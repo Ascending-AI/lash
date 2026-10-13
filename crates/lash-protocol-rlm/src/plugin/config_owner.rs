@@ -50,6 +50,11 @@ pub struct RlmRecordedConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub termination: Option<TerminationMode>,
+    /// The JSON Schema the run's `control.finish` takes its value under;
+    /// absence is any JSON value. A run option, judged under the run's own
+    /// config: a run that states another shape is not drift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_value_schema: Option<serde_json::Value>,
     /// The channel the session's programs run over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
@@ -78,6 +83,7 @@ impl RlmRecordedConfig {
     pub fn turn_options(&self) -> RlmTurnOptions {
         RlmTurnOptions {
             render: self.render.clone(),
+            finish_value_schema: self.finish_value_schema.clone(),
         }
     }
 }
@@ -95,6 +101,7 @@ impl RlmRecordedConfig {
         lash_core::ProtocolTurnOptions::typed(Self {
             render: extras.render,
             termination: extras.termination,
+            finish_value_schema: extras.finish_value_schema,
             channel: Some(RlmChannel::Cell),
             dialect: None,
             behaviour: RlmProtocolPluginConfig::builder()
@@ -114,7 +121,8 @@ impl RlmRecordedConfig {
 #[serde(transparent)]
 pub struct RlmCreateConfig(#[schemars(with = "serde_json::Value")] pub RlmCreateExtras);
 
-/// What a run states for the RLM namespace: its render preferences.
+/// What a run states for the RLM namespace: its render preferences and the
+/// schema of its final value.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(transparent)]
@@ -135,6 +143,22 @@ pub enum RlmConfigRefusal {
         recorded: Option<String>,
         candidate: Option<String>,
     },
+    /// The stated finish value schema is not a schema a tool admits.
+    FinishValueSchemaRefused { message: String },
+}
+
+/// `schema`, refused unless a tool's input admits it.
+fn admitted_finish_schema(
+    schema: Option<serde_json::Value>,
+) -> Result<Option<serde_json::Value>, RlmConfigRefusal> {
+    if let Some(schema) = &schema {
+        lash_core::JsonSchema::admit(schema.clone()).map_err(|error| {
+            RlmConfigRefusal::FinishValueSchemaRefused {
+                message: error.to_string(),
+            }
+        })?;
+    }
+    Ok(schema)
 }
 
 impl std::fmt::Display for RlmConfigRefusal {
@@ -150,6 +174,9 @@ impl std::fmt::Display for RlmConfigRefusal {
                 recorded.as_deref().unwrap_or("nothing"),
                 candidate.as_deref().unwrap_or("nothing"),
             ),
+            Self::FinishValueSchemaRefused { message } => {
+                write!(formatter, "the finish value schema is refused: {message}")
+            }
         }
     }
 }
@@ -203,6 +230,7 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
+            finish_value_schema: admitted_finish_schema(stated.finish_value_schema)?,
             channel: Some(self.channel),
             dialect: Some(self.dialect.clone()),
             behaviour,
@@ -246,14 +274,18 @@ impl ConfigOwner for RlmConfigOwner {
     }
 
     /// Stated render preferences apply field by field over the recorded
-    /// ones. The termination and the pins stay as recorded: a run's options
-    /// cannot name them.
+    /// ones, and a stated finish value schema replaces the recorded one for
+    /// the run. The termination and the pins stay as recorded: a run's
+    /// options cannot name them.
     fn apply_run_options(
         &self,
         recorded: &RlmRecordedConfig,
         options: RlmRunOptions,
     ) -> Result<RlmRecordedConfig, RlmConfigRefusal> {
-        let RlmTurnOptions { render } = options.0;
+        let RlmTurnOptions {
+            render,
+            finish_value_schema,
+        } = options.0;
         let render = match (render, recorded.render.as_ref()) {
             (Some(stated), Some(recorded)) => Some(RlmRenderPatch {
                 print: stated.print.over(&recorded.print),
@@ -261,8 +293,13 @@ impl ConfigOwner for RlmConfigOwner {
             }),
             (stated, recorded) => stated.or_else(|| recorded.cloned()),
         };
+        let finish_value_schema = match admitted_finish_schema(finish_value_schema)? {
+            Some(stated) => Some(stated),
+            None => recorded.finish_value_schema.clone(),
+        };
         Ok(RlmRecordedConfig {
             render,
+            finish_value_schema,
             ..recorded.clone()
         })
     }
@@ -339,14 +376,12 @@ mod tests {
     }
 
     fn facts_for<T>(check: impl FnOnce(&CandidateFacts<'_>) -> T) -> T {
-        let config = lash_core::PersistedSessionConfig::from_policy(
-            &lash_core::SessionPolicy::new(
+        let config =
+            lash_core::PersistedSessionConfig::from_policy(&lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            ),
-            lash_core::SessionToolAccess::ambient(),
-        );
+            ));
         let core = lash_core::CoreConfig::of(&config);
         check(&CandidateFacts {
             core: &core,
@@ -368,6 +403,7 @@ mod tests {
             ..Default::default()
         };
         let recorded = created(Some(RlmCreateExtras {
+            finish_value_schema: None,
             render: Some(print(Some(5), None)),
             termination: Some(TerminationMode::TerminalRequired),
         }));
@@ -375,6 +411,7 @@ mod tests {
             .apply_run_options(
                 &recorded,
                 RlmRunOptions(RlmTurnOptions {
+                    finish_value_schema: None,
                     render: Some(print(None, Some(1))),
                 }),
             )
@@ -411,6 +448,7 @@ mod tests {
     #[test]
     fn run_options_have_no_field_for_a_pin() {
         let recorded = serde_json::to_value(created(Some(RlmCreateExtras {
+            finish_value_schema: None,
             render: Some(RlmRenderPatch::default()),
             termination: Some(TerminationMode::Natural),
         })))
@@ -453,14 +491,12 @@ mod tests {
         );
         let registry =
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
-        let mut config = lash_core::PersistedSessionConfig::from_policy(
-            &lash_core::SessionPolicy::new(
+        let mut config =
+            lash_core::PersistedSessionConfig::from_policy(&lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-            ),
-            lash_core::SessionToolAccess::ambient(),
-        );
+            ));
         config.plugin_config = registry
             .resolve_creation(
                 Some(crate::RLM_PROTOCOL_PLUGIN_ID),

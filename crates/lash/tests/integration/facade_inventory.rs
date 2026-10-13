@@ -148,7 +148,6 @@ use lash::tools::ExecutionPolicy as _;
 use lash::tools::ToolId as _;
 use lash::tools::ToolProvider as _;
 use lash::tools::ToolRegistry as _;
-use lash::tools::ToolSourceHandle as _;
 use lash::tools::invalid_tool_args as _;
 use lash::tools::object_schema as _;
 use lash::tools::parse_optional_usize_arg as _;
@@ -261,7 +260,6 @@ mod testing_inventory {
     use lash::testing::code_execution_context as _;
     use lash::testing::exec_code_invocation as _;
     use lash::testing::mock_attempt_context_with_execution_binding as _;
-    use lash::testing::tool_registry_with_live_provider as _;
 }
 
 #[cfg(all(feature = "rlm", feature = "testing"))]

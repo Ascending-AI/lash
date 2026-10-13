@@ -56,10 +56,7 @@ async fn commit_single_root_node(
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core_execution::SessionToolAccess::ambient(),
-            ),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(&policy.clone()),
             head: lash_core_execution::SessionCreationHead::Config,
             retention: lash_core_execution::Retention::UntilGc,
         })
@@ -67,7 +64,7 @@ async fn commit_single_root_node(
         .expect("create store");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(policy.clone())
+        ..lash_core_execution::RuntimeSessionState::fixture(policy.clone())
     };
     state.ensure_agent_frame_initialized();
     let leaf = state
@@ -136,10 +133,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             source_session_id: SessionId::from("orphan-fork-parent"),
             head_revision: 1,
             relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core_execution::SessionToolAccess::ambient(),
-            ),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(&policy.clone()),
             retention: lash_core_execution::Retention::UntilGc,
         })
         .await

@@ -107,6 +107,14 @@ const HANDLE: &str = "ext_handle";
 const GRANTED: &str = "ext_granted";
 /// The tool a redeployed catalog binds at the granted tool's path.
 const AMBIENT: &str = "ext_ambient";
+/// The path the deferred resolver refuses until the deployment is
+/// redeployed, with [`REFUSED_REASON`].
+const REFUSED: &str = "ext_refused";
+const REFUSED_REASON: &str = "ext_refused is refused by the host's policy";
+/// The path the deferred resolver has no tool for until the deployment is
+/// redeployed, with [`MISSING_NOTE`].
+const MISSING: &str = "ext_missing";
+const MISSING_NOTE: &str = "ext_missing is not installed on this host";
 const MODEL: &str = "cell-restore-model";
 /// What the final answer starts with.
 const FINAL: &str = "final answer";
@@ -174,10 +182,14 @@ impl Cell {
                  console.log(r);"
                 .to_owned(),
             Self::Deferred => format!(
-                "const a = await tools.{GRANTED}({{ x: 1 }});\n\
+                "let r = ''; try {{ await tools.{REFUSED}({{}}); }} catch (e) {{ r = String(e); }}\n\
+                 let u = ''; try {{ await tools.{MISSING}({{}}); }} catch (e) {{ u = String(e); }}\n\
+                 const a = await tools.{GRANTED}({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
+                 let r2 = ''; try {{ await tools.{REFUSED}({{}}); }} catch (e) {{ r2 = String(e); }}\n\
+                 let u2 = ''; try {{ await tools.{MISSING}({{}}); }} catch (e) {{ u2 = String(e); }}\n\
                  const b = await tools.{GRANTED}({{ x: 2 }});\n\
-                 console.log([a, b]);"
+                 console.log([a, b, r, u, r2, u2]);"
             ),
             Self::CancelledBeforeSave => {
                 format!("const a = await tools.{GRANTED}({{ x: 1 }});\nconsole.log(a);")
@@ -231,6 +243,9 @@ struct ExternalWorld {
     /// Whether the deployment was redeployed: its resolver grants nothing
     /// and its catalog binds [`AMBIENT`] at the granted tool's path.
     redeployed: std::sync::atomic::AtomicBool,
+    /// The format of the execution binding the resolver's grant carries:
+    /// none when it carries none.
+    binding: Mutex<Option<lash_core::FormatVersion>>,
     /// How many `ext_slow` bodies were told of their call's cancel.
     cancelled: std::sync::atomic::AtomicUsize,
 }
@@ -324,8 +339,8 @@ struct DeferredTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        let mut manifests = self.listed.tool_manifests();
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = self.listed.tool_manifests(config);
         if self
             .world
             .redeployed
@@ -336,20 +351,41 @@ impl lash_core::ToolProvider for DeferredTools {
         manifests
     }
 
-    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
         [GRANTED, AMBIENT]
             .into_iter()
             .map(granted)
             .find(|definition| definition.id() == id)
             .map(|definition| definition.manifest())
-            .or_else(|| self.listed.resolve_manifest_by_id(id))
+            .or_else(|| self.listed.resolve_manifest_by_id(id, config))
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         if [GRANTED, AMBIENT].contains(&name) {
             return Some(Arc::new(granted(name).contract()));
         }
-        self.listed.resolve_contract(name)
+        self.listed.resolve_contract(name, config)
+    }
+
+    /// It reads its bindings in formats 1 and 2: a grant in format 1 is an
+    /// older format it still reads.
+    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+        const READS: [lash_core::FormatVersion; 2] = [
+            lash_core::FormatVersion::ONE,
+            match lash_core::FormatVersion::new(2) {
+                Some(format) => format,
+                None => lash_core::FormatVersion::ONE,
+            },
+        ];
+        &READS
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -402,12 +438,31 @@ impl CancelTarget {
 }
 
 #[async_trait::async_trait]
-impl lash::tools::DeferredToolResolver for GrantingResolver {
+impl lash_core::ToolProvider for GrantingResolver {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::tools::DeferredToolProvider for GrantingResolver {
     async fn resolve(
         &self,
         _cx: &lash::tools::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
+    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
         let first = self
             .world
             .resolved
@@ -420,19 +475,38 @@ impl lash::tools::DeferredToolResolver for GrantingResolver {
             .world
             .redeployed
             .load(std::sync::atomic::Ordering::SeqCst);
+        let codec = lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools");
+        let binding =
+            (*self.world.binding.lock_recover()).map(|format| lash::tools::ExecutionBinding {
+                codec: codec.clone(),
+                format,
+                payload: json!({ "route": GRANTED }),
+            });
         paths
             .iter()
             .map(|path| {
-                let resolution = if *path == format!("tools.{GRANTED}") && !redeployed {
-                    lash::tools::DeferredToolResolution::Resolved(Box::new(
-                        lash::tools::DeferredToolGrant::new(granted(GRANTED)).with_provider(
-                            lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools"),
-                        ),
-                    ))
+                let outcome = if redeployed {
+                    // A redeployed resolver decides every path otherwise:
+                    // a restored cell that asked it again would see it.
+                    lash::tools::DeferredOutcome::Unavailable { note: None }
+                } else if *path == format!("tools.{GRANTED}") {
+                    lash::tools::DeferredOutcome::Resolved {
+                        provider: codec.clone(),
+                        definition: granted(GRANTED),
+                        binding: binding.clone(),
+                    }
+                } else if *path == format!("tools.{REFUSED}") {
+                    lash::tools::DeferredOutcome::Refused {
+                        reason: REFUSED_REASON.to_owned(),
+                    }
+                } else if *path == format!("tools.{MISSING}") {
+                    lash::tools::DeferredOutcome::Unavailable {
+                        note: Some(MISSING_NOTE.to_owned()),
+                    }
                 } else {
-                    lash::tools::DeferredToolResolution::NotAvailable { note: None }
+                    lash::tools::DeferredOutcome::Unavailable { note: None }
                 };
-                ((*path).to_owned(), resolution)
+                ((*path).to_owned(), outcome)
             })
             .collect()
     }
@@ -622,6 +696,13 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 
 #[async_trait::async_trait]
 impl ProcessEngine for SleepEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -869,10 +950,10 @@ impl CellTurn {
                 } else {
                     sim::workers(&clock)
                 });
-                let (factory, tools) =
+                let (deferred, tools) =
                     if matches!(self.cell, Cell::Deferred | Cell::CancelledBeforeSave) {
                         (
-                            factory.with_deferred_tool_resolver(Arc::new(GrantingResolver {
+                            Some(Arc::new(GrantingResolver {
                                 world: Arc::clone(&self.world),
                                 cancel: (self.cell == Cell::CancelledBeforeSave)
                                     .then(|| Arc::clone(&self.cancel)),
@@ -883,9 +964,19 @@ impl CellTurn {
                             }) as Arc<dyn lash_core::ToolProvider>,
                         )
                     } else {
-                        (factory, ext_tools(Arc::clone(&self.world)))
+                        (None, ext_tools(Arc::clone(&self.world)))
                     };
                 let builder = lash::LashCore::rlm_builder(backend.clone(), factory);
+                let builder = match deferred {
+                    Some(deferred) => {
+                        builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                            lash::plugins::PluginDeclaration::initial("granting"),
+                            lash::plugins::PluginSpec::new()
+                                .with_deferred_provider(lash::hook_key!("deferred"), deferred),
+                        )))
+                    }
+                    None => builder,
+                };
                 let builder = if self.cell == Cell::Replaced {
                     builder.live_replay_store(Arc::clone(&self.live) as _)
                 } else {
@@ -896,7 +987,6 @@ impl CellTurn {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
@@ -929,7 +1019,6 @@ impl CellTurn {
             .core()
             .session(session())
             .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
                 lash::SessionSpec::new(
                     MODEL,
                     lash::TurnBudget::Unbounded,
@@ -1325,7 +1414,7 @@ impl Scenario for CellTurn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -1685,6 +1774,7 @@ async fn sleep_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
 async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<String>) {
     use std::sync::atomic::Ordering;
     let turn = CellTurn::new(Cell::Deferred, dialect, postgres_url);
+    *turn.world.binding.lock_recover() = Some(lash_core::FormatVersion::ONE);
     let (clock, database, nodes) = simulated(&turn).await;
     turn.send().await.expect("the turn is sent");
     nodes.start("a");
@@ -1757,12 +1847,78 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
             "the cell was not answered by the granted tool; the model saw: {last}"
         ));
     }
+    // The refusal and the unavailable decision are matches too: the
+    // restored cell's second calls meet the recorded decisions, never the
+    // redeployed resolver's.
+    // The cell's logged output, before the prompt lists its variables.
+    let logged = last.split_once("output[0]").map_or("", |(_, rest)| {
+        rest.split("Available variables").next().unwrap_or(rest)
+    });
+    for recorded in [REFUSED_REASON, MISSING_NOTE] {
+        let seen = logged.matches(recorded).count();
+        if seen != 2 {
+            violations.push(format!(
+                "the cell met `{recorded}` {seen} times, not before and after the crash; the model saw: {last}"
+            ));
+        }
+    }
     assert!(
         violations.is_empty(),
         "deferred grant across a crash on {dialect:?}:\n  {}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );
+}
+
+/// BINDING-FORMAT-REFUSES (law 14; S8): the resolver grants
+/// `tools.ext_granted` with an execution binding in format 3, which its
+/// codec provider does not declare it reads. The cell parks, typed, before
+/// the match is offered: the provider's reader never sees the binding and
+/// no body runs. (A grant in format 1, an older format the provider still
+/// reads, runs: [`deferred_grant_across_a_crash`].)
+async fn an_unreadable_binding_parks_before_its_provider_reads_it(dialect: Dialect) {
+    let turn = CellTurn::new(Cell::Deferred, dialect, None);
+    *turn.world.binding.lock_recover() = lash_core::FormatVersion::new(3);
+    let (clock, database, nodes) = simulated(&turn).await;
+    turn.send().await.expect("the turn is sent");
+    nodes.start("a");
+    let horizon = clock.logical_ms() + 3 * SLEEP_MS;
+    while !matches!(
+        database.actor(&actor()).await,
+        Ok(Some(row)) if row.state == ActorState::Parked
+    ) {
+        assert!(
+            clock.logical_ms() < horizon && nodes.step().await.is_some(),
+            "the session never parked:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.quiesce().await;
+    let park = format!(
+        "{:?}",
+        turn.core()
+            .session(session())
+            .durable()
+            .await
+            .expect("the session resolves")
+            .park_reason()
+            .await
+            .expect("the park reads")
+    );
+    assert!(
+        park.contains("ExecutionBindingUnreadable"),
+        "the session parks on the unreadable binding: {park}"
+    );
+    assert!(
+        turn.world.entries().is_empty(),
+        "no body ran: {:?}",
+        turn.world.entries()
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_binding_parks_before_its_provider_reads_it_on_sqlite_memory() {
+    an_unreadable_binding_parks_before_its_provider_reads_it(Dialect::SqliteMemory).await;
 }
 
 /// Run `turn`, a cell awaiting a host process that sleeps [`PROCESS_MS`],

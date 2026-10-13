@@ -475,7 +475,7 @@ mod tests {
         context: &lash_core::AttemptContext<'_>,
     ) -> lash_core::ToolOutcome {
         let manifest = provider
-            .resolve_manifest("llm_query")
+            .resolve_manifest("llm_query", &lash_core::OwnerConfigView::default())
             .expect("llm_query manifest resolves");
         match provider
             .execute(ToolCall::new(&manifest, args, context))
@@ -517,7 +517,7 @@ mod tests {
     impl Default for DirectCompletionManager {
         fn default() -> Self {
             Self {
-                snapshot: RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                snapshot: RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -636,7 +636,7 @@ mod tests {
                     model: llm_profile_spec("root-model", Some("fast")),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12))
                 },
-                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12)))
+                ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded, lash_core::MaxToolCalls::new(1024),lash_core::NoProgressBudget::bounded(12)))
             },
             requests: Mutex::new(Vec::new()),
             response_text:
@@ -695,7 +695,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

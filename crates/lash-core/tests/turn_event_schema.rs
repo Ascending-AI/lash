@@ -49,7 +49,6 @@ macro_rules! turn_event_tags {
 
 turn_event_tags! {
     TurnStarted => "turn_started",
-    ToolRestoreReported => "tool_restore_reported",
     ModelRequestStarted => "model_request_started",
     CheckpointRecorded => "checkpoint_recorded",
     StreamBlock => "stream_block",
@@ -110,33 +109,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             json!({
                 "type": "turn_started",
                 "turn_id": "turn-1",
-            }),
-        ),
-        (
-            "tool_restore_reported",
-            TurnEvent::ToolRestoreReported {
-                report: lash_core::ToolRestoreReport {
-                    generation: 4,
-                    lost_members: vec![lash_core::ToolId::from("tool:lost")],
-                    parked_opt_outs: Vec::new(),
-                    superseded_identities: vec![lash_core::SupersededToolIdentity {
-                        retired_id: lash_core::ToolId::from("tool:old"),
-                        live_id: lash_core::ToolId::from("tool:new"),
-                        name: "lookup".to_string(),
-                    }],
-                },
-            },
-            json!({
-                "type": "tool_restore_reported",
-                "report": {
-                    "generation": 4,
-                    "lost_members": ["tool:lost"],
-                    "superseded_identities": [{
-                        "retired_id": "tool:old",
-                        "live_id": "tool:new",
-                        "name": "lookup",
-                    }],
-                },
             }),
         ),
         (

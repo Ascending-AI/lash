@@ -145,7 +145,9 @@ pub struct TestExecutionContextBuilder<'run> {
     session_id: SessionId,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-    tool_registry: Option<Arc<crate::ToolRegistry>>,
+    /// The routes a fixture stated; `None` routes the provider's tools.
+    routes: Option<crate::SurfaceTools>,
+    deferred: Option<(crate::ProviderKey, Arc<dyn crate::DeferredToolProvider>)>,
     processes: Arc<dyn crate::ProcessService>,
     process_engines: crate::ProcessEngineRegistry,
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
@@ -235,7 +237,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
             session_id: SessionId::from("test-session"),
             provider: Arc::new(EmptyToolProvider),
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
-            tool_registry: None,
+            routes: None,
+            deferred: None,
             processes: Arc::new(crate::UnavailableProcessService),
             process_engines: match artifact_ports {
                 Some(ports) => process_engines.with_artifact_ports(ports),
@@ -307,9 +310,64 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    pub fn tool_registry(mut self, tool_registry: Arc<crate::ToolRegistry>) -> Self {
-        self.tool_registry = Some(tool_registry);
+    /// The surface's deferred provider `provider`, declared by `owner` as
+    /// `key`: the call paths the provider's tools do not offer resolve
+    /// through it.
+    pub fn deferred_provider(
+        mut self,
+        owner: &str,
+        key: &str,
+        provider: Arc<dyn crate::DeferredToolProvider>,
+    ) -> Self {
+        self.deferred = Some((crate::ProviderKey::tool_provider(owner, key), provider));
         self
+    }
+
+    /// The surface routes the dispatch's calls are admitted under, in place
+    /// of the provider's.
+    pub fn routes(mut self, routes: crate::SurfaceTools) -> Self {
+        self.routes = Some(routes);
+        self
+    }
+
+    /// The routes of a surface offering each tool of the context's
+    /// provider, under [`test_tools_provider`], beside its deferred
+    /// provider.
+    #[expect(clippy::expect_used, reason = "fixture surface")]
+    fn provider_routes(&self) -> crate::SurfaceTools {
+        let key = test_tools_provider();
+        let config = crate::plugin::OwnerConfigView::default();
+        let entries = self
+            .provider
+            .tool_manifests(&config)
+            .into_iter()
+            .filter_map(|manifest| {
+                let contract = self.provider.resolve_contract(&manifest.name, &config)?;
+                Some(crate::SurfaceEntry {
+                    provider: key.clone(),
+                    definition: crate::ToolDefinition {
+                        manifest,
+                        contract: (*contract).clone(),
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut providers = vec![(key, Arc::clone(&self.provider))];
+        if let Some((identity, deferred)) = &self.deferred {
+            providers.push((
+                identity.clone(),
+                Arc::clone(deferred) as Arc<dyn crate::ToolProvider>,
+            ));
+        }
+        let registry =
+            crate::ToolRegistry::from_tool_registrations(providers, self.deferred.clone())
+                .expect("the fixture's providers register");
+        let surface = crate::RecordedSurface::new(
+            entries,
+            self.deferred.as_ref().map(|(identity, _)| identity.clone()),
+        )
+        .expect("the fixture's surface builds");
+        crate::SurfaceTools::of_surface(&surface, Arc::new(registry))
     }
 
     pub fn processes(mut self, processes: Arc<dyn crate::ProcessService>) -> Self {
@@ -443,6 +501,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
     }
 
     pub fn build(self) -> BuiltTestExecutionContext<'run> {
+        let routes = self
+            .routes
+            .clone()
+            .unwrap_or_else(|| self.provider_routes());
         let mut factories = self
             .plugin_factories
             .unwrap_or_else(default_plugin_factories);
@@ -458,7 +520,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
         )
         .build_session(PluginSessionRequest::creation(
             &self.session_id,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
@@ -556,7 +618,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             execution_budgets: (plugins).execution_budgets(),
             state: plugins,
             tools: self.provider,
-            tool_registry: self.tool_registry,
+            routes,
             tool_catalog: Arc::new(self.tool_catalog),
             sessions,
             session_lifecycle,

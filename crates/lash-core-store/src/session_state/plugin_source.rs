@@ -12,12 +12,6 @@ pub trait SessionPluginStateSource {
         fleet: crate::store::FleetFormat,
     ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError>;
 
-    /// Current tool-registry generation.
-    fn tool_state_generation(&self) -> u64;
-
-    /// Snapshot of the tool registry at the current generation.
-    fn export_tool_state(&self) -> crate::ToolState;
-
     /// Namespace-filtered export, as a plugin-facing handle sees it, in the
     /// formats the source's admission recorded.
     fn export_plugin_state(&self) -> Result<crate::PluginState, crate::RuntimeError>;
@@ -44,14 +38,6 @@ where
         fleet: crate::store::FleetFormat,
     ) -> Result<Option<std::sync::Arc<[u8]>>, crate::RuntimeError> {
         T::capture_plugin_admission(self, config, fleet)
-    }
-
-    fn tool_state_generation(&self) -> u64 {
-        T::tool_state_generation(self)
-    }
-
-    fn export_tool_state(&self) -> crate::ToolState {
-        T::export_tool_state(self)
     }
 
     fn export_plugin_state(&self) -> Result<crate::PluginState, crate::RuntimeError> {

@@ -142,7 +142,6 @@ impl ChildTurn {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(), metadata())
@@ -162,14 +161,10 @@ impl ChildTurn {
     /// Register the process as a host would, uncut: its execution
     /// environment published under a host pin, its child session named.
     async fn register(&self) -> Result<ProcessId, String> {
-        let request = SessionCreateRequest::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            SessionStartPoint::Empty,
-            Default::default(),
-        )
-        .with_session_id(child())
-        .with_spec(&spec())
-        .map_err(|error| format!("state the child's spec: {error}"))?;
+        let request = SessionCreateRequest::root(SessionStartPoint::Empty, Default::default())
+            .with_session_id(child())
+            .with_spec(&spec())
+            .map_err(|error| format!("state the child's spec: {error}"))?;
         let registration = ProcessRegistration::new(
             ProcessInput::SessionTurn {
                 definition_key: "child-turn".to_owned(),
@@ -211,7 +206,7 @@ impl Scenario for ChildTurn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }

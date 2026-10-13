@@ -60,7 +60,7 @@ async fn persisted_record_decode_store(
         .expect("admit persisted-record decode session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -185,7 +185,7 @@ async fn seed_failure_evidence_session(
         .expect("bind receipt-refusal session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -673,7 +673,6 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,
@@ -782,7 +781,7 @@ async fn admitted_input_fixture(
         .expect("admit the fixture session");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

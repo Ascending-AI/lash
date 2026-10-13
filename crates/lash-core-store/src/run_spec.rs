@@ -324,18 +324,12 @@ pub struct RunOverrides {
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
-    /// The tool authority this run executes under, whole: the tools it is
-    /// granted ([`SessionToolAccess::restricted`](crate::SessionToolAccess::restricted))
-    /// and the names it hides, in place of the session's for this run only.
-    /// It is the one-shot form of the core `set_tool_access` command: it is
-    /// recorded with the run's shape, so a resume or a cold reopen of the
-    /// run sees the same grants, and it never reaches the sticky config, so
-    /// a later run that states none runs under the session's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_access: Option<crate::SessionToolAccess>,
     /// The typed run options this run states for the session's config
     /// owners, protocol and host plugins alike (FIG-6021). A statement for
     /// an owner the run's snapshot records no namespace for is refused.
+    /// Which tools a run is offered is one such option of each tool
+    /// provider's owner: it is recorded with the run's shape and never
+    /// reaches the sticky config.
     #[serde(default, skip_serializing_if = "OwnerRunOptions::is_empty")]
     pub owners: OwnerRunOptions,
 }
@@ -353,7 +347,6 @@ impl RunOverrides {
         self.model.is_none()
             && self.reasoning.is_none()
             && self.generation.is_none()
-            && self.tool_access.is_none()
             && self.owners.is_empty()
     }
 
@@ -396,9 +389,6 @@ impl RunOverrides {
         }
         if let Some(generation) = &self.generation {
             config.generation = generation.clone();
-        }
-        if let Some(tool_access) = &self.tool_access {
-            config.tool_access = tool_access.clone();
         }
         Ok(())
     }
@@ -727,7 +717,6 @@ impl RunSpec {
             model: overrides.model.clone().or(definition.model),
             reasoning: overrides.reasoning.clone().or(definition.reasoning),
             generation: overrides.generation.clone().or(definition.generation),
-            tool_access: overrides.tool_access.clone().or(definition.tool_access),
             owners: OwnerRunOptions::default(),
         }
         .apply(&mut config, models)?;

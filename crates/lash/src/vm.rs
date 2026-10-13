@@ -117,6 +117,6 @@ pub use lash_vm_runtime::{
     UnmigratedKernelSession, standard_functions,
 };
 /// What still pins a helper release before this build's own, and why a
-/// node that adopts would not adopt a process off it (FIG-5799).
+/// process's run would not carry onto the build's helpers (FIG-5799).
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession};

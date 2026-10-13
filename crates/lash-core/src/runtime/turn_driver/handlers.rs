@@ -343,14 +343,14 @@ impl RuntimeTurnDriver<'_> {
         // journal (FIG-3672 P7b). Only a sync that built an environment
         // recorded one.
         if result.is_ok() {
-            let authority = &self.turn_pipeline.state().authority;
+            let tool_surface = Arc::new(tool_surface);
             self.session
-                .install_recorded_tool_surface(&authority.tool_access, &tool_surface)
-                // The install pins the live registry and runs the catalog
-                // contributors again, as the sync's step body did, so their
-                // failures are classified the same way (FIG-4651): a live
-                // cause aborts the attempt under its own code, and only a
-                // deterministic catalog defect ends the turn as one.
+                .install_recorded_tool_surface(Arc::clone(&tool_surface))
+                // The install validates the recorded catalog as the sync's
+                // step body did, so its failures are classified the same way
+                // (FIG-4651): a live cause aborts the attempt under its own
+                // code, and only a deterministic catalog defect ends the turn
+                // as one.
                 .map_err(|error| {
                     let message =
                         format!("the recorded tool surface could not be installed: {error}");
@@ -367,7 +367,8 @@ impl RuntimeTurnDriver<'_> {
                 })?;
             // The turn's next phase records the surface its model calls
             // offer, which a resume reinstalls instead of the live one.
-            self.run_config.install_surface(&tool_surface);
+            self.run_config.install_surface(tool_surface);
+            self.surface_installed = true;
         }
         self.handle_machine_response(machine, Response::ExecutionEnvironmentSynced { id, result })?;
         Ok(())

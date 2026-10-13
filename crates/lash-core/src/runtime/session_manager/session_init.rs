@@ -75,7 +75,6 @@ fn recorded_creation_plan(
 ) -> Result<SessionInitPlan, crate::PluginError> {
     let (session_id, mut request) = identified_create_request(request)?;
     let policy = created.policy.clone();
-    request.tool_access = created.authority.tool_access.clone();
     request.prompt_plan = Some(created.authority.prompt_plan.clone());
     let facts = ChildFacts {
         policy,
@@ -137,7 +136,6 @@ fn plan_session_init(
         ..RuntimeSessionState::new(
             policy.clone(),
             crate::RuntimeSessionAuthority::new(
-                request.tool_access.clone(),
                 recorded_plugin_config.clone(),
                 request.prompt_plan.clone().unwrap_or_default(),
             ),
@@ -157,7 +155,6 @@ fn plan_session_init(
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     let plugin_config = crate::plugin::SessionAuthorityContext {
-        tool_access: request.tool_access.clone(),
         plugin_config: initial_runtime_state.admitted_plugin_config(),
     };
 
@@ -816,7 +813,6 @@ async fn reopen_committed_session(
     // The reopened session runs the configuration it recorded, never the
     // redelivered request's (FIG-4379).
     let authority = crate::plugin::SessionAuthorityContext {
-        tool_access: state.authority.tool_access.clone(),
         plugin_config: state.admitted_plugin_config(),
     };
     let plugin_host = current.plugins.plugin_host();
@@ -1168,7 +1164,6 @@ mod tests {
 
     fn root_request() -> SessionCreateRequest {
         SessionCreateRequest::root(
-            crate::SessionToolAccess::ambient(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
         )
@@ -1295,7 +1290,6 @@ mod tests {
     #[test]
     fn a_child_records_only_what_its_request_states() {
         let unstated = SessionCreateRequest::child_session(
-            crate::SessionToolAccess::ambient(),
             "parent",
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::default(),
@@ -1316,7 +1310,6 @@ mod tests {
         );
 
         let keyed = SessionCreateRequest::child(
-            crate::SessionToolAccess::ambient(),
             "parent",
             crate::SessionStartPoint::Empty,
             stated_policy(),
@@ -1333,7 +1326,6 @@ mod tests {
         assert_eq!(
             facts.plugin_config,
             child_facts(&SessionCreateRequest::child(
-                crate::SessionToolAccess::ambient(),
                 "another-parent",
                 crate::SessionStartPoint::Empty,
                 stated_policy(),
@@ -1351,7 +1343,6 @@ mod tests {
     #[test]
     fn a_refused_child_creation_request_carries_its_typed_cause() {
         let mut request = SessionCreateRequest::root(
-            crate::SessionToolAccess::ambient(),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
                 .expect("options"),

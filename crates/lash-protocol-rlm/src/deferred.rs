@@ -1,132 +1,48 @@
-//! Deferred tool resolution: tools a session grants a cell on demand.
+//! Deferred matches: tools the run's deferred provider matches a cell on
+//! demand (S6).
 //!
-//! A host-provided [`DeferredToolResolver`] resolves call paths a cell
-//! writes that the session's Tool Catalog does not offer into [`ToolGrant`]
-//! values, which carry their Tool Execution Bindings, or reports
-//! `NotAvailable`. The resolver resolves on demand only: it does not
+//! The surface a run records names its deferred provider
+//! ([`lash_core::DeferredToolProvider`]), which resolves the call paths a
+//! cell writes that the surface does not offer into
+//! [`lash_core::DeferredMatch`]es: a resolved tool with the provider that
+//! executes it and its [`lash_core::ExecutionBinding`], a refusal, or an
+//! unavailable path. The provider resolves on demand only: it does not
 //! enumerate, advertise or rank tools.
 //!
 //! A cell is lowered against the effects its host offers
 //! ([`lash_vm_runtime::HostBoundary`]), so resolution runs before lowering:
 //! `gather → decide → offer`. The call paths the cell's source writes that
-//! no catalog tool answers are decided before lowering. Grants and unavailable
-//! notes are recorded with the cell's first durable save or park. A redrive
-//! after that save reuses those decisions without calling the resolver;
-//! before the first save, read-only discovery may run again. The flat Tool
-//! Catalog is never mutated: a grant is the cell's.
+//! no surface tool answers are decided before lowering, in one batch whose
+//! matches commit before any call they admit. A redrive reuses the committed
+//! matches and never resolves again. The surface is never mutated: a match
+//! is the cell's.
 
 /// version_surface = "coexist"
-/// version_guard(items(DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION, journal_deferred_outcomes))
-const DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION: &str = "deferred_tool_resolution:v2:";
+/// version_guard(items(DEFERRED_MATCH_PREFIX_VERSION, journal_deferred_matches))
+const DEFERRED_MATCH_PREFIX_VERSION: &str = "deferred_match:v1:";
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
-use async_trait::async_trait;
+use lash_core::{DeferredMatch, DeferredOutcome, DeferredResolveContext};
 use lash_vm_runtime::{HostBoundary, ToolBindingError};
 
-/// A host-authorized tool capability resolved for a deferred call path. It
-/// carries the callable contract and identity (the tool definition) and the
-/// host-owned Tool Execution Binding that routes a call to the backing
-/// account, service, secret or remote executor.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolGrant {
-    /// The callable contract and identity of the resolved tool.
-    pub definition: lash_core::ToolDefinition,
-    /// The declared provider the host authorizes to execute the tool. A
-    /// grant that names none executes through the provider the session's
-    /// catalog binds the tool to.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "lash_core::plugin::declared_tool_provider::option::deserialize"
-    )]
-    pub provider: Option<lash_core::plugin::PluginCallbackIdentity>,
-    /// Host-owned routing authority, opaque to the runtime.
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
-    pub execution_binding: serde_json::Value,
-}
-
-impl ToolGrant {
-    pub fn new(definition: lash_core::ToolDefinition) -> Self {
-        Self {
-            definition,
-            provider: None,
-            execution_binding: serde_json::Value::Null,
-        }
-    }
-
-    /// Execute the granted tool through the provider declared as `provider`.
-    pub fn with_provider(mut self, provider: lash_core::plugin::PluginCallbackIdentity) -> Self {
-        self.provider = Some(provider);
-        self
-    }
-
-    pub fn with_execution_binding(mut self, execution_binding: serde_json::Value) -> Self {
-        self.execution_binding = execution_binding;
-        self
-    }
-}
-
-/// Outcome of resolving one deferred call path.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Resolution {
-    /// The call path resolved to a host-authorized tool.
-    Resolved(Box<ToolGrant>),
-    /// No tool is available for the call path.
-    NotAvailable {
-        /// Optional host-trusted explanation or suggestion shown to the model.
-        /// Lash bounds the recorded note to [`Self::MAX_NOTE_BYTES`] UTF-8
-        /// bytes, including a truncation marker, without refusing the answer.
-        note: Option<String>,
-    },
-}
-
-impl Resolution {
-    /// Maximum recorded host-note length in UTF-8 bytes, including the marker.
-    pub const MAX_NOTE_BYTES: usize = 512;
-
-    /// An unavailable path with a host-trusted explanation or suggestion.
-    pub fn not_available_with(note: impl Into<String>) -> Self {
-        Self::NotAvailable {
-            note: Some(bounded_note(note.into())),
-        }
-    }
-
-    fn bounded(self) -> Self {
-        match self {
-            Self::NotAvailable { note: Some(note) } => Self::not_available_with(note),
-            other => other,
-        }
-    }
-}
-
-fn bounded_note(mut note: String) -> String {
-    const MARKER: &str = " [truncated]";
-    if note.len() > Resolution::MAX_NOTE_BYTES {
-        let mut end = Resolution::MAX_NOTE_BYTES - MARKER.len();
-        while !note.is_char_boundary(end) {
-            end -= 1;
-        }
-        note.truncate(end);
-        note.push_str(MARKER);
-    }
-    note
-}
-
-/// Signatures for unavailable paths with notes let a cell reach the host's
-/// refusal at the call, in either dialect. They grant no tool authority.
+/// Signatures for refused and unavailable paths with notes let a cell reach
+/// the host's explanation at the call, in either dialect. They grant no tool
+/// authority.
 pub(crate) fn offer_unavailable_notes(
-    outcomes: &BTreeMap<String, Resolution>,
+    matches: &BTreeMap<String, DeferredMatch>,
     effects: &mut BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
 ) -> BTreeMap<String, String> {
     let mut notes = BTreeMap::new();
-    for (path, outcome) in outcomes {
-        if let Resolution::NotAvailable { note: Some(note) } = outcome
-            && let Ok(name) = lash_kernel_doc::EffectName::new(path.as_str())
-        {
+    for (path, matched) in matches {
+        let note = match &matched.outcome {
+            DeferredOutcome::Unavailable { note: Some(note) } => note,
+            DeferredOutcome::Refused { reason } => reason,
+            DeferredOutcome::Unavailable { note: None } | DeferredOutcome::Resolved { .. } => {
+                continue;
+            }
+        };
+        if let Ok(name) = lash_kernel_doc::EffectName::new(path.as_str()) {
             effects.insert(
                 name,
                 lash_kernel_doc::Signature {
@@ -144,129 +60,34 @@ pub(crate) fn offer_unavailable_notes(
     notes
 }
 
-/// Who one deferred resolution resolves for: the execution whose cell is
-/// lowered, the logical Run it belongs to, and the capability refs that
-/// Run's recorded shape names.
-#[derive(Clone, Copy, Debug)]
-#[non_exhaustive]
-pub struct DeferredResolveContext<'a> {
-    /// The session frame or process whose cell is lowered.
-    pub owner: &'a lash_core::ExecutionOwner,
-    /// The admitted logical Run; `None` for a process cell.
-    pub run: Option<&'a lash_core::facade_support::TurnAddress>,
-    /// The capability refs the Run's recorded shape names, by slot.
-    pub capabilities: &'a BTreeMap<lash_core::SlotId, lash_core::CapabilityRef>,
-}
-
-impl<'a> DeferredResolveContext<'a> {
-    pub fn new(
-        owner: &'a lash_core::ExecutionOwner,
-        run: Option<&'a lash_core::facade_support::TurnAddress>,
-        capabilities: &'a BTreeMap<lash_core::SlotId, lash_core::CapabilityRef>,
-    ) -> Self {
-        Self {
-            owner,
-            run,
-            capabilities,
-        }
-    }
-}
-
-/// Host-provided resolution of call paths the Tool Catalog does not offer.
-#[async_trait]
-pub trait DeferredToolResolver: Send + Sync {
-    /// Resolve a deterministic batch of call paths (e.g. `web.fetch`) for
-    /// the execution `cx` names. The batch holds every dotted TypeScript path or Python name the
-    /// cell's source calls that no catalog tool answers, so it may hold
-    /// paths that are no tool at all: a path omitted from the returned map
-    /// is recorded as [`Resolution::NotAvailable`], and entries for paths
-    /// outside the batch are ignored.
-    ///
-    /// Use a host note to explain a transient outage, missing permission,
-    /// revocation or a suggested next action. Notes are trusted host text;
-    /// Lash truncates them to [`Resolution::MAX_NOTE_BYTES`] UTF-8 bytes.
-    /// Lash does not retry an unavailable answer. After the cell's first durable save, a redrive reuses the
-    /// recorded decision and note; the next cell resolves again.
-    ///
-    /// This is read-only discovery: it must not install routes or perform
-    /// externally visible work. A precommit retry may call it again. Route
-    /// mutation belongs in [`Self::install_recorded_grant`], after the
-    /// outcome is journaled.
-    async fn resolve(
-        &self,
-        cx: &DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> BTreeMap<String, Resolution>;
-
-    /// Install the process-local execution route for a journaled grant.
-    /// Route rehydration only: it makes no authorization decision and never
-    /// widens the recorded grant. Idempotent.
-    fn install_recorded_grant(
-        &self,
-        _path: &str,
-        _grant: &ToolGrant,
-    ) -> Result<(), RecordedGrantInstallError> {
-        Ok(())
-    }
-}
-
-/// Failure while restoring the process-local route of a journaled grant.
-#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
-pub enum RecordedGrantInstallError {
-    #[error("deferred tool route is temporarily unavailable: {message}")]
-    Transient { message: String },
-    #[error("deferred tool route was revoked: {message}")]
-    Revoked { message: String },
-    #[error("deferred tool route is incompatible: {message}")]
-    Incompatible { message: String },
-}
-
-impl RecordedGrantInstallError {
-    pub fn transient(message: impl Into<String>) -> Self {
-        Self::Transient {
-            message: message.into(),
-        }
-    }
-
-    pub fn revoked(message: impl Into<String>) -> Self {
-        Self::Revoked {
-            message: message.into(),
-        }
-    }
-
-    pub fn incompatible(message: impl Into<String>) -> Self {
-        Self::Incompatible {
-            message: message.into(),
-        }
-    }
-
-    pub fn is_retryable(&self) -> bool {
-        matches!(self, Self::Transient { .. })
-    }
-}
-
-/// A cell could not restore or offer its already-decided authority.
+/// A cell could not decide or offer its deferred matches.
 #[derive(Debug, thiserror::Error)]
 pub enum DeferredResolutionError {
     #[error("deferred resolution requires an admitted ExecCode effect address")]
     MissingLinkIdentity,
-    #[error("failed to commit deferred resolution outcome: {0}")]
+    #[error("failed to commit deferred matches: {0}")]
     Journal(#[source] lash_core::RuntimeEffectControllerError),
-    #[error("journaled deferred resolution outcome is invalid: {0}")]
+    #[error("journaled deferred matches are invalid: {0}")]
     InvalidJournaledOutcome(#[source] serde_json::Error),
-    #[error("failed to restore recorded grant for `{path}`: {source}")]
-    Install {
+    /// The run's surface recorded a deferred provider this node does not
+    /// serve: the cell parks until a node that serves it claims the run.
+    #[error("the run's deferred tool provider `{provider}` is not served on this node")]
+    ProviderUnserved { provider: lash_core::ProviderKey },
+    /// A match's binding is in a format its codec does not read on this
+    /// node (S8): the cell parks before the match is offered.
+    #[error("the matched tool for `{path}` cannot run here: {source}")]
+    BindingUnreadable {
         path: String,
         #[source]
-        source: RecordedGrantInstallError,
+        source: lash_core::ExecutionBindingUnreadable,
     },
-    #[error("failed to offer recorded grant for `{path}`: {source}")]
+    #[error("failed to offer the matched tool for `{path}`: {source}")]
     Offer {
         path: String,
         #[source]
         source: Box<ToolBindingError>,
     },
-    #[error("the session cannot run the granted tool `{path}`: {source}")]
+    #[error("the session cannot run the matched tool `{path}`: {source}")]
     Owner {
         path: String,
         #[source]
@@ -275,28 +96,23 @@ pub enum DeferredResolutionError {
 }
 
 impl DeferredResolutionError {
-    /// Maps replay failures onto the runtime's bounded retry/terminal
-    /// vocabulary without discarding the route-specific typed source.
+    /// Maps a failure onto the runtime's bounded retry, park and terminal
+    /// vocabulary without discarding its typed source.
     pub fn runtime_effect_error(&self) -> lash_core::RuntimeEffectControllerError {
         let code = match self {
             Self::Journal(error) => return error.clone(),
-            Self::Install {
-                source: RecordedGrantInstallError::Transient { .. },
-                ..
-            } => lash_core::RuntimeErrorCode::RuntimeStore,
+            Self::ProviderUnserved { .. } => lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
+            Self::BindingUnreadable { .. } => {
+                lash_core::RuntimeErrorCode::ExecutionBindingUnreadable
+            }
             Self::MissingLinkIdentity
             | Self::InvalidJournaledOutcome(_)
-            | Self::Install { .. }
             | Self::Offer { .. }
             | Self::Owner { .. } => lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed,
         };
         lash_core::RuntimeEffectControllerError::new(code, self.to_string())
     }
 }
-
-/// A handle to the host's deferred resolver, optional because most hosts
-/// ship no deferral.
-pub type SharedDeferredToolResolver = Arc<dyn DeferredToolResolver>;
 
 /// Every call path the source writes: dotted in TypeScript, also bare
 /// in Python (whose tools use names such as `web_fetch`). A scan of the
@@ -342,56 +158,61 @@ pub(crate) fn called_paths(source: &str, dialect: &str) -> BTreeSet<String> {
     paths
 }
 
-/// Prepares each candidate's decision under the cell's effect. The cell's
-/// first durable save records grants and notes in its envelope; a redrive
-/// from that save skips discovery. A precommit redrive may resolve again.
+/// Decides each candidate under the cell's effect: the run's deferred
+/// provider resolves the batch once, and the matches commit before the cell
+/// is lowered. A redrive reuses the committed matches; a precommit redrive
+/// may resolve again. `None` when the run's surface records no deferred
+/// provider.
 #[expect(
     clippy::result_large_err,
     reason = "the error carries the typed runtime error a nested effect records"
 )]
-pub(crate) async fn journal_deferred_outcomes(
+pub(crate) async fn journal_deferred_matches(
     candidates: BTreeSet<String>,
-    resolver: Option<&SharedDeferredToolResolver>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Result<BTreeMap<String, Resolution>, DeferredResolutionError> {
+) -> Result<Option<BTreeMap<String, DeferredMatch>>, DeferredResolutionError> {
+    let provider = match ctx.deferred_provider() {
+        Ok(Some((_, provider))) => std::sync::Arc::clone(provider),
+        Ok(None) => return Ok(None),
+        Err(provider) => return Err(DeferredResolutionError::ProviderUnserved { provider }),
+    };
     let address = ctx
         .parent_invocation()
         .and_then(lash_core::RuntimeInvocation::effect_address)
         .ok_or(DeferredResolutionError::MissingLinkIdentity)?;
     let effect_id = format!("{}:deferred-tool-resolution", address.replay_key);
     let operation = format!(
-        "{DEFERRED_TOOL_RESOLUTION_PREFIX_VERSION}{}",
+        "{DEFERRED_MATCH_PREFIX_VERSION}{}",
         serde_json::to_string(&candidates)
             .map_err(DeferredResolutionError::InvalidJournaledOutcome)?
     );
     let phase_context = ctx.clone();
-    let resolver = resolver.cloned();
     let owner = ctx.owner().clone();
     let run = ctx.logical_run().cloned();
     let capabilities = ctx.run_capabilities().clone();
+    let config = ctx.owner_config().clone();
     let journaled = ctx
         .journaled_deferred_resolution_with(effect_id, operation, move || async move {
-            let mut outcomes = BTreeMap::new();
-            if let Some(resolver) = resolver.as_ref() {
-                let paths = candidates.iter().map(String::as_str).collect::<Vec<_>>();
-                let cx = DeferredResolveContext::new(&owner, run.as_ref(), &capabilities);
-                let mut resolved = resolver.resolve(&cx, &paths).await;
-                for path in paths {
-                    outcomes.insert(
-                        path.to_string(),
+            let paths = candidates.iter().map(String::as_str).collect::<Vec<_>>();
+            let cx = DeferredResolveContext::new(&owner, run.as_ref(), &capabilities, &config);
+            let mut resolved = provider.resolve(&cx, &paths).await;
+            let matches = paths
+                .into_iter()
+                .map(|path| DeferredMatch {
+                    requested: path.to_owned(),
+                    outcome: lash_core::bounded_deferred_outcome(
                         resolved
                             .remove(path)
-                            .unwrap_or(Resolution::NotAvailable { note: None })
-                            .bounded(),
-                    );
-                }
-            }
+                            .unwrap_or(DeferredOutcome::Unavailable { note: None }),
+                    ),
+                })
+                .collect::<Vec<_>>();
             let _phase = phase_context
                 .named_phase("codemode_lash_vm.deferred_resolve.after_resolver_return");
-            serde_json::to_value(outcomes).map_err(|error| {
+            serde_json::to_value(matches).map_err(|error| {
                 lash_core::RuntimeEffectControllerError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                    format!("failed to encode deferred resolution outcome: {error}"),
+                    format!("failed to encode deferred matches: {error}"),
                 )
             })
         })
@@ -400,28 +221,49 @@ pub(crate) async fn journal_deferred_outcomes(
     {
         let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve.after_durable_record");
     }
-    serde_json::from_value(journaled).map_err(DeferredResolutionError::InvalidJournaledOutcome)
+    let matches: Vec<DeferredMatch> = serde_json::from_value(journaled)
+        .map_err(DeferredResolutionError::InvalidJournaledOutcome)?;
+    Ok(Some(
+        matches
+            .into_iter()
+            .map(|matched| (matched.requested.clone(), matched))
+            .collect(),
+    ))
 }
 
-/// `offer`: every granted tool of `outcomes` as an effect of `boundary`
-/// under its binding's call path, its route installed, and the grant its
-/// calls execute under.
+/// `offer`: every resolved match of `matches` as an effect of `boundary`
+/// under its binding's call path, and the grant its calls execute under:
+/// the matched tool, on the provider the match names, with its binding.
 #[expect(
     clippy::result_large_err,
     reason = "the error carries the typed runtime error a nested effect records"
 )]
-pub(crate) fn offer_deferred_grants(
+pub(crate) fn offer_deferred_matches(
     boundary: &mut HostBoundary,
-    outcomes: &BTreeMap<String, Resolution>,
-    resolver: Option<&SharedDeferredToolResolver>,
+    matches: &BTreeMap<String, DeferredMatch>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
 ) -> Result<BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>, DeferredResolutionError> {
     let mut grants = BTreeMap::new();
-    for (path, resolution) in outcomes {
-        let Resolution::Resolved(grant) = resolution else {
+    for (path, matched) in matches {
+        let Some((provider, definition, binding)) = matched.resolved() else {
             continue;
         };
-        let definition = &grant.definition;
+        // A binding is read by its codec only in a format the codec
+        // declares; one it cannot read parks the cell before anything is
+        // offered, and an unserved codec is an unserved provider.
+        if let Some(binding) = binding {
+            let readable = ctx.binding_formats(&binding.codec).ok_or_else(|| {
+                DeferredResolutionError::ProviderUnserved {
+                    provider: binding.codec.clone(),
+                }
+            })?;
+            binding.check_readable(readable).map_err(|source| {
+                DeferredResolutionError::BindingUnreadable {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+        }
         boundary
             .offer_bound_tool(
                 &definition.manifest,
@@ -432,24 +274,15 @@ pub(crate) fn offer_deferred_grants(
                 path: path.clone(),
                 source: Box::new(source),
             })?;
-        if let Some(resolver) = resolver {
-            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve.before_registration");
-            resolver
-                .install_recorded_grant(path, grant)
-                .map_err(|source| DeferredResolutionError::Install {
-                    path: path.clone(),
-                    source,
-                })?;
-        }
         let provider = ctx
-            .tool_provider(&definition.manifest.id, grant.provider.as_ref())
+            .tool_provider(&definition.manifest.id, Some(provider))
             .map_err(|source| DeferredResolutionError::Owner {
                 path: path.clone(),
                 source,
             })?;
         let execution_grant =
             lash_core::ToolExecutionGrant::from_definition(provider, definition.clone())
-                .with_execution_binding(grant.execution_binding.clone());
+                .with_execution_binding(binding.cloned());
         grants.insert(execution_grant.manifest().id.clone(), execution_grant);
     }
     Ok(grants)
@@ -472,25 +305,5 @@ mod tests {
             paths.into_iter().collect::<Vec<_>>(),
             ["a.b.c", "web.fetch", "xs.map"]
         );
-    }
-
-    #[test]
-    fn route_restore_failures_map_to_bounded_retry_policy() {
-        let error = |source| {
-            DeferredResolutionError::Install {
-                path: "web.fetch".into(),
-                source,
-            }
-            .runtime_effect_error()
-        };
-        let transient = error(RecordedGrantInstallError::transient("backend restarting"));
-        let revoked = error(RecordedGrantInstallError::revoked("account disconnected"));
-        assert_eq!(transient.code, lash_core::RuntimeErrorCode::RuntimeStore);
-        assert!(transient.code.is_retryable());
-        assert_eq!(
-            revoked.code,
-            lash_core::RuntimeErrorCode::ToolCatalogResolutionFailed
-        );
-        assert!(revoked.code.is_terminal());
     }
 }

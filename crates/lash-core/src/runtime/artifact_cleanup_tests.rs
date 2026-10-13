@@ -390,6 +390,13 @@ struct Engine(Arc<Applied>);
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for Engine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,

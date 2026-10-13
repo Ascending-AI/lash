@@ -57,9 +57,9 @@ pub(super) fn register_rlm_protocol_plugin(
     )?;
     reg.tools().provider(
         lash_core::hook_key!("finish"),
-        Arc::new(crate::control_tools::finish_tool_provider(
-            dialect.prompt_vocabulary(),
-        )),
+        Arc::new(crate::control_tools::RlmFinishProvider {
+            vocabulary: dialect.prompt_vocabulary(),
+        }),
     )?;
     reg.tool_catalog().contribute(
         lash_core::hook_key!("rlm-catalog"),

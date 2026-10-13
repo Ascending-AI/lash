@@ -126,10 +126,14 @@ impl Tools {
 }
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Tools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         self.contracts.values().map(|d| d.manifest()).collect()
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         self.contracts.get(name).map(|d| Arc::new(d.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -273,7 +277,6 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

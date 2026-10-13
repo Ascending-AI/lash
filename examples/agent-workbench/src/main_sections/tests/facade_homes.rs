@@ -128,7 +128,6 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -139,7 +138,6 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
     let session_id = lash::SessionId::from("workbench-config-change-session");
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "workbench-model-before",
                 lash::TurnBudget::Unbounded,

@@ -100,7 +100,6 @@ fn child_session_actor(process: &ProcessId) -> ActorKey {
 /// ends.
 fn delegation() -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(delegation::DelegationPluginFactory::new(
-        lash::plugins::SessionToolAccess::ambient(),
         served::spec(16),
         lash_core::lifetime::starter,
     ))
@@ -168,11 +167,15 @@ struct Echo(Arc<AtomicUsize>);
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Echo {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![echo_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == ECHO).then(|| Arc::new(echo_definition().contract()))
     }
 
@@ -320,7 +323,6 @@ impl Spawn {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
@@ -361,10 +363,7 @@ impl Spawn {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(16),
-            ))
+            .create(lash::SessionCreation::root(served::spec(16)))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         if self.migrated {
@@ -574,7 +573,7 @@ impl Scenario for Spawn {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 8,
         }
     }

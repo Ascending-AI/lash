@@ -1114,15 +1114,18 @@ impl RuntimeTurnDriver<'static> {
     /// last sync installed, over the session's live executors.
     async fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
         let recorded = match self.run_config.surface() {
-            Some(recorded) => recorded.to_vec(),
+            Some(recorded) => Arc::clone(recorded),
             // A checkpoint taken before the run's first sync records none:
             // the restored machine syncs before it offers a tool.
             None => return Ok(()),
         };
-        let authority = &self.turn_pipeline.state().authority;
         self.session
-            .install_recorded_tool_surface(&authority.tool_access, &recorded)
-            .map_err(|error| TurnError::Exec(format!("the tool surface did not install: {error}")))
+            .install_recorded_tool_surface(recorded)
+            .map_err(|error| {
+                TurnError::Exec(format!("the tool surface did not install: {error}"))
+            })?;
+        self.surface_installed = true;
+        Ok(())
     }
 }
 

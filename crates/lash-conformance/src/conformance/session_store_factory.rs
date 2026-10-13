@@ -124,7 +124,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
             output_tokens: 7,
             ..Default::default()
         },
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.append_active_conversation_messages(&[crate::Message {
         id: "read-only-session-message".to_string(),
@@ -369,7 +369,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         .expect("stale handle metadata");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     stale
@@ -718,7 +718,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     );
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     assert_deleted_write(
@@ -1048,7 +1048,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
         session_id: first_request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(first_request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(first_request.config.session_policy())
     };
     first_state.ensure_agent_frame_initialized();
     first
@@ -1061,7 +1061,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("owner frame node id");
     let mut second_state = crate::RuntimeSessionState {
         session_id: second_request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(second_request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(second_request.config.session_policy())
     };
     second_state.ensure_agent_frame_initialized();
     let second_result = second
@@ -1095,7 +1095,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         persisted_node_ids: second_state.persisted_node_ids,
         session_id: second_state.session_id,
         current_frame_node_id: Some(foreign_parent),
-        ..crate::RuntimeSessionState::ambient_fixture(second_request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(second_request.config.session_policy())
     };
     let commit = crate::RuntimeCommit::persisted_state_with_graph_commit(
         &state,
@@ -1146,7 +1146,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(source_request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(source_request.config.session_policy())
     };
     let execution = lash_core::testing::store_fixtures::execution_graph("fork continuation");
     let crate::plugin::ExecutionGraphCapture::Replace {
@@ -1258,10 +1258,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         source_session_id: source_id.clone(),
         head_revision: tip_revision,
         relation: crate::SessionRelation::Root,
-        config: crate::PersistedSessionConfig::from_policy(
-            &source_request.config.session_policy(),
-            crate::SessionToolAccess::ambient(),
-        ),
+        config: crate::PersistedSessionConfig::from_policy(&source_request.config.session_policy()),
         retention: crate::Retention::UntilGc,
     };
     factory
@@ -1290,7 +1287,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             relation: crate::SessionRelation::Root,
             config: crate::PersistedSessionConfig::from_policy(
                 &source_request.config.session_policy(),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -1316,7 +1312,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             relation: crate::SessionRelation::Root,
             config: crate::PersistedSessionConfig::from_policy(
                 &source_request.config.session_policy(),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -1341,10 +1336,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         source_session_id: source_id.clone(),
         head_revision: root_revision,
         relation: crate::SessionRelation::Root,
-        config: crate::PersistedSessionConfig::from_policy(
-            &source_request.config.session_policy(),
-            crate::SessionToolAccess::ambient(),
-        ),
+        config: crate::PersistedSessionConfig::from_policy(&source_request.config.session_policy()),
         retention: crate::Retention::UntilGc,
     };
     let forked = factory
@@ -1369,7 +1361,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             },
             config: crate::PersistedSessionConfig::from_policy(
                 &source_request.config.session_policy(),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -1479,7 +1470,6 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             relation: crate::SessionRelation::Root,
             config: crate::PersistedSessionConfig::from_policy(
                 &source_request.config.session_policy(),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -1506,7 +1496,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let frame = state

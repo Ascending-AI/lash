@@ -269,18 +269,6 @@ pub struct RuntimeControlConfig {
     pub delta_coalescing: DeltaCoalescing,
     /// Optional narrow-only policy for the model-facing session process tools.
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
-    /// What a turn run does when a persisted tool id no registered source
-    /// resolves. Defaults to
-    /// [`ToolSourcePolicy::Tolerate`](crate::ToolSourcePolicy): the run goes
-    /// on and reports the typed
-    /// [`ToolRestoreReport`](crate::ToolRestoreReport) as its
-    /// `TurnEvent::ToolRestoreReported`. Set
-    /// [`Require`](crate::ToolSourcePolicy::Require) in unattended or
-    /// fixed-tool deployments to refuse, before it builds the session, a turn
-    /// run that would lose a catalog member (FIG-5134). It is carried on the
-    /// host config of the runtime that executes the run; a command run
-    /// tolerates whatever it says.
-    pub tool_source_policy: crate::ToolSourcePolicy,
     /// The host's bound on one obligation delivery (ADR 0109 §1.8). This is
     /// the one source every relay reads: [`relay_policy`](Self::relay_policy)
     /// derives the policy the leader's artifact-cleanup due pass and a
@@ -313,7 +301,7 @@ impl RuntimeControlConfig {
 impl RuntimeHostConfig {
     /// A config over `backend`: its effect host, attachment port,
     /// process-exec-env store and clock, with the commit budget, queued-work
-    /// batching, tool-source policy, execution budgets, delta coalescing and
+    /// batching, execution budgets, delta coalescing and
     /// data retention named explicitly.
     ///
     /// There is intentionally no `Default` and no in-memory constructor. The
@@ -325,7 +313,6 @@ impl RuntimeHostConfig {
         backend: crate::Backend,
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
-        tool_source_policy: crate::ToolSourcePolicy,
         execution_budgets: crate::ExecutionBudgets,
         delta_coalescing: DeltaCoalescing,
         data_retention: DataRetentionConfig,
@@ -372,7 +359,6 @@ impl RuntimeHostConfig {
                 delta_coalescing,
                 effect_host,
                 process_tool_visibility_filter: None,
-                tool_source_policy,
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
                 relay: super::obligations::relay::RelayPolicy::standard(),
                 commit_admission: super::CommitAdmissionPolicy::standard(),

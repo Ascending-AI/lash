@@ -84,6 +84,13 @@ struct IngressAdmissionEngine {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for IngressAdmissionEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> std::result::Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core::ProcessSignature,

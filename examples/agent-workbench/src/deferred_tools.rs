@@ -1,23 +1,24 @@
 //! Production deferred-tool policy for the Agent Workbench.
 //!
 //! The resident `tools.search` capability searches a compact catalogue and
-//! persists every returned grant in SQLite. The RLM resolver authorizes only
-//! those persisted paths. Because Lash VM gathers call paths before it starts
-//! a block, a path discovered by `tools.search` is first callable in the next
-//! block; the SQLite grant survives later turns and process restarts.
+//! persists every returned grant in SQLite. The workbench's deferred
+//! provider resolves only those persisted paths, each to a match whose
+//! execution binding names its call path, and executes them. Because Lash
+//! VM gathers call paths before it starts a block, a path discovered by
+//! `tools.search` is first callable in the next block; the SQLite grant
+//! survives later turns and process restarts, and a committed match is
+//! never resolved again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use lash::sync::MutexExt;
 use lash::tools::{
-    CataloguePreviewOptions, DeferredResolveContext, DeferredToolGrant, DeferredToolResolution,
-    DeferredToolResolver, RecordedGrantInstallError, SharedDeferredToolResolver, StaticToolExecute,
-    StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolBindingResolutionExt, ToolCall,
-    ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolId, ToolManifest,
-    ToolManifestBindingExt, ToolOutcome, ToolProvider,
+    CataloguePreviewOptions, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
+    ExecutionBinding, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding,
+    ToolBindingResolutionExt, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt,
+    ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -25,16 +26,33 @@ use sha2::{Digest, Sha256};
 
 const SEARCH_TOOL_NAME: &str = "search_tools";
 const SEARCH_CALL_PATH: &str = "tools.search";
-/// The key the workbench declares its deferred execution provider under.
+/// The key the workbench declares its deferred provider under.
 pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::HookKey = lash::hook_key!("deferred");
+/// The execution binding format the deferred provider writes and reads:
+/// `{"kind": "agent_workbench_deferred", "call_path": <path>}`.
+/// version_surface = "coexist"
+/// version_guard(items(BINDING_FORMAT, binding_for))
+const BINDING_FORMAT: lash::plugins::FormatVersion = lash::plugins::FormatVersion::ONE;
 
-/// The provider every deferred grant executes through: the workbench
-/// plugin's deferred execution provider.
+/// The provider every deferred match executes through: the workbench
+/// plugin's deferred provider.
 fn deferred_provider() -> lash::plugins::PluginCallbackIdentity {
     lash::plugins::PluginCallbackIdentity::tool_provider(
         "agent_workbench",
         DEFERRED_PROVIDER_KEY.as_str(),
     )
+}
+
+/// The execution binding of the match for `call_path`.
+fn binding_for(call_path: &str) -> ExecutionBinding {
+    ExecutionBinding {
+        codec: deferred_provider(),
+        format: BINDING_FORMAT,
+        payload: json!({
+            "kind": "agent_workbench_deferred",
+            "call_path": call_path,
+        }),
+    }
 }
 const PREVIEW_MODULE_LIMIT: usize = 2;
 const PREVIEW_CALL_NAME_LIMIT: usize = 4;
@@ -44,7 +62,7 @@ const SEARCH_RESULT_LIMIT: usize = 20;
 pub(crate) struct WorkbenchDeferredTools {
     catalogue: Arc<DeferredCatalogue>,
     store: DeferredGrantStore,
-    resolver: Arc<WorkbenchDeferredToolResolver>,
+    provider: Arc<WorkbenchDeferredProvider>,
 }
 
 impl WorkbenchDeferredTools {
@@ -58,19 +76,15 @@ impl WorkbenchDeferredTools {
 
     fn with_store(store: DeferredGrantStore) -> Result<Self, rusqlite::Error> {
         let catalogue = Arc::new(DeferredCatalogue::new(workbench_deferred_definitions()));
-        let resolver = Arc::new(WorkbenchDeferredToolResolver {
+        let provider = Arc::new(WorkbenchDeferredProvider {
+            catalogue: Arc::clone(&catalogue),
             store: store.clone(),
-            installed: Mutex::new(BTreeMap::new()),
         });
         Ok(Self {
             catalogue,
             store,
-            resolver,
+            provider,
         })
-    }
-
-    pub(crate) fn resolver(&self) -> SharedDeferredToolResolver {
-        self.resolver.clone()
     }
 
     pub(crate) fn search_provider(&self) -> Arc<dyn ToolProvider> {
@@ -83,10 +97,10 @@ impl WorkbenchDeferredTools {
         ))
     }
 
-    pub(crate) fn execution_provider(&self) -> Arc<dyn ToolProvider> {
-        Arc::new(DeferredExecutionProvider {
-            definitions: self.catalogue.definitions.clone(),
-        })
+    /// The session's deferred provider: it resolves the granted paths and
+    /// executes their matches.
+    pub(crate) fn deferred_provider(&self) -> Arc<dyn DeferredToolProvider> {
+        self.provider.clone()
     }
 }
 
@@ -94,6 +108,7 @@ pub(crate) fn prompt_preview() -> String {
     DeferredCatalogue::new(workbench_deferred_definitions()).preview()
 }
 
+/// The call paths `tools.search` granted, persisted.
 #[derive(Clone)]
 struct DeferredGrantStore {
     connection: Arc<Mutex<Connection>>,
@@ -112,8 +127,7 @@ impl DeferredGrantStore {
     fn initialize(connection: Connection) -> Result<Self, rusqlite::Error> {
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS deferred_tool_grants (\
-                call_path TEXT PRIMARY KEY NOT NULL, \
-                grant_json TEXT NOT NULL\
+                call_path TEXT PRIMARY KEY NOT NULL\
             );",
         )?;
         Ok(Self {
@@ -121,33 +135,30 @@ impl DeferredGrantStore {
         })
     }
 
-    fn grant(&self, call_path: &str, grant: &DeferredToolGrant) -> Result<(), GrantStoreError> {
-        let grant_json = serde_json::to_string(grant)?;
+    fn grant(&self, call_path: &str) -> Result<(), GrantStoreError> {
         self.connection
             .lock()
             .map_err(|_| GrantStoreError::Poisoned)?
             .execute(
-                "INSERT INTO deferred_tool_grants (call_path, grant_json) VALUES (?1, ?2) \
-                 ON CONFLICT(call_path) DO UPDATE SET grant_json = excluded.grant_json",
-                params![call_path, grant_json],
+                "INSERT INTO deferred_tool_grants (call_path) VALUES (?1) \
+                 ON CONFLICT(call_path) DO NOTHING",
+                params![call_path],
             )?;
         Ok(())
     }
 
-    fn load(&self, call_path: &str) -> Result<Option<DeferredToolGrant>, GrantStoreError> {
-        let grant_json = self
+    fn granted(&self, call_path: &str) -> Result<bool, GrantStoreError> {
+        Ok(self
             .connection
             .lock()
             .map_err(|_| GrantStoreError::Poisoned)?
             .query_row(
-                "SELECT grant_json FROM deferred_tool_grants WHERE call_path = ?1",
+                "SELECT 1 FROM deferred_tool_grants WHERE call_path = ?1",
                 [call_path],
-                |row| row.get::<_, String>(0),
+                |_| Ok(()),
             )
-            .optional()?;
-        grant_json
-            .map(|raw| serde_json::from_str(&raw).map_err(GrantStoreError::from))
-            .transpose()
+            .optional()?
+            .is_some())
     }
 }
 
@@ -157,53 +168,121 @@ enum GrantStoreError {
     Poisoned,
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
 }
 
-struct WorkbenchDeferredToolResolver {
+/// The workbench's deferred provider. It advertises nothing; it resolves a
+/// granted call path to its catalogued tool, executed by itself under a
+/// binding naming the path, and runs that tool's calls.
+struct WorkbenchDeferredProvider {
+    catalogue: Arc<DeferredCatalogue>,
     store: DeferredGrantStore,
-    installed: Mutex<BTreeMap<String, DeferredToolGrant>>,
+}
+
+impl WorkbenchDeferredProvider {
+    fn definition_by_id(&self, id: &ToolId) -> Option<&ToolDefinition> {
+        self.catalogue
+            .definitions
+            .values()
+            .find(|definition| definition.id() == id)
+    }
+
+    fn outcome(&self, path: &str) -> DeferredOutcome {
+        let Some(definition) = self.catalogue.definitions.get(path) else {
+            return DeferredOutcome::Unavailable { note: None };
+        };
+        match self.store.granted(path) {
+            Ok(true) => DeferredOutcome::Resolved {
+                provider: deferred_provider(),
+                definition: definition.clone(),
+                binding: Some(binding_for(path)),
+            },
+            Ok(false) => DeferredOutcome::Unavailable { note: None },
+            Err(err) => {
+                // A resolution has no error channel; surface the store
+                // failure to the operator before recording the path as
+                // unavailable (a re-search will retry in a later run).
+                eprintln!(
+                    "warning: deferred grant store read failed for `{path}` \
+                     ({err}); resolving as not available"
+                );
+                DeferredOutcome::Unavailable { note: None }
+            }
+        }
+    }
 }
 
 #[async_trait]
-impl DeferredToolResolver for WorkbenchDeferredToolResolver {
+impl DeferredToolProvider for WorkbenchDeferredProvider {
     async fn resolve(
         &self,
         _cx: &DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, DeferredToolResolution> {
+    ) -> BTreeMap<String, DeferredOutcome> {
         paths
             .iter()
-            .map(|path| {
-                let resolution = match self.store.load(path) {
-                    Ok(Some(grant)) => DeferredToolResolution::Resolved(Box::new(grant)),
-                    Ok(None) => DeferredToolResolution::NotAvailable { note: None },
-                    Err(err) => {
-                        // The resolver seam has no error channel; surface the
-                        // store failure to the operator before reporting the
-                        // link-scoped NotAvailable (a re-search will retry).
-                        eprintln!(
-                            "warning: deferred grant store read failed for `{path}` \
-                             ({err}); resolving as not available"
-                        );
-                        DeferredToolResolution::NotAvailable { note: None }
-                    }
-                };
-                ((*path).to_string(), resolution)
-            })
+            .map(|path| ((*path).to_string(), self.outcome(path)))
             .collect()
     }
+}
 
-    fn install_recorded_grant(
+#[async_trait]
+impl ToolProvider for WorkbenchDeferredProvider {
+    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_manifest_by_id(
         &self,
-        path: &str,
-        grant: &DeferredToolGrant,
-    ) -> Result<(), RecordedGrantInstallError> {
-        self.installed
-            .lock_recover()
-            .insert(path.to_string(), grant.clone());
-        Ok(())
+        id: &ToolId,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<ToolManifest> {
+        self.definition_by_id(id).map(ToolDefinition::manifest)
+    }
+
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        None
+    }
+
+    fn resolve_contract_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        self.definition_by_id(id)
+            .map(|definition| Arc::new(definition.contract()))
+    }
+
+    fn readable_binding_formats(&self) -> &'static [lash::plugins::FormatVersion] {
+        &[BINDING_FORMAT]
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        let Some(definition) = self
+            .catalogue
+            .definitions
+            .values()
+            .find(|definition| definition.name() == call.name())
+        else {
+            return ToolOutcome::err_fmt(format_args!("unknown deferred tool `{}`", call.name()))
+                .into();
+        };
+        let call_path = deferred_call_path(definition);
+        let bound = call
+            .context
+            .tool_execution_binding()
+            .map(|binding| &binding.payload["call_path"]);
+        if bound != Some(&json!(call_path)) {
+            return ToolOutcome::err(json!({
+                "kind": "invalid_deferred_grant",
+                "message": "execution binding does not match the deferred tool"
+            }))
+            .into();
+        }
+        execute_workbench_utility(&call_path, call.args).into()
     }
 }
 
@@ -318,11 +397,6 @@ struct SearchDeferredTools {
 
 #[async_trait]
 impl StaticToolExecute for SearchDeferredTools {
-    #[expect(
-        clippy::expect_used,
-        reason = "catalogue.search returns call_paths drawn from this same catalogue's \
-                  definitions map, so every result is present"
-    )]
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
             let query = call
@@ -345,18 +419,7 @@ impl StaticToolExecute for SearchDeferredTools {
                 .clamp(1, SEARCH_RESULT_LIMIT);
             let results = self.catalogue.search(query, limit);
             for result in &results {
-                let definition = self
-                    .catalogue
-                    .definitions
-                    .get(&result.call_path)
-                    .expect("search result comes from deferred catalogue");
-                let grant = DeferredToolGrant::new(definition.clone())
-                    .with_provider(deferred_provider())
-                    .with_execution_binding(json!({
-                        "kind": "agent_workbench_deferred",
-                        "call_path": result.call_path,
-                    }));
-                if let Err(error) = self.store.grant(&result.call_path, &grant) {
+                if let Err(error) = self.store.grant(&result.call_path) {
                     return ToolOutcome::err(json!({
                         "kind": "grant_persistence_failed",
                         "message": error.to_string()
@@ -364,73 +427,6 @@ impl StaticToolExecute for SearchDeferredTools {
                 }
             }
             ToolOutcome::ok(json!({ "results": results }))
-        })
-        .await
-        .into()
-    }
-}
-
-struct DeferredExecutionProvider {
-    definitions: BTreeMap<String, ToolDefinition>,
-}
-
-impl DeferredExecutionProvider {
-    fn definition_by_id(&self, id: &ToolId) -> Option<&ToolDefinition> {
-        self.definitions
-            .values()
-            .find(|definition| definition.id() == id)
-    }
-
-    async fn execute_definition(
-        &self,
-        definition: &ToolDefinition,
-        args: &Value,
-        context: &lash::tools::AttemptContext<'_>,
-    ) -> ToolOutcome {
-        let call_path = deferred_call_path(definition);
-        if context.tool_execution_binding()["call_path"] != json!(call_path) {
-            return ToolOutcome::err(json!({
-                "kind": "invalid_deferred_grant",
-                "message": "execution binding does not match the deferred tool"
-            }));
-        }
-        execute_workbench_utility(&call_path, args)
-    }
-}
-
-#[async_trait]
-impl ToolProvider for DeferredExecutionProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        Vec::new()
-    }
-
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        self.definition_by_id(id).map(ToolDefinition::manifest)
-    }
-
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
-        None
-    }
-
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        self.definition_by_id(id)
-            .map(|definition| Arc::new(definition.contract()))
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        (async {
-            let Some(definition) = self
-                .definitions
-                .values()
-                .find(|definition| definition.name() == call.name())
-            else {
-                return ToolOutcome::err_fmt(format_args!(
-                    "unknown deferred tool `{}`",
-                    call.name()
-                ));
-            };
-            self.execute_definition(definition, call.args, call.context)
-                .await
         })
         .await
         .into()
@@ -715,34 +711,20 @@ mod tests {
     /// Resolve `paths` the way a process cell's link asks: no run, no
     /// capability refs. The workbench grants by call path alone.
     async fn resolve(
-        resolver: &WorkbenchDeferredToolResolver,
+        provider: &WorkbenchDeferredProvider,
         paths: &[&str],
-    ) -> BTreeMap<String, DeferredToolResolution> {
+    ) -> BTreeMap<String, DeferredOutcome> {
         let owner = lash::tools::ExecutionOwner::Process {
             process_id: lash::ProcessId::fixture("p_deferred"),
         };
         let capabilities = BTreeMap::new();
-        resolver
+        let config = lash::tools::OwnerConfigView::default();
+        provider
             .resolve(
-                &DeferredResolveContext::new(&owner, None, &capabilities),
+                &DeferredResolveContext::new(&owner, None, &capabilities, &config),
                 paths,
             )
             .await
-    }
-
-    fn grant_for(catalogue: &DeferredCatalogue, call_path: &str) -> DeferredToolGrant {
-        DeferredToolGrant::new(
-            catalogue
-                .definitions
-                .get(call_path)
-                .expect("deferred definition")
-                .clone(),
-        )
-        .with_provider(deferred_provider())
-        .with_execution_binding(json!({
-            "kind": "agent_workbench_deferred",
-            "call_path": call_path,
-        }))
     }
 
     #[tokio::test]
@@ -750,68 +732,44 @@ mod tests {
         let temp = tempfile::tempdir().expect("deferred grant tempdir");
         let path = temp.path().join("grants.db");
         let first = WorkbenchDeferredTools::open(&path).expect("open first grant store");
-        let grant = grant_for(&first.catalogue, "text.sha256");
         first
             .store
-            .grant("text.sha256", &grant)
+            .grant("text.sha256")
             .expect("persist deferred grant");
 
-        let turn_two = resolve(&first.resolver, &["text.sha256"]).await;
+        let turn_two = resolve(&first.provider, &["text.sha256"]).await;
         assert!(matches!(
             turn_two.get("text.sha256"),
-            Some(DeferredToolResolution::Resolved(_))
+            Some(DeferredOutcome::Resolved { .. })
         ));
-        assert!(
-            first.resolver.installed.lock_recover().is_empty(),
-            "discovery must stay side-effect free until the journal commits"
-        );
         drop(first);
 
         let reopened = WorkbenchDeferredTools::open(&path).expect("reopen SQLite grant store");
-        let after_restart = resolve(&reopened.resolver, &["text.sha256"]).await;
-        let restored = match after_restart.get("text.sha256") {
-            Some(DeferredToolResolution::Resolved(grant)) => grant.as_ref(),
-            other => panic!("expected restored grant, got {other:?}"),
+        let after_restart = resolve(&reopened.provider, &["text.sha256"]).await;
+        let Some(DeferredOutcome::Resolved {
+            provider,
+            definition,
+            binding,
+        }) = after_restart.get("text.sha256")
+        else {
+            panic!("expected the restored grant, got {after_restart:?}");
         };
-        assert_eq!(
-            restored.definition.id().as_str(),
-            "workbench:deferred:text_sha256"
-        );
-        assert_eq!(restored.provider, Some(deferred_provider()));
-        assert!(
-            reopened.resolver.installed.lock_recover().is_empty(),
-            "restart discovery must not install before replay commitment"
-        );
-
-        reopened
-            .resolver
-            .install_recorded_grant("text.sha256", restored)
-            .expect("recorded grant route reinstalls");
-        assert_eq!(
-            reopened
-                .resolver
-                .installed
-                .lock_recover()
-                .get("text.sha256")
-                .expect("reinstalled recorded grant")
-                .definition
-                .id()
-                .as_str(),
-            "workbench:deferred:text_sha256"
-        );
+        assert_eq!(definition.id().as_str(), "workbench:deferred:text_sha256");
+        assert_eq!(provider, &deferred_provider());
+        assert_eq!(binding.as_ref(), Some(&binding_for("text.sha256")));
     }
 
     #[tokio::test]
     async fn unavailable_resolution_is_typed_and_deterministic() {
         let tools = WorkbenchDeferredTools::in_memory().expect("open deferred tools");
-        let outcomes = resolve(&tools.resolver, &["text.sha256", "unknown.path"]).await;
+        let outcomes = resolve(&tools.provider, &["text.sha256", "unknown.path"]).await;
         assert!(matches!(
             outcomes.get("text.sha256"),
-            Some(DeferredToolResolution::NotAvailable { note: None })
+            Some(DeferredOutcome::Unavailable { note: None })
         ));
         assert!(matches!(
             outcomes.get("unknown.path"),
-            Some(DeferredToolResolution::NotAvailable { note: None })
+            Some(DeferredOutcome::Unavailable { note: None })
         ));
         assert_eq!(
             outcomes.keys().cloned().collect::<Vec<_>>(),

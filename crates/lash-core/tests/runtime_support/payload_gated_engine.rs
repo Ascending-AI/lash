@@ -7,6 +7,13 @@ pub(super) const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for PayloadGatedEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core::ProcessSignature,

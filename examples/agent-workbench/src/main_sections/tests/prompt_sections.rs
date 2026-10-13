@@ -24,7 +24,7 @@ fn cut(prompt: &WorkbenchPrompt, history_messages: u32) -> PromptCut {
             call: 0,
             purpose: PromptPurpose::Turn,
         },
-        config: lash::plugins::OwnerConfigView::session(lash::plugins::AdmittedPluginConfig::new(
+        config: lash::tools::OwnerConfigView::session(lash::plugins::AdmittedPluginConfig::new(
             serde_json::from_value(json!({
                 "namespaces": {
                     "agent_workbench": { "format_version": 1, "value": prompt }
@@ -221,7 +221,6 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -245,10 +244,7 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
     )
     .expect("the workbench prompt records");
     core.session(lash::SessionId::from("workbench-prompt"))
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        .create(lash::SessionCreation::root(spec))
         .await
         .expect("the session is created");
     let session = core

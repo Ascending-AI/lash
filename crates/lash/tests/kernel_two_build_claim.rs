@@ -81,9 +81,6 @@ enum Build {
     /// (FIG-5799): it retains build N's helpers and reads what build N
     /// wrote as written.
     Helpers,
-    /// [`Build::Helpers`], its kernel engine adopting what build N wrote
-    /// onto the changed helpers.
-    HelpersAdopting,
     /// [`Build::Helpers`], no longer retaining build N's helpers.
     HelpersClosing,
 }
@@ -163,10 +160,7 @@ fn serving_under(
     components: Vec<Component>,
     policy: Option<Arc<std::sync::atomic::AtomicUsize>>,
 ) -> (lash::Backend, lash::LashCore) {
-    let kernel_one = matches!(
-        build,
-        Build::N | Build::Helpers | Build::HelpersAdopting | Build::HelpersClosing
-    );
+    let kernel_one = matches!(build, Build::N | Build::Helpers | Build::HelpersClosing);
     let replies = Arc::new(std::sync::Mutex::new(
         cells
             .iter()
@@ -199,7 +193,7 @@ fn serving_under(
         Build::N => builder.previous_build(),
         Build::NPlus1 => builder,
         Build::Closing => builder.closing_window(),
-        Build::Helpers | Build::HelpersAdopting => builder.helper_successor(),
+        Build::Helpers => builder.helper_successor(),
         Build::HelpersClosing => builder.closing_helpers(),
     };
     let backend = builder.build().expect("the backend assembles");
@@ -214,11 +208,6 @@ fn serving_under(
     .with_worker_service(lash::vm::WorkerService::default());
     let factory = if kernel_one {
         factory.writing_kernel(KernelVersion::One)
-    } else {
-        factory
-    };
-    let factory = if build == Build::HelpersAdopting {
-        factory.adopting_helpers()
     } else {
         factory
     };
@@ -247,7 +236,6 @@ fn serving_under(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -261,12 +249,9 @@ fn serving_under(
 /// The environment a kernel process of these laws runs under: no tools and
 /// no components.
 fn environment() -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
-        lash::MaxToolCalls::new(16),
-    )
-    .build()
-    .expect("the environment builds")
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .build()
+        .expect("the environment builds")
 }
 
 /// Publishes the worker document under a host pin, and answers the start
@@ -614,7 +599,6 @@ async fn session(core: &lash::LashCore, id: &str) -> lash::LashSession {
     match core
         .session(id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 MODEL,
                 lash::TurnBudget::Unbounded,
@@ -1209,14 +1193,14 @@ main {{
     )
 }
 
-/// FIG-5799: a process build N parked inside `ts.array.forEach`, a helper
-/// the later build changes, depends on build N's helper release; the
-/// listing names it, with the typed reason a node that adopts would not
-/// adopt it. A node of the later build that adopts claims it, does not
-/// adopt it, and resumes it on the helper's old body to its answer.
+/// HELPER-PIN (FIG-6074 law 16, D2), the pin: a process build N parked
+/// inside `ts.array.forEach`, a helper the later build changes, depends on
+/// build N's helper release; the listing names it, with the typed reason
+/// its run would not carry onto the changed helper. A node of the later
+/// build claims it, leaves it on the functions it pins, and resumes it on
+/// the helper's old body to its answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_parked_inside_a_changed_helper_is_refused_adoption_and_resumes_on_the_old_body()
-{
+async fn a_process_parked_inside_a_changed_helper_stays_pinned_and_resumes_on_the_old_body() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1253,7 +1237,7 @@ async fn a_process_parked_inside_a_changed_helper_is_refused_adoption_and_resume
         "{listed}"
     );
 
-    let (_new_backend, new) = serving(&stores, Build::HelpersAdopting, "build-helpers", &[]);
+    let (_new_backend, new) = serving(&stores, Build::Helpers, "build-helpers", &[]);
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         new.processes().await_output(&process),
@@ -1476,15 +1460,16 @@ async fn a_rolling_fleet_never_hands_later_helper_work_to_a_node_that_holds_only
     );
 }
 
-/// FIG-5799: the build that stops retaining build N's helpers does not
-/// start while a process build N wrote still pins one, and its refusal
-/// names how many and the command that sweeps them. The process stands
-/// outside the helper it pins, so once a node of the later build that
-/// adopts has been woken to it by the sweep and adopted it onto the
-/// changed helper, the build starts.
+/// HELPER-PIN (FIG-6074 law 16, D2), the refusal: the build that stops
+/// retaining build N's helpers does not start while a process build N
+/// wrote still pins one, and its refusal names how many and the command
+/// that lists them. The process stands outside the helper it pins, so its
+/// run would carry onto the changed helper; a node of the later build
+/// still leaves it pinned, and the build starts once an operator has ended
+/// it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_the_sweep()
- {
+async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_it_ends()
+{
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1494,7 +1479,7 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
     let payload = payload(&old_backend, &after_for_each_sleeper()).await;
     let process = start(&old, payload).await;
     let actor = ActorKey::process(process.as_str()).expect("a process actor key");
-    let written = waiting(&old_backend, &actor).await.formats;
+    waiting(&old_backend, &actor).await;
     old.drain().await.expect("build N's node drains");
     let listed = survey(&old_backend).await;
     assert_eq!(
@@ -1516,25 +1501,32 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
         })) => {
             assert_eq!(retired, "helper release 1.0");
             assert_eq!(dependents, 1);
-            assert_eq!(command, lash::vm::KERNEL_MIGRATION_SWEEP);
+            assert_eq!(command, "lashctl kernel-migration list");
         }
         other => panic!("the closing build started over a dependent run: {other:?}"),
     }
     drop(refusing);
 
-    let (new_backend, new) = serving(&stores, Build::HelpersAdopting, "build-helpers", &[]);
-    let swept = lash::vm::sweep_kernel_migration(&new_backend)
-        .await
-        .expect("the sweep wakes the process");
-    assert_eq!(swept.helper_processes, 1);
-    let adopted = carried_from(&new_backend, &actor, &written).await;
-    assert!(
-        adopted.formats.as_str().contains("kernel-helpers@2"),
-        "the adopted process is in the later build's set: {:?}",
-        adopted.formats
-    );
+    // A node of the later build holds the process on the helpers it pins:
+    // nothing it does carries the run off them.
+    let (new_backend, new) = serving(&stores, Build::Helpers, "build-helpers", &[]);
     let listed = survey(&new_backend).await;
-    assert!(listed.get("helper_processes").is_none(), "{listed}");
+    assert_eq!(
+        listed["helper_processes"],
+        serde_json::json!([{"process": process, "functions": [released_for_each()], "refused": null}]),
+        "{listed}"
+    );
+    new.processes()
+        .cancel(&process, new.effect_host())
+        .await
+        .expect("the cancel is requested");
+    tokio::time::timeout(
+        Duration::from_secs(60),
+        new.processes().await_output(&process),
+    )
+    .await
+    .expect("the cancelled process ends within a minute")
+    .expect("its end is read");
     new.drain().await.expect("the later build's node drains");
 
     let (_closing_backend, closing) =
@@ -1661,10 +1653,20 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
 
 /// The hold component, its body holding when `holds`.
 fn hold_component(holds: bool, seen: &Arc<Holds>) -> Component {
+    hold_component_of(hold_definition(), holds, seen)
+}
+
+/// The hold component serving `definition` under the hold tool's provider
+/// key, its body holding when `holds`.
+fn hold_component_of(
+    definition: lash::tools::ToolDefinition,
+    holds: bool,
+    seen: &Arc<Holds>,
+) -> Component {
     (
         Arc::new(HoldComponent {
             body: Arc::new(lash::tools::StaticToolProvider::new(
-                vec![hold_definition()],
+                vec![definition],
                 HoldBody {
                     holds,
                     seen: Arc::clone(seen),
@@ -1678,13 +1680,11 @@ fn hold_component(holds: bool, seen: &Arc<Holds>) -> Component {
 /// The environment a held process runs under: the hold tool, from its
 /// component.
 fn hold_environment() -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted([hold_definition()]).expect("the hold tool"),
-        lash::MaxToolCalls::new(16),
-    )
-    .component(HOLD, &())
-    .build()
-    .expect("the environment builds")
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(HOLD, &())
+        .link_tool(HOLD.tool_provider("body"), &hold_definition())
+        .build()
+        .expect("the environment builds")
 }
 
 /// A core of build N+1 that installs `components`.
@@ -1929,4 +1929,88 @@ async fn process_step_crosses_deploy() {
         "the later build claimed the held process"
     );
     next.shutdown().await.unwrap();
+}
+
+/// `worker()` sleeps, then performs the hold tool once, answering what it
+/// answered or the error it caught.
+const SLEEPING_HOLD_WORKER: &str = r#"kernel 1
+numbers float
+effect hold.run(input: Any) -> Any
+entry worker() -> Any
+
+fn worker() {
+  do sleep 4000
+  let request = {n: 1}
+  let got = "none"
+  try {
+    set got = perform hold.run(request) as Any
+  } catch e {
+    set got = {kind: e.kind, message: e.message, data: e.data}
+  }
+  return got
+}
+
+main {
+  finish null
+}
+"#;
+
+/// SURFACE-CHANGE-OUTCOME (law 9, process arm; D3, §5a): build N starts a
+/// process whose env retained the hold tool's surface, and stops while the
+/// process sleeps. A later build serving the same provider key with the
+/// tool changed (its execution policy) delivers the call the process issues
+/// once it wakes a typed, catchable `linked_tool_changed` error, and runs
+/// no body. The law asserts this build's own outcome; a build serving the
+/// retained surface runs the recorded call (`process_step_crosses_deploy`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error() {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let seen = Arc::new(Holds::default());
+    let env = hold_environment();
+    let (backend, first) = with_components(
+        &stores,
+        "surface-before",
+        vec![hold_component(false, &seen)],
+    );
+    let payload = payload_under(&first, &backend, &env, SLEEPING_HOLD_WORKER).await;
+    let process = start_under(&first, &env, payload).await;
+    first.shutdown().await.expect("build N stops");
+    drop(first);
+    unowned(&backend, &process).await;
+
+    let changed = hold_definition().with_execution_policy(lash_core::ExecutionPolicy::Once);
+    let (_, later) = with_components(
+        &stores,
+        "surface-changed",
+        vec![hold_component_of(changed, false, &seen)],
+    );
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        later.processes().await_output(&process),
+    )
+    .await
+    .expect("the later build ends the process within a minute")
+    .expect("its end is read");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process ended without an answer: {output:?}");
+    };
+    assert!(
+        output.is_success(),
+        "the process caught the error: {output:?}"
+    );
+    let caught = output.value_for_projection().to_string();
+    assert!(
+        caught.contains("linked_tool_changed") && caught.contains(HOLD_TOOL),
+        "the call answered the typed drift error naming its tool: {caught}"
+    );
+    assert_eq!(
+        seen.deliveries.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no body ran"
+    );
+    later.shutdown().await.expect("the later build stops");
 }

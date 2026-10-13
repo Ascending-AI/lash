@@ -375,7 +375,6 @@ async fn committed_factory_attachment() -> (
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
         retention: crate::Retention::UntilGc,
@@ -1140,7 +1139,6 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
         retention: crate::Retention::UntilGc,
@@ -1699,8 +1697,7 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let transaction = registry
         .admit("upgrade-model", 0, entries)
         .expect("the model command is admitted");
-    let mut config =
-        crate::PersistedSessionConfig::from_policy(&policy, crate::SessionToolAccess::ambient());
+    let mut config = crate::PersistedSessionConfig::from_policy(&policy);
     assert!(matches!(
         registry
             .resolve(

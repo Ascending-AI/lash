@@ -449,7 +449,6 @@ impl CutDelivery {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
@@ -547,7 +546,7 @@ impl Scenario for CutDelivery {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -567,10 +566,7 @@ impl Scenario for CutDelivery {
         let session = self
             .core()
             .session(id.clone())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(BEFORE),
-            ))
+            .create(lash::SessionCreation::root(served::spec(BEFORE)))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         self.core()

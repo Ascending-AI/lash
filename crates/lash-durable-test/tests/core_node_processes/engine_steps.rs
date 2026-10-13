@@ -123,6 +123,7 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
                 } else {
                     engine_step_advance
                 },
+                performs: no_tools,
             }))
             .with_engine_steps(Arc::new(Double {
                 runs: Arc::clone(&self.runs),
@@ -173,6 +174,7 @@ async fn engine_step_without_the_capability_is_refused_before_admission(tier: Ti
         vec![Arc::new(ScriptEngine {
             kind: BARE_ENGINE,
             advance: engine_step_advance,
+            performs: no_tools,
         })],
         |builder| builder,
     )
@@ -309,6 +311,7 @@ impl lash_core::plugin::PluginFactory for RetryPlugin {
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: RETRY_ENGINE,
                 advance: flaky_advance,
+                performs: no_tools,
             }))
             .with_engine_steps(Arc::new(Flaky {
                 runs: Arc::clone(&self.runs),

@@ -102,7 +102,6 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                 .data_retention(lash::DataRetention::standard())
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-                .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                 .execution_budgets(lash::ExecutionBudgets::recommended())
                 .delta_coalescing(lash::DeltaCoalescing::recommended())
                 .build(crate::sim_process_owner())

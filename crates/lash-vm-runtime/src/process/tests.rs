@@ -246,7 +246,7 @@ fn effect(wait: u64, identity: EffectIdentity) -> Issued {
     Issued::Effect {
         wait,
         admission: admitted(identity),
-        tool: lash_sansio::ToolId::new("tool:fetch"),
+        effect: lash_kernel_doc::EffectName::new("tools.fetch").expect("an effect name"),
         input: serde_json::json!({ "wait": wait }),
     }
 }

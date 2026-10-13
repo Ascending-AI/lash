@@ -153,7 +153,7 @@ pub(super) async fn plugin_format_boundary(
     );
     let mut state = RuntimeSessionState {
         session_id: crate::SessionId::fixture(session_id),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -163,7 +163,7 @@ pub(super) async fn plugin_format_boundary(
     let seed = host
         .build_session(PluginSessionRequest::creation(
             "format-seed",
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
     let mut snapshot = seed.export_state();
@@ -252,7 +252,6 @@ pub(super) async fn plugin_format_boundary(
         &original,
         SessionAuthorityContext {
             plugin_config: durable.admitted_plugin_config(),
-            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     );
     let decoded = host

@@ -461,7 +461,7 @@ mod tests {
     fn adopted_intent_rows_count_against_the_node_budget() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-adoption-rows"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -493,7 +493,7 @@ mod tests {
     fn keyed_budget_counts_root_and_changed_bodies_but_excludes_unchanged_refs() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-bytes"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -610,7 +610,7 @@ mod tests {
     fn a_failed_settlement_measures_as_its_bare_commit() {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("budget-failed-settlement"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),

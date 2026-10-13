@@ -52,7 +52,7 @@ use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
 };
 use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 
 use dialect::Dialect;
@@ -72,7 +72,7 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 fn step(name: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
-        tool: ToolId::new(tool),
+        effect: lash_core_execution::testing::effect(tool),
         input: json!({ "step": name }),
         site: None,
     }
@@ -80,6 +80,13 @@ fn step(name: &str, tool: &str) -> StepRequest {
 
 #[async_trait::async_trait]
 impl ProcessEngine for DrainEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -236,15 +243,12 @@ impl ProcessSteps for DrainSteps {
         _step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        Ok(StepAdmission {
-            park: None,
-            policy: ExecutionPolicy::Once,
-            limit: ExecutionLimit::starting_at(
-                now_ms,
-                Duration::from_secs(60),
-                Duration::from_secs(60),
-            ),
-        })
+        Ok(StepAdmission::new(
+            lash_core_execution::testing::step_tool(_step, KIND),
+            ExecutionPolicy::Once,
+            ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.
@@ -271,7 +275,9 @@ impl ProcessSteps for DrainSteps {
         lash_core_execution::runtime::actor::round::member_body({
             let world = Arc::clone(&self.world);
             let process = process.id.clone();
-            let tool = step.admitted_tool(KIND).as_str().to_owned();
+            let tool = lash_core_execution::testing::step_tool(step, KIND)
+                .as_str()
+                .to_owned();
             Box::new(move |_token| {
                 world.entries.lock_recover().push(tool.clone());
                 Box::pin(async move {

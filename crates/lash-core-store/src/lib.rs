@@ -33,6 +33,7 @@ pub mod executable_generation;
 pub mod execution_state;
 pub mod input_normalization;
 pub mod message_projection;
+pub mod obligations;
 mod persisted_node_ids;
 pub mod plugin_state;
 pub mod process_env;
@@ -66,7 +67,7 @@ mod snapshot_index;
 pub mod store;
 pub mod store_failure;
 pub mod tool_run;
-pub mod tool_state;
+pub mod tool_surface;
 pub mod turn_control_vocabulary;
 pub mod turn_failure_evidence;
 pub mod turn_input_vocabulary;
@@ -141,12 +142,11 @@ pub(crate) use queued_work_vocabulary::{
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, SessionLineage,
-    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionToolAccess,
+    SessionObserverIntent, SessionRelation, SessionSnapshot,
 };
 pub(crate) use session_policy::SessionPolicy;
 pub(crate) use session_read_view::SessionReadView;
 pub(crate) use session_state::RuntimeSessionState;
-pub(crate) use tool_state::ToolState;
 pub(crate) use turn_control_vocabulary::{TurnAddress, TurnCancelInputOutcome, TurnCancelRequest};
 pub(crate) use turn_input_vocabulary::{
     AdmittedTurnInputs, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
@@ -170,7 +170,6 @@ pub(crate) mod facade_support {
 
     #[allow(unused_imports)]
     pub(crate) use crate::session_identity::facade_ops::AgentFrameReasonFacadeOps;
-    pub(crate) use crate::tool_state::facade_ops::ToolStateFacadeOps;
 }
 
 /// Path shim: the durable session vocabulary `lash-core` exposes as

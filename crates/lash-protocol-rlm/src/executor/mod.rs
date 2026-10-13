@@ -56,7 +56,6 @@ pub(crate) struct CellServices {
     pub events: Arc<crate::projection::EventCache>,
     /// The workers that lower the cell and host its machine.
     pub workers: lash_vm_client::service::Service,
-    pub deferred_tool_resolver: Option<crate::deferred::SharedDeferredToolResolver>,
     pub execution_bounds: crate::plugin::ExecutionBounds,
     /// The transport the program arrived on.
     pub channel: crate::plugin::RlmChannel,
@@ -328,37 +327,32 @@ async fn link_cell(
             .map_err(|error| surface(error.to_string()))?;
     }
 
-    // gather → decide → offer: the first park records grants and notes
-    // with the lowered cell. Discovery may repeat before that save.
-    let outcomes = match &services.deferred_tool_resolver {
-        Some(_) if ctx.parent_invocation().is_some() => {
-            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
-            let offered = boundary.signatures();
-            let candidates = crate::deferred::called_paths(code, state.dialect())
-                .into_iter()
-                .filter(|path| {
-                    !lash_kernel_doc::EffectName::new(path.as_str())
-                        .is_ok_and(|name| offered.contains_key(&name))
-                })
-                .collect::<BTreeSet<_>>();
-            if candidates.is_empty() {
-                BTreeMap::new()
-            } else {
-                let resolver = services.deferred_tool_resolver.as_ref();
-                crate::deferred::journal_deferred_outcomes(candidates, resolver, ctx)
-                    .await
-                    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
-            }
+    // gather → decide → offer: the run's deferred provider matches the
+    // paths no surface tool answers, and the matches commit before the cell
+    // is lowered. A committed match is never resolved again.
+    let outcomes = if ctx.parent_invocation().is_some() {
+        let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
+        let offered = boundary.signatures();
+        let candidates = crate::deferred::called_paths(code, state.dialect())
+            .into_iter()
+            .filter(|path| {
+                !lash_kernel_doc::EffectName::new(path.as_str())
+                    .is_ok_and(|name| offered.contains_key(&name))
+            })
+            .collect::<BTreeSet<_>>();
+        if candidates.is_empty() {
+            BTreeMap::new()
+        } else {
+            crate::deferred::journal_deferred_matches(candidates, ctx)
+                .await
+                .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
+                .unwrap_or_default()
         }
-        _ => BTreeMap::new(),
+    } else {
+        BTreeMap::new()
     };
-    let grants = crate::deferred::offer_deferred_grants(
-        &mut boundary,
-        &outcomes,
-        services.deferred_tool_resolver.as_ref(),
-        ctx,
-    )
-    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
+    let grants = crate::deferred::offer_deferred_matches(&mut boundary, &outcomes, ctx)
+        .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
 
     let session = state.bindings();
     let mut names = session.names();
@@ -1301,7 +1295,6 @@ impl CodeModeCheckpointPerfFixture {
             services: CellServices {
                 events: Arc::default(),
                 workers,
-                deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 channel: crate::plugin::RlmChannel::Cell,
                 code_renderer: crate::render::CodeRendererSlot::default(),

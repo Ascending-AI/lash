@@ -98,6 +98,19 @@ impl EngineProcessRuntime {
         self.services.process_step_catalog()
     }
 
+    /// How this node serves the process's linked call of `effect` (D3),
+    /// judged now.
+    ///
+    /// # Errors
+    ///
+    /// This runtime has no composition.
+    pub fn step_link(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
+        self.services.process_step_link(effect)
+    }
+
     /// The claim requirements this runtime's process carries while it holds
     /// tool steps (§6.2).
     ///

@@ -15,6 +15,13 @@ fn authoritative_signature() -> ProcessSignature {
 
 #[async_trait::async_trait]
 impl ProcessEngine for SignedEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,

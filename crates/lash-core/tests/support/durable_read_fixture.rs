@@ -19,7 +19,7 @@
 //!
 //! | Durable area | Populated tables | Supported read or refusal asserted |
 //! | --- | --- | --- |
-//! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
+//! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, plugin, and execution state; current and legacy receipt replay |
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
 //! | Receiver queue | `queued_work_batches`, `pending_turn_inputs` | Queue/input payloads, deterministic ids, and a cancelled command's tombstone answering its redelivery |
@@ -318,10 +318,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         cache_write_input_tokens: 3,
         reasoning_output_tokens: 2,
     };
-    loaded.set_tool_state_snapshot(Some(
-        serde_json::from_value(serde_json::json!({"generation": 887, "tools": {}}))
-            .expect("build distinctive fixture tool state"),
-    ));
     loaded.set_plugin_state(Some(fixture_plugin_state()));
     loaded.set_execution_graph(fixture_execution());
     let legacy_operation = OperationId::new(
@@ -585,20 +581,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             reasoning_output_tokens: 2,
         },
         "durable fixture semantic drift: checkpoint token usage changed"
-    );
-    assert_eq!(
-        serde_json::to_value(
-            checkpoint
-                .decode_component::<lash_core::ToolState>(
-                    lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
-                )
-                .expect("decode durable fixture tool state")
-                .as_ref()
-                .expect("durable fixture semantic drift: tool-state component disappeared")
-        )
-        .expect("encode fixture tool state"),
-        serde_json::json!({"generation": 887, "tools": {}}),
-        "durable fixture semantic drift: tool-state content changed"
     );
     // The head holds the namespace map, each entry naming its namespace's
     // values body, a component of its own (FIG-5301).
@@ -1072,7 +1054,6 @@ fn fixture_session_request(session_id: &SessionId) -> SessionStoreCreateRequest 
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,
@@ -1116,7 +1097,7 @@ fn fixture_record_config_operation() -> OperationId {
 fn fixture_state() -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -1151,14 +1132,10 @@ fn fixture_tool_output() -> lash_core::ToolCallOutput {
 fn fixture_process_env() -> ProcessEnv {
     const FIXTURE: lash_core::ProcessConfigKey<serde_json::Value> =
         lash_core::ProcessConfigKey::new("durable-read", lash_core::FormatVersion::ONE);
-    ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted(std::iter::empty())
-            .expect("an empty tool restriction"),
-        lash_core::MaxToolCalls::new(1024),
-    )
-    .component(FIXTURE, &serde_json::json!({"max_chars": 120}))
-    .build()
-    .expect("the fixture environment builds")
+    ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
+        .component(FIXTURE, &serde_json::json!({"max_chars": 120}))
+        .build()
+        .expect("the fixture environment builds")
 }
 
 fn waiting_process_registration(env_ref: ProcessEnvRef) -> ProcessRegistration {

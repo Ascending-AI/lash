@@ -53,6 +53,18 @@ pub enum ToolFailureCause {
     LaunchNotHeld {
         env_ref: String,
     },
+    /// A process step's linked tool is missing from the provider its env
+    /// links it to on this node (D3). The body did not run.
+    LinkedToolMissing {
+        effect: String,
+        tool: crate::ToolId,
+    },
+    /// A process step's linked tool is served on this node with another
+    /// surface than its env retained (D3). The body did not run.
+    LinkedToolChanged {
+        effect: String,
+        tool: crate::ToolId,
+    },
     /// A control call made from a task the cell spawned. Only the cell's
     /// main task ends the turn; the body did not run.
     ControlFromSpawnedTask,

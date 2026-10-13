@@ -45,10 +45,7 @@ fn core_with(
 
 async fn created(core: &LashCore, id: &'static str) -> crate::DurableSession {
     core.session(crate::SessionId::from(id))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
 }
@@ -259,11 +256,15 @@ struct SendTool(Sender);
 
 #[async_trait]
 impl ToolProvider for SendTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![send_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == SEND_TOOL).then(|| Arc::new(send_tool_definition().contract()))
     }
 
@@ -372,7 +373,6 @@ async fn queued_checkpoint_input_preserves_images() {
     let session = core
         .session(crate::SessionId::from(SESSION))
         .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec().attachment_acceptance(Arc::new(acceptance)),
         ))
         .await

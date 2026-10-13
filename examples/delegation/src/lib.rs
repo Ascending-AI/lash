@@ -30,7 +30,6 @@ use lash::plugins::{
     CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, NoRunOptions,
     PluginDeclaration, PluginDefinition, PluginError, PluginFactory, PluginRegistrar,
     PluginSessionContext, PromptInput, PromptSectionSpec, SectionText, SessionPlugin,
-    SessionToolAccess,
 };
 use lash::process::{Lifetime, LifetimePolicy, StartCx};
 
@@ -110,8 +109,6 @@ pub(crate) struct ChildConfig {
     /// The child's whole session config: model, turn budget, tool-call
     /// limit and any plugin options. Nothing is taken from the parent.
     pub(crate) spec: SessionSpec,
-    /// The child's tool access.
-    pub(crate) tool_access: SessionToolAccess,
     /// The child's initial prompt plan; `None` is the neutral default.
     pub(crate) prompt_plan: Option<lash::prompt::PromptPlan>,
     /// Whether children run the RLM protocol.
@@ -128,21 +125,18 @@ pub struct DelegationPluginFactory {
 }
 
 impl DelegationPluginFactory {
-    /// Children created from `child_spec` under `child_tool_access`, whose
-    /// processes take `lifetime`, for example
-    /// [`lash::process::lifetime::starter`]. The spec must state a model, a
-    /// turn budget and a tool-call limit, and the host states the children's
-    /// tool authority (ambient access resolves against the child's own
-    /// catalog): a child has no other source for them.
+    /// Children created from `child_spec`, whose processes take `lifetime`,
+    /// for example [`lash::process::lifetime::starter`]. The spec must state
+    /// a model, a turn budget and a tool-call limit, and any tool provider
+    /// config the children run under: which tools a child is offered is its
+    /// providers' configuration, and a child has no other source for it.
     pub fn new(
-        child_tool_access: SessionToolAccess,
         child_spec: SessionSpec,
         lifetime: impl Fn(&StartCx) -> Lifetime + Send + Sync + 'static,
     ) -> Self {
         Self {
             child: Arc::new(ChildConfig {
                 spec: child_spec,
-                tool_access: child_tool_access,
                 prompt_plan: None,
                 rlm: false,
                 lifetime: Arc::new(lifetime),

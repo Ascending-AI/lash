@@ -220,7 +220,6 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),
@@ -234,7 +233,6 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         .runtime_session_services()
         .expect("runtime session services");
     let create_request = crate::SessionCreateRequest::child_session(
-        crate::SessionToolAccess::ambient(),
         runtime.session_id(),
         crate::SessionStartPoint::Empty,
         crate::PluginOptions::default(),
@@ -525,7 +523,6 @@ async fn plugin_process_reads_are_canonical_observations() {
         backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),

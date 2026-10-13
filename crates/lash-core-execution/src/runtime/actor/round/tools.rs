@@ -51,6 +51,11 @@ pub struct MemberPin {
     /// owner: its tool's at admission, whatever the host offers since.
     /// `None` when no tool answered the call at admission.
     pub declaration: Option<crate::ToolDeclaration>,
+    /// The callbacks its admission bound (S7): the provider that runs it
+    /// and the presentation plan its final answer is presented under, on
+    /// every owner. What the actor's claim obligations hold while the call
+    /// is unsettled. `None` when no tool answered the call at admission.
+    pub binding: Option<crate::tool_run::AdmittedBinding>,
 }
 
 impl MemberPin {
@@ -71,7 +76,15 @@ impl MemberPin {
             limit: ExecutionLimit::starting_at(now_ms, bounds.execution, bounds.execution),
             park: bounds.park.map(|park| ParkDeadline::admitted(park, now)),
             declaration: None,
+            binding: None,
         }
+    }
+
+    /// This pin with `binding`, the callbacks its admission binds.
+    #[must_use]
+    pub fn with_binding(mut self, binding: Option<crate::tool_run::AdmittedBinding>) -> Self {
+        self.binding = binding;
+        self
     }
 
     /// This pin with `declaration`, the one its call settles under.
@@ -123,6 +136,14 @@ pub trait RoundTools: Send + Sync {
     /// What `call` is admitted as, read from the catalog at `now_ms`. Runs
     /// no hook, preparation or body.
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin;
+
+    /// The refusal the first of `calls` meets whose recorded surface entry
+    /// this node's provider no longer serves as recorded (S5): the round
+    /// parks, typed, before any of their bodies starts. `None` when every
+    /// call's entry is served undrifted, or names no entry.
+    fn drift(&self, _calls: &[&PendingToolCall]) -> Option<crate::RuntimeError> {
+        None
+    }
 
     /// The policies the catalog declares now: what a resumed round vetoes a
     /// stored repeat against.
@@ -296,7 +317,8 @@ pub fn call_draft(
         pin.limit,
         pin.park,
     )
-    .with_declaration(pin.declaration))
+    .with_declaration(pin.declaration)
+    .with_binding(pin.binding))
 }
 
 /// The member bodies of one round: each admitted execution runs the body

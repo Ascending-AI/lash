@@ -22,11 +22,15 @@ struct EchoTool;
 
 #[async_trait]
 impl ToolProvider for EchoTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![echo_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "echo_tool").then(|| Arc::new(echo_definition().contract()))
     }
 
@@ -138,11 +142,15 @@ struct AttachmentPutTool;
 
 #[async_trait]
 impl ToolProvider for AttachmentPutTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![attachment_put_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "attachment_put").then(|| Arc::new(attachment_put_definition().contract()))
     }
 

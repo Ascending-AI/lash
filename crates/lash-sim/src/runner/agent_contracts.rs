@@ -502,7 +502,6 @@ async fn facade_final_value_execution_inner(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
@@ -859,7 +858,7 @@ async fn agent_process_contract_core_with_options(
         // install `SessionProcessAdminPluginFactory` for exactly this reason.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind).cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
@@ -931,7 +930,6 @@ fn agent_contract_delegation_plugin(
 ) -> delegation::DelegationPluginFactory {
     {
         delegation::DelegationPluginFactory::new(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 provider_kind,
                 lash::TurnBudget::bounded(1),

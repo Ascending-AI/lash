@@ -159,7 +159,7 @@ impl<'grant> AttemptAuthority<'grant> {
         match self {
             Self::Catalog(_) => tool_context,
             Self::Granted(grant) => tool_context
-                .with_tool_execution_binding(grant.execution_binding.clone())
+                .with_tool_execution_binding(grant.binding.clone())
                 .with_granted_provider(grant.provider.clone()),
         }
     }
@@ -219,7 +219,7 @@ fn body_state(
     };
     let proposal = context
         .composition
-        .tool_provider(tool_id, granted)
+        .tool_provider(tool_id, context.routed_provider(tool_id, granted))
         .map(|provider| {
             crate::plugin::Proposal::for_tool(
                 provider.owner,

@@ -7,7 +7,9 @@ use lash_sansio::llm::types::ProviderReplayMeta;
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 
-use crate::plugin::{PluginError, SessionLifecycleService, SessionSnapshot, SessionStateService};
+use crate::plugin::{
+    OwnerConfigView, PluginError, SessionLifecycleService, SessionSnapshot, SessionStateService,
+};
 use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
 
 mod attachments;
@@ -205,7 +207,9 @@ pub struct AttemptContext<'run> {
     /// captured by the deep tool-dispatch futures.
     parent_invocation: Option<Box<crate::RuntimeInvocation>>,
     prepared_payload: serde_json::Value,
-    tool_execution_binding: serde_json::Value,
+    tool_execution_binding: Option<crate::ExecutionBinding>,
+    /// The run's resolved config the attempt executes under.
+    config: crate::plugin::OwnerConfigView,
     call_id: lash_sansio::ToolCallId,
     attempt_number: u32,
     max_attempts: u32,
@@ -227,6 +231,9 @@ pub struct AttemptContext<'run> {
     /// The catalog the attempt was dispatched against. `None` outside a
     /// runtime dispatch.
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
+    /// The routes of the surface the attempt was admitted under: what a
+    /// start's capture links from. `None` outside a runtime dispatch.
+    routes: Option<crate::SurfaceTools>,
     definition_engines: crate::ProcessEngineRegistry,
     pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
     /// The environments [`declare_launch`](Self::declare_launch) held under
@@ -340,6 +347,7 @@ impl<'run> AttemptContext<'run> {
             parent_invocation: context.parent_invocation.clone().map(Box::new),
             prepared_payload: context.prepared_payload.clone(),
             tool_execution_binding: context.tool_execution_binding.clone(),
+            config: context.config(),
             call_id: context.call_id.clone(),
             attempt_number: context.attempt_number,
             max_attempts: context.max_attempts,
@@ -360,6 +368,10 @@ impl<'run> AttemptContext<'run> {
                 .runtime_dispatch
                 .as_ref()
                 .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
+            routes: context
+                .runtime_dispatch
+                .as_ref()
+                .map(|dispatch| dispatch.routes.clone()),
             resolved_run: context
                 .runtime_execution_context
                 .as_ref()
@@ -437,9 +449,16 @@ impl<'run> AttemptContext<'run> {
     pub fn prepared_payload(&self) -> &serde_json::Value {
         &self.prepared_payload
     }
-    /// Integrator class 3 protocol-owned execution binding for this tool call.
-    pub fn tool_execution_binding(&self) -> &serde_json::Value {
-        &self.tool_execution_binding
+    /// The execution binding of the deferred match this call runs on, its
+    /// readability already checked against the provider's declared formats;
+    /// `None` for a call that carries none.
+    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+        self.tool_execution_binding.as_ref()
+    }
+
+    /// The run's resolved config, which a provider executes the call under.
+    pub fn config(&self) -> &crate::plugin::OwnerConfigView {
+        &self.config
     }
     /// Lash's identity for this logical call (ADR 0117): the key a tool
     /// keys its idempotency on.
@@ -542,7 +561,7 @@ impl<'run> AttemptContext<'run> {
             target,
             label,
             self.resolved_run.as_deref(),
-            self.tool_catalog.as_deref(),
+            self.routes.as_ref(),
             self.enclosing_env.as_deref(),
             &self.definition_engines,
         )
@@ -562,9 +581,14 @@ impl<'run> AttemptContext<'run> {
         &self,
         choice: &crate::ProcessStartChoice,
         target: &crate::ResolvedStartTarget,
-    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
-        self.declare_engine_launch(choice, &target.engine_kind, &target.payload)
-            .await
+    ) -> Result<crate::DeclaredDefinitionLaunch, crate::HoldEnvError> {
+        let launch = self
+            .declare_engine_launch(choice, &target.engine_kind, &target.payload)
+            .await?;
+        Ok(crate::DeclaredDefinitionLaunch::held(
+            target.definition_id.clone(),
+            launch,
+        ))
     }
 
     /// [`declare_launch`](Self::declare_launch) for a start of the `kind`
@@ -672,7 +696,7 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub(crate) direct_completions: crate::DirectCompletionClient<'run>,
     pub(crate) prepared_payload: serde_json::Value,
-    pub(crate) tool_execution_binding: serde_json::Value,
+    pub(crate) tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The identity of the admitted call this context runs.
     pub(crate) call_id: lash_sansio::ToolCallId,
@@ -729,7 +753,7 @@ pub(crate) struct ToolContextBuilder<'run> {
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
     direct_completions: crate::DirectCompletionClient<'run>,
     prepared_payload: serde_json::Value,
-    tool_execution_binding: serde_json::Value,
+    tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     call_id: lash_sansio::ToolCallId,
     completion: ToolCompletionState,
@@ -757,7 +781,7 @@ impl<'run> ToolContextBuilder<'run> {
             attachment_store: Arc::clone(&dispatch.attachment_store),
             direct_completions: dispatch.direct_completions.clone(),
             prepared_payload: call.prepared_payload.clone(),
-            tool_execution_binding: serde_json::Value::Null,
+            tool_execution_binding: None,
             tool_execution_route: ToolExecutionRoute::Catalog,
             call_id: call.call_id.clone(),
             completion: ToolCompletionState::default(),
@@ -831,6 +855,15 @@ impl<'run> ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContext<'run> {
+    /// The run's resolved config the call executes under: its dispatch's,
+    /// or none outside a runtime dispatch.
+    pub(crate) fn config(&self) -> crate::plugin::OwnerConfigView {
+        self.runtime_dispatch.as_ref().map_or_else(
+            || crate::plugin::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
+            |dispatch| dispatch.config.clone(),
+        )
+    }
+
     /// The lineage of the process this tool call runs inside (FIG-3607 R1):
     /// the runtime context's when the call has one, else the dispatch's.
     pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
@@ -924,7 +957,7 @@ impl<'run> ToolContext<'run> {
             attachment_store,
             direct_completions,
             prepared_payload: serde_json::Value::Null,
-            tool_execution_binding: serde_json::Value::Null,
+            tool_execution_binding: None,
             tool_execution_route: ToolExecutionRoute::Catalog,
             call_id: lash_sansio::ToolCallId::fixture("tool-context"),
             completion: ToolCompletionState::default(),
@@ -988,7 +1021,10 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    pub(crate) fn with_tool_execution_binding(mut self, binding: serde_json::Value) -> Self {
+    pub(crate) fn with_tool_execution_binding(
+        mut self,
+        binding: Option<crate::ExecutionBinding>,
+    ) -> Self {
         self.tool_execution_binding = binding;
         self
     }
@@ -1108,16 +1144,12 @@ impl PreparedToolBatch {
     }
 }
 
-/// Explicit authority to execute a tool outside Tool Catalog membership.
-///
-/// Normal tool calls are authorized by catalog membership. A grant is a
-/// separate, caller-provided capability used by deferred resolution flows: it
-/// carries the manifest/contract to validate the call plus an opaque host
-/// execution binding that providers can inspect from the prepare and execute
-/// contexts.
-// `PartialEq` but not `Eq`: `execution_binding` is a `serde_json::Value`, whose
-// float arm has no total equality. Comparison verifies that retained
-// admission preserves the granted authority.
+/// The authority to execute a tool a recorded deferred match resolved,
+/// outside the run's recorded surface: the provider the match names, the
+/// definition its calls are admitted under and the match's execution
+/// binding, which the provider reads from its prepare and execute contexts.
+// `PartialEq` but not `Eq`: the binding's payload is a `serde_json::Value`,
+// whose float arm has no total equality.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolExecutionGrant {
@@ -1132,8 +1164,9 @@ pub struct ToolExecutionGrant {
     /// Contract used to validate granted call arguments without consulting the
     /// current Tool Catalog.
     pub(crate) contract: Box<ToolContract>,
-    /// Opaque host routing payload passed to prepare and execute contexts.
-    pub execution_binding: serde_json::Value,
+    /// The match's execution binding, passed to prepare and execute contexts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<crate::ExecutionBinding>,
 }
 
 impl ToolExecutionGrant {
@@ -1147,7 +1180,7 @@ impl ToolExecutionGrant {
             provider,
             manifest: definition.manifest(),
             contract: Box::new(definition.contract()),
-            execution_binding: serde_json::Value::Null,
+            binding: None,
         }
     }
 
@@ -1161,10 +1194,9 @@ impl ToolExecutionGrant {
         &self.contract
     }
 
-    /// Sets the execution binding carried by a `ToolExecutionGrant` for protocol and process-engine
-    /// implementors while preparing or executing an authorized tool call.
-    pub fn with_execution_binding(mut self, execution_binding: serde_json::Value) -> Self {
-        self.execution_binding = execution_binding;
+    /// The grant with the match's execution binding.
+    pub fn with_execution_binding(mut self, binding: Option<crate::ExecutionBinding>) -> Self {
+        self.binding = binding;
         self
     }
 }
@@ -1179,11 +1211,13 @@ pub struct ToolPrepareContext {
     tool_catalog: Option<Arc<crate::ToolCatalog>>,
     turn_context: crate::TurnContext,
     call_id: lash_sansio::ToolCallId,
-    tool_execution_binding: serde_json::Value,
+    tool_execution_binding: Option<crate::ExecutionBinding>,
     tool_execution_route: ToolExecutionRoute,
     /// The originator of the process chain the call runs in, when it runs
     /// inside a process.
     process_originator: Option<crate::ProcessOriginator>,
+    /// The run's resolved config the call is prepared under.
+    config: crate::plugin::OwnerConfigView,
 }
 
 impl ToolPrepareContext {
@@ -1195,8 +1229,9 @@ impl ToolPrepareContext {
         sessions: Arc<dyn SessionStateService>,
         turn_context: crate::TurnContext,
         call_id: lash_sansio::ToolCallId,
-        tool_execution_binding: serde_json::Value,
+        tool_execution_binding: Option<crate::ExecutionBinding>,
         fleet_format: crate::FleetFormat,
+        config: crate::plugin::OwnerConfigView,
     ) -> Self {
         Self {
             fleet_format,
@@ -1208,6 +1243,7 @@ impl ToolPrepareContext {
             tool_execution_binding,
             tool_execution_route: ToolExecutionRoute::Catalog,
             process_originator: None,
+            config,
         }
     }
 
@@ -1231,8 +1267,9 @@ impl ToolPrepareContext {
             sessions,
             crate::TurnContext::default(),
             lash_sansio::ToolCallId::fixture("prepare-for-testing"),
-            serde_json::Value::Null,
+            None,
             crate::FleetFormat::current(),
+            crate::plugin::OwnerConfigView::session(crate::AdmittedPluginConfig::default()),
         )
         .with_process_originator(process_originator)
     }
@@ -1284,8 +1321,15 @@ impl ToolPrepareContext {
         &self.call_id
     }
 
-    pub fn tool_execution_binding(&self) -> &serde_json::Value {
-        &self.tool_execution_binding
+    /// The execution binding of the deferred match this call runs on, its
+    /// readability already checked; `None` for a call that carries none.
+    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+        self.tool_execution_binding.as_ref()
+    }
+
+    /// The run's resolved config, which a provider prepares the call under.
+    pub fn config(&self) -> &crate::plugin::OwnerConfigView {
+        &self.config
     }
 
     pub fn turn_context(&self) -> &crate::TurnContext {
@@ -1461,21 +1505,32 @@ impl<'a> ToolCall<'a> {
 /// redelivered attempt that declares the same intents realizes none twice.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
-    fn tool_manifests(&self) -> Vec<ToolManifest>;
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        self.tool_manifests()
+    /// The tools this provider advertises under `config`, the run's resolved
+    /// config: which tools exist is the provider's own configuration
+    /// (FIG-6074).
+    fn tool_manifests(&self, config: &OwnerConfigView) -> Vec<ToolManifest>;
+    fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
+        self.tool_manifests(config)
             .into_iter()
             .find(|manifest| manifest.name == name)
     }
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        self.tool_manifests()
+    fn resolve_manifest_by_id(
+        &self,
+        id: &ToolId,
+        config: &OwnerConfigView,
+    ) -> Option<ToolManifest> {
+        self.tool_manifests(config)
             .into_iter()
             .find(|manifest| manifest.id == *id)
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>>;
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        let manifest = self.resolve_manifest_by_id(id)?;
-        self.resolve_contract(&manifest.name)
+    fn resolve_contract(&self, name: &str, config: &OwnerConfigView) -> Option<Arc<ToolContract>>;
+    fn resolve_contract_by_id(
+        &self,
+        id: &ToolId,
+        config: &OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        let manifest = self.resolve_manifest_by_id(id, config)?;
+        self.resolve_contract(&manifest.name, config)
     }
     async fn prepare_tool_call(
         &self,
@@ -1484,6 +1539,13 @@ pub trait ToolProvider: Send + Sync + 'static {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome;
+    /// The execution binding formats this provider reads, declared with its
+    /// key (S8). A recorded binding whose codec is this provider and whose
+    /// format is not listed parks, typed, before the call is prepared: the
+    /// provider's own reader never sees it.
+    fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
+        &[]
+    }
     /// The start of the process an isolated call (its manifest names an
     /// isolation engine) runs: the engine's payload, the environment and the
     /// engine settings (D6). Admission asks once and records the answer; a

@@ -99,7 +99,7 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
             .expect("admit session");
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+            ..RuntimeSessionState::fixture(SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),

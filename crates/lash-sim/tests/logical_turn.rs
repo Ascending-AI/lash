@@ -33,11 +33,15 @@ struct NoTools;
 
 #[async_trait]
 impl ToolProvider for NoTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         None
     }
 
@@ -50,11 +54,15 @@ impl ToolProvider for NoTools {
 
 #[async_trait]
 impl ToolProvider for SeedSwitchTool {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         vec![switch_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         (name == "switch_frame").then(|| Arc::new(switch_tool_definition().contract()))
     }
 
@@ -199,7 +207,6 @@ fn standard_core_on(
         .tools(lash::hook_key!("tools"), tools)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .data_retention(lash::DataRetention {
@@ -306,7 +313,6 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
@@ -425,13 +431,17 @@ impl BoundedSwitchTools {
 
 #[async_trait]
 impl ToolProvider for BoundedSwitchTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         (0..self.switch_count)
             .map(|index| Self::definition(index).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         let index = name.strip_prefix("terminal_tool_")?.parse::<usize>().ok()?;
         (index < self.switch_count).then(|| Arc::new(Self::definition(index).contract()))
     }
@@ -602,7 +612,6 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .execution_budgets(
             lash::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
@@ -772,7 +781,6 @@ await control.finish({ baton: baton });
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
@@ -902,7 +910,6 @@ await local_actions.continue_as({
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
@@ -983,7 +990,6 @@ async fn created_session(
     match core
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model().wire_model,
                 lash::TurnBudget::Unbounded,

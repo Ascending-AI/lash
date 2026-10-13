@@ -15,12 +15,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn catalog_for<T: ToolProvider + ?Sized>(provider: &Arc<T>) -> crate::ToolCatalog {
-        let manifests = provider.tool_manifests();
+        let manifests = provider.tool_manifests(&crate::plugin::OwnerConfigView::default());
         let contracts = manifests
             .iter()
             .filter_map(|manifest| {
                 provider
-                    .resolve_contract(&manifest.name)
+                    .resolve_contract(&manifest.name, &crate::plugin::OwnerConfigView::default())
                     .map(|contract| (manifest.id.clone(), contract))
             })
             .collect();
@@ -52,11 +52,18 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ToolProvider for PrepareRecordingTool {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        fn tool_manifests(
+            &self,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Vec<crate::ToolManifest> {
             vec![process_tool_definition().manifest()]
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
             (name == "process_prepare").then(|| Arc::new(process_tool_definition().contract()))
         }
 
@@ -108,7 +115,7 @@ mod tests {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
@@ -125,7 +132,7 @@ mod tests {
             execution_budgets: (plugins).execution_budgets(),
             state: plugins,
             tools: provider,
-            tool_registry: None,
+            routes: crate::SurfaceTools::default(),
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -244,7 +251,7 @@ mod tests {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
@@ -269,7 +276,7 @@ mod tests {
             execution_budgets: (plugins).execution_budgets(),
             state: plugins,
             tools: provider,
-            tool_registry: None,
+            routes: crate::SurfaceTools::default(),
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),
@@ -510,7 +517,7 @@ mod tests {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
@@ -546,7 +553,7 @@ mod tests {
             execution_budgets: (plugins).execution_budgets(),
             state: plugins,
             tools: provider,
-            tool_registry: None,
+            routes: crate::SurfaceTools::default(),
             tool_catalog,
             sessions: host.clone(),
             session_lifecycle: host.clone(),

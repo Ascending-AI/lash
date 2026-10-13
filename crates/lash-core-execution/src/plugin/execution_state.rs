@@ -145,7 +145,7 @@ mod tests {
         .with_data_limits(limits)
         .build_session(PluginSessionRequest::creation(
             "configured-intent-limits",
-            SessionAuthorityContext::ambient_fixture(),
+            SessionAuthorityContext::fixture(),
         ))
         .expect("plugin session");
         let state: Arc<dyn ExecutionState> = session;

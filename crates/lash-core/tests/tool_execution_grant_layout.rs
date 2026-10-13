@@ -19,7 +19,11 @@ fn tool_execution_grant_json_layout_is_stable() {
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120)),
     )
-    .with_execution_binding(serde_json::json!({ "route": "pinned" }));
+    .with_execution_binding(Some(lash_core::ExecutionBinding {
+        codec: lash_core::plugin::PluginCallbackIdentity::tool_provider("mock", "layout"),
+        format: lash_core::FormatVersion::ONE,
+        payload: serde_json::json!({ "route": "pinned" }),
+    }));
 
     let serialized = serde_json::to_string(&grant).expect("grant must serialize");
     assert_eq!(grant.manifest().id.as_str(), "tool:layout_probe");
@@ -29,7 +33,7 @@ fn tool_execution_grant_json_layout_is_stable() {
     );
     assert_eq!(
         serialized,
-        r#"{"provider":{"owner":"mock","key":"tool_provider:layout"},"manifest":{"id":"tool:layout_probe","name":"layout_probe","description":"Pinned grant layout","compact_contract":{"name":"layout_probe","signature":"layout_probe({ query: str })","returns":"str","parameters":[{"name":"query","required":true,"signature":"query: str","type":"str"}],"description":"Pinned grant layout"},"execution":{"secs":120,"nanos":0}},"contract":{"input_schema":{"canonical":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"output_schema":{"canonical":{"type":"string"}}},"execution_binding":{"route":"pinned"}}"#
+        r#"{"provider":{"owner":"mock","key":"tool_provider:layout"},"manifest":{"id":"tool:layout_probe","name":"layout_probe","description":"Pinned grant layout","compact_contract":{"name":"layout_probe","signature":"layout_probe({ query: str })","returns":"str","parameters":[{"name":"query","required":true,"signature":"query: str","type":"str"}],"description":"Pinned grant layout"},"execution":{"secs":120,"nanos":0}},"contract":{"input_schema":{"canonical":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"output_schema":{"canonical":{"type":"string"}}},"binding":{"codec":{"owner":"mock","key":"tool_provider:layout"},"format":1,"payload":{"route":"pinned"}}}"#
     );
     let round_tripped: ToolExecutionGrant =
         serde_json::from_str(&serialized).expect("grant must deserialize");

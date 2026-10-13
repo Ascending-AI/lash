@@ -36,14 +36,13 @@ async fn world(
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
 ) -> Option<World> {
     World::new(tier, move |backend| {
-        let builder =
-            lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, None, workers))
-                .plugin(Arc::new(
-                    lash::process_controls::SessionProcessAdminPluginFactory::new(
-                        lash_core::lifetime::starter,
-                        lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
-                    ),
-                ));
+        let builder = lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers))
+            .plugin(Arc::new(
+                lash::process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::starter,
+                    lash_core::runtime::env_policy::policy::from_run(|_| Ok(Vec::new())),
+                ),
+            ));
         match tools {
             Some(tools) => builder.tools(lash::hook_key!("tools"), tools),
             None => builder,

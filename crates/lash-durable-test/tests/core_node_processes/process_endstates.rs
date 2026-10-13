@@ -58,6 +58,7 @@ async fn a_detached_process_outlives_its_deleted_session_and_accepts_host_cancel
         vec![Arc::new(ScriptEngine {
             kind: HOLD_ENGINE,
             advance: holding_engine_advance,
+            performs: no_tools,
         })],
         // The session runs no turn; its creation needs a served profile.
         |builder| {
@@ -70,10 +71,7 @@ async fn a_detached_process_outlives_its_deleted_session_and_accepts_host_cancel
     deployment
         .core
         .session(session.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .expect("the session is created");
     let process = start_as(

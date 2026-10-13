@@ -178,7 +178,6 @@ fn node_over(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -277,10 +276,7 @@ fn scripted(
 async fn settle(core: &lash::LashCore, session: &str, input: &str) -> lash::TurnOutput {
     let session = core
         .session(SessionId::try_from(session.to_owned()).unwrap())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .expect("the session is created");
     tokio::time::timeout(
@@ -302,11 +298,7 @@ const PARENT_DONE: &str = "the parent saw its child";
 /// The host's delegation tool (`examples/delegation`): children are created
 /// from [`spec`], stated explicitly, and live until their starter ends.
 fn delegation() -> delegation::DelegationPluginFactory {
-    delegation::DelegationPluginFactory::new(
-        lash::plugins::SessionToolAccess::ambient(),
-        spec(),
-        lash_core::lifetime::starter,
-    )
+    delegation::DelegationPluginFactory::new(spec(), lash_core::lifetime::starter)
 }
 
 /// A parent turn sent to the core calls `spawn_agent`: the core's node runs
@@ -468,10 +460,7 @@ async fn assert_child_creation_plan(
     let parent = deployment
         .core
         .session(parent_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .unwrap();
     let plan = parent_prompt_plan();
@@ -534,11 +523,7 @@ async fn assert_child_creation_plan(
             child_id
         }
         PromptChild::Related => {
-            let mut creation = lash::SessionCreation::child_of(
-                lash::plugins::SessionToolAccess::ambient(),
-                parent_id.clone(),
-                spec(),
-            );
+            let mut creation = lash::SessionCreation::child_of(parent_id.clone(), spec());
             if let Some(plan) = explicit.clone() {
                 creation = creation.with_prompt_plan(plan);
             }
@@ -668,10 +653,7 @@ async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent
     deployment
         .core
         .session(parent_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .unwrap();
     // The parent's own config differs from the neutral default.
@@ -687,16 +669,9 @@ async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent
     for (id, creation) in [
         (
             linked.clone(),
-            lash::SessionCreation::child_of(
-                lash::plugins::SessionToolAccess::ambient(),
-                parent_id.clone(),
-                spec(),
-            ),
+            lash::SessionCreation::child_of(parent_id.clone(), spec()),
         ),
-        (
-            unlinked.clone(),
-            lash::SessionCreation::root(lash::plugins::SessionToolAccess::ambient(), spec()),
-        ),
+        (unlinked.clone(), lash::SessionCreation::root(spec())),
     ] {
         deployment.core.session(id).create(creation).await.unwrap();
     }
@@ -866,17 +841,10 @@ async fn a_linked_childs_attachment_is_held_by_the_child_alone(tier: Tier) {
     let parent = SessionId::from("attachment-parent");
     let child = SessionId::from("attachment-child");
     for (id, creation) in [
-        (
-            parent.clone(),
-            lash::SessionCreation::root(lash::plugins::SessionToolAccess::ambient(), spec()),
-        ),
+        (parent.clone(), lash::SessionCreation::root(spec())),
         (
             child.clone(),
-            lash::SessionCreation::child_of(
-                lash::plugins::SessionToolAccess::ambient(),
-                parent.clone(),
-                spec(),
-            ),
+            lash::SessionCreation::child_of(parent.clone(), spec()),
         ),
     ] {
         deployment.core.session(id).create(creation).await.unwrap();
@@ -1019,7 +987,6 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
         .core
         .session(child.clone())
         .create(lash::SessionCreation::child_of(
-            lash::plugins::SessionToolAccess::ambient(),
             SessionId::from("usage-parent"),
             spec(),
         ))
@@ -1120,6 +1087,18 @@ type Advance = fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::
 struct ScriptEngine {
     kind: &'static str,
     advance: Advance,
+    /// The tools whose effects its runs perform (P3).
+    performs: fn() -> Vec<lash_core::ToolDefinition>,
+}
+
+/// An engine that performs no tool's effect.
+fn no_tools() -> Vec<lash_core::ToolDefinition> {
+    Vec::new()
+}
+
+/// An engine that performs the write tool's effect.
+fn writes() -> Vec<lash_core::ToolDefinition> {
+    vec![write_definition()]
 }
 
 fn infra(error: impl std::fmt::Display) -> lash_core::ProcessInfraError {
@@ -1135,6 +1114,13 @@ fn answer(value: serde_json::Value) -> lash_core::EngineAction {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for ScriptEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core_execution::testing::performs(&(self.performs)()))
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -1269,11 +1255,13 @@ fn settled(outcome: &lash_core::SettledOutput) -> serde_json::Value {
 /// The host tool a tool step runs.
 const WRITE_TOOL: &str = "core_node_write";
 
-/// The outside world: what the write tool wrote, per call. It outlives
-/// every node, as the world outside a deployment does.
+/// The outside world: what the write tool wrote, per call, and a signal
+/// each held write raises. It outlives every node, as the world outside a
+/// deployment does.
 #[derive(Debug, Default)]
 struct World {
     writes: Mutex<Vec<(lash_core::ToolCallId, serde_json::Value)>>,
+    held: tokio::sync::Notify,
 }
 
 struct Write {
@@ -1288,6 +1276,11 @@ impl lash::tools::StaticToolExecute for Write {
             .lock()
             .unwrap()
             .push((call.context.call_id().clone(), call.args.clone()));
+        // A negative `x` holds the call open: it never answers.
+        if call.args["x"].as_i64().is_some_and(|x| x < 0) {
+            self.world.held.notify_one();
+            std::future::pending::<()>().await;
+        }
         lash_core::ToolOutcome::ok(serde_json::json!({ "wrote": call.args })).into()
     }
 }
@@ -1346,27 +1339,31 @@ fn environment() -> lash::process::ProcessEnv {
     environment_of(Vec::new(), &[])
 }
 
-/// An environment admitting `tools`, from the `components` it names.
+/// An environment naming `components` and linking each of `tools` to the
+/// `tools` provider of the component paired with it.
 fn environment_of(
-    tools: Vec<lash_core::ToolDefinition>,
+    tools: Vec<(lash_core::ProcessConfigKey<()>, lash_core::ToolDefinition)>,
     components: &[lash_core::ProcessConfigKey<()>],
 ) -> lash::process::ProcessEnv {
-    components
+    let builder = components.iter().fold(
+        lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16)),
+        |builder, key| builder.component(*key, &()),
+    );
+    tools
         .iter()
-        .fold(
-            lash::process::ProcessEnv::builder(
-                lash_core::SessionToolAccess::restricted(tools).expect("the admitted tools"),
-                lash::MaxToolCalls::new(16),
-            ),
-            |builder, key| builder.component(*key, &()),
-        )
+        .fold(builder, |builder, (component, tool)| {
+            builder.link_tool(component.tool_provider("tools"), tool)
+        })
         .build()
         .expect("the environment builds")
 }
 
 /// The environment a write-tool process states.
 fn write_environment() -> lash::process::ProcessEnv {
-    environment_of(vec![write_definition()], &[WRITE_COMPONENT])
+    environment_of(
+        vec![(WRITE_COMPONENT, write_definition())],
+        &[WRITE_COMPONENT],
+    )
 }
 
 /// A dangling environment is a typed admission refusal, before a process
@@ -1610,7 +1607,7 @@ fn tool_engine_advance(
             lash_core::EngineAction::Steps {
                 steps: vec![lash_core::StepRequest::Tool {
                     step: lash_core::StepName("write".to_owned()),
-                    tool: lash_core::ToolId::new(WRITE_TOOL),
+                    effect: lash_core_execution::testing::effect_of(&write_definition()),
                     input: serde_json::json!({ "x": x }),
                     site: None,
                 }],
@@ -1636,6 +1633,7 @@ async fn host_engine_step_runs_its_catalog_tool_once(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: TOOL_ENGINE,
             advance: tool_engine_advance,
+            performs: writes,
         })],
         |builder| builder.process_component(write_component(&world), WRITE_COMPONENT),
     )
@@ -1693,6 +1691,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
         vec![Arc::new(ScriptEngine {
             kind: HOLD_ENGINE,
             advance: holding_engine_advance,
+            performs: no_tools,
         })],
         |builder| builder,
     )
@@ -1885,11 +1884,15 @@ fn isolated_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for IsolatedTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![isolated_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == ISOLATED_TOOL).then(|| Arc::new(isolated_definition().contract()))
     }
 
@@ -1917,6 +1920,7 @@ fn isolated_engine() -> Arc<dyn lash_core::ProcessEngine> {
     Arc::new(ScriptEngine {
         kind: ISOLATED_ENGINE,
         advance: isolated_engine_advance,
+        performs: no_tools,
     })
 }
 
@@ -2048,10 +2052,7 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
         });
     let session = incapable
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .expect("the session is created");
     // FIG-5367: following a parked run answers its park; it does not settle
@@ -2158,3 +2159,6 @@ mod engine_steps;
 
 #[path = "core_node_processes/session_and_isolated_envs.rs"]
 mod session_and_isolated_envs;
+
+#[path = "core_node_processes/idle_obligations.rs"]
+mod idle_obligations;

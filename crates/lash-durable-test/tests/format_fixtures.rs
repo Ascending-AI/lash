@@ -151,22 +151,19 @@ impl ProcessSteps for KernelSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         match step {
-            StepRequest::Engine { .. } => Ok(StepAdmission {
-                park: None,
-                policy: ExecutionPolicy::repeatable(
-                    std::num::NonZeroU32::new(3).expect("nonzero"),
-                    0,
-                    0,
-                ),
-                limit: ExecutionLimit::starting_at(
+            StepRequest::Engine { .. } => Ok(StepAdmission::new(
+                lash_core_execution::testing::step_tool(step, LASH_VM_ENGINE_KIND),
+                ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).expect("nonzero"), 0, 0),
+                ExecutionLimit::starting_at(
                     now_ms,
                     Duration::from_secs(60),
                     Duration::from_secs(60),
                 ),
-            }),
-            StepRequest::Tool { step, tool, .. } => Err(StepRefusal::UnknownTool {
+                None,
+            )),
+            StepRequest::Tool { step, effect, .. } => Err(StepRefusal::UnknownTool {
                 step: step.0.clone(),
-                tool: tool.as_str().to_owned(),
+                tool: effect.to_string(),
             }),
         }
     }
@@ -199,7 +196,7 @@ impl ProcessSteps for KernelSteps {
             let run = EngineStepRun {
                 process: process.id.clone(),
                 engine_settings: process.engine_settings().cloned(),
-                tool_catalog: Arc::new(lash_core_execution::ToolCatalog::default()),
+                effects: Arc::default(),
                 now: lash_durable::DurableInstant(
                     i64::try_from(SimClock::timestamp_ms_at(self.clock.logical_ms()))
                         .expect("the clock fits"),

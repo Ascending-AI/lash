@@ -89,10 +89,7 @@ pub(crate) fn state_store_request(
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash::persistence::SessionRelation::Root,
-        config: lash::persistence::PersistedSessionConfig::from_policy(
-            &policy,
-            lash::plugins::SessionToolAccess::ambient(),
-        ),
+        config: lash::persistence::PersistedSessionConfig::from_policy(&policy),
         head: lash::persistence::SessionCreationHead::Config,
         retention: lash::Retention::UntilGc,
     }

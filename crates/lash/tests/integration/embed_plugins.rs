@@ -160,11 +160,15 @@ struct TestTools {
 
 #[async_trait]
 impl ToolProvider for TestTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         vec![typed_probe_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         (name == "typed_probe").then(|| Arc::new(typed_probe_definition().contract()))
     }
 
@@ -288,7 +292,6 @@ async fn core_with_responses(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(plugin)
@@ -314,7 +317,6 @@ async fn created_with_label(core: &LashCore, session_id: &str, label: Option<&st
     };
     core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "mock-model",
                 lash::TurnBudget::Unbounded,
@@ -376,12 +378,7 @@ async fn sessions_that_record_no_plugin_config_do_not_get_inactive_fallback_tool
         .await
         .expect("native capability command settles");
 
-    let definitions = session
-        .admin()
-        .tools()
-        .active_manifests()
-        .await
-        .expect("definitions");
+    let definitions = session.admin().offered_tools().await.expect("definitions");
 
     assert!(
         definitions

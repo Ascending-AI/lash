@@ -411,24 +411,6 @@ impl SendBuilder {
         self
     }
 
-    /// The tool authority this input's run executes under, whole: the
-    /// tools it is granted and the names it hides, in place of the
-    /// session's for this run only. It is recorded with the run's shape, so
-    /// a replay or a cold reopen of the run sees the same grants, and it
-    /// never reaches the session config: a toolbox switch is a send, never
-    /// a config write that waits for the running turn.
-    ///
-    /// This is also how one run gets its own final-value shape: a turn's
-    /// value has the type of the finish tool that ended it, so access that
-    /// offers the host's finish tool retyped
-    /// ([`ToolDefinition::with_finish_value_schema`](lash_core::ToolDefinition::with_finish_value_schema))
-    /// types this run's value alone. Whether a turn must finish through a
-    /// tool is the session's, fixed at creation.
-    pub fn tool_access(mut self, access: lash_core::SessionToolAccess) -> Self {
-        self.run_spec.overrides.tool_access = Some(access);
-        self
-    }
-
     /// Accept, then wait for the settled turn.
     pub async fn output(self) -> Result<TurnOutput> {
         self.await?.output().await

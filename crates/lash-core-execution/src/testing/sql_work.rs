@@ -25,7 +25,7 @@ pub async fn receipts(stores: &dyn StoreSet, backend: &'static str) -> Vec<Recei
             .expect("admit SQL work session");
         let mut state = RuntimeSessionState {
             session_id: session.clone(),
-            ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+            ..RuntimeSessionState::fixture(SessionPolicy::new(
                 TurnBudget::Unbounded,
                 MaxToolCalls::new(1024),
                 NoProgressBudget::bounded(12),

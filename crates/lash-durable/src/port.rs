@@ -131,6 +131,9 @@ pub struct Claimed {
     pub cause: ClaimCause,
     /// What the claiming node may do with it.
     pub purpose: ClaimPurpose,
+    /// The claim requirements the actor carried when it was claimed: what
+    /// its owner holds until it derives them again.
+    pub requires: Vec<String>,
 }
 
 /// What a node claimed an actor for (ADR 0106 §1, ADR 0132 §11).

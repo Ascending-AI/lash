@@ -156,7 +156,6 @@ async fn measure(stores_dir: &Path, recorder: &Recorder, announce: bool) -> Resu
     let session = core
         .session(lash::SessionId::try_from("startup-session".to_owned())?)
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 super::runner::latency_llm_profile_spec()?.wire_model,
                 lash::TurnBudget::Unbounded,

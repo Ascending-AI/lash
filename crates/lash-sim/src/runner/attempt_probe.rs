@@ -113,7 +113,6 @@ async fn probe_session(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider_handle, model.clone())
@@ -121,7 +120,6 @@ async fn probe_session(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     core.session(lash_core::SessionId::fixture(session_id.to_string()))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model.wire_model,
                 lash::TurnBudget::Unbounded,

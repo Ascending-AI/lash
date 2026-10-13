@@ -164,15 +164,17 @@ fn core_with(
     executor: &Arc<Executor>,
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> lash::LashCoreBuilder {
+    core_without_tools(backend, executor).tools(lash::hook_key!("tools"), tools)
+}
+
+fn core_without_tools(backend: &lash::Backend, executor: &Arc<Executor>) -> lash::LashCoreBuilder {
     let code_executor: Arc<dyn lash_core::plugin::CodeExecutorPlugin> = executor.clone();
-    lash::LashCore::builder(backend.clone())
-        .protocol_plugin(
-            lash_core::testing::test_standard_protocol_factory_with_runtime_state(
-                Arc::new(Restores(Arc::clone(executor))),
-                Some(code_executor),
-            ),
-        )
-        .tools(lash::hook_key!("tools"), tools)
+    lash::LashCore::builder(backend.clone()).protocol_plugin(
+        lash_core::testing::test_standard_protocol_factory_with_runtime_state(
+            Arc::new(Restores(Arc::clone(executor))),
+            Some(code_executor),
+        ),
+    )
 }
 
 /// A model whose answer `respond` decides from each request and its
@@ -449,7 +451,7 @@ fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for RotatingTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         let mut names = vec!["rotate_surface", "curated_before_rotation"];
         if self.rotated.load(Ordering::SeqCst) {
             names.extend(["new_after_rotation", "hidden_after_rotation"]);
@@ -460,8 +462,12 @@ impl lash_core::ToolProvider for RotatingTools {
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        self.tool_manifests()
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        self.tool_manifests(config)
             .into_iter()
             .any(|manifest| manifest.name == name)
             .then(|| Arc::new(rotating_definition(name).contract()))
@@ -494,8 +500,8 @@ impl lash_core::ToolProvider for RotatingTools {
 const ROTATED_TASK: &str = "call the newly available tool";
 
 /// The follow-on of a frame switch is offered the tools its provider
-/// advertises since the switch, never the session's hidden names nor a tool
-/// the host curated out, and calls the new one.
+/// advertises since the switch, never one the provider's own selection
+/// leaves out, and calls the new one.
 async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier) {
     let offered = Arc::new(Mutex::new(Vec::<String>::new()));
     let model = {
@@ -517,7 +523,9 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
         rotated: AtomicBool::new(false),
     });
     let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
-        core_with(backend, &executor, tools)
+        core_without_tools(backend, &executor).plugin(Arc::new(
+            lash::tools::SelectedToolsPlugin::new("rotating", tools),
+        ))
     })
     .await
     else {
@@ -533,31 +541,17 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
     let config = live.admin().config();
     config
         .apply(
-            lash::config::ConfigWrite::new("hide-after-rotation", config.revision().await.unwrap()),
-            lash::config::ConfigTransaction::of(lash::config::SetToolAccess {
-                access: lash_core::SessionToolAccess::ambient()
-                    .with_hidden_tools(["hidden_after_rotation"])
-                    .unwrap(),
+            lash::config::ConfigWrite::new("select-tools", config.revision().await.unwrap()),
+            lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
+                tools: lash::tools::ToolSelection::AllExcept(vec![
+                    lash_core::ToolId::from("tool:hidden_after_rotation"),
+                    lash_core::ToolId::from("tool:curated_before_rotation"),
+                ]),
             }),
         )
         .await
         .unwrap()
         .await_outcome(&config)
-        .await
-        .unwrap();
-    live.admin()
-        .tools()
-        .set_membership(
-            lash_core::ToolId::from("tool:curated_before_rotation"),
-            false,
-            "host:turn_execution_state:set_membership:483",
-        )
-        .await
-        .unwrap()
-        .settle_with(
-            &live.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
         .await
         .unwrap();
     drop(live);

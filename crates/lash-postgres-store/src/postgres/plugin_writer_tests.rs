@@ -117,7 +117,7 @@ async fn published(storage: &PostgresStorage) -> (i64, i64, i64, Vec<(String, St
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: lash_core_execution::SessionId::fixture(session_id),
-        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -201,19 +201,19 @@ fn outside_for(
 }
 
 async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), StoreError> {
-    let bytes = lash_core_execution::ProcessEnv::builder(
-        lash_core_execution::SessionToolAccess::restricted(std::iter::empty())
-            .expect("an empty tool restriction"),
-        lash_core_execution::MaxToolCalls::new(1024),
-    )
-    .component(
-        lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(PLUGIN, version(format)),
-        &serde_json::json!({"count": 1}),
-    )
-    .build()
-    .expect("the environment builds")
-    .to_store_bytes()
-    .expect("encode the environment");
+    let bytes =
+        lash_core_execution::ProcessEnv::builder(lash_core_execution::MaxToolCalls::new(1024))
+            .component(
+                lash_core_execution::ProcessConfigKey::<serde_json::Value>::new(
+                    PLUGIN,
+                    version(format),
+                ),
+                &serde_json::json!({"count": 1}),
+            )
+            .build()
+            .expect("the environment builds")
+            .to_store_bytes()
+            .expect("encode the environment");
     let env_ref = lash_core_execution::process_env_ref_for_bytes(&bytes);
     let claim =
         lash_core_execution::ReferrerClaim::unguarded(

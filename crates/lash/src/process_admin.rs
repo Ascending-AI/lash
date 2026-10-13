@@ -599,6 +599,39 @@ impl Processes {
         }))
     }
 
+    /// The link check of a start of the `kind` engine on `payload` under
+    /// `env` (P1): `env` links exactly the effects the payload performs, each
+    /// to a tool that fits it under its policy in `fits` (`Compatible` where
+    /// it states none), and this core's components serve each link with the
+    /// surface it retained. A start checks the same pair under `Compatible`;
+    /// `Exact` is a host's opt-in before it starts. Builds the env's
+    /// components and starts nothing.
+    ///
+    /// # Errors
+    ///
+    /// The pair's typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal).
+    pub async fn check_link(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        env: &lash_core::ProcessEnv,
+        fits: &std::collections::BTreeMap<lash_core::EffectName, lash_core::FitPolicy>,
+    ) -> Result<()> {
+        let refused =
+            |refusal| EmbedError::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal });
+        let engines = &self.core.host_process_engines;
+        let performed = engines
+            .performed_effects(kind, payload)
+            .await
+            .map_err(refused)?;
+        lash_core::check_links(env, &performed, fits).map_err(refused)?;
+        engines
+            .components()
+            .check_served(&std::sync::Arc::new(env.clone()))
+            .map_err(refused)?;
+        Ok(())
+    }
+
     /// Recover a published environment from its content reference, including
     /// capability binding ids, contracts and arguments. One store read, without
     /// component builds or session reads. Absent bytes return `None`; corrupt

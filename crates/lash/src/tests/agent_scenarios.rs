@@ -170,11 +170,15 @@ const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> =
 
 #[async_trait]
 impl ToolProvider for RetryingDirectTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![retrying_direct_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "retrying_direct").then(|| Arc::new(retrying_direct_tool_definition().contract()))
     }
 
@@ -291,11 +295,15 @@ fn overflow_payload_definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for OverflowPayloadTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![overflow_payload_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "overflow_payload").then(|| Arc::new(overflow_payload_definition().contract()))
     }
 

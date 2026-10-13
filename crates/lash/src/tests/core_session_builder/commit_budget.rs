@@ -25,10 +25,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
 
     // Precondition: a turn with no attachment fits the budget.
     core.session(crate::SessionId::parse("commit-graph-only-budget-surface").expect("id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
         .send(crate::TurnInput::text("graph rows only"))
@@ -37,10 +34,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() {
         .expect("a graph-only turn fits the node budget");
 
     core.session(crate::SessionId::parse("commit-adoption-row-budget-surface").expect("id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let session = core
@@ -123,10 +117,7 @@ async fn attachment_put_reports_its_configured_byte_delivery_budget() {
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
     core.session(crate::SessionId::from("put-budget-receipt"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("session");
     let session = core

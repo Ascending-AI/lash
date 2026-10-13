@@ -295,12 +295,6 @@ pub trait SessionReadService: Send + Sync {
     ) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
         Ok(Arc::new(self.tool_catalog(session_id).await?))
     }
-
-    async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
-        Err(PluginError::Session(
-            "tool state is unavailable in this session".to_string(),
-        ))
-    }
 }
 
 #[async_trait::async_trait]

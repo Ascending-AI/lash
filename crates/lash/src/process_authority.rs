@@ -3,45 +3,46 @@
 //! filter a list, or cancel a process; lash adds no enforcement.
 
 pub use crate::SessionId;
-pub use crate::plugins::{SessionToolAccess, ToolCatalog};
+pub use crate::plugins::ToolCatalog;
 use crate::process::{ProcessComponentId, ProcessEnv};
+pub use crate::tools::ToolId;
 pub use crate::{CapabilityRef, SlotId};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Process tool names outside the session's current admitted offered names.
-/// Ambient `current` admits all of `offered`, except hidden names. Restricted
-/// access intersects with `offered`, also removing hidden names. Hidden process
-/// names are removed too. A process tool absent from `offered` is excess even
-/// when the session has Ambient access. Offered membership requires both id and
-/// exact name, so a same-name tool with another id is also excess.
-pub fn tools_excess(
-    env: &ProcessEnv,
-    current: &SessionToolAccess,
-    offered: &ToolCatalog,
-) -> BTreeSet<String> {
-    let admitted = current.admitted_names(offered);
-    let offered_members: BTreeSet<_> = offered
+/// One linked effect whose tool `offered` does not offer as the process
+/// links it: the effect path and the linked tool, as evidence.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExcessLink {
+    /// The effect path the process performs.
+    pub effect: String,
+    /// The tool the effect is linked to.
+    pub tool: ToolId,
+}
+
+/// The process's linked effects whose tool `offered` does not offer as the
+/// link retains it. A link and an offered tool compare by tool id and
+/// dispatch surface ([`crate::process::ProcessSurface`]) alone: the
+/// model-facing name, the binding path and the provider key that serves it
+/// are not authority, so neither makes a link excess.
+pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessLink> {
+    let offered = offered
         .tools
         .iter()
-        .map(|entry| (&entry.manifest.id, entry.manifest.name.as_str()))
-        .collect();
-    env.tools()
-        .restricted_tools()
-        .into_iter()
-        .flatten()
-        .filter(|tool| {
-            !env.tools().hides(&tool.manifest.name)
-                && (!admitted.contains(&tool.manifest.name)
-                    || !offered_members.contains(&(&tool.manifest.id, tool.manifest.name.as_str())))
+        .map(|entry| lash_core::ProcessSurface::of_parts(&entry.manifest, &entry.contract))
+        .collect::<Vec<_>>();
+    env.effects()
+        .iter()
+        .filter(|(_, link)| !offered.contains(&link.surface))
+        .map(|(effect, link)| ExcessLink {
+            effect: effect.to_string(),
+            tool: link.tool().clone(),
         })
-        .map(|tool| tool.manifest.name.clone())
         .collect()
 }
 
-/// Whether no visible process tool is excess; Ambient and hidden-name behavior
-/// is exactly [`tools_excess`], including tools absent from `offered`.
-pub fn tools_within(env: &ProcessEnv, current: &SessionToolAccess, offered: &ToolCatalog) -> bool {
-    tools_excess(env, current, offered).is_empty()
+/// Whether no linked effect is excess: exactly [`tools_excess`] is empty.
+pub fn tools_within(env: &ProcessEnv, offered: &ToolCatalog) -> bool {
+    tools_excess(env, offered).is_empty()
 }
 
 /// Components not named in `allowed`, in the environment's composition order.

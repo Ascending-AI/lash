@@ -50,12 +50,10 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
 pub(crate) fn cell_services(
     dialect: &crate::CellDialect,
     workers: lash_vm_client::service::Service,
-    deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
 ) -> crate::executor::CellServices {
     crate::executor::CellServices {
         events: Arc::default(),
         workers,
-        deferred_tool_resolver,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         channel: crate::plugin::RlmChannel::Cell,
         code_renderer: crate::render::CodeRendererSlot::default(),
@@ -107,16 +105,40 @@ pub(crate) fn cell_context(
     )
 }
 
+/// [`cell_context`] whose run's surface records `deferred` as its deferred
+/// provider.
+pub(crate) fn deferred_cell_context(
+    host: &DurableHost,
+    session: &'static str,
+    turn: &'static str,
+    replay_key: &'static str,
+    provider: Arc<dyn lash_core::ToolProvider>,
+    deferred: Arc<dyn lash_core::DeferredToolProvider>,
+) -> lash_core::RuntimeExecutionContext<'static> {
+    let (provider, catalog) = with_finish(provider);
+    lash_core::testing::code_execution_context_with_deferred_provider(
+        host.ports(),
+        provider,
+        catalog,
+        lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
+        ("tests", "deferred", deferred),
+    )
+}
+
 /// A provider that offers no tool of its own.
 pub(crate) struct NoTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NoTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         None
     }
 
@@ -134,26 +156,34 @@ struct WithFinish {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for WithFinish {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        let mut manifests = self.tools.tool_manifests();
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = self.tools.tool_manifests(config);
         manifests.push(self.finish.manifest());
         manifests
     }
 
-    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
         let finish = self.finish.manifest();
         if &finish.id == id {
             return Some(finish);
         }
-        self.tools.resolve_manifest_by_id(id)
+        self.tools.resolve_manifest_by_id(id, config)
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         let finish = self.finish.manifest();
         if name == finish.name || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
         }
-        self.tools.resolve_contract(name)
+        self.tools.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -175,10 +205,11 @@ pub(crate) fn with_finish(
     });
     let catalog = lash_core::ToolCatalog::from_tool_definitions(
         provider
-            .tool_manifests()
+            .tool_manifests(&lash_core::OwnerConfigView::default())
             .into_iter()
             .filter_map(|manifest| {
-                let contract = provider.resolve_contract(&manifest.name)?;
+                let contract = provider
+                    .resolve_contract(&manifest.name, &lash_core::OwnerConfigView::default())?;
                 Some(lash_core::ToolDefinition::from_parts(
                     manifest,
                     contract.as_ref().clone(),

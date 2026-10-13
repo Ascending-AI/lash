@@ -129,7 +129,6 @@ fn core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -173,6 +172,15 @@ fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for ScriptEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core_execution::testing::performs(
+            &[write_definition()],
+        ))
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -363,7 +371,7 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
     lash_core::EngineAction::Steps {
         steps: vec![lash_core::StepRequest::Tool {
             step: lash_core::StepName(step.to_owned()),
-            tool: lash_core::ToolId::new(WRITE_TOOL),
+            effect: lash_core_execution::testing::effect_of(&write_definition()),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
                 lash_sansio::effect_identity_fixture(node_id, occurrence)
@@ -378,13 +386,11 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
 /// The environment a host start states in these laws: the write tool, from
 /// its component.
 fn environment() -> lash_core::ProcessEnv {
-    lash_core::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted([write_definition()]).expect("the write tool"),
-        lash_core::MaxToolCalls::new(16),
-    )
-    .component(WRITE_COMPONENT, &())
-    .build()
-    .expect("the environment builds")
+    lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
+        .component(WRITE_COMPONENT, &())
+        .link_tool(WRITE_COMPONENT.tool_provider("tools"), &write_definition())
+        .build()
+        .expect("the environment builds")
 }
 
 /// Start a detached process of the scripted engine.
@@ -521,7 +527,10 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         "the site's first cap occurrences: {events:#?}"
     );
     for outcome in &outcomes {
-        assert_eq!(outcome.operation, WRITE_TOOL);
+        assert_eq!(
+            outcome.operation,
+            lash_core_execution::testing::effect_of(&write_definition()).as_str()
+        );
         assert_eq!(
             outcome.outcome_class,
             lash_core::ProcessEffectOutcomeClass::Success
@@ -661,7 +670,9 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
         Err(
             lash_core_execution::runtime::process::steps::StepRefusal::UnknownTool {
                 step: step.step().0.clone(),
-                tool: step.admitted_tool(KIND).as_str().to_owned(),
+                tool: lash_core_execution::testing::step_tool(step, KIND)
+                    .as_str()
+                    .to_owned(),
             },
         )
     }

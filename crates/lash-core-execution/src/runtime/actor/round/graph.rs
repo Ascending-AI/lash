@@ -776,6 +776,10 @@ pub struct PinnedMember {
     pub wait_id: Option<String>,
     pub trace: Option<lash_trace::DurableTraceScope>,
     pub declaration: Option<crate::ToolDeclaration>,
+    /// The callbacks the admission bound ([`ExecutionDraft::binding`]).
+    ///
+    /// [`ExecutionDraft::binding`]: super::ExecutionDraft::binding
+    pub binding: Option<crate::tool_run::AdmittedBinding>,
 }
 
 impl PinnedMember {
@@ -793,6 +797,7 @@ impl PinnedMember {
             wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
             trace: draft.trace().cloned(),
             declaration: draft.declaration().cloned(),
+            binding: draft.binding().cloned(),
         }
     }
 }
@@ -847,13 +852,14 @@ impl PinnedMember {
         )
         .with_pinned_wait(pinned)
         .with_trace(self.trace.clone())
-        .with_declaration(self.declaration.clone()))
+        .with_declaration(self.declaration.clone())
+        .with_binding(self.binding.clone()))
     }
 }
 
 impl TokenCodec for PinnedMember {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(9);
+        out.seq(10);
         out.text(self.call.as_str());
         out.text(&self.tool);
         encode_material_ref(&self.request, out);
@@ -863,10 +869,11 @@ impl TokenCodec for PinnedMember {
         self.wait_id.encode(out);
         encode_opt_tree(self.trace.as_ref(), out);
         encode_opt_tree(self.declaration.as_ref(), out);
+        encode_opt_tree(self.binding.as_ref(), out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(9)?;
+        input.expect_struct(10)?;
         Ok(Self {
             call: decode_call_id(input)?,
             tool: input.text()?.to_owned(),
@@ -877,6 +884,7 @@ impl TokenCodec for PinnedMember {
             wait_id: Option::decode(input)?,
             trace: decode_opt_tree(input)?,
             declaration: decode_opt_tree(input)?,
+            binding: decode_opt_tree(input)?,
         })
     }
 }

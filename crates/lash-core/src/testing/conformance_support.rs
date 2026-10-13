@@ -24,5 +24,3 @@ impl SessionGraphConformanceAccess for crate::SessionGraph {
         crate::SessionGraph::data_mut(self)
     }
 }
-
-pub use lash_core_store::tool_state::ToolStateConformanceAccess;

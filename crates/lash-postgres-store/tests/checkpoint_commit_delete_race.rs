@@ -68,7 +68,7 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .expect("create delete victim");
     let mut victim_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-victim"),
-        ..RuntimeSessionState::ambient_fixture(
+        ..RuntimeSessionState::fixture(
             request(&SessionId::from("commit-delete-victim"))
                 .config
                 .session_policy(),
@@ -92,7 +92,7 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .expect("create commit target");
     let mut target_state = RuntimeSessionState {
         session_id: SessionId::from("commit-delete-target"),
-        ..RuntimeSessionState::ambient_fixture(
+        ..RuntimeSessionState::fixture(
             request(&SessionId::from("commit-delete-target"))
                 .config
                 .session_policy(),
@@ -288,7 +288,6 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,

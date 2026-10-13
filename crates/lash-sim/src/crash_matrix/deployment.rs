@@ -75,15 +75,29 @@ pub fn settings() -> DurableSettings {
 }
 
 /// How the deployment's nodes run: each decodes every format set
-/// `backend`'s build writes.
-#[must_use]
-pub fn nodes_config(backend: &Backend) -> SimNodesConfig {
-    SimNodesConfig {
-        lease: LeaseConfig::default(),
-        decodes: backend.formats().decodes(),
-        serves: Vec::new(),
-        max_active: 8,
+/// `world`'s build writes, and serves the callbacks of every core its
+/// facade sessions run on.
+///
+/// # Errors
+///
+/// The world has no backend yet, or a core does not build.
+pub fn nodes_config(world: &Arc<World>) -> Result<SimNodesConfig, String> {
+    let mut serves = Vec::new();
+    for core in [
+        super::cells::cell_core(world)?,
+        super::prompts::prompt_core(world)?,
+        super::compactions::compaction_core(world)?,
+    ] {
+        serves.extend(lash::testing::node_serves(&core));
     }
+    serves.sort();
+    serves.dedup();
+    Ok(SimNodesConfig {
+        lease: LeaseConfig::default(),
+        decodes: world.backend()?.formats().decodes(),
+        serves,
+        max_active: 8,
+    })
 }
 
 /// How long a failover takes: past a dead owner's lease, a reap and a
@@ -465,7 +479,7 @@ impl Scenario for Deployment {
     fn config(&self) -> SimNodesConfig {
         // The shared factory also serves the soak driver, which keeps the
         // production lease. Crash cells use the named short test lease.
-        let mut config = nodes_config(&self.world.backend().expect("the database is built first"));
+        let mut config = nodes_config(&self.world).expect("the database is built first");
         config.lease = Matrix::test_lease();
         config
     }

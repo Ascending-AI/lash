@@ -11,7 +11,6 @@
 //! reading counters.
 
 use crate::conformance::DeploymentViewExt as _;
-use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -269,15 +268,15 @@ async fn commit_generation(
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         head_revision: expected_head_revision,
-        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    state.set_tool_state_snapshot(Some(
-        crate::ToolState::default().with_generation_for_conformance(generation),
-    ));
+    state.set_plugin_state(Some(super::runtime_persistence::plugin_state_at(
+        generation,
+    )));
     let commit = crate::RuntimeCommit::persisted_state_for_test(&state);
     super::runtime_persistence::commit_runtime_state_for_test(
         store,

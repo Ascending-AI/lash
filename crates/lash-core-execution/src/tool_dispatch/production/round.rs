@@ -207,7 +207,12 @@ impl ProductionToolHandlers<'_> {
                 .context
                 .dispatch()
                 .composition
-                .tool_run_binding(&invocation.tool_id, granted)
+                .tool_run_binding(
+                    &invocation.tool_id,
+                    self.context
+                        .dispatch()
+                        .routed_provider(&invocation.tool_id, granted),
+                )
                 .map_err(crate::RuntimeEffectControllerError::from)?;
             match self
                 .bind_isolated(
@@ -542,8 +547,9 @@ pub(super) fn resolved_member(
 
 /// The final answer `output` that a park of the member `call`, a call of
 /// `tool`, resolved to, presented as a body presents its own (ADR 0099 §6):
-/// the session's presentation steps run over it, and what they make of its
-/// model-facing return is recorded as the call's outcome. The call's
+/// the presentation plan `binding` recorded at admission runs over it, not
+/// the session's live selection, and what it makes of the model-facing
+/// return is recorded as the call's outcome. The call's
 /// settlement, its intent outcomes and its completion, is published to the
 /// host live, as provisional activity that the turn's commit settles.
 pub(super) async fn present_resolved(
@@ -551,6 +557,7 @@ pub(super) async fn present_resolved(
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
     tool: &crate::ToolId,
+    binding: Option<&crate::tool_run::AdmittedBinding>,
     output: SettledOutput,
 ) -> SettledOutput {
     let SettledOutput::Completed(material) = &output else {
@@ -586,7 +593,9 @@ pub(super) async fn present_resolved(
         .present_tool_result(
             projection,
             facts,
-            &dispatch.composition.tool_presentation_plan(),
+            &binding
+                .map(|binding| binding.presentation.clone())
+                .unwrap_or_default(),
             &dispatch.facts.attachment_acceptance,
         )
         .await
@@ -701,16 +710,27 @@ pub(super) fn completed_answer(
 /// and for a deferring tool the deadline its host-set park bound sets,
 /// written once with the admission ([`MemberPin::admitted`]). A call no tool
 /// answers is pinned under `context`'s control-phase bound: its body only
-/// answers that it is unavailable.
+/// answers that it is unavailable. The pin binds the provider `granted`
+/// names, else the one the run's surface routes the tool to, and the
+/// session's presentation plan now: the callbacks the call's claim
+/// obligations hold until it settles, and the plan its parked answer is
+/// presented under.
 pub(super) fn member_pin(
     context: &RuntimeExecutionContext<'_>,
     manifest: Option<&crate::ToolManifest>,
     tool: crate::ToolId,
+    granted: Option<&crate::plugin::PluginCallbackIdentity>,
     now_ms: u64,
 ) -> MemberPin {
     if let Some(manifest) = manifest {
+        let dispatch = context.dispatch();
+        let binding = dispatch
+            .composition
+            .tool_run_binding(&tool, dispatch.routed_provider(&tool, granted))
+            .ok();
         return MemberPin::admitted(tool, manifest.execution_policy, manifest.bounds(), now_ms)
-            .with_declaration(manifest.declaration().clone());
+            .with_declaration(manifest.declaration().clone())
+            .with_binding(binding);
     }
     let control = context.dispatch().execution_budgets.control_phase();
     MemberPin {
@@ -719,6 +739,7 @@ pub(super) fn member_pin(
         limit: lash_sansio::ExecutionLimit::starting_at(now_ms, control, control),
         park: None,
         declaration: None,
+        binding: None,
     }
 }
 
@@ -832,11 +853,20 @@ impl RoundTools for ProductionRoundTools {
             || crate::ToolId::new(call.tool_name.clone()),
             |manifest| manifest.id.clone(),
         );
-        member_pin(&self.context, manifest.as_ref(), tool, now_ms)
+        member_pin(&self.context, manifest.as_ref(), tool, None, now_ms)
     }
 
     fn policies(&self) -> PolicyView {
         catalog_policies(&self.context)
+    }
+
+    fn drift(&self, calls: &[&crate::sansio::PendingToolCall]) -> Option<crate::RuntimeError> {
+        let dispatch = self.context.dispatch();
+        calls.iter().find_map(|call| {
+            dispatch
+                .drift_of(&call.tool_name)
+                .map(|drift| drift.refusal(&call.call_id).into_runtime_error())
+        })
     }
 
     fn stop_grace(&self) -> std::time::Duration {
@@ -915,6 +945,7 @@ impl RoundTools for ProductionRoundTools {
             &self.owner,
             call,
             execution.draft().tool(),
+            execution.draft().binding(),
             output,
         ))
     }

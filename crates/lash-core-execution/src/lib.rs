@@ -115,6 +115,7 @@ pub mod sync {
 pub mod test_support;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_ids::test_watchdog;
+pub mod deferred_provider;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod tool_dispatch;
@@ -147,12 +148,6 @@ pub mod facade_support {
         invocation: &crate::RuntimeEffectInvocation,
     ) -> lash_trace::TraceContext {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
-    }
-    pub fn resolve_tool_registry_contract(
-        registry: &crate::ToolRegistry,
-        name: &str,
-    ) -> Option<std::sync::Arc<crate::ToolContract>> {
-        registry.resolve_catalog_contract(name)
     }
 
     pub use crate::attachments::AttachmentGcFence;
@@ -334,19 +329,12 @@ pub mod facade_support {
     pub use crate::session_model::context::PreparedContext;
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_registry::ReconfigureError;
-    pub use crate::tool_registry::SupersededToolIdentity;
-    pub use crate::tool_registry::ToolRestoreReport;
-    pub use crate::tool_registry::ToolSourceHandle;
-    pub use crate::tool_registry::ToolSourcePolicy;
-    pub use crate::tool_registry::ToolStateEntry;
-    pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
     };
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
-    pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
+    pub use lash_core_store::tool_surface::ReconfigureError;
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
@@ -486,9 +474,20 @@ fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
     }
     projected
 }
+pub use deferred_provider::{
+    DeferredResolveContext, DeferredToolProvider, MAX_DEFERRED_NOTE_BYTES,
+    bounded_outcome as bounded_deferred_outcome,
+};
+pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
+pub use lash_core_store::tool_surface::{
+    DeferredMatch, DeferredOutcome, EffectLink, ExecutionBinding, ExecutionBindingUnreadable,
+    LinkKind, ProcessSurface, ProviderKey, RecordedSurface, SurfaceCollision, SurfaceDuplicateTool,
+    SurfaceEntry, SurfaceRefusal,
+};
+pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_registry::{
-    SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
+    SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind, effect_path_of,
 };
 pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
@@ -630,8 +629,8 @@ pub use plugin::{
     PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
     SessionLineage, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
-    UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
+    SessionStateService, StateCommands, UnstatedSessionConfig, durable_identity_conflict,
+    is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
@@ -672,14 +671,14 @@ pub use runtime::{
     AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,
     AssistantResponsePlan, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
     BindingId, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredLaunch,
-    DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
-    DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
-    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredDefinitionLaunch,
+    DeclaredLaunch, DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy,
+    DeploymentStore, DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork,
+    EffectAddress, EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
     EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
     EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStepKind, EngineStepRefusal,
     EngineStepRun, EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
-    ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
+    FitPolicy, ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
     InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay,
     KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE, Material, NamesMaterial,
@@ -687,8 +686,8 @@ pub use runtime::{
     PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeBounds, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    PerformedEffects, PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeBounds, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
     ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError, ProcessConfigKey,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionError,
@@ -743,7 +742,7 @@ pub use runtime::{
     TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
     WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
     WorkCadencePolicy, admit_session_state_generation, admit_session_view, artifact_referrer_ended,
-    hold_process_env, lifetime, live_session_view, mint_process_id, session_is_live,
+    check_links, hold_process_env, lifetime, live_session_view, mint_process_id, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -759,8 +758,7 @@ pub use runtime::{
 };
 pub use session::{
     CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
-    RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, tool_dispatch_surface,
+    RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

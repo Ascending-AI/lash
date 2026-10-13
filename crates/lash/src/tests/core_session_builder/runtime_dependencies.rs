@@ -21,7 +21,6 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())
@@ -118,10 +117,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
-        config: lash_core::PersistedSessionConfig::from_policy(
-            &source_policy.clone(),
-            lash_core::SessionToolAccess::ambient(),
-        ),
+        config: lash_core::PersistedSessionConfig::from_policy(&source_policy.clone()),
         head: lash_core::SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,
     };
@@ -131,7 +127,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -275,10 +271,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&policy.clone()),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -288,7 +281,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: SessionId::from("fork-observer-source"),
         policy,
-        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -493,7 +486,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         .await
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: SessionId::from("fork-observer-branch"),
-            ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy {
+            ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy {
                 model: branch_read.config.model.clone(),
                 ..lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
@@ -673,10 +666,7 @@ async fn duplicate_only_fork_intents_are_canonical(
             pending_observer_intents: Vec::new(),
             session_id: source_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&policy.clone()),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -685,7 +675,7 @@ async fn duplicate_only_fork_intents_are_canonical(
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_session_id.clone(),
         policy,
-        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -779,17 +769,14 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
             ],
             session_id: SessionId::fixture(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &lash_core::SessionPolicy {
-                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                    ..lash_core::SessionPolicy::new(
-                        lash_core::TurnBudget::Unbounded,
-                        lash_core::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&lash_core::SessionPolicy {
+                model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+                ..lash_core::SessionPolicy::new(
+                    lash_core::TurnBudget::Unbounded,
+                    lash_core::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
+                )
+            }),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -915,17 +902,14 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                         "nested-source-node-{case}"
                     ))),
                 },
-                config: lash_core::PersistedSessionConfig::from_policy(
-                    &lash_core::SessionPolicy {
-                        model: Some(recorded_llm_profile(mock_llm_profile_spec())),
-                        ..lash_core::SessionPolicy::new(
-                            lash_core::TurnBudget::Unbounded,
-                            lash_core::MaxToolCalls::new(1024),
-                            crate::NoProgressBudget::bounded(12),
-                        )
-                    },
-                    lash_core::SessionToolAccess::ambient(),
-                ),
+                config: lash_core::PersistedSessionConfig::from_policy(&lash_core::SessionPolicy {
+                    model: Some(recorded_llm_profile(mock_llm_profile_spec())),
+                    ..lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                        lash_core::MaxToolCalls::new(1024),
+                        crate::NoProgressBudget::bounded(12),
+                    )
+                }),
                 head: lash_core::SessionCreationHead::Config,
                 retention: lash_core::Retention::UntilGc,
             },
@@ -1026,7 +1010,6 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         crate::SessionId::parse("generation-fork-host-default").expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::root(
-        crate::plugins::SessionToolAccess::ambient(),
         mock_session_spec().generation(host_generation.clone()),
     ))
     .await?;
@@ -1056,10 +1039,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &source_policy.clone(),
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&source_policy.clone()),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -1069,7 +1049,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: SessionId::from("generation-fork-source"),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

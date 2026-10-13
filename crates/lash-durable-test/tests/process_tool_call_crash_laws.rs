@@ -108,11 +108,15 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![probe_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == PROBE).then(|| Arc::new(probe_definition().contract()))
     }
 
@@ -213,11 +217,11 @@ impl Holding {
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
-                lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None, sim::workers(&clock)))
+                lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, sim::workers(&clock)))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
-                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
@@ -230,8 +234,20 @@ impl Holding {
                         lash::process_controls::SessionProcessAdminPluginFactory::new(|_| {
                             lash_core::Lifetime::Detached
                         },
-                        lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),),
+                        lash_core::testing::run_policy_naming(&[
+                            PROBE_COMPONENT,
+                            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                        ]),),
                     ))
+                    // The body's `await` of the race links `processes.await`
+                    // (P2): the env names the process controls that serve it.
+                    .process_component(
+                        Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                            |_| lash_core::Lifetime::Detached,
+                            lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+                        )),
+                        lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                    )
                     .process_component(
                         lash_core::testing::tool_component(
                             PROBE_COMPONENT,
@@ -390,10 +406,7 @@ impl Scenario for Holding {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(LIMIT),
-            ))
+            .create(lash::SessionCreation::root(served::spec(LIMIT)))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session
@@ -563,10 +576,7 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     let session = deployment
         .core()
         .session(session())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            served::spec(LIMIT),
-        ))
+        .create(lash::SessionCreation::root(served::spec(LIMIT)))
         .await
         .expect("the session is created");
     session

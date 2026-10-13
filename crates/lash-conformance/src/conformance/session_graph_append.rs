@@ -188,10 +188,7 @@ async fn abandoned_branch_scenario(
         source_session_id: source_request.session_id.clone(),
         head_revision: fork_revision,
         relation: crate::SessionRelation::Root,
-        config: crate::PersistedSessionConfig::from_policy(
-            &source_request.config.session_policy(),
-            crate::SessionToolAccess::ambient(),
-        ),
+        config: crate::PersistedSessionConfig::from_policy(&source_request.config.session_policy()),
         retention: crate::Retention::UntilGc,
     };
     factory
@@ -375,7 +372,7 @@ async fn append_conformance_runtime(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+            ..crate::RuntimeSessionState::fixture(request.config.session_policy())
         });
     if state.policy.model.is_none() {
         state.policy = request.config.session_policy();
@@ -395,12 +392,11 @@ async fn append_conformance_runtime(
             snapshot,
             crate::plugin::SessionAuthorityContext {
                 plugin_config: state.admitted_plugin_config(),
-                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         )),
         None => host.defer_session(PluginSessionRequest::creation(
             request.session_id.clone(),
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         )),
     }
     .expect("append conformance plugin session");

@@ -44,7 +44,7 @@ fn execution(
 }
 
 fn ambient() -> RuntimeSessionState {
-    RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -176,11 +176,11 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
     let mut state = ambient();
     let (first_root, first) = execution("first");
     state.set_execution_graph(first);
-    state.set_tool_state_snapshot(Some(crate::ToolState::default()));
+    state.set_plugin_state(Some(crate::PluginState::default()));
     state.discard_runtime_snapshots_retaining_accepted_execution();
     assert!(
-        state.tool_state_snapshot().is_none(),
-        "tool and plugin snapshots are released like every other committed body"
+        state.plugin_state().is_none(),
+        "plugin snapshots are released like every other committed body"
     );
     let accepted = state
         .execution_state_hydration()
@@ -290,7 +290,7 @@ fn restoring_a_graph_stages_its_root_and_every_node() {
 
 #[test]
 fn incomplete_checkpoint_component_projection_is_a_typed_error() {
-    let projected = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let projected = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -298,7 +298,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
     .to_snapshot();
     let state = RuntimeSessionState::from_snapshot(
         projected,
-        crate::session_state::RuntimeSessionAuthority::ambient_fixture(),
+        crate::session_state::RuntimeSessionAuthority::fixture(),
     );
 
     let error = state
@@ -318,7 +318,7 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 #[test]
 #[should_panic(expected = "adopted head revision must advance")]
 fn persisted_commit_cannot_adopt_nonadvancing_revision() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -329,7 +329,7 @@ fn persisted_commit_cannot_adopt_nonadvancing_revision() {
 }
 
 fn fresh_state_with_initial_frame() -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -382,7 +382,7 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         settled.protocol_turn_options()
     );
 
-    let mut reopened = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut reopened = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -430,7 +430,7 @@ fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessio
 /// sticky config, not the first view's.
 #[test]
 fn taking_a_run_view_restores_the_sticky_config() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -444,9 +444,6 @@ fn taking_a_run_view_restores_the_sticky_config() {
     let mut first = sticky.clone();
     first.model = Some(recorded_llm_profile("first-run-route"));
     first.generation.seed = Some(7);
-    first.tool_access = crate::SessionToolAccess::ambient()
-        .with_hidden_tools(["hidden-by-run-view"])
-        .expect("valid hidden tool");
     install_view(&mut state, &first);
     let mut second = sticky.clone();
     second.model = Some(recorded_llm_profile("second-run-route"));
@@ -480,7 +477,7 @@ fn taking_a_run_view_restores_the_sticky_config() {
 /// the sticky config, while the state's own policy stays the run's.
 #[test]
 fn recorded_session_view_reads_the_sticky_config_under_a_run_view() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -516,7 +513,7 @@ fn recorded_session_view_reads_the_sticky_config_under_a_run_view() {
 
 #[test]
 fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -592,7 +589,7 @@ fn recorded_run_view_never_becomes_sticky_after_commit_replay_or_failed_settleme
 /// config is still the head's.
 #[test]
 fn a_run_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -710,7 +707,7 @@ fn assert_read_views_current_frame(
 /// FIG-5248: a fresh session exposes its initial frame without a snapshot projection.
 #[test]
 fn read_view_current_frame_is_the_initial_frame() {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -731,7 +728,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-residency"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -825,8 +822,7 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
     );
-    let mut admitted =
-        crate::PersistedSessionConfig::from_policy(&policy, crate::SessionToolAccess::ambient());
+    let mut admitted = crate::PersistedSessionConfig::from_policy(&policy);
     admitted.plugin_config = capped_plugin_config(12);
     admitted.config_revision = 4;
     let resolved = crate::run_spec::RunSpec::default()
@@ -841,7 +837,7 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
     let mut head = admitted.clone();
     head.plugin_config = capped_plugin_config(20);
     head.config_revision = 5;
-    let mut state = RuntimeSessionState::ambient_fixture(policy.clone());
+    let mut state = RuntimeSessionState::fixture(policy.clone());
     adopt_session_config(&mut state, &head);
     assert_eq!(
         state.admitted_plugin_config(),
@@ -868,9 +864,40 @@ fn a_frame_captures_the_installed_plugin_config() {
         .expect("the initial frame");
     assert_eq!(
         frame
-            .frame_config(crate::SessionToolAccess::ambient())
+            .frame_config()
             .expect("a frame carries its config")
             .plugin_config,
         capped_plugin_config(9)
     );
+}
+
+/// The wire fence (FIG-6074): a checkpoint that still names the retired
+/// tool-state component is refused at decode, typed, never kept as an
+/// opaque component.
+#[test]
+fn a_checkpoint_naming_the_retired_tool_state_component_is_refused() {
+    let body = b"{}";
+    let checkpoint = crate::store::HydratedSessionCheckpoint {
+        components: [(
+            crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT.to_owned(),
+            crate::store::HydratedCheckpointComponent::Changed {
+                encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                body_ref: crate::BlobRef::for_content(body),
+                body: std::sync::Arc::from(&body[..]),
+            },
+        )]
+        .into_iter()
+        .collect(),
+        ..crate::store::HydratedSessionCheckpoint::default()
+    };
+    assert!(matches!(
+        RuntimeCheckpointComponents::from_hydrated(
+            &checkpoint,
+            crate::store::FleetFormat::current()
+        ),
+        Err(crate::StoreError::RetiredStoredShape {
+            shape: crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT,
+            ..
+        })
+    ));
 }

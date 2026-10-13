@@ -75,22 +75,6 @@ pub trait StoreTestSupport: Send + Sync {
         ancestor_node_id: &NodeId,
     ) -> Result<(), StoreError>;
 
-    /// Rewrite the versioned session-head authority bytes in the real backend.
-    ///
-    /// `None` removes `config.tool_access`; `Some` writes the supplied raw JSON.
-    /// Conformance uses this only to prove current malformed records and
-    /// predecessor formats refuse through production read paths.
-    async fn rewrite_session_tool_access_for_testing(
-        &self,
-        _session_id: &SessionId,
-        _schema_version: u32,
-        _tool_access: Option<serde_json::Value>,
-    ) -> Result<(), StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "rewrite_session_tool_access_for_testing",
-        })
-    }
-
     /// Conformance seam for a session a previous build left behind: rewrite
     /// only its physical session-state generation marker, leaving every
     /// guarded payload as it was written.

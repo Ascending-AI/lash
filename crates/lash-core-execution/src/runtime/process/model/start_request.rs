@@ -100,22 +100,22 @@ impl ProcessStartDeclaration {
         )
     }
 
-    /// Declare a start of the definition `definition_id` names under
-    /// `launch`, the launch the declaring attempt held.
+    /// Declare a start of the definition `launch` was held for, under that
+    /// launch.
     pub fn definition(
-        definition_id: super::super::ProcessDefinitionId,
         signature_claim: Option<super::super::ProcessSignature>,
         args: serde_json::Map<String, serde_json::Value>,
-        launch: DeclaredLaunch,
+        launch: super::DeclaredDefinitionLaunch,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
+        let (definition_id, launch) = launch.into_parts();
         Self::of_target(
             ProcessStartTarget::Definition {
                 definition_id,
                 signature_claim,
                 args,
-                launch: launch.into_launch(),
+                launch,
             },
             originator,
             lifetime,

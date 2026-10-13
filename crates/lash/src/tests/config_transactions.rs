@@ -8,10 +8,7 @@ use super::*;
 async fn opened(core: &LashCore, id: &str) -> Result<crate::LashSession> {
     let id = crate::SessionId::parse(id).expect("nonblank host identity");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     core.session(id).open().await
 }
@@ -181,14 +178,33 @@ fn data_definition() -> lash_core::ToolDefinition {
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for DataTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![data_definition().manifest()]
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "read_data").then(|| Arc::new(data_definition().contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         lash_core::ToolOutcome::ok(serde_json::json!(1)).into()
+    }
+}
+
+/// The plugin that offers [`DataTool`] under the selection its own config
+/// namespace holds.
+#[cfg(feature = "rlm")]
+const DATA_TOOLS: &str = "data-tools";
+
+/// A selection that offers every tool but `read_data`.
+#[cfg(feature = "rlm")]
+fn without_data() -> crate::tools::ToolSelectionConfig {
+    crate::tools::ToolSelectionConfig {
+        tools: Some(crate::tools::ToolSelection::AllExcept(vec![
+            lash_core::ToolId::from("tool:read-data"),
+        ])),
     }
 }
 
@@ -219,16 +235,17 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
         let core =
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .tools(crate::hook_key!("tools"), Arc::new(DataTool))
+                .plugin(Arc::new(data_tools()))
                 .build(crate::testing::runtime_lease_owner())?;
         let id =
             SessionId::parse(format!("namespace-collision-{per_run}-{index}")).expect("session id");
-        let hidden = lash_core::SessionToolAccess::ambient()
-            .with_hidden_tools(["read_data"])
-            .expect("valid tool name");
         let session = core
             .session(id)
-            .create(crate::SessionCreation::root(hidden, mock_session_spec()))
+            .create(crate::SessionCreation::root(
+                mock_session_spec()
+                    .plugin(DATA_TOOLS, without_data())
+                    .expect("the selection encodes"),
+            ))
             .await?;
         let session = core.session(session.session_id().clone()).open().await?;
         session
@@ -238,7 +255,12 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
         if per_run {
             let outcome = session
                 .send(crate::TurnInput::text("offer data"))
-                .tool_access(lash_core::SessionToolAccess::ambient())
+                .options(
+                    data_tools().run_options(),
+                    crate::tools::ToolSelectionConfig {
+                        tools: Some(crate::tools::ToolSelection::all()),
+                    },
+                )
                 .await?
                 .outcome()
                 .await?;
@@ -256,8 +278,8 @@ async fn namespace_collision_law(per_run: bool) -> Result<()> {
             let outcome = config
                 .apply(
                     crate::config::ConfigWrite::new("offer-data", revision),
-                    crate::config::ConfigTransaction::of(crate::config::SetToolAccess {
-                        access: lash_core::SessionToolAccess::ambient(),
+                    crate::config::ConfigTransaction::of(crate::tools::SetToolSelection {
+                        tools: crate::tools::ToolSelection::all(),
                     }),
                 )
                 .await?
@@ -291,10 +313,11 @@ async fn tool_configuration_refuses_an_existing_namespace_binding() -> Result<()
     namespace_collision_law(false).await
 }
 
-/// FIG-5824: per-run authority obeys the same admission rule as sticky config.
+/// FIG-5824: a run's provider options obey the same admission rule as
+/// sticky config.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn per_run_tool_access_refuses_an_existing_namespace_binding() -> Result<()> {
+async fn per_run_tool_selection_refuses_an_existing_namespace_binding() -> Result<()> {
     namespace_collision_law(true).await
 }
 
@@ -309,38 +332,45 @@ fn assert_namespace_collision(refusal: &lash_core::ConfigRefusal) {
 }
 
 #[cfg(feature = "rlm")]
+fn data_tools() -> crate::tools::SelectedToolsPlugin {
+    crate::tools::SelectedToolsPlugin::new(DATA_TOOLS, Arc::new(DataTool))
+}
+
+#[cfg(feature = "rlm")]
 struct ChangingDataTool(Arc<std::sync::atomic::AtomicBool>);
 
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for ChangingDataTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         if self.0.load(Ordering::SeqCst) {
-            DataTool.tool_manifests()
+            DataTool.tool_manifests(config)
         } else {
             Vec::new()
         }
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        DataTool.resolve_contract(name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        DataTool.resolve_contract(name, config)
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         DataTool.execute(call).await
     }
 }
 
+/// FIG-5824: adding a previously absent provider namespace refuses at
+/// installation.
 #[cfg(feature = "rlm")]
-async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
-    let visible = Arc::new(std::sync::atomic::AtomicBool::new(!provider_refresh));
-    let mut source = vec![];
-    if !provider_refresh {
-        source.push(typescript_block("await control.finish(0);"));
-    }
-    source.extend([
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn provider_installation_refuses_an_existing_namespace_binding() -> Result<()> {
+    let visible = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from([
         typescript_block("const data = 41; await control.finish(0);"),
         typescript_block("await control.finish(data + 1);"),
-    ]);
-    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(source)));
+    ])));
     let provider = crate::testing::TestProvider::builder()
         .kind("namespace-installation")
         .complete(move |_| {
@@ -360,45 +390,17 @@ async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
                 Arc::new(ChangingDataTool(Arc::clone(&visible))),
             )
             .build(crate::testing::runtime_lease_owner())?;
-    let id =
-        SessionId::parse(format!("namespace-installation-{provider_refresh}")).expect("session id");
+    let id = SessionId::parse("namespace-installation").expect("session id");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(
-            lash_core::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core.session(id).open().await?;
-    if !provider_refresh {
-        session
-            .send(crate::TurnInput::text("record the tools"))
-            .output()
-            .await?;
-        session
-            .admin()
-            .tools()
-            .set_membership("tool:read-data", false, "hide-data")
-            .await?
-            .settle_with(
-                &session.admin().commands(),
-                crate::testing::admin_fixture_outcome,
-            )
-            .await?;
-    }
     session
         .send(crate::TurnInput::text("bind data"))
         .output()
         .await?;
-    let generation = session
-        .admin()
-        .tools()
-        .state()
-        .await?
-        .recorded()
-        .expect("recorded tools")
-        .generation;
     let commands = session.admin().commands();
-    if provider_refresh {
+    {
         visible.store(true, Ordering::SeqCst);
         let receipt = commands
             .refresh_tool_catalog("offer data", "offer-data")
@@ -418,31 +420,7 @@ async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
         assert_namespace_collision(refusal);
         // The provider belongs to the host: withdraw its rejected advertisement.
         visible.store(false, Ordering::SeqCst);
-    } else {
-        let mutation = session
-            .admin()
-            .tools()
-            .set_membership("tool:read-data", true, "offer-data")
-            .await?;
-        let error = mutation
-            .settle_with(&commands, crate::testing::admin_fixture_outcome)
-            .await
-            .expect_err("the membership addition conflicts with data");
-        assert!(matches!(error, crate::EmbedError::Reconfigure(
-            crate::tools::ReconfigureError::ToolNamespaceCollision { root, binding }
-        ) if root == "data" && binding == "data"));
     }
-    assert_eq!(
-        session
-            .admin()
-            .tools()
-            .state()
-            .await?
-            .recorded()
-            .expect("recorded tools")
-            .generation,
-        generation
-    );
     let report = session
         .send(crate::TurnInput::text("read data"))
         .output()
@@ -452,18 +430,4 @@ async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
     drop(session);
     core.shutdown().await?;
     Ok(())
-}
-
-/// FIG-5824: adding a previously absent provider namespace refuses at installation.
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn provider_installation_refuses_an_existing_namespace_binding() -> Result<()> {
-    namespace_installation_law(true).await
-}
-
-/// FIG-5824: re-enabling a curated tool cannot displace a persisted binding.
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn tool_membership_refuses_an_existing_namespace_binding() -> Result<()> {
-    namespace_installation_law(false).await
 }

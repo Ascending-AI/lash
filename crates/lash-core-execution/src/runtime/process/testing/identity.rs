@@ -45,22 +45,16 @@ fn process_env_identity_corpus() -> [(String, String); 2] {
     );
     const CONFIGURED: crate::ProcessConfigKey<serde_json::Value> =
         crate::ProcessConfigKey::new("configured", crate::FormatVersion::ONE);
-    let rich = crate::ProcessEnv::builder(
-        crate::SessionToolAccess::restricted(std::iter::empty())
-            .expect("an empty restriction")
-            .with_hidden_tools(["hidden"])
-            .expect("a hidden name"),
-        crate::MaxToolCalls::new(1024),
-    )
-    .model(model)
-    .component(CONFIGURED, &serde_json::json!({"enabled": true}))
-    .component_with_sessions(
-        crate::ProcessConfigKey::<()>::new("reader", crate::FormatVersion::ONE),
-        &(),
-        [crate::SessionId::from("granted-session")],
-    )
-    .build()
-    .expect("the rich environment builds");
+    let rich = crate::ProcessEnv::builder(crate::MaxToolCalls::new(1024))
+        .model(model)
+        .component(CONFIGURED, &serde_json::json!({"enabled": true}))
+        .component_with_sessions(
+            crate::ProcessConfigKey::<()>::new("reader", crate::FormatVersion::ONE),
+            &(),
+            [crate::SessionId::from("granted-session")],
+        )
+        .build()
+        .expect("the rich environment builds");
     let specs = [crate::testing::process_env_fixture(), rich];
     specs.map(|spec| {
         let bytes = spec.to_store_bytes().expect("encode golden env");

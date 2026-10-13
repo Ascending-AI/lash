@@ -22,11 +22,15 @@ struct PanicTool {
 }
 
 impl ToolProvider for PanicTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![panic_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == lash_core::testing::FIXTURE_ECHO_TOOL)
             .then(|| Arc::new(panic_tool_definition().contract()))
     }

@@ -17,7 +17,7 @@ enum PluginSource {
 pub struct EmbeddedRuntimeBuilder {
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     session_id: Option<SessionId>,
-    creation: Option<(SessionPolicy, crate::SessionToolAccess)>,
+    creation: Option<SessionPolicy>,
     initial_state: Option<RuntimeSessionState>,
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
@@ -53,15 +53,11 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    /// What a session this builder creates records: its policy and its
-    /// tool authority. A builder that opens a recorded session, or runs a
-    /// supplied state, reads both from there and ignores this.
-    pub fn with_creation(
-        mut self,
-        policy: SessionPolicy,
-        tool_access: crate::SessionToolAccess,
-    ) -> Self {
-        self.creation = Some((policy, tool_access));
+    /// What a session this builder creates records: its policy. A builder
+    /// that opens a recorded session, or runs a supplied state, reads it
+    /// from there and ignores this.
+    pub fn with_creation(mut self, policy: SessionPolicy) -> Self {
+        self.creation = Some(policy);
         self
     }
 
@@ -151,20 +147,19 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    /// The state of a session this builder creates, under the policy and
-    /// tool authority its creator stated. Creation resolves the session's
-    /// plugin configuration once its plugins are built.
+    /// The state of a session this builder creates, under the policy its
+    /// creator stated. Creation resolves the session's plugin configuration
+    /// once its plugins are built.
     fn resolve_created_state(&self) -> Result<RuntimeSessionState, SessionError> {
-        let (policy, tool_access) = self.creation.clone().ok_or_else(|| {
+        let policy = self.creation.clone().ok_or_else(|| {
             SessionError::Protocol(
-                "embedded runtime creation is required to create a session; state its SessionPolicy and SessionToolAccess with `with_creation`"
+                "embedded runtime creation is required to create a session; state its SessionPolicy with `with_creation`"
                     .to_string(),
             )
         })?;
         let mut state = RuntimeSessionState::new(
             policy,
             crate::RuntimeSessionAuthority::new(
-                tool_access,
                 crate::PluginConfig::default(),
                 crate::prompt_sections::PromptPlan::default(),
             ),
@@ -226,7 +221,6 @@ impl EmbeddedRuntimeBuilder {
             PluginSource::Session(session) => Ok(Arc::clone(session)),
             PluginSource::Host(host) => {
                 let authority = crate::plugin::SessionAuthorityContext {
-                    tool_access: state.authority.tool_access.clone(),
                     plugin_config: state.admitted_plugin_config(),
                 };
                 let request = match state.plugin_state() {

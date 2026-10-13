@@ -162,7 +162,7 @@ async fn kernel_run(
             ));
         }
     };
-    let boundary = match HostBoundary::of_catalog(&run.tool_catalog) {
+    let boundary = match HostBoundary::of_links(&run.effects) {
         Ok(boundary) => boundary,
         Err(error) => {
             return ended(failure(
@@ -424,14 +424,14 @@ fn issue(
             args: request.args.clone(),
         },
     });
-    let Some(effect) = boundary.effect(&request.effect) else {
+    if boundary.effect(&request.effect).is_none() {
         return Issued::Refused {
             wait,
             admission,
             kind: EFFECT_UNKNOWN.to_owned(),
             message: format!("the host offers no effect `{}`", request.effect),
         };
-    };
+    }
     // A tool is one effect that takes its input as one record.
     let input = match request.args.as_slice() {
         [input] => effect_input(document, process, input),
@@ -445,7 +445,7 @@ fn issue(
         Ok(input) => Issued::Effect {
             wait,
             admission,
-            tool: effect.tool.clone(),
+            effect: request.effect.clone(),
             input,
         },
         Err(message) => Issued::Refused {

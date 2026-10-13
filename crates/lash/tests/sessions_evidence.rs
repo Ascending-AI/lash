@@ -64,13 +64,7 @@ fn drain_area_witnesses() {
     // W0021: lash::SessionCommand::source_key [function]
     let _: fn(&lash::SessionCommand, &'static str) -> String = lash::SessionCommand::source_key;
     // W0022: lash::SessionCreateRequest::child [function]
-    let _ = lash::SessionCreateRequest::child(
-        lash::plugins::SessionToolAccess::ambient(),
-        "",
-        todo!(),
-        todo!(),
-        todo!(),
-    );
+    let _ = lash::SessionCreateRequest::child("", todo!(), todo!(), todo!());
     // W0023: lash::SessionCreateRequest::root [function]
     let _ = lash::SessionCreateRequest::root;
     // W0024: lash::SessionCreateRequest::with_caused_by [function]
@@ -1280,10 +1274,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::testing::MockSessionManager| {
         let _ = &value.tool_catalog;
     });
-    // W0517: lash::testing::MockSessionManager::tool_registry [field]
-    field_witness(|value: &lash::testing::MockSessionManager| {
-        let _ = &value.tool_registry;
-    });
     // W0518: lash::testing::MockSessionManager::turn [field]
     field_witness(|value: &lash::testing::MockSessionManager| {
         let _ = &value.turn;
@@ -1292,8 +1282,6 @@ fn drain_area_witnesses() {
     let _ = lash::testing::MockSessionManager::with_snapshot;
     // W0521: lash::testing::MockSessionManager::with_tool_catalog [function]
     let _ = lash::testing::MockSessionManager::with_tool_catalog;
-    // W0522: lash::testing::MockSessionManager::with_tool_registry [function]
-    let _ = lash::testing::MockSessionManager::with_tool_registry;
     // W0523: lash::testing::MockSessionManager::with_turn [function]
     let _ = lash::testing::MockSessionManager::with_turn;
     // W0524: lash::testing::TestClock::advance [function]

@@ -42,10 +42,13 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// environment lash admits the workflow against: the host's tools, from the
 /// one component that provides them.
 fn environment() -> Result<ProcessEnv, RunError> {
-    let tools = lash::plugins::SessionToolAccess::restricted(crate::display::tool_definitions())
-        .map_err(|error| RunError::Invalid(error.to_string()))?;
-    Ok(ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
-        .component(HOST_TOOLS, &())
+    let host_tools = HOST_TOOLS.tool_provider("tools");
+    Ok(crate::display::tool_definitions()
+        .iter()
+        .fold(
+            ProcessEnv::builder(lash::MaxToolCalls::new(1024)).component(HOST_TOOLS, &()),
+            |env, tool| env.link_tool(host_tools.clone(), tool),
+        )
         .build()?)
 }
 
@@ -572,7 +575,6 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

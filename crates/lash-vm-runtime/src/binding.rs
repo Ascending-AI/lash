@@ -217,6 +217,37 @@ impl crate::HostBoundary {
     /// [`ToolBindingError`] when a tool has no usable binding or two tools
     /// take one path.
     pub fn of_catalog(catalog: &lash_core::ToolCatalog) -> Result<Self, ToolBindingError> {
+        Self::of_catalog_tools(catalog)
+    }
+
+    /// Every effect a process's env links, under its path, typed from the
+    /// surface the link retained (P3): what a run of that env may perform.
+    /// A linked tool that declares a turn control is not offered, as
+    /// [`Self::of_catalog`] offers none.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::BoundaryError`] when a path is no effect name.
+    pub fn of_links(
+        effects: &std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_core::EffectLink>,
+    ) -> Result<Self, crate::BoundaryError> {
+        let mut boundary = Self::new();
+        for (effect, link) in effects {
+            if !link.surface.declaration.controls.is_empty() {
+                continue;
+            }
+            boundary.offer_tool(
+                effect.as_str(),
+                link.tool().clone(),
+                link.surface.input_schema.canonical(),
+                link.surface.output_schema.canonical(),
+                link.surface.declaration.controls.clone(),
+            )?;
+        }
+        Ok(boundary)
+    }
+
+    fn of_catalog_tools(catalog: &lash_core::ToolCatalog) -> Result<Self, ToolBindingError> {
         let mut boundary = Self::new();
         for entry in &catalog.tools {
             if !entry.manifest.declaration().controls.is_empty() {

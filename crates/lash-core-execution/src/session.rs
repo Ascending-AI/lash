@@ -1,17 +1,11 @@
-/// version_surface = "coexist"
-/// version_guard(items(LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION, tool_catalog_authority_fingerprint))
-const LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION: &str = "lash-tool-catalog-authority/v2";
-
 use crate::SessionId;
-#[cfg(test)]
-use crate::plugin::PluginSessionRequest;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
+use crate::RuntimeServices;
 use crate::tool_dispatch::ToolDispatchContext;
-use crate::{RuntimeServices, ToolProvider};
 
 mod execution_context;
 pub(crate) use execution_context::{ToolCallStart, ToolObservationAttribution};
@@ -33,11 +27,13 @@ pub use settlement_incorporation::{Incorporated, IncorporationLedger, Settlement
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{CompletedProtocolToolCall, ToolInvocation, ToolInvocationReply};
 
+/// What a live surface was built under: the plugins' state generations and
+/// the run's resolved configuration, which every provider advertises under
+/// (S2). Two runs whose configurations differ never share a surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ToolCatalogCacheKey {
-    tool_generation: u64,
     plugin_generations: std::collections::BTreeMap<String, u64>,
-    authority_fingerprint: [u8; 32],
+    config: crate::plugin::AdmittedPluginConfig,
 }
 
 #[derive(Debug, Default)]
@@ -46,102 +42,14 @@ struct ToolCatalogDerived {
 }
 
 struct ToolCatalogArtifact {
-    tool_registry: Arc<crate::ToolRegistry>,
+    /// The surface the run's model calls are admitted under: a recorded
+    /// one, or one built from live advertisements for a sync to record.
+    surface: Arc<crate::RecordedSurface>,
+    /// The surface's calls, each routed to its entry's provider.
+    tools: crate::SurfaceTools,
     tool_catalog: Arc<crate::ToolCatalog>,
-    /// The catalog the live registry resolves to now. It is `tool_catalog`
-    /// for a live surface; for a recorded surface it is what the recorded
-    /// definitions are judged against, tool by tool.
-    live_tool_catalog: Arc<crate::ToolCatalog>,
     preamble: Arc<crate::TurnDriverPreamble>,
-    /// The recorded tools whose live definition is missing or dispatches
-    /// differently; empty for a live surface.
-    drift: std::collections::BTreeMap<crate::ToolId, ToolSurfaceDrift>,
     derived: ToolCatalogDerived,
-}
-
-/// How a tool of a turn's recorded surface differs from the live registry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolSurfaceDriftKind {
-    /// The live registry holds no tool with the recorded tool's id.
-    Missing,
-    /// The live tool with the recorded id links or dispatches differently.
-    Changed,
-}
-
-impl ToolSurfaceDriftKind {
-    pub fn describe(self) -> &'static str {
-        match self {
-            Self::Missing => "missing from",
-            Self::Changed => "changed in",
-        }
-    }
-}
-
-/// One tool of a turn's recorded surface whose live definition drifted.
-///
-/// Drift is judged per tool on what decides how a call links and dispatches
-/// ([`tool_dispatch_surface`]); a reworded description or new examples are
-/// not drift, since the prompt is served from the journaled sync.
-#[derive(Clone, Debug)]
-pub struct ToolSurfaceDrift {
-    pub kind: ToolSurfaceDriftKind,
-    pub recorded: crate::ToolDefinition,
-}
-
-impl ToolSurfaceDrift {
-    /// Judges one recorded tool against `live`, the catalog the live registry
-    /// resolves to, on what decides how a call links and dispatches
-    /// ([`tool_dispatch_surface`]): `None` when the live catalog holds it
-    /// undrifted. The one rule a turn's recorded surface and a group tool
-    /// child's recorded admission are both judged by (FIG-3587, FIG-3725).
-    pub fn judge(recorded: &crate::ToolDefinition, live: &crate::ToolCatalog) -> Option<Self> {
-        let kind = match live
-            .tools
-            .iter()
-            .find(|entry| entry.manifest.id == recorded.manifest.id)
-        {
-            None => ToolSurfaceDriftKind::Missing,
-            Some(entry)
-                if tool_dispatch_surface(&entry.manifest, &entry.contract)
-                    != tool_dispatch_surface(&recorded.manifest, &recorded.contract) =>
-            {
-                ToolSurfaceDriftKind::Changed
-            }
-            Some(_) => return None,
-        };
-        Some(Self {
-            kind,
-            recorded: recorded.clone(),
-        })
-    }
-
-    /// The grant a call on the drifted tool is authorized under: the recorded
-    /// definition, so its envelope is the one the journal recorded.
-    pub fn recorded_binding(&self) -> crate::ToolDefinition {
-        self.recorded.clone()
-    }
-
-    /// The refusal a call on the drifted tool meets when the journal does not
-    /// hold its result. It is the binding-drift refusal a code cell's drifted
-    /// binding meets (FIG-3587), so the turn parks the same way.
-    pub fn refusal(&self, call: &crate::PreparedToolCall) -> crate::RuntimeEffectControllerError {
-        let provider = call
-            .provider_call_id
-            .as_deref()
-            .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
-            .unwrap_or_default();
-        crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::LashVmCellBindingDrift,
-            format!(
-                "tool call `{}` ({provider}tool `{}`) names a tool {} the live tool registry \
-                 since the turn's tool surface was recorded; its journal serves only recorded \
-                 results, and this call would reach the tool live, so nothing was dispatched",
-                call.call_id,
-                self.recorded.manifest.id,
-                self.kind.describe(),
-            ),
-        )
-    }
 }
 
 /// The part of a tool definition that decides how a call links and
@@ -188,12 +96,14 @@ pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
 impl ToolCatalogHandle {
-    pub(crate) fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
-        Arc::clone(&self.0.tool_registry)
+    /// The surface's calls, each routed to its entry's provider.
+    pub fn tools(&self) -> crate::SurfaceTools {
+        self.0.tools.clone()
     }
 
-    pub fn tools(&self) -> Arc<dyn ToolProvider> {
-        Arc::clone(&self.0.tool_registry) as Arc<dyn ToolProvider>
+    /// The surface this handle offers.
+    pub fn surface(&self) -> Arc<crate::RecordedSurface> {
+        Arc::clone(&self.0.surface)
     }
 
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
@@ -204,29 +114,9 @@ impl ToolCatalogHandle {
         Arc::clone(&self.0.preamble)
     }
 
-    /// The catalog the live registry resolves to now; see
-    /// [`ToolCatalogArtifact::live_tool_catalog`].
-    pub fn live_tool_catalog(&self) -> Arc<crate::ToolCatalog> {
-        Arc::clone(&self.0.live_tool_catalog)
-    }
-
-    /// The catalog's tools as definitions: what an execution-environment
-    /// sync records as the turn's tool surface.
+    /// The catalog's tools as definitions.
     pub fn definitions(&self) -> Vec<crate::ToolDefinition> {
-        self.0
-            .tool_catalog
-            .tools
-            .iter()
-            .map(|entry| crate::ToolDefinition {
-                manifest: entry.manifest.clone(),
-                contract: (*entry.contract).clone(),
-            })
-            .collect()
-    }
-
-    /// How `tool_id`'s live definition drifted from the recorded surface.
-    pub fn drift_for(&self, tool_id: &crate::ToolId) -> Option<&ToolSurfaceDrift> {
-        self.0.drift.get(tool_id)
+        self.0.surface.definitions().cloned().collect()
     }
 
     fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
@@ -428,20 +318,23 @@ pub struct ExecRequest {
 pub struct Session {
     session_id: SessionId,
     services: RuntimeServices,
-    tool_registry: Arc<crate::ToolRegistry>,
-    tool_catalog_cache: Arc<std::sync::Mutex<Option<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
+    /// The installed surface: a recorded one (no key), or a live one built
+    /// under its key.
+    tool_catalog_cache: Arc<std::sync::Mutex<Option<InstalledToolCatalog>>>,
 }
+
+/// An installed surface and the key it was built under, `None` for a
+/// recorded one.
+type InstalledToolCatalog = (Option<ToolCatalogCacheKey>, ToolCatalogHandle);
 
 impl Session {
     pub async fn new(
         services: RuntimeServices,
         session_id: &SessionId,
     ) -> Result<Self, SessionError> {
-        let tool_registry = services.plugins.tool_registry();
         let session = Self {
             session_id: session_id.clone(),
             services,
-            tool_registry,
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
         };
 
@@ -460,17 +353,12 @@ impl Session {
         Self {
             session_id: self.session_id.clone(),
             services: self.services.clone(),
-            tool_registry: Arc::clone(&self.tool_registry),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
         }
     }
 
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
-    }
-
-    pub fn tools(&self) -> Arc<dyn ToolProvider> {
-        Arc::clone(&self.tool_registry) as Arc<dyn ToolProvider>
     }
 
     pub fn plugins(&self) -> &Arc<crate::PluginSession> {
@@ -491,72 +379,11 @@ impl Session {
             .unwrap_or_else(crate::FleetFormat::current)
     }
 
-    fn tool_catalog_cache_key(
+    fn handle(
         &self,
-        tool_access: &crate::SessionToolAccess,
-        tool_generation: u64,
-    ) -> ToolCatalogCacheKey {
-        ToolCatalogCacheKey {
-            tool_generation,
-            plugin_generations: self.plugins().state_generations(),
-            authority_fingerprint: tool_catalog_authority_fingerprint(tool_access),
-        }
-    }
-
-    fn build_tool_catalog_entry(
-        &self,
-        tool_registry: Arc<crate::ToolRegistry>,
-        tool_access: crate::SessionToolAccess,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let tool_catalog = Arc::new(self.plugins().resolve_live_tool_catalog(
-            Arc::clone(&tool_registry) as Arc<dyn ToolProvider>,
-            tool_access,
-        )?);
-        tool_registry.validate_resident_catalog_routes(&tool_catalog)?;
-        let input = crate::ProtocolBuildInput {
-            tool_catalog: Arc::clone(&tool_catalog),
-            plugin_extensions: self.plugins().extensions().clone(),
-            writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
-        };
-        let driver = self.plugins().protocol_driver();
-        let preamble = driver.build_preamble(input);
-        Ok(ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
-            tool_registry,
-            live_tool_catalog: Arc::clone(&tool_catalog),
-            tool_catalog,
-            preamble: Arc::new(preamble),
-            drift: std::collections::BTreeMap::new(),
-            derived: ToolCatalogDerived::default(),
-        })))
-    }
-
-    /// Installs the tool surface a turn's execution-environment sync
-    /// recorded as the surface its shift reads (FIG-3672 P7b).
-    ///
-    /// The recorded definitions are the catalog: membership, manifests and
-    /// contracts are what the pass that wrote the journal saw, whichever
-    /// worker replays it. The live registry supplies only the executors, and
-    /// each recorded tool is judged against it on its own
-    /// ([`ToolSurfaceDrift`]): a call on a drifted tool is served only from
-    /// its recorded result.
-    pub fn install_recorded_tool_surface(
-        &self,
-        tool_access: &crate::SessionToolAccess,
-        recorded: &[crate::ToolDefinition],
-    ) -> Result<(), crate::PluginError> {
-        let tool_registry = self.pin_live_tool_registry()?;
-        let key = self.tool_catalog_cache_key(tool_access, tool_registry.generation());
-        let live =
-            self.build_tool_catalog_entry(Arc::clone(&tool_registry), tool_access.clone())?;
-        let live_tool_catalog = live.tool_catalog();
-        let drift = recorded
-            .iter()
-            .filter_map(|definition| {
-                ToolSurfaceDrift::judge(definition, &live_tool_catalog)
-                    .map(|drift| (definition.manifest.id.clone(), drift))
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(recorded.to_vec()));
+        surface: Arc<crate::RecordedSurface>,
+        tool_catalog: Arc<crate::ToolCatalog>,
+    ) -> ToolCatalogHandle {
         let preamble = self
             .plugins()
             .protocol_driver()
@@ -565,16 +392,42 @@ impl Session {
                 plugin_extensions: self.plugins().extensions().clone(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
             });
-        let handle = ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
-            tool_registry,
+        ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
+            tools: crate::SurfaceTools::of_surface(&surface, self.plugins().tool_registry()),
+            surface,
             tool_catalog,
-            live_tool_catalog,
             preamble: Arc::new(preamble),
-            drift,
             derived: ToolCatalogDerived::default(),
-        }));
-        *self.tool_catalog_cache.lock_recover() = Some((key, handle));
-        Ok(())
+        }))
+    }
+
+    /// The surface the session's providers offer under `config` (S4),
+    /// built and not installed: a sync records it, and the shift installs
+    /// what the sync recorded ([`Self::install_recorded_tool_surface`]).
+    fn build_tool_surface(
+        &self,
+        config: &crate::plugin::AdmittedPluginConfig,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        let built = self.plugins().build_tool_surface(config)?;
+        Ok(self.handle(built.surface, built.catalog))
+    }
+
+    /// Installs the surface a run recorded as the one its model calls are
+    /// admitted under (S5).
+    ///
+    /// The recorded surface is the catalog: its tools, their providers and
+    /// definitions are what the pass that recorded it saw, whichever worker
+    /// replays it. Nothing is re-advertised: a call whose provider no longer
+    /// serves its recorded definition is judged when it is called
+    /// ([`crate::SurfaceTools::drift`]), and parks.
+    pub fn install_recorded_tool_surface(
+        &self,
+        recorded: Arc<crate::RecordedSurface>,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        let tool_catalog = Arc::new(self.plugins().surface_catalog(&recorded)?);
+        let handle = self.handle(recorded, tool_catalog);
+        *self.tool_catalog_cache.lock_recover() = Some((None, handle.clone()));
+        Ok(handle)
     }
 
     /// The protocol driver's preamble for a turn machine whose environment its
@@ -595,31 +448,34 @@ impl Session {
         Arc::new(preamble)
     }
 
-    /// How `tool_id` drifted from the turn's installed recorded surface, if it
-    /// did; `None` for an undrifted tool or a live surface.
+    /// How `tool_id`'s entry on the installed surface drifted on this node
+    /// under the run's configuration, if it did; `None` for an undrifted
+    /// tool or one the surface does not offer.
     pub fn tool_surface_drift(
         &self,
         tool_id: &crate::ToolId,
-    ) -> Result<Option<ToolSurfaceDrift>, crate::PluginError> {
+    ) -> Result<Option<crate::ToolSurfaceDrift>, crate::PluginError> {
+        let config =
+            crate::plugin::OwnerConfigView::session(self.plugins().admitted_plugin_config());
         Ok(self
             .active_tool_surface_entry()?
-            .drift_for(tool_id)
-            .cloned())
+            .tools()
+            .drift(tool_id, &config))
     }
 
     fn tool_catalog_cache_entry(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let tool_access = self.plugins().tool_access();
-        let key = self.tool_catalog_cache_key(&tool_access, self.tool_registry.generation());
+        let key = ToolCatalogCacheKey {
+            plugin_generations: self.plugins().state_generations(),
+            config: self.plugins().admitted_plugin_config(),
+        };
         let mut cache = self.tool_catalog_cache.lock_recover();
-        if let Some((entry_key, entry)) = cache.as_ref()
+        if let Some((Some(entry_key), entry)) = cache.as_ref()
             && *entry_key == key
         {
             return Ok(entry.clone());
         }
-        let tool_registry = self.pin_live_tool_registry()?;
-        let key = self.tool_catalog_cache_key(&tool_access, tool_registry.generation());
-        let entry = self.build_tool_catalog_entry(tool_registry, tool_access)?;
-        *cache = Some((key, entry.clone()));
+        let entry = self.build_tool_surface(&key.config)?;
+        *cache = Some((Some(key), entry.clone()));
         Ok(entry)
     }
 
@@ -630,74 +486,30 @@ impl Session {
         self.tool_catalog_cache_entry()
     }
 
-    /// Live sources are enumerated exactly once before the registry snapshot is
-    /// frozen. Host curation is already attached by ToolId in that snapshot;
-    /// authority and plugin contributions then filter the model-facing names.
-    /// The returned handle owns both the catalog and the registry dispatch will
-    /// use for calls from that request.
-    ///
-    /// Building a surface installs nothing: an execution-environment sync
-    /// records the surface it built, and the shift installs what the sync
-    /// recorded ([`Self::install_recorded_tool_surface`]).
+    /// The surface the session's providers offer now, under the run's
+    /// configuration: built once per configuration and plugin state, and
+    /// installed for nothing. A sync records it.
     // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
     // accessor's visibility tracks it exactly (`private_interfaces`).
     #[cfg(feature = "testing")]
-    pub fn pin_tool_surface(
-        &self,
-        tool_access: &crate::SessionToolAccess,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        self.pin_tool_surface_inner(tool_access)
+    pub fn pin_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+        self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
     #[cfg(not(feature = "testing"))]
-    pub fn pin_tool_surface(
-        &self,
-        tool_access: &crate::SessionToolAccess,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        self.pin_tool_surface_inner(tool_access)
+    pub fn pin_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+        self.build_tool_surface(&self.plugins().admitted_plugin_config())
     }
 
-    /// Admit a request surface without publishing a colliding live advertisement.
-    pub async fn admit_tool_surface(
-        &self,
-        tool_access: &crate::SessionToolAccess,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let registry = self.plugins().tool_registry();
-        let (revision, preview) = registry.preview_reconfiguration();
-        let pinned = preview.pin_session_surface().map_err(|error| {
-            crate::PluginError::Session(format!("failed to pin session tool surface: {error}"))
-        })?;
-        let surface = self.build_tool_catalog_entry(Arc::new(pinned), tool_access.clone())?;
+    /// Build the surface a sync records (S4) and judge it against the
+    /// protocol before anything records it.
+    pub async fn admit_tool_surface(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
+        let surface = self.build_tool_surface(&self.plugins().admitted_plugin_config())?;
         self.plugins()
             .protocol_session()
             .validate_tool_catalog(&surface.tool_catalog(), None)
             .await?;
-        registry
-            .publish_reconfiguration(revision, &preview)
-            .map_err(|error| {
-                crate::PluginError::Session(format!(
-                    "failed to publish session tool surface: {error}"
-                ))
-            })?;
         Ok(surface)
-    }
-
-    fn pin_tool_surface_inner(
-        &self,
-        tool_access: &crate::SessionToolAccess,
-    ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let tool_registry = self.pin_live_tool_registry()?;
-        self.build_tool_catalog_entry(tool_registry, tool_access.clone())
-    }
-
-    fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
-        self.plugins()
-            .tool_registry()
-            .pin_session_surface()
-            .map(Arc::new)
-            .map_err(|err| {
-                crate::PluginError::Session(format!("failed to pin session tool surface: {err}"))
-            })
     }
 
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
@@ -751,8 +563,8 @@ impl Session {
             ),
             execution_budgets: (self.plugins()).execution_budgets(),
             state: (self.plugins()).clone(),
-            tools: tool_surface.tools(),
-            tool_registry: Some(tool_surface.tool_registry()),
+            tools: Arc::new(tool_surface.tools()),
+            routes: tool_surface.tools(),
             tool_catalog: tool_surface.tool_catalog(),
             sessions,
             session_lifecycle,
@@ -783,15 +595,13 @@ impl Session {
             turn_context,
         ))
         .map(|context| {
-            context
-                .with_fleet_format(
-                    self.services
-                        .store
-                        .as_ref()
-                        .map(crate::store::SessionStore::fleet_format)
-                        .unwrap_or_else(crate::FleetFormat::current),
-                )
-                .with_live_tool_catalog(tool_surface.live_tool_catalog())
+            context.with_fleet_format(
+                self.services
+                    .store
+                    .as_ref()
+                    .map(crate::store::SessionStore::fleet_format)
+                    .unwrap_or_else(crate::FleetFormat::current),
+            )
         })
     }
 
@@ -799,711 +609,9 @@ impl Session {
         *self.tool_catalog_cache.lock_recover() = None;
     }
 
-    /// Validate membership and provider changes against the live execution
-    /// before the registry or offered catalog changes (FIG-5824).
-    pub async fn validate_tool_registry(
-        &self,
-        registry: Arc<crate::ToolRegistry>,
-    ) -> Result<(), crate::PluginError> {
-        let catalog = self.plugins().resolve_live_tool_catalog(
-            registry as Arc<dyn ToolProvider>,
-            self.plugins().tool_access(),
-        )?;
-        self.plugins()
-            .protocol_session()
-            .validate_tool_catalog(&catalog, None)
-            .await
-    }
-
-    pub async fn refresh_tool_catalog(&mut self) -> Result<(), SessionError> {
-        let registry = self.services.plugins.tool_registry();
-        let (revision, preview) = registry.preview_reconfiguration();
-        let pinned =
-            Arc::new(preview.pin_session_surface().map_err(|err| {
-                SessionError::Protocol(format!("tool reconfigure failed: {err}"))
-            })?);
-        self.validate_tool_registry(Arc::clone(&pinned)).await?;
-        registry
-            .publish_reconfiguration(revision, &preview)
-            .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
-        self.tool_registry = pinned;
+    /// Forget the built surface: the next read builds it again from what
+    /// the session's providers advertise under the run's configuration.
+    pub fn refresh_tool_catalog(&mut self) {
         *self.tool_catalog_cache.lock_recover() = None;
-        Ok(())
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "`SessionToolAccess` is composed entirely of strings, enums and maps, whose serialization has no failing case"
-)]
-fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) -> [u8; 32] {
-    let encoded = serde_json::to_vec(tool_access)
-        .expect("SessionToolAccess is composed entirely of serializable authority values");
-    lash_sansio::core_support::blake3_domain_hash(
-        LASH_TOOL_CATALOG_AUTHORITY_DOMAIN_VERSION,
-        encoded,
-    )
-}
-
-#[cfg(test)]
-mod tool_catalog_cache_tests {
-    use super::*;
-    use crate::plugin::StaticPluginFactory;
-    use lash_sansio::sync::MutexExt;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    struct CountingDynamicProvider {
-        names: Arc<std::sync::Mutex<Vec<String>>>,
-        manifest_reads: Arc<AtomicUsize>,
-    }
-
-    struct ReassignableResidentProvider {
-        label: &'static str,
-        active: Arc<AtomicBool>,
-        prepares: Arc<AtomicUsize>,
-        executions: Arc<AtomicUsize>,
-        attempts: Arc<AtomicUsize>,
-    }
-
-    struct AdmissionProbeProvider {
-        contract_available: bool,
-        prepare_calls: Arc<AtomicUsize>,
-    }
-
-    impl AdmissionProbeProvider {
-        fn definition() -> crate::ToolDefinition {
-            crate::ToolDefinition::raw(
-                "tool:resident",
-                "resident",
-                "resident admission probe",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { "pinned": { "type": "string" } },
-                    "required": ["pinned"],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ToolProvider for AdmissionProbeProvider {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            vec![Self::definition().manifest()]
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            (self.contract_available && name == "resident")
-                .then(|| Arc::new(Self::definition().contract()))
-        }
-
-        async fn prepare_tool_call(
-            &self,
-            call: crate::ToolPrepareCall<'_>,
-        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-            self.prepare_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(crate::PreparedToolCall::identity(
-                call.tool_id,
-                call.pending,
-            ))
-        }
-
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            crate::ToolOutcome::ok(serde_json::json!("resident")).into()
-        }
-    }
-
-    fn admission_probe_plugins(
-        provider: Arc<dyn ToolProvider>,
-        tool_access: crate::SessionToolAccess,
-    ) -> Arc<crate::PluginSession> {
-        let mut factories = crate::testing::test_standard_protocol_factories();
-        factories.push(Arc::new(StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial("admission_probe"),
-            crate::PluginSpec::new().with_tool_provider(crate::hook_key!("probe"), provider),
-        )));
-        crate::PluginHost::new(
-            factories,
-            crate::ExecutionBudgets::recommended(),
-            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
-        )
-        .build_session(PluginSessionRequest::creation(
-            "admission-probe",
-            crate::plugin::SessionAuthorityContext {
-                tool_access,
-                ..crate::plugin::SessionAuthorityContext::ambient_fixture()
-            },
-        ))
-        .expect("plugin session")
-    }
-
-    async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
-        let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::ambient());
-        Session::new(
-            crate::testing::runtime_services_without_ports(plugins),
-            &SessionId::from("admission-probe"),
-        )
-        .await
-        .expect("runtime session")
-    }
-
-    impl CountingDynamicProvider {
-        fn definition(name: &str) -> crate::ToolDefinition {
-            crate::ToolDefinition::raw(
-                format!("tool:{name}"),
-                name,
-                format!("dynamic {name}"),
-                crate::ToolDefinition::default_input_schema(),
-                serde_json::json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-        }
-    }
-
-    impl ReassignableResidentProvider {
-        fn definition(&self) -> crate::ToolDefinition {
-            let definition = crate::ToolDefinition::raw(
-                "tool:reassigned",
-                "reassigned",
-                format!("resident route {}", self.label),
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { self.label: { "type": "string" } },
-                    "required": [self.label],
-                    "additionalProperties": false
-                }),
-                serde_json::json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120));
-            if self.label == "route_a" {
-                definition
-                    .with_declaration(
-                        crate::ToolDeclaration::deferring(),
-                        Some(crate::ParkBound::Within(std::time::Duration::from_secs(
-                            120,
-                        ))),
-                    )
-                    .expect("a deferring tool declares its park bound")
-            } else {
-                definition
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ToolProvider for ReassignableResidentProvider {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            self.active
-                .load(Ordering::SeqCst)
-                .then(|| self.definition().manifest())
-                .into_iter()
-                .collect()
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            (name == "reassigned").then(|| Arc::new(self.definition().contract()))
-        }
-
-        async fn prepare_tool_call(
-            &self,
-            call: crate::ToolPrepareCall<'_>,
-        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-            self.prepares.fetch_add(1, Ordering::SeqCst);
-            Ok(crate::PreparedToolCall::identity(
-                call.tool_id,
-                call.pending,
-            ))
-        }
-
-        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            self.executions.fetch_add(1, Ordering::SeqCst);
-            self.attempts.fetch_add(1, Ordering::SeqCst);
-            crate::ToolOutcome::ok(serde_json::json!(format!("attempt_{}", self.label))).into()
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ToolProvider for CountingDynamicProvider {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-            self.manifest_reads.fetch_add(1, Ordering::SeqCst);
-            self.names
-                .lock_recover()
-                .iter()
-                .map(|name| Self::definition(name).manifest())
-                .collect()
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-            self.names
-                .lock_recover()
-                .iter()
-                .any(|candidate| candidate == name)
-                .then(|| Arc::new(Self::definition(name).contract()))
-        }
-
-        async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            crate::ToolOutcome::ok(serde_json::json!(call.name())).into()
-        }
-    }
-
-    #[test]
-    fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
-        let base = crate::SessionToolAccess::ambient();
-        let hidden = base
-            .clone()
-            .with_hidden_tools(["hidden"])
-            .expect("valid hidden name");
-        let explicit = crate::SessionToolAccess::restricted([crate::ToolDefinition::raw(
-            "tool:explicit",
-            "explicit",
-            "authority-defined tool",
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))])
-        .expect("valid restricted definition");
-
-        assert_ne!(
-            tool_catalog_authority_fingerprint(&base),
-            tool_catalog_authority_fingerprint(&hidden)
-        );
-        assert_ne!(
-            tool_catalog_authority_fingerprint(&base),
-            tool_catalog_authority_fingerprint(&explicit)
-        );
-    }
-
-    #[tokio::test]
-    async fn model_request_pin_enumerates_once_and_freezes_catalog_and_dispatch() {
-        let names = Arc::new(std::sync::Mutex::new(vec!["alpha".to_string()]));
-        let manifest_reads = Arc::new(AtomicUsize::new(0));
-        let provider: Arc<dyn ToolProvider> = Arc::new(CountingDynamicProvider {
-            names: Arc::clone(&names),
-            manifest_reads: Arc::clone(&manifest_reads),
-        });
-        let mut factories = crate::testing::test_standard_protocol_factories();
-        factories.push(Arc::new(StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial("pinned_surface"),
-            crate::PluginSpec::new().with_tool_provider(crate::hook_key!("pinned"), provider),
-        )));
-        let plugins = crate::PluginHost::new(
-            factories,
-            crate::ExecutionBudgets::recommended(),
-            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
-        )
-        .build_session(PluginSessionRequest::creation(
-            "pinned-surface",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .expect("plugin session");
-        let session = Session::new(
-            crate::testing::runtime_services_without_ports(plugins),
-            &SessionId::from("pinned-surface"),
-        )
-        .await
-        .expect("runtime session");
-        let reads_before_pin = manifest_reads.load(Ordering::SeqCst);
-
-        let first = session
-            .pin_tool_surface(&crate::SessionToolAccess::ambient())
-            .expect("first request surface");
-        assert_eq!(
-            manifest_reads.load(Ordering::SeqCst),
-            reads_before_pin + 1,
-            "one model-request pin performs one live-source enumeration"
-        );
-        assert!(first.tool_catalog().has_callable_tool("alpha"));
-
-        names.lock_recover().push("beta".to_string());
-        assert!(!first.tool_catalog().has_callable_tool("beta"));
-        assert!(first.tools().resolve_manifest("beta").is_none());
-        assert_eq!(
-            manifest_reads.load(Ordering::SeqCst),
-            reads_before_pin + 1,
-            "catalog and dispatch reads stay on the same frozen request surface"
-        );
-
-        let second = session
-            .pin_tool_surface(&crate::SessionToolAccess::ambient())
-            .expect("next request surface");
-        assert_eq!(
-            manifest_reads.load(Ordering::SeqCst),
-            reads_before_pin + 2,
-            "the next model request performs exactly one fresh enumeration"
-        );
-        assert!(second.tool_catalog().has_callable_tool("beta"));
-        assert!(second.tools().resolve_manifest("beta").is_some());
-        assert!(
-            session
-                .plugins()
-                .tool_registry()
-                .export_state()
-                .iter()
-                .any(|(_, entry)| entry.manifest().name == "beta"),
-            "request admission updates the registry captured at the next durable turn boundary"
-        );
-
-        let hidden_access = crate::SessionToolAccess::ambient()
-            .with_hidden_tools(["alpha"])
-            .expect("valid hidden name");
-        let hidden = session
-            .pin_tool_surface(&hidden_access)
-            .expect("authority-hidden request surface");
-        assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
-        // Building a surface installs nothing; consumers read the surface a
-        // sync recorded, once the shift installs it.
-        session
-            .install_recorded_tool_surface(&hidden_access, &hidden.definitions())
-            .expect("install the recorded hidden surface");
-        assert!(
-            !session
-                .resolved_tool_catalog()
-                .expect("active hidden request surface")
-                .has_callable_tool("alpha"),
-            "consumers retain the exact recorded surface even when session-construction authority differs"
-        );
-        assert!(
-            hidden
-                .tool_registry()
-                .export_state()
-                .iter()
-                .find(|(_, entry)| entry.manifest().name == "alpha")
-                .is_some_and(|(_, entry)| entry.is_member()),
-            "authority suppression must leave host curation true"
-        );
-
-        let unhidden = session
-            .pin_tool_surface(&crate::SessionToolAccess::ambient())
-            .expect("next request with broader authority");
-        assert!(
-            unhidden.tool_catalog().has_callable_tool("alpha"),
-            "removing an authority suppression takes effect on the next request"
-        );
-        assert_eq!(
-            manifest_reads.load(Ordering::SeqCst),
-            reads_before_pin + 5,
-            "each of four request pins and the install enumerated the live source exactly once"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_request_pin_captures_provider_route_across_same_id_reassignment() {
-        let a_active = Arc::new(AtomicBool::new(true));
-        let b_active = Arc::new(AtomicBool::new(false));
-        let a_prepares = Arc::new(AtomicUsize::new(0));
-        let b_prepares = Arc::new(AtomicUsize::new(0));
-        let a_executions = Arc::new(AtomicUsize::new(0));
-        let b_executions = Arc::new(AtomicUsize::new(0));
-        let a_attempts = Arc::new(AtomicUsize::new(0));
-        let b_attempts = Arc::new(AtomicUsize::new(0));
-        let providers = [
-            Arc::new(ReassignableResidentProvider {
-                label: "route_a",
-                active: Arc::clone(&a_active),
-                prepares: Arc::clone(&a_prepares),
-                executions: Arc::clone(&a_executions),
-                attempts: Arc::clone(&a_attempts),
-            }) as Arc<dyn ToolProvider>,
-            Arc::new(ReassignableResidentProvider {
-                label: "route_b",
-                active: Arc::clone(&b_active),
-                prepares: Arc::clone(&b_prepares),
-                executions: Arc::clone(&b_executions),
-                attempts: Arc::clone(&b_attempts),
-            }) as Arc<dyn ToolProvider>,
-        ];
-        let mut factories = crate::testing::test_standard_protocol_factories();
-        let spec = [crate::hook_key!("a"), crate::hook_key!("b")]
-            .into_iter()
-            .zip(providers)
-            .fold(crate::PluginSpec::new(), |spec, (key, provider)| {
-                spec.with_tool_provider(key, provider)
-            });
-        factories.push(Arc::new(StaticPluginFactory::new(
-            crate::plugin::PluginDeclaration::initial("reassignable"),
-            spec,
-        )));
-        let plugins = crate::PluginHost::new(
-            factories,
-            crate::ExecutionBudgets::recommended(),
-            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
-        )
-        .build_session(PluginSessionRequest::creation(
-            "route-reassignment",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .expect("plugin session");
-        let session_id = SessionId::from("route-reassignment");
-        let session = Session::new(
-            crate::testing::runtime_services_without_ports(plugins),
-            &session_id,
-        )
-        .await
-        .expect("runtime session");
-
-        let old = session
-            .pin_tool_surface(&crate::SessionToolAccess::ambient())
-            .expect("request pinned while provider A owns the id");
-        let old_entries = old
-            .tool_catalog()
-            .tools
-            .iter()
-            .filter(|entry| entry.manifest.id.as_str() == "tool:reassigned")
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(old_entries.len(), 1, "the id is advertised exactly once");
-        assert!(
-            old_entries[0]
-                .contract
-                .input_schema
-                .canonical()
-                .pointer("/properties/route_a")
-                .is_some(),
-            "the old request captures provider A's schema"
-        );
-
-        a_active.store(false, Ordering::SeqCst);
-        b_active.store(true, Ordering::SeqCst);
-        let fresh = session
-            .pin_tool_surface(&crate::SessionToolAccess::ambient())
-            .expect("next request pinned after provider B owns the id");
-        let fresh_entries = fresh
-            .tool_catalog()
-            .tools
-            .iter()
-            .filter(|entry| entry.manifest.id.as_str() == "tool:reassigned")
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(fresh_entries.len(), 1, "the reassigned id stays unique");
-        assert!(
-            fresh_entries[0]
-                .contract
-                .input_schema
-                .canonical()
-                .pointer("/properties/route_b")
-                .is_some(),
-            "the fresh request captures provider B's schema"
-        );
-
-        let prepare_context = crate::ToolPrepareContext::with_execution_binding(
-            crate::RuntimeOwner::Session(session_id),
-            Arc::new(crate::testing::MockSessionManager::default()),
-            crate::TurnContext::default(),
-            crate::ToolCallId::fixture("reassigned-call"),
-            serde_json::json!({}),
-            crate::FleetFormat::current(),
-        );
-        old.tools()
-            .prepare_tool_call(crate::ToolPrepareCall {
-                tool_id: crate::ToolId::from("tool:reassigned"),
-                pending: crate::sansio::PendingToolCall {
-                    call_id: crate::ToolCallId::fixture("reassigned-call"),
-                    provider_call_id: None,
-                    tool_name: "reassigned".to_string(),
-                    args: serde_json::json!({ "route_a": "old" }),
-                    replay: None,
-                },
-                context: &prepare_context,
-            })
-            .await
-            .expect("the old request prepares through provider A");
-        let tool_id = crate::ToolId::from("tool:reassigned");
-        let attempt_context = crate::testing::mock_attempt_context();
-        let old_manifest = old
-            .tools()
-            .resolve_manifest_by_id(&tool_id)
-            .expect("the old surface resolves the reassigned manifest");
-        let old_attempt = old
-            .tools()
-            .execute(crate::ToolCall::new(
-                &old_manifest,
-                &serde_json::json!({ "route_a": "old" }),
-                &attempt_context,
-            ))
-            .await;
-        let crate::ToolAttemptOutcome::Done { result, intents } = old_attempt else {
-            panic!("provider A returns a completed attempt")
-        };
-        assert!(intents.is_empty());
-        assert_eq!(
-            result.into_output().value_for_projection(),
-            serde_json::json!("attempt_route_a")
-        );
-        assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
-        assert_eq!(b_prepares.load(Ordering::SeqCst), 0);
-        assert_eq!(a_executions.load(Ordering::SeqCst), 1);
-        assert_eq!(b_executions.load(Ordering::SeqCst), 0);
-        assert!(
-            old_manifest.declaration().may_defer,
-            "the old surface admits provider A's declaration"
-        );
-        assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(b_attempts.load(Ordering::SeqCst), 0);
-
-        fresh
-            .tools()
-            .prepare_tool_call(crate::ToolPrepareCall {
-                tool_id: crate::ToolId::from("tool:reassigned"),
-                pending: crate::sansio::PendingToolCall {
-                    call_id: crate::ToolCallId::fixture("fresh-reassigned-call"),
-                    provider_call_id: None,
-                    tool_name: "reassigned".to_string(),
-                    args: serde_json::json!({ "route_b": "fresh" }),
-                    replay: None,
-                },
-                context: &prepare_context,
-            })
-            .await
-            .expect("the fresh request prepares through provider B");
-        let fresh_manifest = fresh
-            .tools()
-            .resolve_manifest_by_id(&tool_id)
-            .expect("the fresh surface resolves the reassigned manifest");
-        let fresh_attempt = fresh
-            .tools()
-            .execute(crate::ToolCall::new(
-                &fresh_manifest,
-                &serde_json::json!({ "route_b": "fresh" }),
-                &attempt_context,
-            ))
-            .await;
-        let crate::ToolAttemptOutcome::Done { result, intents } = fresh_attempt else {
-            panic!("provider B returns a completed attempt")
-        };
-        assert!(intents.is_empty());
-        assert_eq!(
-            result.into_output().value_for_projection(),
-            serde_json::json!("attempt_route_b")
-        );
-        assert_eq!(a_prepares.load(Ordering::SeqCst), 1);
-        assert_eq!(b_prepares.load(Ordering::SeqCst), 1);
-        assert_eq!(a_executions.load(Ordering::SeqCst), 1);
-        assert_eq!(b_executions.load(Ordering::SeqCst), 1);
-        assert!(
-            !fresh_manifest.declaration().may_defer,
-            "the fresh surface admits provider B's declaration"
-        );
-        assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(b_attempts.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn effective_member_without_contract_is_refused_before_prepare() {
-        let prepare_calls = Arc::new(AtomicUsize::new(0));
-        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
-            contract_available: false,
-            prepare_calls: Arc::clone(&prepare_calls),
-        }))
-        .await;
-
-        let error = match session.pin_tool_surface(&crate::SessionToolAccess::ambient()) {
-            Ok(_) => panic!("missing resident contract must be refused before advertisement"),
-            Err(error) => error,
-        };
-        assert!(matches!(
-            error,
-            crate::PluginError::ResidentToolContractUnavailable { ref tool_id, ref name }
-                if tool_id.as_str() == "tool:resident" && name == "resident"
-        ));
-        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn restricted_definition_uses_id_route_and_missing_route_is_refused_before_prepare() {
-        let prepare_calls = Arc::new(AtomicUsize::new(0));
-        let session = admission_probe_session(Arc::new(AdmissionProbeProvider {
-            contract_available: true,
-            prepare_calls: Arc::clone(&prepare_calls),
-        }))
-        .await;
-        let renamed = crate::ToolDefinition::raw(
-            "tool:resident",
-            "resident_alias",
-            "authority-owned alias",
-            serde_json::json!({
-                "type": "object",
-                "properties": { "authority": { "type": "string" } },
-                "required": ["authority"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120));
-        let renamed_surface = session
-            .pin_tool_surface(
-                &crate::SessionToolAccess::restricted([renamed])
-                    .expect("valid restricted definition"),
-            )
-            .expect("the same ToolId retains its pinned route under an authority-owned alias");
-        let entry = &renamed_surface.tool_catalog().tools[0];
-        assert_eq!(entry.manifest.name, "resident_alias");
-        assert!(
-            entry
-                .contract
-                .input_schema
-                .canonical()
-                .pointer("/properties/authority")
-                .is_some()
-        );
-
-        let missing = crate::ToolDefinition::raw(
-            "tool:missing-route",
-            "missing_route",
-            "no resident execution route",
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120));
-        let error = match session.pin_tool_surface(
-            &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
-        ) {
-            Ok(_) => panic!("missing resident route must be refused before advertisement"),
-            Err(error) => error,
-        };
-        assert!(matches!(
-            error,
-            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
-                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
-        ));
-        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn plugin_session_refuses_missing_resident_route_before_advertisement() {
-        let prepare_calls = Arc::new(AtomicUsize::new(0));
-        let missing = crate::ToolDefinition::raw(
-            "tool:missing-route",
-            "missing_route",
-            "no resident execution route",
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120));
-        let plugins = admission_probe_plugins(
-            Arc::new(AdmissionProbeProvider {
-                contract_available: true,
-                prepare_calls: Arc::clone(&prepare_calls),
-            }),
-            crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
-        );
-
-        let error = plugins
-            .resolved_tool_catalog()
-            .expect_err("direct plugin-session consumers must refuse a missing resident route");
-        assert!(matches!(
-            error,
-            crate::PluginError::ResidentToolRouteUnavailable { ref tool_id, ref name, .. }
-                if tool_id.as_str() == "tool:missing-route" && name == "missing_route"
-        ));
-        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
     }
 }

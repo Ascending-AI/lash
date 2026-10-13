@@ -20,11 +20,18 @@ fn definition() -> lash::tools::ToolDefinition {
 
 #[async_trait]
 impl lash::tools::ToolProvider for Echo {
-    fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Vec<lash::tools::ToolManifest> {
         vec![definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<lash::tools::ToolContract>> {
         (name == "transcript_echo").then(|| Arc::new(definition().contract()))
     }
 
@@ -97,7 +104,6 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -108,7 +114,6 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
     let session = core
         .session(lash::SessionId::from(MODEL))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 MODEL,
                 lash::TurnBudget::Unbounded,

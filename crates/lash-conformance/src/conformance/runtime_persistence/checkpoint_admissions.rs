@@ -23,7 +23,7 @@ where
     admit_conformance_session(&open, &SessionId::from("checkpoint-component-refs")).await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-component-refs"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -271,7 +271,7 @@ where
 pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-unknown-ref"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -314,7 +314,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStor
 pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("missing-frame-run"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

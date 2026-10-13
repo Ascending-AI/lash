@@ -317,23 +317,17 @@ define_plugin_errors! {
         => Self::ToolRegistrationRefused { .. }
         => "tool_registration_refused"
         => crate::ToolFailureClass::InvalidRequest;
-/// An effective resident catalog member has no executable route in the pinned registry.
-    #[error("resident tool `{name}` ({tool_id}) has no pinned execution route: {reason}")]
-    ResidentToolRouteUnavailable {
-        tool_id: crate::ToolId,
-        name: String,
-        reason: String,
-    }
-        => PluginError::ResidentToolRouteUnavailable { tool_id, name, reason }
-        => {
-        tool_id: crate::ToolId,
-        name: String,
-        reason: String,
-    }
-        => Self::ResidentToolRouteUnavailable { tool_id: tool_id.clone(), name: name.clone(), reason: reason.clone() }
-        => Self::ResidentToolRouteUnavailable { .. }
-        => "resident_tool_route_unavailable"
-        => crate::ToolFailureClass::Internal;
+/// The tools a run's providers advertise under its config do not build
+    /// into one surface: two share a model-facing name, or a tool id. The
+    /// host reconfigures one provider.
+    #[error("{refusal}")]
+    ToolSurfaceRefused { refusal: Box<crate::SurfaceRefusal> }
+        => PluginError::ToolSurfaceRefused { refusal }
+        => { refusal: Box<crate::SurfaceRefusal> }
+        => Self::ToolSurfaceRefused { refusal: refusal.clone() }
+        => Self::ToolSurfaceRefused { .. }
+        => "tool_surface_refused"
+        => crate::ToolFailureClass::InvalidRequest;
 /// A fresh session create named an id the catalog already holds. A
     /// create never adopts an existing session (FIG-4112); replaying a
     /// recorded identity is a process run's `SessionTurn` initialisation,
@@ -976,7 +970,7 @@ impl PluginError {
             | Self::ResidentToolDuplicateId { .. }
             | Self::ResidentToolDuplicateName { .. }
             | Self::ToolRegistrationRefused { .. }
-            | Self::ResidentToolRouteUnavailable { .. }
+            | Self::ToolSurfaceRefused { .. }
             | Self::SessionAlreadyExists { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }

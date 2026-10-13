@@ -85,7 +85,6 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/process_start_requires_scope.rs");
     t.compile_fail("tests/ui/process_scope_requires_admission.rs");
     t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
-    t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
     t.compile_fail("tests/ui/session_head_meta_is_not_serializable.rs");
     t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
     t.compile_fail("tests/ui/commit_budget_has_no_default.rs");

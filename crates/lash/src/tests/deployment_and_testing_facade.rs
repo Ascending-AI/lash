@@ -8,18 +8,25 @@ struct GrantBoundTools;
 
 #[async_trait]
 impl ToolProvider for GrantBoundTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         None
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         (async {
             lash_core::ToolOutcome::ok(serde_json::json!({
-                "binding": call.context.tool_execution_binding().clone(),
+                "binding": call
+                    .context
+                    .tool_execution_binding()
+                    .map(|binding| binding.payload.clone()),
             }))
         })
         .await
@@ -41,11 +48,17 @@ fn grant_bound_tool_definition() -> lash_core::ToolDefinition {
 
 #[tokio::test]
 async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
+    let provider =
+        lash_core::plugin::PluginCallbackIdentity::tool_provider("grant-source", "tools");
     let grant = lash_core::ToolExecutionGrant::from_definition(
-        lash_core::plugin::PluginCallbackIdentity::tool_provider("grant-source", "tools"),
+        provider.clone(),
         grant_bound_tool_definition(),
     )
-    .with_execution_binding(serde_json::json!({ "route": "deferred" }));
+    .with_execution_binding(Some(lash_core::ExecutionBinding {
+        codec: provider,
+        format: lash_core::FormatVersion::ONE,
+        payload: serde_json::json!({ "route": "deferred" }),
+    }));
     let args = serde_json::json!({});
 
     let outcome = crate::testing::run_tool_granted(&GrantBoundTools, &grant, &args).await;

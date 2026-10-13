@@ -187,7 +187,7 @@ async fn core_with_process_tools(
             .process_component(
                 Arc::new(lash::process_controls::ProcessControlsComponent::new(
                     lash_core::lifetime::session_or_starter,
-                    lash::process::env::policy::inherit_or(lash::process::env::policy::refuse(
+                    lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
                         "a workflow process starts only inside a process",
                     )),
                 )),
@@ -200,7 +200,6 @@ async fn core_with_process_tools(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash_core::LeaseOwnerIdentity::opaque(
@@ -213,24 +212,34 @@ async fn core_with_process_tools(
 /// The environment a workflow process runs under: `tools.echo`, and with
 /// `process_tools` the process controls, each from its component.
 fn environment(process_tools: bool) -> lash::process::ProcessEnv {
-    let mut tools = echo_definitions();
-    let mut builder = lash::process::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
-        lash::MaxToolCalls::new(1024),
-    )
-    .component(ECHO_TOOLS, &());
+    let mut builder = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(ECHO_TOOLS, &());
+    for tool in echo_definitions() {
+        builder = builder.link_tool(ECHO_TOOLS.tool_provider("tools"), &tool);
+    }
     if process_tools {
         use lash::process_controls::ProcessControlTool;
-        tools.extend(
-            [ProcessControlTool::Start, ProcessControlTool::Await]
-                .map(lash::process_controls::process_tool_definition),
-        );
         builder = builder.component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
+        for control in [ProcessControlTool::Start, ProcessControlTool::Await] {
+            builder = builder.link_tool(
+                lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools"),
+                &lash::process_controls::process_tool_definition(control),
+            );
+        }
     }
-    builder
-        .tools(lash_core::SessionToolAccess::restricted(tools).expect("the workflow tools"))
-        .build()
-        .expect("the environment builds")
+    builder.build().expect("the environment builds")
+}
+
+/// `environment` restricted to `effects`: the env a process that performs
+/// exactly those effects starts under (LINK-EXACTLY).
+fn linking(environment: &lash::process::ProcessEnv, effects: &[&str]) -> lash::process::ProcessEnv {
+    let effects: Vec<_> = effects
+        .iter()
+        .map(|effect| lash::workflow::document::EffectName::new(*effect).expect("an effect name"))
+        .collect();
+    environment
+        .restrict(&effects)
+        .expect("the environment links each effect")
 }
 
 fn published(publish: WorkflowPublish) -> WorkflowPublication {
@@ -401,7 +410,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     // The first definition is immutable: a process of it runs the document
     // it was admitted with, beside a process of the edited one.
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(&pin, &linking(&environment, &[]))
         .await
         .expect("publish the process environment");
     let kept = start(&core, &env_ref, &first.definition, "first", "operator").await;
@@ -475,7 +484,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     };
 
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
         .await
         .expect("publish the process environment");
     let args = serde_json::json!({"a": "x", "b": "y", "c": "z"});
@@ -598,7 +607,10 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(
+            &pin,
+            &linking(&environment, &["processes.start", "processes.await"]),
+        )
         .await
         .expect("publish the process environment");
     let mut args = serde_json::Map::new();
@@ -701,7 +713,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(&pin, &linking(&environment, &[]))
         .await
         .expect("publish the process environment");
     let process = start(

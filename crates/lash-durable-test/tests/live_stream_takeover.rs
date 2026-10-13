@@ -202,7 +202,6 @@ impl Takeover {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model(Arc::clone(&attempts)), served::metadata());
@@ -224,7 +223,7 @@ impl Takeover {
             SimNodesConfig {
                 lease: Matrix::test_lease(),
                 decodes: backend.formats().decodes(),
-                serves: Vec::new(),
+                serves: lash::testing::node_serves(&core),
                 max_active: 4,
             },
             Arc::new(SessionActivation::new(
@@ -235,10 +234,7 @@ impl Takeover {
         );
         let durable = core
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(4),
-            ))
+            .create(lash::SessionCreation::root(served::spec(4)))
             .await
             .expect("the session is created");
         let observed = core

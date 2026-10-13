@@ -101,6 +101,8 @@ pub(crate) struct PluginContributions {
     /// Each plugin's pure state reducers, by name (K10).
     pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
+    /// The one deferred provider, registered among `tool_providers` too.
+    pub(crate) deferred_provider: Option<RegisteredHook<Arc<dyn crate::DeferredToolProvider>>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -157,6 +159,32 @@ impl ToolRegistrations<'_> {
         provider: Arc<dyn ToolProvider>,
     ) -> Result<(), PluginError> {
         self.reg.add_tool_provider(key, provider)
+    }
+
+    /// Register `provider` under `key` as the deferred provider: a tool
+    /// provider that advertises nothing and resolves the call paths a
+    /// surface does not offer. A session or process env has at most one; a
+    /// second, from any plugin, is refused.
+    pub fn deferred(
+        self,
+        key: HookKey,
+        provider: Arc<dyn crate::DeferredToolProvider>,
+    ) -> Result<(), PluginError> {
+        let identity = PluginCallbackIdentity::tool_provider(self.reg.owner.clone(), key.as_str());
+        if let Some(existing) = &self.reg.contributions.deferred_provider {
+            return Err(PluginError::Registration(format!(
+                "deferred tool provider `{identity}` conflicts with `{}`; a session or process \
+                 env has at most one",
+                existing.identity
+            )));
+        }
+        self.reg
+            .add_tool_provider(key, Arc::clone(&provider) as Arc<dyn ToolProvider>)?;
+        self.reg.contributions.deferred_provider = Some(RegisteredHook {
+            identity,
+            hook: provider,
+        });
+        Ok(())
     }
 }
 

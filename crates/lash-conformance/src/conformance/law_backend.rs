@@ -34,10 +34,7 @@ pub(crate) async fn law_session_store(
     law_session_store_with_config(
         stores,
         session_id,
-        crate::PersistedSessionConfig::from_policy(
-            &crate::testing::mock_session_policy(),
-            crate::SessionToolAccess::ambient(),
-        ),
+        crate::PersistedSessionConfig::from_policy(&crate::testing::mock_session_policy()),
     )
     .await
 }
@@ -113,7 +110,6 @@ impl StoreLawBackend {
             self.into_backend(),
             commit_budget,
             queued_work_batching,
-            lash_core::ToolSourcePolicy::Tolerate,
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),

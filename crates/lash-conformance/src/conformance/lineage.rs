@@ -101,7 +101,6 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: crate::Retention::UntilGc,
@@ -123,7 +122,7 @@ async fn seed(
         .expect("admit lineage conformance session");
     let mut state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -168,7 +167,6 @@ async fn fork(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -503,7 +501,6 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })

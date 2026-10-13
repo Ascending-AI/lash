@@ -648,6 +648,7 @@ fn rlm_contract_config(
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
     rlm_contract_config_with_turn_options(lash_protocol_rlm::RlmRecordedConfig::for_testing(
         lash_rlm_types::RlmCreateExtras {
+            finish_value_schema: None,
             termination: Some(termination),
             render: None,
         },

@@ -29,8 +29,8 @@ pub use lash_core_execution::testing::{
     TestProvider, TestProviderBuilder, ToolCallFixture, UnavailableProcessEnvStore,
     UnavailableTurnPreludeStore, behavior_transcript, cancelled_code_execution_context,
     code_execution_context, code_execution_context_for_process,
-    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
-    code_execution_context_with_tool_catalog,
+    code_execution_context_with_deferred_provider, code_execution_context_with_invocation,
+    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
@@ -52,7 +52,7 @@ pub use lash_core_execution::testing::{
     test_llm_profile_config, test_llm_profile_metadata, test_plugin_host,
     test_protocol_factories_ending_without_done, test_standard_protocol_factories,
     test_standard_protocol_factory_with_runtime_state, test_tools_provider, tool_component,
-    tool_hook_context, tool_registry_with_live_provider, trace_capture,
+    tool_hook_context, trace_capture,
 };
 
 /// Prompt composition over a cut a test states (ADR 0133).

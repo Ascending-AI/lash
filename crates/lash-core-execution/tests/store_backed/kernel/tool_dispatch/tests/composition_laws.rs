@@ -23,11 +23,15 @@ struct CountingTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for CountingTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::plugin::OwnerConfigView) -> Vec<crate::ToolManifest> {
         manifests(vec![named_beta_tool("beta")])
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         contract_from(vec![named_beta_tool("beta")], name)
     }
 
@@ -83,7 +87,7 @@ fn session(tools: &CountingTools, mut plugins: Vec<Arc<dyn PluginFactory>>) -> A
     crate::support::plugin_host(plugins)
         .build_session(PluginSessionRequest::creation(
             "root",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .expect("plugin session")
 }
@@ -414,7 +418,7 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
     let error = crate::support::plugin_host(vec![duplicate])
         .build_session(PluginSessionRequest::creation(
             "root",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .err()
         .expect("a duplicate key is refused");
@@ -442,7 +446,7 @@ fn keyed_registrations_refuse_duplicates_and_unpaired_stream_state() {
     let error = crate::support::plugin_host(vec![unpaired])
         .build_session(PluginSessionRequest::creation(
             "root",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .err()
         .expect("an unpaired stream state is refused");

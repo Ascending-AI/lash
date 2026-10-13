@@ -15,7 +15,6 @@ pub struct KernelProcessPluginFactory {
     functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
     #[cfg(feature = "synthetic-next")]
     writes: Option<lash_kernel_doc::KernelVersion>,
-    adopting_helpers: bool,
 }
 
 impl KernelProcessPluginFactory {
@@ -31,7 +30,6 @@ impl KernelProcessPluginFactory {
             functions: None,
             #[cfg(feature = "synthetic-next")]
             writes: None,
-            adopting_helpers: false,
         }
     }
 
@@ -39,13 +37,6 @@ impl KernelProcessPluginFactory {
     #[must_use]
     pub fn with_functions(mut self, functions: Arc<lash_kernel_doc::FunctionRegistry>) -> Self {
         self.functions = Some(functions);
-        self
-    }
-
-    /// Adopt processes off the earlier helper releases this build retains.
-    #[must_use]
-    pub fn adopting_helpers(mut self) -> Self {
-        self.adopting_helpers = true;
         self
     }
 
@@ -97,14 +88,6 @@ impl PluginFactory for KernelProcessPluginFactory {
         let engine = match self.writes {
             Some(writes) => engine.writing(writes),
             None => engine,
-        };
-        let engine = if self.adopting_helpers {
-            engine.adopting_helpers(
-                crate::retained_earlier_helpers()
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
-            )
-        } else {
-            engine
         };
         Ok(vec![crate::kernel_process_engine_registration(engine)])
     }

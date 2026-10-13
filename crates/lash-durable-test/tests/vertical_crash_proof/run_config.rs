@@ -261,6 +261,9 @@ struct Seen {
     tools: Vec<String>,
     /// The request's instructions and messages, rendered.
     prompt: String,
+    /// The tools the request offered, with their descriptions and schemas,
+    /// rendered.
+    tool_specs: String,
 }
 
 /// What a law's deployments saw, across every node.
@@ -346,6 +349,32 @@ fn call(tool: &str, input: &str) -> LlmResponse {
     }
 }
 
+/// The plugins that offer a deployment's tool providers, each under the
+/// selection its own namespace holds, which a run's options may state.
+const TOOLS: &str = "tools";
+const TOOLS_2: &str = "tools-2";
+
+/// A run's options selecting exactly `tools` of each owner's provider.
+fn selecting(per_owner: [(&'static str, Vec<lash_core::ToolDefinition>); 2]) -> lash::RunOverrides {
+    let mut owners = lash::OwnerRunOptions::default();
+    for (owner, tools) in per_owner {
+        owners
+            .set(
+                lash::RunOptionsKey::<lash::tools::ToolSelectionConfig>::new(owner),
+                lash::tools::ToolSelectionConfig {
+                    tools: Some(lash::tools::ToolSelection::Only(
+                        tools.iter().map(|tool| tool.id().clone()).collect(),
+                    )),
+                },
+            )
+            .expect("a selection encodes");
+    }
+    lash::RunOverrides {
+        owners,
+        ..lash::RunOverrides::default()
+    }
+}
+
 /// One deployment over `backend`: `definition` registered when given, only
 /// the `models` keys served, and the host plugin built as `host` builds it.
 struct Deployment<'a> {
@@ -376,6 +405,7 @@ impl Deployment<'_> {
                             model: request.model.key().to_string(),
                             tools: request.tools.iter().map(|tool| tool.name.clone()).collect(),
                             prompt: format!("{:?} {:?}", request.instructions, request.messages),
+                            tool_specs: format!("{:?}", request.tools),
                         });
                         requests.len()
                     };
@@ -398,7 +428,6 @@ impl Deployment<'_> {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .llm_profiles(Arc::new(models))
@@ -406,10 +435,15 @@ impl Deployment<'_> {
         if let Some(definition) = self.definition {
             builder = builder.run_definition(definition);
         }
-        let keys = [lash::hook_key!("tools"), lash::hook_key!("tools-2")];
-        assert!(self.tools.len() <= keys.len(), "a key per tool provider");
-        for (key, tools) in keys.into_iter().zip(self.tools) {
-            builder = builder.tools(key, tools);
+        let owners = [TOOLS, TOOLS_2];
+        assert!(
+            self.tools.len() <= owners.len(),
+            "an owner per tool provider"
+        );
+        for (owner, tools) in owners.into_iter().zip(self.tools) {
+            builder = builder.plugin(Arc::new(lash::tools::SelectedToolsPlugin::new(
+                owner, tools,
+            )));
         }
         builder
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -435,7 +469,7 @@ fn nodes(
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: backend.formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(core),
             max_active: 1,
         },
         Arc::new(SessionActivation::new(
@@ -516,10 +550,7 @@ impl Harness {
     async fn send(&self, core: &lash::LashCore, input: &str, spec: lash::RunSpec) {
         let session = core
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                root_spec(),
-            ))
+            .create(lash::SessionCreation::root(root_spec()))
             .await
             .expect("the session starts on the session model");
         session
@@ -955,9 +986,10 @@ fn probe_definition() -> lash_core::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-/// A6: a send narrows the run's tool access, and the switch produced on its
-/// resumed turn hands the follow-on the running turn's recorded spec: the
-/// follow-on offers the same narrowed tools and reads the same spec hash.
+/// A6: a send narrows the run's tools through its providers' options, and
+/// the switch produced on its resumed turn hands the follow-on the running
+/// turn's recorded spec: the follow-on offers the same narrowed tools and
+/// reads the same spec hash.
 /// A switch that states another spec runs its follow-on under exactly that
 /// spec.
 #[tokio::test]
@@ -965,20 +997,14 @@ async fn a_frame_switch_hands_its_follow_on_the_recorded_spec_or_the_one_it_stat
  {
     let scenario = Harness::new().await;
     let observed = Arc::new(Observed::default());
-    let narrowed = lash::RunSpec::overrides(lash::RunOverrides {
-        tool_access: Some(
-            lash::plugins::SessionToolAccess::restricted([switch_definition()])
-                .expect("the switch alone"),
-        ),
-        ..lash::RunOverrides::default()
-    });
-    let other = lash::RunSpec::overrides(lash::RunOverrides {
-        tool_access: Some(
-            lash::plugins::SessionToolAccess::restricted([switch_definition(), probe_definition()])
-                .expect("the switch and the probe"),
-        ),
-        ..lash::RunOverrides::default()
-    });
+    let narrowed = lash::RunSpec::overrides(selecting([
+        (TOOLS, vec![switch_definition()]),
+        (TOOLS_2, Vec::new()),
+    ]));
+    let other = lash::RunSpec::overrides(selecting([
+        (TOOLS, vec![switch_definition()]),
+        (TOOLS_2, vec![probe_definition()]),
+    ]));
     // The run switches, its follow-on switches under `other`, and that
     // follow-on probes, then answers.
     let answer: Answer = Arc::new(|request, index| match index {
@@ -1078,13 +1104,13 @@ async fn a_frame_switch_hands_its_follow_on_the_recorded_spec_or_the_one_it_stat
                 SWITCH_TOOL.to_owned()
             ],
         ],
-        "the follow-on keeps the narrowed access (beside the protocol's own `batch`); the \
+        "the follow-on keeps the narrowed selection (beside the protocol's own `batch`); the \
          stated spec's run offers its own"
     );
 }
 
-/// SEND-ISOLATION (FIG-6021): queued sends with different options and tool
-/// access each run their own, over the session's config as it stands when
+/// SEND-ISOLATION (FIG-6021): queued sends with different options, a tool
+/// selection among them, each run their own, over the session's config as it stands when
 /// each run starts: a standing edit applied ahead of them supplies what
 /// they leave unstated. A following default send runs the sticky config,
 /// with no earlier run's options, and no send advances the config revision.
@@ -1107,10 +1133,7 @@ async fn queued_sends_run_their_own_options_over_the_sticky_config_on_sqlite_mem
     }
     .core();
     core.session(session())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            root_spec(),
-        ))
+        .create(lash::SessionCreation::root(root_spec()))
         .await
         .expect("the session starts");
     let live = core
@@ -1130,7 +1153,9 @@ async fn queued_sends_run_their_own_options_over_the_sticky_config_on_sqlite_mem
         .await
         .expect("the standing edit is submitted");
     assert!(matches!(edit, ConfigSettlement::Pending(_)), "{edit:?}");
-    let narrowed = lash::plugins::SessionToolAccess::restricted(Vec::new()).expect("no tools");
+    let narrowed = lash::tools::ToolSelectionConfig {
+        tools: Some(lash::tools::ToolSelection::Only(Vec::new())),
+    };
     let durable = core
         .session(session())
         .durable()
@@ -1150,7 +1175,10 @@ async fn queued_sends_run_their_own_options_over_the_sticky_config_on_sqlite_mem
                 },
             );
         if let Some(access) = access {
-            send = send.tool_access(access);
+            send = send.options(
+                lash::RunOptionsKey::<lash::tools::ToolSelectionConfig>::new(TOOLS),
+                access,
+            );
         }
         send.await.expect("the send is accepted");
     }
@@ -1198,9 +1226,256 @@ async fn queued_sends_run_their_own_options_over_the_sticky_config_on_sqlite_mem
     let offered = observed.offered();
     assert!(
         !offered[0].contains(&TOOL.to_owned()),
-        "the first send's narrowed access offers no host tool: {:?}",
+        "the first send's narrowed selection offers no host tool: {:?}",
         offered[0]
     );
     assert!(offered[1].contains(&TOOL.to_owned()), "{:?}", offered[1]);
     assert!(offered[2].contains(&TOOL.to_owned()), "{:?}", offered[2]);
+}
+
+const STABLE_TOOL: &str = "stable_tool";
+const CHANGING_TOOL: &str = "changing_tool";
+
+/// A tool the surface laws offer: `revision` 2 of `changing_tool` takes
+/// another input and says so.
+fn surface_tool(name: &str, revision: u8) -> lash_core::ToolDefinition {
+    let input = if revision == 1 { "number" } else { "string" };
+    lash_core::ToolDefinition::raw(
+        name,
+        name,
+        format!("{name} revision {revision}"),
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "x": { "type": input } }
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("the surface tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+}
+
+/// Records each call it runs, by tool.
+struct SurfaceBodies(Arc<Mutex<Vec<String>>>);
+
+#[async_trait::async_trait]
+impl StaticToolExecute for SurfaceBodies {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.lock_recover().push(call.name().to_owned());
+        ToolOutcome::ok(serde_json::json!({ "ran": call.name() })).into()
+    }
+}
+
+/// The deployment's one provider: `stable_tool`, and `changing_tool` at
+/// `revision`, under one provider key on every deployment.
+fn surface_tools(revision: u8, ran: &Arc<Mutex<Vec<String>>>) -> Arc<dyn lash_core::ToolProvider> {
+    Arc::new(StaticToolProvider::new(
+        vec![
+            surface_tool(STABLE_TOOL, 1),
+            surface_tool(CHANGING_TOOL, revision),
+        ],
+        SurfaceBodies(Arc::clone(ran)),
+    ))
+}
+
+/// Calls `tool` until the transcript holds an answer, then finishes.
+fn call_then_finish(tool: &'static str) -> Answer {
+    Arc::new(move |request, _| {
+        if request
+            .messages
+            .iter()
+            .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant)
+        {
+            text(request, "finished on the recorded surface")
+        } else {
+            call(tool, r#"{"x":7}"#)
+        }
+    })
+}
+
+/// What one RESUME-USES-RECORDED-SURFACE run observed.
+struct SurfaceResume {
+    observed: Arc<Observed>,
+    ran: Arc<Mutex<Vec<String>>>,
+    park: Option<lash::SessionParkReason>,
+    status: Option<lash::TurnStatus>,
+}
+
+/// Run one input that has the model call `tool` on a deployment offering
+/// revision 1 of `changing_tool`, cut the run at `label` (commit, then the
+/// node dies), and resume it on a deployment whose provider, under the same
+/// key, serves revision 2: another input and another description.
+async fn resume_on_a_changed_surface(tool: &'static str, label: CommitLabel) -> SurfaceResume {
+    let scenario = Harness::new().await;
+    let observed = Arc::new(Observed::default());
+    let ran = Arc::new(Mutex::new(Vec::new()));
+    let core_a = Deployment {
+        backend: &scenario.backend,
+        definition: None,
+        host: HostPluginFactory::default(),
+        models: &[MODEL],
+        answer: call_then_finish(tool),
+        observed: &observed,
+        tools: vec![surface_tools(1, &ran)],
+        boot: "recorded",
+    }
+    .core();
+    scenario
+        .send(
+            &core_a,
+            "call the tool, then finish",
+            lash::RunSpec::overrides(lash::RunOverrides::default()),
+        )
+        .await;
+    let script = Script::new();
+    script.cut_on("a", label, 1, Fault::CommitThenAbort);
+    scenario.cut(&core_a, script).await;
+    core_a.shutdown().await.expect("the recording core stops");
+
+    let core_b = Deployment {
+        backend: &scenario.backend,
+        definition: None,
+        host: HostPluginFactory::default(),
+        models: &[MODEL],
+        answer: call_then_finish(tool),
+        observed: &observed,
+        tools: vec![surface_tools(2, &ran)],
+        boot: "changed",
+    }
+    .core();
+    let after = nodes(
+        &scenario.database,
+        &scenario.clock,
+        &scenario.backend,
+        &core_b,
+        Script::new(),
+    );
+    after.start("b");
+    step_until(&after, &scenario.clock, "the resume", || async {
+        scenario
+            .database
+            .actor(&actor())
+            .await
+            .unwrap()
+            .is_some_and(|row| matches!(row.state, ActorState::Idle | ActorState::Parked))
+    })
+    .await;
+    after.kill("b");
+    after.quiesce().await;
+    let durable = core_b
+        .session(session())
+        .durable()
+        .await
+        .expect("the session's durable handle");
+    let park = durable
+        .park_reason()
+        .await
+        .expect("the session's park reads");
+    let status = match park {
+        Some(_) => None,
+        None => Some(
+            durable
+                .attach_id(run())
+                .output()
+                .await
+                .expect("the run has a committed answer")
+                .status(),
+        ),
+    };
+    core_b.shutdown().await.expect("the resuming core stops");
+    SurfaceResume {
+        observed,
+        ran,
+        park,
+        status,
+    }
+}
+
+impl Observed {
+    /// The descriptions of the tools each request offered, by name.
+    fn descriptions(&self) -> Vec<String> {
+        self.requests
+            .lock_recover()
+            .iter()
+            .map(|seen| seen.tool_specs.clone())
+            .collect()
+    }
+}
+
+/// RESUME-USES-RECORDED-SURFACE (law 3; S5, §5a): a run cut after its first
+/// phase commit, before any model call, resumes on a node whose provider
+/// now serves `changing_tool` with another input and description. The
+/// resumed request offers the surface the run recorded, revision 1, never
+/// the live one; its call to the unchanged `stable_tool` runs there, and
+/// the run answers. The next iteration's fresh sync, after a committed
+/// model response, offers what the node serves.
+#[tokio::test]
+async fn a_resume_offers_the_recorded_surface_and_runs_an_unchanged_call_on_sqlite_memory() {
+    let law = resume_on_a_changed_surface(STABLE_TOOL, CommitLabel::MODEL_START).await;
+    assert_eq!(law.park, None, "an unchanged call does not park");
+    assert_eq!(law.status, Some(lash::TurnStatus::Answered));
+    let offered = law.observed.descriptions();
+    assert_eq!(
+        offered.len(),
+        2,
+        "the resumed call and the next: {offered:?}"
+    );
+    assert!(
+        offered[0].contains("changing_tool revision 1") && !offered[0].contains("revision 2"),
+        "the resumed request offers the recorded surface: {}",
+        offered[0]
+    );
+    assert!(
+        offered[1].contains("changing_tool revision 2"),
+        "the next iteration's fresh sync offers the live surface: {}",
+        offered[1]
+    );
+    assert_eq!(*law.ran.lock_recover(), [STABLE_TOOL]);
+}
+
+/// RESUME-USES-RECORDED-SURFACE (law 3), the changed tool: the resumed
+/// run's call to `changing_tool`, whose recorded entry this node's provider
+/// no longer serves as recorded, parks the session, typed, before any body
+/// runs.
+#[tokio::test]
+async fn a_resumed_call_to_a_changed_tool_parks_typed_on_sqlite_memory() {
+    let law = resume_on_a_changed_surface(CHANGING_TOOL, CommitLabel::MODEL_START).await;
+    let park = format!("{:?}", law.park);
+    assert!(
+        park.contains("LashVmCellBindingDrift") && park.contains(CHANGING_TOOL),
+        "the call parks with the typed drift naming the tool: {park}"
+    );
+    assert!(law.ran.lock_recover().is_empty(), "no body ran");
+    // Each pass that meets the drift resumes from the same recorded
+    // `model.start`, so every request it sends offers the recorded surface.
+    let offered = law.observed.descriptions();
+    assert!(!offered.is_empty());
+    for specs in &offered {
+        assert!(
+            specs.contains("changing_tool revision 1") && !specs.contains("revision 2"),
+            "{specs}"
+        );
+    }
+}
+
+/// RESUME-USES-RECORDED-SURFACE (law 3), the second cut: a run cut after
+/// its round's presentation and its next `model.start` committed, whose
+/// next sync the resume replays, offers the surface that commit recorded
+/// on the changed node, and answers.
+#[tokio::test]
+async fn a_replayed_sync_after_a_committed_response_installs_the_recorded_surface_on_sqlite_memory()
+{
+    let law =
+        resume_on_a_changed_surface(STABLE_TOOL, CommitLabel::ROUND_PRESENT_MODEL_START).await;
+    assert_eq!(law.park, None);
+    assert_eq!(law.status, Some(lash::TurnStatus::Answered));
+    let offered = law.observed.descriptions();
+    assert_eq!(offered.len(), 2, "one request per node: {offered:?}");
+    for specs in &offered {
+        assert!(
+            specs.contains("changing_tool revision 1") && !specs.contains("revision 2"),
+            "{specs}"
+        );
+    }
+    assert_eq!(*law.ran.lock_recover(), [STABLE_TOOL]);
 }

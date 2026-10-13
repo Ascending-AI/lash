@@ -25,7 +25,6 @@ offered `submit_error` (`task.fail`) and a prompt section instead of
 
 ```rust,ignore
 let delegation = delegation::DelegationPluginFactory::new(
-    lash::plugins::SessionToolAccess::ambient(),
     lash::SessionSpec::new("child-model", lash::TurnBudget::bounded(8), lash::MaxToolCalls::new(64)),
     lash::process::lifetime::starter,
 )

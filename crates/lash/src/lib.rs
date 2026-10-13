@@ -127,7 +127,7 @@ pub mod config {
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
         SetAttachmentAcceptance, SetChargeSafety, SetGeneration, SetLlmProfile, SetMaxToolCalls,
-        SetNoProgressBudget, SetPromptPlan, SetReasoning, SetToolAccess, SetTurnBudget,
+        SetNoProgressBudget, SetPromptPlan, SetReasoning, SetTurnBudget,
     };
     pub use lash_core::{
         CORE_CONFIG_OWNER, ConfigCommandCatalog, ConfigCommandDescriptor, ConfigCommandEntry,
@@ -207,7 +207,6 @@ pub mod usage;
 pub mod workflow;
 
 pub use crate::admin::host_commands::{SessionCommandAdmin, SessionCommandWithdrawal};
-pub use crate::admin::tool_state::{AdvancedToolAdmin, ToolAdmin};
 pub use crate::admin::{AdminMutation, Completions};
 pub use crate::core::{
     DeploymentDrainStatus, LashCore, LashCoreBuilder, NodeDrainError, NodeDrainReport,
@@ -354,18 +353,17 @@ pub use lash_sansio::{
 /// from the crate root.
 pub mod prelude {
     pub use crate::{
-        AdvancedToolAdmin, ChargeSafetyPolicy, DeploymentDrainStatus, DurableSession, EmbedError,
-        InputItem, LashCore, LashCoreBuilder, LashSession, LlmProfileConfig, LlmProfileKey,
-        LlmProfileLimits, LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder,
-        LlmProfileRegistry, MaxToolCalls, NoProgressBudget, ObservableSession, ParkedSession,
+        ChargeSafetyPolicy, DeploymentDrainStatus, DurableSession, EmbedError, InputItem, LashCore,
+        LashCoreBuilder, LashSession, LlmProfileConfig, LlmProfileKey, LlmProfileLimits,
+        LlmProfileLimitsError, LlmProfileMetadata, LlmProfileMetadataBuilder, LlmProfileRegistry,
+        MaxToolCalls, NoProgressBudget, ObservableSession, ParkedSession,
         PendingTurnInputCancelOutcome, PluginStack, RegisteredLlmProfile, Result, SendBuilder,
         SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
-        TurnActivityId, TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish,
-        TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus,
-        TurnStop,
+        SessionStartPoint, SessionView, TurnActivity, TurnActivityFanout, TurnActivityId,
+        TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
     };
 }
 
@@ -424,6 +422,7 @@ pub mod tools {
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
+    pub use lash_core::ToolId;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
     pub use lash_core::{
@@ -441,8 +440,7 @@ pub mod tools {
         ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
-        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
-        facade_support::ToolStateFacadeOps, turn_stop_from_tool_control,
+        facade_support::ReconfigureError, turn_stop_from_tool_control,
     };
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
@@ -451,6 +449,14 @@ pub mod tools {
     /// or an outcome it does not admit.
     pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
+    /// The deferred provider and what it records: a [`DeferredMatch`] per
+    /// call path, committed once, with the [`ExecutionBinding`] that routes a
+    /// resolved tool's calls.
+    pub use lash_core::{
+        DeferredMatch, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
+        ExecutionBinding, ExecutionBindingUnreadable, MAX_DEFERRED_NOTE_BYTES,
+        bounded_deferred_outcome,
+    };
     /// Turn flow control constructed by tool implementors; attach it with
     /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
     pub use lash_core::{
@@ -459,6 +465,13 @@ pub mod tools {
     /// A finish tool: its call ends the turn with its whole input as the
     /// turn's value, typed by the schema it is built with.
     pub use lash_core::{FinishToolProvider, finish_tool, finish_tool_id};
+    /// What a run's tool surface records and a provider reads: the provider
+    /// keys tools are matched to, the surface entries, the run's config each
+    /// provider method reads, and the refusal of a surface whose names collide.
+    pub use lash_core::{
+        OwnerConfigView, ProviderKey, RecordedSurface, SurfaceCollision, SurfaceDuplicateTool,
+        SurfaceEntry, SurfaceRefusal, ToolSurfaceDrift, ToolSurfaceDriftKind,
+    };
     /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
     /// its body, [`ToolDefinition::with_declaration`] the park of a tool that
     /// may defer. A tool missing one cannot be defined: the refusal names
@@ -474,29 +487,19 @@ pub mod tools {
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.
     pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
-    pub use lash_core::{
-        ToolId, ToolState, facade_support::SupersededToolIdentity,
-        facade_support::ToolMembershipUpdate, facade_support::ToolRestoreReport,
-        facade_support::ToolSourcePolicy, facade_support::ToolStateChange,
-        facade_support::ToolStateChangeOutcome, facade_support::ToolStateEntry,
-    };
     /// Engine-owned tool-intent admission records used by process-registry integrators.
     pub use lash_core::{
         ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
         ToolIntentSubmissionSettlement,
     };
     #[cfg(feature = "rlm")]
+    pub use lash_protocol_rlm::DeferredResolutionError;
+    #[cfg(feature = "rlm")]
     pub use lash_protocol_rlm::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
         DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, catalogue_preview,
         catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
         catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
-    };
-    #[cfg(feature = "rlm")]
-    pub use lash_protocol_rlm::{
-        DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
-        RecordedGrantInstallError, Resolution as DeferredToolResolution,
-        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
     };
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
@@ -688,11 +691,10 @@ pub mod plugins {
     /// final result.
     pub use lash_core::plugin::{
         AfterToolContributions, AfterToolDecision, AttemptOrdinal, BeforeToolDecision,
-        CachedToolSuccess, CheckRank, OwnerConfigView, PreparedCallReadView, RankedVerdict,
-        ToolArgsCheckHook, ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput,
-        ToolHookContext, ToolHookOccurrence, ToolHookPhase, ToolResultCandidate,
-        ToolResultCheckHook, ToolResultCheckInput, ToolResultTransformHook,
-        ToolResultTransformInput,
+        CachedToolSuccess, CheckRank, PreparedCallReadView, RankedVerdict, ToolArgsCheckHook,
+        ToolArgsCheckInput, ToolArgsTransformHook, ToolArgsTransformInput, ToolHookContext,
+        ToolHookOccurrence, ToolHookPhase, ToolResultCandidate, ToolResultCheckHook,
+        ToolResultCheckInput, ToolResultTransformHook, ToolResultTransformInput,
     };
     /// Hook contracts and reports used by plugin authors. Every hook
     /// registers under a [`HookKey`] (see [`hook_key!`](crate::hook_key));
@@ -705,8 +707,8 @@ pub mod plugins {
         ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
         ContextPressureHook, HookKey, PluginExtensionContribution, PluginRecordContribution,
         PluginSessionMaterialization, PluginSpecBuilder, PluginTraceEmitter, SessionContributions,
-        StaticPluginFactory, ToolCatalogContext, ToolMembershipContribution,
-        ToolPresentationPresenter, ToolResultProjectionContext, TurnContributions, TurnHookReport,
+        StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
+        ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
@@ -842,7 +844,7 @@ pub mod plugins {
     /// Both are runtime-implemented — a plugin receives one, never writes one.
     pub use lash_core::{
         AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
-        SessionGraphService, SessionStateService, SessionToolAccess, SessionToolAccessError,
+        SessionGraphService, SessionStateService,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
@@ -976,7 +978,8 @@ pub mod process {
     /// Compare recorded process authority with a host's current grants.
     pub mod authority {
         pub use crate::process_authority::{
-            capabilities_excess, components_excess, session_grants, tools_excess, tools_within,
+            ExcessLink, capabilities_excess, components_excess, session_grants, tools_excess,
+            tools_within,
         };
     }
     pub use crate::process_feed::{
@@ -993,12 +996,16 @@ pub mod process {
         StaticProcessComponent,
     };
     pub use lash_core::{
-        DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings, HoldEnvError,
-        ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
-        ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx,
-        ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits, ProcessModel,
-        ProcessStartChoice, ResolvedStartTarget,
+        DeclaredDefinitionLaunch, DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings,
+        HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
+        ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice,
+        ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits,
+        ProcessModel, ProcessStartChoice, ResolvedStartTarget,
     };
+    /// What an env links each effect a process performs to: the tool, the
+    /// component provider that serves it and the dispatch surface the link
+    /// was checked against, and the effects an engine declares it performs.
+    pub use lash_core::{EffectLink, LinkKind, PerformedEffects, ProcessSurface, effect_path_of};
     /// Explicit environment choices for a start policy. None is a default:
     /// a host states which it uses.
     pub mod env {

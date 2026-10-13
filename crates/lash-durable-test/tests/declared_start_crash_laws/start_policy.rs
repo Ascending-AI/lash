@@ -41,12 +41,9 @@ enum Stated {
 
 /// An environment of no tools whose tool-call limit is `limit`.
 fn limited(limit: usize) -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
-        lash::MaxToolCalls::new(limit),
-    )
-    .build()
-    .expect("the environment builds")
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(limit))
+        .build()
+        .expect("the environment builds")
 }
 
 const REFUSAL: &str = "the law's policy refuses this start";
@@ -184,7 +181,6 @@ fn core_over(
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(served::model(Arc::clone(scripts)), served::metadata())
@@ -320,7 +316,7 @@ impl Deployment {
                 .0
                 .formats()
                 .decodes(),
-                serves: Vec::new(),
+                serves: lash::testing::node_serves(&self.first),
                 max_active: 8,
             },
             Arc::clone(&switch) as Arc<dyn Activation>,
@@ -328,10 +324,7 @@ impl Deployment {
         let session = self
             .first
             .session(policy_session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(16),
-            ))
+            .create(lash::SessionCreation::root(served::spec(16)))
             .await
             .expect("the parent is created");
         session

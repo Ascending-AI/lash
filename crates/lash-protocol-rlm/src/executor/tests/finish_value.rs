@@ -26,11 +26,15 @@ struct SubmitTool;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SubmitTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![submit().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         matches!(name, "answer_submit" | "tool:answer_submit")
             .then(|| Arc::new(submit().contract()))
     }
@@ -45,9 +49,9 @@ impl lash_core::ToolProvider for SubmitTool {
 async fn submit_cell(dialect: &CellDialect, code: &str) -> lash_core::ExecResponse {
     let host = open_host().await;
     let services = if dialect.name() == CellDialect::python().name() {
-        cell_services(dialect, python_workers(), None)
+        cell_services(dialect, python_workers())
     } else {
-        cell_services(dialect, lash_vm_client::service::Service::default(), None)
+        cell_services(dialect, lash_vm_client::service::Service::default())
     };
     run_cell(
         &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),

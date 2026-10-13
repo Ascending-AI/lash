@@ -5,11 +5,8 @@
 //! and the lifecycle services stay in `lash-core`.
 
 use crate::facade_support::SessionGraphFacadeOps;
-use crate::{
-    PluginConfig, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy, ToolDefinition,
-};
+use crate::{PluginConfig, ProtocolTurnOptions, SessionAppendNode, SessionId, SessionPolicy};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 /// One durable, not-yet-settled process-observer edge.
 ///
@@ -406,209 +403,6 @@ impl SessionRelation {
         }
     }
 }
-/// Explicit resident-tool authority for one session.
-///
-/// Ambient access uses the host registry's captured resident definitions.
-/// Restricted access uses only the complete definitions carried here; an empty
-/// restricted set therefore means no resident tools. Exact-name hiding is a
-/// separate projection policy in both modes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SessionToolAccess {
-    resident: SessionResidentToolAccess,
-    hidden_tools: BTreeSet<String>,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum SessionResidentToolAccess {
-    Ambient,
-    Restricted(Vec<ToolDefinition>),
-}
-/// Refusal from checked [`SessionToolAccess`] construction or decoding.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum SessionToolAccessError {
-    #[error("restricted tool definition at index {index} has an empty name")]
-    EmptyToolName { index: usize },
-    #[error("restricted tool name `{name}` appears more than once")]
-    DuplicateToolName { name: String },
-    #[error("restricted tool id `{tool_id}` appears more than once")]
-    DuplicateToolId { tool_id: crate::ToolId },
-    #[error("hidden tool name at index {index} is empty")]
-    EmptyHiddenToolName { index: usize },
-    #[error("hidden tool name `{name}` appears more than once")]
-    DuplicateHiddenToolName { name: String },
-}
-#[derive(Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
-enum SessionToolAccessWire {
-    Ambient {
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        hidden_tools: Vec<String>,
-    },
-    Restricted {
-        tools: Vec<ToolDefinition>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        hidden_tools: Vec<String>,
-    },
-}
-impl SessionToolAccess {
-    /// Ambient authority: the session may call every tool its host
-    /// registers, now and later. Tool authority is a host decision with no
-    /// default; a creator states this or [`restricted`](Self::restricted).
-    pub fn ambient() -> Self {
-        Self {
-            resident: SessionResidentToolAccess::Ambient,
-            hidden_tools: BTreeSet::new(),
-        }
-    }
-
-    pub fn restricted(
-        tools: impl IntoIterator<Item = ToolDefinition>,
-    ) -> Result<Self, SessionToolAccessError> {
-        let tools = tools.into_iter().collect::<Vec<_>>();
-        Self::validate_restricted_tools(&tools)?;
-        Ok(Self {
-            resident: SessionResidentToolAccess::Restricted(tools),
-            hidden_tools: BTreeSet::new(),
-        })
-    }
-
-    /// Applies exact-name hiding independently from resident membership.
-    pub fn with_hidden_tools(
-        mut self,
-        names: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<Self, SessionToolAccessError> {
-        for (index, name) in names.into_iter().enumerate() {
-            self.insert_hidden_tool(name.into(), index)?;
-        }
-        Ok(self)
-    }
-
-    /// Adds one exact hidden name while preserving checked authority invariants.
-    pub fn hide_tool(&mut self, name: impl Into<String>) -> Result<(), SessionToolAccessError> {
-        self.insert_hidden_tool(name.into(), self.hidden_tools.len())
-    }
-
-    /// Names admitted from the resolved catalog the session is offered.
-    /// Ambient admits every offered name; Restricted admits offered members
-    /// with a matching id and exact name. Exact hidden names are removed in either mode. A restricted
-    /// name absent from the catalog is never admitted.
-    pub fn admitted_names(&self, offered: &lash_sansio::ToolCatalog) -> BTreeSet<String> {
-        offered
-            .tools
-            .iter()
-            .filter(|entry| {
-                !self.hides(&entry.manifest.name)
-                    && self.restricted_tools().is_none_or(|tools| {
-                        tools.iter().any(|tool| {
-                            tool.manifest.id == entry.manifest.id
-                                && tool.manifest.name == entry.manifest.name
-                        })
-                    })
-            })
-            .map(|entry| entry.manifest.name.clone())
-            .collect()
-    }
-
-    pub fn restricted_tools(&self) -> Option<&[ToolDefinition]> {
-        match &self.resident {
-            SessionResidentToolAccess::Ambient => None,
-            SessionResidentToolAccess::Restricted(tools) => Some(tools),
-        }
-    }
-
-    pub fn hidden_tools(&self) -> &BTreeSet<String> {
-        &self.hidden_tools
-    }
-
-    /// Lets protocol implementors apply the session's persisted tool-hiding policy by exact name.
-    pub fn hides(&self, name: &str) -> bool {
-        self.hidden_tools.contains(name)
-    }
-
-    fn validate_restricted_tools(tools: &[ToolDefinition]) -> Result<(), SessionToolAccessError> {
-        let mut names = BTreeSet::new();
-        let mut ids = BTreeSet::new();
-        for (index, tool) in tools.iter().enumerate() {
-            if tool.manifest.name.trim().is_empty() {
-                return Err(SessionToolAccessError::EmptyToolName { index });
-            }
-            if !names.insert(tool.manifest.name.clone()) {
-                return Err(SessionToolAccessError::DuplicateToolName {
-                    name: tool.manifest.name.clone(),
-                });
-            }
-            if !ids.insert(tool.manifest.id.clone()) {
-                return Err(SessionToolAccessError::DuplicateToolId {
-                    tool_id: tool.manifest.id.clone(),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn insert_hidden_tool(
-        &mut self,
-        name: String,
-        index: usize,
-    ) -> Result<(), SessionToolAccessError> {
-        if name.trim().is_empty() {
-            return Err(SessionToolAccessError::EmptyHiddenToolName { index });
-        }
-        if !self.hidden_tools.insert(name.clone()) {
-            return Err(SessionToolAccessError::DuplicateHiddenToolName { name });
-        }
-        Ok(())
-    }
-}
-impl Serialize for SessionToolAccess {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let hidden_tools = self.hidden_tools.iter().cloned().collect::<Vec<_>>();
-        match &self.resident {
-            SessionResidentToolAccess::Ambient => SessionToolAccessWire::Ambient { hidden_tools },
-            SessionResidentToolAccess::Restricted(tools) => SessionToolAccessWire::Restricted {
-                tools: tools.clone(),
-                hidden_tools,
-            },
-        }
-        .serialize(serializer)
-    }
-}
-/// The serde layer encodes and decodes through [`SessionToolAccessWire`], so
-/// the wire enum's schema is the decode shape; the checked invariants
-/// (`validate_restricted_tools`, hidden-name rules) are post-decode refusals
-/// no schema assertion can express.
-impl schemars::JsonSchema for SessionToolAccess {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "SessionToolAccess".into()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        SessionToolAccessWire::json_schema(generator)
-    }
-}
-impl<'de> Deserialize<'de> for SessionToolAccess {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let wire = SessionToolAccessWire::deserialize(deserializer)?;
-        let (access, hidden_tools) = match wire {
-            SessionToolAccessWire::Ambient { hidden_tools } => (Self::ambient(), hidden_tools),
-            SessionToolAccessWire::Restricted {
-                tools,
-                hidden_tools,
-            } => (
-                Self::restricted(tools).map_err(serde::de::Error::custom)?,
-                hidden_tools,
-            ),
-        };
-        access
-            .with_hidden_tools(hidden_tools)
-            .map_err(serde::de::Error::custom)
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub session_id: SessionId,
@@ -631,12 +425,6 @@ pub struct SessionSnapshot {
     /// changes only through a config patch.
     #[serde(default, skip_serializing_if = "PluginConfig::is_empty")]
     pub plugin_config: PluginConfig,
-    /// Read-only projection of the hydrated tool-state reference. Applying a
-    /// snapshot does not write this field; the resident component set wins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_state_ref: Option<crate::store::BlobRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_state_generation: Option<u64>,
     /// Read-only projection of the hydrated plugin-snapshot reference. Applying
     /// a snapshot does not write this field; the resident component set wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -665,8 +453,6 @@ impl SessionSnapshot {
             token_usage: crate::LlmUsage::default(),
             last_prompt_usage: None,
             plugin_config: PluginConfig::default(),
-            tool_state_ref: None,
-            tool_state_generation: None,
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,
@@ -807,14 +593,4 @@ pub enum SessionObservedProcessOutcome {
 impl crate::store::DurableRecord for FrameNodeId {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::artifact_referrer::ARTIFACT_REFERRER_KINDS_VERSION);
-}
-
-impl crate::store::DurableRecord for SessionResidentToolAccess {
-    const SURFACE: crate::store::SurfaceFormat =
-        crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
-}
-
-impl crate::store::DurableRecord for SessionToolAccessWire {
-    const SURFACE: crate::store::SurfaceFormat =
-        crate::surface_format!(crate::store::SESSION_HEAD_META_SCHEMA_VERSION);
 }

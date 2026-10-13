@@ -609,16 +609,21 @@ pub struct RlmCreateExtras {
     /// Session-wide termination requirement. Absence is the `Natural` default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination: Option<TerminationMode>,
+    /// The JSON Schema `control.finish` takes its value under, so a turn's
+    /// final value has this type. Absence is any JSON value. A run may state
+    /// another for itself ([`RlmTurnOptions::finish_value_schema`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_value_schema: Option<serde_json::Value>,
 }
 
 /// The RLM options a *single turn* may state again (FIG-1979): its render
-/// preferences.
+/// preferences and the schema of its final value.
 ///
 /// There is currently no language choice to state: TypeScript is the only shipped RLM dialect
 /// and nothing — a turn bag, a session bag, a create contract — names one.
-/// The termination is the session's, fixed at creation, and the type of the
-/// final value is the finishing tool's: a run that wants another final shape
-/// offers another finish tool through its tool access.
+/// The termination is the session's, fixed at creation. The type of the
+/// final value is the finishing tool's: a run that wants another shape for
+/// `control.finish` states it here, for that run alone.
 ///
 /// These are the RLM owner's run options: the owner applies each stated
 /// field over the session's recorded value, and an unstated one leaves it
@@ -629,6 +634,9 @@ pub struct RlmCreateExtras {
 pub struct RlmTurnOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RlmRenderPatch>,
+    /// The JSON Schema this run's `control.finish` takes its value under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_value_schema: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -689,6 +697,7 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
         Self {
             render: None,
             termination: config.termination,
+            finish_value_schema: None,
         }
     }
 }

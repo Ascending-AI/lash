@@ -36,7 +36,6 @@ pub struct PluginSessionRequest<'a> {
     pub owner: RuntimeOwner,
     pub materialization: PluginSessionMaterializationRequest<'a>,
     pub tool_catalog_overlay: ToolCatalogContribution,
-    pub tool_snapshot: Option<crate::ToolState>,
 }
 
 impl<'a> PluginSessionRequest<'a> {
@@ -48,7 +47,6 @@ impl<'a> PluginSessionRequest<'a> {
                 seed_snapshot: None,
             },
             tool_catalog_overlay: ToolCatalogContribution::default(),
-            tool_snapshot: None,
         }
     }
 
@@ -64,7 +62,6 @@ impl<'a> PluginSessionRequest<'a> {
                 config,
             },
             tool_catalog_overlay: ToolCatalogContribution::default(),
-            tool_snapshot: None,
         }
     }
 }
@@ -89,24 +86,20 @@ struct BuiltSessionContributions {
     contributions: PluginContributions,
 }
 
-/// The recorded facts a plugin session is built under: the session's tool
-/// authority and its recorded plugin configuration (or a process's captured
-/// one).
+/// The recorded facts a plugin session is built under: its recorded plugin
+/// configuration (or a process's captured one).
 #[derive(Clone, Debug)]
 pub struct SessionAuthorityContext {
-    pub tool_access: SessionToolAccess,
     /// The recorded plugin configuration the session is built with
     /// (FIG-4379).
     pub plugin_config: super::AdmittedPluginConfig,
 }
 
 impl SessionAuthorityContext {
-    /// The fixture context tests share: ambient tool access and no plugin
-    /// configuration.
+    /// The fixture context tests share: no plugin configuration.
     #[cfg(any(test, feature = "testing"))]
-    pub fn ambient_fixture() -> Self {
+    pub fn fixture() -> Self {
         Self {
-            tool_access: SessionToolAccess::ambient(),
             plugin_config: super::AdmittedPluginConfig::default(),
         }
     }
@@ -398,7 +391,6 @@ impl PluginHost {
             owner,
             materialization,
             tool_catalog_overlay,
-            tool_snapshot,
         } = request;
         let (authority, materialization, snapshot, forked) = match materialization {
             PluginSessionMaterializationRequest::Creation {
@@ -433,12 +425,10 @@ impl PluginHost {
             host: self.clone(),
             owner,
             materialization,
-            tool_snapshot,
             capabilities: Arc::new(std::sync::OnceLock::new()),
             tool_catalog_overlay,
             authority: Arc::new(std::sync::RwLock::new(
                 super::session_obj::LiveSessionAuthority {
-                    tool_access: authority.tool_access,
                     plugin_config: authority.plugin_config,
                 },
             )),
@@ -518,7 +508,6 @@ impl PluginHost {
                 tracing: self.trace_runtime.clone(),
                 trace: None,
                 owner: session.owner.clone(),
-                tool_access: authority.tool_access,
                 plugin_config: authority.plugin_config,
                 materialization: session.materialization,
                 extensions: self.extensions.clone(),
@@ -527,8 +516,7 @@ impl PluginHost {
                 plugins,
                 mut contributions,
             } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
-            let registry = build_tool_registry(&contributions, session.tool_snapshot.clone())?;
-            let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
+            let registry = build_tool_registry(&contributions)?;
             let session_extensions = PluginExtensions::from_contributions(
                 plugins
                     .iter()
@@ -549,7 +537,6 @@ impl PluginHost {
                     plugins,
                     contributions,
                     tool_registry: registry,
-                    tools,
                     session_extensions,
                 });
         }
@@ -590,14 +577,12 @@ impl PluginHost {
     pub fn inspect_prompt_catalog(
         &self,
         owner: RuntimeOwner,
-        tool_access: crate::SessionToolAccess,
         plugin_config: super::AdmittedPluginConfig,
     ) -> Result<super::prompt::PromptCatalog, PluginError> {
         let ctx = PluginSessionContext {
             tracing: self.trace_runtime.clone(),
             trace: None,
             owner,
-            tool_access,
             plugin_config,
             materialization: PluginSessionMaterialization::Rematerialization,
             extensions: self.extensions.clone(),
@@ -608,6 +593,40 @@ impl PluginHost {
         )?;
         Ok(super::prompt::PromptCatalog::new(
             built.contributions.prompt,
+        ))
+    }
+
+    /// The obligation tokens this host serves (S7): one for every callback
+    /// the installed plugins register, as their static registrations
+    /// resolve it. The plugins are built over empty state and config, as a
+    /// session being created builds them before it records any; nothing is
+    /// invoked or materialized. A callback's registration never depends on
+    /// config.
+    ///
+    /// # Errors
+    ///
+    /// A plugin's build or registration error.
+    pub fn served_obligations(&self) -> Result<Vec<String>, PluginError> {
+        let ctx = PluginSessionContext {
+            tracing: self.trace_runtime.clone(),
+            trace: None,
+            owner: RuntimeOwner::Session(
+                crate::SessionId::parse("serves-probe")
+                    .map_err(|error| PluginError::Registration(error.to_string()))?,
+            ),
+            plugin_config: super::AdmittedPluginConfig::default(),
+            materialization: PluginSessionMaterialization::Creation,
+            extensions: self.extensions.clone(),
+        };
+        let mut built = self.build_session_contributions(
+            &ctx,
+            Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(None))),
+        )?;
+        let registry = build_tool_registry(&built.contributions)?;
+        let composition = super::ExecutionComposition::new(&mut built.contributions, registry);
+        Ok(lash_core_store::obligations::ObligationToken::of_callbacks(
+            lash_core_store::obligations::RegistryKind::Session,
+            composition.contributions().map(|(_, identity)| identity),
         ))
     }
 
@@ -743,25 +762,17 @@ impl PluginHost {
 
 pub(crate) fn build_tool_registry(
     contributions: &PluginContributions,
-    tool_snapshot: Option<crate::ToolState>,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
     let providers = contributions
         .tool_providers
         .iter()
         .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)))
         .collect();
-    let registry = crate::ToolRegistry::from_tool_registrations(providers).map_err(|err| {
-        PluginError::Registration(format!("failed to build tool registry: {err}"))
-    })?;
-    match tool_snapshot {
-        Some(snapshot) => registry
-            .fork_with_state(snapshot)
-            .map(Arc::new)
-            .map_err(|err| {
-                PluginError::Session(format!(
-                    "tool state cannot be applied to this plugin host session: {err}"
-                ))
-            }),
-        None => Ok(Arc::new(registry)),
-    }
+    let deferred = contributions
+        .deferred_provider
+        .as_ref()
+        .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)));
+    crate::ToolRegistry::from_tool_registrations(providers, deferred)
+        .map(Arc::new)
+        .map_err(|err| PluginError::Registration(format!("failed to build tool registry: {err}")))
 }

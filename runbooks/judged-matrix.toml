@@ -110,5 +110,4 @@ example-core-shutdown = { tier = "deterministic", model = "scripted-provider" }
 host-provisioned-schema = { tier = "deterministic", model = "scripted-provider" }
 mcp-naming-refresh = { tier = "deterministic", model = "scripted-provider" }
 runtime-identity = { tier = "deterministic", model = "scripted-provider" }
-resident-tool-authority = { tier = "deterministic", model = "scripted-provider" }
 workbench-attachment-reclamation = { tier = "deterministic", model = "scripted-provider" }

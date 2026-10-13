@@ -28,10 +28,7 @@ impl CreatedSession for crate::SessionBuilder {
         match self
             .core
             .session(self.session_id.clone())
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                spec,
-            ))
+            .create(crate::SessionCreation::root(spec))
             .await
         {
             Ok(_)
@@ -334,11 +331,15 @@ struct AppTools;
 
 #[async_trait]
 impl ToolProvider for AppTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![app_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
@@ -480,7 +481,6 @@ mod store_faults;
 mod stream_evidence;
 mod tool_check_control;
 mod tool_intent_ingress;
-mod tool_restore_report;
 mod turn_cancel_modes;
 #[cfg(feature = "rlm")]
 mod turn_cancel_waits;

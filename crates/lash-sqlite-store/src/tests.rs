@@ -267,18 +267,6 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
     }
 }
 
-lash_conformance::tool_access_persistence_tests!({
-    let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
-    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Normal)
-        .await
-        .expect("open tool-access catalog");
-    let catalog = stores.open_store().await.expect("open tool-access store");
-    (
-        (dir, stores),
-        catalog as Arc<dyn lash_core_execution::store::ConformanceDeployment>,
-    )
-});
-
 #[test]
 fn queued_work_checks_reject_illegal_vocabulary() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
@@ -594,7 +582,6 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                     lash_core_execution::TurnBudget::Unbounded,
                     lash_core_execution::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                    lash_core_execution::SessionToolAccess::ambient(),
                 ),
                 head: lash_core_execution::SessionCreationHead::Config,
                 retention: lash_core_execution::Retention::UntilGc,
@@ -680,7 +667,7 @@ async fn durable_state(
 ) -> lash_core_execution::RuntimeSessionState {
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -692,10 +679,7 @@ async fn durable_state(
         .admit_session(&SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(
-                &state.policy.clone(),
-                lash_core_execution::SessionToolAccess::ambient(),
-            ),
+            config: lash_core_execution::PersistedSessionConfig::from_policy(&state.policy.clone()),
             head: lash_core_execution::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
@@ -1117,7 +1101,6 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,
@@ -1158,7 +1141,6 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,
@@ -1207,7 +1189,6 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
@@ -1312,7 +1293,6 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         retention: lash_core_execution::Retention::UntilGc,
     };
@@ -1342,7 +1322,6 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),

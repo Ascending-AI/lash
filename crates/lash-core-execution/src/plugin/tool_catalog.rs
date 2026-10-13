@@ -1,11 +1,15 @@
 use super::*;
 
+/// What a catalog contributor reads: the tools the run's providers advertise
+/// under its resolved config, and that config. A contributor may only
+/// remove candidates; which tools exist is each provider's configuration.
 #[derive(Clone)]
 pub struct ToolCatalogContext {
     pub owner: crate::RuntimeOwner,
+    /// The advertised candidates, every provider's under the run's config.
     pub tools: Vec<ToolManifest>,
-    pub resolve_contract: Option<lash_sansio::ToolContractResolver>,
-    pub tool_access: SessionToolAccess,
+    /// The run's resolved config.
+    pub config: super::OwnerConfigView,
     pub extensions: PluginExtensions,
 }
 
@@ -51,8 +55,6 @@ impl PluginAbort {
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionContributions {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_membership: Vec<ToolMembershipContribution>,
     /// Appends retain their caller-stable operation identities and ancestor
     /// requirements. They join the turn draft after durable acknowledgement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -61,16 +63,8 @@ pub struct SessionContributions {
 
 impl SessionContributions {
     pub fn is_empty(&self) -> bool {
-        self.tool_membership.is_empty() && self.graph_appends.is_empty()
+        self.graph_appends.is_empty()
     }
-}
-
-/// A catalog membership change, preserving the tool's state and identity.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ToolMembershipContribution {
-    pub tool_id: crate::ToolId,
-    pub present: bool,
 }
 
 /// What one before-turn or checkpoint observer contributes: runtime events

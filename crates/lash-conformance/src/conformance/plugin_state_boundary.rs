@@ -21,13 +21,13 @@ pub async fn plugin_state_boundary_trace(
             &host,
             parent_id,
             None,
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         )
         .await;
         let handle = fixture.state(parent_id);
         let mut state = RuntimeSessionState {
             session_id: parent_id.parse().unwrap(),
-            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -66,7 +66,7 @@ pub async fn plugin_state_boundary_trace(
             &rebuilt_host,
             parent_id,
             crash_state.plugin_state(),
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         )
         .await;
         assert_eq!(
@@ -108,7 +108,7 @@ pub async fn plugin_state_boundary_trace(
             &rebuilt_host,
             parent_id,
             durable.plugin_state(),
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         )
         .await;
         assert_eq!(
@@ -132,7 +132,7 @@ pub async fn plugin_state_boundary_trace(
         let child = plugins
             .fork_for_session(
                 SessionId::fixture(child_id),
-                lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+                lash_core::plugin::SessionAuthorityContext::fixture(),
             )
             .unwrap();
         let child_handle = fixture.state(child_id);
@@ -160,7 +160,7 @@ pub async fn plugin_state_boundary_trace(
         assert_eq!(handle.get("child-only"), None);
         let mut child_state = RuntimeSessionState {
             session_id: child_id.parse().unwrap(),
-            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),

@@ -111,6 +111,7 @@ fn pin(call: &CellCall, request: NodeId) -> PinnedMember {
         wait_id: None,
         trace: None,
         declaration: None,
+        binding: None,
     }
 }
 

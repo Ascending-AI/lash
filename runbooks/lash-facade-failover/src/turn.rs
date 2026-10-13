@@ -246,7 +246,6 @@ pub fn core(
     .serve_sessions(serve)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .data_retention(lash::DataRetention::standard())
-    .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -268,7 +267,6 @@ pub fn core(
 pub async fn admit(core: &lash::LashCore) -> Result<(), String> {
     core.session(session())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 MODEL,
                 lash::TurnBudget::Unbounded,

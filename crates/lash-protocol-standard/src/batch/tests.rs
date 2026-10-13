@@ -229,7 +229,7 @@ fn batch_config_ceiling_is_refused_at_build() {
         )
         .build_session(PluginSessionRequest::creation(
             "root",
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         ))
     };
     let refused = build(65)

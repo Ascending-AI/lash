@@ -73,19 +73,7 @@ pub trait EngineStateMigration: Send + Sync {
     /// The earlier formats the engine carries forward.
     fn carries(&self) -> Vec<EngineStateFormat>;
 
-    /// Whether the engine also carries a state already in its own format
-    /// onto what this build holds: the adoption an operator chose of what
-    /// an earlier build wrote against functions this build is about to
-    /// stop holding (FIG-5799). The claimer asks
-    /// [`migrate`](Self::migrate) of such a state too, once every live node
-    /// that serves the process decodes this build's set; a refusal leaves
-    /// the process as written.
-    fn adopts(&self) -> bool {
-        false
-    }
-
-    /// `state`, written in a carried format, in the engine's own, or
-    /// adopted when the engine [`adopts`](Self::adopts); or
+    /// `state`, written in a carried format, in the engine's own; or
     /// `None` when the process is not at a point the engine carries it
     /// from, and goes on in the format it is in. It may read and publish
     /// what the state names, and it changes nothing of the process: the
@@ -128,12 +116,14 @@ pub struct StepName(pub String);
 /// `(process, step, ordinal)`, and its `ToolCallId` derives from it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StepRequest {
-    /// A catalog tool, under its declaration, `ExecutionPolicy` and ceiling.
+    /// A linked call, under its tool's declaration, `ExecutionPolicy` and
+    /// ceiling.
     Tool {
         /// The step's name.
         step: StepName,
-        /// The catalog tool it runs.
-        tool: lash_sansio::ToolId,
+        /// The effect it performs, by its path (P3): the process env's link
+        /// of it names the tool that runs, never the engine.
+        effect: lash_kernel_doc::EffectName,
         /// The tool's input.
         input: serde_json::Value,
         /// The site of the engine's workflow document it runs for, when the
@@ -185,16 +175,24 @@ impl StepRequest {
         }
     }
 
-    /// The tool its admission records for a process of engine `engine`:
-    /// the catalog tool, or for an engine step `<engine>/<kind>`, which only
-    /// identifies the record. An engine step is dispatched by its variant,
-    /// never by this name.
+    /// What its process's operations name the step's work: the effect's
+    /// path, or the engine body's kind.
+    #[must_use]
+    pub fn operation(&self) -> String {
+        match self {
+            Self::Tool { effect, .. } => effect.to_string(),
+            Self::Engine { kind, .. } => kind.0.clone(),
+        }
+    }
+}
+
+impl EngineStepKind {
+    /// The tool an engine step's admission records for a process of engine
+    /// `engine`: `<engine>/<kind>`, which only identifies the record. An
+    /// engine step is dispatched by its variant, never by this name.
     #[must_use]
     pub fn admitted_tool(&self, engine: &str) -> lash_sansio::ToolId {
-        match self {
-            Self::Tool { tool, .. } => tool.clone(),
-            Self::Engine { kind, .. } => lash_sansio::ToolId::new(format!("{engine}/{}", kind.0)),
-        }
+        lash_sansio::ToolId::new(format!("{engine}/{}", self.0))
     }
 }
 
@@ -214,8 +212,8 @@ impl EngineStepKind {
 }
 
 /// What an engine step's body is handed: the process, what its row
-/// recorded, the catalog its steps resolve against, the activation's clock
-/// reading and the step's own kind and input.
+/// recorded, the effects its env links, the activation's clock reading and
+/// the step's own kind and input.
 #[derive(Clone)]
 pub struct EngineStepRun {
     /// The process the step belongs to.
@@ -223,8 +221,10 @@ pub struct EngineStepRun {
     /// The engine settings the process's start stated and its row records
     /// (D4): never this build's defaults.
     pub engine_settings: Option<super::EngineSettings>,
-    /// The catalog the process's steps resolve against.
-    pub tool_catalog: std::sync::Arc<crate::ToolCatalog>,
+    /// The effects the process's env links (P3): what its linked calls
+    /// may perform, each with the surface it was checked against.
+    pub effects:
+        std::sync::Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::EffectLink>>,
     /// The activation's clock reading when the body started.
     pub now: DurableInstant,
     /// The activation's clock, for a body that waits.

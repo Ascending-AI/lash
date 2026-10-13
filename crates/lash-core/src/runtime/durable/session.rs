@@ -795,9 +795,10 @@ impl SessionActivation {
             }
             Err(error) => return Err(error),
         };
-        let ran = match phases::run_phases(cx, self.services.as_ref(), turn, heads)
-            .instrument(span)
-            .await
+        let ran = match Box::pin(
+            phases::run_phases(cx, self.services.as_ref(), turn, heads).instrument(span),
+        )
+        .await
         {
             // A refusal no pass would clear, met as the turn finishes (an
             // after-turn callback's), ends the run with it, as one met at

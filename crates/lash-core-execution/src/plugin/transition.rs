@@ -161,10 +161,7 @@ impl PluginSession {
         let authority = self.live_authority();
         let mut plugin_config = authority.plugin_config;
         plugin_config.config = std::sync::Arc::new(config);
-        let config = SessionAuthorityContext {
-            tool_access: authority.tool_access,
-            plugin_config,
-        };
+        let config = SessionAuthorityContext { plugin_config };
         let materialization = match self.materialization {
             PluginSessionMaterialization::Creation => {
                 PluginSessionMaterializationRequest::Creation {
@@ -186,7 +183,6 @@ impl PluginSession {
                 owner: self.owner.clone(),
                 materialization,
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
-                tool_snapshot: self.tool_snapshot.clone(),
             })?;
         candidate.adopt_plugin_transition(record)?;
         candidate.materialize()?;
@@ -374,13 +370,9 @@ impl PluginSession {
                 owner: self.owner.clone(),
                 materialization: PluginSessionMaterializationRequest::Rematerialization {
                     snapshot: state,
-                    config: SessionAuthorityContext {
-                        tool_access: authority.tool_access,
-                        plugin_config,
-                    },
+                    config: SessionAuthorityContext { plugin_config },
                 },
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
-                tool_snapshot: self.tool_snapshot.clone(),
             })
     }
 

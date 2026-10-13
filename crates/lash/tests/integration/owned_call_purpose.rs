@@ -223,7 +223,6 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -233,7 +232,6 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         .expect("core");
     core.session(lash::SessionId::from("purpose-probe-session"))
         .create(lash::SessionCreation {
-            tool_access: lash::plugins::SessionToolAccess::ambient(),
             parent: None,
             spec: lash::SessionSpec::new(
                 MODEL,

@@ -362,8 +362,8 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessEnv::from_store_bytes;
     // W0197: lash::process::ProcessEnv::components [function]
     let _ = lash::process::ProcessEnv::components;
-    // W0198: lash::process::ProcessEnv::tools [function]
-    let _ = lash::process::ProcessEnv::tools;
+    // W0198: lash::process::ProcessEnv::effects [function]
+    let _ = lash::process::ProcessEnv::effects;
     // W0199: lash::process::ProcessEnv::to_store_bytes [function]
     let _ = lash::process::ProcessEnv::to_store_bytes;
     // W0200: lash::persistence::ProcessHandleView::new [function]
@@ -631,9 +631,9 @@ fn processes_area_witnesses() {
     });
 }
 
-/// FIG-6034 laws 3 and 9 on SQLite memory: a process builds only the
-/// components its environment names, in env order, and an environment
-/// with ambient tools is refused wherever it is stated.
+/// FIG-6034 law 3 on SQLite memory: a process builds only the components
+/// its environment names, in env order; and the authority read reports the
+/// env's linked effects.
 #[cfg(all(feature = "sqlite", feature = "rlm", feature = "worker"))]
 #[allow(
     clippy::expect_used,
@@ -667,7 +667,6 @@ mod named_component_laws {
         ProcessConfigKey::new("evidence-presenter-2", FormatVersion::ONE);
     const TWIN: ProcessConfigKey<()> = ProcessConfigKey::new("evidence-twin", FormatVersion::ONE);
     const A_TOOL: &str = "evidence_a_tool";
-    const ISOLATED_TOOL: &str = "evidence_isolated";
 
     /// What every component and plugin of the deployment did.
     #[derive(Default)]
@@ -838,12 +837,11 @@ mod named_component_laws {
         }
     }
 
-    /// The environment a policy states: the turn's run with `keys`, or
-    /// one with ambient tools.
+    /// The environment a policy states: the turn's run captured under
+    /// `keys`, or the host's narrowing of a `from_run` choice.
     #[derive(Clone)]
     enum Stated {
         Named(Vec<ProcessConfigKey<()>>),
-        Ambient,
         Authority,
     }
 
@@ -858,7 +856,6 @@ mod named_component_laws {
         {
             let stated = self.0.lock_recover().clone();
             let env = match stated {
-                Stated::Ambient => ambient_env(),
                 Stated::Authority => {
                     let policy = lash::process::env::policy::from_run(|_| {
                         Ok(vec![ProcessComponentEntry::new(A, &(), [])?])
@@ -868,15 +865,9 @@ mod named_component_laws {
                         panic!("from_run chooses new")
                     };
                     // The host explicitly narrows its from_run choice to a and b.
-                    let mut builder = ProcessEnv::builder(
-                        lash::plugins::SessionToolAccess::restricted([
-                            a_definition(A_TOOL),
-                            a_definition("b"),
-                        ])
-                        .expect("the law states valid tool grants"),
-                        recorded.max_tool_calls(),
-                    )
-                    .attachments(Arc::clone(recorded.attachments()));
+                    let mut builder = ProcessEnv::builder(recorded.max_tool_calls())
+                        .attachments(Arc::clone(recorded.attachments()))
+                        .effects(recorded.effects().clone());
                     if let Some(model) = recorded.model() {
                         builder = builder.model(model.clone());
                     }
@@ -891,7 +882,7 @@ mod named_component_laws {
                         .map_err(lash::process::ProcessEnvPolicyError::Refused)?
                 }
                 Stated::Named(keys) => {
-                    let (Some(run), Some(offered)) = (cx.run, cx.offered) else {
+                    let (Some(run), Some(surface)) = (cx.run, cx.surface) else {
                         return Err(lash::process::ProcessEnvPolicyError::Fault(
                             "no recorded run".into(),
                         ));
@@ -901,61 +892,14 @@ mod named_component_laws {
                         .map(|key| ProcessComponentEntry::new(*key, &(), []))
                         .collect::<Result<Vec<_>, _>>()
                         .map_err(lash::process::ProcessEnvPolicyError::Refused)?;
-                    ProcessEnv::from_run(run, offered, entries)
+                    cx.capture(run, surface, entries)
+                        .await
                         .map_err(lash::process::ProcessEnvPolicyError::Refused)?
                 }
             };
             Ok(lash::process::ProcessStartChoice {
                 env: lash::process::ProcessEnvChoice::New(env),
                 engine_settings: cx.engine_defaults()?,
-            })
-        }
-    }
-
-    fn ambient_env() -> ProcessEnv {
-        ProcessEnv::builder(
-            lash::plugins::SessionToolAccess::ambient(),
-            lash::MaxToolCalls::new(16),
-        )
-        .build()
-        .expect("an ambient environment builds; admission refuses it")
-    }
-
-    /// A tool isolated in the held engine whose provider states an
-    /// ambient environment.
-    struct AmbientIsolated;
-
-    fn isolated_definition() -> lash::tools::ToolDefinition {
-        a_definition(ISOLATED_TOOL)
-            .isolated_in(lash_core::testing::HELD_PROCESS_ENGINE_KIND)
-            .expect("an isolated tool names its engine")
-    }
-
-    #[async_trait::async_trait]
-    impl lash::tools::ToolProvider for AmbientIsolated {
-        fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
-            vec![isolated_definition().manifest()]
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
-            (name == ISOLATED_TOOL).then(|| Arc::new(isolated_definition().contract()))
-        }
-
-        async fn execute(
-            &self,
-            _call: lash::tools::ToolCall<'_>,
-        ) -> lash::tools::ToolAttemptOutcome {
-            lash::tools::ToolOutcome::ok(serde_json::json!("ordinary body")).into()
-        }
-
-        fn isolated_start(
-            &self,
-            call: lash_core::IsolatedProcessRequest<'_>,
-        ) -> Result<lash_core::IsolatedStart, ProcessEnvRefusal> {
-            Ok(lash_core::IsolatedStart {
-                payload: call.args.clone(),
-                env: lash::process::ProcessEnvChoice::New(ambient_env()),
-                engine_settings: None,
             })
         }
     }
@@ -1033,11 +977,9 @@ mod named_component_laws {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .tools(lash::hook_key!("tools"), a_provider())
-            .tools(lash::hook_key!("tools-2"), Arc::new(AmbientIsolated))
             .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -1077,6 +1019,9 @@ mod named_component_laws {
                 lash::persistence::LeaseIncarnationId::new("named-components-boot"),
             ))
             .expect("the core builds");
+        // The node projects what it serves from every installed component
+        // as it starts: those builds are no process's.
+        witness.builds.lock_recover().clear();
         World {
             core,
             stores,
@@ -1095,7 +1040,6 @@ mod named_component_laws {
                 .core
                 .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
                 .create(lash::SessionCreation::root(
-                    lash::plugins::SessionToolAccess::ambient(),
                     lash::SessionSpec::new(
                         MODEL,
                         lash::TurnBudget::Unbounded,
@@ -1165,11 +1109,7 @@ mod named_component_laws {
     fn env_of(keys: &[ProcessConfigKey<()>]) -> ProcessEnv {
         keys.iter()
             .fold(
-                ProcessEnv::builder(
-                    lash::plugins::SessionToolAccess::restricted([a_definition(A_TOOL)])
-                        .expect("the tool"),
-                    lash::MaxToolCalls::new(16),
-                ),
+                ProcessEnv::builder(lash::MaxToolCalls::new(16)),
                 |builder, key| builder.component(*key, &()),
             )
             .build()
@@ -1219,17 +1159,14 @@ mod named_component_laws {
 
         let uninstalled = ProcessConfigKey::<()>::new("evidence-uninstalled", FormatVersion::ONE);
         let unreadable = ProcessConfigKey::<()>::new(A.component(), FormatVersion::new(2).unwrap());
-        let malformed = ProcessEnv::builder(
-            lash::plugins::SessionToolAccess::restricted(std::iter::empty()).unwrap(),
-            lash::MaxToolCalls::new(16),
-        )
-        .component(
-            ProcessConfigKey::<i64>::new(CHECK.component(), FormatVersion::ONE),
-            &7,
-        )
-        .build()
-        .unwrap();
-        let cases: [(&str, ProcessEnv, fn(&ProcessEnvRefusal) -> bool); 5] = [
+        let malformed = ProcessEnv::builder(lash::MaxToolCalls::new(16))
+            .component(
+                ProcessConfigKey::<i64>::new(CHECK.component(), FormatVersion::ONE),
+                &7,
+            )
+            .build()
+            .unwrap();
+        let cases: [(&str, ProcessEnv, fn(&ProcessEnvRefusal) -> bool); 4] = [
             ("uninstalled", env_of(&[uninstalled]), |refusal| {
                 matches!(refusal, ProcessEnvRefusal::ComponentNotInstalled { .. })
             }),
@@ -1246,9 +1183,6 @@ mod named_component_laws {
                 env_of(&[PRESENTER_1, PRESENTER_2]),
                 |refusal| matches!(refusal, ProcessEnvRefusal::DuplicatePresenter { .. }),
             ),
-            ("duplicate tool name", env_of(&[A, TWIN]), |refusal| {
-                matches!(refusal, ProcessEnvRefusal::DuplicateToolName { .. })
-            }),
         ];
         for (case, env, expected) in cases {
             let refusal = world
@@ -1258,61 +1192,6 @@ mod named_component_laws {
             assert!(expected(&refusal), "{case}: {refusal:?}");
             assert!(!world.stored(&env).await, "{case}: nothing is stored");
         }
-        world.core.shutdown().await.expect("the core shuts down");
-    }
-
-    /// AMBIENT-REFUSED (D7).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn an_environment_with_ambient_tools_is_refused_wherever_it_is_stated() {
-        let world = world().await;
-        let ambient = ambient_env();
-        assert_eq!(
-            world.publish(&ambient).await,
-            Err(ProcessEnvRefusal::AmbientTools)
-        );
-        assert!(!world.stored(&ambient).await, "nothing is stored");
-
-        *world.stated.lock_recover() = Stated::Ambient;
-        let value = world
-            .run(
-                "ambient-starts",
-                &format!(
-                    "const body = async () => 1;\n\
-                     let started; try {{ await processes.start({{ definition: body }}); started = \"started\"; }} catch (e) {{ started = String(e?.message ?? e); }}\n\
-                     let isolated; try {{ await tools.{ISOLATED_TOOL}({{}}); isolated = \"ran\"; }} catch (e) {{ isolated = String(e?.message ?? e); }}\n\
-                     await control.finish({{ started: started, isolated: isolated }});"
-                ),
-            )
-            .await;
-        for start in ["started", "isolated"] {
-            let answer = value[start].as_str().unwrap_or_default();
-            assert!(
-                answer.contains("ambient"),
-                "the {start} start is the call's tool error: {value}"
-            );
-        }
-        let processes = world
-            .core
-            .processes()
-            .list(
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
-                    ..Default::default()
-                },
-                std::num::NonZeroUsize::new(4).unwrap(),
-                None,
-            )
-            .await
-            .expect("the processes list")
-            .processes;
-        assert!(processes.is_empty(), "no start registered: {processes:?}");
-
-        let restricted = env_of(&[A]);
-        world
-            .publish(&restricted)
-            .await
-            .expect("restricted access passes");
-        assert!(world.stored(&restricted).await);
         world.core.shutdown().await.expect("the core shuts down");
     }
 
@@ -1370,14 +1249,13 @@ mod named_component_laws {
     async fn may_address_process(
         processes: &lash::process::Processes,
         id: &lash::ProcessId,
-        current: &lash::plugins::SessionToolAccess,
         offered: &lash::plugins::ToolCatalog,
     ) -> lash::Result<bool> {
         Ok(match processes.environment(id).await? {
             Some(lash::process::ProcessEnvView {
                 authority: lash::process::ProcessAuthority::Engine { env, .. },
                 ..
-            }) => lash::process::authority::tools_excess(&env, current, offered).is_empty(),
+            }) => lash::process::authority::tools_excess(&env, offered).is_empty(),
             _ => false,
         })
     }
@@ -1451,13 +1329,12 @@ mod named_component_laws {
         assert_eq!(Some(env_ref), record.env_ref());
         assert_eq!(engine_settings.as_ref(), record.engine_settings());
         assert_eq!(
-            env.tools()
-                .restricted_tools()
-                .unwrap()
+            env.effects()
                 .iter()
-                .map(|tool| tool.manifest.name.as_str())
-                .collect::<std::collections::BTreeSet<_>>(),
-            [A_TOOL, "b"].into_iter().collect()
+                .map(|(effect, link)| (effect.to_string(), link.tool().to_string()))
+                .collect::<Vec<_>>(),
+            [(format!("tools.{A_TOOL}"), format!("tool:{A_TOOL}"))],
+            "the env links exactly the effect the process performs"
         );
         let before = reads.calls.load(Ordering::SeqCst);
         assert_eq!(
@@ -1469,48 +1346,12 @@ mod named_component_laws {
             1,
             "one read by reference"
         );
-        let session = world
-            .core
-            .session(lash::SessionId::try_from("authority-session").unwrap())
-            .open()
-            .await
-            .unwrap();
-        let current = lash::plugins::SessionToolAccess::restricted([a_definition(A_TOOL)]).unwrap();
-        let config = session.admin().config();
-        let revision = config.revision().await.unwrap();
-        let changed = config
-            .apply(
-                lash::config::ConfigWrite::new("authority:narrow", revision),
-                lash::config::ConfigTransaction::of(lash::config::SetToolAccess {
-                    access: current.clone(),
-                }),
-            )
-            .await
-            .unwrap();
-        let changed = tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            changed.await_outcome(&config),
-        )
-        .await
-        .expect("the engine settles the narrowing")
-        .unwrap();
-        assert!(
-            matches!(
-                changed,
-                lash::config::ConfigTransactionOutcome::Applied { .. }
-            ),
-            "{changed:?}"
-        );
-        let current = session.durable().tool_access().await.unwrap().unwrap();
+        // The host's current offer no longer names A's tool: the read
+        // reports the linked effect as excess, by path and tool.
         let offered = lash::plugins::ToolCatalog::from_tool_definitions(vec![
-            a_definition(A_TOOL),
             a_definition("b"),
             a_definition("c"),
         ]);
-        assert_eq!(
-            current.admitted_names(&offered),
-            [A_TOOL.to_owned()].into_iter().collect()
-        );
         assert_eq!(
             world
                 .core
@@ -1521,11 +1362,25 @@ mod named_component_laws {
             Some(view.clone())
         );
         assert_eq!(
-            lash::process::authority::tools_excess(env, &current, &offered),
-            ["b".to_owned()].into_iter().collect()
+            lash::process::authority::tools_excess(env, &offered),
+            [lash::process::authority::ExcessLink {
+                effect: format!("tools.{A_TOOL}"),
+                tool: lash::tools::ToolId::from(format!("tool:{A_TOOL}")),
+            }]
+            .into_iter()
+            .collect()
         );
         assert!(
-            !may_address_process(&world.core.processes(), &record.id, &current, &offered)
+            !may_address_process(&world.core.processes(), &record.id, &offered)
+                .await
+                .unwrap()
+        );
+        let offering_a = lash::plugins::ToolCatalog::from_tool_definitions(vec![
+            a_definition(A_TOOL),
+            a_definition("b"),
+        ]);
+        assert!(
+            may_address_process(&world.core.processes(), &record.id, &offering_a)
                 .await
                 .unwrap()
         );
@@ -1588,24 +1443,15 @@ mod named_component_laws {
             world.witness.builds(A) > builds,
             "catalog preview deliberately builds components"
         );
-        assert!(matches!(
-            world.core.host_artifacts().process_catalog(&ambient_env()),
-            Err(lash::EmbedError::Plugin(PluginError::ProcessEnvRefused {
-                refusal: ProcessEnvRefusal::AmbientTools
-            }))
-        ));
         let capability = lash::CapabilityRef {
             binding: lash::BindingId::new("binding:promoted"),
             contract: lash::ContractRef::new("integration", 3),
             args: serde_json::json!({"account": "promoted"}),
         };
-        let recorded = ProcessEnv::builder(
-            lash::plugins::SessionToolAccess::restricted([]).unwrap(),
-            lash::MaxToolCalls::new(2),
-        )
-        .capability(lash::SlotId::new("integration"), capability.clone())
-        .build()
-        .unwrap();
+        let recorded = ProcessEnv::builder(lash::MaxToolCalls::new(2))
+            .capability(lash::SlotId::new("integration"), capability.clone())
+            .build()
+            .unwrap();
         let reference = world
             .core
             .host_artifacts()
@@ -1646,84 +1492,65 @@ mod named_component_laws {
         assert_eq!(world.witness.builds(A), builds);
     }
 
-    /// D7: resolved catalog membership and exact hiding, including a mismatched id.
+    /// D7 over effects (P7): a linked effect is within the host's offer when
+    /// the offer holds the linked tool id with the same dispatch surface.
+    /// The model-facing name, the binding path and the provider that serves
+    /// it are not authority; another id or a changed surface is excess.
     #[test]
-    fn admitted_names_obey_the_offered_catalog_and_hidden_names() {
-        use lash::plugins::{SessionToolAccess, ToolCatalog};
-        let offered = ToolCatalog::from_tool_definitions(vec![
-            a_definition("a"),
-            a_definition("b"),
-            a_definition("c"),
-        ]);
-        for (access, expected) in [
-            (SessionToolAccess::ambient(), vec!["a", "b", "c"]),
-            (
-                SessionToolAccess::ambient()
-                    .with_hidden_tools(["b"])
-                    .unwrap(),
-                vec!["a", "c"],
-            ),
-            (
-                SessionToolAccess::restricted([
-                    a_definition("a"),
-                    a_definition("b"),
-                    a_definition("missing"),
-                ])
-                .unwrap(),
-                vec!["a", "b"],
-            ),
-            (
-                SessionToolAccess::restricted([a_definition("a"), a_definition("b")])
-                    .unwrap()
-                    .with_hidden_tools(["b"])
-                    .unwrap(),
-                vec!["a"],
-            ),
-        ] {
-            assert_eq!(
-                access.admitted_names(&offered),
-                expected.into_iter().map(str::to_owned).collect()
-            );
-        }
+    fn linked_effects_obey_the_offered_tool_identity_and_surface() {
+        use lash::plugins::ToolCatalog;
+        use lash::process::authority::{ExcessLink, tools_excess, tools_within};
+        let env = ProcessEnv::builder(lash::MaxToolCalls::new(2))
+            .component(A, &())
+            .link_tool(A.tool_provider("tools"), &a_definition("a"))
+            .build()
+            .unwrap();
+        let excess: std::collections::BTreeSet<_> = [ExcessLink {
+            effect: "tools.a".to_owned(),
+            tool: lash::tools::ToolId::from("tool:a"),
+        }]
+        .into_iter()
+        .collect();
+
+        let offered =
+            ToolCatalog::from_tool_definitions(vec![a_definition("a"), a_definition("b")]);
+        assert!(tools_within(&env, &offered));
+        let mut renamed = a_definition("a");
+        renamed.manifest.name = "renamed".into();
+        assert!(
+            tools_within(&env, &ToolCatalog::from_tool_definitions(vec![renamed])),
+            "a new model-facing name is not authority"
+        );
         let mut other_id = a_definition("a");
         other_id.manifest.id = "other:a".into();
-        assert!(
-            SessionToolAccess::restricted([other_id])
-                .unwrap()
-                .admitted_names(&offered)
-                .is_empty()
-        );
-        let mut changed_identity = a_definition("a");
-        changed_identity.manifest.id = "other:a".into();
-        let absent_identity = ProcessEnv::builder(
-            SessionToolAccess::restricted([changed_identity]).unwrap(),
-            lash::MaxToolCalls::new(2),
-        )
-        .build()
-        .unwrap();
         assert_eq!(
-            lash::process::authority::tools_excess(
-                &absent_identity,
-                &SessionToolAccess::ambient(),
-                &offered
-            ),
-            ["a".to_owned()].into_iter().collect(),
-            "a same-name tool with another id is absent from offered"
+            tools_excess(&env, &ToolCatalog::from_tool_definitions(vec![other_id])),
+            excess,
+            "a same-name tool with another id does not offer the link"
         );
-        let env = ProcessEnv::builder(
-            SessionToolAccess::restricted([a_definition("a"), a_definition("missing")]).unwrap(),
-            lash::MaxToolCalls::new(2),
+        let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+        let changed = lash::tools::ToolDefinition::raw(
+            "tool:a",
+            "a",
+            "Answers `a`.",
+            serde_json::json!({
+                "type": "object",
+                "properties": { "x": { "type": "string" } },
+                "required": ["x"]
+            }),
+            object,
         )
-        .build()
-        .unwrap();
+        .expect("the tool's schemas")
+        .with_execution(std::time::Duration::from_secs(60))
+        .with_tool_binding(lash::tools::ToolBinding::new(["tools"], "a"));
         assert_eq!(
-            lash::process::authority::tools_excess(&env, &SessionToolAccess::ambient(), &offered),
-            ["missing".to_owned()].into_iter().collect()
+            tools_excess(&env, &ToolCatalog::from_tool_definitions(vec![changed])),
+            excess,
+            "a changed surface under the same id does not offer the link"
         );
-        assert!(!lash::process::authority::tools_within(
+        assert!(!tools_within(
             &env,
-            &SessionToolAccess::ambient(),
-            &offered
+            &ToolCatalog::from_tool_definitions(Vec::new())
         ));
         let session = lash::SessionId::try_from("granted-session").unwrap();
         let capability = lash::CapabilityRef {
@@ -1732,14 +1559,11 @@ mod named_component_laws {
             args: serde_json::json!({"scope": "read"}),
         };
         let slot = lash::SlotId::new("integration");
-        let env = ProcessEnv::builder(
-            SessionToolAccess::restricted([]).unwrap(),
-            lash::MaxToolCalls::new(2),
-        )
-        .component_with_sessions(A, &(), [session.clone()])
-        .capability(slot.clone(), capability.clone())
-        .build()
-        .unwrap();
+        let env = ProcessEnv::builder(lash::MaxToolCalls::new(2))
+            .component_with_sessions(A, &(), [session.clone()])
+            .capability(slot.clone(), capability.clone())
+            .build()
+            .unwrap();
         let id = env.components()[0].id().clone();
         assert_eq!(
             lash::process::authority::components_excess(&env, &Default::default()),
@@ -1776,3 +1600,10 @@ mod named_component_laws {
         );
     }
 }
+
+#[path = "processes_evidence/link_laws.rs"]
+#[allow(
+    clippy::expect_used,
+    reason = "a law's setup failing is the law failing"
+)]
+mod link_laws;

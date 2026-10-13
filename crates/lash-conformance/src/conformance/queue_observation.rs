@@ -19,7 +19,6 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                    crate::SessionToolAccess::ambient(),
                 ),
                 head: crate::SessionCreationHead::Config,
                 retention: crate::Retention::UntilGc,
@@ -29,7 +28,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         if committed {
             let state = RuntimeSessionState {
                 session_id: session_id.clone(),
-                ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

@@ -8,11 +8,15 @@ struct NoopTools;
 
 #[async_trait::async_trait]
 impl ToolProvider for NoopTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         None
     }
 
@@ -34,7 +38,7 @@ fn test_execution_context_with_env_store(
     )
     .build_session(PluginSessionRequest::creation(
         "session",
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
@@ -44,7 +48,7 @@ fn test_execution_context_with_env_store(
         execution_budgets: (plugins).execution_budgets(),
         state: plugins,
         tools: Arc::new(NoopTools),
-        tool_registry: None,
+        routes: crate::SurfaceTools::default(),
         tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
         sessions: Arc::new(crate::testing::MockSessionManager::default()),
         session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),

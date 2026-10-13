@@ -178,7 +178,7 @@ pub async fn coordinate_tool_invocation<'run>(
                 record.provider_call_id = call.provider_call_id.clone();
                 let current = context
                     .tools
-                    .resolve_manifest_by_id(&call.tool_id)
+                    .resolve_manifest_by_id(&call.tool_id, &context.config)
                     .map_or(execution_policy, |manifest| manifest.execution_policy);
                 let retry_after = if execution_policy.permits_repeat(current, attempt) {
                     match &record.output.outcome {

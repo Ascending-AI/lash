@@ -188,13 +188,7 @@ fn assert_intro(request: &LlmRequest, expected: &str, how: &str) {
 /// Create `id` under the plan placing `key`.
 async fn create_placing(core: &LashCore, id: &str, key: &str) -> Result<()> {
     core.session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(
-            crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            )
-            .with_prompt_plan(placing(key)),
-        )
+        .create(crate::SessionCreation::root(mock_session_spec()).with_prompt_plan(placing(key)))
         .await?;
     Ok(())
 }
@@ -501,10 +495,7 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
         .serve_test_llm_profile(scripted_provider(&served, &script), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core
         .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
@@ -599,13 +590,7 @@ async fn facade_prompt_pool_and_limits_control_real_composition() -> Result<()> 
     });
     plan.limits.max_section_bytes = std::num::NonZeroU32::new(20_000).expect("limit");
     core.session(SessionId::from("pool-admitted"))
-        .create(
-            crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            )
-            .with_prompt_plan(plan.clone()),
-        )
+        .create(crate::SessionCreation::root(mock_session_spec()).with_prompt_plan(plan.clone()))
         .await?;
     let caller = std::thread::current().id();
     run(&core, "pool-admitted", "render on the host pool").await?;
@@ -620,13 +605,7 @@ async fn facade_prompt_pool_and_limits_control_real_composition() -> Result<()> 
     assert_eq!(served.lock_recover().len(), 2);
     plan.limits.max_section_bytes = std::num::NonZeroU32::MIN;
     core.session(SessionId::from("pool-refused"))
-        .create(
-            crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            )
-            .with_prompt_plan(plan),
-        )
+        .create(crate::SessionCreation::root(mock_session_spec()).with_prompt_plan(plan))
         .await?;
     let result = core
         .session(SessionId::from("pool-refused"))

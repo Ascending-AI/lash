@@ -175,13 +175,6 @@ pub enum RuntimeErrorCause {
     ConfigRefused {
         refusal: Box<crate::config_transaction::ConfigRefusal>,
     },
-    /// The restore report of a turn run refused under
-    /// `ToolSourcePolicy::Require` (FIG-5134): the typed half of
-    /// [`RuntimeErrorCode::ToolSourcesUnavailable`]. Its lost members are
-    /// what no registered source resolves.
-    ToolSourcesUnavailable {
-        report: Box<crate::tool_state::ToolRestoreReport>,
-    },
 }
 
 pub use lash_sansio::StoredDataCorruption;
@@ -224,35 +217,6 @@ impl RuntimeEffectControllerError {
     }
 }
 
-impl RuntimeEffectControllerError {
-    /// A turn run's refusal under `ToolSourcePolicy::Require` (FIG-5134):
-    /// `report` lost members no registered source resolves. Terminal by its
-    /// code on every path that carries it.
-    #[must_use]
-    pub fn tool_sources_unavailable(
-        session_id: &SessionId,
-        report: crate::tool_state::ToolRestoreReport,
-    ) -> Self {
-        let mut error = Self::new(
-            RuntimeErrorCode::ToolSourcesUnavailable,
-            format!(
-                "session `{session_id}` requires every persisted tool source: no registered \
-                 source resolves {}",
-                report
-                    .lost_members
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        );
-        error.cause = Some(RuntimeErrorCause::ToolSourcesUnavailable {
-            report: Box::new(report),
-        });
-        error
-    }
-}
-
 impl super::RuntimeError {
     /// The plugin-state refusal this error carries, if a plugin refused its
     /// own namespace's key, size or codec (FIG-5324).
@@ -260,16 +224,6 @@ impl super::RuntimeError {
     pub fn plugin_state_refusal(&self) -> Option<&crate::plugin_state::PluginStateError> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::PluginState { refusal } => Some(refusal),
-            _ => None,
-        }
-    }
-
-    /// The restore report of a run refused under `ToolSourcePolicy::Require`,
-    /// if this error is that refusal (FIG-5134).
-    #[must_use]
-    pub fn tool_sources_unavailable(&self) -> Option<&crate::tool_state::ToolRestoreReport> {
-        match self.cause.as_ref()? {
-            RuntimeErrorCause::ToolSourcesUnavailable { report } => Some(report),
             _ => None,
         }
     }

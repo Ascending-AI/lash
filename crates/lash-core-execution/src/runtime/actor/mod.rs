@@ -7,6 +7,7 @@
 //! clock, the cancel token, the replay probe and the due times) is real.
 
 pub mod activation_loop;
+pub mod claim_obligations;
 mod core;
 pub mod ingress;
 pub mod journal;

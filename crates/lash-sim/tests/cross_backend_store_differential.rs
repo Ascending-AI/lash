@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
@@ -28,7 +27,7 @@ use lash_core::{
     QueuedWorkAuthority, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
     SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
-    ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
+    TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
 use lash_core_store::plugin_state::{NamespaceBody, PluginStateMap, namespace_component_key};
 use lash_postgres_store::PostgresStorage;
@@ -572,7 +571,7 @@ fn runtime_commit(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -606,11 +605,6 @@ const DIFFERENTIAL_PLUGIN: &str = "differential-plugin";
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
-    let tool_state = serde_json::from_value::<ToolState>(serde_json::json!({
-        "generation": 7,
-        "tools": {}
-    }))
-    .expect("build differential tool state");
     // The head's namespace map names each namespace's values body by content
     // address, and the body is a component of its own.
     let namespace = PluginNamespaceState {
@@ -634,12 +628,6 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         .collect(),
     };
     let components = [
-        (
-            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
-            lash_core::HydratedCheckpointComponent::changed(
-                rmp_serde::to_vec_named(&tool_state).expect("encode differential tool state"),
-            ),
-        ),
         (
             lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
             lash_core::HydratedCheckpointComponent::changed(
@@ -898,7 +886,6 @@ impl BackendRunner {
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
@@ -935,7 +922,6 @@ impl BackendRunner {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(provider, model)
@@ -1096,7 +1082,6 @@ impl BackendRunner {
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                            lash_core::SessionToolAccess::ambient(),
                         ),
                         retention: lash_core::Retention::UntilGc,
                     })
@@ -1248,22 +1233,6 @@ impl BackendRunner {
                     .expect("cold-reopened session must hydrate its checkpoint");
                 let expected = checkpoint_bodies();
                 assert_eq!(
-                    checkpoint
-                        .decode_component::<ToolState>(
-                            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
-                        )?
-                        .as_ref()
-                        .map(ToolState::generation),
-                    expected
-                        .decode_component::<ToolState>(
-                            lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT,
-                        )?
-                        .as_ref()
-                        .map(ToolState::generation),
-                    "{} cold reopen must rehydrate the tool-state body",
-                    self.name
-                );
-                assert_eq!(
                     checkpoint.decode_component::<PluginStateMap>(
                         lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
                     )?,
@@ -1398,7 +1367,7 @@ impl BackendRunner {
                     .expect("generated sequence creates handle before commit");
                 let state = RuntimeSessionState {
                     session_id: self.session_id.clone(),
-                    ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                    ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
@@ -1511,7 +1480,6 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,
@@ -1670,7 +1638,6 @@ async fn runners_for_case_with_clock(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,

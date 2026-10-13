@@ -100,20 +100,6 @@ impl CurrentOwnerCapability {
         ))
     }
 
-    pub(in crate::runtime::session_manager) fn current_tool_registry(
-        &self,
-    ) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
-        match &self.owner {
-            super::CurrentOwner::Process {
-                engine: Some(engine),
-                ..
-            } => Ok(Arc::clone(&engine.composition.registry)),
-            _ => Ok(self
-                .session_plugins("current_tool_registry")?
-                .tool_registry()),
-        }
-    }
-
     pub(in crate::runtime::session_manager) async fn snapshot_current(
         &self,
     ) -> Result<SessionSnapshot, crate::PluginError> {
@@ -140,26 +126,6 @@ impl CurrentOwnerCapability {
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.shared_tool_catalog_by_id(session_id).await
-    }
-
-    pub(in crate::runtime::session_manager) async fn tool_state(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::ToolState, crate::PluginError> {
-        self.known_session(session_id)?;
-        Ok(self.current_tool_registry()?.export_state())
-    }
-
-    pub(in crate::runtime::session_manager) async fn apply_tool_state(
-        &self,
-        session_id: &SessionId,
-        snapshot: crate::ToolState,
-    ) -> Result<u64, crate::PluginError> {
-        self.known_session(session_id)?;
-        let tool_registry = self.current_tool_registry()?;
-        tool_registry
-            .apply_state(snapshot)
-            .map_err(|err| crate::PluginError::Session(err.to_string()))
     }
 
     pub(in crate::runtime::session_manager) async fn emit_trace_event(

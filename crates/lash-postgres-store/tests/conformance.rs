@@ -155,15 +155,6 @@ async fn postgres_lineage_handles() -> Option<(IsolatedDatabase, LineageConforma
     Some((database_fixture, handles))
 }
 
-lash_conformance::tool_access_persistence_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!("skipping Postgres tool-access recovery: database URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    (database_fixture, Arc::new(storage.session_store_factory()))
-});
-
 lash_conformance::fence_integrity_tests!({
     let Some(database_url) = database_url() else {
         eprintln!("skipping Postgres fence-integrity conformance: database is not configured");
@@ -566,7 +557,6 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: lash_core_execution::SessionCreationHead::Config,
             retention: lash_core_execution::Retention::UntilGc,
@@ -596,7 +586,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("stamp turn-owned upload");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(SESSION_ID.to_string()),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

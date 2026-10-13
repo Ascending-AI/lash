@@ -125,6 +125,10 @@ store_error_samples! {
         found: 1,
         current: 2,
     },
+    RetiredStoredShape { .. } => StoreError::RetiredStoredShape {
+        record_kind: "sampled",
+        shape: "sampled",
+    },
     Incompatible { .. } => StoreError::Incompatible {
         refusal: crate::compat::CompatRefusal::Unstamped {
             component: "sampled".to_string(),

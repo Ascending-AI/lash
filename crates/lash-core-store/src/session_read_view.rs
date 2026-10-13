@@ -373,8 +373,6 @@ impl SessionReadMeta {
             token_usage: self.token_usage.clone(),
             last_prompt_usage: self.last_prompt_usage.clone(),
             plugin_config: self.plugin_config.clone(),
-            tool_state_ref: None,
-            tool_state_generation: None,
             plugin_state_ref: None,
             plugin_state_generations: Default::default(),
             execution_state_ref: None,

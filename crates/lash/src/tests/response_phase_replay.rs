@@ -25,7 +25,7 @@ fn callback_session(
     )
     .build_session(lash_core::plugin::PluginSessionRequest::creation(
         "recorded-response-plan",
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     ))
     .expect("materialize the callback registry")
 }

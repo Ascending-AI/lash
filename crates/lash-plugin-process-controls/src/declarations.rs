@@ -242,7 +242,6 @@ pub async fn execute_process_start_tool_call(
         Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
     };
     let declaration = lash_core::ProcessStartDeclaration::definition(
-        resolved.definition_id.clone(),
         Some(resolved.signature.clone()),
         resolved.args.clone(),
         launch,

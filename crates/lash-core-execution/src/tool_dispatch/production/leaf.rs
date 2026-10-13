@@ -10,7 +10,7 @@ fn encoding(message: String) -> SingletonRunError {
 
 impl ProductionToolHandlers<'_> {
     /// The definition a tool leaf is admitted under: its recorded binding,
-    /// its grant's, or the catalog's.
+    /// its match's, or its surface entry's.
     pub(super) fn leaf_definition(
         &self,
         invocation: &crate::session::tool_execution::ToolInvocation,
@@ -30,14 +30,10 @@ impl ProductionToolHandlers<'_> {
             })
             .or_else(|| {
                 self.context
-                    .tool_catalog()
-                    .tools
-                    .iter()
-                    .find(|definition| definition.manifest.id == invocation.tool_id)
-                    .map(|entry| crate::ToolDefinition {
-                        manifest: entry.manifest.clone(),
-                        contract: entry.contract.as_ref().clone(),
-                    })
+                    .dispatch()
+                    .routes
+                    .entry(&invocation.tool_id)
+                    .map(|entry| entry.definition.clone())
             })
     }
 
@@ -59,7 +55,12 @@ impl ProductionToolHandlers<'_> {
             .context
             .dispatch()
             .composition
-            .tool_run_binding(&invocation.tool_id, granted)
+            .tool_run_binding(
+                &invocation.tool_id,
+                self.context
+                    .dispatch()
+                    .routed_provider(&invocation.tool_id, granted),
+            )
             .map_err(crate::RuntimeEffectControllerError::from)?;
         let mut attribution = attribution.clone();
         if invocation.issuing_language_node_id.is_some() {

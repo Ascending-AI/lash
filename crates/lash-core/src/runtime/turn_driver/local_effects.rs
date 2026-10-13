@@ -166,7 +166,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     match runner.driver.refresh_execution_environment().await {
                         Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
                         Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
-                            (Err(failure), Vec::new())
+                            (Err(failure), crate::RecordedSurface::default())
                         }
                         Err(super::tool_catalog::SyncFailure::Live(error)) => {
                             let terminal = error.is_terminal();
@@ -287,6 +287,7 @@ pub(super) fn turn_effect_executor(
         admitted_body: driver.admitted_body.take(),
         model_attempt: driver.model_attempt,
         run_config: driver.run_config.clone(),
+        surface_installed: driver.surface_installed,
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {

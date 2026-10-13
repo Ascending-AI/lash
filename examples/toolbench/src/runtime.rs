@@ -275,7 +275,6 @@ async fn run_turn(
     };
     core.session(session_id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             session_spec
                 .no_progress_budget(lash::NoProgressBudget::Unbounded)
                 .plugin_options(plugin_options),
@@ -409,8 +408,7 @@ fn build_turn_core(
         })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("toolbench"), lash::persistence::LeaseIncarnationId::new(format!("run-{run}-typescript-{}", task.id))))
         .context("build Lash core")?;
     // The run's session spec: the bench's one model under the task's turn

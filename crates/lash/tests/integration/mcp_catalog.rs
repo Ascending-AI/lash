@@ -117,7 +117,6 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             "advertised-surface",
             lash_core::plugin::SessionAuthorityContext {
                 plugin_config: lash_core::AdmittedPluginConfig::new(plugin_config, 0),
-                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("created session");
@@ -148,7 +147,6 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         &snapshot,
         lash_core::plugin::SessionAuthorityContext {
             plugin_config: config,
-            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ))
     .expect("reopened session");
@@ -182,7 +180,15 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             .contract)
             .clone(),
     };
-    let drift = lash_core::ToolSurfaceDrift::judge(&recorded_definition, &live)
+    let served = live
+        .tools
+        .iter()
+        .find(|entry| entry.manifest.id == recorded_definition.manifest.id)
+        .map(|entry| lash_core::ToolDefinition {
+            manifest: entry.manifest.clone(),
+            contract: (*entry.contract).clone(),
+        });
+    let drift = lash_core::ToolSurfaceDrift::judge(&recorded_definition, served.as_ref())
         .expect("a recorded tool the advertisement dropped drifts");
     assert_eq!(drift.kind, lash_core::ToolSurfaceDriftKind::Missing);
     // The server's guidance section renders the guidance the offered
@@ -285,7 +291,6 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
                 surface,
                 lash_core::plugin::SessionAuthorityContext {
                     plugin_config: lash_core::AdmittedPluginConfig::new(plugin_config, 0),
-                    ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .expect("prompt session");
@@ -534,7 +539,6 @@ async fn turn_witness(store: Store, failure_law: bool) {
         })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(factory.clone())

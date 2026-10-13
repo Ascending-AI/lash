@@ -40,6 +40,7 @@ pub(crate) fn test_config_with_termination(
     termination: lash_core::TerminationMode,
 ) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(recorded_namespace(RlmCreateExtras {
+        finish_value_schema: None,
         termination: Some(termination),
         render: None,
     }))
@@ -54,6 +55,7 @@ pub(crate) fn test_config_with_termination(
 )]
 pub(crate) fn recorded_namespace(options: RlmCreateExtras) -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::typed(lash_protocol_rlm::RlmRecordedConfig {
+        finish_value_schema: None,
         render: options.render,
         termination: options.termination,
         channel: Some(lash_protocol_rlm::RlmChannel::Cell),
@@ -590,7 +592,7 @@ impl RlmProtocolScenario {
                 )
                 .build_session(PluginSessionRequest::creation(
                     "rlm-protocol-scenario-hooks",
-                    lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+                    lash_core::plugin::SessionAuthorityContext::fixture(),
                 ))
                 .unwrap_or_else(|err| {
                     panic!("{} failed to register plugin hooks: {err}", self.name)

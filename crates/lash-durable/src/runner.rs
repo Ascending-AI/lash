@@ -352,6 +352,12 @@ impl Owned {
         self.claimed.purpose
     }
 
+    /// The claim requirements the actor carried when it was claimed.
+    #[must_use]
+    pub fn requires(&self) -> &[String] {
+        &self.claimed.requires
+    }
+
     /// Whether the node is draining: the activation releases the actor
     /// `ready` at its next committed phase, under `drain.release`, instead
     /// of starting more work.

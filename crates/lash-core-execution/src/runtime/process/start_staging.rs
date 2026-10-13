@@ -35,8 +35,8 @@ use super::{
 };
 use crate::{
     ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactStoreId, ModuleArtifactStore,
-    ReferrerClaim, ReferrerGuard, RuntimeEffectControllerError, StartKey, TurnFailureCause,
-    runtime::Clock, store::ArtifactCleanupLedger,
+    ProcessEnv, ReferrerClaim, ReferrerGuard, RuntimeEffectControllerError, StartKey,
+    TurnFailureCause, runtime::Clock, store::ArtifactCleanupLedger,
 };
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
@@ -761,8 +761,14 @@ async fn stage<'a>(
     let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
     let (definition, mut registration) = resolve_start_target(stores, &claim, registration).await?;
     check_sealed_settings(stores, &registration)?;
-    registration.requires = stage_requirements(stores, env.as_ref()).await?;
+    let loaded = load_staged_env(stores, env.as_ref()).await?;
+    registration.requires = loaded
+        .as_ref()
+        .map(crate::plugin::ProcessComponentDeclaration::env_requirements)
+        .unwrap_or_default();
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
+    // The engine's artifacts are held: its effects are read from them.
+    link_start(stores, loaded.as_ref(), &registration).await?;
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
     let submitted_input = Arc::clone(&registration.input);
     let prepared = stores
@@ -1131,15 +1137,14 @@ async fn stage_env(
     Ok(Some(env))
 }
 
-/// The claim requirements a process under the staged environment carries:
-/// its components' config tokens (§6.2). The environment is held, so its
-/// bytes are read back verified.
-async fn stage_requirements(
+/// The staged environment, read back verified: it is held. A process under
+/// it requires its components' config tokens (§6.2).
+async fn load_staged_env(
     stores: &ProcessStartStores<'_>,
     env: Option<&StagedEnv>,
-) -> Result<Vec<String>, RuntimeEffectControllerError> {
+) -> Result<Option<ProcessEnv>, RuntimeEffectControllerError> {
     let (Some(env), Some(env_store)) = (env, stores.env_store) else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     let loaded = crate::runtime::load_process_env(env_store.as_ref(), &env.env_ref)
         .await
@@ -1150,7 +1155,36 @@ async fn stage_requirements(
                 error,
             )
         })?;
-    Ok(crate::plugin::ProcessComponentDeclaration::env_requirements(&loaded))
+    Ok(Some(loaded))
+}
+
+/// The link check of an engine start (P1): its env links exactly the
+/// effects its engine says the payload performs, each fitting, and this
+/// node's components serve each link with its retained surface. Repeat-safe:
+/// a redrive under the same key checks the same pair.
+async fn link_start(
+    stores: &ProcessStartStores<'_>,
+    env: Option<&ProcessEnv>,
+    registration: &ProcessRegistration,
+) -> Result<(), RuntimeEffectControllerError> {
+    let (ProcessInput::Engine { kind, payload, .. }, Some(env)) =
+        (registration.input.as_ref(), env)
+    else {
+        return Ok(());
+    };
+    let refused = |refusal| crate::PluginError::ProcessEnvRefused { refusal };
+    let performed = stores
+        .engines
+        .performed_effects(kind, payload)
+        .await
+        .map_err(refused)?;
+    super::check_links(env, &performed, &std::collections::BTreeMap::new()).map_err(refused)?;
+    stores
+        .engines
+        .components()
+        .check_served(&Arc::new(env.clone()))
+        .map_err(refused)?;
+    Ok(())
 }
 
 /// The engine of an engine start checks the settings its starter sealed,

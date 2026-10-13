@@ -3,44 +3,19 @@ use std::sync::Arc;
 
 use super::*;
 
+/// A surface built from what a run's providers advertise under its config
+/// (S4): the surface to record, and the catalog its model calls offer.
 #[derive(Clone)]
 pub struct ResolvedToolSurface {
-    pub registry: Arc<crate::ToolRegistry>,
+    pub surface: Arc<crate::RecordedSurface>,
     pub catalog: Arc<crate::ToolCatalog>,
 }
 
 impl PluginSession {
-    /// Pin this plugin session's resolved tool surface: its registry and the
-    /// catalog its owner's calls resolve against.
+    /// The surface this plugin session's providers offer under its admitted
+    /// configuration.
     pub fn pin_resolved_tool_surface(&self) -> Result<ResolvedToolSurface, PluginError> {
-        let registry = Arc::new(
-            self.capabilities()
-                .tool_registry
-                .pin_session_surface()
-                .map_err(|error| {
-                    PluginError::Session(format!("failed to pin direct tool surface: {error}"))
-                })?,
-        );
-        let provider = Arc::clone(&registry) as Arc<dyn crate::ToolProvider>;
-        let tools = provider.tool_manifests();
-        let contract_provider = Arc::clone(&provider);
-        let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |manifest: &ToolManifest| {
-                contract_provider.resolve_contract_by_id(&manifest.id)
-            });
-        let authority = self.live_authority();
-        let catalog = self.resolve_tool_catalog(ToolCatalogContext {
-            owner: self.owner.clone(),
-            tools,
-            resolve_contract: Some(Arc::clone(&resolve_contract)),
-            tool_access: authority.tool_access,
-            extensions: self.extensions.clone(),
-        })?;
-        registry.validate_resident_catalog_routes(&catalog)?;
-        Ok(ResolvedToolSurface {
-            registry,
-            catalog: Arc::new(catalog),
-        })
+        self.build_tool_surface(&self.admitted_plugin_config())
     }
 
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, PluginError> {
@@ -56,40 +31,32 @@ impl PluginSession {
         ))
     }
 
-    /// The catalog a session's calls resolve against when `tools` is its
-    /// live provider: the registry's manifests and contracts through this
-    /// session's catalog contributions and `tool_access`. It is
-    /// what a recorded tool is judged against by a turn's recorded surface
-    /// and the logical Run's recorded admission.
-    pub fn resolve_live_tool_catalog(
+    /// Build the surface in one place (S4): every provider advertises under
+    /// `config`, the catalog contributors remove candidates, two tools under
+    /// one model-facing name are refused naming both tools and providers,
+    /// and what remains is the surface a run records, with the session's
+    /// deferred provider.
+    ///
+    /// # Errors
+    ///
+    /// A provider's advertisement, a contributor or the catalog build
+    /// refused, or the surface collides ([`PluginError::ToolSurfaceRefused`]).
+    pub fn build_tool_surface(
         &self,
-        tools: Arc<dyn crate::ToolProvider>,
-        tool_access: crate::SessionToolAccess,
-    ) -> Result<crate::ToolCatalog, PluginError> {
-        let manifests = tools.tool_manifests();
-        let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |manifest: &ToolManifest| tools.resolve_contract_by_id(&manifest.id));
-        self.resolve_tool_catalog(ToolCatalogContext {
-            owner: self.owner.clone(),
-            tools: manifests,
-            resolve_contract: Some(resolve_contract),
-            tool_access,
-            extensions: self.extensions.clone(),
-        })
-    }
-
-    pub fn resolve_tool_catalog(
-        &self,
-        ctx: ToolCatalogContext,
-    ) -> Result<crate::ToolCatalog, PluginError> {
+        config: &super::AdmittedPluginConfig,
+    ) -> Result<ResolvedToolSurface, PluginError> {
+        let view = super::OwnerConfigView::session(config.clone());
+        let advertised = self.capabilities().tool_registry.advertise(&view)?;
         let mut contributions = collect_owned_sync(
             self.composition().tool_catalog_contributors(),
             ToolCatalogContext {
-                owner: ctx.owner.clone(),
-                tools: ctx.tools.clone(),
-                resolve_contract: ctx.resolve_contract.clone(),
-                tool_access: ctx.tool_access.clone(),
-                extensions: ctx.extensions.clone(),
+                owner: self.owner.clone(),
+                tools: advertised
+                    .iter()
+                    .map(|entry| entry.definition.manifest.clone())
+                    .collect(),
+                config: view,
+                extensions: self.extensions.clone(),
             },
             |hook, ctx| hook(ctx),
         )?
@@ -97,60 +64,74 @@ impl PluginSession {
         .map(|owned| owned.value)
         .collect::<Vec<_>>();
         contributions.push(self.tool_catalog_overlay.clone());
-        let (tools, resolve_contract) = if let Some(definitions) =
-            ctx.tool_access.restricted_tools()
-        {
-            let definitions = Arc::new(definitions.to_vec());
-            (
-                definitions.iter().map(|tool| tool.manifest()).collect(),
-                Some(Arc::new(move |manifest: &ToolManifest| {
-                    definitions
-                        .iter()
-                        .find(|tool| {
-                            tool.manifest.id == manifest.id && tool.manifest.name == manifest.name
-                        })
-                        .map(|tool| Arc::new(tool.contract()))
-                }) as lash_sansio::ToolContractResolver),
-            )
-        } else {
-            (ctx.tools, ctx.resolve_contract)
-        };
-        let authority_hidden_tools = tools
-            .iter()
-            .filter(|tool| ctx.tool_access.hides(&tool.name))
-            .map(|tool| tool.name.clone())
+        let removed = contributions
+            .into_iter()
+            .flat_map(|contribution| contribution.remove)
             .collect::<BTreeSet<_>>();
-        if !authority_hidden_tools.is_empty() {
-            contributions.push(ToolCatalogContribution {
-                remove: authority_hidden_tools.into_iter().collect(),
+        let entries = advertised
+            .into_iter()
+            .filter(|entry| !removed.contains(&entry.definition.manifest.name))
+            .collect::<Vec<_>>();
+        let surface = crate::RecordedSurface::new(entries, self.composition().deferred_key())
+            .map_err(|refusal| PluginError::ToolSurfaceRefused {
+                refusal: Box::new(refusal),
+            })?;
+        let catalog = self.surface_catalog(&surface)?;
+        Ok(ResolvedToolSurface {
+            surface: Arc::new(surface),
+            catalog: Arc::new(catalog),
+        })
+    }
+
+    /// The catalog `surface`'s tools offer, validated as a resident catalog:
+    /// schemas usable, contracts present and isolation engines registered.
+    pub fn surface_catalog(
+        &self,
+        surface: &crate::RecordedSurface,
+    ) -> Result<crate::ToolCatalog, PluginError> {
+        let definitions = surface.definitions().cloned().collect::<Vec<_>>();
+        let tools = definitions
+            .iter()
+            .map(|definition| definition.manifest.clone())
+            .collect();
+        let resolve_contract: lash_sansio::ToolContractResolver =
+            Arc::new(move |manifest: &ToolManifest| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.manifest.id == manifest.id)
+                    .map(|definition| Arc::new(definition.contract.clone()))
             });
-        }
         crate::build_tool_catalog(crate::ToolCatalogBuildInput {
             tools,
-            resolve_contract,
-            contributions,
+            resolve_contract: Some(resolve_contract),
+            contributions: Vec::new(),
             isolation_engines: self.host.isolation_engines(),
         })
-        .map_err(|err| match err {
-            source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {
-                PluginError::UnusableToolSchema {
-                    source: Box::new(source),
-                }
+        .map_err(catalog_build_error)
+    }
+}
+
+/// A catalog build refusal as the plugin error it is.
+pub(crate) fn catalog_build_error(err: lash_sansio::ToolCatalogBuildError) -> PluginError {
+    match err {
+        source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {
+            PluginError::UnusableToolSchema {
+                source: Box::new(source),
             }
-            lash_sansio::ToolCatalogBuildError::MissingContract { tool_id, name } => {
-                PluginError::ResidentToolContractUnavailable { tool_id, name }
+        }
+        lash_sansio::ToolCatalogBuildError::MissingContract { tool_id, name } => {
+            PluginError::ResidentToolContractUnavailable { tool_id, name }
+        }
+        lash_sansio::ToolCatalogBuildError::DuplicateId { tool_id } => {
+            PluginError::ResidentToolDuplicateId { tool_id }
+        }
+        lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
+            PluginError::ResidentToolDuplicateName { name }
+        }
+        lash_sansio::ToolCatalogBuildError::RegistrationRefused { refusal } => {
+            PluginError::ToolRegistrationRefused {
+                source: Box::new(refusal),
             }
-            lash_sansio::ToolCatalogBuildError::DuplicateId { tool_id } => {
-                PluginError::ResidentToolDuplicateId { tool_id }
-            }
-            lash_sansio::ToolCatalogBuildError::DuplicateName { name } => {
-                PluginError::ResidentToolDuplicateName { name }
-            }
-            lash_sansio::ToolCatalogBuildError::RegistrationRefused { refusal } => {
-                PluginError::ToolRegistrationRefused {
-                    source: Box::new(refusal),
-                }
-            }
-        })
+        }
     }
 }

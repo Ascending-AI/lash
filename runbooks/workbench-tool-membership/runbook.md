@@ -1,15 +1,21 @@
-# Workbench tool catalogue membership
+# Workbench tool selection
 
 Read [RULES.md](../RULES.md) first. This economy browser referee uses the real
-`deepseek/deepseek-v4-flash` provider. It proves that an operator can remove and
-restore a tool through the browser, and that the model loses and regains that
-capability on subsequent turns. Mock inbox messages are the only tool effects.
+`deepseek/deepseek-v4-flash` provider. It proves that an operator can leave a
+tool out of the session's selection and offer it again through the browser,
+and that the model loses and regains that capability on subsequent turns.
+Mock inbox messages are the only tool effects.
+
+Which tools a session is offered is its providers' own config: the workbench's
+mail tools are offered under the workbench owner's `ToolSelection`, which the
+browser changes with the owner's `set_tools` config command
+(`POST /api/tools/selection`). There is no session-wide tool membership.
 
 The companion host law is
 `tests::tool_catalog_route_removes_and_restores_the_models_tool` on
 `//examples/agent-workbench:agent-workbench__unit_test`, over SQLite memory.
-It cross-checks HTTP membership writes, retained removed entries, active
-manifests, and the next provider request's current catalogue instructions.
+It cross-checks the HTTP selection writes, the listed tools a selection
+leaves out, and the next provider request's current catalogue instructions.
 
 ## Boot and evidence
 
@@ -24,15 +30,17 @@ served model from the turn trace, rather than trusting the environment.
 Use these three authorities at every checkpoint:
 
 - Page: the tools panel's labelled checkboxes, status, and rendered replies.
-- API: `/api/tools?session_id=<S>` (retained entries and pending changes),
-  `/api/state?session_id=<S>`, and `/api/accounts/test/inbox`.
+- API: `/api/tools?session_id=<S>` (each tool with `offered` and
+  `selectable`), `/api/state?session_id=<S>`, and
+  `/api/accounts/test/inbox`.
 - Disk: read `lash-sessions.db` without writing it. Follow `session_head`
-  into `session_revisions.checkpoint_ref` and read that `blobs` row, whose
-  content is one checkpoint-graph node's encoded envelope. The node's
-  component set maps `tool_state` to the component blob ref; decode the
-  referenced tool-state blob. Its entry and `member` bit must agree with the
-  API. An omitted `member` means true. Save the extracted entry with its head
-  revision, and save each phase's new `trace.jsonl` slice.
+  into `session_revisions.config_ref` and read that `blobs` row: the
+  session's recorded config. The workbench owner's namespace records the
+  selection as `tools: {"all_except": [...]}`; the tools it names must be
+  exactly the selectable tools the API lists with `offered: false`. No
+  recorded selection means every mail tool is offered. Save the extracted
+  namespace with its head revision, and save each phase's new `trace.jsonl`
+  slice.
 
 ## Initial capability
 
@@ -44,12 +52,13 @@ the model picker. The checkbox labelled `inbox__test__send` is checked.
 Save `01-present.png`, the API snapshot, disk entry, and new turn trace.
 Require a successful completed `inbox__test__send` tool call in the new trace.
 
-## Remove membership
+## Leave it out
 
 Uncheck that tool in the browser. Wait for the pending state to clear; do not
 interpret an accepted command as an applied change. The checkbox must stay
-listed, unchecked and available for restoration. Save `02-removed.png` and
-cross-check API and disk membership false.
+listed, unchecked and available to offer again. Save `02-removed.png` and
+cross-check the API (`offered: false`) and the disk selection, which names it
+in `all_except`.
 
 Send another browser turn: “If inbox.test.send is available, send title
 membership-disabled, text unavailable probe, and reply with its id. If it is
@@ -60,10 +69,10 @@ trace omits large outgoing request bodies; historical messages and the user's pr
 `03-unavailable.png`, the state/inbox snapshots and this turn's trace.
 Do not gate on the model's exact wording.
 
-## Restore membership
+## Offer it again
 
-Check the same retained checkbox. Wait for settlement and require API and
-disk membership true. Send a browser turn asking it to send title
+Check the same listed checkbox. Wait for settlement and require the API to
+list it `offered: true` and the disk selection to no longer name it. Send a browser turn asking it to send title
 membership-after, text restored through `inbox.test.send` and reply with its
 id. Require that message in the inbox and a successful completed
 `inbox__test__send` call in the new trace. Save `04-restored.png` and the corresponding API,
@@ -81,8 +90,8 @@ page/API/disk disagreement; save the failing checkpoint and report its stage.
 | Gate | Result | Evidence |
 | --- | --- | --- |
 | Initial tool is callable and advertised | | `01-present.png`, inbox, successful tool trace |
-| Browser removal persists and stays restorable | | `02-removed.png`, API, disk entry |
+| Leaving it out persists and stays selectable | | `02-removed.png`, API, disk selection |
 | Disabled model cannot send and produces no message | | `03-unavailable.png`, inbox, no send-tool trace |
-| Restoration advertises and executes the tool again | | `04-restored.png`, inbox, API, disk, trace |
-| Reload retains membership; mobile control fits | | `05-reloaded.png`, `06-mobile.png` |
+| Offering it again advertises and executes the tool | | `04-restored.png`, inbox, API, disk, trace |
+| Reload retains the selection; mobile control fits | | `05-reloaded.png`, `06-mobile.png` |
 | Operator can understand applied, pending and error states | | visible checkbox labels and status |

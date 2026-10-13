@@ -14,7 +14,6 @@ use lash_vm_runtime::ResolvedToolBinding;
 pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
 
-use crate::deferred::SharedDeferredToolResolver;
 use crate::executor::{CellServices, CodeModeExecutionState, execute_cell};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
@@ -260,7 +259,6 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) presentation: crate::RlmPresentationConfig,
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
-    pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
     /// The session-pinned transport programs arrive on. Carried with the
     /// services because the executor needs it to decide whether cell-delimiter
@@ -337,7 +335,6 @@ impl SessionDialect {
             events: Arc::default(),
             services: CodeModeDialectServices {
                 workers: lash_vm_client::service::Service::default(),
-                deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -790,7 +787,6 @@ impl DialectSession {
             &CellServices {
                 events: Arc::clone(&self.events),
                 workers: self.services.workers.clone(),
-                deferred_tool_resolver: self.services.deferred_tool_resolver.clone(),
                 execution_bounds: self.services.execution_bounds,
                 channel: self.services.channel,
                 code_renderer: self.services.code_renderer.clone(),
@@ -1224,7 +1220,6 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
         kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
         workers: lash_vm_client::service::Service::default(),
-        deferred_tool_resolver: None,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,

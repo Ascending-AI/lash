@@ -138,10 +138,7 @@ pub(crate) async fn open_created_session_from(
     let session_id = session_id.into();
     match core
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        .create(lash::SessionCreation::root(spec))
         .await
     {
         Ok(_)

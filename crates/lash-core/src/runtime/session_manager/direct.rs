@@ -459,7 +459,6 @@ mod tests {
             crate::testing::sqlite_memory_store_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
-            crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),
@@ -477,7 +476,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: crate::SessionId::fixture(SESSION_ID.to_string()),
                 policy: policy.clone(),
-                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

@@ -87,7 +87,7 @@ fn plugin_view_cannot_capture_foreign_namespace() {
     let session = host
         .defer_session(PluginSessionRequest::creation(
             "capture-owner",
-            SessionAuthorityContext::ambient_fixture(),
+            SessionAuthorityContext::fixture(),
         ))
         .unwrap();
     session.adopt_native_view(&bytes, fleet).unwrap();
@@ -181,10 +181,7 @@ fn plugin_view_cannot_capture_foreign_namespace() {
         Err(PluginError::Session(_))
     ));
     assert!(matches!(
-        view.fork_for_session(
-            "foreign-capture",
-            SessionAuthorityContext::ambient_fixture()
-        ),
+        view.fork_for_session("foreign-capture", SessionAuthorityContext::fixture()),
         Err(PluginError::Session(_))
     ));
     let full = session.committed_state().unwrap();
@@ -360,7 +357,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let result = host.build_session(PluginSessionRequest::rematerialization(
         "unreadable",
         &snapshot,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     assert!(
@@ -409,7 +406,6 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
         "bad-config",
         crate::plugin::SessionAuthorityContext {
             plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ));
     assert!(matches!(
@@ -588,7 +584,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
             let result = host.build_session(PluginSessionRequest::rematerialization(
                 "malformed",
                 &snapshot,
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ));
             assert!(
                 matches!(result, Err(crate::PluginError::State(_))),
@@ -623,7 +619,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let result = host.build_session(PluginSessionRequest::rematerialization(
         "unreadable-past",
         &snapshot,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ));
     let Err(crate::PluginError::Format(refusal)) = result else {
         panic!("a missing converter is a typed format refusal");
@@ -643,7 +639,6 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
         "unreadable-config",
         crate::plugin::SessionAuthorityContext {
             plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
         },
     ));
     assert!(
@@ -684,12 +679,12 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     for request in [
         PluginSessionRequest::creation(
             "wrong-owner-create",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ),
         PluginSessionRequest::rematerialization(
             "wrong-owner-reopen",
             &snapshot,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ),
     ] {
         let result = host.build_session(request);
@@ -734,7 +729,6 @@ fn plugin_formats_convert_only_in_recorded_transition() {
                 &snapshot,
                 crate::plugin::SessionAuthorityContext {
                     plugin_config: crate::AdmittedPluginConfig::new(config.clone(), 3),
-                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .unwrap();
@@ -873,14 +867,11 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
         .build_session(PluginSessionRequest::rematerialization(
             "parent",
             &durable,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
     let child = parent
-        .fork_for_session(
-            "child",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        )
+        .fork_for_session("child", crate::plugin::SessionAuthorityContext::fixture())
         .unwrap();
     assert_eq!(child.export_state(), parent.export_state());
     assert_eq!(
@@ -984,7 +975,7 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
         .defer_session(PluginSessionRequest::rematerialization(
             "admitted",
             &stored,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
     let record = host.transition_plugins(
@@ -1188,7 +1179,7 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     .build_session(PluginSessionRequest::rematerialization(
         "transition-owner",
         &base,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .unwrap();
     let before = session.export_state();
@@ -1310,7 +1301,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
             .isolated_registry()
             .defer_session(PluginSessionRequest::creation(
                 "read-only-owner",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .unwrap();
         session

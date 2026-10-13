@@ -5,7 +5,6 @@ mod process_lifecycle;
 mod process_replay;
 pub(crate) mod replay;
 
-use crate::facade_support::ToolStateFacadeOps;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -75,7 +74,7 @@ impl QueryPlugins {
                 view,
                 fleet: runtime.fleet_format(),
             }),
-            None => (runtime.is_store_backed() && runtime.state.tool_state_ref().is_some())
+            None => (runtime.is_store_backed() && runtime.state.checkpoint_ref.is_some())
                 .then_some(Self::Head(plugins)),
         }
     }
@@ -122,7 +121,6 @@ pub struct RuntimeObservation {
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     /// The committed turn index at publication time.
     pub turn_index: usize,
-    pub tool_state: Option<crate::ToolState>,
     /// The session's active tool catalog, or the capture error. One field —
     /// an error never travels with a catalog.
     pub tool_catalog: Result<Arc<Vec<serde_json::Value>>, String>,
@@ -145,7 +143,6 @@ impl RuntimeObservation {
     fn from_runtime(
         runtime: &LashRuntime,
         cursor: SessionCursor,
-        previous: Option<&RuntimeObservation>,
         revision: SessionRevision,
         read_view: crate::SessionReadView,
         authority_fingerprint: Vec<u8>,
@@ -153,38 +150,6 @@ impl RuntimeObservation {
         let tool_catalog = runtime
             .active_tool_catalog_shared()
             .map_err(|err| err.to_string());
-        let tool_state_generation = runtime
-            .resident_session
-            .is_valid()
-            .then(|| {
-                runtime
-                    .session
-                    .as_ref()
-                    .map(|session| session.plugins().tool_registry().generation())
-            })
-            .flatten();
-        let tool_state = match (
-            tool_state_generation,
-            previous.and_then(|observation| observation.tool_state.as_ref()),
-        ) {
-            (Some(generation), Some(snapshot)) if snapshot.generation() == generation => {
-                Some(snapshot.clone())
-            }
-            (Some(_), _) => match runtime.tool_state() {
-                Ok(state) => Some(state),
-                Err(err) => {
-                    tracing::warn!(
-                        session_id = %runtime.session_id(),
-                        error = %err,
-                        "failed to capture tool state for observation; omitting the snapshot",
-                    );
-                    None
-                }
-            },
-            // No registry is built here (FIG-4857): the session's tool state
-            // is what the adopted head recorded (FIG-5139).
-            (None, _) => runtime.state.tool_state_snapshot().cloned(),
-        };
         // A durable admission or command invalidates resident capabilities
         // until the async reload gate adopts the committed head. Publication
         // projects that head without consulting stale plugin services.
@@ -220,7 +185,6 @@ impl RuntimeObservation {
             read_view,
             current_frame_node_id: runtime.state.current_frame_node_id.clone(),
             turn_index: runtime.state.turn_index,
-            tool_state,
             tool_catalog,
             plugin_services,
             process_registry: runtime.host.process_registry().cloned(),
@@ -461,7 +425,6 @@ impl RuntimeHandle {
         let observation = RuntimeObservation::from_runtime(
             &runtime,
             cursor,
-            None,
             revision,
             read_view,
             authority_fingerprint,
@@ -516,7 +479,6 @@ impl RuntimeHandle {
     /// position.
     pub fn adopt_observation_from(&self, runtime: &LashRuntime) {
         let revision = SessionRevision::from_runtime(runtime);
-        let previous = self.observation.load_full();
         let (read_view, authority_fingerprint) = export_observation_state(runtime);
         let cursor = self
             .live_replay_store
@@ -524,7 +486,6 @@ impl RuntimeHandle {
         let next = RuntimeObservation::from_runtime(
             runtime,
             cursor,
-            Some(previous.as_ref()),
             revision,
             read_view,
             authority_fingerprint,
@@ -546,7 +507,6 @@ impl RuntimeHandle {
         let mut next = RuntimeObservation::from_runtime(
             runtime,
             previous.cursor.clone(),
-            Some(previous.as_ref()),
             revision,
             read_view,
             authority_fingerprint,
@@ -882,7 +842,6 @@ mod tests {
                     crate::testing::sqlite_memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
-                    crate::ToolSourcePolicy::Tolerate,
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
                     crate::DataRetentionConfig::standard(),
@@ -891,26 +850,23 @@ mod tests {
             )
             .with_session_id("publish-order")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_creation(
-                crate::SessionPolicy {
-                    model: Some(crate::LlmProfileConfig::new(
-                        crate::RecordedLlmProfile::mint(
-                            crate::LlmProfileKey::from("test-model"),
-                            crate::LlmProfileMetadata::builder("test-model")
-                                .cache_retention(crate::provider::CacheRetention::Short)
-                                .context_window_tokens(1024)
-                                .build()
-                                .expect("model"),
-                        ),
-                    )),
-                    ..crate::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                crate::SessionToolAccess::ambient(),
-            )
+            .with_creation(crate::SessionPolicy {
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .cache_retention(crate::provider::CacheRetention::Short)
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
+                )
+            })
             .build(),
         )
         .await
@@ -951,7 +907,6 @@ mod tests {
                     crate::testing::sqlite_memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
-                    crate::ToolSourcePolicy::Tolerate,
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
                     crate::DataRetentionConfig::standard(),
@@ -960,26 +915,23 @@ mod tests {
             )
             .with_session_id("auxiliary-reconciliation")
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_creation(
-                crate::SessionPolicy {
-                    model: Some(crate::LlmProfileConfig::new(
-                        crate::RecordedLlmProfile::mint(
-                            crate::LlmProfileKey::from("test-model"),
-                            crate::LlmProfileMetadata::builder("test-model")
-                                .cache_retention(crate::provider::CacheRetention::Short)
-                                .context_window_tokens(1024)
-                                .build()
-                                .expect("model"),
-                        ),
-                    )),
-                    ..crate::SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    )
-                },
-                crate::SessionToolAccess::ambient(),
-            )
+            .with_creation(crate::SessionPolicy {
+                model: Some(crate::LlmProfileConfig::new(
+                    crate::RecordedLlmProfile::mint(
+                        crate::LlmProfileKey::from("test-model"),
+                        crate::LlmProfileMetadata::builder("test-model")
+                            .cache_retention(crate::provider::CacheRetention::Short)
+                            .context_window_tokens(1024)
+                            .build()
+                            .expect("model"),
+                    ),
+                )),
+                ..crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                    crate::NoProgressBudget::bounded(12),
+                )
+            })
             .build(),
         )
         .await

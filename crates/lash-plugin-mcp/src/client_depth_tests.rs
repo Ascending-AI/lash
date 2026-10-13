@@ -635,7 +635,7 @@ async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcom
     let tool_name = depth_tool_name();
     let provider = McpToolProvider::new(Arc::clone(factory.pool()));
     let manifest = provider
-        .resolve_manifest(&tool_name)
+        .resolve_manifest(&tool_name, &lash_core::OwnerConfigView::default())
         .expect("depth tool manifest resolves");
     let fixture = crate::plugin::prepared_test_call(&provider, &manifest).await;
     let context = fixture.attempt("client-depth");

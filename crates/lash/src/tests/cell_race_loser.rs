@@ -37,14 +37,18 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for RaceTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [FAST, SLOW]
             .into_iter()
             .map(|name| definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
@@ -107,10 +111,7 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
     )?;
     let session = core
         .session(crate::SessionId::parse("race-loser-progress").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("race then sleep")).await?;
     tokio::time::timeout(Duration::from_secs(30), tools.entered.notified())
@@ -166,14 +167,18 @@ struct ClosingTools {
 
 #[async_trait]
 impl ToolProvider for ClosingTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [FAST, SLOW]
             .into_iter()
             .map(|name| definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
@@ -220,10 +225,7 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
     )?;
     let session = core
         .session(crate::SessionId::parse("closing-race").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();
     let report = tokio::time::timeout(
@@ -341,14 +343,18 @@ fn backoff_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for BackoffTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [FAST, SLOW]
             .into_iter()
             .map(|name| backoff_definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [FAST, SLOW]
             .contains(&name)
             .then(|| Arc::new(backoff_definition(name).contract()))
@@ -386,10 +392,7 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
     )?;
     let session = core
         .session(crate::SessionId::parse("closing-backoff").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();
     let sent = Instant::now();

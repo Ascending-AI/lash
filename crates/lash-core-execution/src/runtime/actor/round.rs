@@ -152,6 +152,7 @@ pub struct ExecutionDraft {
     pinned: Option<PinnedWait>,
     trace: Option<lash_trace::DurableTraceScope>,
     declaration: Option<crate::ToolDeclaration>,
+    binding: Option<crate::tool_run::AdmittedBinding>,
 }
 
 impl ExecutionDraft {
@@ -176,7 +177,25 @@ impl ExecutionDraft {
             pinned: None,
             trace: None,
             declaration: None,
+            binding: None,
         }
+    }
+
+    /// This draft with `binding`, the callbacks its admission binds
+    /// ([`MemberPin::binding`]).
+    #[must_use]
+    pub fn with_binding(mut self, binding: Option<crate::tool_run::AdmittedBinding>) -> Self {
+        self.binding = binding;
+        self
+    }
+
+    /// The callbacks its admission bound: what the actor's claim
+    /// obligations hold while the call is unsettled, and the presentation
+    /// plan its parked answer is presented under. `None` when no tool
+    /// answered the call at admission.
+    #[must_use]
+    pub fn binding(&self) -> Option<&crate::tool_run::AdmittedBinding> {
+        self.binding.as_ref()
     }
 
     /// This draft with `declaration`, the one its call settles under
@@ -826,6 +845,26 @@ pub fn admit_by(
         ));
     }
     Ok(admitted)
+}
+
+/// Each member the admissions among `facts` admit, with the callbacks its
+/// admission bound: what a session's claim obligations hold until the
+/// member settles (S7). An admission that does not read back names
+/// nothing; the store refuses its commit.
+pub(crate) fn admitted_bindings(
+    facts: &lash_durable::domain::graph::RunFacts,
+) -> Vec<(ToolCallId, Option<crate::tool_run::AdmittedBinding>)> {
+    facts
+        .rows
+        .iter()
+        .filter(|row| row.kind == lash_durable::domain::graph::RunFactKind::Admit)
+        .filter_map(|row| match records::read(facts, row) {
+            Ok(records::Record::Admit(body)) => Some(body.members),
+            _ => None,
+        })
+        .flatten()
+        .map(|pin| (pin.call, pin.binding))
+        .collect()
 }
 
 /// Refuse an admission of no draft, or of one call twice.

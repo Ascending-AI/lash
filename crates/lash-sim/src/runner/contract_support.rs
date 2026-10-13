@@ -390,11 +390,15 @@ pub(super) struct ContractAppTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ContractAppTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![contract_app_lookup_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "app_lookup").then(|| Arc::new(contract_app_lookup_definition().contract()))
     }
 
@@ -467,11 +471,15 @@ impl ContractDurableInputTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ContractDurableInputTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![contract_durable_input_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "mock_input_request")
             .then(|| Arc::new(contract_durable_input_definition().contract()))
     }

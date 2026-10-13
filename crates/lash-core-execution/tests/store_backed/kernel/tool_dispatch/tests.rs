@@ -42,30 +42,6 @@ fn manifests(definitions: Vec<crate::ToolDefinition>) -> Vec<crate::ToolManifest
         .collect()
 }
 
-struct HiddenDispatchTools {
-    contracts_resolved: Arc<AtomicUsize>,
-    executed: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for HiddenDispatchTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(vec![named_beta_tool("hidden")])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        self.contracts_resolved.fetch_add(1, Ordering::SeqCst);
-        (name == "hidden").then(|| Arc::new(named_beta_tool("hidden").contract()))
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        ToolOutcome::ok(json!("hidden")).into()
-    }
-}
-
-mod single_gate;
-
 /// A tool the provider resolves by name but advertises in no manifest: not
 /// in the session's catalog.
 struct ExactDispatchTools {
@@ -74,25 +50,38 @@ struct ExactDispatchTools {
     /// Whether the provider resolves the tool's contract by name.
     contract_available: bool,
     /// The execution bindings the body saw, when the law watches them.
-    observed_execution_bindings: Option<Arc<std::sync::Mutex<Vec<serde_json::Value>>>>,
+    observed_execution_bindings:
+        Option<Arc<std::sync::Mutex<Vec<Option<crate::ExecutionBinding>>>>>,
 }
 
 #[async_trait::async_trait]
 impl ToolProvider for ExactDispatchTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::plugin::OwnerConfigView) -> Vec<crate::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_manifest(&self, name: &str) -> Option<crate::ToolManifest> {
+    fn resolve_manifest(
+        &self,
+        name: &str,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> Option<crate::ToolManifest> {
         (name == "host_only").then(|| named_beta_tool("host_only").manifest())
     }
 
-    fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &crate::ToolId,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> Option<crate::ToolManifest> {
         (id == &crate::ToolId::from("tool:host_only"))
             .then(|| named_beta_tool("host_only").manifest())
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         self.contracts_resolved.fetch_add(1, Ordering::SeqCst);
         (self.contract_available && name == "host_only")
             .then(|| Arc::new(named_beta_tool("host_only").contract()))
@@ -104,7 +93,7 @@ impl ToolProvider for ExactDispatchTools {
             bindings
                 .lock()
                 .expect("the binding witness")
-                .push(call.context.tool_execution_binding().clone());
+                .push(call.context.tool_execution_binding().cloned());
         }
         ToolOutcome::ok(json!("host")).into()
     }
@@ -126,8 +115,10 @@ fn provider_plugins(
 /// A dispatch context whose effects are unavailable: what it dispatches must
 /// end before any attempt runs.
 async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchContext<'static> {
-    let tools = plugins.tools();
-    let tool_catalog = plugins.resolved_tool_catalog().expect("tool catalog");
+    let resolved = plugins.pin_resolved_tool_surface().expect("tool surface");
+    let routes = crate::SurfaceTools::of_surface(&resolved.surface, plugins.tool_registry());
+    let tools: Arc<dyn ToolProvider> = Arc::new(routes.clone());
+    let tool_catalog = resolved.catalog;
     ToolDispatchContext {
         fleet_format: lash_core_execution::FleetFormat::current(),
         composition: (plugins).composition(),
@@ -135,7 +126,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         execution_budgets: (plugins).execution_budgets(),
         state: plugins,
         tools,
-        tool_registry: None,
+        routes,
         tool_catalog,
         sessions: Arc::new(MockSessionManager::default()),
         session_lifecycle: Arc::new(MockSessionManager::default()),
@@ -183,53 +174,11 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
     });
     let context = refusing_dispatch_context(provider_plugins(
         provider,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .await;
     let outcome =
         dispatch_tool_call(&context, "host_only".to_string(), json!({ "value": "ok" })).await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(
-        outcome.record.output.value_for_projection()["message"],
-        json!("Tool is unavailable in this session")
-    );
-    assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
-    assert_eq!(executed.load(Ordering::SeqCst), 0);
-}
-
-/// A tool the session's authority hides is unavailable before its contract
-/// resolves, though the registry still holds it.
-#[tokio::test]
-async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
-    let contracts_resolved = Arc::new(AtomicUsize::new(0));
-    let executed = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(HiddenDispatchTools {
-        contracts_resolved: Arc::clone(&contracts_resolved),
-        executed: Arc::clone(&executed),
-    });
-    let tool_access = crate::SessionToolAccess::ambient()
-        .with_hidden_tools(["hidden"])
-        .expect("valid hidden name");
-    let plugins = provider_plugins(
-        provider,
-        crate::plugin::SessionAuthorityContext {
-            tool_access,
-            ..crate::plugin::SessionAuthorityContext::ambient_fixture()
-        },
-    );
-    assert!(
-        plugins
-            .tool_registry()
-            .export_state()
-            .iter()
-            .find(|(_, entry)| entry.manifest().name == "hidden")
-            .is_some_and(|(_, entry)| entry.is_member()),
-        "authority hiding must not rewrite the registry's curation bit"
-    );
-    let context = refusing_dispatch_context(plugins).await;
-    let outcome =
-        dispatch_tool_call(&context, "hidden".to_string(), json!({ "value": "ok" })).await;
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(
@@ -256,14 +205,14 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     });
     let context = refusing_dispatch_context(provider_plugins(
         provider,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .await;
     let grant = crate::ToolExecutionGrant::from_definition(
         crate::plugin::PluginCallbackIdentity::tool_provider("test_tools", "tools"),
         named_beta_tool("host_only"),
     )
-    .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
+    .with_execution_binding(Some(granted_binding()));
     let pending = crate::sansio::PendingToolCall {
         call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
         provider_call_id: None,
@@ -283,7 +232,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     };
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
-        .execution_binding(grant.execution_binding.clone());
+        .execution_binding(grant.binding.clone());
     let launch = crate::coordinate_prepared_tool_call_launch_with_execution_context(
         &context,
         prepared,
@@ -303,8 +252,17 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         *observed_execution_bindings
             .lock()
             .expect("the binding witness"),
-        vec![json!({ "kind": "test", "route": "deferred" })]
+        vec![Some(granted_binding())]
     );
+}
+
+/// The binding the grant in these tests carries, in its provider's format.
+fn granted_binding() -> crate::ExecutionBinding {
+    crate::ExecutionBinding {
+        codec: crate::plugin::PluginCallbackIdentity::tool_provider("test_tools", "tools"),
+        format: crate::FormatVersion::ONE,
+        payload: json!({ "kind": "test", "route": "deferred" }),
+    }
 }
 
 /// An MCP tool whose input schema does not forbid unknown properties admits
@@ -337,11 +295,18 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
 
     #[async_trait::async_trait]
     impl ToolProvider for StrictMcpTools {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        fn tool_manifests(
+            &self,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Vec<crate::ToolManifest> {
             manifests(vec![definition()])
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
             (name == "mcp__appworld__venmo_show_transactions")
                 .then(|| Arc::new(definition().contract()))
         }
@@ -357,7 +322,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
         Arc::new(StrictMcpTools {
             executed: Arc::clone(&executed),
         }),
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .await;
     let outcome = dispatch_tool_call(
@@ -401,11 +366,18 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
 
     #[async_trait::async_trait]
     impl ToolProvider for ProjectionPolicyTools {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        fn tool_manifests(
+            &self,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Vec<crate::ToolManifest> {
             manifests(vec![definition()])
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
             (name == "seedy").then(|| Arc::new(definition().contract()))
         }
 
@@ -435,7 +407,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     ))])
     .build_session(PluginSessionRequest::creation(
         "root",
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .expect("plugin session");
     let outcome = dispatch_tool_call(

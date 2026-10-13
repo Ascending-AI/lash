@@ -68,7 +68,6 @@ impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
         self.commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
     }
@@ -137,11 +136,7 @@ impl BenchmarkCore {
     ) -> lash::Result<lash::LashSession> {
         self.create_and_open_session(
             session_id,
-            lash::SessionCreation::child_of(
-                lash::plugins::SessionToolAccess::ambient(),
-                parent_session_id,
-                self.session_spec(),
-            ),
+            lash::SessionCreation::child_of(parent_session_id, self.session_spec()),
         )
         .await
     }
@@ -820,7 +815,6 @@ fn benchmark_plugin_factories(
             lash::TurnBudget::Unbounded
         };
         let delegation = delegation::DelegationPluginFactory::new(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 benchmark_llm_profile_spec().wire_model,
                 turn_budget,
@@ -1050,10 +1044,7 @@ pub(crate) async fn build_runtime(
         }
     };
     let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
-    let mut creation = lash::SessionCreation::root(
-        lash::plugins::SessionToolAccess::ambient(),
-        core.session_spec(),
-    );
+    let mut creation = lash::SessionCreation::root(core.session_spec());
     if wiring.large_tool_catalog_plugin {
         // The Gmail-sized fixture renders roughly 266 KiB of declarations.
         // Its configured limits admit that population without changing the
@@ -1160,10 +1151,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     }
     let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack, &plugins)?;
     let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
-    let mut creation = lash::SessionCreation::root(
-        lash::plugins::SessionToolAccess::ambient(),
-        core.session_spec(),
-    );
+    let mut creation = lash::SessionCreation::root(core.session_spec());
     if wiring.large_tool_catalog_plugin {
         // The Gmail-sized fixture renders roughly 266 KiB of declarations.
         // Its configured limits admit that population without changing the
@@ -1226,7 +1214,6 @@ fn durable_benchmark_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugins(plugin_stack);

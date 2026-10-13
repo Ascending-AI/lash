@@ -6,23 +6,39 @@ mod control;
 mod session;
 
 impl RuntimeSessionServices {
-    /// The catalog an engine process's steps resolve against: the tools its
-    /// environment's components provide that its environment's tools admit
-    /// (D7).
+    /// The tools an engine process's linked calls run on, and their
+    /// catalog: each tool its env links an effect to, as this node's
+    /// components serve it under the env's config, when it still projects
+    /// to the surface the link retains.
+    pub(in crate::runtime) fn process_step_surface(
+        &self,
+    ) -> Result<(crate::SurfaceTools, Arc<crate::ToolCatalog>), crate::PluginError> {
+        let (process_id, engine) = self.current.engine_process()?;
+        let core = &self.current.host.core;
+        let (routes, catalog) = engine.composition.linked_tools(
+            &engine.env,
+            crate::RuntimeOwner::Process(process_id.clone()),
+            &core.process_engines.components().host().extensions,
+            core.process_engines.engine_kinds(),
+        )?;
+        Ok((routes, Arc::new(catalog)))
+    }
+
+    /// How this node serves the engine process's linked call of `effect`
+    /// (D3), judged now.
+    pub(in crate::runtime) fn process_step_link(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        Ok(engine.composition.step_link(&engine.env, effect))
+    }
+
+    /// The catalog an engine process's linked calls resolve against.
     pub(in crate::runtime) fn process_step_catalog(
         &self,
     ) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        let (process_id, engine) = self.current.engine_process()?;
-        let core = &self.current.host.core;
-        engine
-            .composition
-            .tool_catalog(
-                crate::RuntimeOwner::Process(process_id.clone()),
-                engine.env.tools(),
-                &core.process_engines.components().host().extensions,
-                core.process_engines.engine_kinds(),
-            )
-            .map(Arc::new)
+        Ok(self.process_step_surface()?.1)
     }
 
     /// The claim requirements an engine process carries while it holds tool
@@ -55,10 +71,11 @@ impl RuntimeSessionServices {
         process: &crate::ProcessRecord,
     ) -> Result<crate::runtime::ProcessStepTools, crate::PluginError> {
         use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
-        let catalog = self.process_step_catalog()?;
+        let (routes, catalog) = self.process_step_surface()?;
         let (_, engine) = self.current.engine_process()?;
         let env = Arc::clone(&engine.env);
-        let dispatch = self.process_step_dispatch(Arc::clone(&catalog), cx)?;
+        let effects = Arc::new(env.effects().clone());
+        let dispatch = self.process_step_dispatch(routes, Arc::clone(&catalog), cx)?;
         let core = &self.current.host.core;
         let context = crate::RuntimeExecutionContext::new(
             dispatch,
@@ -78,7 +95,11 @@ impl RuntimeSessionServices {
                 process_id: process.id.clone(),
             })
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        Ok(crate::runtime::ProcessStepTools { catalog, tools })
+        Ok(crate::runtime::ProcessStepTools {
+            catalog,
+            effects,
+            tools,
+        })
     }
 
     /// The dispatch an engine process's tool steps run on (ADR 0132 §10):
@@ -88,6 +109,7 @@ impl RuntimeSessionServices {
     /// and originator its children start under (FIG-3607 R1).
     fn process_step_dispatch<'run>(
         &self,
+        routes: crate::SurfaceTools,
         catalog: Arc<crate::ToolCatalog>,
         effect_controller: crate::ActorContext,
     ) -> Result<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>, crate::PluginError> {
@@ -102,8 +124,8 @@ impl RuntimeSessionServices {
             config: crate::plugin::OwnerConfigView::components(Arc::clone(&engine.env)),
             execution_budgets: core.control.execution_budgets.clone(),
             state: engine.state.clone(),
-            tools: Arc::clone(&engine.composition.registry) as Arc<dyn crate::ToolProvider>,
-            tool_registry: Some(Arc::clone(&engine.composition.registry)),
+            tools: Arc::new(routes.clone()),
+            routes,
             tool_catalog: catalog,
             sessions: services.state_service(),
             session_lifecycle: services.lifecycle_service(),

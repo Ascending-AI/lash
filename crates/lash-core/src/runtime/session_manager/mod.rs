@@ -710,7 +710,6 @@ mod process_visibility_tests {
             backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
-            crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),
@@ -733,7 +732,7 @@ mod process_visibility_tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(SESSION_ID.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

@@ -59,13 +59,13 @@ mod tests {
             ))])
             .build_session(PluginSessionRequest::creation(
                 "capture-race",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .unwrap();
         let store = session_store("capture-race").await;
         let mut state = crate::RuntimeSessionState {
             session_id: "capture-race".into(),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
@@ -141,7 +141,7 @@ mod tests {
         let default_session = default_host
             .build_session(PluginSessionRequest::creation(
                 "state-limits",
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .unwrap();
         let refused = crate::publish_plugin_state(
@@ -178,7 +178,7 @@ mod tests {
         let plugins = host
             .build_session(PluginSessionRequest::creation(
                 "state-limits",
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .unwrap();
         // Three separately admitted values also exceed the old namespace bound.
@@ -201,7 +201,7 @@ mod tests {
         let store = session_store("state-limits").await;
         let mut runtime = crate::RuntimeSessionState {
             session_id: "state-limits".into(),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -225,7 +225,7 @@ mod tests {
             .build_session(PluginSessionRequest::rematerialization(
                 "state-limits",
                 snapshot,
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .expect("the configured bounds also admit the reopened state");
         assert_eq!(
@@ -277,7 +277,7 @@ mod tests {
             .defer_session(PluginSessionRequest::rematerialization(
                 "state-limits",
                 &Default::default(),
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .unwrap();
         replay.adopt_plugin_transition(&recorded).unwrap();

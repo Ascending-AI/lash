@@ -655,7 +655,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         let completion_context = context.clone();
         if let Some(grant) = &prepared.input.grant {
             context = context
-                .with_tool_execution_binding(grant.execution_binding.clone())
+                .with_tool_execution_binding(grant.binding.clone())
                 .with_granted_provider(grant.provider.clone());
         }
         let authority = match &prepared.input.grant {

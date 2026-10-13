@@ -53,11 +53,15 @@ impl FixtureTools {
 
 #[async_trait::async_trait]
 impl ToolProvider for FixtureTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
         vec![fixture_echo_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         (name == FIXTURE_ECHO_TOOL).then(|| Arc::new(fixture_echo_definition().contract()))
     }
 

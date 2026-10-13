@@ -131,7 +131,7 @@ async fn admit(world: &World) -> OwnedAdmission {
     let plugins = lash_core_execution::testing::test_plugin_host(Vec::new())
         .build_session(crate::plugin::PluginSessionRequest::creation(
             SESSION,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .expect("the plugin session builds");
     OwnedCall {

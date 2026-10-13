@@ -378,6 +378,13 @@ pub enum StoreError {
         "session state version {found} has no conversion chain to {current}; drain sessions and recreate the store with this version"
     )]
     SessionStateVersionUnsupported { found: u32, current: u32 },
+    /// A stored shape this build retired in its clean cutover: it is
+    /// refused at decode and never reinterpreted (FIG-6074).
+    #[error("{record_kind} holds the retired stored shape `{shape}`, which this build refuses")]
+    RetiredStoredShape {
+        record_kind: &'static str,
+        shape: &'static str,
+    },
     /// A store, an epoch or a stored label this build cannot admit
     /// (ADR 0115 §1.5). The refusal names its remedy.
     #[error("{refusal}")]
@@ -968,6 +975,7 @@ impl StoreError {
             | Self::StoreSessionMismatch { .. }
             | Self::SessionStateVersionUnsupported { .. }
             | Self::Incompatible { .. }
+            | Self::RetiredStoredShape { .. }
             | Self::WriterFenced { .. }
             | Self::SessionStateVersionNewerThanRuntime { .. }
             | Self::InvalidSessionId { .. }
@@ -1075,6 +1083,7 @@ impl StoreError {
             Self::TurnOutcomeMaterializationRefused { error } => error.code.clone(),
 
             Self::Incompatible { .. } => Code::StoreIncompatible,
+            Self::RetiredStoredShape { .. } => Code::StoreIncompatible,
             Self::WriterFenced { .. } => Code::WriterFenced,
             Self::StoreSessionMismatch { .. } => Code::StoreSessionMismatch,
             Self::SessionStateVersionUnsupported { .. } => Code::SessionStateVersionUnsupported,
@@ -1229,6 +1238,7 @@ impl StoreError {
             | Self::SessionExecutionLeaseExpired { .. }
             // The deployment: a finalize, rollback or another build clears it.
             | Self::Incompatible { .. }
+            | Self::RetiredStoredShape { .. }
             | Self::WriterFenced { .. }
             | Self::SessionStateVersionNewerThanRuntime { .. }
             | Self::SessionStateVersionUnsupported { .. }
@@ -1371,6 +1381,7 @@ impl StoreError {
             Self::HistoryCursorLineageChanged { .. } => "HistoryCursorLineageChanged",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
             Self::Incompatible { .. } => "Incompatible",
+            Self::RetiredStoredShape { .. } => "RetiredStoredShape",
             Self::WriterFenced { .. } => "WriterFenced",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 "SessionStateVersionNewerThanRuntime"

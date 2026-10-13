@@ -33,7 +33,6 @@ pub struct CheckpointComponentWrite {
 #[serde(rename_all = "snake_case")]
 pub enum CheckpointComponent {
     TurnState,
-    ToolState,
     PluginState,
     ExecutionState,
 }
@@ -42,7 +41,6 @@ impl CheckpointComponent {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::TurnState => "turn_state",
-            Self::ToolState => "tool_state",
             Self::PluginState => "plugin_state",
             Self::ExecutionState => "execution_state",
         }
@@ -446,14 +444,6 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
             logical_bytes: checkpoint_encoded_len(&checkpoint.turn_state).ok(),
         },
     }];
-    record_component(
-        &mut components,
-        CheckpointComponent::ToolState,
-        checkpoint.component_ref(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT),
-        checkpoint
-            .component_body(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
-            .map(|body| Some(body.len())),
-    );
     if let Some(body) = checkpoint.component_body(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
         let state = rmp_serde::from_slice::<lash_core_store::plugin_state::PluginStateMap>(body)
             .expect("runtime plugin namespace map encodes");

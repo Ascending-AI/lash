@@ -227,7 +227,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
 fn state(session: &str) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: session.parse().unwrap(),
-        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+        ..RuntimeSessionState::fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -612,7 +612,6 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
                 TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })

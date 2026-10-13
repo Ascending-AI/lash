@@ -19,18 +19,23 @@
 //! crate depends on `lash-kernel-doc` and on no other lash crate.
 
 mod admit;
+mod closure;
 mod flow;
 mod graph;
 mod link;
 mod manifest;
 mod refusal;
+mod schema;
 mod types;
 mod typing;
 
 #[cfg(test)]
+mod closure_tests;
+#[cfg(test)]
 mod tests;
 
-pub use admit::{Admitted, Environment, admit, derive, derive_definition};
+pub use admit::{Admitted, Environment, admit, derive, derive_definition, derive_view};
+pub use closure::{EntryEffectsRefusal, entry_effects};
 pub use graph::{
     ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge, EdgeKind,
     EffectSet, ExecutionSite, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode, NodeId,
@@ -39,3 +44,4 @@ pub use graph::{
 };
 pub use manifest::{Requirements, requirements};
 pub use refusal::{Refusal, RefusalReason, Refused};
+pub use schema::{result_type_of_schema, signature_serves, tool_signature, type_of_schema};

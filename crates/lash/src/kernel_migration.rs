@@ -159,14 +159,6 @@ pub struct KernelMigrationSweep {
     pub processes: usize,
     /// The sessions still in it it woke.
     pub sessions: usize,
-    /// The processes still pinning a helper release before this build's
-    /// own it woke, for a node that adopts to adopt (FIG-5799).
-    #[serde(skip_serializing_if = "is_zero")]
-    pub helper_processes: usize,
-}
-
-fn is_zero(count: &usize) -> bool {
-    *count == 0
 }
 
 /// Wakes every process and session of `backend` still in the kernel
@@ -183,10 +175,7 @@ fn is_zero(count: &usize) -> bool {
 pub async fn sweep_kernel_migration(
     backend: &crate::Backend,
 ) -> Result<KernelMigrationSweep, DurableError> {
-    let mut sweep = KernelMigrationSweep {
-        helper_processes: wake_helper_dependents(backend).await?,
-        ..KernelMigrationSweep::default()
-    };
+    let mut sweep = KernelMigrationSweep::default();
     let Some(earlier) = earlier_kernel_formats() else {
         return Ok(sweep);
     };
@@ -215,49 +204,6 @@ pub async fn sweep_kernel_migration(
         }
     }
     Ok(sweep)
-}
-
-/// Wakes every unfinished kernel process that pins a function of a helper
-/// release before this build's own, so a node that adopts claims it and
-/// adopts it; answers how many it woke.
-async fn wake_helper_dependents(backend: &crate::Backend) -> Result<usize, DurableError> {
-    let unavailable = |error: KernelMigrationSurveyError| match error {
-        KernelMigrationSurveyError::State(error) => error,
-        other => DurableError::Store(lash_core::durable_port::StoreFailure {
-            kind: lash_core::durable_port::StoreFailureKind::Unavailable,
-            message: other.to_string(),
-        }),
-    };
-    let mut woken = 0;
-    for release in surveyed_helper_releases().map_err(unavailable)? {
-        let retired = crate::helper_releases::retired_helpers(release).map_err(unavailable)?;
-        let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
-            unavailable(KernelMigrationSurveyError::State(DurableError::Store(
-                lash_core::durable_port::StoreFailure {
-                    kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                    message: error.to_string(),
-                },
-            )))
-        })?;
-        let processes = lash_vm_runtime::survey_helper_processes(backend, &functions, &retired)
-            .await
-            .map_err(unavailable)?;
-        for dependent in processes {
-            let Ok(actor) = ActorKey::process(dependent.process.as_str()) else {
-                continue;
-            };
-            let mut tx = MailTx::new();
-            tx.wake(actor);
-            match backend.commit_mail(tx, CommitLabel::MAIL_PROCESS).await {
-                Ok(_) => woken += 1,
-                Err(DurableError::MailRefused(
-                    MailRefusal::ActorTerminal(_) | MailRefusal::UnknownActor(_),
-                )) => {}
-                Err(error) => return Err(error),
-            }
-        }
-    }
-    Ok(woken)
 }
 
 /// The kernel version a backend of this build retires, when the window the

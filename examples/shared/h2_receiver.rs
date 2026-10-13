@@ -23,11 +23,7 @@ fn receiver_payload(session: &lash::SessionId) -> serde_json::Value {
 /// The environment every h2 fixture process runs under: no tools and no
 /// components, since its engines call none.
 fn environment() -> Result<lash::process::ProcessEnv> {
-    Ok(lash::process::ProcessEnv::builder(
-        lash::plugins::SessionToolAccess::restricted(std::iter::empty())?,
-        lash::MaxToolCalls::new(1024),
-    )
-    .build()?)
+    Ok(lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024)).build()?)
 }
 
 /// The receiver's engine: its process runs until it is cancelled.
@@ -35,6 +31,13 @@ pub struct ReceiverEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for ReceiverEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
+        Ok(lash::process::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash::process::ProcessSignature,
@@ -160,6 +163,13 @@ pub struct SourceEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SourceEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
+        Ok(lash::process::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash::process::ProcessSignature,
@@ -294,6 +304,13 @@ pub struct SleeperEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SleeperEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
+        Ok(lash::process::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash::process::ProcessSignature,

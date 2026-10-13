@@ -17,7 +17,7 @@ pub(super) async fn registration_state_law(
         &fixture.host(),
         id,
         None,
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     )
     .await;
     let handle = fixture.state(id);
@@ -48,7 +48,7 @@ pub(super) async fn registration_state_law(
     assert_eq!(handle.generation(), 5);
     let mut state = RuntimeSessionState {
         session_id: id.parse().unwrap(),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -70,7 +70,7 @@ pub(super) async fn registration_state_law(
         &rebuilt.host(),
         id,
         durable.plugin_state(),
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     )
     .await;
     let handle = rebuilt.state(id);

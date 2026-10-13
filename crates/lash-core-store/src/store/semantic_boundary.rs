@@ -172,7 +172,7 @@ mod semantic_boundary_request_identity_tests {
     fn boundary_commit(boundary: &str, key: &str) -> RuntimeCommit {
         let state = crate::RuntimeSessionState {
             session_id: SessionId::from("root"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -267,7 +267,6 @@ mod semantic_boundary_request_identity_tests {
             crate::TurnBudget::bounded(3),
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         );
         let error = stale
             .validate_operation_session()

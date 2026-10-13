@@ -33,8 +33,7 @@ use tokio_util::sync::CancellationToken;
 pub use documents::{DocumentStoreError, KernelDocuments};
 pub use helpers::{
     AdoptedRun, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
-    RetiredHelpers, plan_helper_adoption, retained_earlier_helpers, retired_functions_reached,
-    survey_helper_processes,
+    RetiredHelpers, plan_helper_adoption, retired_functions_reached, survey_helper_processes,
 };
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
@@ -225,9 +224,6 @@ pub struct KernelProcessEngine {
     pub(crate) policy: KernelRunPolicy,
     pub(crate) random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(crate) trace_runtime: Option<lash_core::trace::TraceRuntime>,
-    /// The functions of the helper releases a node of this engine adopts
-    /// processes off, with their counterparts (FIG-5799).
-    pub(crate) adopts: Option<Arc<RetiredHelpers>>,
 }
 
 /// Host-selected policy for one `kernel_run`, separate from a process's
@@ -307,22 +303,7 @@ impl KernelProcessEngine {
             policy: KernelRunPolicy::standard(),
             random: Arc::new(process_random),
             trace_runtime: None,
-            adopts: None,
         }
-    }
-
-    /// This engine adopting each process it claims whose document reaches
-    /// a function of `retired` onto that function's counterpart, the
-    /// build's own helper of its name, when the run is not parked inside a
-    /// helper the adoption changes (FIG-5799). An operator chooses it to
-    /// carry what the build before it wrote off a helper release before a
-    /// build that no longer retains that release starts. A process it
-    /// refuses goes on as written, and `lashctl kernel-migration list`
-    /// names it with the typed reason.
-    #[must_use]
-    pub fn adopting_helpers(mut self, retired: RetiredHelpers) -> Self {
-        self.adopts = (!retired.is_empty()).then(|| Arc::new(retired));
-        self
     }
 
     /// This engine as the previous build's: it writes kernel version
@@ -411,6 +392,33 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
 
     fn cancel_grace(&self) -> std::time::Duration {
         std::time::Duration::ZERO
+    }
+
+    /// The effects the entry's code calls or spawns (P2), as the checker
+    /// reads them from its published document.
+    async fn performed_effects(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        let uncertified = |reason: String| lash_core::ProcessEnvRefusal::Uncertified { reason };
+        let definition = KernelProcessDefinition::from_payload(payload)
+            .map_err(|error| uncertified(format!("invalid kernel process payload: {error}")))?;
+        let (document, _) = self
+            .entry(&definition)
+            .await
+            .map_err(|error| uncertified(error.to_string()))?
+            .map_err(uncertified)?;
+        // The entry's own code is checked where it runs; the closure reads
+        // the document's structure only.
+        let graph = lash_kernel_check::derive_view(&document, self.functions.as_ref())
+            .map_err(|refusal| uncertified(refusal.to_string()))?;
+        lash_kernel_check::entry_effects(
+            &document,
+            &graph,
+            self.functions.as_ref(),
+            &definition.entry,
+        )
+        .map_err(|refusal| uncertified(refusal.to_string()))
     }
 
     /// A process runs the document its payload names and resumes under the

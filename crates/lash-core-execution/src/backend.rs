@@ -315,8 +315,8 @@ impl Backend {
             formats = formats.carrying(&format, previous);
         }
         // A build that retires every format the migration carries from
-        // carries nothing forward (ADR 0115 §3.5), unless it adopts.
-        if formats == self.inner.formats && !migration.adopts() {
+        // carries nothing forward (ADR 0115 §3.5).
+        if formats == self.inner.formats {
             return self.clone();
         }
         let mut migrations = self.inner.migrations.clone();

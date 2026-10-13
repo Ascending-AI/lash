@@ -47,7 +47,6 @@ fn creation_authority(host: &PluginHost) -> SessionAuthorityContext {
         .expect("the creation config resolves");
     SessionAuthorityContext {
         plugin_config: lash_core::AdmittedPluginConfig::new(config, 0),
-        ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
     }
 }
 
@@ -76,7 +75,6 @@ fn live_extension_data_changed_after_creation_does_not_rewrite_the_record() -> R
             &snapshot,
             SessionAuthorityContext {
                 plugin_config: config.clone(),
-                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("reopened session");

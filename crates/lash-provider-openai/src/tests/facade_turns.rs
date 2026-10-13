@@ -45,7 +45,6 @@ pub(super) async fn durable_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended());
     let builder = match tools {
@@ -68,7 +67,6 @@ pub(super) async fn session(
 ) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
         .create(lash::SessionCreation::root(
-            lash_core::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 model,
                 lash::TurnBudget::Unbounded,
@@ -387,7 +385,6 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::new(config).expect("recorded budgets"))
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -400,7 +397,6 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
                 "mixed-recovery-{max_attempts}"
             )))
             .create(lash::SessionCreation::root(
-                lash_core::SessionToolAccess::ambient(),
                 lash::SessionSpec::new(
                     "mixed-recovery",
                     lash::TurnBudget::Unbounded,

@@ -151,8 +151,8 @@ async fn epoch_under(
             return epoch;
         }
     };
-    let node_config = match world.backend() {
-        Ok(backend) => nodes_config(&backend),
+    let node_config = match nodes_config(&world) {
+        Ok(config) => config,
         Err(error) => {
             epoch.violations.push(error);
             return epoch;

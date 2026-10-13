@@ -108,11 +108,6 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
 
-    /// The catalog the live registry resolves to, when the dispatch catalog
-    /// is a turn's recorded surface: what a code cell's journaled binding set
-    /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
-    /// catalog is live.
-    live_tool_catalog: Option<Arc<crate::ToolCatalog>>,
     pub(super) process_env_store: Arc<dyn crate::ProcessEnvStore>,
     /// `F` this execution's durable writers emit — recorded by the bound
     /// session's store, so a stamped surface version is the fleet's, not the
@@ -484,7 +479,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_material_store: self.tool_material_store.clone(),
 
-            live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
             fleet_format: self.fleet_format,
             attachment_store: Arc::clone(&self.attachment_store),
@@ -1175,6 +1169,31 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self.dispatch.owner
     }
 
+    /// The configuration this execution runs under: the run's resolved one,
+    /// or its process env's.
+    pub fn owner_config(&self) -> &crate::plugin::OwnerConfigView {
+        &self.dispatch.config
+    }
+
+    /// The deferred provider of the surface this execution's calls are
+    /// admitted under, with the key the surface recorded it as (S6).
+    ///
+    /// # Errors
+    ///
+    /// The recorded key, when this node does not serve it.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the recorded key and its provider travel together"
+    )]
+    pub fn deferred_provider(
+        &self,
+    ) -> Result<
+        Option<(&crate::ProviderKey, &Arc<dyn crate::DeferredToolProvider>)>,
+        crate::ProviderKey,
+    > {
+        self.dispatch.routes.deferred_provider()
+    }
+
     /// The session this execution runs in, or
     /// [`crate::PluginError::NotASessionRuntime`] inside a process.
     pub fn session_id(&self) -> Result<&SessionId, crate::PluginError> {
@@ -1183,20 +1202,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.dispatch.tool_catalog)
-    }
-
-    /// The catalog the live registry resolves to now. It is
-    /// [`Self::tool_catalog`] unless that is a turn's recorded surface.
-    pub fn live_tool_catalog(&self) -> Arc<crate::ToolCatalog> {
-        self.live_tool_catalog
-            .clone()
-            .unwrap_or_else(|| Arc::clone(&self.dispatch.tool_catalog))
-    }
-
-    #[must_use]
-    pub(crate) fn with_live_tool_catalog(mut self, live: Arc<crate::ToolCatalog>) -> Self {
-        self.live_tool_catalog = Some(live);
-        self
     }
 
     pub fn turn_context(&self) -> &crate::TurnContext {

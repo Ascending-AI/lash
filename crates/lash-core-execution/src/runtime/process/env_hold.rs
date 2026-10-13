@@ -183,8 +183,8 @@ fn publish_error(error: ArtifactStoreError, env: &ProcessEnv) -> HoldEnvError {
 /// Hold the environment `choice` states under the execution claim of
 /// `scope`, with its settings checked against the `kind` engine for
 /// `payload`: the sealed launch of a start declared or bound inside that
-/// execution. `Inherit` holds `enclosing`'s environment, and is refused
-/// outside a process.
+/// execution. `Restrict` holds `enclosing`'s environment restricted to the
+/// effects `payload` performs, and is refused outside a process.
 pub(crate) async fn hold_launch(
     engines: &super::ProcessEngineRegistry,
     scope: &crate::ExecutionScope,
@@ -194,14 +194,27 @@ pub(crate) async fn hold_launch(
     payload: &serde_json::Value,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
     let selection = match &choice.env {
-        super::ProcessEnvChoice::Inherit => match enclosing {
-            Some(enclosing) => ProcessEnvSelection::Published(enclosing.env_ref.clone()),
-            None => {
+        super::ProcessEnvChoice::Restrict => {
+            let Some(enclosing) = enclosing else {
                 return Err(HoldEnvError::Refused(ProcessEnvRefusal::Policy {
-                    reason: "a start outside a process has no environment to inherit".into(),
+                    reason: "a start outside a process has no environment to restrict".into(),
                 }));
+            };
+            let performed = engines
+                .performed_effects(kind, payload)
+                .await
+                .map_err(HoldEnvError::Refused)?;
+            if performed.keys().eq(enclosing.env.effects().keys()) {
+                ProcessEnvSelection::Published(enclosing.env_ref.clone())
+            } else {
+                ProcessEnvSelection::New(
+                    enclosing
+                        .env
+                        .restrict(performed.keys())
+                        .map_err(HoldEnvError::Refused)?,
+                )
             }
-        },
+        }
         super::ProcessEnvChoice::Published(env_ref) => {
             ProcessEnvSelection::Published(env_ref.clone())
         }

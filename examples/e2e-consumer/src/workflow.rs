@@ -55,15 +55,18 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// defines inline.
 fn environment() -> Result<ProcessEnv> {
     use lash::process_controls::{ProcessControlTool, process_tool_definition};
-    let mut tools = tool_definitions();
-    tools.extend(
-        [ProcessControlTool::Start, ProcessControlTool::Await].map(process_tool_definition),
-    );
-    let tools = lash::plugins::SessionToolAccess::restricted(tools)?;
-    Ok(ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
+    let host_tools = HOST_TOOLS.tool_provider("tools");
+    let controls = lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools");
+    let mut env = ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(HOST_TOOLS, &())
-        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
-        .build()?)
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &());
+    for tool in tool_definitions() {
+        env = env.link_tool(host_tools.clone(), &tool);
+    }
+    for control in [ProcessControlTool::Start, ProcessControlTool::Await] {
+        env = env.link_tool(controls.clone(), &process_tool_definition(control));
+    }
+    Ok(env.build()?)
 }
 
 /// The host's two tools. `review.request` defers: its process parks until
@@ -196,7 +199,7 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
     let environment = lash::process::env::policy::from_run(|_| {
         Ok(vec![ProcessComponentEntry::new(HOST_TOOLS, &(), [])?])
     });
-    let nested = lash::process::env::policy::inherit_or(lash::process::env::policy::refuse(
+    let nested = lash::process::env::policy::restrict_or(lash::process::env::policy::refuse(
         "the process controls start inside a process only",
     ));
     Ok(LashCore::standard_builder(backend)
@@ -861,7 +864,6 @@ mod tests {
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(

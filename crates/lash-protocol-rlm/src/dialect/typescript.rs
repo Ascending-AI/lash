@@ -275,7 +275,6 @@ mod tests {
                 kernel: crate::executor::KernelCarry::default(),
                 presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),
-                deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,

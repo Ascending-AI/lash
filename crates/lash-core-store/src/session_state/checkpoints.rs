@@ -8,41 +8,6 @@ use super::{
 };
 
 impl RuntimeSessionState {
-    /// Durable reference for the well-known tool-state component.
-    pub fn tool_state_ref(&self) -> Option<&crate::store::BlobRef> {
-        self.checkpoint_components
-            .component_ref(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
-    }
-
-    /// Generation carried by the typed tool-state view.
-    pub fn tool_state_generation(&self) -> Option<u64> {
-        self.checkpoint_components.tool_state_generation()
-    }
-
-    /// Typed resident view of the well-known tool-state component.
-    pub fn tool_state_snapshot(&self) -> Option<&crate::ToolState> {
-        self.checkpoint_components.tool_state_snapshot()
-    }
-
-    /// Replace or explicitly delete the well-known tool-state component.
-    pub fn set_tool_state_snapshot(&mut self, snapshot: Option<crate::ToolState>) {
-        self.checkpoint_components.set_tool_state_snapshot(snapshot);
-    }
-
-    /// Whether the captured tool catalog differs from its durable component.
-    /// Released bodies are unchanged; a repeated stamp of the same catalog
-    /// also remains unchanged, even though it supplies a pending body.
-    pub fn tool_state_is_dirty(&self) -> Result<bool, crate::StoreError> {
-        let Some(snapshot) = self.tool_state_snapshot() else {
-            return Ok(false);
-        };
-        let bytes = crate::store::encode_checkpoint_component(
-            crate::store::TOOL_STATE_CHECKPOINT_COMPONENT,
-            snapshot,
-        )?;
-        Ok(self.tool_state_ref() != Some(&crate::store::BlobRef::for_content(&bytes)))
-    }
-
     /// Durable reference for the head's plugin namespace map.
     pub fn plugin_state_ref(&self) -> Option<&crate::store::BlobRef> {
         self.checkpoint_components
@@ -250,12 +215,6 @@ impl RuntimeSessionState {
             &dyn SessionPluginStateSource,
         ) -> Result<crate::PluginState, crate::RuntimeError>,
     ) -> Result<(), crate::RuntimeError> {
-        let generation = plugins.tool_state_generation();
-        if self.tool_state_ref().is_none() || self.tool_state_generation() != Some(generation) {
-            let snapshot = plugins.export_tool_state();
-            self.set_tool_state_snapshot(Some(snapshot));
-        }
-
         // A namespace whose values did not change keeps its body's
         // descriptor; ownership and receipt evidence change only the map.
         let snapshot = capture(plugins)?;

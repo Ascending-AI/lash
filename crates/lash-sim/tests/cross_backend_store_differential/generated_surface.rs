@@ -154,7 +154,6 @@ async fn surface_runners(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,

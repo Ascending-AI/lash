@@ -138,10 +138,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("preopened-session"),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&policy.clone()),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -151,7 +148,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("preopened-session"),
         policy: policy.clone(),
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -232,7 +229,7 @@ async fn park_returns_error_when_final_commit_fails() {
         RuntimeSessionState {
             session_id: SessionId::from("park-session"),
             policy: standard_test_policy(),
-            ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -274,7 +271,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
     let plugins = plugin_host
         .build_session(PluginSessionRequest::creation(
             "root",
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         ))
         .expect("plugins");
     let runtime_host = test_host_config(&backend);
@@ -287,7 +284,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
         standard_test_policy(),
         runtime_host,
         runtime_services,
-        RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

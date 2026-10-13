@@ -56,10 +56,7 @@ pub use control_tools::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
     read_output_tool_definition,
 };
-pub use deferred::{
-    DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
-    RecordedGrantInstallError, Resolution, SharedDeferredToolResolver, ToolGrant,
-};
+pub use deferred::DeferredResolutionError;
 pub use dialect::{
     CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
     DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,

@@ -152,6 +152,8 @@ pub(super) fn claim_within(
                 ClaimCause::Ready
             },
             purpose,
+            // `of_stored` refused a corrupt spelling above.
+            requires: lash_durable::parse_requires(requires.as_deref()).unwrap_or_default(),
         });
     }
     Ok(Ok(claimed))

@@ -43,6 +43,13 @@ fn module_of(payload: &serde_json::Value) -> Result<String, crate::PluginError> 
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for ModuleDefinitionEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core::ProcessSignature,

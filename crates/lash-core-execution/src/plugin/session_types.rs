@@ -2,7 +2,7 @@ pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SessionToolAccessError,
+    SessionStartPoint,
 };
 
 use crate::SessionId;
@@ -100,7 +100,6 @@ pub struct SessionCreateRequest {
     /// Unknown or pruned ids do not fail session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observed_processes: Vec<crate::ProcessId>,
-    pub tool_access: SessionToolAccess,
     /// Plugin-owned options that configure plugin behavior at session
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
@@ -108,13 +107,9 @@ pub struct SessionCreateRequest {
 }
 
 impl SessionCreateRequest {
-    /// A root session's request under `tool_access`. Tool authority is the
-    /// creator's decision, ambient or restricted, and has no default.
-    pub fn root(
-        tool_access: SessionToolAccess,
-        start: SessionStartPoint,
-        plugin_options: PluginOptions,
-    ) -> Self {
+    /// A root session's request. Which tools it is offered is its tool
+    /// providers' configuration, stated in `plugin_options`.
+    pub fn root(start: SessionStartPoint, plugin_options: PluginOptions) -> Self {
         Self {
             session_id: Some(SessionId::from_uuid(uuid::Uuid::new_v4().as_u128())),
             relation: SessionRelation::Root,
@@ -122,7 +117,6 @@ impl SessionCreateRequest {
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -131,7 +125,6 @@ impl SessionCreateRequest {
     }
 
     pub fn child_session(
-        tool_access: SessionToolAccess,
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         plugin_options: PluginOptions,
@@ -146,7 +139,6 @@ impl SessionCreateRequest {
             policy: None,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -155,7 +147,6 @@ impl SessionCreateRequest {
     }
 
     pub fn child(
-        tool_access: SessionToolAccess,
         parent_session_id: impl Into<SessionId>,
         start: SessionStartPoint,
         policy: SessionPolicy,
@@ -171,7 +162,6 @@ impl SessionCreateRequest {
             policy: Some(policy),
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
-            tool_access,
             plugin_options,
             model: None,
             reasoning: None,
@@ -266,91 +256,6 @@ impl SessionCreateRequest {
             *cause = Some(caused_by);
         }
         self
-    }
-}
-
-#[cfg(test)]
-mod session_tool_access_tests {
-    use super::{SessionToolAccess, SessionToolAccessError};
-
-    fn tool(id: &str, name: &str) -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
-            id,
-            name,
-            format!("{name} description"),
-            crate::ToolDefinition::default_input_schema(),
-            serde_json::json!({ "type": "string" }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-    }
-
-    #[test]
-    fn ambient_and_restricted_empty_have_distinct_canonical_encodings() {
-        assert_eq!(
-            serde_json::to_value(SessionToolAccess::ambient()).expect("serialize ambient"),
-            serde_json::json!({ "mode": "ambient" })
-        );
-        let restricted = SessionToolAccess::restricted([]).expect("empty restriction is valid");
-        assert_eq!(
-            serde_json::to_value(&restricted).expect("serialize restricted empty"),
-            serde_json::json!({ "mode": "restricted", "tools": [] })
-        );
-        assert_eq!(
-            restricted
-                .restricted_tools()
-                .expect("explicit restricted mode")
-                .len(),
-            0
-        );
-    }
-
-    #[test]
-    fn checked_construction_rejects_invalid_restricted_definitions() {
-        let empty_name = SessionToolAccess::restricted([tool("tool:empty", " ")])
-            .expect_err("blank name must refuse");
-        assert_eq!(
-            empty_name,
-            SessionToolAccessError::EmptyToolName { index: 0 }
-        );
-
-        let duplicate_name = SessionToolAccess::restricted([
-            tool("tool:first", "duplicate"),
-            tool("tool:second", "duplicate"),
-        ])
-        .expect_err("duplicate name must refuse");
-        assert_eq!(
-            duplicate_name,
-            SessionToolAccessError::DuplicateToolName {
-                name: "duplicate".to_string()
-            }
-        );
-
-        let duplicate_id = SessionToolAccess::restricted([
-            tool("tool:duplicate", "first"),
-            tool("tool:duplicate", "second"),
-        ])
-        .expect_err("duplicate id must refuse");
-        assert!(matches!(
-            duplicate_id,
-            SessionToolAccessError::DuplicateToolId { tool_id }
-                if tool_id.as_str() == "tool:duplicate"
-        ));
-
-        assert_eq!(
-            SessionToolAccess::ambient()
-                .with_hidden_tools([" "])
-                .expect_err("blank hidden name must refuse"),
-            SessionToolAccessError::EmptyHiddenToolName { index: 0 }
-        );
-        assert_eq!(
-            SessionToolAccess::ambient()
-                .with_hidden_tools(["duplicate", "duplicate"])
-                .expect_err("duplicate hidden name must refuse"),
-            SessionToolAccessError::DuplicateHiddenToolName {
-                name: "duplicate".to_string()
-            }
-        );
     }
 }
 

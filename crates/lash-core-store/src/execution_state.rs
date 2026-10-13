@@ -10,7 +10,8 @@ use std::sync::Arc;
 /// Interpretation of a stored checkpoint key. Manifests retain their string keys.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckpointComponentKey {
-    ToolState,
+    /// The retired tool-state component: refused at decode (FIG-6074).
+    RetiredToolState,
     PluginState,
     /// One plugin namespace's values body, by plugin.
     PluginNamespace(String),
@@ -19,7 +20,7 @@ pub enum CheckpointComponentKey {
 impl CheckpointComponentKey {
     pub fn parse(key: &str) -> Self {
         match key {
-            crate::store::TOOL_STATE_CHECKPOINT_COMPONENT => Self::ToolState,
+            crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT => Self::RetiredToolState,
             crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => Self::PluginState,
             _ => match crate::plugin_state::namespace_component_plugin(key) {
                 Some(plugin) => Self::PluginNamespace(plugin.to_owned()),

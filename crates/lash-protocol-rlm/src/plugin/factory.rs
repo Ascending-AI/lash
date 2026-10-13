@@ -8,16 +8,7 @@ use super::registration::register_rlm_protocol_plugin;
 use super::{
     RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig, RlmRecordedBehaviour, RlmRecordedConfig,
 };
-use crate::deferred::SharedDeferredToolResolver;
 use crate::dialect::{CellDialect, CodeModeDialectServices, SessionDialect};
-
-type ResolverFactory =
-    dyn Fn(&PluginSessionContext) -> Result<SharedDeferredToolResolver, PluginError> + Send + Sync;
-
-enum DeferredResolverConstruction {
-    Shared(SharedDeferredToolResolver),
-    PerSession(Arc<ResolverFactory>),
-}
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
@@ -33,13 +24,9 @@ pub struct RlmProtocolPluginFactory {
     /// stands in for the build before the synthetic successor.
     #[cfg(feature = "synthetic-next")]
     kernel_writes: Option<lash_kernel_doc::KernelVersion>,
-    deferred_tool_resolver: Option<DeferredResolverConstruction>,
     /// Which helper release this host's cells are written against; `None`
     /// is the build's own (FIG-5799).
     helpers: Option<Arc<dyn super::HelperReleaseGate>>,
-    /// Whether the kernel engine adopts processes written against an
-    /// earlier helper release onto the build's own (FIG-5799).
-    adopting_helpers: bool,
 }
 
 impl RlmProtocolPluginFactory {
@@ -58,9 +45,7 @@ impl RlmProtocolPluginFactory {
             worker_functions: None,
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
-            deferred_tool_resolver: None,
             helpers: None,
-            adopting_helpers: false,
         }
     }
 
@@ -118,19 +103,6 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    /// Adopt each kernel process this host's node claims that pins a
-    /// function of a helper release before the build's own onto the
-    /// build's function of the same name, when its run is not parked
-    /// inside a helper the adoption changes (FIG-5799): the operator's
-    /// choice before a build that stops retaining that release starts. A
-    /// process it does not adopt goes on as written, and `lashctl
-    /// kernel-migration list` names it with the typed reason.
-    #[must_use]
-    pub fn adopting_helpers(mut self) -> Self {
-        self.adopting_helpers = true;
-        self
-    }
-
     /// Whether a helper release gate is installed.
     pub fn has_helper_gate(&self) -> bool {
         self.helpers.is_some()
@@ -166,37 +138,6 @@ impl RlmProtocolPluginFactory {
             requests_per_park: pool.requests_per_park,
             join_members: pool.join_members,
         }
-    }
-
-    /// Wire a host-provided [`DeferredToolResolver`](crate::DeferredToolResolver)
-    /// that resolves each cell's batch of call paths absent from the
-    /// session's tools into per-path Tool Grants or unavailable outcomes.
-    /// Most hosts ship none. The last resolver setter selects shared or
-    /// per-session construction.
-    pub fn with_deferred_tool_resolver(mut self, resolver: SharedDeferredToolResolver) -> Self {
-        self.deferred_tool_resolver = Some(DeferredResolverConstruction::Shared(resolver));
-        self
-    }
-
-    /// Construct a resolver when the existing plugin factory materializes a session.
-    /// Construction refusals propagate as the closure's typed [`PluginError`].
-    /// The last resolver setter selects shared or per-session construction.
-    ///
-    /// Bind only immutable routing data from this build context. Its recorded
-    /// configuration is the value at materialization, not the current run's
-    /// configuration. Each resolution's identity and authority come from
-    /// [`DeferredResolveContext`](crate::DeferredResolveContext)'s owner, run
-    /// and capabilities.
-    pub fn with_deferred_tool_resolver_factory(
-        mut self,
-        factory: impl Fn(&PluginSessionContext) -> Result<SharedDeferredToolResolver, PluginError>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Self {
-        self.deferred_tool_resolver =
-            Some(DeferredResolverConstruction::PerSession(Arc::new(factory)));
-        self
     }
 
     /// The dialect a session being created records.
@@ -321,11 +262,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             Some(writes) => factory.writing_kernel(writes),
             None => factory,
         };
-        let factory = if self.adopting_helpers {
-            factory.adopting_helpers()
-        } else {
-            factory
-        };
         factory.process_engine_contributions(ctx)
     }
 
@@ -349,11 +285,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             presentation: config.presentation,
             workers: self.workers.clone(),
             code_renderer: config.code_renderer.clone(),
-            deferred_tool_resolver: match &self.deferred_tool_resolver {
-                Some(DeferredResolverConstruction::Shared(resolver)) => Some(Arc::clone(resolver)),
-                Some(DeferredResolverConstruction::PerSession(factory)) => Some(factory(ctx)?),
-                None => None,
-            },
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
             kernel: crate::executor::KernelCarry::new(self.worker_functions.clone(), writes),
@@ -415,6 +346,7 @@ mod tests {
             .memory_limit(crate::MemoryBound::unbounded())
             .build();
         RlmRecordedConfig {
+            finish_value_schema: None,
             render: None,
             termination: None,
             channel: Some(crate::RlmChannel::Cell),
@@ -430,125 +362,6 @@ mod tests {
             .memory_limit(crate::MemoryBound::unbounded())
             .build();
         RlmProtocolPluginFactory::new(config, CellDialect::typescript())
-    }
-
-    struct SessionResolver {
-        route: String,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::DeferredToolResolver for SessionResolver {
-        async fn resolve(
-            &self,
-            _cx: &crate::DeferredResolveContext<'_>,
-            _paths: &[&str],
-        ) -> std::collections::BTreeMap<String, crate::Resolution> {
-            std::collections::BTreeMap::new()
-        }
-    }
-
-    #[test]
-    fn resolver_construction_uses_each_sessions_recorded_context_on_materialization() {
-        use lash_sansio::sync::MutexExt;
-        let context = |id: &str, route: &str, revision, materialization| {
-            let mut config = lash_core::PluginConfig::default();
-            config.insert(
-                RLM_PROTOCOL_PLUGIN_ID,
-                serde_json::to_value(recorded(Some("typescript"))).expect("recorded config"),
-            );
-            config.insert("host.routing", serde_json::json!({"route": route}));
-            PluginSessionContext {
-                tracing: lash_core::trace::TraceRuntime::new(Arc::new(
-                    lash_core::facade_support::SystemClock,
-                )),
-                trace: None,
-                owner: lash_core::RuntimeOwner::Session(
-                    lash_core::SessionId::parse(id).expect("session id"),
-                ),
-                tool_access: lash_core::SessionToolAccess::ambient(),
-                plugin_config: lash_core::plugin::AdmittedPluginConfig::new(config, revision),
-                materialization,
-                extensions: Default::default(),
-            }
-        };
-        let first = context("first", "account-a", 3, Creation);
-        let second = context("second", "account-b", 7, Creation);
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let observed = Arc::clone(&seen);
-        let host = factory().with_deferred_tool_resolver_factory(move |ctx| {
-            let route = ctx
-                .plugin_config
-                .config
-                .get("host.routing")
-                .expect("recorded routing")["route"]
-                .as_str()
-                .expect("route")
-                .to_owned();
-            let resolver = Arc::new(SessionResolver { route });
-            observed.lock_recover().push((
-                ctx.owner.clone(),
-                ctx.plugin_config.clone(),
-                ctx.materialization,
-                Arc::downgrade(&resolver),
-            ));
-            Ok(resolver)
-        });
-        let a = host.build(&first).expect("first session");
-        let b = host.build(&second).expect("second session");
-        let mut rematerialized = first.clone();
-        rematerialized.materialization = Rematerialization;
-        let rebuilt = host.build(&rematerialized).expect("recorded first session");
-        let mut second_rematerialized = second.clone();
-        second_rematerialized.materialization = Rematerialization;
-        let second_rebuilt = host
-            .build(&second_rematerialized)
-            .expect("recorded second session");
-        let seen = seen.lock_recover();
-        assert_eq!(seen.len(), 4);
-        for (observation, expected) in
-            seen.iter()
-                .zip([&first, &second, &rematerialized, &second_rematerialized])
-        {
-            assert_eq!(observation.0, expected.owner);
-            assert_eq!(observation.1, expected.plugin_config);
-            assert_eq!(observation.2, expected.materialization);
-        }
-        let resolvers = seen
-            .iter()
-            .map(|entry| entry.3.upgrade().expect("plugin retains resolver"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            resolvers
-                .iter()
-                .map(|resolver| resolver.route.as_str())
-                .collect::<Vec<_>>(),
-            ["account-a", "account-b", "account-a", "account-b"]
-        );
-        assert!(!Arc::ptr_eq(&resolvers[0], &resolvers[1]));
-        assert!(!Arc::ptr_eq(&resolvers[0], &resolvers[2]));
-        assert!(!Arc::ptr_eq(&resolvers[1], &resolvers[3]));
-        drop((a, b, rebuilt, second_rebuilt));
-
-        let refusal = || PluginError::MissingRecordedSessionConfig {
-            plugin_id: "host.routing".into(),
-            field: "route".into(),
-        };
-        let shared: SharedDeferredToolResolver = Arc::new(SessionResolver {
-            route: "shared".into(),
-        });
-        let host = factory()
-            .with_deferred_tool_resolver_factory(move |_| Err(refusal()))
-            .with_deferred_tool_resolver(shared);
-        assert!(
-            host.build(&first).is_ok(),
-            "last shared setter replaces refused factory"
-        );
-        let host = host.with_deferred_tool_resolver_factory(move |_| Err(refusal()));
-        assert!(
-            matches!(host.build(&first), Err(PluginError::MissingRecordedSessionConfig { plugin_id, field })
-            if plugin_id == "host.routing" && field == "route"),
-            "last factory setter preserves typed refusal"
-        );
     }
 
     /// A session runs in the dialect its record names, whatever this host

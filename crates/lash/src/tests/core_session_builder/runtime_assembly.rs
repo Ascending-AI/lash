@@ -11,10 +11,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let catalog = backend.session_store_factory();
     if deleted {
         core.session(session_id.clone())
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            ))
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("create the deletion fixture explicitly");
         catalog
@@ -34,7 +31,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let policy = lash_core::testing::standard_test_policy();
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::ambient_fixture(policy.clone())
+        ..RuntimeSessionState::fixture(policy.clone())
     };
     let plugins = lash_core::facade_support::PluginHost::new(
         lash_core::testing::test_standard_protocol_factories(),
@@ -45,7 +42,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
     )
     .build_session(PluginSessionRequest::creation(
         session_id.clone(),
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     ))
     .expect("runtime plugins");
     for builder in [false, true] {
@@ -53,7 +50,6 @@ async fn assert_runtime_assembly_refuses_without_writes(
             backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
-            crate::tools::ToolSourcePolicy::Tolerate,
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
             lash_core::facade_support::DataRetentionConfig::standard(),
@@ -133,7 +129,6 @@ fn peer_core(backend: lash_core::Backend) -> LashCore {
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())

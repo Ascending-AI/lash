@@ -124,12 +124,6 @@ impl SessionAdmin {
         }
     }
 
-    pub fn tools(&self) -> ToolAdmin {
-        ToolAdmin {
-            context: self.context.clone(),
-        }
-    }
-
     pub fn commands(&self) -> SessionCommandAdmin {
         SessionCommandAdmin {
             context: self.context.clone(),
@@ -158,6 +152,25 @@ impl SessionAdmin {
     pub fn processes(&self) -> SessionProcessAdmin {
         self.processes.clone()
     }
+
+    /// The tools the session's providers offer under its current config,
+    /// by model-facing name: what its next run is offered before that run's
+    /// own options. It reads the live providers and records nothing; which
+    /// tools a provider offers is that provider's config, and a committed
+    /// run keeps the surface it recorded.
+    pub async fn offered_tools(&self) -> Result<Vec<lash_core::ToolManifest>> {
+        self.context
+            .with_writer(async |runtime: &mut crate::support::LashRuntime| {
+                runtime.reload_invalidated_resident_session_state().await?;
+                let resolved = runtime.offered_tool_surface()?;
+                Ok(resolved
+                    .surface
+                    .definitions()
+                    .map(|definition| definition.manifest.clone())
+                    .collect())
+            })
+            .await
+    }
 }
 
 mod context;
@@ -166,9 +179,6 @@ pub(crate) mod config_transactions;
 use config_transactions::SessionConfigAdmin;
 pub(crate) mod host_commands;
 use host_commands::{SessionCommandAdmin, unsettled_command_error};
-pub(crate) mod tool_state;
-use tool_state::ToolAdmin;
-pub use tool_state::{PendingToolStateChange, SessionToolState};
 pub(crate) mod process_admin;
 use process_admin::SessionProcessAdmin;
 pub(crate) mod prompt;

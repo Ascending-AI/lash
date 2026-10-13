@@ -50,8 +50,9 @@ pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 1;
 /// version_surface = "migrate"
 /// format_manifest = "CheckpointComponentEncoding"
 pub const CHECKPOINT_COMPONENT_ENCODING_VERSION: u32 = 2;
-/// Well-known component key used by the runtime's tool registry snapshot.
-pub const TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
+/// The component key the retired tool-state snapshot was stored under. A
+/// checkpoint that still names it is refused at decode (FIG-6074).
+pub const RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT: &str = "tool_state";
 /// Well-known component key used by the runtime's plugin-session snapshot.
 pub const PLUGIN_STATE_CHECKPOINT_COMPONENT: &str = "plugin_state";
 /// Well-known component key for the recorded plugin admission and native view.

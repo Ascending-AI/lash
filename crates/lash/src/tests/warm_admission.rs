@@ -33,10 +33,7 @@ fn serving(stores: Arc<dyn lash_core::StoreSet>, claim_poll: std::time::Duration
 async fn send_in_turn(core: &LashCore, session: &str, texts: &[&str]) {
     let session = core
         .session(crate::SessionId::parse(session).expect("session id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("create the session");
     for text in texts {

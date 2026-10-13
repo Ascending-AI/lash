@@ -8,12 +8,14 @@ mod engine;
 pub mod engine_state;
 mod env_hold;
 pub mod env_policy;
+mod link_check;
 pub(crate) use env_hold::hold_launch;
 pub use env_hold::{HoldEnvError, ProcessEnvPorts, ProcessEnvSelection, hold_process_env};
 pub use env_policy::{
     EnclosingProcess, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
     ProcessStartChoice, ResolvedStartTarget,
 };
+pub use link_check::{FitPolicy, check_links};
 mod events;
 #[cfg(test)]
 mod guarded_surface_tests;
@@ -67,10 +69,10 @@ pub use effect_summary::{
     ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
-    AdmittedProcessIdentity, InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider,
-    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineRegistration, ProcessEngineRegistry, ProcessExecutionDocumentRead,
-    ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
+    AdmittedProcessIdentity, InspectedProcessDefinition, PerformedEffects, ProcessDocument,
+    ProcessDocumentProvider, ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
 };
 pub use engine_state::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStateMigration,
@@ -87,25 +89,25 @@ pub use events::{
     terminal_append_request,
 };
 pub use model::{
-    Ancestry, DeclaredLaunch, DeclaredProcessIdentity, EngineLaunch, EngineSettings, HandleId,
-    InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy, PreparedProcessRegistration,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
-    ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvLoadError, ProcessEnvRef,
-    ProcessEnvRefusal, ProcessEnvStore, ProcessExecutionContext, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput,
-    ProcessLifecycleState, ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode,
-    ProcessModel, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
-    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget, ProcessStarted,
-    ProcessStatus, ProcessStatusFilter, ProcessTombstone, ProcessWaits, RetiredProcessStatus,
-    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
-    SessionScope, SessionScopeId, StartCx, StartCxError, StartKey, StoreRealization,
-    TerminalProcessStatus, WaitKind, WaitState, artifact_referrer_ended,
-    artifact_store_plugin_error, lifetime, load_process_env, mint_process_id,
-    process_child_session_id, process_session_id, process_session_turn_id,
+    Ancestry, DeclaredDefinitionLaunch, DeclaredLaunch, DeclaredProcessIdentity, EngineLaunch,
+    EngineSettings, HandleId, InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy,
+    PreparedProcessRegistration, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessCompletionOutcome, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
+    ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvLoadError,
+    ProcessEnvRef, ProcessEnvRefusal, ProcessEnvStore, ProcessExecutionContext,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLimits,
+    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessModel, ProcessObserverBy,
+    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
+    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartDeclaration,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRegistration,
+    ProcessStartRequest, ProcessStartTarget, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTombstone, ProcessWaits, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION,
+    ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId, SessionScope, SessionScopeId,
+    StartCx, StartCxError, StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitState,
+    artifact_referrer_ended, artifact_store_plugin_error, lifetime, load_process_env,
+    mint_process_id, process_child_session_id, process_session_id, process_session_turn_id,
 };
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{

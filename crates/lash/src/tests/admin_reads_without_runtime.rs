@@ -6,16 +6,11 @@
 
 use super::*;
 use crate::support::TurnInput;
-use crate::tools::{ToolManifest, ToolState};
-use lash_core::facade_support::ToolStateFacadeOps as _;
 use lash_sansio::SessionId;
 
 /// What the durable admin reads answered.
 struct AdminReads {
-    tool_state: crate::admin::SessionToolState,
-    manifests: Vec<ToolManifest>,
     execution: Option<lash_core::plugin::HydratedExecutionGraph>,
-    observed_tool_state: Option<ToolState>,
 }
 
 /// Call every host admin read on `session`, whose runtime holds no built
@@ -32,8 +27,6 @@ async fn read_every_admin_surface(session: &crate::LashSession) -> Result<AdminR
         "precondition: no run activated this handle's runtime"
     );
     let admin = session.admin();
-    let tool_state = admin.tools().state().await?;
-    let manifests = admin.tools().active_manifests().await?;
     let execution = admin.state().snapshot_execution().await?;
     let _ = admin.state().export().await;
     admin.state().persist_current().await?;
@@ -46,17 +39,7 @@ async fn read_every_admin_surface(session: &crate::LashSession) -> Result<AdminR
     observed.snapshot().await?;
     let _ = observed.read_view();
     let _ = observed.list_all_process_handles().await;
-    assert_eq!(
-        observed.active_tool_manifests(),
-        manifests,
-        "the observed catalog is the recorded one"
-    );
-    Ok(AdminReads {
-        tool_state,
-        manifests,
-        execution,
-        observed_tool_state: observed.tool_state(),
-    })
+    Ok(AdminReads { execution })
 }
 
 fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
@@ -79,7 +62,6 @@ fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
 async fn every_admin_read_answers_from_durable_state_without_an_activated_runtime() -> Result<()> {
     {
         let backend = sqlite_memory_store_backend().await;
-        let app_lookup = lash_core::ToolId::from("tool:app_lookup");
 
         // A session that never ran: its head records nothing yet.
         let core = rlm_core(backend.clone(), true)?;
@@ -90,14 +72,10 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
             .open()
             .await?;
         let reads = read_every_admin_surface(&never_ran).await?;
-        assert!(reads.tool_state.recorded().is_none());
-        assert!(reads.tool_state.pending().is_empty());
-        assert!(reads.manifests.is_empty());
         assert!(reads.execution.is_none());
-        assert!(reads.observed_tool_state.is_none());
 
-        // A run records tool state and execution state; a cold reopen on a
-        // core without the run's tool source builds no capabilities.
+        // A run records execution state; a cold reopen on a core without
+        // the run's tool source builds no capabilities.
         let session_id = SessionId::from("admin-reads-cold-reopen");
         let ran = core
             .session(session_id.clone())
@@ -113,20 +91,6 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
         let reopened_core = rlm_core(backend, false)?;
         let reopened = reopened_core.session(session_id.clone()).open().await?;
         let reads = read_every_admin_surface(&reopened).await?;
-        let recorded = reads
-            .tool_state
-            .recorded()
-            .expect("the run recorded the session's tool state");
-        assert!(recorded.contains(&app_lookup));
-        assert!(reads.tool_state.pending().is_empty());
-        assert!(
-            reads
-                .manifests
-                .iter()
-                .any(|manifest| manifest.id == app_lookup),
-            "the recorded catalog names the run's tool"
-        );
-        assert_eq!(reads.observed_tool_state.as_ref(), Some(recorded));
         let execution = reads
             .execution
             .expect("the head records the run's execution state");

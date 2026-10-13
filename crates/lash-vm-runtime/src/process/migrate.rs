@@ -250,68 +250,13 @@ pub struct KernelStateMigration {
 
 impl KernelStateMigration {
     /// The migration of `engine`'s processes, or `None` when its build
-    /// ships none: it interprets one kernel version, and adopts no process
-    /// off a helper release (FIG-5799).
+    /// ships none: it interprets one kernel version. A process pinned to a
+    /// helper release is never carried off it here (FIG-6074, D2).
     pub fn of(engine: Arc<KernelProcessEngine>) -> Option<Self> {
         let carries = engine.writes.previous().is_some_and(|previous| {
             migration_from(previous).is_some_and(|migration| migration.to == engine.writes)
         });
-        (carries || engine.adopts.is_some()).then_some(Self { engine })
-    }
-}
-
-impl KernelStateMigration {
-    /// `state`, in this build's format, adopted onto the build's helpers;
-    /// `None` when the engine adopts nothing or the process reaches no
-    /// helper it retires. A refusal is not final: the process goes on as
-    /// written, and the survey names it.
-    async fn adopt(
-        &self,
-        process: &ProcessId,
-        state: &EngineState,
-    ) -> Result<Option<EngineState>, EngineStateRefusal> {
-        let engine = &self.engine;
-        let Some(retired) = &engine.adopts else {
-            return Ok(None);
-        };
-        let adopted = super::helpers::adopt_state(
-            &engine.documents,
-            &engine.functions,
-            retired,
-            engine.writes,
-            state,
-            engine.workers.config().graph_reads.execution(),
-        )
-        .await
-        .map_err(|error| match error {
-            super::helpers::AdoptError::Refused(refusal) => EngineStateRefusal {
-                refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
-                message: refusal.to_string(),
-                fatal: false,
-            },
-            super::helpers::AdoptError::Store(error) => retried(error),
-        })?;
-        let Some(super::helpers::Adopted {
-            mut state,
-            mut input,
-            document,
-        }) = adopted
-        else {
-            return Ok(None);
-        };
-        let claim = lash_core::ReferrerClaim::unguarded(
-            lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
-        )
-        .map_err(retried)?;
-        input.document = engine
-            .documents
-            .publish(&claim, &document)
-            .await
-            .map_err(retried)?;
-        state.payload = serde_json::to_value(&input).map_err(retried)?;
-        advance::encode(&state, engine.writes)
-            .map(Some)
-            .map_err(retried)
+        carries.then_some(Self { engine })
     }
 }
 
@@ -346,10 +291,6 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
             .collect()
     }
 
-    fn adopts(&self) -> bool {
-        self.engine.adopts.is_some()
-    }
-
     async fn migrate(
         &self,
         process: &ProcessId,
@@ -357,7 +298,7 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
     ) -> Result<Option<EngineState>, EngineStateRefusal> {
         let engine = &self.engine;
         if state.format == advance::state_format(engine.writes) {
-            return self.adopt(process, state).await;
+            return Ok(None);
         }
         let carried = carry(
             &engine.documents,

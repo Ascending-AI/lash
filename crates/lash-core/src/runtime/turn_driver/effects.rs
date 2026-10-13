@@ -270,12 +270,7 @@ impl RuntimeTurnDriver<'_> {
         let delivery = result.map_err(RuntimeEffectControllerError::into_journaled)?;
         self.turn_pipeline
             .graph_appends()
-            .apply_session_contributions(
-                &self.session_id,
-                self.session.plugins(),
-                &session_contributions,
-            )
-            .await
+            .apply_session_contributions(&self.session_id, &session_contributions)
             .map_err(|err| {
                 RuntimeEffectControllerError::from(
                     err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint),

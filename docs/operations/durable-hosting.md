@@ -76,7 +76,6 @@ let core = lash::LashCore::builder(backend)
     // Example host limits; measure and select them for the deployment.
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .tool_source_policy(lash::tools::ToolSourcePolicy::Require)
     .execution_budgets(budgets)
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .data_retention(lash::DataRetention {
@@ -92,21 +91,20 @@ let core = lash::LashCore::builder(backend)
 
 ### Required choices before serving
 
-The core requires all six policy inputs below. A named preset is a host's
+The core requires all five policy inputs below. A named preset is a host's
 explicit choice of values, not an implicit policy or a measured deployment
 recommendation. `build` refuses a missing core choice. The same applies to
 session, model, RLM and store choices.
 
-The example selects a 1,024-token action reserve for queued work and refuses
-missing persisted tool sources. The reserve is advisory data for a custom
+The example selects a 1,024-token action reserve for queued work. The reserve is advisory data for a custom
 drain policy; the shipped drain modes do no token arithmetic. Tool and engine
 body bounds and park bounds belong to their execution contracts, separately
 from the shared model, control and provider budgets.
 
 | Boundary | Required host choices | Current owner |
 | --- | --- | --- |
-| Core | `commit_budget`, `queued_work_batching`, `tool_source_policy`, `execution_budgets`, `delta_coalescing`, `data_retention` on `LashCoreBuilder` | [Builder](../../crates/lash/src/core.rs) and [required-policy validation](../../crates/lash/src/core/runtime_host_config.rs). |
-| Session creation | `SessionSpec::model`, `turn_budget`, `max_tool_calls`, `no_progress_budget`; supply tool authority through `SessionCreation::root(tool_access, spec)` or `child_of(tool_access, parent, spec)` | [Session spec](../../crates/lash-core-execution/src/session_model/mod.rs) and [creation](../../crates/lash/src/session.rs). A child records supplied config; only a fork clones. |
+| Core | `commit_budget`, `queued_work_batching`, `execution_budgets`, `delta_coalescing`, `data_retention` on `LashCoreBuilder` | [Builder](../../crates/lash/src/core.rs) and [required-policy validation](../../crates/lash/src/core/runtime_host_config.rs). |
+| Session creation | `SessionSpec::model`, `turn_budget`, `max_tool_calls`, `no_progress_budget`; create through `SessionCreation::root(spec)` or `child_of(parent, spec)`. Which tools a session offers is each tool provider's own config (`ToolSelection`), which `spec` states | [Session spec](../../crates/lash-core-execution/src/session_model/mod.rs) and [creation](../../crates/lash/src/session.rs). A child records supplied config; only a fork clones. |
 | Recorded model | Wire model, nonzero context window and `CacheRetention` in `LlmProfileMetadata`; choose capability and request defaults for the route | [Model metadata](../../crates/lash-sansio/src/llm_profile.rs). |
 | RLM, when installed | `RlmProtocolPluginConfig::builder()` requires `instruction_limit`, `memory_limit` and `channel` before `build()` | [Typed builder](../../crates/lash-protocol-rlm/src/plugin/config.rs). |
 | SQLite | Supply `SqliteSynchronous` to `SqliteStoreSet::open` | [Store open](../../crates/lash-sqlite-store/src/lib.rs) and [§3](#3-sqlite-is-one-file). |
@@ -1365,7 +1363,7 @@ cap; the workbench's upload preset is 1 MiB.
 | H | MCP catalog pages / items / bytes | 64 / 4096 / 8 MiB | `McpServerConfig.data_limits: McpDataLimits` | Addressable counts/bytes |
 | H | MCP inbound stdio message | 8 MiB | `McpServerConfig.data_limits.stdio_message_bytes` | Addressable bytes |
 | H | MCP calls / startup / liveness / reconnect / shutdown | Startup 10 s; call 60 s idle / 600 s total; probe 5 s, disconnect after 3 timeouts, keepalive off; reconnect 500 ms–30 s, unlimited attempts; close 3 s, forced stages 1 s each, scheduling 1 s, child poll 10 ms | `McpServerConfig.{startup_timeout_ms,call_max_total_timeout_ms,call_policy,shutdown_policy}` | Representable milliseconds and validated reconnect/cleanup ordering |
-| H | Tool body, park, requests, source/execution allowance | Explicit, no inferred tool default | `ToolDraft` / admitted tool execution and park bounds; `ToolSourcePolicy` | Typed bounds; provider/native capabilities still checked |
+| H | Tool body, park, requests, execution allowance | Explicit, no inferred tool default | `ToolDraft` / admitted tool execution and park bounds | Typed bounds; provider/native capabilities still checked |
 | H/S | Execution and provider attempts | Recommended model 10 min, control 60 s, stop 2 s; attempts host-declared | `LashCoreBuilder::execution_budgets`, `ProviderAttemptLimits`, tool/model contracts | 30 days / 16 attempts; finite recorded deadline and retry arithmetic |
 | H | Turn / no-progress budgets | Required explicit finite or unbounded choice | `SessionSpec` / `TurnBudget` / `NoProgressBudget` | Nonzero addressable count or explicit unbounded |
 | H/S | Delta coalescing | 50 ms, 8 KiB, first immediate | `LashCoreBuilder::delta_coalescing(DeltaCoalescing)` | 10 s / 1 MiB; bounded event frame/coalescing latency |

@@ -286,11 +286,8 @@ pub(crate) async fn workbench_core_builder(
     let protocol = crate::session_protocol::selected()?;
     // The workbench's delegation tool (`examples/delegation`): children run
     // the workbench's session defaults and live until their starter ends.
-    let delegation = delegation::DelegationPluginFactory::new(
-        lash::plugins::SessionToolAccess::ambient(),
-        child_spec,
-        lash::process::lifetime::starter,
-    );
+    let delegation =
+        delegation::DelegationPluginFactory::new(child_spec, lash::process::lifetime::starter);
     let delegation: Arc<dyn PluginFactory> = match protocol {
         crate::session_protocol::SessionProtocol::Standard => Arc::new(delegation),
         crate::session_protocol::SessionProtocol::Rlm => Arc::new(delegation.with_rlm_children()),
@@ -312,8 +309,7 @@ pub(crate) async fn workbench_core_builder(
             }
             let factory =
                 lash::rlm::RlmProtocolPluginFactory::new(rlm_config, dialect.cell_dialect())
-                    .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
-                    .with_deferred_tool_resolver(deferred_tools.resolver());
+                    .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?);
             // The chat's own finish tool takes the place of Lash's.
             LashCore::rlm_builder(host_backend, factory).tools(
                 lash::hook_key!("chat-reply"),
@@ -326,7 +322,6 @@ pub(crate) async fn workbench_core_builder(
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .data_retention(lash::DataRetention::standard())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .live_replay_store(live_replay)
     .delta_coalescing(delta_coalescing_from_environment()?);

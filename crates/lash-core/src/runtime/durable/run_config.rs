@@ -26,7 +26,7 @@ use crate::ResolvedRun;
 pub struct RecordedRunConfig {
     run: Arc<ResolvedRun>,
     run_stored: Option<NodeId>,
-    surface: Option<Arc<[crate::ToolDefinition]>>,
+    surface: Option<Arc<crate::RecordedSurface>>,
     surface_stored: Option<NodeId>,
 }
 
@@ -56,20 +56,21 @@ impl RecordedRunConfig {
         Arc::clone(&self.run)
     }
 
-    /// The tool surface the run's latest environment sync installed, as a
-    /// resume reinstalls it: `None` before the run's first sync.
+    /// The tool surface the run's latest environment sync installed, with
+    /// its deferred provider, as a resume reinstalls it: `None` before the
+    /// run's first sync.
     #[must_use]
-    pub fn surface(&self) -> Option<&[crate::ToolDefinition]> {
-        self.surface.as_deref()
+    pub fn surface(&self) -> Option<&Arc<crate::RecordedSurface>> {
+        self.surface.as_ref()
     }
 
     /// Record `surface` as the one the run's latest sync installed. An
     /// unchanged surface keeps the node an earlier phase stored it as.
-    pub(in crate::runtime) fn install_surface(&mut self, surface: &[crate::ToolDefinition]) {
-        if self.surface.as_deref() == Some(surface) {
+    pub(in crate::runtime) fn install_surface(&mut self, surface: Arc<crate::RecordedSurface>) {
+        if self.surface.as_deref() == Some(&*surface) {
             return;
         }
-        self.surface = Some(Arc::from(surface));
+        self.surface = Some(surface);
         self.surface_stored = None;
     }
 
@@ -157,8 +158,8 @@ impl RecordedRunConfig {
             .map_err(|error| format!("the run's resolved shape does not decode: {error}"))?;
         let surface = surface
             .map(|(node, text)| {
-                serde_json::from_str::<Vec<crate::ToolDefinition>>(text)
-                    .map(|definitions| (node, Arc::<[crate::ToolDefinition]>::from(definitions)))
+                serde_json::from_str::<crate::RecordedSurface>(text)
+                    .map(|surface| (node, Arc::new(surface)))
                     .map_err(|error| format!("the run's tool surface does not decode: {error}"))
             })
             .transpose()?;
@@ -166,7 +167,7 @@ impl RecordedRunConfig {
             run: Arc::new(resolved),
             run_stored: Some(run.0),
             surface_stored: surface.as_ref().map(|(node, _)| *node),
-            surface: surface.map(|(_, definitions)| definitions),
+            surface: surface.map(|(_, surface)| surface),
         })
     }
 }

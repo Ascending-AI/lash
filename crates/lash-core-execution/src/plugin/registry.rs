@@ -12,7 +12,7 @@ use super::{
     ErasedPluginOperationInvokeFuture, HookKey, PluginCommand, PluginCommandHandler, PluginError,
     PluginHost, PluginLifecycleEventHook, PluginOperationOutcome, PluginOperationRegistration,
     PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
-    PluginTask, PluginTaskHandler, SessionToolAccess, ToolArgsCheckHook, ToolArgsTransformHook,
+    PluginTask, PluginTaskHandler, ToolArgsCheckHook, ToolArgsTransformHook,
     ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook, ToolResultTransformHook,
 };
 use crate::ToolProvider;
@@ -81,6 +81,9 @@ pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
     /// Each provider under its declared key (FIG-6073).
     pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
+    /// The deferred provider, under its declared key: a session has at
+    /// most one.
+    pub deferred_provider: Option<(HookKey, Arc<dyn crate::DeferredToolProvider>)>,
     pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
     pub before_turn_hooks: Vec<(HookKey, BeforeTurnHook)>,
     pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
@@ -120,6 +123,17 @@ impl PluginSpec {
 
     pub fn with_tool_provider(mut self, key: HookKey, provider: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push((key, provider));
+        self
+    }
+
+    /// Register `provider` as the deferred provider under `key`, replacing
+    /// one this spec named before.
+    pub fn with_deferred_provider(
+        mut self,
+        key: HookKey,
+        provider: Arc<dyn crate::DeferredToolProvider>,
+    ) -> Self {
+        self.deferred_provider = Some((key, provider));
         self
     }
 
@@ -477,7 +491,6 @@ pub struct PluginSessionContext {
     /// Who the plugin session is built for: a session, or a process runtime
     /// built from its captured execution environment.
     pub owner: crate::RuntimeOwner,
-    pub tool_access: SessionToolAccess,
     /// The session's recorded plugin configuration at this build (FIG-4379):
     /// what it was created with or last patched to, or a process's captured
     /// configuration. It is the value at build time only: a hook reads the
@@ -1050,6 +1063,9 @@ impl SessionPlugin for SpecPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         for (key, provider) in &self.spec.tool_providers {
             reg.tools().provider(*key, Arc::clone(provider))?;
+        }
+        if let Some((key, provider)) = &self.spec.deferred_provider {
+            reg.tools().deferred(*key, Arc::clone(provider))?;
         }
         for (key, contributor) in &self.spec.tool_catalog_contributors {
             reg.tool_catalog()

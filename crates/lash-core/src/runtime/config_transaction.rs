@@ -198,8 +198,7 @@ impl LashRuntime {
         if matches!(
             resolution.publish(&mut candidate),
             crate::ConfigTransactionOutcome::Applied { .. }
-        ) && (candidate.tool_access != base.tool_access
-            || candidate.plugin_config != base.plugin_config)
+        ) && candidate.plugin_config != base.plugin_config
             && let Err(error) = super::config_ops::validate_config_tool_catalog(
                 self.services.plugins.host(),
                 &self.state,
@@ -577,8 +576,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
         if matches!(
             resolution.publish(&mut candidate),
             crate::ConfigTransactionOutcome::Applied { .. }
-        ) && (candidate.tool_access != self.base.tool_access
-            || candidate.plugin_config != self.base.plugin_config)
+        ) && candidate.plugin_config != self.base.plugin_config
             && let Err(error) = super::config_ops::validate_config_tool_catalog(
                 &self.catalog_host,
                 &self.state,

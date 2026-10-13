@@ -80,6 +80,7 @@ mod tests {
     /// A recorded namespace with only its pins.
     fn pinned(channel: Option<RlmChannel>, dialect: Option<&str>) -> RlmRecordedConfig {
         RlmRecordedConfig {
+            finish_value_schema: None,
             render: None,
             termination: None,
             channel,

@@ -77,7 +77,6 @@ pub(super) fn build(
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .tools(
@@ -110,10 +109,14 @@ fn definition() -> Result<lash_core::ToolDefinition> {
 struct DeferredTools(lash_core::ToolDefinition);
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![self.0.manifest()]
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "boundary_wait").then(|| Arc::new(self.0.contract()))
     }
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -124,10 +127,7 @@ impl lash_core::ToolProvider for DeferredTools {
 pub(super) async fn create(core: &lash::LashCore, name: &str) -> Result<lash::DurableSession> {
     Ok(core
         .session(lash::SessionId::try_from(name.to_owned())?)
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec()?,
-        ))
+        .create(lash::SessionCreation::root(spec()?))
         .await?)
 }
 pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Meter) -> Result<()> {
@@ -565,7 +565,6 @@ async fn lifecycle(
         let request = lash_core::ProcessStartRequest::session_turn(
             "boundary-child",
             lash_core::SessionCreateRequest::child(
-                lash::plugins::SessionToolAccess::ambient(),
                 "lifecycle-parent",
                 lash_core::SessionStartPoint::Empty,
                 lash_core::SessionPolicy {

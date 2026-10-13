@@ -209,7 +209,6 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
     .commit_budget(lash::CommitBudget::bounded(256 * 1024 * 1024, 1_000_000))
     .data_retention(lash::DataRetention::standard())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .serve_test_llm_profile(provider(args, Arc::clone(&meter)), metadata()?)
@@ -269,7 +268,6 @@ async fn run(args: &Args, meter: Arc<measure::Meter>) -> Result<()> {
             let session = core
                 .session(session_id()?)
                 .create(lash::SessionCreation::root(
-                    lash::plugins::SessionToolAccess::ambient(),
                     lash::SessionSpec::new(
                         MODEL,
                         lash::TurnBudget::Unbounded,

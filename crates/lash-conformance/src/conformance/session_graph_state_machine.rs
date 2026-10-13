@@ -754,7 +754,6 @@ impl SessionGraphScenario {
                 relation,
                 config: crate::PersistedSessionConfig::from_policy(
                     &request.config.session_policy(),
-                    crate::SessionToolAccess::ambient(),
                 ),
                 retention: crate::Retention::UntilGc,
             })
@@ -1550,7 +1549,7 @@ async fn property_runtime(
         .unwrap_or_else(|| crate::RuntimeSessionState {
             session_id: request.session_id.clone(),
             policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+            ..crate::RuntimeSessionState::fixture(request.config.session_policy())
         });
     let host = crate::PluginHost::new(
         crate::testing::test_standard_protocol_factories(),
@@ -1565,12 +1564,11 @@ async fn property_runtime(
             snapshot,
             crate::plugin::SessionAuthorityContext {
                 plugin_config: state.admitted_plugin_config(),
-                ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
             },
         )),
         None => host.build_session(PluginSessionRequest::creation(
             request.session_id.clone(),
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         )),
     }
     .map_err(|error| error.to_string())?;

@@ -11,9 +11,6 @@ impl crate::plugin::SessionReadService for MockSessionManager {
     async fn tool_catalog(&self, _: &SessionId) -> Result<Vec<serde_json::Value>, PluginError> {
         Ok(self.tool_catalog.clone())
     }
-    async fn tool_state(&self, session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
-        crate::plugin::SessionStateService::tool_state(self, session_id).await
-    }
 }
 
 #[async_trait::async_trait]
@@ -41,29 +38,6 @@ impl crate::plugin::SessionStateService for MockSessionManager {
         _session_id: &SessionId,
     ) -> Result<Vec<serde_json::Value>, PluginError> {
         Ok(self.tool_catalog.clone())
-    }
-    async fn tool_state(&self, _session_id: &SessionId) -> Result<crate::ToolState, PluginError> {
-        self.tool_registry
-            .as_ref()
-            .map(crate::ToolRegistry::export_state)
-            .ok_or_else(|| {
-                PluginError::Session("tool state is unavailable in this session".to_string())
-            })
-    }
-
-    async fn apply_tool_state(
-        &self,
-        _session_id: &SessionId,
-        snapshot: crate::ToolState,
-    ) -> Result<u64, PluginError> {
-        let Some(tool_registry) = self.tool_registry.as_ref() else {
-            return Err(PluginError::Session(
-                "tool state mutation is unavailable in this session".to_string(),
-            ));
-        };
-        tool_registry
-            .apply_state(snapshot)
-            .map_err(|err| PluginError::Session(err.to_string()))
     }
 }
 

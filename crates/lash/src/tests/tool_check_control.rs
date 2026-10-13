@@ -31,11 +31,15 @@ fn echo_definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for EchoTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![echo_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == ECHO).then(|| Arc::new(echo_definition().contract()))
     }
 
@@ -108,10 +112,7 @@ async fn run_policy_turn(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();
     let output = session

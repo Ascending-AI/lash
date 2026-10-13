@@ -148,6 +148,13 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     })
                     .into()
             }
+            // A surface its providers cannot build is the candidate's typed
+            // refusal, deterministic over the config that advertised it.
+            PluginError::ToolSurfaceRefused { refusal } => {
+                Self::run_shape_refused(crate::RunShapeRefusal::Owner {
+                    refusal: crate::plugin::CoreConfigOwner::surface_refusal(*refusal),
+                })
+            }
             err @ PluginError::ProcessCancelConflict { .. } => {
                 Self::new(RuntimeErrorCode::ProcessCancelConflict, err.to_string())
             }
@@ -189,7 +196,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ResidentToolDuplicateId { .. }
             | PluginError::ResidentToolDuplicateName { .. }
             | PluginError::ToolRegistrationRefused { .. }
-            | PluginError::ResidentToolRouteUnavailable { .. }
             | PluginError::SessionAlreadyExists { .. }
             | PluginError::MissingRecordedSessionConfig { .. }
             | PluginError::RecordedSessionConfigConflict { .. }

@@ -17,7 +17,9 @@ pub struct ToolDispatchContext<'run> {
     pub facts: ExecutionFacts,
     pub execution_budgets: crate::ExecutionBudgets,
     pub tools: Arc<dyn ToolProvider>,
-    pub tool_registry: Option<Arc<crate::ToolRegistry>>,
+    /// The routes of the surface or links this dispatch's calls are
+    /// admitted under: which provider each tool's entry records.
+    pub routes: crate::SurfaceTools,
     pub tool_catalog: Arc<ToolCatalog>,
     pub sessions: Arc<dyn SessionStateService>,
     /// The fleet format the owning store records: what a provider's
@@ -143,6 +145,28 @@ impl ToolDispatchContext<'_> {
 }
 
 impl<'run> ToolDispatchContext<'run> {
+    /// The provider a call of `tool` is routed to: the one its deferred
+    /// match grants, else the one its surface entry records.
+    pub fn routed_provider<'a>(
+        &'a self,
+        tool: &crate::ToolId,
+        granted: Option<&'a crate::plugin::PluginCallbackIdentity>,
+    ) -> Option<&'a crate::plugin::PluginCallbackIdentity> {
+        granted.or_else(|| self.routes.entry(tool).map(|entry| &entry.provider))
+    }
+
+    /// How the surface entry offering the model-facing tool `name` drifted
+    /// on this node under the dispatch's config, if it did (S5): judged
+    /// against the definition the entry retained, under the provider it
+    /// records. `None` when no entry offers `name`.
+    pub fn drift_of(&self, name: &str) -> Option<crate::ToolSurfaceDrift> {
+        let entry = self
+            .routes
+            .entries()
+            .find(|entry| entry.definition.manifest.name == name)?;
+        self.routes.drift(entry.tool(), &self.config)
+    }
+
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {
         crate::ProcessOpScope::new(self.effect_controller.clone())
             .with_parent_invocation(self.parent_invocation.clone())
@@ -159,7 +183,7 @@ impl<'run> ToolDispatchContext<'run> {
             facts: self.facts.clone(),
             execution_budgets: self.execution_budgets.clone(),
             tools: Arc::clone(&self.tools),
-            tool_registry: self.tool_registry.clone(),
+            routes: self.routes.clone(),
             tool_catalog: Arc::clone(&self.tool_catalog),
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),

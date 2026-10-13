@@ -205,12 +205,10 @@ where
     Ok(out)
 }
 
-/// The session's resident authority: the tool access the plugin catalog
-/// projection reads, and the plugin configuration its hooks run under, held
-/// under one lock.
+/// The session's resident authority: the plugin configuration its hooks and
+/// tool providers run under.
 #[derive(Clone)]
 pub(super) struct LiveSessionAuthority {
-    pub(super) tool_access: SessionToolAccess,
     /// The plugin configuration the session's hooks run under (FIG-4379):
     /// the running run's admitted configuration, the head's outside a run,
     /// or a process's captured configuration.
@@ -227,7 +225,6 @@ pub struct PluginSession {
     pub(super) materialized: Arc<std::sync::atomic::AtomicBool>,
     pub(super) materialization_lock: Arc<std::sync::Mutex<()>>,
     pub(super) materialization: PluginSessionMaterialization,
-    pub(super) tool_snapshot: Option<crate::ToolState>,
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
     pub(super) authority: Arc<std::sync::RwLock<LiveSessionAuthority>>,
     pub(super) extensions: PluginExtensions,
@@ -248,7 +245,6 @@ pub struct PluginSession {
 pub(super) struct PluginSessionCapabilities {
     pub(super) composition: Arc<ExecutionComposition>,
     pub(super) plugins: Vec<Arc<dyn SessionPlugin>>,
-    pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
     pub(super) session_extensions: PluginExtensions,
     pub(super) contributions: PluginContributions,
@@ -467,11 +463,6 @@ impl PluginSession {
         &self.owner
     }
 
-    /// Returns a snapshot of the session's current resident tool authority.
-    pub fn tool_access(&self) -> SessionToolAccess {
-        self.authority.read_recover().tool_access.clone()
-    }
-
     /// The plugin configuration this session's hooks run under: a running
     /// run's admitted configuration and revision, taken from its recorded
     /// run (FIG-4379), never the session's current head.
@@ -492,17 +483,6 @@ impl PluginSession {
 
     pub(super) fn live_authority(&self) -> LiveSessionAuthority {
         self.authority.read_recover().clone()
-    }
-
-    /// Replaces the resident tool access after the corresponding durable
-    /// state has been adopted. Returns whether it changed.
-    pub fn replace_tool_access(&self, tool_access: &SessionToolAccess) -> bool {
-        let mut current = self.authority.write_recover();
-        if current.tool_access == *tool_access {
-            return false;
-        }
-        current.tool_access = tool_access.clone();
-        true
     }
 
     /// Whether this session's plugins hold mutable session state: a plugin
@@ -535,10 +515,6 @@ impl PluginSession {
 
     pub fn host(&self) -> &PluginHost {
         &self.host
-    }
-
-    pub fn tools(&self) -> Arc<dyn ToolProvider> {
-        Arc::clone(&self.capabilities().tools)
     }
 
     pub fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
@@ -981,7 +957,6 @@ impl PluginSession {
         let snapshot = self.capture_state();
         self.host.build_session(PluginSessionRequest {
             tool_catalog_overlay: self.tool_catalog_overlay.clone(),
-            tool_snapshot: Some(self.capabilities().tool_registry.export_state()),
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
                 seed_snapshot: Some(&snapshot),
@@ -1174,14 +1149,6 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
     }
 
-    fn tool_state_generation(&self) -> u64 {
-        self.tool_registry().generation()
-    }
-
-    fn export_tool_state(&self) -> crate::ToolState {
-        self.tool_registry().export_state()
-    }
-
     fn export_plugin_state(&self) -> Result<PluginState, crate::RuntimeError> {
         self.in_recorded_formats(self.export_state())
             .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
@@ -1235,7 +1202,7 @@ mod attachment_notice_order_tests {
         let session = host
             .build_session(PluginSessionRequest::creation(
                 "notice-order-session",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
         let reference = crate::AttachmentRef::new(
@@ -1348,7 +1315,7 @@ mod presentation_plan_tests {
         )
         .build_session(PluginSessionRequest::creation(
             "presentation-plan",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap()
     }

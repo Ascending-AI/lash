@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use lash_core::StepName;
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, Name};
 use lash_kernel_state::AdmittedWait;
-use lash_sansio::ToolId;
 use lash_vm_client::wire::OutcomeWire;
 use lash_vm_protocol::{PayloadKind, SealedGraphState};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -240,12 +239,12 @@ pub(crate) struct KernelRunInput {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Issued {
-    /// A `perform` of an effect the host offers: the tool that runs it and
-    /// the tool's input.
+    /// A `perform` of an effect the process's env links: its path, which
+    /// the link names the tool of (P3), and the tool's input.
     Effect {
         wait: u64,
         admission: Admission,
-        tool: ToolId,
+        effect: lash_kernel_doc::EffectName,
         input: serde_json::Value,
     },
     /// A `perform` the boundary refuses: the error is raised at the

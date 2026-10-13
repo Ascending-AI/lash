@@ -39,12 +39,16 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
     )
     .await;
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let original = provider.tool_manifests().remove(0);
+    let original = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let prepared = prepare(&provider, &original).await;
     let grant = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
     let grant_fixture = lash_core::testing::ToolCallFixture::mock()
         .prepared_call(&prepared)
-        .execution_binding(json!({"kind": "mcp", "server": "mock", "tool_id": original.id}));
+        .execution_binding(Some(crate::plugin::mcp_binding(
+            json!({"kind": "mcp", "server": "mock", "tool_id": original.id}),
+        )));
     let grant_context = grant_fixture.attempt("mcp-canonical-grant-law");
     let lash_core::ToolAttemptOutcome::Done { result, .. } = grant
         .execute(lash_core::ToolCall::new(
@@ -71,7 +75,9 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
         .unwrap()
         .definition
         .manifest = replacement;
-    let rebuilt = provider.tool_manifests().remove(0);
+    let rebuilt = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let restored: lash_core::PreparedToolCall = serde_json::from_value(recorded).unwrap();
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&restored);
     let context = fixture.attempt("mcp-cold-binding-law");
@@ -148,7 +154,9 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
     )
     .await;
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let original = provider.tool_manifests().remove(0);
+    let original = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let prepared = prepare(&provider, &original).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
     let context = fixture.attempt("mcp-binding-refusal-law");
@@ -255,7 +263,9 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
     )
     .await;
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let original = provider.tool_manifests().remove(0);
+    let original = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let prepared = prepare(&provider, &original).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
     let context = fixture.attempt("mcp-unsupported-law");
@@ -301,7 +311,9 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
     }
     let grant = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
     let wrong_server = lash_core::testing::mock_attempt_context_with_execution_binding(
-        json!({"kind": "mcp", "tool_id": original.id, "server": "other"}),
+        crate::plugin::mcp_binding(
+            json!({"kind": "mcp", "tool_id": original.id, "server": "other"}),
+        ),
     );
     let attempt = grant
         .execute(lash_core::ToolCall::new(
@@ -385,7 +397,9 @@ async fn l07_mcp_required_remote_tasks_refuse_during_admission() {
     let imported = admission::bind_imported_tools(imported, &entry, &service.peer).unwrap();
     entry.replace_imported_tools(imported).unwrap();
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let manifest = provider.tool_manifests().remove(0);
+    let manifest = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let context = lash_core::ToolPrepareContext::for_testing(
         lash_core::RuntimeOwner::Session("mcp-task-refusal".into()),
         Arc::new(lash_core::testing::MockSessionManager::default()),
@@ -417,7 +431,9 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     let clock = scripted::Clock::new().await;
     let (pool, mut mock) = scripted::Mock::connect(scratch.path(), MockOptions::default()).await;
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let manifest = provider.tool_manifests().remove(0);
+    let manifest = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .remove(0);
     let prepared = prepare(&provider, &manifest).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
     let context = fixture.attempt("mcp-body-timeout-law");

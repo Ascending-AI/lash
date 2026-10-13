@@ -24,7 +24,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
         .expect("admit source");
     let mut state = crate::RuntimeSessionState {
         session_id: source_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -74,10 +74,7 @@ pub async fn fork_inherits_history_without_execution_queues_waits_or_journals(
                 source_session_id: source_id.clone(),
                 source_node_id: Some(leaf.clone()),
             },
-            config: crate::PersistedSessionConfig::from_policy(
-                &state.policy.clone(),
-                crate::SessionToolAccess::ambient(),
-            ),
+            config: crate::PersistedSessionConfig::from_policy(&state.policy.clone()),
             retention: crate::Retention::UntilGc,
         })
         .await
@@ -158,7 +155,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         .expect("source");
     let mut state = crate::RuntimeSessionState {
         session_id: id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -189,10 +186,7 @@ pub async fn reclaim_races_fork_and_unpin_without_using_process_roots(
         source_session_id: id.clone(),
         head_revision: state.head_revision,
         relation: crate::SessionRelation::Root,
-        config: crate::PersistedSessionConfig::from_policy(
-            &state.policy.clone(),
-            crate::SessionToolAccess::ambient(),
-        ),
+        config: crate::PersistedSessionConfig::from_policy(&state.policy.clone()),
         retention: crate::Retention::UntilGc,
     };
     let (fork, unpin, delete) = tokio::join!(

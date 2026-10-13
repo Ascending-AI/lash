@@ -62,10 +62,7 @@ async fn a_run_in_flight_when_its_session_is_deleted_ends_typed(
     let session_id = SessionId::fixture(ID);
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
 
     let running = session

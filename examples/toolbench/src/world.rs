@@ -1144,8 +1144,12 @@ mod catalog_tests {
             let mut seed = World::seeded();
             seed.catalog = catalog;
             let world = SharedWorld::new(seed);
-            let rlm = world.provider().tool_manifests();
-            let mut standard = world.standard_provider().tool_manifests();
+            let rlm = world
+                .provider()
+                .tool_manifests(&lash::tools::OwnerConfigView::default());
+            let mut standard = world
+                .standard_provider()
+                .tool_manifests(&lash::tools::OwnerConfigView::default());
             assert_eq!(rlm.len(), count);
             let submit = standard.pop().unwrap();
             assert_eq!(submit.name, "submit");

@@ -69,6 +69,12 @@ impl PluginCallbackIdentity {
     }
 }
 
+impl std::fmt::Display for PluginCallbackIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}:{}", self.owner, self.key)
+    }
+}
+
 /// Whether `key` is a declared tool provider key: 1 to 64 bytes of ASCII
 /// letters, digits, `_`, `-` and `.`, beginning with a letter. A provider is
 /// named by its author, never by its position, so no key is a number.

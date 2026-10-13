@@ -191,7 +191,6 @@ impl BackendRunner {
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                            lash_core::SessionToolAccess::ambient(),
                         ),
                         retention: lash_core::Retention::UntilGc,
                     })
@@ -230,7 +229,6 @@ impl BackendRunner {
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                            lash_core::SessionToolAccess::ambient(),
                         ),
                         retention: lash_core::Retention::UntilGc,
                     })
@@ -271,7 +269,6 @@ impl BackendRunner {
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                            lash_core::SessionToolAccess::ambient(),
                         ),
                         retention: lash_core::Retention::UntilGc,
                     })
@@ -312,7 +309,6 @@ impl BackendRunner {
                             lash_core::TurnBudget::Unbounded,
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
-                            lash_core::SessionToolAccess::ambient(),
                         ),
                         retention: lash_core::Retention::UntilGc,
                     })
@@ -447,7 +443,6 @@ pub(super) async fn selected_observer_intents(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
@@ -465,7 +460,7 @@ pub(super) async fn selected_observer_intents(
         let source = admit_test_session(factory.clone(), &source_request)
             .await
             .expect("history source");
-        let mut state = RuntimeSessionState::ambient_fixture(request.config.session_policy());
+        let mut state = RuntimeSessionState::fixture(request.config.session_policy());
         state.session_id = source_id.clone();
         state.ensure_agent_frame_initialized();
         let head_revision = source
@@ -482,7 +477,6 @@ pub(super) async fn selected_observer_intents(
                 pending_observer_intents: request.pending_observer_intents.clone(),
                 config: lash_core::PersistedSessionConfig::from_policy(
                     &request.config.session_policy(),
-                    lash_core::SessionToolAccess::ambient(),
                 ),
                 retention: lash_core::Retention::UntilGc,
             })

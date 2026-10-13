@@ -232,3 +232,7 @@ reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
 [[retired_hash_domain]]
 name = "lash-codemode-execution-state-leaf/v2"
 reason = "FIG-5894: a session's execution state is one SessionExecution graph of content-addressed nodes, with no named leaves"
+
+[[retired_hash_domain]]
+name = "lash-tool-catalog-authority/v2"
+reason = "FIG-6074: a run's tools are its recorded surface, matched by provider key; no tool-access authority is hashed"

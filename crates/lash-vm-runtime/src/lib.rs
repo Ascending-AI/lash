@@ -54,6 +54,7 @@ pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 /// wire-level host.
 pub use lash_vm_client::{RemoteMachine, RemoteMachines, RunHost};
 
+pub use process::RetiredHelpers;
 pub use process::{
     AdmittedWorkflow, AdoptedRun, DocumentStoreError, EFFECT_ARGUMENTS, EFFECT_UNKNOWN,
     HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession, KERNEL_RUN_STEP,
@@ -68,5 +69,4 @@ pub use process::{
     migrate_saved_function, migration_refusal, plan_helper_adoption, plan_migration,
     retired_functions_reached, survey_helper_processes, survey_kernel_processes, with_definitions,
 };
-pub use process::{RetiredHelpers, retained_earlier_helpers};
 pub use process_plugin::KernelProcessPluginFactory;

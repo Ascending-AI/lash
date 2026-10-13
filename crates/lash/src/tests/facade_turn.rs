@@ -11,10 +11,7 @@ async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
     let session = accounts
         .core
         .session(crate::SessionId::from("facade-queued-cancel"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let held = session
@@ -74,10 +71,7 @@ async fn a_sent_input_runs_on_the_cores_node_and_answers_its_reply() {
     let session_id = lash_sansio::SessionId::try_from("facade-turn".to_owned()).expect("id");
     let session = core
         .session(session_id)
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -114,10 +108,7 @@ async fn a_turns_model_call_carries_its_typed_turn_run_and_attempt() {
     .expect("standard core");
     let session = core
         .session(lash_sansio::SessionId::try_from("attributed-turn".to_owned()).expect("id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let turn = crate::TurnId::parse("host-attributed-turn").expect("turn id");
@@ -221,10 +212,7 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
         lash_sansio::SessionId::try_from("facade-frame-switch".to_owned()).expect("id");
     let session = core
         .session(session_id)
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
 
@@ -293,7 +281,7 @@ fn account_tool(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for AccountTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         self.names
             .lock_recover()
             .iter()
@@ -301,7 +289,11 @@ impl ToolProvider for AccountTools {
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         self.names
             .lock_recover()
             .iter()
@@ -428,10 +420,7 @@ async fn a_refresh_queued_while_the_session_is_idle_settles_and_the_next_turn_se
     let session = accounts
         .core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let first = session
@@ -508,10 +497,7 @@ async fn a_refresh_queued_during_a_turn_applies_after_its_commit_and_the_next_tu
     let session = accounts
         .core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let admin = accounts
@@ -639,10 +625,7 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
             let id = lash_sansio::SessionId::try_from("three-steps".to_owned()).expect("id");
             let session = old
                 .session(id.clone())
-                .create(crate::SessionCreation::root(
-                    crate::plugins::SessionToolAccess::ambient(),
-                    mock_session_spec(),
-                ))
+                .create(crate::SessionCreation::root(mock_session_spec()))
                 .await
                 .expect("created");
             let input = crate::TurnId::parse("three-step-input").expect("input id");
@@ -734,10 +717,7 @@ async fn cancelling_a_running_input_answers_cancelled_with_accepted_detail() {
     let session = accounts
         .core
         .session(crate::SessionId::from("facade-running-cancel"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let held = session
@@ -779,10 +759,7 @@ async fn cancelling_an_unknown_or_completed_run_answers_unknown_or_revoked() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     let session = core
         .session(crate::SessionId::from("facade-unknown-cancel"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     assert!(matches!(
@@ -815,10 +792,7 @@ async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown
     let session = accounts
         .core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let held = session
@@ -898,10 +872,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
     let session_id = crate::SessionId::from("facade-operation-settled");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     // Seed terminal evidence without a live owner competing with the fixture.
@@ -1085,10 +1056,7 @@ async fn a_turns_request_carries_its_sections_where_they_are_placed() {
     let session_id = lash_sansio::SessionId::try_from("prompt-sections".to_owned()).expect("id");
     let session = core
         .session(session_id)
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -1206,10 +1174,7 @@ async fn a_call_whose_section_refuses_fails_closed_and_sends_nothing() {
     let session_id = lash_sansio::SessionId::try_from("broken-section".to_owned()).expect("id");
     let session = core
         .session(session_id)
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session

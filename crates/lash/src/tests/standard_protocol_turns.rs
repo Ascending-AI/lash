@@ -67,10 +67,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from("whitespace-response-session"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -162,11 +159,15 @@ fn status_tool() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for CountingTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![status_tool().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "status").then(|| Arc::new(status_tool().contract()))
     }
 
@@ -201,10 +202,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from("malformed-args-session"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -323,14 +321,18 @@ fn discovery_tool(name: &str, inline: bool) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for DiscoveryTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![
             discovery_tool("tools.search", true).manifest(),
             discovery_tool("catalog_only", false).manifest(),
         ]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         match name {
             "tools.search" => Some(Arc::new(discovery_tool(name, true).contract())),
             "catalog_only" => Some(Arc::new(discovery_tool(name, false).contract())),
@@ -424,10 +426,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     };
     let session = core
         .session(crate::SessionId::from(session_id))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -590,11 +589,15 @@ fn lookup_tool() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for LookupTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![lookup_tool().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "lookup").then(|| Arc::new(lookup_tool().contract()))
     }
 
@@ -632,10 +635,7 @@ async fn persisted_provider_parts(
     .expect("standard core");
     let session = core
         .session(crate::SessionId::from(session_id))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     let output = session
@@ -751,7 +751,6 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
     let session = core
         .session(crate::SessionId::from("terminal-required-standard"))
         .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec()
                 .plugin(
                     crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,

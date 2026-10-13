@@ -25,7 +25,6 @@ fn booted(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -88,7 +87,6 @@ fn host_session_turn(plugin_options: lash_core::PluginOptions) -> lash_core::Pro
         )
     };
     let create_request = lash_core::SessionCreateRequest::child(
-        lash::plugins::SessionToolAccess::ambient(),
         TURN_PARENT,
         lash_core::SessionStartPoint::Empty,
         policy,
@@ -164,10 +162,7 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
     });
     let parent = first
         .session(SessionId::try_from(TURN_PARENT.to_owned()).unwrap())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .expect("the parent is created");
     let _turn = parent
@@ -292,7 +287,7 @@ fn explicit_engine_advance(
         lash_core::EngineEvent::Started { payload } => lash_core::EngineAction::Steps {
             steps: vec![lash_core::StepRequest::Tool {
                 step: lash_core::StepName("b".to_owned()),
-                tool: lash_core::ToolId::new(B_TOOL),
+                effect: lash_core_execution::testing::effect("b.run"),
                 input: payload,
                 site: None,
             }],
@@ -304,6 +299,11 @@ fn explicit_engine_advance(
         lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
         _ => lash_core::EngineAction::Idle,
     }
+}
+
+/// What the explicit engine performs: B's tool.
+fn b_runs() -> Vec<lash_core::ToolDefinition> {
+    vec![object_tool(B_TOOL, ["b", "run"])]
 }
 
 fn object_tool(name: &str, binding: [&str; 2]) -> lash_core::ToolDefinition {
@@ -333,7 +333,7 @@ fn explicit_definition() -> lash_core::ToolDefinition {
 /// `[check, B]` in that order.
 fn explicit_environment() -> lash::process::ProcessEnv {
     environment_of(
-        vec![object_tool(B_TOOL, ["b", "run"])],
+        vec![(B_COMPONENT, object_tool(B_TOOL, ["b", "run"]))],
         &[CHECK_COMPONENT, B_COMPONENT],
     )
 }
@@ -373,14 +373,18 @@ fn stored_envs(database: &str) -> i64 {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SessionTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![
             explicit_definition().manifest(),
             ordinary_definition().manifest(),
         ]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         match name {
             EXPLICIT_TOOL => Some(Arc::new(explicit_definition().contract())),
             ORDINARY_TOOL => Some(Arc::new(ordinary_definition().contract())),
@@ -507,6 +511,7 @@ async fn an_isolated_tool_runs_its_process_under_its_providers_explicit_environm
         Arc::new(ScriptEngine {
             kind: EXPLICIT_ENGINE,
             advance: explicit_engine_advance,
+            performs: b_runs,
         }) as Arc<dyn lash_core::ProcessEngine>
     };
     let before = stored_envs(&database);
@@ -517,10 +522,7 @@ async fn an_isolated_tool_runs_its_process_under_its_providers_explicit_environm
     let session_id = SessionId::try_from("explicit-env".to_owned()).unwrap();
     let session = first
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec(),
-        ))
+        .create(lash::SessionCreation::root(spec()))
         .await
         .expect("the session is created");
     let _turn = session

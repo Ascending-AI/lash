@@ -29,13 +29,12 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, tool_step_output, tool_step_resolved,
-    tool_step_settled,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, tool_step_output, tool_step_refused,
+    tool_step_resolved, tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
     EngineStepRun, ExecutionLimit, MaxToolCalls, ProcessInput, ProcessRecord, StepRequest,
-    ToolCatalog,
 };
 
 use super::DurableProcessWorker;
@@ -49,12 +48,13 @@ fn engine_kind(process: &ProcessRecord) -> Option<&str> {
 }
 
 impl DurableProcessWorker {
-    /// The catalog the engine process `process`'s steps resolve against.
-    async fn step_catalog(
+    /// How this node serves `process`'s linked call of `effect` (D3).
+    async fn step_link(
         &self,
         process: &ProcessRecord,
-    ) -> Result<Arc<ToolCatalog>, crate::PluginError> {
-        self.engine_runtime(process).await?.step_catalog()
+        effect: &lash_core::EffectName,
+    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
+        self.engine_runtime(process).await?.step_link(effect)
     }
 
     /// The tool step `execution` of `process`, which runs `step` on
@@ -67,7 +67,7 @@ impl DurableProcessWorker {
         execution: AdmittedExecution,
         token: tokio_util::sync::CancellationToken,
     ) -> MemberOutcome {
-        let StepRequest::Tool { tool, input, .. } = step else {
+        let StepRequest::Tool { effect, input, .. } = step else {
             return SettledOutput::Interrupted.into();
         };
         // `prepare` built the activation's tools before any step was
@@ -81,15 +81,13 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "a process tool step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
+        let tool = execution.draft().tool();
         let name = step
             .catalog
             .tools
             .iter()
-            .find(|entry| entry.manifest.id == tool)
-            .map_or_else(
-                || tool.as_str().to_owned(),
-                |entry| entry.manifest.name.clone(),
-            );
+            .find(|entry| entry.manifest.id == *tool)
+            .map_or_else(|| effect.to_string(), |entry| entry.manifest.name.clone());
         let call = lash_core_execution::sansio::PendingToolCall {
             call_id: execution.call().clone(),
             provider_call_id: None,
@@ -292,41 +290,85 @@ impl ProcessSteps for WorkerSteps {
                     .process_engines
                     .engine_steps(engine, kind)?;
                 let total = steps.execution(kind);
-                Ok(StepAdmission {
-                    policy: steps.retry(kind),
-                    limit: ExecutionLimit::starting_at(now_ms, total, total),
-                    park: None,
-                })
+                Ok(StepAdmission::new(
+                    kind.admitted_tool(engine),
+                    steps.retry(kind),
+                    ExecutionLimit::starting_at(now_ms, total, total),
+                    None,
+                ))
             }
-            StepRequest::Tool { step, tool, .. } => {
-                let catalog = self.0.step_catalog(process).await.map_err(|error| {
+            StepRequest::Tool { step, effect, .. } => {
+                let link = self.0.step_link(process, effect).await.map_err(|error| {
                     StepRefusal::Unavailable {
                         step: step.0.clone(),
                         reason: error.to_string(),
                     }
                 })?;
-                let manifest = catalog
-                    .tools
-                    .iter()
-                    .find(|entry| entry.manifest.id == *tool)
-                    .map(|entry| &entry.manifest)
-                    .ok_or_else(|| StepRefusal::UnknownTool {
+                match link {
+                    crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {
                         step: step.0.clone(),
-                        tool: tool.as_str().to_owned(),
-                    })?;
-                // The body's limit and the park's deadline are pinned
-                // separately, as a round member's are.
-                let pin = MemberPin::admitted(
-                    manifest.id.clone(),
-                    manifest.execution_policy,
-                    manifest.bounds(),
-                    now_ms,
-                );
-                Ok(StepAdmission {
-                    policy: pin.policy,
-                    limit: pin.limit,
-                    park: pin.park,
-                })
+                        tool: effect.to_string(),
+                    }),
+                    // The body's limit and the park's deadline are pinned
+                    // separately, as a round member's are.
+                    crate::plugin::StepLink::Served { manifest, binding } => {
+                        let pin = MemberPin::admitted(
+                            manifest.id.clone(),
+                            manifest.execution_policy,
+                            manifest.bounds(),
+                            now_ms,
+                        );
+                        let mut admission =
+                            StepAdmission::new(pin.tool, pin.policy, pin.limit, pin.park);
+                        admission.binding = Some(*binding);
+                        Ok(admission)
+                    }
+                    // The linked tool is missing or changed here (D3): the
+                    // step settles with a typed tool failure, which its
+                    // engine receives as a catchable error, and no body
+                    // starts, on this attempt or a retry.
+                    crate::plugin::StepLink::Drifted { tool, kind } => {
+                        let control = self
+                            .0
+                            .config
+                            .runtime_host
+                            .control
+                            .execution_budgets
+                            .control_phase();
+                        let effect = effect.to_string();
+                        let (code, cause) = match kind {
+                            crate::ToolSurfaceDriftKind::Missing => (
+                                "linked_tool_missing",
+                                crate::ToolFailureCause::LinkedToolMissing {
+                                    effect: effect.clone(),
+                                    tool: tool.clone(),
+                                },
+                            ),
+                            crate::ToolSurfaceDriftKind::Changed => (
+                                "linked_tool_changed",
+                                crate::ToolFailureCause::LinkedToolChanged {
+                                    effect: effect.clone(),
+                                    tool: tool.clone(),
+                                },
+                            ),
+                        };
+                        let message = format!(
+                            "the effect `{effect}` is linked to tool `{tool}`, which is {} \
+                             what this node's provider serves since the process's env \
+                             retained it; nothing ran",
+                            kind.describe()
+                        );
+                        let mut admission = StepAdmission::new(
+                            tool,
+                            crate::ExecutionPolicy::Once,
+                            ExecutionLimit::starting_at(now_ms, control, control),
+                            None,
+                        );
+                        admission.settled =
+                            Some(step_failure(process, code, message, Some(cause), None).output);
+                        Ok(admission)
+                    }
+                }
             }
         }
     }
@@ -360,6 +402,28 @@ impl ProcessSteps for WorkerSteps {
                 }
             })
         })
+    }
+
+    /// A step its admission settled (D3) retains the ToolCallRecord a body
+    /// would, so its engine reads the failure as the call's output.
+    fn admitted_output(
+        &self,
+        process: &lash_core_execution::ProcessId,
+        step: &StepRequest,
+        call: &lash_core_execution::ToolCallId,
+        output: SettledOutput,
+    ) -> SettledOutput {
+        let StepRequest::Tool { effect, input, .. } = step else {
+            return output;
+        };
+        let call = lash_core_execution::sansio::PendingToolCall {
+            call_id: call.clone(),
+            provider_call_id: None,
+            tool_name: effect.to_string(),
+            args: input.clone(),
+            replay: None,
+        };
+        tool_step_refused(process, &call, output)
     }
 
     fn engine_output(
@@ -453,13 +517,13 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "an engine step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
-        let tool_catalog = Arc::clone(&tools.catalog);
+        let effects = Arc::clone(&tools.effects);
         let cx = runtime.cx();
         let backend = cx.backend().clone();
         let run = EngineStepRun {
             process: process.id.clone(),
             engine_settings: process.engine_settings().cloned(),
-            tool_catalog,
+            effects,
             now: cx.now(),
             clock: Arc::clone(cx.clock()),
             projection_providers: Some(Arc::clone(backend.projection_providers())),
@@ -480,9 +544,7 @@ fn refused_component(refusal: &crate::ProcessEnvRefusal) -> Option<String> {
         | Refusal::ConfigRefused { id, .. }
         | Refusal::ComponentBuildFailed { id, .. }
         | Refusal::ConfigWriterOutsideFleetRange { id, .. } => Some(id.clone()),
-        Refusal::DuplicatePresenter { second, .. } | Refusal::DuplicateToolName { second, .. } => {
-            Some(second.clone())
-        }
+        Refusal::DuplicatePresenter { second, .. } => Some(second.clone()),
         _ => None,
     }
 }

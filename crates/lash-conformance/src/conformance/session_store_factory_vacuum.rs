@@ -31,7 +31,7 @@ pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
         .expect("create pinned-at-delete source");
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state
@@ -69,10 +69,7 @@ pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
             source_session_id: request.session_id.clone(),
             head_revision: pinned_revision,
             relation: crate::SessionRelation::Root,
-            config: crate::PersistedSessionConfig::from_policy(
-                &request.config.session_policy(),
-                crate::SessionToolAccess::ambient(),
-            ),
+            config: crate::PersistedSessionConfig::from_policy(&request.config.session_policy()),
             retention: crate::Retention::UntilGc,
         })
         .await
@@ -218,7 +215,7 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
-        ..crate::RuntimeSessionState::ambient_fixture(request.config.session_policy())
+        ..crate::RuntimeSessionState::fixture(request.config.session_policy())
     };
     state.ensure_agent_frame_initialized();
     let pinned = crate::Target::Revision(

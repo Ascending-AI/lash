@@ -164,10 +164,7 @@ async fn a_turn_without_a_code_executor() -> Result<(crate::TurnOutput, Vec<serd
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("protocol-effects").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let output = session.send(TurnInput::text("run code")).output().await?;
     drop(session);
@@ -235,10 +232,7 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     let run = crate::TurnId::from("runtime-stop-cause-run");
     let session = running
         .session(id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let live = session
         .send(crate::TurnInput::text("run code"))

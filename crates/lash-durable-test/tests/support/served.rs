@@ -301,10 +301,9 @@ pub fn cell(source: &str) -> LlmResponse {
 /// budgets generous.
 pub fn rlm(
     _backend: &lash::Backend,
-    resolver: Option<lash::tools::SharedDeferredToolResolver>,
     workers: lash::vm::WorkerService,
 ) -> lash::rlm::RlmProtocolPluginFactory {
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
+    lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
             .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
@@ -312,11 +311,7 @@ pub fn rlm(
             .build(),
         lash::rlm::CellDialect::typescript(),
     )
-    .with_worker_service(workers);
-    match resolver {
-        Some(resolver) => factory.with_deferred_tool_resolver(resolver),
-        None => factory,
-    }
+    .with_worker_service(workers)
 }
 
 /// One law's core on one tier, serving its own node.
@@ -438,7 +433,6 @@ impl World {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(batching)
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model, metadata())
@@ -470,10 +464,7 @@ impl World {
     pub async fn session(&self, name: &str, spec: lash::SessionSpec) -> lash::DurableSession {
         self.core
             .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                spec,
-            ))
+            .create(lash::SessionCreation::root(spec))
             .await
             .expect("the session is created")
     }
@@ -526,7 +517,6 @@ impl World {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model(Arc::clone(&self.scripts)), metadata())

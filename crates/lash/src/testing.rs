@@ -12,11 +12,6 @@ pub use lash_core::testing::run_tool_granted;
 /// One backend with some of its ports decorated by a test that observes or
 /// faults them: the decorated backend is still one substrate (ADR 0104, B2).
 pub use lash_core::testing::runtime_helpers::LayeredBackend;
-/// A standalone [`ToolRegistry`](crate::tools::ToolRegistry) plus the
-/// [`ToolSourceHandle`](crate::tools::ToolSourceHandle) `provider` registered
-/// under — the live-source route a run's built registry takes, for host
-/// tests that exercise source routing without a live session.
-pub use lash_core::testing::tool_registry_with_live_provider;
 /// A held process for host tests: an engine input of [`HeldProcessEngine`]'s
 /// kind, a registration of one under the fixture environment, and the plugin
 /// factory that contributes the engine to a host's core. A held process runs
@@ -150,7 +145,7 @@ pub fn node_activation(
 /// simulated node of the core serves, so it runs the processes the core's
 /// own node would (FIG-6034 D3).
 pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
-    core.env.core.process_engines.components().serves()
+    core.node_serves()
 }
 
 /// Decode a command's recorded outcome while explicitly settling fixture setup.
@@ -228,32 +223,6 @@ impl AdminFixtureOutcome for lash_core::OpenAgentFrameOutcome {
             crate::SessionCommandOutcome::OpenAgentFrame {
                 outcome: lash_core::runtime::OpenAgentFrameCommandOutcome::Refused { refusal },
             } => Err(crate::EmbedError::Runtime(refusal.into())),
-            other => Err(fixture_outcome_error(other)),
-        }
-    }
-}
-impl AdminFixtureOutcome for u64 {
-    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
-        match outcome {
-            crate::SessionCommandOutcome::ToolState {
-                outcome: lash_core::facade_support::ToolStateChangeOutcome::Applied { generation },
-            } => Ok(generation),
-            crate::SessionCommandOutcome::ToolState {
-                outcome: lash_core::facade_support::ToolStateChangeOutcome::Refused { error },
-            } => Err(error.into()),
-            other => Err(fixture_outcome_error(other)),
-        }
-    }
-}
-impl AdminFixtureOutcome for lash_core::ToolRestoreReport {
-    fn from_admin_outcome(outcome: crate::SessionCommandOutcome) -> crate::Result<Self> {
-        match outcome {
-            crate::SessionCommandOutcome::ToolState {
-                outcome: lash_core::facade_support::ToolStateChangeOutcome::Restored { report },
-            } => Ok(report),
-            crate::SessionCommandOutcome::ToolState {
-                outcome: lash_core::facade_support::ToolStateChangeOutcome::Refused { error },
-            } => Err(error.into()),
             other => Err(fixture_outcome_error(other)),
         }
     }

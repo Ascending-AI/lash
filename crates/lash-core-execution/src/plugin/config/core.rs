@@ -70,6 +70,9 @@ pub enum CoreConfigRefusal {
     PolicyUnstated,
     /// FIG-5824: offering this tool namespace would hide a session binding.
     ToolNamespaceCollision { root: String, binding: String },
+    /// The tools the candidate's providers advertise do not build into one
+    /// surface (S4): two share a model-facing name, or a tool id.
+    ToolSurfaceRefused { refusal: Box<crate::SurfaceRefusal> },
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
@@ -83,6 +86,7 @@ impl std::fmt::Display for CoreConfigRefusal {
                 formatter,
                 "tool namespace `{root}` conflicts with top-level binding `{binding}`; rename `{binding}` to `{binding}_` before offering these tools"
             ),
+            Self::ToolSurfaceRefused { refusal } => write!(formatter, "{refusal}"),
             Self::ReasoningWithoutLlmProfile { reasoning } => write!(
                 formatter,
                 "reasoning {reasoning:?} needs a model, and the session records none"
@@ -121,6 +125,18 @@ impl CoreConfigOwner {
 }
 
 impl CoreConfigOwner {
+    /// The core owner's refusal of a candidate whose providers' tools do
+    /// not build into one surface.
+    pub fn surface_refusal(refusal: crate::SurfaceRefusal) -> super::ConfigRefusal {
+        super::ConfigRefusal::by_owner(
+            super::CORE_CONFIG_OWNER,
+            super::RefusalSite::Candidate,
+            &CoreConfigRefusal::ToolSurfaceRefused {
+                refusal: Box::new(refusal),
+            },
+        )
+    }
+
     /// The core owner's `refusal` of a session's creation.
     pub fn creation_refusal(refusal: CoreConfigRefusal) -> super::ConfigRefusal {
         super::ConfigRefusal::by_owner(
@@ -288,19 +304,6 @@ impl ConfigCommand for SetChargeSafety {
     const NAME: &'static str = "set_charge_safety";
 }
 
-/// Replace the session's tool authority, whole.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetToolAccess {
-    pub access: crate::SessionToolAccess,
-}
-
-impl ConfigCommand for SetToolAccess {
-    type Owner = CoreConfigOwner;
-    type Output = ();
-    const NAME: &'static str = "set_tool_access";
-}
-
 /// Replace the host's prompt plan, whole, from the session's next run (ADR
 /// 0133): the section order, the placements that override plugin defaults,
 /// and the composition limits. A plan that orders or places a section twice,
@@ -418,12 +421,6 @@ pub(super) fn registration() -> Result<RegisteredOwner, ConfigRegistrationError>
         CoreConfigOwner::validate_charge_safety(&command.charge_safety)?;
         changed(CoreConfig {
             charge_safety: command.charge_safety,
-            ..core.clone()
-        })
-    })?;
-    reg.command::<SetToolAccess>(|core, command| {
-        changed(CoreConfig {
-            tool_access: command.access,
             ..core.clone()
         })
     })?;

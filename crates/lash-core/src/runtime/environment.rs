@@ -9,7 +9,7 @@
 //! Three embedder patterns this enables:
 //!
 //! * **CLI interactive (single runtime, default):**
-//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching,crate::ToolSourcePolicy::Tolerate, DataRetentionConfig::standard())).build()`.
+//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching, DataRetentionConfig::standard())).build()`.
 //!   The host config is built over one backend, which supplies every store
 //!   port and the effect host; the zero-infra backend is a SQLite memory
 //!   backend (ADR 0102).
@@ -188,12 +188,6 @@ impl RuntimeEnvironmentBuilder {
 
     pub fn with_trace_context(mut self, context: TraceContext) -> Self {
         self.env.core.tracing = self.env.core.tracing.clone().with_base_context(context);
-        self
-    }
-
-    /// See [`crate::ToolSourcePolicy`]; the default is `Tolerate`.
-    pub fn with_tool_source_policy(mut self, policy: crate::ToolSourcePolicy) -> Self {
-        self.env.core.control.tool_source_policy = policy;
         self
     }
 

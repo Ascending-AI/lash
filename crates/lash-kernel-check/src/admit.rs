@@ -58,6 +58,19 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     }
 }
 
+/// The view of a document whose functions resolve and whose shape is
+/// valid, whatever faults its type and scope rules find: what a reader of
+/// its structure needs, such as an entry's linked-effect set, when the
+/// code it reads is checked where it runs. [`derive`] refuses those faults.
+///
+/// # Errors
+///
+/// A function the document names is missing, or its shape is invalid.
+pub fn derive_view(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {
+    let mut errors = Vec::new();
+    check(document, catalog, &mut errors).ok_or(Refusal { errors })
+}
+
 /// Links a library function's kernel-code body and derives its view: one
 /// unit, [`Unit::Library`] of the definition's identity. A definition with
 /// no body derives an empty view.

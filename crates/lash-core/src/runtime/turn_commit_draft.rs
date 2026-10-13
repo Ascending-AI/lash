@@ -187,63 +187,24 @@ impl TurnGraphAppendDraft {
     }
 
     /// Apply accepted callback output only after the owning step acknowledges.
-    /// Stage the whole batch before changing the registry or graph. Reapplying
-    /// an unchanged membership keeps its generation, including after a checkpoint.
-    pub(in crate::runtime) async fn apply_session_contributions(
+    /// Stage the whole batch before changing the graph.
+    pub(in crate::runtime) fn apply_session_contributions(
         &self,
         session_id: &SessionId,
-        plugins: &crate::PluginSession,
         contributions: &[crate::plugin::SessionContributions],
     ) -> Result<(), crate::PluginError> {
-        use crate::facade_support::ToolStateFacadeOps;
         if contributions
             .iter()
             .all(crate::plugin::SessionContributions::is_empty)
         {
             return Ok(());
         }
-        let registry = plugins.tool_registry();
-        let mut tools = registry.export_state();
-        let mut changed = false;
-        for contribution in contributions {
-            for membership in &contribution.tool_membership {
-                let entry = tools.get(&membership.tool_id).ok_or_else(|| {
-                    crate::PluginError::Session(format!("unknown tool `{}`", membership.tool_id))
-                })?;
-                changed |= entry.is_member() != membership.present;
-                tools
-                    .set_membership(&membership.tool_id, membership.present)
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            }
-        }
-        let preview = if changed {
-            let (revision, preview) = registry.preview_reconfiguration();
-            preview
-                .apply_state(tools)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-            let catalog = plugins.resolve_live_tool_catalog(
-                Arc::new(preview.clone()) as Arc<dyn crate::ToolProvider>,
-                plugins.tool_access(),
-            )?;
-            plugins
-                .protocol_session()
-                .validate_tool_catalog(&catalog, None)
-                .await?;
-            Some((revision, preview))
-        } else {
-            None
-        };
         let mut inner = self.inner.lock_recover();
         let mut staged = inner.clone();
         for contribution in contributions {
             for append in &contribution.graph_appends {
                 Self::record_append(&mut staged, session_id, append)?;
             }
-        }
-        if let Some((revision, preview)) = preview {
-            registry
-                .publish_reconfiguration(revision, &preview)
-                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         }
         *inner = staged;
         Ok(())
@@ -592,7 +553,7 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -874,7 +835,7 @@ mod tests {
         let clock = crate::SystemClock;
         let mut state = RuntimeSessionState {
             session_id: SessionId::from("frame-replacement"),
-            ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),

@@ -13,13 +13,14 @@
 //! wrote; and while such a node is live, a node of the later build writes
 //! the newest release every live node holds ([`FleetHelperWrites`]).
 //!
-//! Before a build that stops retaining a release starts, every process and
-//! session that still pins one of its functions ends, is adopted onto the
-//! build's own helpers (`RlmProtocolPluginFactory::adopting_helpers`), or is
-//! ended by an operator. `lashctl kernel-migration list` names each with
-//! why it would not be adopted; the build's node refuses to start while one
-//! is left ([`DurableError::RetiredDependents`]). Nothing expires by
-//! calendar.
+//! A process stays pinned to the functions it was written against: nothing
+//! moves it onto the build's own helpers on its own (FIG-6074, D2). Before
+//! a build that stops retaining a release starts, every process and session
+//! that still pins one of its functions ends, or is ended by an operator.
+//! `lashctl kernel-migration list` names each, a process with why its run
+//! would not carry onto the build's helpers; the build's node refuses to
+//! start while one is left ([`DurableError::RetiredDependents`]), naming
+//! that command. Nothing expires by calendar.
 //!
 //! [`DurableError::RetiredDependents`]: lash_core::durable_port::DurableError::RetiredDependents
 
@@ -34,6 +35,10 @@ use lash_kernel_doc::FunctionRegistry;
 use lash_vm_runtime::{
     HelperDependentProcess, HelperDependentSession, KernelMigrationSurveyError, RetiredHelpers,
 };
+
+/// The operator command that names what still pins a helper release a
+/// build stops retaining: what that build names when it refuses to start.
+const HELPER_DEPENDENTS_LIST: &str = "lashctl kernel-migration list";
 
 /// How many actors one listing page reads.
 #[cfg(feature = "rlm")]
@@ -56,9 +61,9 @@ pub(crate) fn retired_helpers(release: u32) -> Result<RetiredHelpers, KernelMigr
 }
 
 /// Every process and session of `backend` that pins a function of
-/// `retired`, a helper release about to be dropped, with whether a node
-/// that adopts would adopt each process; `functions` is the build's
-/// library. It reads the store and writes nothing.
+/// `retired`, a helper release about to be dropped, with whether each
+/// process's run would carry onto the build's helpers; `functions` is the
+/// build's library. It reads the store and writes nothing.
 ///
 /// # Errors
 ///
@@ -228,8 +233,10 @@ impl lash_core::RetirementCheck for HelperRetirement {
         names.join(", ")
     }
 
+    /// The listing that names each dependent, which ends or an operator
+    /// ends: nothing wakes it onto the build's helpers (FIG-6074, D2).
     fn command(&self) -> String {
-        crate::kernel_migration::KERNEL_MIGRATION_SWEEP.to_owned()
+        HELPER_DEPENDENTS_LIST.to_owned()
     }
 
     async fn dependents(&self, backend: &lash_core::Backend) -> Result<u64, DurableError> {

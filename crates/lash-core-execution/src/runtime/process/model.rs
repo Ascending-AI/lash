@@ -365,6 +365,34 @@ impl DeclaredLaunch {
     }
 }
 
+/// A launch held for a start of one definition: the definition its env was
+/// held and checked for is bound into it (P1), so a declaration made with it
+/// starts exactly that definition.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredDefinitionLaunch {
+    definition: super::ProcessDefinitionId,
+    launch: DeclaredLaunch,
+}
+
+impl DeclaredDefinitionLaunch {
+    pub(crate) fn held(definition: super::ProcessDefinitionId, launch: DeclaredLaunch) -> Self {
+        Self { definition, launch }
+    }
+
+    /// The definition the launch was held for.
+    pub fn definition(&self) -> &super::ProcessDefinitionId {
+        &self.definition
+    }
+
+    pub fn launch(&self) -> &EngineLaunch {
+        self.launch.launch()
+    }
+
+    pub(crate) fn into_parts(self) -> (super::ProcessDefinitionId, EngineLaunch) {
+        (self.definition, self.launch.into_launch())
+    }
+}
+
 /// The store of process execution environments (ADR 0113 §2.1): immutable
 /// bytes under a content-addressed reference, kept alive by referrer edges.
 /// Only the cleanup executor severs edges, through

@@ -395,6 +395,15 @@ impl MockMailProvider {
         Self { world, triggers }
     }
 
+    /// Every mail tool the connected accounts make, selected or not: what
+    /// the browser's tool catalog lists.
+    pub(crate) fn all_manifests(&self) -> Vec<ToolManifest> {
+        self.definitions()
+            .iter()
+            .map(ToolDefinition::manifest)
+            .collect()
+    }
+
     fn definitions(&self) -> Vec<ToolDefinition> {
         let summaries = self.world.account_summaries();
         let mut defs = Vec::with_capacity(summaries.len() * MAIL_OPERATIONS.len());
@@ -411,9 +420,8 @@ impl MockMailProvider {
     }
 
     /// Only used to route execution; resolution (`tool_manifests`/`resolve_contract`) covers
-    /// live accounts exclusively.
-    /// A persisted session that references a removed account's tools restores anyway —
-    /// lash-core orphans them as non-members and rebinds when the account is re-added.
+    /// live accounts exclusively. A recorded run that calls a removed account's tool parks
+    /// until the account is re-added.
     fn route(&self, name: &str) -> Option<(String, &'static str)> {
         let rest = name.strip_prefix("inbox__")?;
         for operation in MAIL_OPERATIONS {
@@ -429,23 +437,32 @@ impl MockMailProvider {
 
 #[async_trait]
 impl ToolProvider for MockMailProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.definitions()
-            .iter()
-            .map(ToolDefinition::manifest)
+    /// The mail tools the workbench's recorded selection admits under
+    /// `config` (the browser's tool catalog writes it).
+    fn tool_manifests(&self, config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
+        let selection = crate::plugins::workbench_tool_selection(config);
+        self.all_manifests()
+            .into_iter()
+            .filter(|manifest| selection.admits(&manifest.id))
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        let selection = crate::plugins::workbench_tool_selection(config);
         let (slug, operation) = self.route(name)?;
         let summary = self
             .world
             .account_summaries()
             .into_iter()
             .find(|summary| summary.slug == slug)?;
-        Some(Arc::new(
-            definition_for(&slug, &summary.display_name, operation).contract(),
-        ))
+        let definition = definition_for(&slug, &summary.display_name, operation);
+        selection
+            .admits(definition.id())
+            .then(|| Arc::new(definition.contract()))
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {

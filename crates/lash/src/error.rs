@@ -67,9 +67,6 @@ pub enum EmbedError {
     /// The creator must choose a bound on consecutive unproductive attempts.
     #[error("no_progress_budget is required; choose a bound or explicit unbounded execution")]
     MissingNoProgressBudget,
-    /// The host must choose how to handle a missing tool source.
-    #[error("tool source policy is required; provide .tool_source_policy(...)")]
-    MissingToolSourcePolicy,
     #[error(transparent)]
     /// Returned when run options a send states for a config owner do not
     /// serialize (FIG-6021). Nothing is accepted.
@@ -105,7 +102,7 @@ pub enum EmbedError {
     /// Returned when the runtime has no commit budget.
     MissingCommitBudget,
     #[error(
-        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...).tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)"
+        "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
@@ -170,7 +167,8 @@ pub enum EmbedError {
     /// Invalid same-session admission wait TTL.
     #[error(transparent)]
     CommitAdmissionPolicy(#[from] crate::CommitAdmissionPolicyError),
-    /// A ToolAdmin reconfiguration was refused before changing its catalog.
+    /// A tool registry reconfiguration was refused before changing its
+    /// catalog.
     #[error("tool reconfiguration: {0}")]
     Reconfigure(#[from] lash_core::facade_support::ReconfigureError),
     #[error(
@@ -446,7 +444,6 @@ impl EmbedError {
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
-            | Self::MissingToolSourcePolicy
             | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
@@ -507,7 +504,6 @@ impl EmbedError {
             | Self::MissingTurnBudget
             | Self::MissingMaxToolCalls
             | Self::MissingNoProgressBudget
-            | Self::MissingToolSourcePolicy
             | Self::RunOptionsEncode(_)
             | Self::MissingExecutionBudgets
             | Self::MissingDeltaCoalescing
@@ -537,12 +533,8 @@ impl EmbedError {
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::Validation(_)
-                | lash_core::facade_support::ReconfigureError::UnknownSource(_)
                 | lash_core::facade_support::ReconfigureError::ToolNamespaceCollision { .. },
             ) => true,
-            Self::Reconfigure(
-                lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },
-            ) => false,
             Self::Reconfigure(_) => false,
             Self::Session(SessionError::LlmProfileUnavailable { .. }) => false,
             Self::Session(SessionError::LlmProfileUnconfigured { .. })

@@ -16,7 +16,7 @@ use crate::testing::{cell_context, run_cell};
 async fn a_function_a_cell_defines_is_called_two_cells_later() {
     let host = open_host().await;
     let tools = Arc::new(CellTools::default());
-    let services = typescript_services(None);
+    let services = typescript_services();
     let mut state = typescript_state();
 
     let defined = run_cell(
@@ -187,7 +187,7 @@ async fn cell(
     let response = run_cell(
         state,
         cell_context(host, SESSION, TURN, key, tools),
-        &typescript_services(None),
+        &typescript_services(),
         code,
     )
     .await;
@@ -200,15 +200,23 @@ pub(super) struct NoTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NoTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_manifest_by_id(&self, _id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        _id: &lash_core::ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
         None
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         None
     }
 
@@ -334,7 +342,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     let refused = run_cell(
         &mut seeded,
         cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
-        &typescript_services(None),
+        &typescript_services(),
         "await control.finish(await shout(\"b\"));",
     )
     .await;
@@ -432,7 +440,7 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     let refused = run_cell(
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools),
-        &typescript_services(None),
+        &typescript_services(),
         "await control.finish(later());",
     )
     .await;
@@ -463,11 +471,15 @@ impl EchoEndsTheTurn {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for EchoEndsTheTurn {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![Self::definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "echo" || name == "tool:echo").then(|| Arc::new(Self::definition().contract()))
     }
 
@@ -509,7 +521,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_now_ends_the_turn() {
             "exec-code:1",
             Arc::new(EchoEndsTheTurn),
         ),
-        &typescript_services(None),
+        &typescript_services(),
         "const said = await shout(\"b\");",
     )
     .await;
@@ -536,7 +548,7 @@ async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
     let refused = run_cell(
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &typescript_services(None),
+        &typescript_services(),
         "async function done(value) { await control.finish(value); }\nawait echo.say({ text: \"ran\" });",
     )
     .await;

@@ -81,11 +81,15 @@ impl crate::plugins::SessionPlugin for StatePlugin {
 
 #[async_trait]
 impl ToolProvider for StatePlugin {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![set_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == SET).then(|| Arc::new(set_definition().contract()))
     }
 
@@ -193,10 +197,7 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(&id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("set both")).await?;
     let mut events = handle.events();

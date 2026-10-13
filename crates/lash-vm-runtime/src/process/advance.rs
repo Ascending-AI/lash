@@ -320,7 +320,7 @@ fn run_settled(
                     Issued::Effect {
                         wait,
                         admission,
-                        tool,
+                        effect,
                         input,
                     } => {
                         let step = StepName(format!("effect.{}", state.effects));
@@ -335,7 +335,7 @@ fn run_settled(
                         );
                         steps.push(StepRequest::Tool {
                             step,
-                            tool,
+                            effect,
                             input,
                             site: Some(identity),
                         });

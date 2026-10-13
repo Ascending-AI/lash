@@ -33,14 +33,6 @@ impl SessionPluginStateSource for CommittedPlugins<'_> {
         self.plugins.capture_plugin_admission(config, fleet)
     }
 
-    fn tool_state_generation(&self) -> u64 {
-        self.plugins.tool_state_generation()
-    }
-
-    fn export_tool_state(&self) -> crate::ToolState {
-        self.plugins.export_tool_state()
-    }
-
     fn export_plugin_state(&self) -> Result<crate::PluginState, crate::RuntimeError> {
         self.plugins.export_plugin_state()
     }

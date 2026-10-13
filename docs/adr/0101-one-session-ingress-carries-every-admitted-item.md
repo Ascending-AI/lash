@@ -474,11 +474,12 @@ Creation records them; commands change them at boundaries. The run records its
 resolved execution snapshot. Durable input may carry a `RunSpec` whose overrides
 apply to that run without overwriting the sticky session config.
 
-A run states its own tool grants the same way (FIG-5093): `RunOverrides::tool_access`
-is the run's tool authority, whole, recorded with its shape, so a resume or a
-cold reopen of the run sees the same grants. A toolbox switch is therefore an
-accepted input, never a config command that waits for the running run; the
-session's `SetToolAccess` stays the default for every run that states none.
+A run states which tools it is offered the same way (FIG-5093; FIG-6074): each tool provider's `ToolSelection` is a typed run option of
+its owner (`RunOverrides::owners`), recorded with the run's shape, so a
+resume or a cold reopen of the run sees the same selection. A toolbox switch
+is therefore an accepted input, never a config command that waits for the
+running run; the provider's sticky config stays the default for every run
+that states none. There is no session-wide tool authority.
 The capability refs a `RunSpec` names are recorded with the shape too, and
 reach the host's deferred tool resolver, with the session and the run, on
 every resolution the run asks for.

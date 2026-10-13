@@ -697,26 +697,6 @@ macro_rules! session_delete_blob_reclaim_tests {
     };
 }
 
-/// Register the durable tool-access recovery law.
-#[macro_export]
-macro_rules! tool_access_persistence_tests {
-    ($fixture:block) => {
-        $crate::tool_access_persistence_tests!(@catalogue $fixture; [
-            (session_tool_access_durable_recovery, "tool-access-durable-recovery"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, persistence) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(persistence).await;
-            }
-        )*
-    };
-}
-
 /// Expansion machinery for process-prune reclamation registration.
 #[macro_export]
 macro_rules! __process_prune_reclaim_register {

@@ -63,11 +63,15 @@ fn runtime_lookup_definition() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for RuntimeLookupTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![runtime_lookup_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "lookup").then(|| Arc::new(runtime_lookup_definition().contract()))
     }
 
@@ -137,7 +141,6 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -228,7 +231,6 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -288,7 +290,6 @@ async fn durable_backend() -> lash::Backend {
 async fn created_session(core: &lash::LashCore, session_id: &str) -> lash::DurableSession {
     core.session(lash::SessionId::fixture(session_id.to_owned()))
         .create(lash::SessionCreation::root(
-            lash_core::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 "gemini-test",
                 lash::TurnBudget::Unbounded,

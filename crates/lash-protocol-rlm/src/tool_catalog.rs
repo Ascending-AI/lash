@@ -510,8 +510,7 @@ mod tests {
             ToolCatalogContext {
                 owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: vec![missing.manifest()],
-                resolve_contract: None,
-                tool_access: lash_core::SessionToolAccess::ambient(),
+                config: lash_core::OwnerConfigView::default(),
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),
@@ -554,8 +553,7 @@ mod tests {
             ToolCatalogContext {
                 owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: vec![retired_only.manifest()],
-                resolve_contract: None,
-                tool_access: lash_core::SessionToolAccess::ambient(),
+                config: lash_core::OwnerConfigView::default(),
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),
@@ -608,11 +606,7 @@ mod tests {
             ToolCatalogContext {
                 owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
                 tools: manifests.clone(),
-                resolve_contract: Some(Arc::new({
-                    let contracts = contracts.clone();
-                    move |manifest| contracts.get(&manifest.id).cloned()
-                })),
-                tool_access: lash_core::SessionToolAccess::ambient(),
+                config: lash_core::OwnerConfigView::default(),
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),

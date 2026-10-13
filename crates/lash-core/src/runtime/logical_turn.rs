@@ -19,23 +19,10 @@ impl LashRuntime {
         observer: &TurnObserver,
         scoped_effect_controller: &ActorContext,
         turn_id: &TurnId,
-        tool_restore: Option<crate::ToolRestoreReport>,
     ) {
         let mut cursor =
             super::turn_loop::turn_observation_cursor(scoped_effect_controller, turn_id, "start");
         super::turn_loop::emit_turn_started(observer, &mut cursor, turn_id);
-        // The restore this run's transition (or a later re-sync) made, when
-        // something persisted had no source: the sender reads it on the run's
-        // output and observers on the session's feed (FIG-5134).
-        if let Some(report) = tool_restore.filter(|report| !report.is_clean()) {
-            cursor.observe(
-                &observer.for_turn(turn_id),
-                crate::engine::ObservedEvent::Activity {
-                    correlation_id: None,
-                    event: crate::TurnEvent::ToolRestoreReported { report },
-                },
-            );
-        }
     }
 
     /// How this runtime's turns frame their stream deltas for the host.

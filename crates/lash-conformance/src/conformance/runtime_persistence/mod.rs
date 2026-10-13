@@ -6,12 +6,37 @@
 //! [`StoreMaintenance`](crate::StoreMaintenance).
 
 use super::*;
-use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
-use lash_core::testing::conformance_support::ToolStateConformanceAccess;
+use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::testing::store_fixtures::admit_at_checkpoint_for_test;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
+
+/// A plugin state whose one namespace is at `generation`: a checkpoint
+/// component whose content a commit changes and a load reads back.
+pub(crate) fn plugin_state_at(generation: u64) -> crate::PluginState {
+    crate::PluginState {
+        plugins: std::collections::BTreeMap::from([(
+            "conformance".to_owned(),
+            crate::PluginNamespaceState {
+                generation,
+                ..Default::default()
+            },
+        )]),
+    }
+}
+
+/// The generation of the one namespace [`plugin_state_at`] writes, read
+/// from the head's stored namespace map: each namespace's entry, its
+/// values body held apart by content address.
+pub(crate) fn plugin_state_generation(
+    stored: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Option<u64> {
+    stored
+        .get("conformance")
+        .and_then(|entry| entry.get("generation"))
+        .and_then(serde_json::Value::as_u64)
+}
 
 /// Clock policy supplied to runtime-persistence conformance.
 #[derive(Clone)]

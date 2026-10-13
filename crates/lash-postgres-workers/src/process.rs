@@ -46,10 +46,20 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core_execution::PluginError::Session(error.to_string()))
 }
 
+/// The tool the runbook's steps record: the step's own name, standing in
+/// for the tool a linked env would name.
+fn step_tool(step: &StepRequest) -> ToolId {
+    match step {
+        StepRequest::Tool { effect, .. } => ToolId::new(effect.as_str()),
+        StepRequest::Engine { kind, .. } => kind.admitted_tool(KIND),
+    }
+}
+
 fn step(name: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
-        tool: ToolId::new(name),
+        effect: lash_core_execution::EffectName::new(name)
+            .unwrap_or_else(|_| unreachable!("a step name is an effect name")),
         input: json!({ "step": name }),
         site: None,
     }
@@ -61,6 +71,13 @@ pub struct WorkerEngine;
 
 #[async_trait::async_trait]
 impl ProcessEngine for WorkerEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -248,15 +265,12 @@ impl ProcessSteps for WorkerSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
-        Ok(StepAdmission {
-            park: None,
-            policy: ExecutionPolicy::Once,
-            limit: ExecutionLimit::starting_at(
-                now_ms,
-                Duration::from_secs(60),
-                Duration::from_secs(60),
-            ),
-        })
+        Ok(StepAdmission::new(
+            step_tool(step),
+            ExecutionPolicy::Once,
+            ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.
@@ -284,7 +298,7 @@ impl ProcessSteps for WorkerSteps {
             let call = execution.call();
             let witness = self.witness.clone();
             let process = process.id.clone();
-            let tool = step.admitted_tool(KIND).as_str().to_owned();
+            let tool = step_tool(step).as_str().to_owned();
             let call = call.to_string();
             Box::new(move |_token| {
                 Box::pin(async move {

@@ -5,9 +5,9 @@
 //! tool the turn was running nor the model. An `AfterStep` cancel stays
 //! pending until the host escalates it to `Immediate`.
 //!
-//! No session records claim requirements of its own yet, so the law records
-//! one the way an owner does: a recorder node claims the released session
-//! and stamps the requirement on the actor's row in a fenced commit.
+//! The requirement is the session's own (S7): the turn's admitted call
+//! holds its provider's obligation token until it settles, and the
+//! deployment that cancels it does not register that provider.
 //!
 //! Over SQLite memory; the PostgreSQL legs are ignored outside a PostgreSQL
 //! gate, which selects them with `--include-ignored`.
@@ -15,7 +15,6 @@
 use super::*;
 use crate::{TurnCancelMode, TurnInput};
 use lash_core::ToolDefinitionBindingExt as _;
-use lash_core::durable_port::{ActorKey, CommitLabel, NodeId, NodeSpec, Release};
 use lash_core::facade_support::TurnCancelOutcome;
 
 /// How long a stop may take to reach its terminal.
@@ -23,8 +22,6 @@ const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long a pending `AfterStep` cancel is watched for not ending.
 const STAYS_PENDING_FOR: std::time::Duration = std::time::Duration::from_secs(2);
 const TOOL: &str = "held_tool";
-/// The claim requirement no node of the law serves.
-const UNSERVED: &str = "law:unserved-provider";
 
 /// The stores a law's deployments run over, and what must outlive them.
 async fn stores(storage: &str) -> (Arc<dyn lash_core::StoreSet>, Vec<Box<dyn std::any::Any>>) {
@@ -75,11 +72,15 @@ fn tool_definition() -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for HeldTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == TOOL).then(|| Arc::new(tool_definition().contract()))
     }
 
@@ -113,6 +114,7 @@ fn tool_calling_model(calls: &Calls) -> ProviderHandle {
         .into_handle()
 }
 
+/// The deployment that runs the turn, serving the held tool's provider.
 fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
@@ -120,9 +122,17 @@ fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
         .build(crate::testing::runtime_lease_owner())
 }
 
+/// A deployment of the same model that registers no provider of the held
+/// tool: it serves none of the stranded session's requirements.
+fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
+    explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+}
+
 /// A session whose turn is in flight in its tool call when its node stops,
-/// now carrying a claim requirement no node serves; with the provider calls
-/// counted when the node stopped.
+/// its admitted call holding the held tool's provider required; with the
+/// provider calls counted when the node stopped.
 struct Stranded {
     backend: lash_core::Backend,
     calls: Calls,
@@ -147,10 +157,7 @@ async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std:
     let core = deploy(&backend, &calls)?;
     let session = core
         .session(SessionId::fixture(id))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session
         .send(TurnInput::text("use the tool"))
@@ -159,7 +166,6 @@ async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std:
     calls.entered.notified().await;
     drop((handle, session));
     core.shutdown().await?;
-    record_unserved_requirement(&backend, id).await;
     let before = calls.counts();
     Ok((
         Stranded {
@@ -169,46 +175,6 @@ async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std:
         },
         held,
     ))
-}
-
-/// Stamp [`UNSERVED`] on session `id`'s actor as its owner would: a
-/// recorder node claims the released session, records the requirement in a
-/// fenced commit and lets it go ready.
-async fn record_unserved_requirement(backend: &lash_core::Backend, id: &str) {
-    let store = backend.durable();
-    let recorder = store
-        .register_node(&NodeSpec {
-            node: NodeId::new("law-requirement-recorder"),
-            decodes: backend.formats().session_decodes(),
-            serves: Vec::new(),
-            ttl_millis: 15_000,
-        })
-        .await
-        .expect("register the recorder node");
-    let actor = ActorKey::session(id).expect("a session actor key");
-    let claimed = store.claim(&recorder, 64).await.expect("claim");
-    assert!(
-        claimed.iter().any(|claim| claim.actor == actor),
-        "the stopped node released the session ready: {claimed:?}"
-    );
-    for claim in claimed {
-        let mut tx = store
-            .begin(&claim.actor, claim.epoch)
-            .await
-            .expect("open the recorder's transaction");
-        if claim.actor == actor {
-            tx.set_requires(vec![UNSERVED.to_owned()]);
-        }
-        tx.give_up(Release::Ready);
-        store
-            .commit(tx, CommitLabel::new("law.record_requires"))
-            .await
-            .expect("record the requirement");
-    }
-    store
-        .release_node(&recorder)
-        .await
-        .expect("release the recorder node");
 }
 
 fn requested(receipt: crate::CancelReceipt) -> TurnCancelOutcome {
@@ -225,7 +191,7 @@ async fn an_immediate_cancel_ends_an_unserved_session_without_a_provider(
 ) -> Result<()> {
     const ID: &str = "unserved-immediate-cancel";
     let (stranded, _held) = stranded(storage, ID).await?;
-    let core = deploy(&stranded.backend, &stranded.calls)?;
+    let core = deploy_unserving(&stranded.backend, &stranded.calls)?;
     let turn = stranded.turn(&core, ID).await?;
     let outcome = requested(
         turn.cancel()
@@ -259,7 +225,7 @@ async fn an_immediate_cancel_ends_an_unserved_session_without_a_provider(
 async fn a_close_ends_an_unserved_session_without_a_provider(storage: &str) -> Result<()> {
     const ID: &str = "unserved-close";
     let (stranded, _held) = stranded(storage, ID).await?;
-    let core = deploy(&stranded.backend, &stranded.calls)?;
+    let core = deploy_unserving(&stranded.backend, &stranded.calls)?;
     let administration = core.session_administration().await;
     let deletion = LashCore::delete_session(administration.delete_context(ID)?).await?;
     assert!(
@@ -290,7 +256,7 @@ async fn an_after_step_cancel_of_an_unserved_session_waits_until_escalated(
 ) -> Result<()> {
     const ID: &str = "unserved-after-step-cancel";
     let (stranded, _held) = stranded(storage, ID).await?;
-    let core = deploy(&stranded.backend, &stranded.calls)?;
+    let core = deploy_unserving(&stranded.backend, &stranded.calls)?;
     let turn = stranded.turn(&core, ID).await?;
     let outcome = requested(
         turn.cancel()

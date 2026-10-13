@@ -456,7 +456,6 @@ async fn measure_store_hardening_history_reads(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
-                        lash_core::SessionToolAccess::ambient(),
                     ),
                     retention: lash_core::Retention::UntilGc,
                 })
@@ -574,7 +573,7 @@ async fn load_store_hardening_state(
     .map(|loaded| loaded.state)
     .unwrap_or_else(|| RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -594,7 +593,6 @@ pub(super) fn runtime_perf_session_create_request(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: lash_core::SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,

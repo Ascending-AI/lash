@@ -223,14 +223,6 @@ runtime_error_codes! {
         /// The deployment's plugin set and the recorded request decide it, so
         /// retrying the identical creation cannot change the answer (FIG-4396).
         SessionConfigRefused = "session_config_refused" => Terminal,
-        // the deployment's sources decide it; a run admitted on them is refused again.
-        /// A turn run under `ToolSourcePolicy::Require` found a persisted Tool
-        /// Catalog member no registered source resolves, and was refused
-        /// before it installed the session's tool state (FIG-5134). Its
-        /// typed half is
-        /// [`RuntimeErrorCause::ToolSourcesUnavailable`], which carries the
-        /// restore report.
-        ToolSourcesUnavailable = "tool_sources_unavailable" => Terminal,
         // the row has no head; a redrive reads the same row.
         /// A session's catalog row has no head, so its creation recorded no
         /// config (FIG-4553). A session opens with the config its creation
@@ -536,6 +528,12 @@ runtime_error_codes! {
         RecordedCallbackUnavailable = "recorded_callback_unavailable" => Parked,
         /// Recorded stream-hook state has a format the receiving plugin cannot read.
         StreamStateFormatUnreadable = "stream_state_format_unreadable" => Parked,
+        // the recorded binding's format is one this build's codec does not read.
+        /// A recorded execution binding is in a format its codec provider does
+        /// not declare it reads on this node (S8). It is checked before the
+        /// binding is installed or a call prepared, so the provider's reader
+        /// never saw it; a build that reads the format serves it.
+        ExecutionBindingUnreadable = "execution_binding_unreadable" => Parked,
         // the redrive diverged from the engine's journal; only the build that wrote it serves it.
         /// A redriven effect's reconstructed envelope differs from the one its
         /// engine journal recorded. The
@@ -787,6 +785,7 @@ impl RuntimeErrorCode {
                 | Self::RetiredGeneration
                 | Self::RecordedCallbackUnavailable
                 | Self::StreamStateFormatUnreadable
+                | Self::ExecutionBindingUnreadable
                 | Self::LashVmCellBindingDrift
         )
     }
@@ -1091,7 +1090,6 @@ impl RuntimeError {
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::RunShapeRefused { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
-            | RuntimeErrorCause::ToolSourcesUnavailable { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateUnrecorded { .. }

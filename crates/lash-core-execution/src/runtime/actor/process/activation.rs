@@ -59,6 +59,7 @@ use lash_sansio::{ToolCallAdmission, ToolCallPosition};
 use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
+use super::effects::{record_effect, record_omitted_effects};
 use super::session_turn::SessionTurns;
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
@@ -192,6 +193,8 @@ pub(super) struct Live {
     /// where publication starts past this node's own mark. `None` until a
     /// pass read the row.
     published: Option<u64>,
+    /// The `requires` the actor's row holds: claimed, then as written.
+    requires: Vec<String>,
 }
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -249,6 +252,7 @@ impl ProcessActivation {
             first_pass: true,
             ended_refused: false,
             published: None,
+            requires: owned.requires().to_vec(),
         };
         loop {
             let passed = self.pass(owned, process, &mut live).await;
@@ -514,10 +518,6 @@ impl ProcessActivation {
             }
         }
         let written = state.format.clone();
-        let requires_before = self
-            .steps
-            .requirements(&record, &step_requests(&driver))
-            .await?;
         let mut tx = match self
             .carry_forward(
                 owned,
@@ -551,7 +551,7 @@ impl ProcessActivation {
         let mut policies = Vec::with_capacity(driver.steps.len());
         for step in driver.steps.values() {
             if let Ok(admission) = self.steps.admit(&record, &step.request, millis(now)).await {
-                policies.push((step.request.admitted_tool(kind), admission.policy));
+                policies.push((admission.tool, admission.policy));
             }
         }
         let policies = PolicyView::new(policies);
@@ -696,16 +696,31 @@ impl ProcessActivation {
         }));
         self.record_published(&mut tx, process, &row);
         // The commit that changes the steps the process holds rewrites its
-        // component config requirements: a node that reads the environment
-        // can finish unsettled steps under its current code (D3).
-        let requires = self
+        // requirements (S7): its components' config tokens, and the callbacks
+        // its unsettled steps were admitted under, those held from earlier
+        // rounds and those this commit admits.
+        let components = self
             .steps
             .requirements(&record, &step_requests(&driver))
-            .await?;
-        if requires != requires_before
-            && let Some(requires) = requires
-        {
-            tx.set_requires(requires);
+            .await?
+            .unwrap_or_default();
+        let held = driver.steps.values().filter_map(|step| {
+            fold.round(RunSeq(step.run))?
+                .members()
+                .get(usize::try_from(step.member).ok()?)?
+                .draft()
+                .binding()
+        });
+        let admitted = fresh
+            .iter()
+            .filter_map(|execution| execution.draft().binding());
+        let requires = crate::runtime::actor::claim_obligations::process_requires(
+            components,
+            held.chain(admitted),
+        );
+        let rewrites = requires != live.requires;
+        if rewrites {
+            tx.set_requires(requires.clone());
         }
         if (row.state_rev == 0 || next.format != written)
             && let Some(formats) = self.backend.formats().process_in(&next.format)
@@ -717,6 +732,9 @@ impl ProcessActivation {
         }
         super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        if rewrites {
+            live.requires = requires;
+        }
         // The steps this transition admitted run once the next pass folds
         // their rows.
         live.lifecycle.admitted(&fresh);
@@ -1122,7 +1140,7 @@ impl ProcessActivation {
         now: DurableInstant,
         fresh: &mut Vec<AdmittedExecution>,
     ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
-        let ProcessInput::Engine { kind: engine, .. } = record.input.as_ref() else {
+        let ProcessInput::Engine { .. } = record.input.as_ref() else {
             return Err(corrupt("an advanced process", "it runs no engine"));
         };
         // An engine wait is bounded by the engine's own bound, fixed now.
@@ -1166,6 +1184,7 @@ impl ProcessActivation {
                 driver.next_run += 1;
                 let admission = ToolCallAdmission::process("", process.clone());
                 let mut drafts = Vec::with_capacity(requests.len());
+                let mut settled = Vec::with_capacity(requests.len());
                 for (member, request) in (0_u64..).zip(requests) {
                     if driver.steps.contains_key(request.step()) {
                         return Ok(Some(refused(format!(
@@ -1196,14 +1215,21 @@ impl ProcessActivation {
                             .unwrap_or(u64::MAX),
                         request,
                     };
-                    drafts.push(ExecutionDraft::new(
-                        step.call.clone(),
-                        step.request.admitted_tool(engine),
-                        step_request_material(process, &step),
-                        step.policy,
-                        step.limit(),
-                        admitted.park,
-                    ));
+                    drafts.push(
+                        ExecutionDraft::new(
+                            step.call.clone(),
+                            admitted.tool,
+                            step_request_material(process, &step),
+                            step.policy,
+                            step.limit(),
+                            admitted.park,
+                        )
+                        .with_binding(admitted.binding),
+                    );
+                    settled.push(admitted.settled.map(|output| {
+                        self.steps
+                            .admitted_output(process, &step.request, &step.call, output)
+                    }));
                     driver.steps.insert(step.request.step().clone(), step);
                 }
                 if drafts.is_empty() {
@@ -1221,7 +1247,15 @@ impl ProcessActivation {
                     },
                 )
                 .map_err(|refusal| corrupt("a process step's admission", refusal))?;
-                fresh.extend(admitted.members().iter().cloned());
+                // A step its admission settled (D3) commits its outcome with
+                // the admission and starts no body.
+                for (member, settled) in admitted.members().iter().zip(settled) {
+                    match settled {
+                        Some(output) => round::settle(tx, member, output, Vec::new())
+                            .map_err(|refusal| corrupt("a settled step's admission", refusal))?,
+                        None => fresh.push(member.clone()),
+                    }
+                }
                 driver.blocked = wake.map(|until| Blocked::Sleep {
                     until: until.0,
                     site: None,
@@ -1360,131 +1394,6 @@ fn settled_step(driver: &mut Driver, fold: &RunFold) -> Option<(InFlight, Settle
     })?;
     let step = driver.steps.remove(&name)?;
     Some((step, outcome))
-}
-
-/// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
-/// node it runs for, in the transaction that hands it to the engine: once,
-/// under its call, so a recomputed pass appends nothing new. An occurrence
-/// past the per-node cap is counted instead, and the counts are recorded
-/// with the terminal. A step that names no node records nothing.
-fn record_effect(
-    tx: &mut ActorTx,
-    process: &ProcessId,
-    driver: &mut Driver,
-    step: &InFlight,
-    outcome: &SettledOutput,
-    fleet: crate::FleetFormat,
-) {
-    let Some(site) = step.request.site() else {
-        return;
-    };
-    let Some((class, code)) = effect_class(outcome) else {
-        return;
-    };
-    // The cap is per node, whichever of the node's sites each occurrence
-    // ran at: a site's own occurrence number says nothing about it.
-    let recorded = driver
-        .recorded_effects
-        .get(site.site.to_string().as_str())
-        .copied()
-        .unwrap_or_default();
-    if recorded >= driver.effect_occurrence_cap {
-        driver
-            .omitted_effects
-            .entry(site.site.to_string())
-            .or_default()
-            .record(class);
-        return;
-    }
-    driver
-        .recorded_effects
-        .insert(site.site.to_string(), recorded + 1);
-    let operation = match &step.request {
-        StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
-        StepRequest::Engine { kind, .. } => kind.0.clone(),
-    };
-    let mut occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
-        site.clone(),
-        operation,
-        class,
-        code,
-        format!("process:{process}:effect:{}", step.call),
-        fleet,
-    );
-    occurrence.call_id = match &step.request {
-        StepRequest::Tool { .. } => Some(step.call.clone()),
-        StepRequest::Engine { .. } => None,
-    };
-    append_event(tx, process, occurrence.append_request());
-}
-
-/// How a settled step's effect ended, by the tool output it settled with or
-/// the answer every reader gives a stopped step; `None` for a park, which
-/// settles nothing.
-fn effect_class(
-    outcome: &SettledOutput,
-) -> Option<(
-    crate::runtime::process::ProcessEffectOutcomeClass,
-    Option<crate::FailureCode>,
-)> {
-    use crate::runtime::process::ProcessEffectOutcomeClass as Class;
-    let output = match outcome {
-        SettledOutput::Waiting(_) => return None,
-        SettledOutput::Completed(output) => {
-            serde_json::from_str::<crate::ToolCallOutput>(output.payload()).ok()
-        }
-        SettledOutput::Failed(failure) => {
-            serde_json::from_str::<crate::ToolCallOutput>(failure.payload()).ok()
-        }
-        stopped => stopped.stopped_answer(),
-    };
-    Some(match output.map(|output| output.outcome) {
-        Some(crate::ToolCallOutcome::Success(_)) => (Class::Success, None),
-        Some(crate::ToolCallOutcome::Failure(failure)) => (
-            Class::Failure,
-            Some(crate::runtime::process::tool_failure_code(&failure)),
-        ),
-        Some(crate::ToolCallOutcome::Cancelled(_)) => (Class::Cancelled, None),
-        // A payload that is no tool output still says which way it went.
-        None if matches!(outcome, SettledOutput::Completed(_)) => (Class::Success, None),
-        None => (Class::Failure, None),
-    })
-}
-
-/// Append `request` to `process`'s event log on `tx`, exactly once under
-/// its replay key: it commits with the transaction, or not at all.
-pub(super) fn append_event(
-    tx: &mut ActorTx,
-    process: &ProcessId,
-    request: crate::ProcessEventAppendRequest,
-) {
-    tx.write(DomainWrite::Process(ProcessWrite::AppendEvent {
-        process: process.clone(),
-        event_type: request.fact.event_type().to_owned(),
-        payload_json: request.fact.payload().to_string(),
-        replay_key: request.replay.map(|replay| replay.key).unwrap_or_default(),
-    }));
-}
-
-/// Record the effect occurrences `driver` counted past the per-node cap on
-/// `tx`, the process's terminal transaction, before its terminal.
-fn record_omitted_effects(
-    tx: &mut ActorTx,
-    process: &ProcessId,
-    driver: &Driver,
-    fleet: crate::FleetFormat,
-) {
-    if driver.omitted_effects.is_empty() {
-        return;
-    }
-    let mut omissions =
-        crate::runtime::process::ProcessEffectOmissions::new(driver.omitted_effects.clone(), fleet);
-    omissions.occurrence_cap = driver.effect_occurrence_cap;
-    append_event(
-        tx,
-        process,
-        omissions.append_request(format!("process:{process}:effect-omissions")),
-    );
 }
 
 /// A steps' lifecycle failure as the activation reports it: a store

@@ -171,6 +171,7 @@ fn every_round_fact_round_trips_through_its_node() {
                 wait_id: Some("ab".to_owned()),
                 trace: None,
                 declaration: None,
+                binding: None,
             }))],
         },
         RoundFact::Start {

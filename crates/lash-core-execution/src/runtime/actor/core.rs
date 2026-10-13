@@ -94,6 +94,9 @@ pub(super) struct Inner {
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
     dues: Dues,
+    /// A claimed session's claim obligations, which every commit through
+    /// the context derives its `requires` from (S7); none otherwise.
+    obligations: Option<super::claim_obligations::SessionObligations>,
 }
 
 impl std::fmt::Debug for ActorContext {
@@ -137,6 +140,7 @@ impl ActorContext {
                 cancel,
                 probe,
                 dues: Dues::new(),
+                obligations: None,
             }),
             scope: Scope::new(admitted),
         }
@@ -167,6 +171,9 @@ impl ActorContext {
                 cancel,
                 probe,
                 dues: Dues::new(),
+                obligations: (owned.actor().kind() == lash_durable::ActorKind::Session).then(
+                    || super::claim_obligations::SessionObligations::claimed(owned.requires()),
+                ),
             }),
             scope: Scope::new(admitted),
         }
@@ -195,6 +202,7 @@ impl ActorContext {
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
                 dues: Dues::new(),
+                obligations: None,
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
         }
@@ -378,13 +386,40 @@ impl ActorContext {
     /// write; unavailable for a context that owns no claim.
     pub async fn commit_draining(
         &self,
-        tx: ActorTx,
+        mut tx: ActorTx,
         label: CommitLabel,
         release: lash_durable::Release,
     ) -> Result<ActorCommit, DurableError> {
-        self.claimed_drain()?
-            .release_with(self.durable()?.as_ref(), tx, label, release)
-            .await
+        let drain = self.claimed_drain()?;
+        let durable = self.durable()?;
+        let staged = self.stage_obligations(&mut tx, label);
+        let committed = drain
+            .release_with(durable.as_ref(), tx, label, release)
+            .await;
+        self.finish_obligations(staged, committed.is_ok());
+        committed
+    }
+
+    /// Derive `tx`'s claim requirements, for a claimed session (S7).
+    fn stage_obligations(
+        &self,
+        tx: &mut ActorTx,
+        label: CommitLabel,
+    ) -> Option<super::claim_obligations::Staged> {
+        self.inner
+            .obligations
+            .as_ref()
+            .map(|obligations| obligations.stage(tx, label, self.inner.epoch))
+    }
+
+    fn finish_obligations(
+        &self,
+        staged: Option<super::claim_obligations::Staged>,
+        committed: bool,
+    ) {
+        if let (Some(obligations), Some(staged)) = (self.inner.obligations.as_ref(), staged) {
+            obligations.concluded(staged, committed);
+        }
     }
 
     fn claimed_drain(&self) -> Result<&lash_durable::runner::Drain, DurableError> {
@@ -442,10 +477,14 @@ impl ActorContext {
     /// someone else's, [`DurableError::Domain`] for a refused domain write.
     pub async fn commit(
         &self,
-        tx: ActorTx,
+        mut tx: ActorTx,
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
-        self.durable()?.commit(tx, label).await
+        let durable = self.durable()?;
+        let staged = self.stage_obligations(&mut tx, label);
+        let committed = durable.commit(tx, label).await;
+        self.finish_obligations(staged, committed.is_ok());
+        committed
     }
 
     /// Commit the mailbox transaction `tx` under `label` through this

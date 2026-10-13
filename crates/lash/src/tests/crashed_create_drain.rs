@@ -127,10 +127,7 @@ async fn headless_row(
 ) -> Result<lash_core::store::SessionStore> {
     let session_id = SessionId::fixture(session);
     core.session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     seams
         .delete_session_head_for_testing(&session_id)
@@ -180,7 +177,6 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
     let policy = creator.policy_snapshot();
     let request = |id: &str| {
         let mut request = lash_core::SessionCreateRequest::root(
-            crate::plugins::SessionToolAccess::ambient(),
             lash_core::SessionStartPoint::Empty,
             lash_core::PluginOptions::default(),
         )

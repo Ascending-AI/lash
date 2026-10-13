@@ -224,7 +224,7 @@ async fn committed_first_frame(
     .expect("admit session");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id,
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

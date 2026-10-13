@@ -253,7 +253,6 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -266,7 +265,6 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
     core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 key,
                 lash::TurnBudget::Unbounded,
@@ -382,7 +380,6 @@ fn core_over(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended());
     for plugin in plugins {
@@ -712,7 +709,6 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
     let created = core
         .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 unregistered,
                 lash::TurnBudget::Unbounded,
@@ -833,7 +829,6 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -846,7 +841,6 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     let created = core
         .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 GLM,
                 lash::TurnBudget::Unbounded,
@@ -879,7 +873,6 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     // Send: the session records `high` on the thinking model.
     core.session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 THINKER,
                 lash::TurnBudget::Unbounded,
@@ -1136,11 +1129,18 @@ impl AskTwice {
 
 #[async_trait::async_trait]
 impl lash::tools::ToolProvider for AskTwice {
-    fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Vec<lash::tools::ToolManifest> {
         vec![ask_twice_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash::tools::ToolContract>> {
         (name == ASK_TWICE).then(|| Arc::new(ask_twice_definition().contract()))
     }
 

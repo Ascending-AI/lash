@@ -17,14 +17,18 @@ pub(crate) struct RlmControlToolsProvider {
 
 #[async_trait]
 impl ToolProvider for RlmControlToolsProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         vec![
             continue_as_tool_definition_for(self.vocabulary).manifest(),
             read_output_tool_definition_for(self.vocabulary).manifest(),
         ]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         match name {
             "continue_as" => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
@@ -48,12 +52,61 @@ impl ToolProvider for RlmControlToolsProvider {
     }
 }
 
-/// Lash's `control.finish`, the default finish a code-mode session offers:
-/// a [`lash_core::FinishToolProvider`] of [`finish_tool_definition_for`].
-pub(crate) fn finish_tool_provider(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-) -> lash_core::FinishToolProvider {
-    lash_core::FinishToolProvider::new([finish_tool_definition_for(vocabulary)])
+/// Lash's `control.finish`, the default finish a code-mode session offers
+/// ([`finish_tool_definition_for`]), typed by the finish value schema the
+/// run's RLM config states (S9). The schema is a run option of the protocol
+/// that owns finish: each method reads it from the run's own config, so a
+/// run that states another shape offers, admits and settles its finish
+/// under that shape alone, and is not drift.
+pub(crate) struct RlmFinishProvider {
+    pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
+}
+
+impl RlmFinishProvider {
+    /// `control.finish` as the run's config types it. A schema the config
+    /// states but no tool admits leaves the untyped finish: the config owner
+    /// refuses such a schema before any run records it.
+    fn definition(&self, config: &lash_core::OwnerConfigView) -> ToolDefinition {
+        let definition = finish_tool_definition_for(self.vocabulary);
+        let schema = config
+            .decode::<crate::RlmRecordedConfig>(crate::RLM_PROTOCOL_PLUGIN_ID)
+            .ok()
+            .flatten()
+            .and_then(|recorded| recorded.finish_value_schema)
+            .and_then(|schema| lash_core::JsonSchema::admit(schema).ok());
+        match schema {
+            Some(schema) => definition
+                .clone()
+                .with_finish_value_schema(schema)
+                .unwrap_or(definition),
+            None => definition,
+        }
+    }
+}
+
+#[async_trait]
+impl ToolProvider for RlmFinishProvider {
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
+        vec![self.definition(config).manifest()]
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        let definition = self.definition(config);
+        (definition.manifest.name == name).then(|| Arc::new(definition.contract()))
+    }
+
+    /// The value is the whole input: settlement checks it against the
+    /// schema the call was admitted under.
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() != FINISH_TOOL_NAME {
+            return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into();
+        }
+        ToolOutcome::finish(call.args.clone()).into()
+    }
 }
 
 /// The retained-output reader as a session in `dialect` advertises it.
@@ -282,7 +335,7 @@ mod tests {
     impl Default for BatonManager {
         fn default() -> Self {
             Self {
-                snapshot: RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+                snapshot: RuntimeSessionState::fixture(SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -453,7 +506,7 @@ mod tests {
         })
         .attempt("test-turn");
         let manifest = provider
-            .resolve_manifest("continue_as")
+            .resolve_manifest("continue_as", &lash_core::OwnerConfigView::default())
             .expect("continue_as manifest");
         match provider
             .execute(lash_core::ToolCall::new(&manifest, args, &context))
@@ -503,7 +556,7 @@ mod tests {
                         )
                     },
                     session_graph,
-                    ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                    ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                         lash_core::TurnBudget::Unbounded,
                         lash_core::MaxToolCalls::new(1024),
                         lash_core::NoProgressBudget::bounded(12),
@@ -644,7 +697,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
@@ -716,7 +769,7 @@ mod tests {
                         lash_core::NoProgressBudget::bounded(12),
                     )
                 },
-                ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+                ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),

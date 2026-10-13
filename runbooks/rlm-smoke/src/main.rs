@@ -519,7 +519,7 @@ async fn main() -> Result<()> {
         .tools(lash::hook_key!("tools"), workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_jsonl_path(&trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
@@ -531,7 +531,6 @@ async fn main() -> Result<()> {
     match core
         .session(args.session_id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 args.model.as_str(),
                 lash::TurnBudget::bounded(12),

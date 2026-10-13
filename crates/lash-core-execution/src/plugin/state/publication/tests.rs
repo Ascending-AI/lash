@@ -71,11 +71,11 @@ fn session(host: &crate::PluginHost, snapshot: Option<&PluginState>) -> Arc<crat
         Some(snapshot) => PluginSessionRequest::rematerialization(
             "state-owner",
             snapshot,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ),
         None => PluginSessionRequest::creation(
             "state-owner",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ),
     };
     host.isolated_registry().build_session(request).unwrap()

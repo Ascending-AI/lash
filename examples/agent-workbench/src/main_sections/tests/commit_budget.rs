@@ -55,7 +55,6 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
         LashCore::standard_builder(backend())
             .llm_profiles(profiles())
             .data_retention(lash::DataRetention::standard())
-            .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
     };

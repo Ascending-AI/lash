@@ -229,7 +229,6 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
     if args.phase != Phase::Resume {
         core.session(id.clone())
             .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
                 lash::SessionSpec::new(
                     provider::MODEL,
                     lash::TurnBudget::Unbounded,

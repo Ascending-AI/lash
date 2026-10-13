@@ -299,7 +299,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas()
+async fn composition_trace_fires_once_when_the_tool_selection_changes_with_full_ordered_schemas()
 -> Result<()> {
     let traced = Traced::new(
         mock_provider(vec![
@@ -308,7 +308,12 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
             text_call("still absent"),
         ])
         .into_handle(),
-        |builder| builder.tools(crate::hook_key!("tools"), Arc::new(EchoTool)),
+        |builder| {
+            builder.plugin(Arc::new(crate::tools::SelectedToolsPlugin::new(
+                "echo",
+                Arc::new(EchoTool),
+            )))
+        },
     )
     .await?;
     let session = traced.session("tool-membership").await?;
@@ -317,20 +322,27 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
         .send(TurnInput::text("tool-member"))
         .output()
         .await?;
-    session
-        .admin()
-        .tools()
-        .set_membership(
-            lash_core::ToolId::from("tool:echo_tool"),
-            false,
-            "host:tracing:set_membership:319",
+    let config = session.admin().config();
+    let revision = config.revision().await?;
+    let outcome = config
+        .apply(
+            crate::config::ConfigWrite::new("deselect-echo", revision),
+            crate::config::ConfigTransaction::of(crate::tools::SetToolSelection {
+                tools: crate::tools::ToolSelection::AllExcept(vec![lash_core::ToolId::from(
+                    "tool:echo_tool",
+                )]),
+            }),
         )
         .await?
-        .settle_with(
-            &session.admin().commands(),
-            crate::testing::admin_fixture_outcome,
-        )
+        .await_outcome(&config)
         .await?;
+    assert!(
+        matches!(
+            outcome,
+            crate::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{outcome:?}"
+    );
     session
         .send(TurnInput::text("tool-removed"))
         .output()
@@ -345,7 +357,7 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
     assert_eq!(
         changes.len(),
         2,
-        "initial membership and one genuine removal emit exactly once: {changes:?}"
+        "the initial surface and one genuine removal emit exactly once: {changes:?}"
     );
     let initial_tools = changes[0]["tool_schemas"]
         .as_array()
@@ -397,11 +409,15 @@ impl SchemaChangingTool {
 
 #[async_trait]
 impl ToolProvider for SchemaChangingTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![self.definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
@@ -719,11 +735,15 @@ struct PendingEchoTool(tokio::sync::mpsc::UnboundedSender<(lash_core::PinnedKey,
 
 #[async_trait]
 impl ToolProvider for PendingEchoTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![pending_echo_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 

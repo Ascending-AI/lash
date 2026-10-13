@@ -159,7 +159,6 @@ pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
         retention: crate::Retention::UntilGc,

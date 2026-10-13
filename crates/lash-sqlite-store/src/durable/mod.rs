@@ -1255,6 +1255,9 @@ impl DurableStore for SqliteDurableStore {
                             &stored_formats,
                             requires.as_deref(),
                         )?,
+                        // `of_stored` refused a corrupt spelling above.
+                        requires: lash_durable::parse_requires(requires.as_deref())
+                            .unwrap_or_default(),
                     })
                 })
                 .collect())

@@ -95,7 +95,6 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(model(Arc::downgrade(world)), metadata()?)
@@ -121,7 +120,6 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
 pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> Result<(), String> {
     core.session(session.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 MODEL,
                 lash::TurnBudget::Unbounded,

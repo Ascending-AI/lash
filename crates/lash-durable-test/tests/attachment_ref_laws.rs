@@ -189,10 +189,14 @@ fn definition() -> lash_core::ToolDefinition {
 }
 #[async_trait::async_trait]
 impl ToolProvider for NestedMedia {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![definition().manifest()]
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "nested_media").then(|| Arc::new(definition().contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -305,7 +309,6 @@ async fn send(url: bool, tools: bool) -> Sent {
         })
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -322,10 +325,7 @@ async fn send(url: bool, tools: bool) -> Sent {
     .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
     .attachment_acceptance(Arc::new(catalogue()));
     core.session(id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        .create(lash::SessionCreation::root(spec))
         .await
         .unwrap();
     let session = core.session(id).open().await.unwrap();
@@ -473,11 +473,15 @@ struct ReceiptTool {
 
 #[async_trait::async_trait]
 impl ToolProvider for ReceiptTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "nested_media").then(|| Arc::new(definition().contract()))
     }
 
@@ -560,7 +564,6 @@ async fn tool_put_receipts_match_session_delivery_advice() {
         })
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -571,7 +574,6 @@ async fn tool_put_receipts_match_session_delivery_advice() {
     let id = lash::SessionId::from("put-receipt-law");
     core.session(id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 MODEL,
                 lash::TurnBudget::Unbounded,

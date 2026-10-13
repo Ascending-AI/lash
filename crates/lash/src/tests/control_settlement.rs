@@ -20,38 +20,47 @@ fn answer_tool(value_schema: serde_json::Value) -> lash_core::ToolDefinition {
     .with_tool_binding(lash_core::ToolBinding::new(["answer"], "submit"))
 }
 
+/// A model that answers each request with the next of `cells`, recording
+/// each request's messages in `requests`.
+#[cfg(feature = "rlm")]
+fn scripted_cells(
+    kind: &'static str,
+    cells: Vec<String>,
+    requests: Arc<StdMutex<Vec<String>>>,
+) -> lash_core::facade_support::ProviderHandle {
+    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(cells)));
+    crate::testing::TestProvider::builder()
+        .kind(kind)
+        .complete(move |request| {
+            requests.lock_recover().push(
+                serde_json::to_string(&request.messages).expect("serialize request messages"),
+            );
+            let text = cells.lock_recover().pop_front().expect("scripted cell");
+            async move { Ok(text_response(&text)) }
+        })
+        .build()
+        .into_handle()
+}
+
 /// FIG-5823 law 4: a host that offers its own finish tool replaces Lash's
-/// `control.finish`, and a send whose tool access offers that tool retyped
-/// changes the value's shape for its run alone. The retyped run finishes
-/// with text; the next run, under the session's access, refuses text as
-/// the integer the host declared, and finishes with one.
+/// `control.finish`, and the value has the type the host declared: text is
+/// refused as the integer, and an integer finishes.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Result<()> {
+async fn a_host_finish_replaces_the_default_and_types_the_value() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(vec![
-        typescript_block("await answer.submit(\"seven\");"),
-        typescript_block(
-            "let first = \"none\";\n\
-             try {\n  await answer.submit(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
-             console.log(`caught ${first}`);",
-        ),
-        typescript_block("await answer.submit(7);"),
-    ])));
-    let provider = {
-        let (requests, cells) = (Arc::clone(&requests), Arc::clone(&cells));
-        crate::testing::TestProvider::builder()
-            .kind("host-finish")
-            .complete(move |request| {
-                requests.lock_recover().push(
-                    serde_json::to_string(&request.messages).expect("serialize request messages"),
-                );
-                let text = cells.lock_recover().pop_front().expect("scripted cell");
-                async move { Ok(text_response(&text)) }
-            })
-            .build()
-            .into_handle()
-    };
+    let provider = scripted_cells(
+        "host-finish",
+        vec![
+            typescript_block(
+                "let first = \"none\";\n\
+                 try {\n  await answer.submit(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
+                 console.log(`caught ${first}`);",
+            ),
+            typescript_block("await answer.submit(7);"),
+        ],
+        Arc::clone(&requests),
+    );
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
@@ -68,13 +77,85 @@ async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Resu
         .await
         .open()
         .await?;
+    let typed = session
+        .send(TurnInput::text("answer with a number"))
+        .output()
+        .await?;
+
+    assert_eq!(
+        typed.result.outcome,
+        TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "answer".to_string(),
+            value: serde_json::json!(7),
+        })
+    );
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(
+        requests[1].contains("caught tool_failed"),
+        "the host's declared type refused text: {}",
+        requests[1]
+    );
+    for request in &requests {
+        assert!(
+            request.contains("answer.submit") && !request.contains("control.finish"),
+            "the host's finish is offered in place of Lash's: {request}"
+        );
+    }
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// S9: the schema `control.finish` takes its value under is a run option of
+/// the RLM namespace, not drift. A run that states a string schema finishes
+/// with text; the next run, under the session's integer schema, refuses
+/// text and finishes with an integer.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_retypes_the_finish_value_for_itself_alone() -> Result<()> {
+    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let provider = scripted_cells(
+        "run-finish-schema",
+        vec![
+            typescript_block("await control.finish(\"seven\");"),
+            typescript_block(
+                "let first = \"none\";\n\
+                 try {\n  await control.finish(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
+                 console.log(`caught ${first}`);",
+            ),
+            typescript_block("await control.finish(7);"),
+        ],
+        Arc::clone(&requests),
+    );
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .build(crate::testing::runtime_lease_owner())?;
+    let id = SessionId::parse("run-finish-schema").expect("nonblank host identity");
+    core.session(id.clone())
+        .create(crate::SessionCreation::root(
+            mock_session_spec()
+                .plugin(
+                    crate::rlm::RLM_PROTOCOL_PLUGIN_ID,
+                    crate::rlm::RlmCreateExtras {
+                        render: None,
+                        termination: None,
+                        finish_value_schema: Some(serde_json::json!({ "type": "integer" })),
+                    },
+                )
+                .expect("the RLM namespace encodes"),
+        ))
+        .await?;
+    let session = core.session(id).open().await?;
     let retyped = session
         .send(TurnInput::text("answer in words"))
-        .tool_access(
-            crate::plugins::SessionToolAccess::restricted([answer_tool(
-                serde_json::json!({ "type": "string" }),
-            )])
-            .expect("a retyped finish is valid access"),
+        .options(
+            crate::rlm::RLM_RUN_OPTIONS,
+            crate::rlm::RlmRunOptions(crate::rlm::RlmTurnOptions {
+                render: None,
+                finish_value_schema: Some(serde_json::json!({ "type": "string" })),
+            }),
         )
         .output()
         .await?;
@@ -86,14 +167,14 @@ async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Resu
     assert_eq!(
         retyped.result.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "answer".to_string(),
+            tool_name: "finish".to_string(),
             value: serde_json::json!("seven"),
         })
     );
     assert_eq!(
         typed.result.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "answer".to_string(),
+            tool_name: "finish".to_string(),
             value: serde_json::json!(7),
         })
     );
@@ -101,15 +182,9 @@ async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Resu
     assert_eq!(requests.len(), 3, "{requests:?}");
     assert!(
         requests[2].contains("caught tool_failed"),
-        "the run under the session's access refused text: {}",
+        "the run under the session's schema refused text: {}",
         requests[2]
     );
-    for request in &requests {
-        assert!(
-            request.contains("answer.submit") && !request.contains("control.finish"),
-            "the host's finish is offered in place of Lash's: {request}"
-        );
-    }
     drop(session);
     core.shutdown().await?;
     Ok(())
@@ -147,11 +222,15 @@ fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition 
 
 #[async_trait]
 impl ToolProvider for SubmitTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![submit_definition(self.value.clone()).manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == SUBMIT).then(|| Arc::new(submit_definition(self.value.clone()).contract()))
     }
 
@@ -218,10 +297,7 @@ async fn run_submit_turn(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let events = RecordingEvents::default();
     let report = session
@@ -426,7 +502,6 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
     let session = core
         .session(SessionId::parse("batch-member-finish").expect("nonblank host identity"))
         .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
             mock_session_spec()
                 .plugin(
                     crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,

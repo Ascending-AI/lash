@@ -9,7 +9,7 @@ use super::*;
 pub struct ServedExecutionEnvironmentSync {
     pub prelude: TurnPreludeRef,
     pub result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
-    pub tool_surface: Vec<crate::ToolDefinition>,
+    pub tool_surface: crate::RecordedSurface,
 }
 
 impl RuntimeEffectOutcome {

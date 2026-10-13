@@ -1,11 +1,14 @@
 //! The environment a process runs under (FIG-6028, FIG-6034).
 //!
-//! A process is not a session. Whatever starts it states its whole
-//! environment: its model data, attachment rules, tool-call limit, tool
-//! access, the ordered process components it is built from and the
-//! capability refs its resolutions receive. Lash never infers an
-//! environment, fills one by default or falls back to deployment defaults:
-//! every runtime built for the process reads these bytes and nothing else.
+//! A process is not a session. It is the immutable pair of a document and
+//! an env (FIG-6074): the document is a template performing namespaced
+//! effects, and the env implements it. Whatever starts it states the whole
+//! env: its model data, attachment rules, tool-call limit, the link of each
+//! effect the document performs to a tool, the ordered process components
+//! it is built from and the capability refs its resolutions receive. Lash
+//! never infers an env, fills one by default or falls back to deployment
+//! defaults: every runtime built for the process reads these bytes and
+//! nothing else.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -17,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::AttachmentCapabilitySnapshot;
 use crate::run_spec::{CapabilityRef, SlotId};
-use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, SessionId, SessionToolAccess};
+use crate::tool_surface::EffectLink;
+use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, SessionId};
+use lash_kernel_doc::EffectName;
 
 use crate::process_identity::{ProcessEnvRef, process_env_ref_for_bytes};
 
@@ -38,9 +43,10 @@ pub struct ProcessEnv {
     )]
     attachments: Arc<AttachmentCapabilitySnapshot>,
     limits: ProcessLimits,
-    /// Always `Restricted`: an env with ambient tools is refused at
-    /// admission (D7).
-    tools: SessionToolAccess,
+    /// The link of each effect the process performs, exactly: a start is
+    /// refused unless these are the effects its entry calls or spawns.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    effects: BTreeMap<EffectName, EffectLink>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     components: Vec<ProcessComponentEntry>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -181,6 +187,12 @@ impl<T> ProcessConfigKey<T> {
 
     pub const fn component(&self) -> &'static str {
         self.component
+    }
+
+    /// The key of the tool provider this component declares as `key`: what
+    /// an env links an effect it serves to.
+    pub fn tool_provider(&self, key: &str) -> crate::tool_surface::ProviderKey {
+        crate::tool_surface::ProviderKey::tool_provider(self.component, key)
     }
 
     pub const fn format(&self) -> FormatVersion {
@@ -338,8 +350,6 @@ impl ProcessComponentConfig {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ProcessEnvRefusal {
-    #[error("a process environment must restrict its tools; ambient tool access is refused")]
-    AmbientTools,
     #[error("process component `{id}` is named more than once")]
     DuplicateComponent { id: String },
     #[error("process component `{id}` is not installed")]
@@ -356,12 +366,47 @@ pub enum ProcessEnvRefusal {
     ComponentBuildFailed { id: String, reason: String },
     #[error("process components `{first}` and `{second}` both register a presenter")]
     DuplicatePresenter { first: String, second: String },
-    #[error("process components `{first}` and `{second}` both register tool `{name}`")]
-    DuplicateToolName {
-        name: String,
-        first: String,
-        second: String,
+    /// The env does not link an effect the entry calls or spawns.
+    #[error("effect `{effect}` the process performs is not linked")]
+    EffectNotLinked { effect: String },
+    /// The env links an effect the entry never calls or spawns.
+    #[error("effect `{effect}` is linked, but the process does not perform it")]
+    EffectNotPerformed { effect: String },
+    /// A linked tool does not fit the effect's kernel signature.
+    #[error("effect `{effect}` is linked to tool `{tool}`, which does not fit it: {reason}")]
+    EffectUnfit {
+        effect: String,
+        tool: String,
+        reason: String,
     },
+    /// No env component serves a linked tool under its config.
+    #[error(
+        "effect `{effect}` is linked to tool `{tool}`, which no env component `{provider}` serves"
+    )]
+    ToolNotServed {
+        effect: String,
+        tool: String,
+        provider: String,
+    },
+    /// The serving component projects a linked tool differently from the
+    /// surface the link retains.
+    #[error(
+        "effect `{effect}` is linked to tool `{tool}`, whose served surface differs from the linked one"
+    )]
+    LinkedSurfaceChanged { effect: String, tool: String },
+    /// Two linked effect paths collide: one is a namespace of the other.
+    #[error("linked effects `{first}` and `{second}` collide")]
+    LinkPathCollision { first: String, second: String },
+    /// Capture matched an effect to a tool of the run's recorded surface
+    /// that no component the env names serves.
+    #[error("{}", capture_missing(effect, tool))]
+    CaptureMissing { effect: String, tool: String },
+    /// A restricted child env names an effect its parent does not link.
+    #[error("effect `{effect}` is not linked by the parent env it is restricted from")]
+    RestrictMissing { effect: String },
+    /// The document's linked-effect set could not be certified.
+    #[error("the process's linked effects cannot be certified: {reason}")]
+    Uncertified { reason: String },
     #[error("process environment `{env_ref}` is not published")]
     Unpublished { env_ref: String },
     #[error(
@@ -376,15 +421,15 @@ pub enum ProcessEnvRefusal {
 }
 
 impl ProcessEnv {
-    /// Start an environment from the two facts no environment omits: its
-    /// tool access and its tool-call limit. Lash fills neither.
-    pub fn builder(tools: SessionToolAccess, max_tool_calls: MaxToolCalls) -> ProcessEnvBuilder {
+    /// Start an environment from the one fact no environment omits: its
+    /// tool-call limit. Lash fills it from nothing.
+    pub fn builder(max_tool_calls: MaxToolCalls) -> ProcessEnvBuilder {
         ProcessEnvBuilder {
             env: Self {
                 model: None,
                 attachments: Arc::new(AttachmentCapabilitySnapshot::default()),
                 limits: ProcessLimits::new(max_tool_calls),
-                tools,
+                effects: BTreeMap::new(),
                 components: Vec::new(),
                 capabilities: BTreeMap::new(),
             },
@@ -394,41 +439,21 @@ impl ProcessEnv {
 
     /// An environment stated from `run`, the starting turn's recorded run:
     /// its model data, attachment rules, tool-call limit and capability
-    /// refs, its tool access resolved against `offered`, and exactly
-    /// `components`. Nothing is inferred from tool owners (M2).
+    /// refs, with `effects` linked and exactly `components`. Nothing is
+    /// inferred from tool owners (M2).
     ///
     /// # Errors
     ///
-    /// The resolved tools or the component list are refused.
+    /// The component list is refused.
     pub fn from_run(
         run: &crate::run_spec::ResolvedRun,
-        offered: &lash_sansio::ToolCatalog,
+        effects: BTreeMap<EffectName, EffectLink>,
         components: Vec<ProcessComponentEntry>,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
         let config = run.config();
-        let admitted = offered
-            .tools
-            .iter()
-            .filter(|entry| {
-                !config.tool_access.hides(&entry.manifest.name)
-                    && config.tool_access.restricted_tools().is_none_or(|tools| {
-                        tools.iter().any(|tool| {
-                            tool.manifest.id == entry.manifest.id
-                                && tool.manifest.name == entry.manifest.name
-                        })
-                    })
-            })
-            .map(|entry| lash_sansio::ToolDefinition {
-                manifest: entry.manifest.clone(),
-                contract: (*entry.contract).clone(),
-            });
-        let tools = crate::SessionToolAccess::restricted(admitted).map_err(|error| {
-            ProcessEnvRefusal::Policy {
-                reason: format!("the run's tools do not restrict: {error}"),
-            }
-        })?;
-        let mut builder = ProcessEnv::builder(tools, config.max_tool_calls)
-            .attachments(Arc::clone(&config.attachment_acceptance));
+        let mut builder = ProcessEnv::builder(config.max_tool_calls)
+            .attachments(Arc::clone(&config.attachment_acceptance))
+            .effects(effects);
         if let Some(profile) = &config.model {
             builder = builder.model(ProcessModel::new(
                 profile.clone(),
@@ -443,6 +468,32 @@ impl ProcessEnv {
             builder = builder.entry(entry);
         }
         builder.build()
+    }
+
+    /// This env restricted to `effects`, each keeping the link this env
+    /// recorded for it: a child's derived env, never re-resolved. It is a
+    /// new content address.
+    ///
+    /// # Errors
+    ///
+    /// An effect this env does not link.
+    pub fn restrict<'a>(
+        &self,
+        effects: impl IntoIterator<Item = &'a EffectName>,
+    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
+        let mut restricted = self.clone();
+        restricted.effects = effects
+            .into_iter()
+            .map(|effect| {
+                self.effects
+                    .get(effect)
+                    .map(|link| (effect.clone(), link.clone()))
+                    .ok_or_else(|| ProcessEnvRefusal::RestrictMissing {
+                        effect: effect.to_string(),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(restricted)
     }
 
     pub fn model(&self) -> Option<&ProcessModel> {
@@ -461,8 +512,9 @@ impl ProcessEnv {
         self.limits.max_tool_calls
     }
 
-    pub fn tools(&self) -> &SessionToolAccess {
-        &self.tools
+    /// The link of each effect the process performs.
+    pub fn effects(&self) -> &BTreeMap<EffectName, EffectLink> {
+        &self.effects
     }
 
     /// The named components, in composition order.
@@ -508,14 +560,31 @@ impl ProcessEnv {
     }
 
     /// The structural refusals admission checks before any component is
-    /// consulted: ambient tools (D7) and duplicate component ids.
+    /// consulted: duplicate component ids and colliding linked effects.
     ///
     /// # Errors
     ///
     /// The first structural refusal.
     pub fn check_shape(&self) -> Result<(), ProcessEnvRefusal> {
-        if self.tools.restricted_tools().is_none() {
-            return Err(ProcessEnvRefusal::AmbientTools);
+        let paths = self
+            .effects
+            .keys()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        for (index, first) in paths.iter().enumerate() {
+            for second in &paths[index + 1..] {
+                let nested = |outer: &str, inner: &str| {
+                    inner
+                        .strip_prefix(outer)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                };
+                if nested(first, second) || nested(second, first) {
+                    return Err(ProcessEnvRefusal::LinkPathCollision {
+                        first: first.clone(),
+                        second: second.clone(),
+                    });
+                }
+            }
         }
         let mut ids = BTreeSet::new();
         for entry in &self.components {
@@ -555,9 +624,48 @@ impl ProcessEnvBuilder {
         self
     }
 
+    /// Link `effect` to `link`, replacing an earlier link of it.
     #[must_use]
-    pub fn tools(mut self, tools: SessionToolAccess) -> Self {
-        self.env.tools = tools;
+    pub fn link(mut self, effect: EffectName, link: EffectLink) -> Self {
+        self.env.effects.insert(effect, link);
+        self
+    }
+
+    /// Link the effect `definition`'s binding names (`module.operation`) to
+    /// that tool, served by the env component provider declared as
+    /// `provider`, against its process surface. A tool with no binding
+    /// names no effect: [`Self::build`] refuses it.
+    #[must_use]
+    pub fn link_tool(
+        mut self,
+        provider: crate::tool_surface::ProviderKey,
+        definition: &crate::ToolDefinition,
+    ) -> Self {
+        let link = crate::tool_surface::EffectLink {
+            provider,
+            surface: crate::tool_surface::ProcessSurface::of(definition),
+            kind: crate::tool_surface::LinkKind::Tool,
+        };
+        match crate::tool_surface::effect_path_of(&definition.manifest)
+            .and_then(|path| EffectName::new(path.as_str()).ok())
+        {
+            Some(effect) => {
+                self.env.effects.insert(effect, link);
+            }
+            None => {
+                self.refusal
+                    .get_or_insert(ProcessEnvRefusal::EffectNotLinked {
+                        effect: definition.manifest.name.clone(),
+                    });
+            }
+        }
+        self
+    }
+
+    /// Link exactly `effects`, replacing every earlier link.
+    #[must_use]
+    pub fn effects(mut self, effects: BTreeMap<EffectName, EffectLink>) -> Self {
+        self.env.effects = effects;
         self
     }
 
@@ -606,15 +714,26 @@ impl ProcessEnvBuilder {
         if let Some(refusal) = self.refusal {
             return Err(refusal);
         }
-        let mut ids = BTreeSet::new();
-        for entry in &self.env.components {
-            if !ids.insert(entry.id.as_str()) {
-                return Err(ProcessEnvRefusal::DuplicateComponent {
-                    id: entry.id.to_string(),
-                });
-            }
-        }
+        self.env.check_shape()?;
         Ok(self.env)
+    }
+}
+
+/// Why capture found no server for `effect`'s `tool`. `processes.await` is
+/// also performed by the guard a TypeScript `await` of a value of unknown
+/// type lowers to, so a body that never names it can need it linked.
+fn capture_missing(effect: &str, tool: &str) -> String {
+    let refusal = format!(
+        "effect `{effect}` matched tool `{tool}` in the run's recorded surface, which no component the env names serves"
+    );
+    if effect == "processes.await" {
+        format!(
+            "{refusal}: the body performs it explicitly or through the implicit handle-await guard \
+             that every `await` of a value of unknown type lowers to; name the `processes` \
+             component in the env to link it"
+        )
+    } else {
+        refusal
     }
 }
 

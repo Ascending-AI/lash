@@ -135,12 +135,16 @@ struct CountedEcho(Arc<Script>);
 
 #[async_trait]
 impl ToolProvider for CountedEcho {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        lash_core::testing::FixtureTools.tool_manifests()
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        lash_core::testing::FixtureTools.tool_manifests(config)
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        lash_core::testing::FixtureTools.resolve_contract(name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        lash_core::testing::FixtureTools.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -208,10 +212,7 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node(
     let old = build_core(Arc::clone(&stores), "drain-old-build", &script);
     for id in ["mid-turn", "idle"] {
         old.session(session_id(id))
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            ))
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("created");
         let first = answered(&old, id, "hello").await;
@@ -348,10 +349,7 @@ async fn a_host_learns_why_its_cores_node_stopped() {
     let script = Arc::new(Script::default());
     let old = build_boot(Arc::clone(&stores), "restarted-owner", "boot-1", &script);
     old.session(session_id("served"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     // The old boot's node answered a turn, so it registered first.

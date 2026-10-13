@@ -117,28 +117,27 @@ impl ExecutionComposition {
         )
     }
 
-    /// The one provider identity a call of `tool` binds to and dispatches
-    /// through, before admission: the provider its grant names, else the
-    /// provider the catalog binds the tool to. It must be registered here.
+    /// The provider a call of `tool` binds to and dispatches through: the
+    /// one its surface entry or deferred match records, `provider`, which
+    /// must be registered here. A tool with no entry and no match has no
+    /// provider.
     pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
-        granted: Option<&PluginCallbackIdentity>,
+        provider: Option<&PluginCallbackIdentity>,
     ) -> Result<PluginCallbackIdentity, PluginError> {
-        let provider = granted
-            .cloned()
-            .or_else(|| self.tool_registry.execution_provider(tool))
-            .ok_or_else(|| {
-                PluginError::Registration(format!("tool `{tool}` has no registered provider"))
-            })?;
+        let provider = provider.cloned().ok_or_else(|| {
+            PluginError::Registration(format!(
+                "tool `{tool}` is neither on the run's surface nor a recorded match"
+            ))
+        })?;
         if !self
             .tool_providers
             .iter()
             .any(|registered| registered.identity == provider)
         {
             return Err(PluginError::Registration(format!(
-                "tool `{tool}` names provider `{}:{}`, which is not registered",
-                provider.owner, provider.key
+                "tool `{tool}` names provider `{provider}`, which is not registered"
             )));
         }
         Ok(provider)
@@ -147,14 +146,20 @@ impl ExecutionComposition {
     pub(crate) fn tool_run_binding(
         &self,
         tool: &crate::ToolId,
-        granted: Option<&PluginCallbackIdentity>,
+        provider: Option<&PluginCallbackIdentity>,
     ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
-        let executable = self.tool_provider(tool, granted)?;
+        let executable = self.tool_provider(tool, provider)?;
         Ok(crate::tool_run::AdmittedBinding {
             preparation: executable.clone(),
             executable,
             presentation: self.tool_presentation_plan(),
         })
+    }
+
+    /// The deferred provider's key, when one is registered: what resolves
+    /// the call paths a surface does not offer.
+    pub fn deferred_key(&self) -> Option<PluginCallbackIdentity> {
+        self.tool_registry.deferred_key().cloned()
     }
 
     /// Bind recorded provider identities to this worker's capabilities.
@@ -569,7 +574,7 @@ mod tests {
         let session = crate::testing::test_plugin_host(vec![Arc::new(EveryContribution)])
             .build_session(PluginSessionRequest::creation(
                 "composition-identities-session",
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .expect("materialized session");
         let composition = session.composition();
@@ -640,7 +645,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::ToolProvider for Keyed {
-        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
             if self.advertises {
                 vec![Self::definition().manifest()]
             } else {
@@ -648,11 +653,19 @@ mod tests {
             }
         }
 
-        fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+        fn resolve_manifest_by_id(
+            &self,
+            id: &crate::ToolId,
+            _config: &crate::OwnerConfigView,
+        ) -> Option<crate::ToolManifest> {
             (id.as_str() == KEYED_TOOL).then(|| Self::definition().manifest())
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &crate::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
             (name == "keyed").then(|| Arc::new(Self::definition().contract()))
         }
 
@@ -686,16 +699,26 @@ mod tests {
     }
 
     /// What a call of `keyed` records as its binding under `composition`,
-    /// and what dispatch through `tools` executes.
+    /// matched on the surface `registry` advertises, and what dispatch
+    /// through that surface executes.
     async fn bound_and_executed(
         composition: &ExecutionComposition,
-        tools: &dyn ToolProvider,
+        registry: Arc<crate::ToolRegistry>,
     ) -> (crate::tool_run::AdmittedBinding, serde_json::Value) {
+        let entries = registry
+            .advertise(&crate::OwnerConfigView::default())
+            .expect("the providers advertise");
+        let tools = crate::SurfaceTools::of_entries(entries, registry);
+        let tool = crate::ToolId::from(KEYED_TOOL);
+        let provider = &tools
+            .entry(&tool)
+            .expect("the surface offers the tool")
+            .provider;
         let binding = composition
-            .tool_run_binding(&crate::ToolId::from(KEYED_TOOL), None)
-            .expect("the catalog binds the tool");
+            .tool_run_binding(&tool, Some(provider))
+            .expect("the surface binds the tool");
         let crate::ToolAttemptOutcome::Done { result, .. } =
-            crate::testing::run_tool(tools, "keyed", &serde_json::json!({})).await
+            crate::testing::run_tool(&tools, "keyed", &serde_json::json!({})).await
         else {
             panic!("the call completes inline");
         };
@@ -707,7 +730,7 @@ mod tests {
         crate::testing::test_plugin_host(factories)
             .build_session(PluginSessionRequest::creation(
                 "keyed-providers",
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .expect("materialized session")
     }
@@ -738,7 +761,7 @@ mod tests {
         for served_first in [true, false] {
             let session = session_of(vec![keyed_plugin("keyed", keyed_providers(served_first))]);
             let (binding, executed) =
-                bound_and_executed(&session.composition(), session.tools().as_ref()).await;
+                bound_and_executed(&session.composition(), session.tool_registry()).await;
             assert_eq!(binding.executable, served, "served first: {served_first}");
             assert_eq!(binding.preparation, served, "served first: {served_first}");
             assert_eq!(executed, serde_json::json!("served"));
@@ -751,7 +774,7 @@ mod tests {
                 .collect();
             let session = session_of(plugins);
             let (binding, executed) =
-                bound_and_executed(&session.composition(), session.tools().as_ref()).await;
+                bound_and_executed(&session.composition(), session.tool_registry()).await;
             assert_eq!(
                 binding.executable,
                 PluginCallbackIdentity::tool_provider("served", "served"),
@@ -786,7 +809,8 @@ mod tests {
                 )
                 .expect("the components compose");
             let (binding, executed) =
-                bound_and_executed(&composition.composition, composition.registry.as_ref()).await;
+                bound_and_executed(&composition.composition, Arc::clone(&composition.registry))
+                    .await;
             assert_eq!(
                 binding.executable,
                 PluginCallbackIdentity::tool_provider("keyed-component", "served"),
@@ -816,7 +840,7 @@ mod tests {
         let refused = crate::testing::test_plugin_host(vec![keyed_plugin("twice", twice())])
             .build_session(PluginSessionRequest::creation(
                 "duplicate-key",
-                SessionAuthorityContext::ambient_fixture(),
+                SessionAuthorityContext::fixture(),
             ))
             .err()
             .expect("a duplicate key refuses the session's registration");
@@ -835,7 +859,7 @@ mod tests {
         )])
         .build_session(PluginSessionRequest::creation(
             "positional-key",
-            SessionAuthorityContext::ambient_fixture(),
+            SessionAuthorityContext::fixture(),
         ))
         .err()
         .expect("a positional key refuses the session's registration");

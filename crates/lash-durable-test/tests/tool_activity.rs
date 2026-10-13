@@ -139,14 +139,18 @@ impl ActivityTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ActivityTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [GATED, DEFERRED]
             .into_iter()
             .map(|name| definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [GATED, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(definition(name).contract()))
@@ -622,7 +626,6 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(
@@ -642,10 +645,7 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
         let session_id = lash::SessionId::try_from("provider-activity".to_owned()).unwrap();
         let session = core
             .session(session_id.clone())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(8),
-            ))
+            .create(lash::SessionCreation::root(served::spec(8)))
             .await
             .expect("the session is created");
         let observed = core
@@ -971,7 +971,6 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
@@ -993,10 +992,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     let session_id = lash::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let session = attached
         .session(session_id.clone())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            served::spec(8),
-        ))
+        .create(lash::SessionCreation::root(served::spec(8)))
         .await
         .expect("the session is created");
     let observed = attached

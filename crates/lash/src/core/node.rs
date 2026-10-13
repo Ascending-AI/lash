@@ -250,8 +250,27 @@ impl LashCore {
             backend,
             sessions,
             processes,
-            serves: self.env.core.process_engines.components().serves(),
+            serves: self.node_serves(),
         }
+    }
+
+    /// The claim requirements the core's node serves: its process
+    /// components' config formats, and the obligation token of every
+    /// callback its plugins register (S7), projected from their static
+    /// registrations without invoking any.
+    pub(crate) fn node_serves(&self) -> Vec<String> {
+        let mut serves = self.env.core.process_engines.components().serves();
+        if let Some(host) = &self.env.plugin_host {
+            match host.served_obligations() {
+                Ok(tokens) => serves.extend(tokens),
+                Err(error) => {
+                    tracing::error!(%error, "the core's plugins serve no callbacks");
+                }
+            }
+        }
+        serves.sort();
+        serves.dedup();
+        serves
     }
 
     /// The hub that ticks when a commit grew a process's log, on this

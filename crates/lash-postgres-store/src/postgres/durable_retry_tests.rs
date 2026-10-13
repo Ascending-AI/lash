@@ -42,7 +42,6 @@ async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
                 TurnBudget::Unbounded,
                 MaxToolCalls::new(16),
                 lash_core::NoProgressBudget::bounded(12),
-                lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
             owning_process_id: None,

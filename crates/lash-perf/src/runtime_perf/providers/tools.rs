@@ -179,7 +179,7 @@ fn large_tool_catalog_cache() -> &'static Arc<BenchmarkLargeToolCatalogCache> {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkEchoTool {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         vec![
             benchmark_echo_tool_definition().manifest(),
             benchmark_slow_tool_definition().manifest(),
@@ -187,7 +187,11 @@ impl ToolProvider for BenchmarkEchoTool {
         ]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<std::sync::Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<std::sync::Arc<ToolContract>> {
         match name {
             "benchmark_echo" => Some(std::sync::Arc::new(
                 benchmark_echo_tool_definition().contract(),
@@ -223,14 +227,18 @@ impl ToolProvider for BenchmarkEchoTool {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkObliqueTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         benchmark_oblique_tool_definitions()
             .into_iter()
             .map(|definition| definition.manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         benchmark_oblique_tool_definition_for(name)
             .map(|definition| Arc::new(definition.contract()))
     }
@@ -736,11 +744,15 @@ fn oblique_doc_text(index: usize) -> String {
 
 #[async_trait::async_trait]
 impl ToolProvider for BenchmarkLargeToolCatalog {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         self.cache.manifests.clone()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         self.cache.contracts.get(name).cloned()
     }
 

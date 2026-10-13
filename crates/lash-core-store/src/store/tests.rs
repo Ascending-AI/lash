@@ -32,7 +32,7 @@ fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from("golden-session"),
         turn_index: 7,
-        ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -216,8 +216,8 @@ fn regenerate_intent_hash_golden_vector() {
 
 #[test]
 fn failure_evidence_changes_intent_hash_from_current_shape() {
-    // Checkpoint manifest v3, explicit ambient tool access, and the config
-    // revision are pinned in intent bytes.
+    // Checkpoint manifest v3 and the config revision are pinned in intent
+    // bytes.
     // FIG-3542: the frame-handoff batch list left the intent; a pending
     // follow-on enters it only when the commit leaves one on the head.
     // FIG-4236: the usage deltas left the intent (ADR 0125).
@@ -225,6 +225,8 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     // is session mail), and with it the always-present turn id field.
     // FIG-5894: the checkpoint's execution state is named by its
     // SessionExecution root, not a set of named leaves.
+    // FIG-6074: the session's tool access left the config; a run's tools
+    // are its recorded surface.
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
@@ -263,7 +265,6 @@ fn session_head_meta_refuses_a_head_json_naming_another_session() {
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
         },
         7,

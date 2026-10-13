@@ -84,17 +84,61 @@ pub fn process_env_fixture() -> crate::ProcessEnv {
 pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
     const PAYLOAD: crate::ProcessConfigKey<serde_json::Value> =
         crate::ProcessConfigKey::new("fixture-payload", crate::FormatVersion::ONE);
-    crate::ProcessEnv::builder(
-        crate::SessionToolAccess::restricted(std::iter::empty())
-            .expect("an empty tool restriction is valid"),
-        crate::MaxToolCalls::new(1024),
-    )
-    .component(
-        PAYLOAD,
-        &serde_json::json!({ "payload": "x".repeat(bytes) }),
-    )
-    .build()
-    .expect("the fixture process environment encodes")
+    crate::ProcessEnv::builder(crate::MaxToolCalls::new(1024))
+        .component(
+            PAYLOAD,
+            &serde_json::json!({ "payload": "x".repeat(bytes) }),
+        )
+        .build()
+        .expect("the fixture process environment encodes")
+}
+
+/// The tool a test's own process steps record for `step` of an `engine`
+/// process, which links no env: the effect's path stands in for the tool a
+/// link names, and an engine step records its body's id.
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn step_tool(step: &crate::StepRequest, engine: &str) -> crate::ToolId {
+    match step {
+        crate::StepRequest::Tool { effect, .. } => crate::ToolId::new(effect.as_str()),
+        crate::StepRequest::Engine { kind, .. } => kind.admitted_tool(engine),
+    }
+}
+
+/// The effect name `name` spells, for a test's own engine.
+#[cfg(any(test, feature = "testing"))]
+#[expect(clippy::expect_used, reason = "fixture effect names")]
+#[must_use]
+pub fn effect(name: &str) -> crate::EffectName {
+    crate::EffectName::new(name).expect("a fixture effect name")
+}
+
+/// The effect `definition`'s binding names (`module.operation`): the path
+/// an env links it under and an engine's step performs.
+#[cfg(any(test, feature = "testing"))]
+#[expect(clippy::expect_used, reason = "fixture tools are bound")]
+#[must_use]
+pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
+    effect(&crate::effect_path_of(&definition.manifest).expect("a fixture tool is bound"))
+}
+
+/// What an engine that performs each of `tools` declares (P3): each tool's
+/// effect, under the signature its schemas project to.
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn performs(tools: &[crate::ToolDefinition]) -> crate::PerformedEffects {
+    tools
+        .iter()
+        .map(|tool| {
+            (
+                effect_of(tool),
+                lash_kernel_check::tool_signature(
+                    tool.contract.input_schema.canonical(),
+                    tool.contract.output_schema.canonical(),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// A component-free environment that admits no tool and holds at most
@@ -102,13 +146,9 @@ pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
 #[cfg(any(test, feature = "testing"))]
 #[expect(clippy::expect_used, reason = "fixture environment")]
 pub fn process_env_with_limit(max_tool_calls: usize) -> crate::ProcessEnv {
-    crate::ProcessEnv::builder(
-        crate::SessionToolAccess::restricted(std::iter::empty())
-            .expect("an empty tool restriction is valid"),
-        crate::MaxToolCalls::new(max_tool_calls),
-    )
-    .build()
-    .expect("the fixture process environment encodes")
+    crate::ProcessEnv::builder(crate::MaxToolCalls::new(max_tool_calls))
+        .build()
+        .expect("the fixture process environment encodes")
 }
 
 /// Publishes the fixed fixture execution environment into `env_store`, held
@@ -244,7 +284,7 @@ pub fn run_policy_naming(
     keys: &[crate::ProcessConfigKey<()>],
 ) -> std::sync::Arc<dyn crate::ProcessEnvPolicy> {
     let keys = keys.to_vec();
-    crate::runtime::env_policy::policy::inherit_or(crate::runtime::env_policy::policy::from_run(
+    crate::runtime::env_policy::policy::restrict_or(crate::runtime::env_policy::policy::from_run(
         move |_| {
             keys.iter()
                 .map(|key| crate::ProcessComponentEntry::new(*key, &(), std::iter::empty()))
@@ -331,6 +371,13 @@ pub struct HeldProcessEngine;
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl crate::ProcessEngine for HeldProcessEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,
@@ -443,6 +490,13 @@ pub struct FixtureProcessEngine;
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl crate::ProcessEngine for FixtureProcessEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,
@@ -1167,8 +1221,8 @@ impl<'run> ToolCallFixture<'run> {
         self
     }
 
-    /// Sets the grant execution binding the call runs with.
-    pub fn execution_binding(mut self, binding: serde_json::Value) -> Self {
+    /// Sets the execution binding the call runs with.
+    pub fn execution_binding(mut self, binding: Option<crate::ExecutionBinding>) -> Self {
         self.context.tool_execution_binding = binding;
         self
     }
@@ -1231,7 +1285,6 @@ impl<'run> ToolCallFixture<'run> {
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
         );
         self.resolved_run = Some(Arc::new(
             crate::ResolvedRun::snapshot(base)
@@ -1254,31 +1307,19 @@ impl<'run> ToolCallFixture<'run> {
     }
 }
 
-/// Project an in-crate test's dispatch state into the leaf-attempt context.
-#[cfg(test)]
-pub(crate) fn mock_attempt_context_from<'run>(
-    context: &crate::tool_provider::ToolContext<'run>,
-) -> crate::AttemptContext<'run> {
-    ToolCallFixture {
-        context: context.clone(),
-        resolved_run: None,
-    }
-    .attempt("test-turn")
-}
-
 /// Tool bodies take [`crate::AttemptContext`], so this is the context a unit
 /// test hands a provider's `execute`.
 pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
     ToolCallFixture::mock().attempt("test-turn")
 }
 
-/// Like [`mock_attempt_context`], but with the grant execution binding
-/// populated, for provider tests that assert grant-only routing behavior.
+/// Like [`mock_attempt_context`], but with a deferred match's execution
+/// binding populated, for provider tests that assert match-only routing.
 pub fn mock_attempt_context_with_execution_binding(
-    binding: serde_json::Value,
+    binding: crate::ExecutionBinding,
 ) -> crate::AttemptContext<'static> {
     ToolCallFixture::mock()
-        .execution_binding(binding)
+        .execution_binding(Some(binding))
         .attempt("test-turn")
 }
 
@@ -1316,7 +1357,7 @@ impl<'run> crate::AttemptContext<'run> {
     ) -> Self {
         let context = context
             .clone()
-            .with_tool_execution_binding(grant.execution_binding.clone())
+            .with_tool_execution_binding(grant.binding.clone())
             .with_granted_provider(grant.provider.clone());
         Self::from_tool_context(
             &context,
@@ -1496,11 +1537,15 @@ pub struct EmptyToolProvider;
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyToolProvider {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::plugin::OwnerConfigView) -> Vec<crate::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &crate::plugin::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         None
     }
 
@@ -1633,6 +1678,25 @@ pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controlle
         .provider(provider)
         .tool_catalog(tool_catalog)
         .borrowed_effect_controller(effect_controller)
+        .runtime_parent_invocation(invocation)
+        .build()
+        .into_runtime()
+}
+
+/// [`code_execution_context_with_tool_provider_catalog_and_invocation`]
+/// whose surface records `deferred`, declared by `owner` as `key`, as its
+/// deferred provider.
+pub fn code_execution_context_with_deferred_provider<'run>(
+    ports: impl Into<TestExecutionPorts>,
+    provider: Arc<dyn crate::ToolProvider>,
+    tool_catalog: crate::ToolCatalog,
+    invocation: crate::RuntimeInvocation,
+    (owner, key, deferred): (&str, &str, Arc<dyn crate::DeferredToolProvider>),
+) -> crate::RuntimeExecutionContext<'run> {
+    TestExecutionContextBuilder::new(ports.into())
+        .provider(provider)
+        .tool_catalog(tool_catalog)
+        .deferred_provider(owner, key, deferred)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()
@@ -2088,7 +2152,8 @@ where
     P: crate::ToolProvider + ?Sized,
 {
     let context = ToolCallFixture::mock().attempt("test-turn");
-    let Some(manifest) = tool.resolve_manifest(name) else {
+    let Some(manifest) = tool.resolve_manifest(name, &crate::plugin::OwnerConfigView::default())
+    else {
         return crate::ToolOutcome::err_fmt(format!("unknown tool: {name}")).into();
     };
     tool.execute(crate::ToolCall::new(&manifest, args, &context))
@@ -2119,28 +2184,6 @@ where
     );
     tool.execute(crate::ToolCall::new(grant.manifest(), args, &context))
         .await
-}
-
-/// The standalone-registry counterpart of `session.admin().tools().add_provider`:
-/// a fresh [`crate::ToolRegistry`] with `provider` registered through the same
-/// live-source route a session admin call takes.
-///
-/// Host tests that exercise the registry's source routing — e.g. the route a
-/// resolved deferred grant follows in production — build the registry here
-/// rather than through the facade-internal registry ops. The returned
-/// [`crate::tool_registry::ToolSourceHandle`] is the source the provider's
-/// calls route to; [`crate::ToolRegistry::from_tool_provider`] is the
-/// plugin-source lane instead.
-pub fn tool_registry_with_live_provider(
-    provider: Arc<dyn crate::ToolProvider>,
-) -> (crate::ToolRegistry, crate::tool_registry::ToolSourceHandle) {
-    use crate::tool_registry::facade_ops::ToolRegistryFacadeOps as _;
-
-    let registry = crate::ToolRegistry::empty();
-    let handle = registry
-        .add_tool_provider(provider)
-        .expect("registering a provider on a fresh tool registry cannot fail");
-    (registry, handle)
 }
 
 pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {
@@ -2185,7 +2228,6 @@ pub struct MockSessionManager {
     pub snapshot: SessionSnapshot,
     pub tool_catalog: Vec<serde_json::Value>,
     pub turn: AssembledTurn,
-    pub tool_registry: Option<crate::ToolRegistry>,
     /// The registry the mock's process routes read and write. `None` (the
     /// default) is a session manager with no process port: every process
     /// route refuses, so a tool test that never touches processes needs no
@@ -2197,10 +2239,9 @@ pub struct MockSessionManager {
 impl Default for MockSessionManager {
     fn default() -> Self {
         Self {
-            snapshot: RuntimeSessionState::ambient_fixture(mock_session_policy()).to_snapshot(),
+            snapshot: RuntimeSessionState::fixture(mock_session_policy()).to_snapshot(),
             tool_catalog: Vec::new(),
             turn: mock_assembled_turn(&SessionId::from("root"), ""),
-            tool_registry: None,
             process_registry: None,
             created: Mutex::new(Vec::new()),
         }
@@ -2221,12 +2262,6 @@ impl MockSessionManager {
 
     pub fn with_turn(mut self, turn: AssembledTurn) -> Self {
         self.turn = turn;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_tool_registry(mut self, tool_registry: crate::ToolRegistry) -> Self {
-        self.tool_registry = Some(tool_registry);
         self
     }
 
@@ -2478,7 +2513,6 @@ pub use test_protocol_fakes::{
 mod test_protocol_fakes;
 
 pub mod committed_turns_law;
-pub mod conformance_support;
 pub mod graph_integrity;
 pub mod lineage;
 pub mod store_fixtures;

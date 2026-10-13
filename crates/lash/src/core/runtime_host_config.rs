@@ -16,10 +16,6 @@ impl LashCoreBuilder {
             .queued_work_batching
             .take()
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
-        let tool_source_policy = self
-            .tool_source_policy
-            .take()
-            .ok_or(EmbedError::MissingToolSourcePolicy)?;
         let execution_budgets = self
             .execution_budgets
             .take()
@@ -32,7 +28,6 @@ impl LashCoreBuilder {
             self.backend.clone(),
             commit_budget,
             queued_work_batching,
-            tool_source_policy,
             execution_budgets,
             delta_coalescing,
             data_retention,
@@ -490,7 +485,6 @@ mod pacing_laws {
         let durable = core
             .session(id.clone())
             .create(crate::SessionCreation::root(
-                lash_core::SessionToolAccess::ambient(),
                 crate::tests::mock_session_spec(),
             ))
             .await
@@ -573,7 +567,6 @@ mod pacing_laws {
         let id = lash_core::SessionId::from("retry-fence");
         core.session(id.clone())
             .create(crate::SessionCreation::root(
-                lash_core::SessionToolAccess::ambient(),
                 crate::tests::mock_session_spec(),
             ))
             .await

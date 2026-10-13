@@ -78,6 +78,15 @@ impl PluginFactory for WorkbenchPluginFactory {
                 },
                 output: (),
             })
+        })?;
+        registrar.command::<SetWorkbenchTools>(|recorded, command| {
+            Ok(lash::plugins::OwnerChange {
+                recorded: WorkbenchPrompt {
+                    tools: Some(command.tools),
+                    ..recorded.clone()
+                },
+                output: (),
+            })
         })
     }
 
@@ -116,9 +125,9 @@ impl SessionPlugin for WorkbenchSessionPlugin {
             lash::hook_key!("tool-search"),
             self.deferred_tools.search_provider(),
         )?;
-        reg.tools().provider(
+        reg.tools().deferred(
             crate::deferred_tools::DEFERRED_PROVIDER_KEY,
-            self.deferred_tools.execution_provider(),
+            self.deferred_tools.deferred_provider(),
         )?;
         reg.tools()
             .provider(lash::hook_key!("approvals"), self.approvals.provider())?;
@@ -143,7 +152,6 @@ impl SessionPlugin for WorkbenchSessionPlugin {
                     Ok(lash::plugins::AfterTurnContributions {
                         session: lash::plugins::SessionContributions {
                             graph_appends: workbench_derived_note(&state).into_iter().collect(),
-                            ..Default::default()
                         },
                         ..Default::default()
                     })
@@ -191,6 +199,10 @@ pub(crate) struct WorkbenchPrompt {
     /// accounts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) context: Vec<String>,
+    /// Which mail tools the workbench offers, every one when absent. The
+    /// browser's tool catalog writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<lash::tools::ToolSelection>,
 }
 
 /// Replace the workbench's prompt context.
@@ -214,6 +226,37 @@ impl lash::plugins::ConfigCommand for SetWorkbenchPromptContext {
     type Owner = WorkbenchConfigOwner;
     type Output = ();
     const NAME: &'static str = "set_prompt_context";
+}
+
+/// Replace which mail tools the workbench offers.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    lash::plugins::schemars::JsonSchema,
+)]
+#[schemars(crate = "lash::plugins::schemars")]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SetWorkbenchTools {
+    pub(crate) tools: lash::tools::ToolSelection,
+}
+
+impl lash::plugins::ConfigCommand for SetWorkbenchTools {
+    type Owner = WorkbenchConfigOwner;
+    type Output = ();
+    const NAME: &'static str = "set_tools";
+}
+
+/// The mail-tool selection the workbench's namespace holds under `config`:
+/// every tool when none is recorded, and none when it does not decode.
+pub(crate) fn workbench_tool_selection(
+    config: &lash::tools::OwnerConfigView,
+) -> lash::tools::ToolSelection {
+    lash::tools::ToolSelection::of(config, "agent_workbench")
+        .unwrap_or_else(|_| lash::tools::ToolSelection::Only(Vec::new()))
 }
 
 pub(crate) struct WorkbenchConfigOwner;
@@ -460,10 +503,7 @@ impl AppState {
                 },
             )?,
         };
-        Ok(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        Ok(lash::SessionCreation::root(spec))
     }
 }
 
@@ -504,6 +544,7 @@ pub(crate) fn workbench_session_prompt(
     WorkbenchPrompt {
         instructions,
         context: workbench_prompt_context(mail_world),
+        tools: None,
     }
 }
 

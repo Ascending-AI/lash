@@ -579,7 +579,6 @@ async fn a_held_turn_pinned_both_ways_forks_after_collection(
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .serve_test_llm_profile(

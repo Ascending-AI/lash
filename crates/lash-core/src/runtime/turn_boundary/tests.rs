@@ -59,7 +59,7 @@ fn test_protocol_event(kind: &str) -> crate::ProtocolEvent {
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-1"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -260,7 +260,7 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-switch-back"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -446,7 +446,7 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("frame-transition"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -578,7 +578,7 @@ fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
     let clock = crate::SystemClock;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("first-turn-switch"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             UNBOUNDED,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),

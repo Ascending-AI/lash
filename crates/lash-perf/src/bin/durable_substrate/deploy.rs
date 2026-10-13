@@ -203,6 +203,7 @@ impl Deployment {
             Arc::clone(&self.scripts),
             Arc::clone(&self.recorder),
         )?;
+        let serves = lash::testing::node_serves(&cells);
         let sessions = SessionActivation::new(
             backend.clone(),
             Arc::new(BenchServices::new(
@@ -226,7 +227,7 @@ impl Deployment {
                     drain: Drain::default(),
                     sessions: Arc::new(sessions),
                     processes: Some(Arc::new(processes)),
-                    serves: Vec::new(),
+                    serves,
                 },
                 async move {
                     let _ = stopped.await;

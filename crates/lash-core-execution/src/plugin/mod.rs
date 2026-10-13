@@ -26,7 +26,7 @@ mod process_components;
 pub use process_components::{
     ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentFactory,
     ProcessComponentHost, ProcessComponentPorts, ProcessComponentRegistry, ProcessComponentSpec,
-    ProcessComposition, ProcessSessionReads, StaticProcessComponent,
+    ProcessComposition, ProcessSessionReads, StaticProcessComponent, StepLink,
 };
 mod execution_views;
 pub use composition::{ContributionKind, ExecutionComposition};
@@ -143,8 +143,8 @@ pub use session_types::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameOutcome, OpenAgentFrameRequest, PluginOwned, SessionCreateRequest, SessionHandle,
     SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
-    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess,
-    SessionToolAccessError, UnstatedSessionConfig,
+    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionStartPoint,
+    UnstatedSessionConfig,
 };
 pub use state::{
     FrontierRefusal, FrontierStep, HookCause, HookOccurrence, KeyRejection, NamespaceEntry,
@@ -157,7 +157,7 @@ pub use state::{
 pub use tool_catalog::{
     AfterTurnContributions, AfterTurnDecisions, CheckpointApplication, PluginAbort,
     PluginRecordContribution, RecordedTurnContribution, SessionContributions, ToolCatalogContext,
-    ToolMembershipContribution, TurnContributions, TurnPreparation,
+    TurnContributions, TurnPreparation,
 };
 pub use tool_catalog::{observe_plugin_runtime_events, plugin_runtime_session_events};
 pub use tool_hooks::{
@@ -268,7 +268,7 @@ mod tests {
         )
         .build_session(PluginSessionRequest::creation(
             "typed-causes",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
         let error = session
@@ -398,14 +398,18 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ToolProvider for MockToolProvider {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
+        fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
             self.tool_definitions()
                 .into_iter()
                 .map(|tool| tool.manifest())
                 .collect()
         }
 
-        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &crate::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
             self.tool_definitions()
                 .into_iter()
                 .find(|tool| tool.name() == name)
@@ -515,7 +519,7 @@ mod tests {
         let session = host
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("session");
         let (_plugin_id, result) = session
@@ -546,7 +550,7 @@ mod tests {
         let session = host
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("session");
         let def = session
@@ -573,7 +577,7 @@ mod tests {
         let session = host
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("session");
 
@@ -679,7 +683,7 @@ mod tests {
         )
         .build_session(PluginSessionRequest::creation(
             "root",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         )) {
             Ok(_) => panic!("a task may not reuse a registered query name"),
             Err(err) => err,
@@ -776,11 +780,11 @@ mod tests {
         let root = host
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("root");
         let child = root
-            .fork_for_session("child", SessionAuthorityContext::ambient_fixture())
+            .fork_for_session("child", SessionAuthorityContext::fixture())
             .expect("child");
 
         let (_plugin_id, result) = child
@@ -816,7 +820,7 @@ mod tests {
         let _session = host
             .build_session(PluginSessionRequest::creation(
                 "root",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("session");
         assert!(host.session(&SessionId::from("root")).is_ok());

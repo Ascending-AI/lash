@@ -22,7 +22,7 @@ pub use super::layered_backend::{LayeredBackend, LayeredStores};
 pub use super::recording_store::{EndRefusedRunHook, RecordingDeploymentStore, RecordingStore};
 
 pub fn default_state() -> RuntimeSessionState {
-    let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -445,7 +445,7 @@ pub fn plugin_session_with_tools(
     )
     .build_session(PluginSessionRequest::creation(
         session_id,
-        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        crate::plugin::SessionAuthorityContext::fixture(),
     ))
     .expect("plugins")
 }
@@ -483,7 +483,7 @@ pub async fn advance_session_head(
                 .await
                 .expect("load the session binding")
                 .expect("the store is bound to a session");
-            let mut state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -516,7 +516,7 @@ pub async fn create_runtime_fixture_session(
     create_runtime_fixture_session_with_config(
         store,
         session_id,
-        crate::PersistedSessionConfig::from_policy(policy, crate::SessionToolAccess::ambient()),
+        crate::PersistedSessionConfig::from_policy(policy),
     )
     .await
 }
@@ -588,7 +588,6 @@ pub async fn recording_session_store(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             head: crate::SessionCreationHead::Config,
             retention: crate::Retention::UntilGc,
@@ -609,7 +608,6 @@ pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
         backend.clone(),
         test_commit_budget(),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         DataRetentionConfig::standard(),
@@ -632,11 +630,15 @@ pub fn test_runtime_host_config_with_provider(
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EmptyTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         None
     }
 
@@ -740,7 +742,7 @@ impl TestRuntime {
         // applies, rather than widening the builtin set for every crate that
         // turns on the `testing` feature.
         let plugin_host = test_runtime_plugin_host(self.plugins, self.tools);
-        let mut initial_state = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        let mut initial_state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
@@ -764,7 +766,6 @@ impl TestRuntime {
                 initial_state.session_id.clone(),
                 crate::plugin::SessionAuthorityContext {
                     plugin_config: initial_state.admitted_plugin_config(),
-                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
                 },
             ))
             .expect("plugins");
@@ -776,10 +777,7 @@ impl TestRuntime {
         if let Some(store) = self.store.as_ref() {
             // The created head records the same plugin config the runtime's
             // initial state carries, so a reopen adopts it (FIG-4553).
-            let mut config = crate::PersistedSessionConfig::from_policy(
-                &policy,
-                crate::SessionToolAccess::ambient(),
-            );
+            let mut config = crate::PersistedSessionConfig::from_policy(&policy);
             config.plugin_config = initial_state.authority.plugin_config.clone();
             create_runtime_fixture_session_with_config(
                 store.as_ref(),
@@ -1012,11 +1010,15 @@ fn echo_tool_definition() -> crate::ToolDefinition {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for EchoTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         vec![echo_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         (name == "echo_tool").then(|| Arc::new(echo_tool_definition().contract()))
     }
 
@@ -1044,13 +1046,17 @@ pub struct TerminalControlTool {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for TerminalControlTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         (0..self.controls.len())
             .map(|index| self.definition(index).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         name.strip_prefix("terminal_tool_")
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|index| *index < self.controls.len())
@@ -1123,11 +1129,15 @@ pub struct SlowTool {
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for SlowTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         vec![slow_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         (name == "slow_tool").then(|| Arc::new(slow_tool_definition().contract()))
     }
 
@@ -1168,11 +1178,15 @@ pub struct MemoryProbeTool;
 
 #[async_trait::async_trait]
 impl crate::ToolProvider for MemoryProbeTool {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<crate::ToolManifest> {
         vec![memory_probe_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
         (name == "memory_probe").then(|| Arc::new(memory_probe_tool_definition().contract()))
     }
 

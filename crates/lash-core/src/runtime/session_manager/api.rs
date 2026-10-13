@@ -27,13 +27,6 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.services.current.shared_tool_catalog(session_id).await
     }
-
-    async fn tool_state(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::ToolState, crate::PluginError> {
-        self.services.current.tool_state(session_id).await
-    }
 }
 
 #[async_trait::async_trait]
@@ -72,24 +65,6 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
         session_id: &SessionId,
     ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
         self.services.current.shared_tool_catalog(session_id).await
-    }
-
-    async fn tool_state(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::ToolState, crate::PluginError> {
-        self.services.current.tool_state(session_id).await
-    }
-
-    async fn apply_tool_state(
-        &self,
-        session_id: &SessionId,
-        snapshot: crate::ToolState,
-    ) -> Result<u64, crate::PluginError> {
-        self.services
-            .current
-            .apply_tool_state(session_id, snapshot)
-            .await
     }
 }
 

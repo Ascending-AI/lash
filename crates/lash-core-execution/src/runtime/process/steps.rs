@@ -41,11 +41,15 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::{ParkDeadline, Resolution};
 use crate::{
     ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
+    ToolId,
 };
 
 /// A step's admission: what its tool's declaration pins before it runs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StepAdmission {
+    /// The tool its admission records: the linked tool, or an engine step's
+    /// [`EngineStepKind::admitted_tool`](super::EngineStepKind::admitted_tool).
+    pub tool: ToolId,
     /// The tool's execution policy.
     pub policy: ExecutionPolicy,
     /// The step body's limit, from the bound its host set.
@@ -54,6 +58,35 @@ pub struct StepAdmission {
     /// completion wait its admission pins, separate from the body's limit,
     /// or none for a park that lasts until its process scope ends.
     pub park: Option<ParkDeadline>,
+    /// The callbacks its admission binds (S7): what the process's claim
+    /// obligations hold until the step settles. `None` for an engine step.
+    pub binding: Option<crate::tool_run::AdmittedBinding>,
+    /// The outcome a step settles with at its admission, without a body
+    /// (D3): its linked tool is missing from this node's provider, or
+    /// changed since the env retained its surface. It commits with the
+    /// admission; no `x_start` of it runs a body.
+    pub settled: Option<SettledOutput>,
+}
+
+impl StepAdmission {
+    /// The admission of a step of `tool` under `policy`, `limit` and
+    /// `park`, binding nothing and settled by its body.
+    #[must_use]
+    pub fn new(
+        tool: ToolId,
+        policy: ExecutionPolicy,
+        limit: ExecutionLimit,
+        park: Option<ParkDeadline>,
+    ) -> Self {
+        Self {
+            tool,
+            policy,
+            limit,
+            park,
+            binding: None,
+            settled: None,
+        }
+    }
 }
 
 /// A step refused before its admission; nothing was recorded. The process
@@ -106,8 +139,12 @@ pub enum StepRefusal {
 /// its body through the tool dispatch a turn's round runs on, on the
 /// process's own plugin session.
 pub struct ProcessStepTools {
-    /// The process's own plugin session's catalog.
+    /// The catalog of the linked tools this node serves as the env retained
+    /// them.
     pub catalog: Arc<ToolCatalog>,
+    /// The effects the process's env links: what each step's effect path
+    /// runs.
+    pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::EffectLink>>,
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
 }
@@ -259,11 +296,10 @@ pub trait ProcessSteps: Send + Sync {
         Ok(())
     }
 
-    /// The claim requirements `process` carries while it holds `steps`
-    /// (§6.2): its environment's components' config tokens, and the
-    /// revision token of every component a tool step among `steps` is
-    /// bound to. `None` when these steps keep no requirement, so the
-    /// activation leaves what the actor carries alone.
+    /// The component claim requirements `process` carries while it holds
+    /// `steps` (§6.2): its environment's components' config tokens. `None`
+    /// when it keeps none. The activation adds the callbacks its unsettled
+    /// steps were admitted under (S7).
     ///
     /// # Errors
     ///
@@ -315,6 +351,20 @@ pub trait ProcessSteps: Send + Sync {
         step: &StepRequest,
         execution: &AdmittedExecution,
     ) -> MemberBody;
+
+    /// The outcome `step`'s admission settled (D3) commits as its call
+    /// `call`, retained as its body's outcome would be. Steps normally
+    /// commit it as their admission answered it.
+    fn admitted_output(
+        &self,
+        process: &ProcessId,
+        step: &StepRequest,
+        call: &crate::ToolCallId,
+        output: SettledOutput,
+    ) -> SettledOutput {
+        let _ = (process, step, call);
+        output
+    }
 
     /// The engine's view of a committed step outcome at incorporation.
     /// This pure projection runs no body. Steps normally answer their stored
@@ -429,6 +479,31 @@ fn replace_payload(
         }
         (settled, _) => settled,
     }
+}
+
+/// The ToolCallRecord `call` retains for `settled`, the tool failure its
+/// admission answered without a body (D3).
+#[must_use]
+pub fn tool_step_refused(
+    process: &ProcessId,
+    call: &crate::sansio::PendingToolCall,
+    settled: SettledOutput,
+) -> SettledOutput {
+    let record = settled
+        .payload()
+        .and_then(|payload| serde_json::from_str::<crate::ToolCallOutput>(payload).ok())
+        .map(|output| crate::ToolCallRecord {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+            tool: call.tool_name.clone(),
+            args: call.args.clone(),
+            output,
+        });
+    replace_payload(
+        process,
+        settled,
+        record.and_then(|record| serde_json::to_string(&record).ok()),
+    )
 }
 
 /// Project a retained process tool record to the output its engine reads.

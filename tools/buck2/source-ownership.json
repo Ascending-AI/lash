@@ -12,7 +12,8 @@
         "tests/otel_trace_evidence.rs"
       ],
       "processes_evidence": [
-        "tests/processes_evidence.rs"
+        "tests/processes_evidence.rs",
+        "tests/processes_evidence/*.rs"
       ],
       "processes_evidence_b": [
         "tests/processes_evidence_b.rs"
@@ -79,7 +80,7 @@
       "runtime_lifecycle": [
         "tests/runtime_lifecycle.rs",
         "tests/runtime_support/**/*.rs",
-        "tests/runtime/tests/tool_surface_lifecycle.rs"
+        "tests/runtime/tests/process_engine_admission.rs"
       ],
       "runtime_observability": [
         "tests/runtime_observability.rs",
@@ -109,11 +110,6 @@
       "src/runtime/process/validation_tests.rs",
       "src/runtime/work/awaiter/tests.rs",
       "src/session/execution_context/tests.rs",
-      "src/tool_registry/admission_tests.rs",
-      "src/tool_registry/pinning_tests.rs",
-      "src/tool_registry/tests.rs",
-      "src/tool_registry/tests/grant_support.rs",
-      "src/tool_registry/tests/restore_tests.rs",
       "src/trace_feedback_tests.rs"
     ],
     "unit_test_sources": [

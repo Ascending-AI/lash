@@ -46,11 +46,15 @@ struct Inspector {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Inspector {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![inspect_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == INSPECT).then(|| Arc::new(inspect_definition().contract()))
     }
 
@@ -71,7 +75,7 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
     World::new(tier, move |backend| {
         lash::LashCore::rlm_builder(
             backend.clone(),
-            served::rlm(backend, None, sim::untimed_workers()),
+            served::rlm(backend, sim::untimed_workers()),
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(

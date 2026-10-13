@@ -53,7 +53,7 @@ fn commit_at(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::ambient_fixture(lash_core_execution::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core_execution::SessionPolicy::new(
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -248,7 +248,6 @@ async fn process_record_is_a_root_without_registry_liveness() {
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,

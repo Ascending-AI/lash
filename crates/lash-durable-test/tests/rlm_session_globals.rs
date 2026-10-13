@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use served::{Tier, World};
-use web_fetch::{Fetch, GrantFetch};
+use web_fetch::Fetch;
 
 /// The session every cell runs in.
 const SESSION: &str = "fig3571-l11";
@@ -40,7 +40,7 @@ const SESSION: &str = "fig3571-l11";
 fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
     lash::LashCore::rlm_builder(
         backend.clone(),
-        served::rlm(backend, Some(Arc::new(GrantFetch)), sim::untimed_workers()),
+        served::rlm(backend, sim::untimed_workers()),
     )
     .plugin(Arc::new(
         lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -49,6 +49,7 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
         ),
     ))
     .tools(lash::hook_key!("tools"), Arc::new(Fetch))
+    .plugin(web_fetch::grant_fetch())
 }
 
 /// The names the production prompt binds in `request` (a rendered request):

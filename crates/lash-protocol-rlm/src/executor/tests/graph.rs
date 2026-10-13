@@ -26,7 +26,7 @@ async fn cell(
     let response = run_cell(
         state,
         cell_context(host, SESSION, TURN, key, Arc::new(NoTools)),
-        &typescript_services(None),
+        &typescript_services(),
         code,
     )
     .await;
@@ -150,7 +150,7 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
         lash_core::ExecRequest {
             code: "kept.push(3);\nconst extra = twice(21);".to_owned(),
         },
-        &typescript_services(None),
+        &typescript_services(),
         crate::projection::CodeModeProjectedBindings::default(),
     ))
     .await;

@@ -1026,12 +1026,13 @@ pub enum RuntimeEffectOutcome {
         /// reference, never the transcript.
         prelude: TurnPreludeRef,
         result: Box<Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>>,
-        /// The tool surface the sync built: every tool of the catalog the
-        /// iteration's calls resolve against, as its definition. The shift
-        /// installs it as the catalog, on the live pass and on every replay,
-        /// and judges each tool against the live registry on its own (FIG-3672
-        /// P7b). Empty when the sync failed.
-        tool_surface: Vec<crate::ToolDefinition>,
+        /// The tool surface the sync installed: every tool the iteration's
+        /// calls resolve against, with the provider it is matched to and its
+        /// whole definition, and the surface's deferred provider (S5). The
+        /// shift installs it, on the live pass and on every replay, and a
+        /// call is judged against its provider when it is made. Empty when
+        /// the sync failed.
+        tool_surface: crate::RecordedSurface,
     },
     /// The environment a load validated and acquired under its execution.
     /// Replay resolves the same immutable bytes from this recorded digest.

@@ -7,7 +7,7 @@ Accepted.
 ## Context
 
 A session records its config with its head: the core model,
-generation, attachment acceptance, tool access, the execution controls
+generation, attachment acceptance, the execution controls
 (turn budget, no-progress budget and charge safety; FIG-4376), and
 one namespace per installed plugin, the protocol's included (FIG-4379,
 [ADR 0013](0013-protocol-capabilities-enter-through-the-plugin-contract.md)).
@@ -41,7 +41,7 @@ the next namespace and the command's output. It sees immutable facts only. A
 setting with no command cannot change after creation. Core config is owned
 by the reserved `core` owner, whose commands include `SetLlmProfile`,
 `SetReasoning`, `SetAttachmentAcceptance`,
-`SetGeneration`, `SetToolAccess`, `SetTurnBudget`,
+`SetGeneration`, `SetTurnBudget`,
 `SetNoProgressBudget`, `SetChargeSafety` and `SetPromptPlan`, which records
 the host's prompt plan (ADR 0133 §3). `SetChargeSafety` refuses a
 policy accepting more unsafe retries than the provider handle ever buys. The
@@ -55,9 +55,11 @@ FIG-5257). A run's options are the owner's `RunOptions` type
 behaviour or a pin: a payload that names one
 does not decode and refuses the run's shape, whatever value it states
 (FIG-4652). An owner whose namespace no run overrides uses `NoRunOptions`.
-The core owner is one: a run states its core overrides (model, reasoning,
-generation and tool access) as `RunOverrides` fields, the one-shot forms of
-the core commands, which the run's shape records (FIG-5093).
+The core owner is one: a run states its core overrides (model, reasoning
+and generation) as `RunOverrides` fields, the one-shot forms of the core
+commands, which the run's shape records (FIG-5093). Which tools a run is
+offered is not core config: it is each tool provider's `ToolSelection`, a
+run option of that provider's owner (FIG-6074).
 
 `SetLlmProfile` carries an opaque `LlmProfileKey` (FIG-4374). Its reducer is the one
 core reducer that reads more than the recorded namespace: it asks the host's

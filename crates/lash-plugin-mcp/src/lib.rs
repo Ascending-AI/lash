@@ -85,7 +85,8 @@ pub use host::{
     McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpUrlElicitationComplete,
 };
 pub use plugin::{
-    McpDeferredToolProvider, McpPluginFactory, McpPluginFactoryBuilder, McpToolProvider,
+    MCP_BINDING_FORMAT, MCP_RUN_OPTIONS, McpDeferredToolProvider, McpPluginFactory,
+    McpPluginFactoryBuilder, McpToolProvider,
 };
 pub use pool::{McpConnectionPool, McpServerFault, McpServerHealth, McpServerStatus};
 pub use rmcp::model::{

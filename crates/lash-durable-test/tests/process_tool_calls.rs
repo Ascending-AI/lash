@@ -110,14 +110,18 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [PROBE, DEFERRED]
             .into_iter()
             .map(|name| probe_definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [PROBE, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))
@@ -175,14 +179,26 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
         });
         lash::LashCore::rlm_builder(
             backend.clone(),
-            served::rlm(backend, None, sim::untimed_workers()),
+            served::rlm(backend, sim::untimed_workers()),
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+                lash_core::testing::run_policy_naming(&[
+                    PROBE_COMPONENT,
+                    lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                ]),
             ),
         ))
+        // A body's `await` of an unknown value links `processes.await`
+        // (P2): the env names the process controls that serve it.
+        .process_component(
+            Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+            )),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+        )
         .process_component(
             lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
             PROBE_COMPONENT,
@@ -683,14 +699,26 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
         });
         lash::LashCore::rlm_builder(
             layered.clone(),
-            served::rlm(&layered, None, sim::untimed_workers()),
+            served::rlm(&layered, sim::untimed_workers()),
         )
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::starter,
-                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+                lash_core::testing::run_policy_naming(&[
+                    PROBE_COMPONENT,
+                    lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                ]),
             ),
         ))
+        // A body's `await` of an unknown value links `processes.await`
+        // (P2): the env names the process controls that serve it.
+        .process_component(
+            Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[PROBE_COMPONENT]),
+            )),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+        )
         .process_component(
             lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
             PROBE_COMPONENT,

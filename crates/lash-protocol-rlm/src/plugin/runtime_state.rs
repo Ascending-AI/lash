@@ -25,25 +25,10 @@ impl RlmRuntimeState {
 
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Result<Self, SessionError> {
-        Self::new_for_tests_with_resolver(None)
-    }
-
-    /// A test session whose deferred-tool resolver can park a cell mid-flight.
-    ///
-    /// The resolver is awaited inside `execute_code_inner`, which is the only
-    /// suspension point a unit test can reach without a live host: it lets a
-    /// test hold a cell open and observe what a second caller — or a caller
-    /// arriving after the first was cancelled — actually sees.
-    #[cfg(test)]
-    fn new_for_tests_with_resolver(
-        deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
-    ) -> Result<Self, SessionError> {
         let services = crate::dialect::CodeModeDialectServices {
             kernel: crate::executor::KernelCarry::default(),
             presentation: crate::RlmPresentationConfig::standard(),
             workers: lash_vm_client::service::Service::default(),
-            deferred_tool_resolver,
-
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
             code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,
@@ -773,11 +758,11 @@ mod tests {
         )
     }
 
-    /// A cell that references an unresolved module call-path, so the deferred
-    /// resolver is consulted before anything is linked or run.
+    /// A cell that references an unresolved module call-path, so the run's
+    /// deferred provider is consulted before anything is linked or run.
     const PARKING_CELL: &str = "await web.fetch({});";
 
-    /// A deferred-tool resolver that parks a cell inside `resolve` until it is
+    /// A deferred provider that parks a cell inside `resolve` until it is
     /// released.
     ///
     /// This is the only suspension point a unit test can plant in the middle of
@@ -802,12 +787,35 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl crate::DeferredToolResolver for ParkingResolver {
+    impl lash_core::ToolProvider for ParkingResolver {
+        fn tool_manifests(
+            &self,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Vec<lash_core::ToolManifest> {
+            Vec::new()
+        }
+
+        fn resolve_contract(
+            &self,
+            _name: &str,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Option<Arc<lash_core::ToolContract>> {
+            None
+        }
+
+        async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            lash_core::ToolOutcome::err_fmt(format_args!("the parking provider runs no tool"))
+                .into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash_core::DeferredToolProvider for ParkingResolver {
         async fn resolve(
             &self,
-            _cx: &crate::DeferredResolveContext<'_>,
+            _cx: &lash_core::DeferredResolveContext<'_>,
             paths: &[&str],
-        ) -> std::collections::BTreeMap<String, crate::Resolution> {
+        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             // A self-waking park: every poll re-reads the flag, so a release
             // is never missed whichever waker happens to execute the future.
@@ -825,7 +833,7 @@ mod tests {
                 .map(|path| {
                     (
                         (*path).to_string(),
-                        crate::Resolution::NotAvailable { note: None },
+                        lash_core::DeferredOutcome::Unavailable { note: None },
                     )
                 })
                 .collect()
@@ -834,10 +842,7 @@ mod tests {
 
     fn parked_session() -> (Arc<ParkingResolver>, RlmRuntimeState) {
         let resolver = Arc::new(ParkingResolver::default());
-        let state = RlmRuntimeState::new_for_tests_with_resolver(Some(
-            Arc::clone(&resolver) as crate::SharedDeferredToolResolver
-        ))
-        .expect("runtime state");
+        let state = RlmRuntimeState::new_for_tests().expect("runtime state");
         (resolver, state)
     }
 
@@ -852,10 +857,11 @@ mod tests {
     fn admitted_context(
         handler: &crate::testing::DurableHost,
         cell_id: &str,
+        resolver: &Arc<ParkingResolver>,
     ) -> lash_core::RuntimeExecutionContext<'static> {
         let replay_key = format!("exec-code:{cell_id}");
         let (provider, catalog) = crate::testing::with_finish(Arc::new(crate::testing::NoTools));
-        lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+        lash_core::testing::code_execution_context_with_deferred_provider(
             handler.ports(),
             provider,
             catalog,
@@ -866,6 +872,11 @@ mod tests {
                 0,
                 replay_key.clone(),
                 replay_key,
+            ),
+            (
+                "tests",
+                "parking",
+                Arc::clone(resolver) as Arc<dyn lash_core::DeferredToolProvider>,
             ),
         )
     }
@@ -1083,7 +1094,7 @@ mod tests {
                 let cancelled_handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 {
                     let mut cancelled = Box::pin(state.execute_code(
-                        admitted_context(&cancelled_handler, "cancelled"),
+                        admitted_context(&cancelled_handler, "cancelled", &resolver),
                         cell(PARKING_CELL),
                     ));
                     poll_until_parked(&mut cancelled, &resolver).await;
@@ -1094,7 +1105,7 @@ mod tests {
                 let handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let next = state
                     .execute_code(
-                        admitted_context(&handler, "survivor"),
+                        admitted_context(&handler, "survivor", &resolver),
                         cell("let survivor = 1;\nawait control.finish(survivor);"),
                     )
                     .await
@@ -1117,7 +1128,7 @@ mod tests {
                 // One cell is running: parked mid-flight, holding the state.
                 let running_handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let mut running = Box::pin(state.execute_code(
-                    admitted_context(&running_handler, "running"),
+                    admitted_context(&running_handler, "running", &resolver),
                     cell(PARKING_CELL),
                 ));
                 poll_until_parked(&mut running, &resolver).await;
@@ -1128,7 +1139,7 @@ mod tests {
                 let waiting_handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 {
                     let mut waiting = Box::pin(state.execute_code(
-                        admitted_context(&waiting_handler, "waiting"),
+                        admitted_context(&waiting_handler, "waiting", &resolver),
                         cell("let second_cell = 2;"),
                     ));
                     for _ in 0..16 {
@@ -1160,7 +1171,7 @@ mod tests {
                 let handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let second = state
                     .execute_code(
-                        admitted_context(&handler, "waiting"),
+                        admitted_context(&handler, "waiting", &resolver),
                         cell("let second_cell = 2;"),
                     )
                     .await
@@ -1174,7 +1185,7 @@ mod tests {
                 let handler = crate::testing::DurableHost::open(admitted_scope()).await;
                 let total = state
                     .execute_code(
-                        admitted_context(&handler, "total"),
+                        admitted_context(&handler, "total", &resolver),
                         cell("await control.finish(second_cell);"),
                     )
                     .await

@@ -87,11 +87,15 @@ struct DeferredTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeferredTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == DEFERRED).then(|| Arc::new(definition().contract()))
     }
 
@@ -290,11 +294,15 @@ impl Hold {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Hold {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![held_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == HELD).then(|| Arc::new(held_definition().contract()))
     }
 
@@ -373,7 +381,7 @@ fn held_builder(
             }
             Lost::InCellCall => lash::LashCore::rlm_builder(
                 backend.clone(),
-                served::rlm(backend, None, sim::untimed_workers()),
+                served::rlm(backend, sim::untimed_workers()),
             )
             .tools(lash::hook_key!("tools"), Arc::new(hold)),
         };

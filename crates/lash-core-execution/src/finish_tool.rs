@@ -11,11 +11,10 @@
 //! instead, with [`ToolDefinition::control`].
 //!
 //! The provider runs every tool it holds as the identity, by id, whatever
-//! schema the call was admitted under. A run that offers the same tool
-//! with another schema (`SendBuilder::tool_access` with the tool's
-//! definition rebuilt by [`finish_tool`]) therefore changes the shape for
-//! that run alone: admission records the run's definition, and settlement
-//! checks against it.
+//! schema the call was admitted under. A protocol that offers a run its
+//! finish tool with another schema (a run option of the protocol plugin
+//! that owns finish) therefore changes the shape for that run alone:
+//! admission records the run's definition, and settlement checks against it.
 
 use std::sync::Arc;
 
@@ -80,11 +79,15 @@ impl FinishToolProvider {
 
 #[async_trait]
 impl ToolProvider for FinishToolProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &crate::OwnerConfigView) -> Vec<ToolManifest> {
         self.tools.iter().map(ToolDefinition::manifest).collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         self.tools
             .iter()
             .find(|tool| tool.manifest.name == name)
@@ -107,28 +110,20 @@ impl ToolProvider for FinishToolProvider {
 
 /// What a protocol's catalog leaves out so that a host's own finish tool
 /// takes the place of the protocol's default one, `default`: the default,
-/// when any other tool the surface offers declares a Finish. The surface is
-/// the run's restricted definitions when its tool access restricts, less
-/// the tools the access hides. A host that constrains a turn's answer with
-/// a typed finish tool is never undercut by an untyped one beside it.
+/// when any other candidate declares a Finish. The candidates are what the
+/// run's providers advertise under its config, so a host finish its
+/// provider's config does not offer never suppresses the default. A host
+/// that constrains a turn's answer with a typed finish tool is never
+/// undercut by an untyped one beside it.
 #[must_use]
 pub fn suppress_default_finish(
     ctx: &crate::plugin::ToolCatalogContext,
     default: &crate::ToolId,
 ) -> crate::plugin::ToolCatalogContribution {
-    let surface: Vec<ToolManifest> = match ctx.tool_access.restricted_tools() {
-        Some(definitions) => definitions.iter().map(ToolDefinition::manifest).collect(),
-        None => ctx.tools.clone(),
-    };
-    let offered = |tool: &&ToolManifest| !ctx.tool_access.hides(&tool.name);
-    let Some(default_tool) = surface
-        .iter()
-        .filter(offered)
-        .find(|tool| &tool.id == default)
-    else {
+    let Some(default_tool) = ctx.tools.iter().find(|tool| &tool.id == default) else {
         return crate::plugin::ToolCatalogContribution::default();
     };
-    let host_finish = surface.iter().filter(offered).any(|tool| {
+    let host_finish = ctx.tools.iter().any(|tool| {
         &tool.id != default
             && tool
                 .declaration()

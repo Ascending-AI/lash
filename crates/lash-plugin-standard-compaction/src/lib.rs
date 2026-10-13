@@ -347,8 +347,6 @@ struct CompactionSnapshotIdentity<'a> {
     token_usage: &'a lash_core::LlmUsage,
     last_prompt_usage: &'a Option<LlmUsage>,
     plugin_config: &'a lash_core::PluginConfig,
-    tool_state_ref: &'a Option<lash_core::store::BlobRef>,
-    tool_state_generation: Option<u64>,
     plugin_state_ref: &'a Option<lash_core::store::BlobRef>,
     plugin_state_generations: &'a BTreeMap<String, u64>,
     execution_state_ref: &'a Option<lash_core::store::BlobRef>,
@@ -412,8 +410,6 @@ fn compaction_request_identity(
         token_usage,
         last_prompt_usage,
         plugin_config,
-        tool_state_ref,
-        tool_state_generation,
         plugin_state_ref,
         plugin_state_generations,
         execution_state_ref,
@@ -452,8 +448,6 @@ fn compaction_request_identity(
             token_usage,
             last_prompt_usage,
             plugin_config,
-            tool_state_ref,
-            tool_state_generation: *tool_state_generation,
             plugin_state_ref,
             plugin_state_generations,
             execution_state_ref,
@@ -512,14 +506,11 @@ pub(crate) fn prepare_compaction_request(
     instructions: Option<&str>,
     config: &StandardCompactionConfig,
 ) -> Result<(SessionSnapshot, String), ContextError> {
-    // The request state only shapes the summarizer's one prompt: it calls no
-    // tool and installs no plugin, and it states so.
-    let no_tools = lash_core::SessionToolAccess::restricted(std::iter::empty())
-        .map_err(|error| ContextError::Session(error.to_string()))?;
+    // The request state only shapes the summarizer's one prompt: it installs
+    // no plugin, so no provider offers it a tool.
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(
         state.clone(),
         lash_core::RuntimeSessionAuthority::new(
-            no_tools,
             lash_core::PluginConfig::default(),
             lash_core::prompt_sections::PromptPlan::default(),
         ),

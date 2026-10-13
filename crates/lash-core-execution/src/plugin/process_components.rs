@@ -195,6 +195,9 @@ pub struct ProcessComponentSpec {
     /// Each provider under its declared key, the static identity its calls
     /// bind and dispatch through.
     pub tool_providers: Vec<(HookKey, Arc<dyn ToolProvider>)>,
+    /// The deferred provider, under its declared key: an env has at most
+    /// one.
+    pub deferred_provider: Option<(HookKey, Arc<dyn crate::DeferredToolProvider>)>,
     pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
     pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
     pub tool_args_checks: Vec<(HookKey, ToolArgsCheckHook)>,
@@ -254,6 +257,50 @@ impl ProcessComponentRegistry {
 
     pub fn host(&self) -> &ProcessComponentHost {
         &self.host
+    }
+
+    /// Check that these components serve every tool link of `env` (P1): the
+    /// link's provider, built under the env's config, serves its tool with
+    /// the surface the link retained. A `call_dynamic` link is matched per
+    /// call.
+    ///
+    /// # Errors
+    ///
+    /// [`ProcessEnvRefusal::ToolNotServed`] or
+    /// [`ProcessEnvRefusal::LinkedSurfaceChanged`] naming the effect, or the
+    /// refusal of a component that does not compose.
+    pub fn check_served(&self, env: &Arc<ProcessEnv>) -> Result<(), ProcessEnvRefusal> {
+        let tools = env
+            .effects()
+            .iter()
+            .filter(|(_, link)| link.kind == crate::LinkKind::Tool);
+        let mut tools = tools.peekable();
+        if tools.peek().is_none() {
+            return Ok(());
+        }
+        let composition = self.compose(env, None)?;
+        for (effect, link) in tools {
+            match composition.step_link(env, effect) {
+                StepLink::Served { .. } => {}
+                StepLink::Drifted {
+                    kind: crate::ToolSurfaceDriftKind::Changed,
+                    ..
+                } => {
+                    return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
+                        effect: effect.to_string(),
+                        tool: link.tool().to_string(),
+                    });
+                }
+                StepLink::Drifted { .. } | StepLink::Unlinked => {
+                    return Err(ProcessEnvRefusal::ToolNotServed {
+                        effect: effect.to_string(),
+                        tool: link.tool().to_string(),
+                        provider: format!("{}/{}", link.provider.owner, link.provider.key),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Install `factory` under `key`.
@@ -330,8 +377,9 @@ impl ProcessComponentRegistry {
             .map(|registered| &registered.declaration)
     }
 
-    /// The claim requirements this registry serves (§6.2): each component's
-    /// readable config formats.
+    /// The claim requirements this registry serves (§6.2, S7): each
+    /// component's readable config formats, and the token of every process
+    /// callback its components register.
     pub fn serves(&self) -> Vec<String> {
         let mut serves = BTreeSet::new();
         for declaration in self.declarations() {
@@ -342,7 +390,51 @@ impl ProcessComponentRegistry {
                 ));
             }
         }
+        serves.extend(self.served_callbacks());
         serves.into_iter().collect()
+    }
+
+    /// The obligation tokens of the callbacks the installed components
+    /// register (S7): a projection of each component's registrations, built
+    /// alone under its unit config with no process, as an admission builds
+    /// it. A component whose config is not `()` cannot be built without a
+    /// process's config and projects none; one that does not build is
+    /// logged and projects none.
+    fn served_callbacks(&self) -> Vec<String> {
+        let mut tokens = Vec::new();
+        for registered in self.components.values() {
+            if registered.factory.config_type() != TypeId::of::<()>() {
+                continue;
+            }
+            let declaration = &registered.declaration;
+            let entry = ProcessComponentEntry::from_parts(
+                declaration.id.clone(),
+                lash_core_store::process_env::ProcessComponentConfig::new(
+                    declaration.config_format,
+                    serde_json::Value::Null,
+                ),
+                BTreeSet::new(),
+            );
+            let composed = ProcessEnv::builder(crate::MaxToolCalls::new(1))
+                .entry(entry)
+                .build()
+                .and_then(|env| self.compose(&env, None));
+            match composed {
+                Ok(composition) => tokens.extend(crate::ObligationToken::of_callbacks(
+                    crate::RegistryKind::Process,
+                    composition
+                        .composition
+                        .contributions()
+                        .map(|(_, identity)| identity),
+                )),
+                Err(error) => tracing::error!(
+                    component = %declaration.id,
+                    %error,
+                    "a process component serves no callbacks"
+                ),
+            }
+        }
+        tokens
     }
 
     /// What each installed component declares about the config formats it
@@ -425,7 +517,6 @@ impl ProcessComponentRegistry {
         state: &Arc<std::sync::Mutex<state::PluginStateRegistry>>,
     ) -> Result<BuiltComponents, ProcessEnvRefusal> {
         let mut contributions = PluginContributions::default();
-        let mut tool_owners = BTreeMap::<String, String>::new();
         let mut presenter_owner: Option<String> = None;
         let mut owners = Vec::with_capacity(env.components().len());
         for entry in env.components() {
@@ -452,17 +543,6 @@ impl ProcessComponentRegistry {
                     id: id.clone(),
                     reason: error.to_string(),
                 })?;
-            for (_, provider) in &spec.tool_providers {
-                for manifest in provider.tool_manifests() {
-                    if let Some(first) = tool_owners.insert(manifest.name.clone(), id.clone()) {
-                        return Err(ProcessEnvRefusal::DuplicateToolName {
-                            name: manifest.name,
-                            first,
-                            second: id,
-                        });
-                    }
-                }
-            }
             if spec.presenter.is_some() {
                 if let Some(first) = presenter_owner.take() {
                     return Err(ProcessEnvRefusal::DuplicatePresenter { first, second: id });
@@ -496,7 +576,7 @@ impl ProcessComponentRegistry {
             owners.push(owner);
         }
         let registry =
-            super::runtime_impl::build_tool_registry(&contributions, None).map_err(|error| {
+            super::runtime_impl::build_tool_registry(&contributions).map_err(|error| {
                 ProcessEnvRefusal::ComponentBuildFailed {
                     id: owners.last().cloned().unwrap_or_default(),
                     reason: error.to_string(),
@@ -550,6 +630,7 @@ struct BuiltComponents {
 fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Result<(), PluginError> {
     let ProcessComponentSpec {
         tool_providers,
+        deferred_provider,
         tool_catalog_contributors,
         tool_args_transforms,
         tool_args_checks,
@@ -562,6 +643,9 @@ fn register_spec(reg: &mut PluginRegistrar, spec: ProcessComponentSpec) -> Resul
     } = spec;
     for (key, provider) in tool_providers {
         reg.tools().provider(key, provider)?;
+    }
+    if let Some((key, provider)) = deferred_provider {
+        reg.tools().deferred(key, provider)?;
     }
     for (key, contributor) in tool_catalog_contributors {
         reg.tool_catalog().contribute(key, contributor)?;
@@ -605,50 +689,118 @@ pub struct ProcessComposition {
     pub(in crate::plugin) state: Arc<std::sync::Mutex<state::PluginStateRegistry>>,
 }
 
+/// How a node serves one linked call of a process (D3).
+#[derive(Clone, Debug)]
+pub enum StepLink {
+    /// The env links no such effect.
+    Unlinked,
+    /// The link's provider serves the tool as the env retained it: the call
+    /// is admitted under `manifest` and binds `binding`.
+    Served {
+        manifest: Box<ToolManifest>,
+        binding: Box<crate::tool_run::AdmittedBinding>,
+    },
+    /// The link's provider does not serve the tool, or serves it changed
+    /// since the env retained its surface: the call settles typed, without
+    /// a body.
+    Drifted {
+        tool: crate::ToolId,
+        kind: crate::ToolSurfaceDriftKind,
+    },
+}
+
 impl ProcessComposition {
-    /// The catalog a process's calls resolve against: the components'
-    /// tools that `tools` admits, through the components' catalog
-    /// contributions (D7: `env.tools ∩ component tools`).
+    /// How this node serves the linked call of `effect` under `env` (D3):
+    /// the link's provider, by its key, serving the linked tool with the
+    /// surface the link retained, judged now, before the call's `x_start`.
+    #[must_use]
+    pub fn step_link(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> StepLink {
+        let Some(link) = env.effects().get(effect) else {
+            return StepLink::Unlinked;
+        };
+        let config = super::OwnerConfigView::components(Arc::clone(env));
+        let drifted = |kind| StepLink::Drifted {
+            tool: link.tool().clone(),
+            kind,
+        };
+        let Some(definition) = self.registry.served(&link.provider, link.tool(), &config) else {
+            return drifted(crate::ToolSurfaceDriftKind::Missing);
+        };
+        if crate::ProcessSurface::of(&definition) != link.surface {
+            return drifted(crate::ToolSurfaceDriftKind::Changed);
+        }
+        match self
+            .composition
+            .tool_run_binding(link.tool(), Some(&link.provider))
+        {
+            Ok(binding) => StepLink::Served {
+                manifest: Box::new(definition.manifest),
+                binding: Box::new(binding),
+            },
+            Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
+        }
+    }
+
+    /// The tools a process's linked calls run on, as this node's components
+    /// serve them under `env`'s config (FIG-6074): each distinct tool an
+    /// effect is linked to whose served projection is the surface its link
+    /// retains, routed to its link's provider. A linked tool this node does
+    /// not serve, or serves with another surface, is left out: a call of it
+    /// settles as a typed tool failure when its step is admitted, before any
+    /// body starts. The components' catalog contributors run over the
+    /// linked tools as `owner`'s, under `extensions`: one that refuses
+    /// refuses the catalog.
     ///
     /// # Errors
     ///
-    /// A tool does not build into a catalog.
-    pub fn tool_catalog(
+    /// A contributor refuses, or a served tool does not build into a
+    /// catalog.
+    pub fn linked_tools(
         &self,
+        env: &Arc<crate::ProcessEnv>,
         owner: crate::RuntimeOwner,
-        tools: &crate::SessionToolAccess,
         extensions: &PluginExtensions,
         isolation_engines: BTreeSet<String>,
-    ) -> Result<crate::ToolCatalog, PluginError> {
-        let admitted: Option<BTreeSet<(&crate::ToolId, &str)>> =
-            tools.restricted_tools().map(|definitions| {
-                definitions
-                    .iter()
-                    .map(|definition| (&definition.manifest.id, definition.manifest.name.as_str()))
-                    .collect()
-            });
-        let provider = Arc::clone(&self.registry) as Arc<dyn ToolProvider>;
-        let manifests = provider
-            .tool_manifests()
-            .into_iter()
-            .filter(|manifest| {
-                admitted.as_ref().is_some_and(|admitted| {
-                    admitted.contains(&(&manifest.id, manifest.name.as_str()))
-                }) && !tools.hides(&manifest.name)
-            })
+    ) -> Result<(crate::tool_registry::SurfaceTools, crate::ToolCatalog), PluginError> {
+        let config = super::OwnerConfigView::components(Arc::clone(env));
+        let mut entries = BTreeMap::<crate::ToolId, crate::SurfaceEntry>::new();
+        for link in env.effects().values() {
+            if entries.contains_key(link.tool()) {
+                continue;
+            }
+            let Some(definition) = self.registry.served(&link.provider, link.tool(), &config)
+            else {
+                continue;
+            };
+            if crate::ProcessSurface::of(&definition) != link.surface {
+                continue;
+            }
+            entries.insert(
+                link.tool().clone(),
+                crate::SurfaceEntry {
+                    provider: link.provider.clone(),
+                    definition,
+                },
+            );
+        }
+        let definitions = entries
+            .values()
+            .map(|entry| entry.definition.clone())
             .collect::<Vec<_>>();
-        let contract_provider = Arc::clone(&provider);
-        let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |manifest: &ToolManifest| {
-                contract_provider.resolve_contract_by_id(&manifest.id)
-            });
+        let manifests = definitions
+            .iter()
+            .map(|definition| definition.manifest.clone())
+            .collect::<Vec<_>>();
         let contributions = super::session_obj::collect_owned_sync(
             self.composition.tool_catalog_contributors(),
             ToolCatalogContext {
                 owner,
                 tools: manifests.clone(),
-                resolve_contract: Some(Arc::clone(&resolve_contract)),
-                tool_access: tools.clone(),
+                config,
                 extensions: extensions.clone(),
             },
             |hook, ctx| hook(ctx),
@@ -656,13 +808,25 @@ impl ProcessComposition {
         .into_iter()
         .map(|owned| owned.value)
         .collect::<Vec<_>>();
-        crate::build_tool_catalog(crate::ToolCatalogBuildInput {
+        let catalog = crate::build_tool_catalog(crate::ToolCatalogBuildInput {
             tools: manifests,
-            resolve_contract: Some(resolve_contract),
+            resolve_contract: Some(Arc::new(move |manifest: &ToolManifest| {
+                definitions
+                    .iter()
+                    .find(|definition| definition.manifest.id == manifest.id)
+                    .map(|definition| Arc::new(definition.contract.clone()))
+            })),
             contributions,
             isolation_engines,
         })
-        .map_err(|error| PluginError::Registration(error.to_string()))
+        .map_err(|error| PluginError::Registration(error.to_string()))?;
+        Ok((
+            crate::tool_registry::SurfaceTools::of_entries(
+                entries.into_values(),
+                Arc::clone(&self.registry),
+            ),
+            catalog,
+        ))
     }
 }
 
@@ -727,6 +891,7 @@ impl StaticPluginFactory {
             declaration: component,
             spec: ProcessComponentSpec {
                 tool_providers: spec.tool_providers.clone(),
+                deferred_provider: spec.deferred_provider.clone(),
                 tool_catalog_contributors: spec.tool_catalog_contributors.clone(),
                 tool_args_transforms: spec.tool_args_transforms.clone(),
                 tool_args_checks: spec.tool_args_checks.clone(),

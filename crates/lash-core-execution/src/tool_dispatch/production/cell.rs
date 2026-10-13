@@ -181,6 +181,7 @@ impl CellTools {
                 || call.tool_id.clone(),
                 |definition| definition.manifest.id.clone(),
             ),
+            call.execution_grant.as_deref().map(|grant| &grant.provider),
             now_ms,
         )
     }
@@ -238,6 +239,7 @@ impl CellTools {
             &self.owner,
             &pending,
             execution.draft().tool(),
+            execution.draft().binding(),
             output,
         )
         .await

@@ -130,6 +130,15 @@ effects: `processes.start` with `{definition: &worker, args}`, where
 `&worker` is a function reference to the entry, then `processes.await` with
 `{handle}`.
 
+A process's environment links exactly the effects its entry performs: what
+its code calls or spawns, never what it only passes on, such as the child's
+`&worker` (FIG-6074). A start whose environment leaves one unlinked, or
+links one the entry does not perform, is refused, naming the effect. One
+effect is easy to miss: an `await` of a value the checker cannot prove is a
+local task lowers to a guarded `processes.await`, so an entry that awaits a
+handle it was handed performs `processes.await` even when its source never
+names it, and its environment must link it.
+
 ## Editing
 
 Open the document as a `Draft` and apply kernel edits to it.
@@ -377,14 +386,14 @@ the separate component registry. It fills no session or deployment defaults.
 | --- | --- |
 | Host engine or definition start | The host publishes `ProcessEnv` under a host pin, then states `EngineLaunch { env, settings }` in the request. It may explicitly call `processes().engine_defaults(kind, payload)`. |
 | Model start in a session | The host's required async `ProcessEnvPolicy` sees the recorded run and authoritative resolved target. Declaration holds and seals its complete choice with the tool outcome. |
-| Nested model start in a process | The same host policy sees the enclosing process. `cx.inherit()` explicitly chooses its exact environment and settings; a new environment is also an explicit choice. |
+| Nested model start in a process | The same host policy sees the enclosing process. `cx.restrict()` explicitly chooses the enclosing environment, restricted to the effects the target performs, and its settings; `policy::restrict_or` does so inside a process and asks another policy outside one. A new environment is also an explicit choice. |
 | Other tool-outcome or runtime child start | Its producer states the complete choice and declares/holds it under the attempt's execution claim. Session-turn declarations carry no environment. |
 | Isolated tool call | The tool provider's `isolated_start` states payload, environment choice and settings. Binding holds that choice without overwriting it. |
 | Workflow publication | The host names `ProcessEnv` for admission against the component catalog; the eventual start states its launch. |
 | Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
 | Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
 | Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
-| Adoption by another build | The build must serve the recorded components and config formats. It builds only the named components; nothing is re-selected. |
+| Claim by another build | The build must serve the recorded components, config formats and each linked tool's retained surface. It builds only the named components; nothing is re-selected. A kernel process stays pinned to the helper functions it was written against. |
 
 A committed model-start decision never re-runs its policy. An attempt abandoned
 before commit may choose again. A policy refusal becomes a tool error; a policy
@@ -407,11 +416,11 @@ no process authority policy. A host that wants revocation gates
 and `tools_excess`, filters `processes.list` results the same way, or cancels the
 process. The host also decides how to authorize a session-turn's child session.
 
-Compare against the session's resolved offered catalog, never its tool policy
-alone. Ambient admits all offered names except hidden names; Restricted admits
-the matching offered identities, also excluding hidden names. A process tool
-absent from the offered catalog is excess, including a same-name tool with a
-different id. Capability refs are within only when
+Compare against the session's resolved offered catalog. A process's effect
+links each name a tool; a link whose tool the catalog does not offer with the
+same id and dispatch surface is excess, including a same-name tool with a
+different id. The model-facing name, the binding path and the serving
+provider's key are not authority. Capability refs are within only when
 equal; opaque refs have no ordering of authority. Components and named-session
 grants have separate helpers in `lash::process::authority`.
 
@@ -424,13 +433,12 @@ for the host's separate policy:
 async fn may_address_process(
     processes: &lash::process::Processes,
     id: &lash::ProcessId,
-    current: &lash::plugins::SessionToolAccess,
     offered: &lash::plugins::ToolCatalog,
 ) -> lash::Result<bool> {
     Ok(match processes.environment(id).await? {
         Some(lash::process::ProcessEnvView {
             authority: lash::process::ProcessAuthority::Engine { env, .. }, ..
-        }) => lash::process::authority::tools_excess(&env, current, offered).is_empty(),
+        }) => lash::process::authority::tools_excess(&env, offered).is_empty(),
         _ => false,
     })
 }
@@ -441,5 +449,5 @@ A host holding only an `env_ref`, such as a promoted workflow definition, uses
 statement, including capability binding ids, contracts and arguments. The ref
 is content identity and confers no retention; keep the environment pinned.
 `host_artifacts().process_catalog(&env)` admits the environment and builds its
-components with no process to return their tools intersected with `env.tools`.
+components with no process to return the tools they serve for `env`'s links.
 That catalog observes the serving build, rather than the tools at start time.

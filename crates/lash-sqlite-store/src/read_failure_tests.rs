@@ -195,7 +195,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
 
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from("readonly-session"),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -345,7 +345,7 @@ async fn admit_and_seed(store: &SqliteStore, session_id: &SessionId) {
         .expect("admit the seeded session");
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: session_id.clone(),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
@@ -438,7 +438,7 @@ async fn seed_failure_evidence_session(
         .expect("admit receipt session");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

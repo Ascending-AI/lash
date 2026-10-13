@@ -29,7 +29,7 @@ fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
 fn state(session_id: &str) -> RuntimeSessionState {
     RuntimeSessionState {
         session_id: SessionId::fixture(session_id),
-        ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+        ..RuntimeSessionState::fixture(SessionPolicy::new(
             TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -504,7 +504,6 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
                 TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -543,7 +542,6 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
                 TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })
@@ -592,7 +590,6 @@ async fn fork_at(
                 TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                crate::SessionToolAccess::ambient(),
             ),
             retention: crate::Retention::UntilGc,
         })

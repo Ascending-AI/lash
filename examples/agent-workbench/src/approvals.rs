@@ -355,11 +355,15 @@ impl ApprovalToolProvider {
 
 #[async_trait]
 impl ToolProvider for ApprovalToolProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
         vec![Self::definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         (name == APPROVAL_TOOL_NAME).then(|| Arc::new(Self::definition().contract()))
     }
 

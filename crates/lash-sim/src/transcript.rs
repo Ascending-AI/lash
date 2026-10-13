@@ -402,7 +402,7 @@ mod tests {
     use lash_core::store::RuntimeCommit;
     use lash_core::{
         PluginState, RuntimeSessionState, SessionCatalogStore as _, SessionCreationHead,
-        SessionRelation, SessionStoreCreateRequest, ToolState,
+        SessionRelation, SessionStoreCreateRequest,
     };
 
     use super::*;
@@ -428,13 +428,14 @@ mod tests {
         assert!(
             correct
                 .lines()
-                .any(|line| line.contains("tool_state") && line.contains("stored logical=")),
+                // A namespace map renders its stored body inline.
+                .any(|line| line.contains("plugin_state") && line.contains(" stored ")),
             "control transcript must show the changed body was stored: {correct}"
         );
         assert!(
             defect
                 .lines()
-                .any(|line| line.contains("tool_state") && line.contains("ref (unchanged)")),
+                .any(|line| line.contains("plugin_state") && line.contains("ref (unchanged)")),
             "mutated transcript must expose the missing body: {defect}"
         );
     }
@@ -455,7 +456,6 @@ mod tests {
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                    lash_core::SessionToolAccess::ambient(),
                 ),
                 head: SessionCreationHead::Config,
                 retention: lash_core::Retention::UntilGc,
@@ -468,14 +468,13 @@ mod tests {
         let mut state = RuntimeSessionState {
             session_id: SessionId::from("mutation-session"),
             turn_index: 1,
-            ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+            ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ))
         };
-        state.set_tool_state_snapshot(Some(tool_state(1)));
-        state.set_plugin_state(Some(PluginState::default()));
+        state.set_plugin_state(Some(plugin_state(1)));
         state.set_execution_graph(lash_core::testing::store_fixtures::execution_graph(
             "first execution state",
         ));
@@ -486,8 +485,7 @@ mod tests {
         state.apply_persisted_commit_result(first);
 
         state.turn_index = 2;
-        state.set_tool_state_snapshot(Some(tool_state(2)));
-        state.set_plugin_state(Some(PluginState::default()));
+        state.set_plugin_state(Some(plugin_state(2)));
         state.set_execution_graph(lash_core::testing::store_fixtures::execution_graph(
             "changed execution state",
         ));
@@ -504,12 +502,18 @@ mod tests {
             .expect("observed second commit")
     }
 
-    fn tool_state(generation: u64) -> ToolState {
-        serde_json::from_value(serde_json::json!({
-            "generation": generation,
-            "tools": {}
-        }))
-        .expect("construct tool state")
+    /// A plugin state whose one namespace is at `generation`: a commit that
+    /// changes it changes its checkpoint component.
+    fn plugin_state(generation: u64) -> PluginState {
+        PluginState {
+            plugins: std::collections::BTreeMap::from([(
+                "transcript".to_owned(),
+                lash_core::PluginNamespaceState {
+                    generation,
+                    ..Default::default()
+                },
+            )]),
+        }
     }
 
     fn trace_with_write(write: CheckpointWriteEvent) -> SimulationTrace {

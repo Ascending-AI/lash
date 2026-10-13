@@ -68,11 +68,15 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for TokenWatchingTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![tool_definition(WATCH).manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == WATCH).then(|| Arc::new(tool_definition(WATCH).contract()))
     }
 
@@ -108,11 +112,15 @@ struct RetryOnceTool {
 
 #[async_trait]
 impl ToolProvider for RetryOnceTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![tool_definition(RETRY).manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == RETRY).then(|| Arc::new(tool_definition(RETRY).contract()))
     }
 
@@ -233,10 +241,7 @@ async fn session_with(
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(id).expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     Ok((core, session))
 }
@@ -1001,10 +1006,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let run = crate::TurnId::parse("turn-that-cannot-finish").expect("nonblank host identity");
     let handle = session
@@ -1085,10 +1087,7 @@ async fn an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_
     let session_id = crate::SessionId::parse(ID).expect("nonblank host identity");
     let session = core
         .session(session_id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let run = crate::TurnId::parse("turn-in-backoff").expect("nonblank host identity");
     let handle = session

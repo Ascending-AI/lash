@@ -451,10 +451,10 @@ impl LashCore {
         crate::artifacts::HostArtifacts::new(self)
     }
 
-    /// The tool catalogue a process created under `env` resolves: the tools
-    /// only the components `env` names provide that its tools admit, built
-    /// with no process, as its runtime builds them (FIG-6034 §3.7). Nothing
-    /// of a session builds.
+    /// The tool catalogue a process created under `env` resolves: each tool
+    /// `env` links an effect to, as the components `env` names serve it,
+    /// built with no process, as its runtime builds them. Nothing of a
+    /// session builds.
     pub(crate) fn process_tool_catalog(
         &self,
         env: &lash_core::ProcessEnv,
@@ -466,12 +466,13 @@ impl LashCore {
             .map_err(|refusal| lash_core::PluginError::ProcessEnvRefused { refusal })?;
         // The catalog is resolved before any process exists: its owner is a
         // fresh process id that no record will carry.
-        Ok(Arc::new(composition.tool_catalog(
+        let (_, catalog) = composition.linked_tools(
+            &Arc::new(env.clone()),
             lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
-            env.tools(),
             &components.host().extensions,
             engines.engine_kinds(),
-        )?))
+        )?;
+        Ok(Arc::new(catalog))
     }
 
     /// Check start arguments against a retained definition's authoritative signature.
@@ -698,7 +699,6 @@ pub struct LashCoreBuilder {
     observation_work_limits: crate::tracing::ObservationWorkLimits,
     data_limits: crate::RuntimeDataLimits,
     trace_context: Option<lash_trace::TraceContext>,
-    tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
     delta_coalescing: Option<crate::DeltaCoalescing>,
     /// Each builder tool provider under its declared key: the plugin it is
@@ -770,7 +770,6 @@ impl LashCoreBuilder {
             observation_work_limits: Default::default(),
             data_limits: crate::RuntimeDataLimits::standard(),
             trace_context: None,
-            tool_source_policy: None,
             execution_budgets: None,
             delta_coalescing: None,
             tool_providers: Vec::new(),
@@ -1025,13 +1024,6 @@ impl LashCoreBuilder {
 
     pub fn trace_context(mut self, trace_context: lash_trace::TraceContext) -> Self {
         self.trace_context = Some(trace_context);
-        self
-    }
-
-    /// Required host choice for running with a missing persisted tool source.
-    /// Both choices preserve typed tool-loss reporting.
-    pub fn tool_source_policy(mut self, policy: lash_core::ToolSourcePolicy) -> Self {
-        self.tool_source_policy = Some(policy);
         self
     }
 

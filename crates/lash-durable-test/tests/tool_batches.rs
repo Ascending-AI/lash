@@ -247,14 +247,18 @@ struct Leaves {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Leaves {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [LEAF, DEFERRED_LEAF]
             .into_iter()
             .map(|name| leaf_definition(name).manifest())
             .collect()
     }
 
-    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
         [LEAF, DEFERRED_LEAF, GRANTED_LEAF]
             .into_iter()
             .map(leaf_definition)
@@ -262,7 +266,11 @@ impl lash_core::ToolProvider for Leaves {
             .map(|definition| definition.manifest())
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [LEAF, DEFERRED_LEAF, GRANTED_LEAF]
             .contains(&name)
             .then(|| Arc::new(leaf_definition(name).contract()))
@@ -311,30 +319,51 @@ impl lash_core::ToolProvider for Leaves {
     }
 }
 
-/// Grants the unlisted leaf to a cell that names it.
+/// The deferred provider that resolves the unlisted leaf for a cell that
+/// names it, to the tool the leaves serve under `tools`.
 struct GrantedLeaves;
 
 #[async_trait::async_trait]
-impl lash::tools::DeferredToolResolver for GrantedLeaves {
+impl lash_core::ToolProvider for GrantedLeaves {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::tools::DeferredToolProvider for GrantedLeaves {
     async fn resolve(
         &self,
         _cx: &lash::tools::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
+    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
         paths
             .iter()
             .map(|path| {
-                let resolution = if *path == format!("tools.{GRANTED_LEAF}") {
-                    lash::tools::DeferredToolResolution::Resolved(Box::new(
-                        lash::tools::DeferredToolGrant::new(leaf_definition(GRANTED_LEAF))
-                            .with_provider(lash::plugins::PluginCallbackIdentity::tool_provider(
-                                "tools", "tools",
-                            )),
-                    ))
+                let outcome = if *path == format!("tools.{GRANTED_LEAF}") {
+                    lash::tools::DeferredOutcome::Resolved {
+                        provider: lash::plugins::PluginCallbackIdentity::tool_provider(
+                            "tools", "tools",
+                        ),
+                        definition: leaf_definition(GRANTED_LEAF),
+                        binding: None,
+                    }
                 } else {
-                    lash::tools::DeferredToolResolution::NotAvailable { note: None }
+                    lash::tools::DeferredOutcome::Unavailable { note: None }
                 };
-                ((*path).to_owned(), resolution)
+                ((*path).to_owned(), outcome)
             })
             .collect()
     }
@@ -356,12 +385,15 @@ impl Producers {
             let builder = if code {
                 lash::LashCore::rlm_builder(
                     backend.clone(),
-                    served::rlm(
-                        backend,
-                        Some(Arc::new(GrantedLeaves)),
-                        sim::untimed_workers(),
-                    ),
+                    served::rlm(backend, sim::untimed_workers()),
                 )
+                .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                    lash::plugins::PluginDeclaration::initial("granted-leaves"),
+                    lash::plugins::PluginSpec::new().with_deferred_provider(
+                        lash::hook_key!("deferred"),
+                        Arc::new(GrantedLeaves),
+                    ),
+                )))
             } else {
                 lash::LashCore::standard_builder(backend.clone())
             };
@@ -1037,14 +1069,18 @@ struct SugarTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SugarTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         SUGAR_TOOLS
             .iter()
             .map(|name| sugar_tool(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         SUGAR_TOOLS
             .contains(&name)
             .then(|| Arc::new(sugar_tool(name).contract()))

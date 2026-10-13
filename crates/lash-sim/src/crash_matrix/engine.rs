@@ -52,7 +52,7 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 fn step(name: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
-        tool: ToolId::new(tool),
+        effect: lash_core_execution::testing::effect(tool),
         input: json!({ "step": name }),
         site: None,
     }
@@ -90,6 +90,13 @@ pub struct SimProcessEngine;
 
 #[async_trait::async_trait]
 impl ProcessEngine for SimProcessEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -288,15 +295,12 @@ impl ProcessSteps for SimSteps {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        Ok(StepAdmission {
-            park: None,
-            policy: policy(&step.admitted_tool(KIND)),
-            limit: ExecutionLimit::starting_at(
-                now_ms,
-                Duration::from_secs(60),
-                Duration::from_secs(60),
-            ),
-        })
+        Ok(StepAdmission::new(
+            lash_core_execution::testing::step_tool(step, KIND),
+            policy(&lash_core_execution::testing::step_tool(step, KIND)),
+            ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.
@@ -324,7 +328,7 @@ impl ProcessSteps for SimSteps {
             let call = execution.call();
             let world = Arc::clone(&self.world);
             let process = process.id.clone();
-            let tool = step.admitted_tool(KIND);
+            let tool = lash_core_execution::testing::step_tool(step, KIND);
             let call = call.clone();
             Box::new(move |_token| {
                 Box::pin(async move {

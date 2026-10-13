@@ -34,14 +34,16 @@ impl MemberDraft {
         opener: &lash_core_store::effect_opener::EffectOpener,
         pin: lash_core_execution::runtime::actor::round::MemberPin,
     ) -> Result<Self, ParentFault> {
-        Self::new(
+        let mut member = Self::new(
             call,
             pin.tool,
             request,
             opener,
             (pin.policy, pin.limit),
             pin.park,
-        )
+        )?;
+        member.draft = member.draft.with_binding(pin.binding);
+        Ok(member)
     }
 
     /// The member `call` of `tool` over `request`, owned by `opener`'s run,

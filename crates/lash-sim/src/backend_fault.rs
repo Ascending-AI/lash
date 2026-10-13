@@ -360,7 +360,7 @@ impl GeneratedBackendFaultHarness {
         let factory = self.create_session(&session_id).await?;
         let state = RuntimeSessionState {
             session_id: session_id.clone(),
-            ..RuntimeSessionState::ambient_fixture(SessionPolicy::new(
+            ..RuntimeSessionState::fixture(SessionPolicy::new(
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
@@ -463,7 +463,6 @@ impl GeneratedBackendFaultHarness {
                     lash_core::TurnBudget::Unbounded,
                     lash_core::MaxToolCalls::new(1024),
                     lash_core::NoProgressBudget::bounded(12),
-                    lash_core::SessionToolAccess::ambient(),
                 ),
                 head: SessionCreationHead::Config,
                 retention: lash_core::Retention::UntilGc,

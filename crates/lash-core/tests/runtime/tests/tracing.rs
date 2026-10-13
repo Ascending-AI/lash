@@ -5,7 +5,6 @@
 
 use super::*;
 use ::tracing::Instrument;
-use lash_core::facade_support::ToolStateFacadeOps;
 use lash_sansio::sync::MutexExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
@@ -43,11 +42,15 @@ impl SchemaChangingTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for SchemaChangingTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![self.definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
@@ -101,11 +104,15 @@ struct PendingEchoTool {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for PendingEchoTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![pending_echo_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 

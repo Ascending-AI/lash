@@ -28,10 +28,7 @@ async fn process_cancel_withdraws_its_inputs_and_preserves_foreign_child_inputs(
                 }),
             },
             pending_observer_intents: Vec::new(),
-            config: crate::PersistedSessionConfig::from_policy(
-                &runtime.state.policy().clone(),
-                crate::SessionToolAccess::ambient(),
-            ),
+            config: crate::PersistedSessionConfig::from_policy(&runtime.state.policy().clone()),
             head: crate::SessionCreationHead::Config,
             owning_process_id: Some(process_id.clone()),
             retention: crate::Retention::UntilGc,

@@ -474,7 +474,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
     crate::testing::finalize_fleet_format(set.location(), 2).expect("finalize");
     let state = lash_core_execution::RuntimeSessionState {
         session_id: session.clone(),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(
+        ..lash_core_execution::RuntimeSessionState::fixture(
             lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),

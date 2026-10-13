@@ -154,12 +154,6 @@ pub mod facade_support {
         crate::trace::trace_context_for_effect_invocation(context, invocation)
     }
     pub use crate::runtime::run_head_advancing_commit_attempt;
-    pub fn resolve_tool_registry_contract(
-        registry: &crate::ToolRegistry,
-        name: &str,
-    ) -> Option<std::sync::Arc<crate::ToolContract>> {
-        registry.resolve_catalog_contract(name)
-    }
 
     pub use crate::attachments::AttachmentGcFence;
     pub use crate::attachments::AttachmentPolicy;
@@ -238,8 +232,7 @@ pub mod facade_support {
         AfterToolContributions, AfterToolDecision, BeforeToolDecision, CachedToolSuccess, HookKey,
         PluginAbort, PluginRecordContribution, PreparedCallReadView, SessionContributions,
         ToolArgsCheckInput, ToolArgsTransformInput, ToolHookContext, ToolHookOccurrence,
-        ToolMembershipContribution, ToolResultCandidate, ToolResultCheckInput,
-        ToolResultTransformInput, TurnContributions,
+        ToolResultCandidate, ToolResultCheckInput, ToolResultTransformInput, TurnContributions,
     };
     pub use crate::plugin::{
         HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,
@@ -359,22 +352,12 @@ pub mod facade_support {
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
     pub use crate::tool_registry::ReconfigureError;
-    pub use crate::tool_registry::SupersededToolIdentity;
-    pub use crate::tool_registry::ToolRestoreReport;
-    pub use crate::tool_registry::ToolSourceHandle;
-    pub use crate::tool_registry::ToolSourcePolicy;
-    pub use crate::tool_registry::ToolStateEntry;
-    pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
     pub use lash_core_execution::Response;
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
     };
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::session_state::facade_ops::RuntimeSessionStateFacadeOps;
-    pub use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
-    pub use lash_core_store::tool_state::{
-        ToolMembershipUpdate, ToolStateChange, ToolStateChangeOutcome,
-    };
     pub use lash_sansio::AcceptedInjectedTurnInput;
     pub use lash_sansio::AttachmentMaterializationNotice;
     pub use lash_sansio::AttachmentMaterializationReason;
@@ -452,6 +435,13 @@ pub use attachments::{
 /// The run spec a frame switch's follow-on runs under (FIG-6021).
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::turn_stop_from_tool_control;
+pub use lash_core_execution::{
+    DeferredMatch, DeferredOutcome, DeferredResolveContext, DeferredToolProvider, EffectLink,
+    EffectName, ExecutionBinding, ExecutionBindingUnreadable, LinkKind, MAX_DEFERRED_NOTE_BYTES,
+    ObligationToken, PerformedEffects, ProcessSurface, ProviderKey, RecordedSurface, RegistryKind,
+    SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, SurfaceTools,
+    ToolSurfaceDrift, ToolSurfaceDriftKind, bounded_deferred_outcome, effect_path_of,
+};
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
@@ -493,9 +483,7 @@ pub(crate) use lash_sansio::{
 };
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
-pub use tool_registry::{
-    SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
-};
+pub use tool_registry::ToolRegistry;
 pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 
@@ -565,8 +553,8 @@ pub use plugin::{
     PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
     SessionLineage, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
-    UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
+    SessionStateService, StateCommands, UnstatedSessionConfig, durable_identity_conflict,
+    is_durable_identity_conflict,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 
@@ -613,14 +601,14 @@ pub use runtime::{
     AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,
     AssistantResponsePlan, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
     BindingId, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
-    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredLaunch,
-    DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
-    DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
-    EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredDefinitionLaunch,
+    DeclaredLaunch, DeclaredProcessIdentity, DefinitionAcquisition, DefinitionRef, DeliveryPolicy,
+    DeploymentStore, DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork,
+    EffectAddress, EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate,
     EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
     EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStepKind, EngineStepRefusal,
     EngineStepRun, EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
-    ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
+    FitPolicy, ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
     InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay,
     KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
     LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
@@ -692,7 +680,8 @@ pub use runtime::{
     TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef,
     TurnPreludeStore, WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
     WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
-    artifact_store_plugin_error, hold_process_env, lifetime, mint_process_id, tool_failure_code,
+    artifact_store_plugin_error, check_links, hold_process_env, lifetime, mint_process_id,
+    tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
@@ -725,8 +714,7 @@ pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
     CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
-    RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, tool_dispatch_surface,
+    RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

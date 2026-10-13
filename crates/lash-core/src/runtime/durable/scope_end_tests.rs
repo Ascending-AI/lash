@@ -1131,6 +1131,13 @@ impl LawEngine {
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for LawEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,
@@ -1237,7 +1244,7 @@ impl crate::ProcessEngine for LawEngine {
                 crate::EngineAction::Steps {
                     steps: vec![crate::StepRequest::Tool {
                         step: crate::StepName("forever".into()),
-                        tool: lash_sansio::ToolId::new(HANGING_TOOL),
+                        effect: lash_core_execution::testing::effect(HANGING_TOOL),
                         input: serde_json::Value::Null,
                         site: None,
                     }],
@@ -1271,7 +1278,7 @@ impl crate::ProcessEngine for LawEngine {
 
 /// The step tool of [`LawEngineMode::RunForever`]: [`HangingSteps`] runs it
 /// and ignores its cancel.
-const HANGING_TOOL: &str = "l6b-law-hang";
+const HANGING_TOOL: &str = "l6b_law_hang";
 
 /// A node serving the law's process actors with L6's process activation.
 struct ProcessNode {
@@ -1330,11 +1337,12 @@ impl ProcessSteps for HangingSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let long = Duration::from_secs(60);
-        Ok(StepAdmission {
-            park: None,
-            policy: lash_sansio::ExecutionPolicy::Once,
-            limit: lash_sansio::ExecutionLimit::starting_at(now_ms, long, long),
-        })
+        Ok(StepAdmission::new(
+            lash_core_execution::testing::step_tool(_step, "law"),
+            lash_sansio::ExecutionPolicy::Once,
+            lash_sansio::ExecutionLimit::starting_at(now_ms, long, long),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.

@@ -1,24 +1,21 @@
 //! The before-turn and checkpoint callback laws (ADR 0133 §6, FIG-4921): a
-//! callback's session contributions, a tool-membership change and a graph
-//! append, are the session's once with its turn, and no callback runs again
+//! callback's session contribution, a graph append, is the session's once
+//! with its turn, and no callback runs again
 //! once the phase that records its decision committed.
 //!
 //! A host creates a session on a core and sends it an input; the simulated
 //! nodes A and B run its turn with the core's turn services over the
 //! production store. The model answers in text. One plugin's callback,
-//! before the turn or at its before-completion checkpoint, removes the
-//! `hook_search` tool from the session and appends a node carrying a value
-//! of its own run. The matrix runs the uncut turn, then cuts it at every
+//! before the turn or at its before-completion checkpoint, appends a node
+//! carrying a value of its own run. The matrix runs the uncut turn, then cuts it at every
 //! labelled write under fail-before, ack-hidden, zombie, abort and
 //! commit-then-abort, recovers on the other node, and checks:
 //!
 //! - **Committed with the turn:** once the turn ended, the session's head
-//!   holds exactly one of the callback's appends, the value of one run, and
-//!   the tool as a non-member.
+//!   holds exactly one of the callback's appends, the value of one run.
 //! - **Once past its decision:** a before-turn decision is recorded with
 //!   every phase's checkpoint, so no before-turn run starts after a
-//!   `model.start` committed, and every model request of the turn already
-//!   omits the removed tool; a before-completion checkpoint's decision
+//!   `model.start` committed; a before-completion checkpoint's decision
 //!   commits with `turn.commit`, so no checkpoint run starts after it.
 //! - The turn committed once and ended, and a zombie's writes after its
 //!   reap are refused.
@@ -41,7 +38,6 @@ use matrix::MatrixTestExt as _;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
-use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core_execution::StoreSet;
@@ -62,9 +58,6 @@ const INPUT: &str = "turn-callback-turn";
 const PLUGIN: &str = "turn-callback-law";
 /// The type of the node the callback's graph append adds.
 const NOTE: &str = "turn_callback_law.note";
-/// The tool the callback removes.
-const TOOL: &str = "hook_search";
-const TOOL_ID: &str = "tool:hook-search";
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -106,8 +99,8 @@ struct Run {
 struct World {
     phase: Phase,
     runs: Mutex<Vec<Run>>,
-    /// Whether each model request offered the tool, in order.
-    offered: Mutex<Vec<bool>>,
+    /// How many model requests the deployment was sent.
+    asked: std::sync::atomic::AtomicUsize,
     /// The deployment, whose trace a run reads.
     nodes: OnceLock<Weak<SimNodes>>,
 }
@@ -117,7 +110,7 @@ impl World {
         Self {
             phase,
             runs: Mutex::default(),
-            offered: Mutex::default(),
+            asked: std::sync::atomic::AtomicUsize::new(0),
             nodes: OnceLock::new(),
         }
     }
@@ -149,10 +142,6 @@ impl World {
             after_decision,
         });
         lash_core::plugin::SessionContributions {
-            tool_membership: vec![lash_core::plugin::ToolMembershipContribution {
-                tool_id: TOOL_ID.into(),
-                present: false,
-            }],
             graph_appends: vec![lash_core::AppendSessionNodesRequest {
                 operation_id: format!("turn-callback-law:{value}"),
                 nodes: vec![lash_core::SessionAppendNode::plugin(
@@ -162,38 +151,6 @@ impl World {
                 requires_ancestor_node_id: None,
             }],
         }
-    }
-}
-
-/// The tool the callback removes; the model never calls it.
-struct SearchTool;
-
-fn search_tool() -> lash_core::ToolDefinition {
-    let object = serde_json::json!({ "type": "object" });
-    lash_core::ToolDefinition::raw(
-        TOOL_ID,
-        TOOL,
-        "The callback law's probe.",
-        object.clone(),
-        object,
-    )
-    .expect("the tool's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL))
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for SearchTool {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![search_tool().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == TOOL).then(|| Arc::new(search_tool().contract()))
-    }
-
-    async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        panic!("the law's model never calls a tool")
     }
 }
 
@@ -265,17 +222,15 @@ impl lash::plugins::SessionPlugin for CallbackPlugin {
     }
 }
 
-/// The model: it answers every request in text, and records whether the
-/// request offered the tool.
+/// The model: it answers every request in text, and counts it.
 fn model(world: Arc<World>) -> lash_core::facade_support::ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("turn-callback-law")
         .requires_streaming(true)
         .complete(move |request: lash_core::llm::types::LlmRequest| {
             world
-                .offered
-                .lock_recover()
-                .push(request.tools.iter().any(|tool| tool.name == TOOL));
+                .asked
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let answer = served::text(&request, "done");
             async move { Ok(answer) }
         })
@@ -284,12 +239,8 @@ fn model(world: Arc<World>) -> lash_core::facade_support::ProviderHandle {
 }
 
 /// The values of the callback's appends on `stores`' committed head of
-/// `session`, in path order, and whether the head's tool state holds the
-/// tool as a member.
-async fn committed(
-    stores: &lash::Backend,
-    session: &SessionId,
-) -> Result<(Vec<String>, Option<bool>), String> {
+/// `session`, in path order.
+async fn committed(stores: &lash::Backend, session: &SessionId) -> Result<Vec<String>, String> {
     let factory = stores.stores().session_store_factory();
     let view = lash_core_execution::store::SessionStore::new(factory, session.clone())
         .map_err(|error| format!("the session's store: {error}"))?;
@@ -314,12 +265,7 @@ async fn committed(
             })
         })
         .collect();
-    let member = loaded
-        .state
-        .tool_state_snapshot()
-        .and_then(|tools| tools.entries().get(&TOOL_ID.into()))
-        .map(|entry| entry.is_member());
-    Ok((notes, member))
+    Ok(notes)
 }
 
 /// The scenario in one phase on one dialect, fresh for every matrix cell.
@@ -365,11 +311,9 @@ impl Crash {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(Arc::clone(&self.world)), served::metadata())
-                    .tools(lash::hook_key!("tools"), Arc::new(SearchTool))
                     .plugin(Arc::new(CallbackPlugin {
                         world: Arc::clone(&self.world),
                     }))
@@ -409,31 +353,18 @@ impl Crash {
                 self.world.phase.decision()
             ));
         }
-        let offered = self.world.offered.lock_recover().clone();
-        if offered.is_empty() {
+        if self.world.asked.load(std::sync::atomic::Ordering::SeqCst) == 0 {
             violations.push("the model was never asked".to_owned());
-        }
-        if self.world.phase == Phase::BeforeTurn && offered.iter().any(|offered| *offered) {
-            violations.push(format!(
-                "a model request offered the tool the before-turn decision removed: {offered:?}"
-            ));
         }
 
         match committed(&self.backend(), &session()).await {
             Err(error) => violations.push(error),
-            Ok((notes, member)) => {
-                match &notes[..] {
-                    [note] if runs.iter().any(|run| &run.value == note) => {}
-                    _ => violations.push(format!(
-                        "the head does not hold one run's append: {notes:?}"
-                    )),
-                }
-                if member != Some(false) {
-                    violations.push(format!(
-                        "the head's tool state holds the removed tool as {member:?}"
-                    ));
-                }
-            }
+            Ok(notes) => match &notes[..] {
+                [note] if runs.iter().any(|run| &run.value == note) => {}
+                _ => violations.push(format!(
+                    "the head does not hold one run's append: {notes:?}"
+                )),
+            },
         }
 
         if let Some(cut) = cut {
@@ -468,7 +399,7 @@ impl Scenario for Crash {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -487,10 +418,7 @@ impl Scenario for Crash {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(8),
-            ))
+            .create(lash::SessionCreation::root(served::spec(8)))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         session
@@ -583,23 +511,22 @@ async fn prove(phase: Phase, tier: Tier) {
     );
 }
 
-/// A before-turn callback's tool removal and graph append are the
-/// session's once with its turn, whatever write a crash cuts: every model
-/// request omits the tool, and no run of the callback starts once a phase
-/// recorded its decision (FIG-4921, ADR 0133 §6).
-async fn accepted_before_turn_membership_and_appends_survive_every_cut(tier: Tier) {
+/// A before-turn callback's graph append is the session's once with its
+/// turn, whatever write a crash cuts, and no run of the callback starts
+/// once a phase recorded its decision (FIG-4921, ADR 0133 §6).
+async fn accepted_before_turn_appends_survive_every_cut(tier: Tier) {
     prove(Phase::BeforeTurn, tier).await;
 }
 
-/// A before-completion checkpoint's tool removal and graph append are the
-/// session's once with its turn, whatever write a crash cuts, and no run of
-/// the checkpoint starts once `turn.commit` committed (FIG-4921).
-async fn accepted_checkpoint_membership_and_appends_survive_every_cut(tier: Tier) {
+/// A before-completion checkpoint's graph append is the session's once
+/// with its turn, whatever write a crash cuts, and no run of the checkpoint
+/// starts once `turn.commit` committed (FIG-4921).
+async fn accepted_checkpoint_appends_survive_every_cut(tier: Tier) {
     prove(Phase::BeforeCompletion, tier).await;
 }
 
 tiered_laws!(
     current_thread:
-    accepted_before_turn_membership_and_appends_survive_every_cut,
-    accepted_checkpoint_membership_and_appends_survive_every_cut,
+    accepted_before_turn_appends_survive_every_cut,
+    accepted_checkpoint_appends_survive_every_cut,
 );

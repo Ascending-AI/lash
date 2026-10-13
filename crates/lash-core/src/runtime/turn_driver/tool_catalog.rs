@@ -5,6 +5,7 @@ use crate::{PluginError, TurnDriverPreamble};
 
 pub(super) struct PreparedExecutionEnvironment {
     pub(super) tool_definitions: Vec<crate::ToolDefinition>,
+    surface: crate::RecordedSurface,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
 }
 
@@ -67,18 +68,20 @@ impl RuntimeTurnDriver<'_> {
         machine
     }
 
-    /// The step body of an execution-environment sync: builds the tool
-    /// surface over the live registry and returns it with the surface's
-    /// definitions, which the sync records. It installs nothing: the shift
-    /// installs the surface the sync recorded. It composes no prompt: each
-    /// model call composes its own at admission (ADR 0133 §6), over the
-    /// surface installed here.
+    /// The step body of an execution-environment sync: the surface the
+    /// sync records, with what the machine reads of it. The drive's first
+    /// sync of a run that recorded a surface consumes that record and
+    /// advertises nothing (S5, §5a); any other sync builds the surface from
+    /// what the session's providers advertise under the run's config. It
+    /// installs nothing: the shift installs the surface the sync recorded.
+    /// It composes no prompt: each model call composes its own at admission
+    /// (ADR 0133 §6), over the surface installed here.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &self,
     ) -> Result<
         (
             crate::sansio::ExecutionEnvironmentSync,
-            Vec<crate::ToolDefinition>,
+            crate::RecordedSurface,
         ),
         SyncFailure,
     > {
@@ -108,20 +111,22 @@ impl RuntimeTurnDriver<'_> {
                     })
                     .collect(),
             },
-            execution_environment.tool_definitions,
+            execution_environment.surface,
         ))
     }
 
     pub(super) async fn prepare_execution_environment(
         &self,
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
-        let state = self.turn_pipeline.state();
-        let tool_surface = self
-            .session
-            .admit_tool_surface(&state.authority.tool_access)
-            .await?;
+        let tool_surface = match self.run_config.surface() {
+            Some(recorded) if !self.surface_installed => self
+                .session
+                .install_recorded_tool_surface(Arc::clone(recorded))?,
+            _ => self.session.admit_tool_surface().await?,
+        };
         Ok(PreparedExecutionEnvironment {
             tool_definitions: tool_surface.definitions(),
+            surface: tool_surface.surface().as_ref().clone(),
             turn_driver_preamble: tool_surface.preamble(),
         })
     }

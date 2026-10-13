@@ -8,7 +8,7 @@ fn state() -> CodeModeExecutionState {
 }
 
 fn python_services() -> super::super::CellServices {
-    cell_services(&CellDialect::python(), python_workers(), None)
+    cell_services(&CellDialect::python(), python_workers())
 }
 
 /// FIG-5803 / FIG-5779: Python reserves catalog namespace roots as well

@@ -77,7 +77,7 @@ impl LashRuntime {
         };
         self.activate_turn_session().await?;
         self.apply_turn_config(run_config.run())?;
-        Self::emit_physical_turn_start(observer, controller, run, self.tool_restore_report.take());
+        Self::emit_physical_turn_start(observer, controller, run);
         let tracing = &self.host.core.tracing;
         // An admission that traced nothing leaves the turn untraced.
         let retained_trace = retained_trace.unwrap_or_else(|| {
@@ -301,8 +301,7 @@ impl LashRuntime {
         };
         let mut prepared = crate::PluginSession::apply_before_turn(before_turn.clone());
         turn_graph_appends
-            .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
-            .await
+            .apply_session_contributions(&self.state.session_id, &prepared.session)
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
         if plugins.has_before_turn_hooks() {
             prelude.before_turn = Some(
@@ -398,6 +397,7 @@ impl LashRuntime {
             admitted_body: None,
             model_attempt: 1,
             run_config,
+            surface_installed: false,
         });
         Ok(DurableTurn {
             driver,

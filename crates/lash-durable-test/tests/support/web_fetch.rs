@@ -30,16 +30,24 @@ pub struct Fetch;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Fetch {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &lash_core::ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<lash_core::ToolManifest> {
         let definition = fetch_definition();
         (definition.id() == id).then(|| definition.manifest())
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "web_fetch").then(|| Arc::new(fetch_definition().contract()))
     }
 
@@ -48,30 +56,62 @@ impl lash_core::ToolProvider for Fetch {
     }
 }
 
-/// Grants `web.fetch` to a cell that names it.
+/// The deferred provider that resolves `web.fetch` for a cell that names
+/// it, to the tool [`Fetch`] serves under `tools`. It serves nothing itself.
 pub struct GrantFetch;
 
 #[async_trait::async_trait]
-impl lash::tools::DeferredToolResolver for GrantFetch {
+impl lash_core::ToolProvider for GrantFetch {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::tools::DeferredToolProvider for GrantFetch {
     async fn resolve(
         &self,
         _cx: &lash::tools::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
+    ) -> BTreeMap<String, lash::tools::DeferredOutcome> {
         paths
             .iter()
             .map(|path| {
-                let resolution = if *path == "web.fetch" {
-                    lash::tools::DeferredToolResolution::Resolved(Box::new(
-                        lash::tools::DeferredToolGrant::new(fetch_definition()).with_provider(
-                            lash::plugins::PluginCallbackIdentity::tool_provider("tools", "tools"),
+                let outcome = if *path == "web.fetch" {
+                    lash::tools::DeferredOutcome::Resolved {
+                        provider: lash::plugins::PluginCallbackIdentity::tool_provider(
+                            "tools", "tools",
                         ),
-                    ))
+                        definition: fetch_definition(),
+                        binding: None,
+                    }
                 } else {
-                    lash::tools::DeferredToolResolution::NotAvailable { note: None }
+                    lash::tools::DeferredOutcome::Unavailable { note: None }
                 };
-                ((*path).to_owned(), resolution)
+                ((*path).to_owned(), outcome)
             })
             .collect()
     }
+}
+
+/// The plugin that registers [`GrantFetch`] as a session's deferred
+/// provider.
+pub fn grant_fetch() -> Arc<dyn lash::plugins::PluginFactory> {
+    Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial("grant-fetch"),
+        lash::plugins::PluginSpec::new()
+            .with_deferred_provider(lash::hook_key!("deferred"), Arc::new(GrantFetch)),
+    ))
 }

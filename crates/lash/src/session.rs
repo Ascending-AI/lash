@@ -10,9 +10,8 @@ use crate::support::{
     RuntimeHandle, RuntimeObservation, RuntimeSessionState, SessionAdmin, SessionCreationHead,
     SessionCursor, SessionError, SessionObservation, SessionObservationSubscription, SessionPolicy,
     SessionReadView, SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest,
-    ToolManifest, ToolState, TurnInput, build_plugin_host,
+    TurnInput, build_plugin_host,
 };
-use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::{SessionObservationEvent, facade_support::LiveReplayGap};
 
 /// Builder for one host-named session.
@@ -61,13 +60,6 @@ pub struct SessionCreation {
     /// creation typed as
     /// [`SessionConfigRefused`](lash_core::SessionError::SessionConfigRefused).
     pub spec: SessionSpec,
-    /// The session's tool authority, stated by its creator: ambient, or
-    /// restricted to a named set
-    /// ([`SessionToolAccess`](crate::plugins::SessionToolAccess)). Which
-    /// tools a session may call is a host decision with no default, so both
-    /// constructors take it. It is recorded with the session's initial
-    /// config head and changed afterwards only through a config transaction.
-    pub tool_access: lash_core::SessionToolAccess,
     /// The session's parent, recorded as its Session Relation (ADR 0089).
     /// This is the only facade path to a related session: the session is an
     /// ordinary session with its own Session Binding and recorded response
@@ -81,27 +73,22 @@ pub struct SessionCreation {
 }
 
 impl SessionCreation {
-    /// A root session created from `spec` under `tool_access`.
-    pub fn root(tool_access: lash_core::SessionToolAccess, spec: SessionSpec) -> Self {
+    /// A root session created from `spec`. Which tools it offers is each
+    /// tool provider's own configuration, which `spec` states.
+    pub fn root(spec: SessionSpec) -> Self {
         Self {
             spec,
-            tool_access,
             parent: None,
             prompt_plan: None,
         }
     }
 
-    /// A session created from `spec` under `tool_access` and recorded as
-    /// `parent`'s child (ADR 0089). It records only the configuration its
-    /// creator supplies: the parent's tool authority is not inherited.
-    pub fn child_of(
-        tool_access: lash_core::SessionToolAccess,
-        parent: SessionId,
-        spec: SessionSpec,
-    ) -> Self {
+    /// A session created from `spec` and recorded as `parent`'s child (ADR
+    /// 0089). It records only the configuration its creator supplies:
+    /// nothing of the parent's is inherited.
+    pub fn child_of(parent: SessionId, spec: SessionSpec) -> Self {
         Self {
             spec,
-            tool_access,
             parent: Some(parent),
             prompt_plan: None,
         }
@@ -244,7 +231,6 @@ impl SessionBuilder {
     pub async fn create(self, creation: SessionCreation) -> Result<DurableSession> {
         let SessionCreation {
             spec,
-            tool_access,
             parent,
             prompt_plan,
         } = creation;
@@ -254,7 +240,7 @@ impl SessionBuilder {
         lash_core::CoreConfigOwner::validate_charge_safety(&policy.charge_safety)
             .map_err(lash_core::CoreConfigOwner::creation_refusal)
             .map_err(lash_core::SessionError::SessionConfigRefused)?;
-        let mut config = lash_core::PersistedSessionConfig::from_policy(&policy, tool_access);
+        let mut config = lash_core::PersistedSessionConfig::from_policy(&policy);
         if let Some(plan) = prompt_plan {
             plan.validate()
                 .map_err(|error| lash_core::CoreConfigRefusal::PromptPlanRefused { error })
@@ -1195,18 +1181,6 @@ impl ObservableSession {
 
     pub fn read_view(&self) -> SessionReadView {
         self.resident().read_view.clone()
-    }
-
-    pub fn tool_state(&self) -> Option<ToolState> {
-        self.resident().tool_state.clone()
-    }
-
-    pub fn active_tool_manifests(&self) -> Vec<ToolManifest> {
-        self.resident()
-            .tool_state
-            .as_ref()
-            .map(ToolState::tool_manifests)
-            .unwrap_or_default()
     }
 
     /// Lists process handles.

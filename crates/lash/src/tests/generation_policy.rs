@@ -129,10 +129,7 @@ async fn turn_driver_rejects_unsupported_effort_before_provider_call() -> Result
     // carries it to the provider.
     let Err(refused) = core
         .session(crate::SessionId::parse("unsupported-effort").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        .create(crate::SessionCreation::root(spec))
         .await
     else {
         panic!("an unsupported effort is refused");

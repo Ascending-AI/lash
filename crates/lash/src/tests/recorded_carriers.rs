@@ -1,7 +1,6 @@
-//! FIG-5520: no runtime carrier runs under a blank ambient authority or a
-//! silent preset. After a reopen, an RLM session's plugin session and a
-//! process runtime run under the budgets their host records and the
-//! authority their session or environment recorded.
+//! FIG-5520: no runtime carrier runs under a silent preset. After a reopen,
+//! an RLM session's plugin session and a process runtime run under the
+//! budgets their host records.
 
 use super::*;
 use crate::support::TurnInput;
@@ -40,7 +39,6 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(budgets)
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
@@ -52,23 +50,16 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_reopened_rlm_session_and_its_process_worker_run_under_recorded_budgets_and_authority() {
+async fn a_reopened_rlm_session_and_its_process_worker_run_under_recorded_budgets() {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let path = directory.path().join("lash.db");
     let budgets = stated_budgets();
-    let authority = crate::plugins::SessionToolAccess::ambient()
-        .with_hidden_tools(["withheld".to_string()])
-        .expect("valid hidden tools");
-    assert_ne!(authority, crate::plugins::SessionToolAccess::ambient());
     let id = SessionId::from("recorded-carriers");
 
     // The first host creates the session, then goes away.
     let core = rlm_core_at(&path, budgets.clone()).await;
     core.session(id.clone())
-        .create(crate::SessionCreation::root(
-            authority.clone(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created");
     core.shutdown().await.expect("shutdown");
@@ -91,7 +82,6 @@ async fn a_reopened_rlm_session_and_its_process_worker_run_under_recorded_budget
             .assembled_plugin_session(),
     );
     assert_eq!(plugins.execution_budgets(), budgets);
-    assert_eq!(plugins.tool_access(), authority);
 
     // A process worker the reopened host serves runs under the host's
     // stated budgets.

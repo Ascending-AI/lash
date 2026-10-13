@@ -278,11 +278,20 @@ const LAW_FLAKY: &str = "law_flaky";
 /// completion wait.
 const LAW_PARK: &str = "law_park";
 
+/// A law tool's effect name.
+#[expect(
+    clippy::expect_used,
+    reason = "every law tool name is a fixed valid effect name"
+)]
+fn law_effect(tool: &str) -> crate::EffectName {
+    crate::EffectName::new(tool).expect("a law effect name")
+}
+
 fn law_step(step: &str, tool: &str) -> EngineAction {
     EngineAction::Steps {
         steps: vec![StepRequest::Tool {
             step: StepName(step.to_owned()),
-            tool: lash_sansio::ToolId::new(tool),
+            effect: law_effect(tool),
             input: json!({}),
             site: None,
         }],
@@ -321,6 +330,13 @@ fn ended(value: Value) -> EngineAction {
 
 #[async_trait::async_trait]
 impl ProcessEngine for LawEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
+        Ok(crate::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &crate::ProcessSignature,
@@ -392,7 +408,7 @@ impl ProcessEngine for LawEngine {
                 "stuck" => EngineAction::Steps {
                     steps: vec![StepRequest::Tool {
                         step: StepName("stuck".to_owned()),
-                        tool: lash_sansio::ToolId::new("law_stuck"),
+                        effect: law_effect("law_stuck"),
                         input: json!({}),
                         site: None,
                     }],
@@ -411,7 +427,7 @@ impl ProcessEngine for LawEngine {
                         .iter()
                         .map(|step| StepRequest::Tool {
                             step: StepName((*step).to_owned()),
-                            tool: lash_sansio::ToolId::new(LAW_PARK),
+                            effect: law_effect(LAW_PARK),
                             input: json!({}),
                             site: Some(law_site(step)),
                         })
@@ -542,7 +558,7 @@ fn step_entries(call: &ToolCallId) -> u32 {
 
 fn step_tool(step: &StepRequest) -> &str {
     match step {
-        StepRequest::Tool { tool, .. } => tool.as_str(),
+        StepRequest::Tool { effect, .. } => effect.as_str(),
         StepRequest::Engine { .. } => "",
     }
 }
@@ -578,15 +594,16 @@ impl ProcessSteps for LawSteps {
             _ => ExecutionPolicy::Once,
         };
         let limit = ExecutionLimit::starting_at(now_ms, LONG, LONG);
-        Ok(StepAdmission {
+        Ok(StepAdmission::new(
+            lash_sansio::ToolId::new(step_tool(step)),
             policy,
             limit,
-            park: (step_tool(step) == LAW_PARK).then(|| {
+            (step_tool(step) == LAW_PARK).then(|| {
                 ParkDeadline::At(WaitDeadline::at_instant(lash_durable::DurableInstant(
                     i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
                 )))
             }),
-        })
+        ))
     }
 
     fn resolved(

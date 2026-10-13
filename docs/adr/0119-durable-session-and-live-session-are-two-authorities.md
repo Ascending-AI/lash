@@ -119,88 +119,23 @@ events reach a feed.
 
 Source: `crates/lash-core/src/runtime/durable_queue.rs:104`.
 
-## Tool loss is a typed fact of the run that restores tool state
+## A run serves its recorded tool surface
 
-An open builds no capabilities (FIG-4857): a session's tool registry and
-plugins exist only once a run publishes its plugin transition. Tool loss,
-`ToolSourcePolicy` and host tool administration therefore belong to runs and
-to durable state, never to the open (FIG-5134).
+Amended by FIG-6074: tool state, tool loss reports, the tool-source policy
+and host tool administration are deleted. An open builds no capabilities
+(FIG-4857), and a run records the tool surface it offers when it prepares:
+each tool with the provider that serves it, its dispatch surface and the
+run's `ToolSelection` of each provider. A resume serves the prompt from that
+record and never rebuilds it from the live catalog. Drift is judged per
+call, against the recorded tool under its provider's key
+(`ToolSurfaceDrift::judge`): a call to a tool its provider no longer serves,
+or serves with another dispatch surface, parks typed (`ParkReason::BindingDrift`);
+a call to an undrifted tool runs. Which tools a provider offers is that
+provider's own config, changed by its owner's typed command or stated for
+one run as a run option, never a session-wide authority.
 
-### One owner for installing persisted tool state
-
-`install_persisted_tool_state` owns tool-state reconciliation for a run's
-construction of the session's capabilities, a host restore command, a
-persisted-state install and a resident re-sync. It returns a
-`ToolRestoreReport` and never refuses. The runtime keeps the report until its
-next turn starts, which reports a non-clean one as
-`TurnEvent::ToolRestoreReported` right after `TurnStarted`. The sender reads
-it on the run's output (`TurnOutput::tool_restore_report`), and observers read
-the same typed event on the session's observation feed.
-
-### The report separates three facts
-
-The report distinguishes:
-
-- A lost member has persisted `member: true` and no resolving live source.
-- A parked opt-out has no resolving source and persisted `member: false`.
-- A replaced identity has a live tool owning its model-facing name under a
-  different id. The new identity stays a default member; the old grant and
-  opt-out do not transfer.
-
-Only lost members produce a warning. An orphan preserves the host's member
-bit; effective membership is `member && !orphaned`, so rebind can restore it.
-Alias replacement drops the replaced identity instead of retaining an orphan.
-
-Source: `crates/lash-core-execution/src/tool_registry/rebind.rs:128`.
-
-### Delivery
-
-A non-clean report also emits a `tool_restore.report` trace event with its
-site and the three classes. A clean report emits neither the trace event nor
-the turn event.
-
-Source: `crates/lash-core/src/runtime/tool_restore.rs`.
-
-### Tool-source policy
-
-The host must choose `ToolSourcePolicy::Tolerate` or `ToolSourcePolicy::Require`
-through `LashCoreBuilder::tool_source_policy`; a builder installs neither by
-default. Under `Require`, a turn run,
-fresh or resumed, previews the restore over the plugins it materialized
-before it installs the session's tool state, and refuses when it would lose
-a member (FIG-5325). The refusal is the run's typed terminal,
-`RuntimeErrorCode::ToolSourcesUnavailable` with the report as its
-`RuntimeErrorCause`, which the session actor commits as the run's `Refused`
-terminal and the sender reads as `SendOutcome::Refused`. Parked opt-outs and
-replaced identities do not refuse. The refused run makes no config or state
-commit, restores no protocol session and emits no `SessionRestored`. Command
-runs build their session under `Tolerate`, so a host's tool restore still
-applies on a `Require` core. The core sets the policy for every run its node
-executes.
-
-Tolerate permits reading and continuing a conversation during tool-source
-outages. A deployment whose tool set is part of its execution contract can
-choose Require. This policy checks tool restoration, not every condition
-needed to run a turn.
-
-Sources: `crates/lash-core/src/runtime/tool_restore.rs` and
-`crates/lash-core/src/runtime/plugin_transition.rs`.
-
-### Host tool administration is durable
-
-`ToolAdmin::state` reads the tool state the session's durable head recorded,
-beside the `ChangeToolState` commands a host submitted that no run applied
-yet, typed as pending; it builds nothing. A membership change, snapshot apply
-or restore is a `SessionCommand::ChangeToolState`: refused at once with a
-typed `ReconfigureError` when it is invalid against the recorded snapshot,
-otherwise applied in lane order by the command run against the capabilities
-its transition built, and settled as a typed `ToolStateChangeOutcome`. A
-protocol session extension is durable the same way: its session nodes are a
-host append the command lane applies, which the protocol folds on every
-restore.
-
-Sources: `crates/lash/src/admin/tool_state.rs` and
-`crates/lash-core/src/runtime/tool_state_commands.rs`.
+Sources: `crates/lash-core-store/src/tool_surface.rs` and
+`crates/lash-core-execution/src/tool_registry.rs`.
 
 ### Every host admin read and write needs no activated runtime
 
@@ -210,31 +145,26 @@ another process ran it, or a cold reopen's recorded admission does not
 validate against this core. So no admin surface reads an activated runtime
 (FIG-5139):
 
-- Reads answer from the durable head or the session store: tool state and
-  active manifests (above); the execution snapshot
+- Reads answer from the durable head or the session store: the execution
+  snapshot
   (`SessionStateAdmin::snapshot_execution`), the head checkpoint's
   execution root and leaves, `None` when the head records none; the config
   revision and catalog; processes. Host registrations live in host storage
-  under ADR 0137. The synchronous
-  `ObservableSession::tool_state` and `active_tool_manifests` answer the
-  adopted head's recorded tool state when no registry is built.
+  under ADR 0137.
 - Writes are session commands applied at the next transition: appends,
-  frame opens, compaction, config transactions, tool-state changes, plugin
-  commands and tasks.
+  frame opens, compaction, config transactions, plugin commands and tasks.
 - Removed, with no durable meaning: `SessionStateAdmin::restore_execution`
   (execution state moves only with history; seed a fresh interpreter with
-  `open_agent_frame`), `ToolAdmin::resolve_contract` and `ToolCatalogMiss`
-  (a contract is the live provider's; the recorded manifest, with its
-  compact contract, is `ToolAdmin::active_manifests`), and
-  `ToolAdmin::remove_source` (a source handle is process-local; a session
-  drops a tool with `set_membership(id, false)`).
+  `open_agent_frame`) and `ToolAdmin` with all of its reads and writes
+  (FIG-6074: a run's recorded surface is the tool record, and which tools a
+  provider offers is its own config).
 
 A plugin query is not an admin read: it runs plugin code over the plugin
 view the session's last run or command published, as its head records it.
 It runs on the plugins a run built on the handle's runtime, or else on a
 private build of that recorded view, which registers, installs and appends
 nothing; an open still builds no capabilities (FIG-5344). A store-backed head
-records that view as its namespace components, config and tool state, never
+records that view as its namespace components and config, never
 as a native view copy that every commit would rewrite (FIG-5896). Where the
 head records no published view, because the session never ran or commanded, it
 is refused with the typed `PluginOperationInvokeError::NotPublished`; a host
@@ -265,7 +195,8 @@ Sources: `crates/lash/src/session.rs` (`open_resolved`) and
 
 ## Consequences
 
-Durable queue access cannot orphan tools or emit runtime restoration events.
+Durable queue access cannot change a run's tool surface or emit runtime
+restoration events.
 Multiple correctly bound handles can operate beside the serialized shift.
 Acquiring a runtime for a poll would perform reconciliation without an
 execution need. Inferring execution completion from a queue row disappearing

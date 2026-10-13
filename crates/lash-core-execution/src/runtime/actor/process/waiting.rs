@@ -3,8 +3,8 @@
 //! the node that waits when the engine named one. A wait is entered when the
 //! actor releases to wait on rows, and ended by the transition after which
 //! it no longer holds.
-use super::activation::append_event as append;
 use super::driver::{Blocked, Driver};
+use super::effects::append_event as append;
 use crate::runtime::actor::round::{MemberState, RunFold};
 use crate::{ProcessId, ProcessRecord, StepRequest, WaitKind, WaitState};
 use lash_durable::ActorTx;

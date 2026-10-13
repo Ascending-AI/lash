@@ -216,8 +216,9 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
             drain: lash_durable::runner::Drain::default(),
             sessions: Arc::new(sessions),
             processes: Some(Arc::new(processes)),
-            // The SQL-defined workers install no process component.
-            serves: Vec::new(),
+            // The SQL-defined workers install no process component: the
+            // node serves its core's session callbacks.
+            serves: lash::testing::node_serves(&core),
         },
         stop,
     )

@@ -1271,6 +1271,7 @@ impl DurableStore for PostgresDurableStore {
                     let mut claimed = rows
                         .iter()
                         .map(|row| {
+                            let requires = requires_of(get::<Option<String>>(row, 4)?)?;
                             Ok(Claimed {
                                 actor: actor_key(&get::<String>(row, 0)?)?,
                                 epoch: Epoch(get(row, 1)?),
@@ -1279,11 +1280,8 @@ impl DurableStore for PostgresDurableStore {
                                 } else {
                                     ClaimCause::Ready
                                 },
-                                purpose: ClaimPurpose::of(
-                                    node,
-                                    &get::<String>(row, 3)?,
-                                    &requires_of(get::<Option<String>>(row, 4)?)?,
-                                ),
+                                purpose: ClaimPurpose::of(node, &get::<String>(row, 3)?, &requires),
+                                requires,
                             })
                         })
                         .collect::<Result<Vec<_>, DurableError>>()?;
@@ -1309,11 +1307,13 @@ impl DurableStore for PostgresDurableStore {
                     .map_err(sqlx_failure)?;
             rows.into_iter()
                 .map(|(key, epoch, formats, requires)| {
+                    let requires = requires_of(requires)?;
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
-                        purpose: ClaimPurpose::of(node, &formats, &requires_of(requires)?),
+                        purpose: ClaimPurpose::of(node, &formats, &requires),
+                        requires,
                     })
                 })
                 .collect()

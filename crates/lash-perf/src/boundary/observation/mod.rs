@@ -134,10 +134,14 @@ fn workload_component(
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Tools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![self.mark.manifest()]
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "mark").then(|| Arc::new(self.mark.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -235,7 +239,6 @@ impl Fleet {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended());
             let identity = node_identity(index, &run);
@@ -311,14 +314,17 @@ pub(super) fn unique(name: &str) -> String {
 }
 
 /// The environment a workload's processes run under and are admitted
-/// against: the workload tool, from the component that provides it.
-fn environment() -> Result<ProcessEnv> {
-    let tools = lash::plugins::SessionToolAccess::restricted([mark_definition()?])?;
-    Ok(
-        ProcessEnv::builder(tools, lash::MaxToolCalls::new(1_000_000))
-            .component(WORKLOAD_TOOLS, &())
-            .build()?,
-    )
+/// against: the workload tool's component, linking `tools.mark` when the
+/// document performs it (a start links exactly what its process performs).
+fn environment(marks: bool) -> Result<ProcessEnv> {
+    let builder =
+        ProcessEnv::builder(lash::MaxToolCalls::new(1_000_000)).component(WORKLOAD_TOOLS, &());
+    let builder = if marks {
+        builder.link_tool(WORKLOAD_TOOLS.tool_provider("tools"), &mark_definition()?)
+    } else {
+        builder
+    };
+    Ok(builder.build()?)
 }
 
 /// A workflow lash admitted from a kernel document and holds under a pin.
@@ -335,7 +341,7 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
     use lash::workflow::edit::Draft;
     let mut document =
         parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
-    let environment = environment()?;
+    let environment = environment(!document.manifest.effects.is_empty())?;
     let artifacts = core.host_artifacts();
     // The document performs each effect under the signature this host
     // offers it under.

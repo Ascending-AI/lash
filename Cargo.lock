@@ -2164,6 +2164,8 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
+ "lash-kernel-check",
+ "lash-kernel-doc",
  "proptest",
  "rmp-serde",
  "schemars",
@@ -2644,6 +2646,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "lash-internal-core",
+ "serde",
  "serde_json",
 ]
 
@@ -2829,6 +2832,7 @@ name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "serde_json",
  "thiserror",
 ]
 

@@ -87,7 +87,6 @@ mod store_contract_state_machine;
 mod store_maintenance_outcome;
 mod store_recovery;
 mod support_prelude;
-mod tool_access_persistence;
 mod tool_intent_retention;
 
 #[cfg(feature = "lash-vm")]
@@ -129,7 +128,6 @@ pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
 pub use store_recovery::*;
 pub(crate) use support_prelude::*;
-pub use tool_access_persistence::*;
 pub use tool_intent_retention::*;
 
 mod attachment_delivery;

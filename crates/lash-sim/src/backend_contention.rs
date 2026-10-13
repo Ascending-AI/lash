@@ -218,7 +218,6 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
         retention: lash_core::Retention::UntilGc,
@@ -241,7 +240,7 @@ async fn stale_head_transaction_is_rejected(
     let current = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -254,7 +253,7 @@ async fn stale_head_transaction_is_rejected(
     let stale = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         head_revision: expected_head_revision,
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -292,7 +291,7 @@ async fn operation_commit_retry_and_conflict_are_fenced(
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -320,7 +319,7 @@ async fn operation_commit_retry_and_conflict_are_fenced(
     let changed_state = RuntimeSessionState {
         session_id: SessionId::fixture(session_id.to_string()),
         turn_index: 1,
-        ..RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

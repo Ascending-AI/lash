@@ -59,7 +59,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
                         for (id, host) in hosts.lock_recover().iter() {
                             let session = host.session(&SessionId::from(id)).unwrap();
                             assert!(session.export_state().plugins.is_empty());
-                            let mut exported = crate::RuntimeSessionState::ambient_fixture(
+                            let mut exported = crate::RuntimeSessionState::fixture(
                                 crate::testing::mock_session_policy(),
                             );
                             exported
@@ -147,7 +147,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let parent = host
         .defer_session(PluginSessionRequest::creation(
             "private-parent",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         ))
         .unwrap();
     let transition = |id: &str, state: &crate::PluginState| {
@@ -204,7 +204,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
     let owned_child = parent
         .fork_for_session(
             "private-child",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            crate::plugin::SessionAuthorityContext::fixture(),
         )
         .unwrap();
     let child = restricted
@@ -237,7 +237,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             .plugins
             .is_empty()
     );
-    let mut runtime_state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut runtime_state = crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -256,7 +256,6 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),
@@ -284,7 +283,6 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::testing::sqlite_memory_store_backend().await,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-        crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
         crate::DataRetentionConfig::standard(),

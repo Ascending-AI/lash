@@ -28,7 +28,7 @@ use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableInstant, LeaseConfig};
 use lash_durable_test::{Fault, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_sansio::sync::MutexExt as _;
-use lash_sansio::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 
 const KIND: &str = "l9d-law";
@@ -82,6 +82,13 @@ fn event_name(event: &EngineEvent) -> String {
 
 #[async_trait::async_trait]
 impl ProcessEngine for LawEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -182,7 +189,7 @@ impl ProcessEngine for LawEngine {
             ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
                 steps: vec![StepRequest::Tool {
                     step: StepName("refused".to_owned()),
-                    tool: ToolId::new(REFUSED_TOOL),
+                    effect: lash_core_execution::testing::effect(REFUSED_TOOL),
                     input: json!({}),
                     site: None,
                 }],
@@ -255,21 +262,18 @@ impl ProcessSteps for LawSteps {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        if step.admitted_tool(KIND).as_str() == REFUSED_TOOL {
+        if lash_core_execution::testing::step_tool(step, KIND).as_str() == REFUSED_TOOL {
             return Err(StepRefusal::Refused {
                 step: step.step().0.clone(),
                 reason: "its input does not match the tool's declaration".to_owned(),
             });
         }
-        Ok(StepAdmission {
-            park: None,
-            policy: ExecutionPolicy::Once,
-            limit: ExecutionLimit::starting_at(
-                now_ms,
-                Duration::from_secs(60),
-                Duration::from_secs(60),
-            ),
-        })
+        Ok(StepAdmission::new(
+            lash_core_execution::testing::step_tool(step, KIND),
+            ExecutionPolicy::Once,
+            ExecutionLimit::starting_at(now_ms, Duration::from_secs(60), Duration::from_secs(60)),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.

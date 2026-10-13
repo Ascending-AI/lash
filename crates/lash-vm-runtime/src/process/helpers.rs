@@ -1,25 +1,26 @@
 //! Kernel processes that depend on a helper release a build stops
-//! retaining, and their adoption onto the build's own helpers (FIG-5799).
+//! retaining (FIG-5799), and the plan that would carry one onto the
+//! build's own helpers.
 //!
 //! A helper fix is a new function, and so is every helper that calls it: a
 //! process written against an earlier release pins that release's
 //! functions, and resumes on exactly them while the build retains the
-//! release. Before a build stops retaining it, each process that still
-//! pins one of its functions ends, is adopted, or is ended by an operator.
-//! Adopting replaces each pinned function with the build's function of the
-//! same name, rewrites the document, and carries the parked run onto it
+//! release. Nothing moves it off them on its own (FIG-6074, D2): before a
+//! build stops retaining the release, each process that still pins one of
+//! its functions ends or is ended by an operator, and the build's node
+//! refuses to start while one is left. [`plan_helper_adoption`] replaces
+//! each pinned function with the build's function of the same name,
+//! rewrites the document, and carries the parked run onto it
 //! (`lash_kernel_migrate::adopt`); a run that stands inside a replaced body
-//! no correspondence carries is refused, typed, and goes on as written.
+//! no correspondence carries is refused, typed.
 //!
 //! [`survey_helper_processes`] lists the dependents for `lashctl
-//! kernel-migration list`; a node of a build whose kernel engine adopts
-//! ([`KernelProcessEngine::adopting_helpers`]) adopts each it claims, as
-//! its first commit, when every live node serving it holds the build's
-//! helpers.
+//! kernel-migration list`, each with the typed reason its run would not
+//! carry onto the build's helpers.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core::{EngineState, ProcessId};
+use lash_core::ProcessId;
 use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionId, FunctionName, FunctionRegistry,
     KernelVersion, Site, Unit, validate_document,
@@ -28,30 +29,13 @@ use lash_kernel_migrate::{ParkedRefusal, Rewritten};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::state::{OpenedRun, WholeState, capture_whole};
 
-use super::state::{KernelEngineState, KernelProcessInput, Phase, SealedRun, Wait};
-use super::{DocumentStoreError, KernelDocuments, KernelMigrationSurveyError, advance};
+use super::state::KernelProcessInput;
+use super::{KernelDocuments, KernelMigrationSurveyError, advance};
 
 /// The functions a build stops holding when it stops retaining a helper
 /// release, each with the build's function of the same name and kernel
 /// version, when it has one (`lash_vm_library::standard_retired_helpers`).
 pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
-
-/// The functions of every helper release before this build's own that the
-/// build retains, each with its counterpart: what a node whose engine
-/// adopts carries processes off.
-///
-/// # Errors
-///
-/// The library's: the shipped library does not assemble.
-pub fn retained_earlier_helpers() -> Result<RetiredHelpers, lash_vm_library::LibraryError> {
-    let mut retired = RetiredHelpers::new();
-    for (_, release) in lash_vm_library::RETAINED_HELPER_RELEASES {
-        if *release < lash_vm_library::HELPER_RELEASE {
-            retired.extend(lash_vm_library::standard_retired_helpers(*release)?);
-        }
-    }
-    Ok(retired)
-}
 
 /// Why a run is not adopted onto a build's own helpers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
@@ -239,108 +223,6 @@ fn adopt_run(
     .map_err(|failure| state(failure.to_string()))
 }
 
-/// A stored state adopted, before its document is published.
-pub(crate) struct Adopted {
-    pub(crate) state: KernelEngineState,
-    pub(crate) input: KernelProcessInput,
-    pub(crate) document: Document,
-}
-
-pub(crate) enum AdoptError {
-    Refused(HelperAdoptionRefusal),
-    Store(DocumentStoreError),
-}
-
-/// `state`, written by this build's engine in `writes`, adopted onto the
-/// counterparts of the `retired` functions its document reaches; `None`
-/// when it reaches none or a run is in flight, which is adopted at its
-/// next park.
-pub(crate) async fn adopt_state(
-    documents: &KernelDocuments,
-    functions: &FunctionRegistry,
-    retired: &RetiredHelpers,
-    writes: KernelVersion,
-    state: &EngineState,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
-) -> Result<Option<Adopted>, AdoptError> {
-    let undecodable =
-        |message: String| AdoptError::Refused(HelperAdoptionRefusal::State { message });
-    let (mut state, written) =
-        advance::decode(writes, state).map_err(|error| undecodable(error.to_string()))?;
-    // A state of an earlier kernel version is carried by its migration
-    // first; a run in flight is adopted at its next park.
-    if written != writes || matches!(state.phase, Phase::Running { .. } | Phase::Ended) {
-        return Ok(None);
-    }
-    let input = KernelProcessInput::from_payload(&state.payload)
-        .map_err(|error| undecodable(error.to_string()))?;
-    let base = documents
-        .get(&input.document)
-        .await
-        .map_err(AdoptError::Store)?
-        .ok_or(AdoptError::Refused(
-            HelperAdoptionRefusal::DocumentMissing {
-                document: input.document,
-            },
-        ))?;
-    let whole = state
-        .parked
-        .as_ref()
-        .map(super::migrate::unsealed)
-        .transpose()
-        .map_err(undecodable)?;
-    let admitted: Vec<AdmittedWait> = state
-        .admissions
-        .values()
-        .map(|admission| admission.0.clone())
-        .collect();
-    let Some(adopted) = plan_helper_adoption(
-        &base,
-        whole.as_ref().map(|whole| (whole, admitted.as_slice())),
-        functions,
-        retired,
-        limits,
-    )
-    .map_err(AdoptError::Refused)?
-    else {
-        return Ok(None);
-    };
-    let identify = |identity: &mut lash_kernel_doc::EffectIdentity| {
-        adopted
-            .rewritten
-            .effect_identity(&base, identity)
-            .map(|carried| *identity = carried)
-            .map_err(|refusal| {
-                AdoptError::Refused(HelperAdoptionRefusal::Parked {
-                    document: adopted.from,
-                    refusal,
-                })
-            })
-    };
-    for wait in state.waits.values_mut() {
-        let (Wait::Step { identity, .. } | Wait::Timer { identity, .. }) = wait;
-        identify(identity)?;
-    }
-    for delivery in &mut state.settled {
-        identify(&mut delivery.identity)?;
-    }
-    for admission in state.admissions.values_mut() {
-        identify(&mut admission.0.identity)?;
-    }
-    let owner = state.parked.as_ref().map(|parked| parked.0.owner().clone());
-    state.parked = match (adopted.parked, owner) {
-        (Some(carried), Some(owner)) => Some(SealedRun(
-            carried.sealed(owner, &adopted.rewritten.identity().to_string()),
-        )),
-        _ => None,
-    };
-    Ok(Some(Adopted {
-        state,
-        input,
-        document: adopted.rewritten.document,
-    }))
-}
-
 /// A kernel process that pins a function of a helper release a build stops
 /// retaining.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -348,7 +230,8 @@ pub struct HelperDependentProcess {
     pub process: ProcessId,
     /// The retired functions its document reaches.
     pub functions: BTreeSet<FunctionId>,
-    /// Why a node that adopts would not adopt it; `None` when it would.
+    /// Why its run would not carry onto the build's helpers; `None` when
+    /// it would.
     pub refused: Option<HelperAdoptionRefusal>,
 }
 
@@ -368,8 +251,8 @@ pub struct HelperDependentSession {
 }
 
 /// Every unfinished kernel process of `backend`, started or not, whose
-/// document reaches a function of `retired`, with whether it would be
-/// adopted onto the build's helpers; `functions` is the build's library. It
+/// document reaches a function of `retired`, with whether its run would
+/// carry onto the build's helpers; `functions` is the build's library. It
 /// reads the store and writes nothing.
 ///
 /// # Errors

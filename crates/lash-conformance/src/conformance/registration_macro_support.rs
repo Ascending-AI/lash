@@ -34,7 +34,6 @@ pub use super::session_store_factory::*;
 pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;
-pub use super::tool_access_persistence::*;
 pub use super::tool_intent_retention::*;
 pub use lash_core::ProcessRegistry;
 

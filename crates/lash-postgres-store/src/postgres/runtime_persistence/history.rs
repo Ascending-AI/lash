@@ -549,7 +549,7 @@ pub(crate) async fn window_conn(
             config = graph
                 .nodes
                 .first()
-                .and_then(|node| node.frame_config(config.tool_access.clone()))
+                .and_then(|node| node.frame_config())
                 .ok_or_else(|| corrupt("SessionGraph", "frame has no config"))?;
         }
         graph

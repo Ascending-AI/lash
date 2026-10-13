@@ -11,16 +11,16 @@ fn rlm_core_type_is_nameable(core: lash::LashCore) {
 fn main() {
     fn local_serde<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     local_serde::<lash::workflow::WorkflowUnavailable>();
+    local_serde::<lash::tools::DeferredMatch>();
+    local_serde::<lash::tools::ExecutionBinding>();
+    let _ = deferred_resolution_uses_facade_types;
     let _ = rlm_tool_types_are_nameable;
     let _ = rlm_core_type_is_nameable;
 }
 
-fn resolver_factory_uses_facade_types(
-    factory: lash::rlm::RlmProtocolPluginFactory,
-    resolver: lash::tools::SharedDeferredToolResolver,
-) -> lash::rlm::RlmProtocolPluginFactory {
-    factory.with_deferred_tool_resolver_factory(move |ctx: &lash::plugins::PluginSessionContext| {
-        let _ = (&ctx.owner, &ctx.plugin_config);
-        Ok::<_, lash::plugins::PluginError>(resolver.clone())
-    })
+fn deferred_resolution_uses_facade_types(
+    cx: &lash::tools::DeferredResolveContext<'_>,
+    provider: std::sync::Arc<dyn lash::tools::DeferredToolProvider>,
+) {
+    let _ = (&cx.owner, &cx.run, &cx.config, provider);
 }

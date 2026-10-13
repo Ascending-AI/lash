@@ -349,7 +349,6 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
             .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
@@ -365,10 +364,7 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
         let core = build(&backend, "first-boot");
         let session = core
             .session(session_id.clone())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(8),
-            ))
+            .create(lash::SessionCreation::root(served::spec(8)))
             .await
             .expect("create the session");
         send(&session, "before-restart", "before the restart").await;
@@ -594,7 +590,7 @@ fn standard_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
 fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
     lash::LashCore::rlm_builder(
         backend.clone(),
-        served::rlm(backend, None, sim::untimed_workers()),
+        served::rlm(backend, sim::untimed_workers()),
     )
     .tools(lash::hook_key!("tools"), echo())
 }

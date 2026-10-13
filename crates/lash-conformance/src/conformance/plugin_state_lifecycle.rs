@@ -20,13 +20,13 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
         &fixture.host(),
         id,
         None,
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     )
     .await;
     let policy = crate::testing::mock_session_policy();
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::ambient_fixture(policy.clone())
+        ..RuntimeSessionState::fixture(policy.clone())
     };
     let hook_context = crate::plugin::TurnHookContext {
         session_id: id.into(),
@@ -77,7 +77,6 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
         state.plugin_state(),
         SessionAuthorityContext {
             plugin_config: state.admitted_plugin_config(),
-            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     )
     .await;
@@ -116,13 +115,13 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
     };
     let mut state = RuntimeSessionState {
         session_id: id.into(),
-        ..RuntimeSessionState::ambient_fixture(policy.clone())
+        ..RuntimeSessionState::fixture(policy.clone())
     };
     let plugins = support::construct(
         &fixture.host(),
         id,
         None,
-        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
     )
     .await;
     state
@@ -197,7 +196,6 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         Some(durable),
         SessionAuthorityContext {
             plugin_config: state.admitted_plugin_config(),
-            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
         },
     )
     .await;

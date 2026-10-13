@@ -3,7 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+pub use lash_kernel_check::type_of_schema;
+use lash_kernel_doc::{EffectName, Signature, Type};
 use lash_sansio::ToolId;
 
 /// One effect a document may perform, and the tool that answers it.
@@ -72,14 +73,7 @@ impl HostBoundary {
             name,
             HostEffect {
                 tool,
-                signature: Signature {
-                    params: vec![Param {
-                        name: Name::new("input"),
-                        ty: type_of_schema(input),
-                        optional: false,
-                    }],
-                    result: type_of_schema(output),
-                },
+                signature: lash_kernel_check::tool_signature(input, output),
                 controls,
             },
         )
@@ -198,69 +192,62 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
     }
 }
 
-/// The kernel type a JSON schema describes. A schema the grammar has no
-/// exact type for is [`Type::Any`]: the tool still validates its own input.
-pub fn type_of_schema(schema: &serde_json::Value) -> Type {
-    let Some(object) = schema.as_object() else {
-        return Type::Any;
-    };
-    if let Some(values) = object.get("enum").and_then(serde_json::Value::as_array) {
-        let texts: Option<Vec<String>> = values
-            .iter()
-            .map(|value| value.as_str().map(str::to_owned))
-            .collect();
-        return texts
-            .filter(|texts| !texts.is_empty())
-            .map_or(Type::Any, Type::Enum);
-    }
-    match object.get("type").and_then(serde_json::Value::as_str) {
-        Some("null") => Type::Null,
-        Some("boolean") => Type::Bool,
-        Some("integer") => Type::Int,
-        Some("number") => Type::Number,
-        Some("string") => Type::Text,
-        Some("array") => Type::List(Box::new(
-            object.get("items").map_or(Type::Any, type_of_schema),
-        )),
-        Some("object") => record_of(object),
-        _ => Type::Any,
-    }
-}
-
-/// A closed object schema as a record; any other object schema is `Any`.
-fn record_of(object: &serde_json::Map<String, serde_json::Value>) -> Type {
-    let Some(properties) = object
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-    else {
-        return Type::Any;
-    };
-    if object.get("additionalProperties") != Some(&serde_json::Value::Bool(false)) {
-        return Type::Any;
-    }
-    let required: BTreeSet<&str> = object
-        .get("required")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .collect();
-    Type::Record(RecordType {
-        fields: properties
-            .iter()
-            .map(|(field, schema)| RecordTypeField {
-                name: field.clone(),
-                ty: type_of_schema(schema),
-                optional: !required.contains(field.as_str()),
-            })
-            .collect(),
-        rest: None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_kernel_doc::{RecordType, RecordTypeField};
+
+    /// OPEN-RESULT-FITS (law 18, D4): a tool's result projects to an open
+    /// record, so a tool whose result adds a field serves a document checked
+    /// against the earlier schema-projected result, and the runtime check
+    /// takes the extra field. A manually authored closed result stays
+    /// closed and refuses it. Input projection is unchanged: a closed record.
+    #[test]
+    fn a_result_that_adds_a_field_fits_a_projected_result_and_not_a_closed_one() {
+        let input = serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["q"],
+            "properties": { "q": { "type": "string" } },
+        });
+        let result = |fields: serde_json::Value| {
+            serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["hits"],
+                "properties": fields,
+            })
+        };
+        let earlier = result(serde_json::json!({ "hits": { "type": "integer" } }));
+        let later = result(serde_json::json!({
+            "hits": { "type": "integer" },
+            "took_ms": { "type": "integer" },
+        }));
+        let expected = lash_kernel_check::tool_signature(&input, &earlier);
+        let provided = lash_kernel_check::tool_signature(&input, &later);
+        assert!(
+            lash_kernel_check::signature_serves(&provided, &expected),
+            "the added field fits the projected result"
+        );
+        let closed = Signature {
+            result: type_of_schema(&earlier),
+            ..expected.clone()
+        };
+        assert!(
+            !lash_kernel_check::signature_serves(&provided, &closed),
+            "a closed result refuses the open one"
+        );
+        assert_eq!(
+            provided.params[0].ty,
+            type_of_schema(&input),
+            "input stays a closed record"
+        );
+        json_serves(
+            &expected.result,
+            &serde_json::json!({ "hits": 3, "took_ms": 12 }),
+        )
+        .expect("the runtime check takes the extra field");
+    }
 
     /// Target 4: a tool's signature is stated in the kernel type grammar. A
     /// closed object schema is a record with its optional fields marked, and

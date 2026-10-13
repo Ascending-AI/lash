@@ -102,24 +102,18 @@ impl crate::runtime::LashRuntime {
         self.transition_run_plugins(scoped_effect_controller).await
     }
 
-    /// Build the session a turn run runs in over its recorded transition,
-    /// under the host's [`ToolSourcePolicy`](crate::ToolSourcePolicy): under
-    /// `Require` a run whose restore would lose a recorded member is
-    /// refused, typed, before anything is installed (FIG-5134). Its
-    /// preparation's terminal error ends the run as `Refused`, in the run's
-    /// own commit.
+    /// Build the session a turn run runs in over its recorded transition.
+    /// Its preparation's terminal error ends the run as `Refused`, in the
+    /// run's own commit.
     pub(in crate::runtime) async fn activate_turn_session(
         &mut self,
     ) -> Result<(), crate::RuntimeError> {
-        let policy = self.host.core.control.tool_source_policy;
-        self.activate_run_session(policy).await?;
+        self.activate_run_session().await?;
         self.deliver_undelivered_config_change().await;
         Ok(())
     }
 
-    /// Build the session a command run applies against. A command run
-    /// tolerates tool loss whatever the host's policy: a host's restore
-    /// answers its report instead of being refused (ADR 0119).
+    /// Build the session a command run applies against.
     ///
     /// Either build delivers the config change the session's head still
     /// owes its observers (FIG-5397), and the run's head commit retires it.
@@ -127,7 +121,7 @@ impl crate::runtime::LashRuntime {
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
     ) -> Result<(), crate::RuntimeError> {
-        self.materialize_run_session(scoped_effect_controller, crate::ToolSourcePolicy::Tolerate)
+        self.materialize_run_session(scoped_effect_controller)
             .await?;
         self.deliver_undelivered_config_change().await;
         Ok(())
@@ -156,11 +150,10 @@ impl crate::runtime::LashRuntime {
     async fn materialize_run_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
-        policy: crate::ToolSourcePolicy,
     ) -> Result<(), crate::RuntimeError> {
         self.transition_run_plugins(scoped_effect_controller)
             .await?;
-        self.activate_run_session(policy).await
+        self.activate_run_session().await
     }
 
     /// The transition half of [`Self::materialize_run_session`]: the run's
@@ -233,16 +226,12 @@ impl crate::runtime::LashRuntime {
 
     /// The activation half of [`Self::materialize_run_session`]: the session
     /// built, readied and restored over the recorded transition.
-    async fn activate_run_session(
-        &mut self,
-        policy: crate::ToolSourcePolicy,
-    ) -> Result<(), crate::RuntimeError> {
+    async fn activate_run_session(&mut self) -> Result<(), crate::RuntimeError> {
         if self.session.is_some() {
             return Ok(());
         }
         let plugin_error =
             |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
-        self.require_tool_sources(policy)?;
         Box::pin(self.materialize_published_session())
             .await
             .map_err(|error| match error {
@@ -252,46 +241,5 @@ impl crate::runtime::LashRuntime {
                     error.to_string(),
                 ),
             })
-    }
-
-    /// Under `Require`, refuse when restoring the session's recorded tool
-    /// state over the materialized plugins' sources would lose a member. It
-    /// previews the restore without changing the registry, so a refused run
-    /// installs nothing, restores no protocol session and emits no
-    /// `SessionRestored`. Parked opt-outs and superseded identities never
-    /// refuse: neither is a capability the session lost.
-    fn require_tool_sources(
-        &self,
-        policy: crate::ToolSourcePolicy,
-    ) -> Result<(), crate::RuntimeError> {
-        let (crate::ToolSourcePolicy::Require, Some(snapshot)) =
-            (policy, self.state.tool_state_snapshot())
-        else {
-            return Ok(());
-        };
-        let plugin_error =
-            |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
-        self.services.plugins.materialize().map_err(plugin_error)?;
-        let report = self
-            .services
-            .plugins
-            .tool_registry()
-            .preview_restore(snapshot)
-            .map_err(|error| {
-                crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::Plugin,
-                    format!("tool restore preview failed: {error}"),
-                )
-            })?;
-        if report.has_lost_members() {
-            return Err(
-                crate::RuntimeEffectControllerError::tool_sources_unavailable(
-                    &self.state.session_id,
-                    report,
-                )
-                .into_runtime_error(),
-            );
-        }
-        Ok(())
     }
 }

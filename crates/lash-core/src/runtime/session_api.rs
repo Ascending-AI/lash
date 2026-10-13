@@ -14,15 +14,13 @@ impl LashRuntime {
         &self.state
     }
 
-    /// Stamp the live tool and plugin state onto the resident state.
+    /// Stamp the live plugin state onto the resident state.
     ///
     /// # Errors
     /// The typed refusal of a plugin namespace that cannot be written in
     /// the format its admission recorded (FIG-4747).
     pub fn stamp_live_plugin_state(&mut self) -> Result<(), RuntimeError> {
         if let Some(session) = self.session.as_ref() {
-            let snapshot = session.plugins().tool_registry().export_state();
-            self.state.set_tool_state_snapshot(Some(snapshot));
             self.state
                 .capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
@@ -33,9 +31,9 @@ impl LashRuntime {
     /// through here (durable adoption and reload, append rollback and receipt
     /// replay, settled config commands, turn commits, session creation), so
     /// none can skip what a replacement owes the live session: the resident
-    /// authority, the tool access the plugin catalog projection reads, is
-    /// published to the live plugin session, invalidating discovery caches only when it changed, so live
-    /// discovery always reflects the settled authority (FIG-2415, FIG-2987).
+    /// plugin configuration is published to the live plugin session, so live
+    /// discovery always reflects the settled configuration (FIG-2415,
+    /// FIG-2987).
     pub(in crate::runtime) fn install_resident_state(
         &mut self,
         state: crate::RuntimeSessionState,
@@ -94,10 +92,10 @@ impl LashRuntime {
             .expect("test config formats decode");
     }
 
-    /// Publish the resident authority to the live plugin session: its tool
-    /// authority, and the plugin configuration its hooks run under — the
-    /// installed view's, which inside a run is the run's recorded
-    /// admission (FIG-4379).
+    /// Publish the resident authority to the live plugin session: the plugin
+    /// configuration its hooks and tool providers run under — the installed
+    /// view's, which inside a run is the run's recorded admission
+    /// (FIG-4379).
     pub(super) fn publish_resident_authority(&mut self) -> Result<(), crate::FormatRefusal> {
         let Some(session) = self.session.as_ref() else {
             return Ok(());
@@ -105,12 +103,6 @@ impl LashRuntime {
         session
             .plugins()
             .publish_plugin_config(self.state.admitted_plugin_config())?;
-        if session
-            .plugins()
-            .replace_tool_access(&self.state.authority.tool_access)
-        {
-            session.invalidate_runtime_caches();
-        }
         Ok(())
     }
     pub fn active_tool_catalog_shared(
@@ -134,23 +126,6 @@ impl LashRuntime {
             .unwrap_or_else(|| Ok(Arc::new(Vec::new())))
     }
 
-    pub fn tool_state(&self) -> Result<crate::ToolState, SessionError> {
-        match self.resident_session.validity() {
-            ResidentSessionState::Invalidated { decision_id } => {
-                self.trace_synchronous_resident_state_refusal(decision_id, "tool_state");
-                return Err(SessionError::Protocol(
-                    "resident session state is invalidated; durable reload is required".to_string(),
-                ));
-            }
-            ResidentSessionState::Valid => {}
-        }
-        let Some(session) = self.session.as_ref() else {
-            return Err(SessionError::Protocol(
-                "runtime session not available".to_string(),
-            ));
-        };
-        Ok(session.plugins().tool_registry().export_state())
-    }
     /// The protocol turn options the session runs under: a view of the
     /// protocol plugin's recorded configuration namespace (FIG-4379).
     pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
@@ -194,8 +169,6 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state().await?;
         let mut state = self.state.clone();
         if let Some(session) = self.session.as_ref() {
-            let snapshot = session.plugins().tool_registry().export_state();
-            state.set_tool_state_snapshot(Some(snapshot));
             state.capture_plugin_states(session.plugins(), self.fleet_format())?;
         }
         Ok(state)
@@ -375,23 +348,18 @@ impl LashRuntime {
             self.install_resident_state(adopted)?;
             return Ok(());
         }
-        let tracing = self.host.core.tracing.clone();
-        let tool_restore =
-            Box::pin(self.restore_resident_session_components(&mut adopted, &tracing))
-                .await
-                .map_err(|(_stage, error)| {
-                    if error.cause.is_some() {
-                        SessionError::Plugin(crate::PluginError::Runtime(error))
-                    } else {
-                        SessionError::Protocol(format!(
-                            "failed to restore the adopted session head: {error}"
-                        ))
-                    }
-                })?;
+        Box::pin(self.restore_resident_session_components(&mut adopted))
+            .await
+            .map_err(|(_stage, error)| {
+                if error.cause.is_some() {
+                    SessionError::Plugin(crate::PluginError::Runtime(error))
+                } else {
+                    SessionError::Protocol(format!(
+                        "failed to restore the adopted session head: {error}"
+                    ))
+                }
+            })?;
         self.install_resident_state(adopted)?;
-        if tool_restore.is_some() {
-            self.tool_restore_report = tool_restore;
-        }
         Ok(())
     }
 
@@ -509,10 +477,27 @@ impl LashRuntime {
             .host()
             .inspect_prompt_catalog(
                 crate::RuntimeOwner::Session(self.state.session_id.clone()),
-                self.state.authority.tool_access.clone(),
                 self.state.admitted_plugin_config(),
             )
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string()))
+    }
+
+    /// The surface the session's providers offer under its recorded config:
+    /// what its next run records before that run's own options. It records
+    /// nothing.
+    pub fn offered_tool_surface(&self) -> Result<crate::plugin::ResolvedToolSurface, RuntimeError> {
+        let plugin = |error: crate::PluginError| {
+            RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string())
+        };
+        // A session no run materialized yet builds its capabilities first.
+        self.services
+            .plugins
+            .prepare_capabilities()
+            .map_err(plugin)?;
+        self.services
+            .plugins
+            .build_tool_surface(&self.state.admitted_plugin_config())
+            .map_err(plugin)
     }
 
     /// The plugin session this runtime was assembled with, whether or not a
@@ -966,14 +951,15 @@ impl LashRuntime {
         if matches!(
             commands.as_slice(),
             [crate::SessionCommand::RefreshToolCatalog { .. }
-                | crate::SessionCommand::ChangeToolState { .. }
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
                 | crate::SessionCommand::CompactContext { .. }]
         ) && let Err(error) = Box::pin(self.materialize_command_session(effect_controller)).await
         {
-            if matches!(error.run_shape_refusal(), Some(crate::RunShapeRefusal::Owner { refusal })
-                    if matches!(refusal.owner_refusal::<crate::CoreConfigRefusal>(), Some(crate::CoreConfigRefusal::ToolNamespaceCollision { .. })))
+            if error
+                .run_shape_refusal()
+                .and_then(super::config_ops::catalog_refusal_of)
+                .is_some()
             {
                 let committed = Box::pin(self.commit_host_command(
                     effect_controller,
@@ -1015,8 +1001,7 @@ impl LashRuntime {
                 crate::SessionCommand::AppendSessionNodes { .. }
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
-                | crate::SessionCommand::OpenAgentFrame { .. }
-                | crate::SessionCommand::ChangeToolState { .. },
+                | crate::SessionCommand::OpenAgentFrame { .. },
             ] => {
                 drop(RuntimeNamedPhase::begin(
                     self.turn_phase_probe.clone(),
@@ -1052,14 +1037,6 @@ impl LashRuntime {
                     super::host_commands::HostPluginOperation::Task,
                     name.clone(),
                     args.clone(),
-                    completion,
-                    effect_controller,
-                ))
-                .await;
-            }
-            [crate::SessionCommand::ChangeToolState { change }] => {
-                return Box::pin(self.apply_tool_state_command(
-                    change.as_ref().clone(),
                     completion,
                     effect_controller,
                 ))
@@ -1161,8 +1138,7 @@ impl LashRuntime {
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
                 | crate::SessionCommand::OpenAgentFrame { .. }
-                | crate::SessionCommand::ApplyConfigTransaction { .. }
-                | crate::SessionCommand::ChangeToolState { .. }) => {
+                | crate::SessionCommand::ApplyConfigTransaction { .. }) => {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::SessionCommandRequired,
                         format!(

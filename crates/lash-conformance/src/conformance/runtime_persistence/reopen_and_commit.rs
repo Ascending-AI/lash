@@ -137,15 +137,13 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     // First commit writes a live checkpoint blob.
     let mut v1 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    v1.set_tool_state_snapshot(Some(
-        ToolState::default().with_generation_for_conformance(1),
-    ));
+    v1.set_plugin_state(Some(super::plugin_state_at(1)));
     let v1_result = commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v1),
@@ -158,15 +156,13 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
     let mut v2 = RuntimeSessionState {
         session_id: SessionId::from("gc-blobs"),
         head_revision: v1_result.head_revision,
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ))
     };
-    v2.set_tool_state_snapshot(Some(
-        ToolState::default().with_generation_for_conformance(2),
-    ));
+    v2.set_plugin_state(Some(super::plugin_state_at(2)));
     commit_runtime_state_for_test(
         &store,
         RuntimeCommit::persisted_state_for_test(&v2),
@@ -205,10 +201,12 @@ pub async fn gc_blobs(factory: ReopenableRuntimeStore) {
         read.checkpoint
             .and_then(|checkpoint| {
                 checkpoint
-                    .decode_component::<ToolState>(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
-                    .expect("decode reachable tool state")
+                    .decode_component::<std::collections::BTreeMap<String, serde_json::Value>>(
+                        crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
+                    )
+                    .expect("decode reachable plugin state")
             })
-            .map(|tool_state| tool_state.generation()),
+            .and_then(|state| super::plugin_state_generation(&state)),
         Some(2),
         "gc must preserve the reachable checkpoint's snapshots"
     );
@@ -262,7 +260,7 @@ pub async fn attachment_acquisition_preserves_receiving_referrer(store: Arc<dyn 
 pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -305,7 +303,7 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
 pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -355,7 +353,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
 pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -438,7 +436,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
 pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -486,7 +484,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 ) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -535,7 +533,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
 pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
@@ -576,7 +574,7 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
 pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),
-        ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+        ..RuntimeSessionState::fixture(crate::SessionPolicy::new(
             crate::TurnBudget::Unbounded,
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),

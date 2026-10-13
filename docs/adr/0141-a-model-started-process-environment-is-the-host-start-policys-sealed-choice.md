@@ -51,15 +51,16 @@ refusal. A changed policy cannot alter a declaration that already committed.
 ### 4. Inheritance and presets are explicit choices
 
 The host may choose `policy::from_run` with its own ordered component mapping,
-`cx.inherit()` inside a process, `policy::inherit_or`, `policy::published`, or
-`policy::refuse`. None is a default. `cx.engine_defaults()` is also an explicit
+`cx.restrict()` inside a process (FIG-6074: the enclosing environment
+restricted to the effects the target performs), `policy::restrict_or`,
+`policy::published`, or `policy::refuse`. None is a default. `cx.engine_defaults()` is also an explicit
 choice, sealed as settings at declaration, rather than consulted at realization.
 A host start states `EngineLaunch` itself.
 
-A process environment admits only Restricted tools. Ambient is refused at
-publication and at every start that chooses an environment (D7). Comparisons
-against a session use its resolved offered catalog; opaque capability refs
-are compared for equality, never presumed narrower.
+A process environment links each effect its process performs to one tool,
+exactly: a start whose environment links an effect the process does not
+perform, or leaves one unlinked, is refused (FIG-6074, P1). Opaque
+capability refs are compared for equality, never presumed narrower.
 
 ## Consequences
 

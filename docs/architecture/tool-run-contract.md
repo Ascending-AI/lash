@@ -95,8 +95,9 @@ before any is admitted.
 
 **Declaration.** The author declares exactly `may_defer`, `intents` and
 `isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`. Admission
-reads it from the manifest the call is admitted under: the catalog's, the
-grant's, or a replayed cell's recorded binding. A manifest is complete by
+reads it from the manifest the call is admitted under: the run's recorded
+surface's, a recorded deferred match's, or a replayed cell's recorded
+binding. A manifest is complete by
 construction: one with an invalid declaration, without a bound its host must
 set, or isolated without naming its process engine cannot be built or
 decoded (`RegistrationRefused`), and an isolated tool enters a catalog only
@@ -121,8 +122,12 @@ before invoking any callback. A missing key parks with
 implementation under the same key completes an unfinished derivation.
 Stream-hook state records its format, and the owning plugin declares its
 native and readable stream-state formats. An unreadable one parks with
-`StreamStateFormatUnreadable`; a readable older format runs. Deferred grant
-bindings have no readability check until the `ExecutionBinding` cutover.
+`StreamStateFormatUnreadable`; a readable older format runs. A deferred
+match's `ExecutionBinding { codec, format, payload }` is checked the same
+way, against the formats its codec provider declares, before the binding is
+installed or prepared and never by the provider's own reader first: an
+unreadable one parks with `ExecutionBindingUnreadable`
+(`execution_binding_unreadable`; FIG-6074).
 Presentation binds an optional singleton presenter followed by ordered steps;
 an empty plan is explicit and adopts no callback installed later.
 

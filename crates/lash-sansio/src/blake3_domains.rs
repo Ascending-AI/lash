@@ -111,6 +111,7 @@ pub(crate) const RETIRED_BLAKE3_DOMAINS: &[&str] = &[
     "lash-runtime-usage-payload/v2",
     "lash-runtime-usage-payload/v3",
     "lash-runtime-usage-payload/v4",
+    "lash-tool-catalog-authority/v2",
     "lash-tool-intent-payload/v2",
     "lash-tool-output-spill/v2",
     "lash-tool-schema-cache/v2",

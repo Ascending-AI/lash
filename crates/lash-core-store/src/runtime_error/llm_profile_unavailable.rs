@@ -40,7 +40,6 @@ impl RuntimeErrorCause {
             | Self::ArtifactReferrerEnded { .. }
             | Self::RunShapeRefused { .. }
             | Self::ConfigRefused { .. }
-            | Self::ToolSourcesUnavailable { .. }
             | Self::MaxToolCallsExceeded { .. }
             | Self::PluginStateUnrecorded { .. }
             | Self::PluginStateEffectOwnerMismatch

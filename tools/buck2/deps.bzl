@@ -304,6 +304,8 @@ PACKAGE_DEPS = {
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "rmp_serde": "//third-party/rust:p0285",
@@ -842,6 +844,7 @@ PACKAGE_DEPS = {
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "lash_core": "//crates/lash-core:lash-core",
+            "serde": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0320"
         }
     },
@@ -1043,6 +1046,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "serde_json": "//third-party/rust:p0320",
             "thiserror": "//third-party/rust:p0373"
         }
     },

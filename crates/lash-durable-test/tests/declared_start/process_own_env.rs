@@ -1,10 +1,11 @@
 //! A process runs under its own recorded environment, never its starting
 //! session's (FIG-6034, D18): PROCESS-OWN-ENV and NESTED-ENV.
 //!
-//! A code mode cell of a turn sent with its own model, a hidden tool and a
-//! capability ref starts a detached process through the run's policy, which
-//! names the probe component and the process controls. The process holds
-//! in its first step while the host narrows the session's tools, changes
+//! A code mode cell of a turn sent with its own model, a tool selection that
+//! leaves one tool out and a capability ref starts a detached process
+//! through the run's policy, which captures the run's recorded surface over
+//! the probe component and the process controls. The process holds in its
+//! first step while the host narrows the session's tool selection, changes
 //! its model and deletes it; the deployment stops. On a fresh worker over
 //! the same stores the process reads its catalog, model and capability refs
 //! and starts two children: one that inherits its environment and one under
@@ -30,13 +31,17 @@ const WAIT: &str = "probe_wait";
 const READ: &str = "probe_read";
 /// Offered at the send and narrowed out of the session afterwards.
 const LATER: &str = "probe_later";
-/// The probe component provides it; the send hides it.
+/// The probe component provides it; the send's selection leaves it out.
 const EXTRA: &str = "probe_extra";
+/// The plugin that offers the session its probe tools under the selection
+/// its own namespace holds.
+const SESSION_TOOLS: &str = "own-env-session-tools";
 /// The session offers it; no component provides it.
 const SESSION_ONLY: &str = "probe_session_only";
 
 const CELL: &str = r#"const body = async () => {
   await tools.probe_wait({});
+  await tools.probe_later({ who: "later" });
   const own = await tools.probe_read({ who: "parent" });
   const inherited = await processes.start({
     definition: async () => await tools.probe_read({ who: "inherit" }),
@@ -141,7 +146,7 @@ impl lash::tools::StaticToolExecute for ProbeBody {
                 catalog
                     .tools
                     .iter()
-                    .map(|entry| entry.manifest.name.clone())
+                    .map(|entry| entry.manifest.id.to_string())
                     .collect()
             })
             .unwrap_or_default();
@@ -222,16 +227,14 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
 /// component and the process controls.
 struct Policy;
 
-/// The environment a `new` child states: the read probe alone, a tool-call
-/// limit of its own and no model.
+/// The environment a `new` child states: the read probe alone, linked to
+/// the probe component's tool, a tool-call limit of its own and no model.
 fn new_environment() -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted([probe_definition(READ)]).expect("the probe"),
-        lash::MaxToolCalls::new(7),
-    )
-    .component(PROBE, &())
-    .build()
-    .expect("the environment builds")
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(7))
+        .component(PROBE, &())
+        .link_tool(PROBE.tool_provider("probe"), &probe_definition(READ))
+        .build()
+        .expect("the environment builds")
 }
 
 #[async_trait::async_trait]
@@ -241,13 +244,13 @@ impl lash_core::ProcessEnvPolicy for Policy {
         cx: &lash_core::ProcessEnvCx<'_>,
     ) -> Result<lash_core::ProcessStartChoice, lash_core::ProcessEnvPolicyError> {
         match cx.label {
-            Some("inherit") => cx.inherit(),
+            Some("inherit") => cx.restrict(),
             Some("new") => Ok(lash_core::ProcessStartChoice {
                 env: lash_core::ProcessEnvChoice::New(new_environment()),
                 engine_settings: cx.engine_defaults()?,
             }),
             _ => {
-                let (Some(run), Some(offered)) = (cx.run, cx.offered) else {
+                let (Some(run), Some(surface)) = (cx.run, cx.surface) else {
                     return Err(lash_core::ProcessEnvPolicyError::Fault(
                         "a top-level start has its run".into(),
                     ));
@@ -259,7 +262,8 @@ impl lash_core::ProcessEnvPolicy for Policy {
                     .map_err(lash_core::ProcessEnvPolicyError::Refused)?;
                 Ok(lash_core::ProcessStartChoice {
                     env: lash_core::ProcessEnvChoice::New(
-                        lash::process::ProcessEnv::from_run(run, offered, entries)
+                        cx.capture(run, surface, entries)
+                            .await
                             .map_err(lash_core::ProcessEnvPolicyError::Refused)?,
                     ),
                     engine_settings: cx.engine_defaults()?,
@@ -331,10 +335,10 @@ fn worker(
     );
     let core = lash::LashCore::rlm_builder(backend.clone(), factory)
         .llm_profiles(Arc::new(models))
-        .tools(
-            lash::hook_key!("tools"),
+        .plugin(Arc::new(lash::tools::SelectedToolsPlugin::new(
+            SESSION_TOOLS,
             probe_tools(seen, holds, &[WAIT, READ, LATER, EXTRA, SESSION_ONLY]),
-        )
+        )))
         .process_component(
             Arc::new(ProbeComponent {
                 seen: Arc::clone(seen),
@@ -358,7 +362,6 @@ fn worker(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -431,7 +434,6 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let session = first
         .session(session_id.clone())
         .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
             lash::SessionSpec::new(
                 SESSION_MODEL,
                 lash::TurnBudget::Unbounded,
@@ -451,10 +453,13 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
             .send(lash::TurnInput::text("start the process"))
             .run(run)
             .model(RUN_MODEL)
-            .tool_access(
-                lash::plugins::SessionToolAccess::ambient()
-                    .with_hidden_tools([EXTRA])
-                    .expect("a hidden tool"),
+            .options(
+                lash::RunOptionsKey::<lash::tools::ToolSelectionConfig>::new(SESSION_TOOLS),
+                lash::tools::ToolSelectionConfig {
+                    tools: Some(lash::tools::ToolSelection::AllExcept(vec![
+                        lash_core::ToolId::from(EXTRA),
+                    ])),
+                },
             )
             .output(),
     )
@@ -468,26 +473,34 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let parent = labelled(&backend, "parent").await;
     let env = stored_env(&backend, &parent).await;
 
-    // The host narrows the session's tools, changes its model and deletes
-    // it while the process holds.
+    // The host narrows the session's tool selection, changes its model and
+    // deletes it while the process holds.
     let session = first
         .session(session_id.clone())
         .open()
         .await
         .expect("the session opens");
-    session
-        .admin()
-        .tools()
-        .set_membership(lash_core::ToolId::from(LATER), false, "own-env:narrow")
-        .await
-        .expect("the narrowing is submitted")
-        .settle_with(
-            &session.admin().commands(),
-            lash::testing::admin_fixture_outcome,
+    let config = session.admin().config();
+    let revision = config.revision().await.expect("the config revision");
+    let narrowed = config
+        .apply(
+            lash::config::ConfigWrite::new("own-env:narrow", revision),
+            lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
+                tools: lash::tools::ToolSelection::AllExcept(vec![lash_core::ToolId::from(LATER)]),
+            }),
         )
         .await
+        .expect("the narrowing is accepted")
+        .await_outcome(&config)
+        .await
         .expect("the narrowing settles");
-    let config = session.admin().config();
+    assert!(
+        matches!(
+            narrowed,
+            lash::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{narrowed:?}"
+    );
     let revision = config.revision().await.expect("the config revision");
     let changed = config
         .apply(
@@ -554,28 +567,22 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
             .unwrap_or_else(|| panic!("the `{who}` step read: {reads:#?}"))
     };
     let own = read("parent");
-    // The catalog is the environment's tools that a component provides:
-    // the narrowed tool stays, the hidden one and the session-only one
-    // never come.
-    let admitted: BTreeSet<String> = env
-        .tools()
-        .restricted_tools()
-        .expect("a process's tools are restricted")
-        .iter()
-        .map(|tool| tool.manifest.name.clone())
+    // The catalog is the environment's linked tools: the effects the
+    // process performs, captured from the run's recorded surface. The
+    // narrowed tool stays; a tool the process never performs is never
+    // linked, whatever the run offered.
+    let linked: BTreeSet<String> = env
+        .effects()
+        .values()
+        .map(|link| link.tool().to_string())
         .collect();
-    assert!(
-        own.catalog.is_subset(&admitted),
-        "{own:#?} within {admitted:?}"
-    );
+    assert!(own.catalog.is_subset(&linked), "{own:#?} within {linked:?}");
     for name in [WAIT, READ, LATER] {
+        assert!(linked.contains(name), "{name}: {linked:?}");
         assert!(own.catalog.contains(name), "{name}: {own:#?}");
     }
-    assert!(
-        admitted.contains(SESSION_ONLY),
-        "the run offered {SESSION_ONLY}"
-    );
     for name in [EXTRA, SESSION_ONLY] {
+        assert!(!linked.contains(name), "{name}: {linked:?}");
         assert!(!own.catalog.contains(name), "{name}: {own:#?}");
     }
     assert_eq!(own.model.as_deref(), Some(RUN_MODEL), "the run's model");
@@ -583,8 +590,10 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let builds = seen.builds.lock_recover().clone();
     let parent_ref = parent.env_ref().expect("the parent's environment");
     assert!(builds.iter().any(|(env, _)| env == parent_ref));
+    let inherited = labelled(&backend, "inherit").await;
+    let inherited_ref = inherited.env_ref().expect("the restricted environment");
     for (env, capabilities) in &builds {
-        let expected = if env == parent_ref {
+        let expected = if env == parent_ref || env == inherited_ref {
             granted()
         } else {
             BTreeMap::new()
@@ -595,13 +604,21 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         );
     }
 
-    // NESTED-ENV.
-    let inherited = labelled(&backend, "inherit").await;
+    // NESTED-ENV: the child performs the read alone, so restricting the
+    // parent's env records a derived env holding the parent's own link for
+    // it, never re-resolved.
     let fresh_child = labelled(&backend, "new").await;
+    let restricted = stored_env(&backend, &inherited).await;
+    let read_effect = lash_core_execution::testing::effect_of(&probe_definition(READ));
     assert_eq!(
-        inherited.env_ref(),
-        parent.env_ref(),
-        "inherit records the parent's ref"
+        restricted.effects().keys().collect::<Vec<_>>(),
+        vec![&read_effect],
+        "restrict links the child's effects alone"
+    );
+    assert_eq!(
+        restricted.effects().get(&read_effect),
+        env.effects().get(&read_effect),
+        "with the parent's recorded link"
     );
     assert_eq!(
         inherited.engine_settings(),

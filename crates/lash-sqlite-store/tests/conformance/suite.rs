@@ -140,7 +140,6 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
             lash_core_execution::TurnBudget::Unbounded,
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
         retention: lash_core_execution::Retention::UntilGc,
@@ -211,7 +210,6 @@ async fn fork_session_rejects_a_malformed_target_session_id() {
             lash_core_execution::TurnBudget::Unbounded,
             lash::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
-            lash_core_execution::SessionToolAccess::ambient(),
         ),
         retention: lash_core_execution::Retention::UntilGc,
     };

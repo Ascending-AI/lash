@@ -3,16 +3,12 @@ use super::*;
 const PROBE: ProcessConfigKey<serde_json::Value> =
     ProcessConfigKey::new("probe", FormatVersion::ONE);
 
-fn restricted() -> SessionToolAccess {
-    SessionToolAccess::restricted(Vec::new()).expect("no tools")
-}
-
 /// ADR 0004: a process environment is a closed, typed shape. A field the
 /// type does not declare is refused when the bytes decode, not discovered
 /// later during process recovery; so is the retired captured-session shape.
 #[test]
 fn a_process_env_refuses_unknown_fields_and_the_retired_shape() {
-    let env = ProcessEnv::builder(restricted(), MaxToolCalls::new(8))
+    let env = ProcessEnv::builder(MaxToolCalls::new(8))
         .component(PROBE, &serde_json::json!({ "probe": 1 }))
         .build()
         .expect("env");
@@ -32,12 +28,12 @@ fn a_process_env_refuses_unknown_fields_and_the_retired_shape() {
 #[test]
 fn component_order_is_part_of_the_address_and_ids_are_unique() {
     const OTHER: ProcessConfigKey<()> = ProcessConfigKey::new("other", FormatVersion::ONE);
-    let forward = ProcessEnv::builder(restricted(), MaxToolCalls::new(8))
+    let forward = ProcessEnv::builder(MaxToolCalls::new(8))
         .component(PROBE, &serde_json::Value::Null)
         .component(OTHER, &())
         .build()
         .expect("env");
-    let reversed = ProcessEnv::builder(restricted(), MaxToolCalls::new(8))
+    let reversed = ProcessEnv::builder(MaxToolCalls::new(8))
         .component(OTHER, &())
         .component(PROBE, &serde_json::Value::Null)
         .build()
@@ -47,7 +43,7 @@ fn component_order_is_part_of_the_address_and_ids_are_unique() {
         reversed.stable_ref().expect("ref")
     );
     assert_eq!(
-        ProcessEnv::builder(restricted(), MaxToolCalls::new(8))
+        ProcessEnv::builder(MaxToolCalls::new(8))
             .component(PROBE, &serde_json::Value::Null)
             .component(PROBE, &serde_json::Value::Null)
             .build(),

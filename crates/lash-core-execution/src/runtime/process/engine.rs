@@ -97,6 +97,11 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
 /// of I0, FIG-5194). See [`super::engine_state`] for the advance contract
 /// and cancel.
 ///
+/// The effects a process performs, each with the kernel signature its code
+/// was checked against (P3).
+pub type PerformedEffects =
+    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>;
+
 /// No method has a default body: every engine answers every question
 /// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
 /// `External`) are not registered here.
@@ -171,6 +176,19 @@ pub trait ProcessEngine: Send + Sync {
         claim: &crate::ReferrerClaim,
         artifact_ref: &str,
     ) -> Result<(), crate::PluginError>;
+
+    /// The effects a run of `payload` performs (P3): each path its code
+    /// calls or spawns, with the kernel signature it was checked against.
+    /// An env links exactly these. An engine that performs no effect of its
+    /// own answers an empty map: its runs may link only `call_dynamic`.
+    ///
+    /// # Errors
+    ///
+    /// The payload names effects the engine cannot certify, typed.
+    async fn performed_effects(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<PerformedEffects, crate::ProcessEnvRefusal>;
 
     /// Check supplied start arguments against an authoritative signature.
     /// Engines with no checkable signature return a typed refusal.
@@ -775,6 +793,25 @@ impl ProcessEngineRegistry {
         payload: &serde_json::Value,
     ) -> Result<Option<EngineSettings>, crate::PluginError> {
         self.require(kind)?.default_settings(payload)
+    }
+
+    /// The effects a run of `payload` on the `kind` engine performs (P3).
+    ///
+    /// # Errors
+    ///
+    /// The engine is not configured, or it cannot certify the payload's
+    /// effects.
+    pub async fn performed_effects(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<PerformedEffects, crate::ProcessEnvRefusal> {
+        self.require(kind)
+            .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
+                reason: error.to_string(),
+            })?
+            .performed_effects(payload)
+            .await
     }
 
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind

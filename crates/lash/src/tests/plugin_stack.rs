@@ -63,12 +63,12 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
     );
     assert!(
         matches!(host.build_session(lash_core::plugin::PluginSessionRequest::creation(
-        "duplicate-owner", lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+        "duplicate-owner", lash_core::plugin::SessionAuthorityContext::fixture(),
     )), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
     );
     assert!(matches!(host.inspect_prompt_catalog(
         lash_core::RuntimeOwner::Session(SessionId::fixture("duplicate-owner")),
-        crate::plugins::SessionToolAccess::ambient(), Default::default(),
+        Default::default(),
     ), Err(lash_core::PluginError::Declaration(error)) if error == duplicate));
     let record = host.transition_plugins(
         crate::plugins::PluginTransitionRequest {
@@ -149,97 +149,6 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
         lash_core::PluginRuntimeEvent::Status { key, label, .. }
         if key == "surface" && label == "working"
     ));
-    Ok(())
-}
-
-/// Host tool curation is durable session state: it needs no built session,
-/// it applies in a run, and a session reopened on a new deployment over the
-/// stores restores it, the host's removal included (FIG-5134).
-#[tokio::test]
-async fn persisted_session_restores_tool_state() -> Result<()> {
-    let app_lookup = lash_core::ToolId::from("tool:app_lookup");
-    let stores = sqlite_memory_store_set().await;
-    let deploy = || {
-        explicit_ephemeral_facets(LashCore::standard_builder(lash_conformance::backend_over(
-            stores.clone(),
-        )))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .tools(crate::hook_key!("tools"), Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())
-    };
-    let core = deploy()?;
-    let session = core
-        .session(crate::SessionId::parse("persisted-tools").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
-    assert!(
-        session.admin().tools().state().await?.recorded().is_none(),
-        "an open builds no capabilities, so nothing has recorded tool state yet"
-    );
-    session
-        .admin()
-        .tools()
-        .set_membership(
-            app_lookup.clone(),
-            false,
-            "host:plugin_stack:set_membership:74",
-        )
-        .await?
-        .settle_with(
-            &session.admin().commands(),
-            crate::testing::admin_fixture_outcome,
-        )
-        .await?;
-    let curated = session.admin().tools().state().await?;
-    assert!(
-        curated.pending().is_empty(),
-        "the settled change is applied, not pending"
-    );
-    let curated = curated
-        .recorded()
-        .expect("the command run recorded the session's tool state")
-        .clone();
-    assert!(
-        !curated
-            .entries()
-            .get(&app_lookup)
-            .expect("app tool")
-            .is_member(),
-        "the command run applied the host's removal"
-    );
-    drop(session);
-    core.shutdown().await?;
-
-    let reopened_core = deploy()?;
-    let reopened = reopened_core
-        .session(crate::SessionId::parse("persisted-tools").expect("nonblank host identity"))
-        .open()
-        .await?;
-    reopened
-        .send(TurnInput::text("restore the persisted tool state"))
-        .output()
-        .await?;
-    let state = reopened.admin().tools().state().await?;
-    let restored = state
-        .recorded()
-        .expect("the run recorded the restored tool state");
-    assert!(
-        restored.generation >= curated.generation,
-        "the restored state continues the curated one: {} < {}",
-        restored.generation,
-        curated.generation
-    );
-    assert!(
-        !restored
-            .entries()
-            .get(&app_lookup)
-            .expect("app tool")
-            .is_member(),
-        "the host-removed tool is restored as a non-member"
-    );
-    reopened_core.shutdown().await?;
     Ok(())
 }
 
@@ -384,12 +293,16 @@ struct BuilderSentinelTools {
 
 #[async_trait]
 impl ToolProvider for BuilderSentinelTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        AppTools.tool_manifests()
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        AppTools.tool_manifests(config)
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        AppTools.resolve_contract(name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        AppTools.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

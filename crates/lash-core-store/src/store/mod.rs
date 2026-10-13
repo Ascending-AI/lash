@@ -17,9 +17,9 @@ pub use crate::plugin_state::fork_checkpoint_plugin_state;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor, CheckpointExecution,
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PLUGIN_ADMISSION_CHECKPOINT_COMPONENT,
-    PLUGIN_STATE_CHECKPOINT_COMPONENT, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
-    TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
-    ensure_checkpoint_component_hash_agreement,
+    PLUGIN_STATE_CHECKPOINT_COMPONENT, RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT,
+    SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    ensure_checkpoint_component_encoding_version, ensure_checkpoint_component_hash_agreement,
 };
 pub mod admission_plan;
 pub mod commit_budget;

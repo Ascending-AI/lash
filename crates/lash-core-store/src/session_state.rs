@@ -10,7 +10,7 @@ const LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION: &str =
 
 use crate::SessionId;
 use crate::TurnId;
-use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
+use crate::facade_support::SessionGraphFacadeOps;
 
 use crate::session_model::{LlmUsage, Message, SessionPolicy, plugin_message_to_message};
 use crate::{PersistedTurnState, SessionSnapshot};
@@ -169,18 +169,6 @@ impl RuntimeCheckpointComponents {
 
     fn from_snapshot(snapshot: &SessionSnapshot, fleet_format: crate::store::FleetFormat) -> Self {
         let mut result = Self::unproven();
-        if let Some(blob_ref) = snapshot.tool_state_ref.clone() {
-            result.entries.insert(
-                crate::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
-                ResidentCheckpointComponent::Unchanged {
-                    descriptor: Self::descriptor(blob_ref, fleet_format),
-                    body: ResidentCheckpointComponentBody::ToolState {
-                        snapshot: None,
-                        generation: snapshot.tool_state_generation,
-                    },
-                },
-            );
-        }
         if let Some(blob_ref) = snapshot.plugin_state_ref.clone() {
             result.entries.insert(
                 crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
@@ -226,18 +214,11 @@ impl RuntimeCheckpointComponents {
                 }
             })?;
             let body = match crate::plugin::CheckpointComponentKey::parse(key) {
-                crate::plugin::CheckpointComponentKey::ToolState => {
-                    let snapshot = checkpoint
-                        .decode_component_for_fleet::<crate::ToolState>(key, fleet_format)?
-                        .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
-                            record_kind: "HydratedSessionCheckpoint",
-                            message: format!("component `{key}` disappeared during decode"),
-                        })?;
-                    let generation = Some(snapshot.generation());
-                    ResidentCheckpointComponentBody::ToolState {
-                        snapshot: Some(snapshot),
-                        generation,
-                    }
+                crate::plugin::CheckpointComponentKey::RetiredToolState => {
+                    return Err(crate::StoreError::RetiredStoredShape {
+                        record_kind: "HydratedSessionCheckpoint",
+                        shape: crate::store::RETIRED_TOOL_STATE_CHECKPOINT_COMPONENT,
+                    });
                 }
                 crate::plugin::CheckpointComponentKey::PluginState => {
                     plugin_map = Some((key.clone(), descriptor));
@@ -335,10 +316,6 @@ impl RuntimeCheckpointComponents {
             let pending = match component {
                 ResidentCheckpointComponent::Changed { body, .. } => {
                     let body = match body {
-                        PendingCheckpointComponentBody::ToolState { snapshot, .. } => {
-                            crate::store::encode_checkpoint_component(key, snapshot)
-                                .map(std::sync::Arc::from)?
-                        }
                         PendingCheckpointComponentBody::PluginState { map, .. } => {
                             crate::store::encode_checkpoint_component(key, &map.map)
                                 .map(std::sync::Arc::from)?
@@ -379,39 +356,6 @@ impl RuntimeCheckpointComponents {
         self.component(key)
             .and_then(|component| component.descriptor())
             .map(|descriptor| &descriptor.blob_ref)
-    }
-
-    fn tool_state_snapshot(&self) -> Option<&crate::ToolState> {
-        self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
-            .and_then(ResidentCheckpointComponent::tool_state_snapshot)
-    }
-
-    fn tool_state_generation(&self) -> Option<u64> {
-        self.component(crate::store::TOOL_STATE_CHECKPOINT_COMPONENT)
-            .and_then(ResidentCheckpointComponent::tool_state_generation)
-    }
-
-    fn set_tool_state_snapshot(&mut self, snapshot: Option<crate::ToolState>) {
-        let key = crate::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string();
-        let Some(snapshot) = snapshot else {
-            self.entries.remove(&key);
-            return;
-        };
-        let generation = Some(snapshot.generation());
-        let descriptor = self
-            .entries
-            .get(&key)
-            .and_then(|entry| entry.descriptor().cloned());
-        self.entries.insert(
-            key,
-            ResidentCheckpointComponent::Changed {
-                descriptor,
-                body: PendingCheckpointComponentBody::ToolState {
-                    snapshot,
-                    generation,
-                },
-            },
-        );
     }
 
     fn plugin_state(&self) -> Option<&crate::PluginState> {
@@ -710,7 +654,6 @@ impl RuntimeCheckpointComponents {
 /// Durable authority inputs required to reconstruct a session on another worker.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionAuthority {
-    pub tool_access: crate::SessionToolAccess,
     /// The session's recorded plugin configuration (FIG-4379), as the
     /// installed config view states it: the head's, or a running run's
     /// admitted view. Every plugin session built for this state reads it.
@@ -734,15 +677,13 @@ pub struct RuntimeSessionAuthority {
 }
 
 impl RuntimeSessionAuthority {
-    /// The authority a state is constructed from: its tool access, plugin
-    /// configuration and prompt plan, with no run view installed.
+    /// The authority a state is constructed from: its plugin configuration
+    /// and prompt plan, with no run view installed.
     pub fn new(
-        tool_access: crate::SessionToolAccess,
         plugin_config: crate::PluginConfig,
         prompt_plan: crate::prompt_sections::PromptPlan,
     ) -> Self {
         Self {
-            tool_access,
             plugin_config,
             prompt_plan,
             run_view: None,
@@ -751,19 +692,14 @@ impl RuntimeSessionAuthority {
 
     /// The authority `config` records.
     pub fn of_config(config: &crate::PersistedSessionConfig) -> Self {
-        Self::new(
-            config.tool_access.clone(),
-            config.plugin_config.clone(),
-            config.prompt_plan.clone(),
-        )
+        Self::new(config.plugin_config.clone(), config.prompt_plan.clone())
     }
 
-    /// The fixture authority tests share: ambient tool access, no plugin
-    /// configuration and the default prompt plan.
+    /// The fixture authority tests share: no plugin configuration and the
+    /// default prompt plan.
     #[cfg(any(test, feature = "testing"))]
-    pub fn ambient_fixture() -> Self {
+    pub fn fixture() -> Self {
         Self::new(
-            crate::SessionToolAccess::ambient(),
             crate::PluginConfig::default(),
             crate::prompt_sections::PromptPlan::default(),
         )
@@ -867,10 +803,10 @@ impl RuntimeSessionState {
     }
 
     /// The fixture state tests share: `policy` under
-    /// [`RuntimeSessionAuthority::ambient_fixture`].
+    /// [`RuntimeSessionAuthority::fixture`].
     #[cfg(any(test, feature = "testing"))]
-    pub fn ambient_fixture(policy: SessionPolicy) -> Self {
-        Self::new(policy, RuntimeSessionAuthority::ambient_fixture())
+    pub fn fixture(policy: SessionPolicy) -> Self {
+        Self::new(policy, RuntimeSessionAuthority::fixture())
     }
 
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
@@ -928,8 +864,6 @@ impl RuntimeSessionState {
             token_usage: self.token_usage.clone(),
             last_prompt_usage: self.last_prompt_usage.clone(),
             plugin_config: self.authority.plugin_config.clone(),
-            tool_state_ref: self.tool_state_ref().cloned(),
-            tool_state_generation: self.tool_state_generation(),
             plugin_state_ref: self.plugin_state_ref().cloned(),
             plugin_state_generations: self
                 .checkpoint_components
@@ -1277,7 +1211,6 @@ pub fn adopt_session_config(
     state: &mut RuntimeSessionState,
     config: &crate::PersistedSessionConfig,
 ) {
-    state.authority.tool_access = config.tool_access.clone();
     state.authority.plugin_config = config.plugin_config.clone();
     state.authority.prompt_plan = config.prompt_plan.clone();
     apply_persisted_session_config(state, config);

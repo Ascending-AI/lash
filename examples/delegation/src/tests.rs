@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use lash::plugins::{
     AdmittedPluginConfig, PluginHost, PluginOptions, PluginSessionRequest, SessionAuthorityContext,
-    SessionStateService, SessionToolAccess,
+    SessionStateService,
 };
 use lash::tools::{PendingToolCall, StaticToolExecute, ToolCallOutcome, ToolOutcome};
 use lash::{MaxToolCalls, ProcessId, RuntimeOwner, SessionId, SessionSpec, ToolCallId, TurnBudget};
@@ -44,9 +44,6 @@ fn spawner() -> SpawnAgent {
     SpawnAgent {
         child: Arc::new(ChildConfig {
             spec: child_spec(),
-            tool_access: SessionToolAccess::ambient()
-                .with_hidden_tools(["write_file"])
-                .expect("a hidden tool name"),
             prompt_plan: None,
             rlm: true,
             lifetime: Arc::new(lash::process::lifetime::starter),
@@ -166,9 +163,9 @@ async fn a_session_spawn_parents_under_its_own_session() {
 
 /// The child's create request states exactly the host's configuration and
 /// the call's arguments: the host's spec (key unminted, its budgets), the
-/// configured tool access, the plugin's own namespace with the task, and
-/// the RLM termination with the call's output shape. The child process's
-/// session id is the one its start derives.
+/// plugin's own namespace with the task, and the RLM termination with the
+/// call's output shape as the child's finish value schema. The child
+/// process's session id is the one its start derives.
 #[tokio::test]
 async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     let spawn = prepare(
@@ -181,19 +178,15 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     let spawn = prepared(&spawn);
     let request = *spawn.create_request;
 
-    let expected = lash::SessionCreateRequest::root(
-        lash::plugins::SessionToolAccess::ambient(),
-        lash::SessionStartPoint::Empty,
-        PluginOptions::default(),
-    )
-    .with_spec(&child_spec())
-    .expect("the child spec states a session");
+    let expected =
+        lash::SessionCreateRequest::root(lash::SessionStartPoint::Empty, PluginOptions::default())
+            .with_spec(&child_spec())
+            .expect("the child spec states a session");
     assert_eq!(request.session_id, None);
     assert_eq!(request.policy, expected.policy);
     assert_eq!(request.model, expected.model);
     assert_eq!(request.reasoning, None);
     assert_eq!(request.prompt_plan, None);
-    assert_eq!(request.tool_access, spawner().child.tool_access);
     assert_eq!(
         request.plugin_options.plugins[DELEGATION_PLUGIN_ID].value,
         json!({ "task": "count the chunk" })
@@ -208,13 +201,19 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
         rlm.termination,
         Some(lash::rlm::TerminationMode::TerminalRequired)
     ));
+    assert_eq!(
+        rlm.finish_value_schema.as_ref(),
+        spawn
+            .output_schema
+            .as_ref()
+            .map(lash::schema::JsonSchema::as_value)
+    );
     assert!(spawn.output_schema.is_some());
 }
 
 /// The tools a session built under `namespace` is offered.
 fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
     let factory: Arc<dyn PluginFactory> = Arc::new(DelegationPluginFactory::new(
-        lash::plugins::SessionToolAccess::ambient(),
         child_spec(),
         lash::process::lifetime::starter,
     ));
@@ -242,7 +241,6 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
             "offered",
             SessionAuthorityContext {
                 plugin_config: AdmittedPluginConfig::new(config, 0),
-                ..SessionAuthorityContext::ambient_fixture()
             },
         ))
         .expect("the session builds");

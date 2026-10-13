@@ -52,10 +52,7 @@ async fn a_send_decodes_only_the_nodes_it_appends() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let id = SessionId::fixture("history-hydration");
     core.session(id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = core.session(id.clone()).open().await?;
     for turn in 0..WARM_SENDS {

@@ -49,7 +49,6 @@ pub struct CoreConfig {
     pub no_progress_budget: crate::NoProgressBudget,
     pub charge_safety: crate::ChargeSafetyPolicy,
     pub generation: crate::GenerationOptions,
-    pub tool_access: crate::SessionToolAccess,
     #[serde(
         default,
         skip_serializing_if = "crate::prompt_sections::PromptPlan::is_default"
@@ -68,7 +67,6 @@ impl CoreConfig {
             no_progress_budget: config.no_progress_budget,
             charge_safety: config.charge_safety.clone(),
             generation: config.generation.clone(),
-            tool_access: config.tool_access.clone(),
             prompt_plan: config.prompt_plan.clone(),
         }
     }
@@ -82,7 +80,6 @@ impl CoreConfig {
         config.no_progress_budget = self.no_progress_budget;
         config.charge_safety = self.charge_safety.clone();
         config.generation = self.generation.clone();
-        config.tool_access = self.tool_access.clone();
         config.prompt_plan = self.prompt_plan.clone();
     }
 }

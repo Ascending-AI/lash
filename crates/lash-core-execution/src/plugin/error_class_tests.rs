@@ -79,7 +79,9 @@ plugin_error_samples! {
         start_key: crate::StartKey::for_host("sampled"),
     },
     ProcessEnvRefused { .. } => PluginError::ProcessEnvRefused {
-        refusal: crate::ProcessEnvRefusal::AmbientTools,
+        refusal: crate::ProcessEnvRefusal::EffectNotLinked {
+            effect: "sampled".to_string(),
+        },
     },
     InvalidToolDiscovery { .. } => PluginError::InvalidToolDiscovery {
         operation: "sampled".to_string(),
@@ -101,10 +103,14 @@ plugin_error_samples! {
             bound: crate::ToolBound::Execution,
         }),
     },
-    ResidentToolRouteUnavailable { .. } => PluginError::ResidentToolRouteUnavailable {
-        tool_id: crate::ToolId::from("tool:sampled"),
-        name: "sampled".to_string(),
-        reason: "sampled".to_string(),
+    ToolSurfaceRefused { .. } => PluginError::ToolSurfaceRefused {
+        refusal: Box::new(crate::SurfaceRefusal::Collision(crate::SurfaceCollision {
+            name: "sampled".to_string(),
+            first_tool: crate::ToolId::from("tool:first"),
+            first_provider: crate::ProviderKey::tool_provider("first", "tools"),
+            second_tool: crate::ToolId::from("tool:second"),
+            second_provider: crate::ProviderKey::tool_provider("second", "tools"),
+        })),
     },
     SessionAlreadyExists { .. } => PluginError::SessionAlreadyExists { session_id: session() },
     SessionHeadOwned { .. } => PluginError::SessionHeadOwned {

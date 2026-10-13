@@ -73,8 +73,6 @@ mod session_resume_tests;
 #[path = "tests/tool_control.rs"]
 mod tool_control_tests;
 #[cfg(test)]
-#[path = "tests/tool_loss.rs"]
-mod tool_loss_tests;
 #[cfg(test)]
 #[path = "tests/typescript_dialect.rs"]
 mod typescript_dialect_tests;
@@ -837,8 +835,9 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation() {
     ));
 }
 
-/// Browser membership writes curate the durable session catalogue, retain a
-/// removed entry for restoration, and change what the next model turn sees.
+/// Browser selection writes the workbench's mail-tool config, keeps a
+/// deselected tool listed for reselection, and changes what the next model
+/// turn sees.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_catalog_route_removes_and_restores_the_models_tool() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
@@ -878,8 +877,7 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
         .expect("initial turn");
     let tool = session
         .admin()
-        .tools()
-        .active_manifests()
+        .offered_tools()
         .await
         .expect("catalogue")
         .into_iter()
@@ -906,25 +904,27 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
         "the browser can list the catalogue"
     );
     for (index, member) in [false, true].into_iter().enumerate() {
-        let response = client.post(format!("{base}/api/tools/membership"))
+        let response = client.post(format!("{base}/api/tools/selection"))
             .query(&[("session_id", session_id.as_str())])
-            .json(&json!({"tool_id": tool.id, "member": member, "request_id": format!("catalogue-law-{index}")}))
-            .send().await.expect("membership request");
+            .json(&json!({"tool_id": tool.id, "offered": member, "request_id": format!("catalogue-law-{index}")}))
+            .send().await.expect("selection request");
         assert!(matches!(
             response.status(),
             StatusCode::OK | StatusCode::ACCEPTED
         ));
-        let result: Value = response.json().await.expect("membership response");
+        let result: Value = response.json().await.expect("selection response");
         if result["status"] == "pending" {
             let receipt = serde_json::from_value(result["receipt"].clone()).expect("typed receipt");
             assert!(matches!(
                 session
                     .admin()
-                    .commands()
+                    .config()
                     .settle(receipt)
                     .await
-                    .expect("settle membership"),
-                lash::SessionCommandSettlement::Applied { .. }
+                    .expect("settle the selection"),
+                lash::config::ConfigSettlement::Settled(
+                    lash::config::ConfigTransactionOutcome::Applied { .. }
+                )
             ));
         } else {
             assert_eq!(result["status"], "applied");
@@ -943,13 +943,12 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
             .expect("tools")
             .iter()
             .find(|entry| entry["id"] == tool.id.as_str())
-            .expect("removed tool stays restorable");
-        assert_eq!(entry["member"], member);
+            .expect("a deselected tool stays listed");
+        assert_eq!(entry["offered"], member);
         assert_eq!(
             session
                 .admin()
-                .tools()
-                .active_manifests()
+                .offered_tools()
                 .await
                 .expect("active")
                 .iter()
@@ -968,7 +967,7 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
         assert_eq!(
             prompt.contains("inbox.test.send"),
             present,
-            "the system catalogue tracks membership: {prompt}"
+            "the system catalogue tracks the selection: {prompt}"
         );
     }
     server.abort();
@@ -976,7 +975,7 @@ async fn tool_catalog_route_removes_and_restores_the_models_tool() {
 }
 
 /// Every installed inbox account, whatever its name, resolves as a tool the
-/// session's recorded catalog carries, membership edits that catalog, and a
+/// session is offered, the workbench's selection edits that offer, and a
 /// turn sends through each account's installed plugin.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn inbox_authority_resolves_for_any_account_name() {
@@ -1021,14 +1020,37 @@ async fn inbox_authority_resolves_for_any_account_name() {
         commands.settle(receipt).await.expect("publish catalog"),
         lash::SessionCommandSettlement::Durable(_)
     ));
-    let session_tools = session.admin().tools();
     let active_send = || async {
-        session_tools
-            .active_manifests()
+        session
+            .admin()
+            .offered_tools()
             .await
-            .expect("read active session manifests")
+            .expect("read the offered tools")
             .into_iter()
             .find(|manifest| manifest.name == "inbox__test__send")
+    };
+    let select = |tools: lash::tools::ToolSelection, id: &'static str| {
+        let config = session.admin().config();
+        async move {
+            let revision = config.revision().await.expect("read the config revision");
+            let outcome = config
+                .apply(
+                    lash::config::ConfigWrite::new(id, revision),
+                    lash::config::ConfigTransaction::of(SetWorkbenchTools { tools }),
+                )
+                .await
+                .expect("submit the selection")
+                .await_outcome(&config)
+                .await
+                .expect("settle the selection");
+            assert!(
+                matches!(
+                    outcome,
+                    lash::config::ConfigTransactionOutcome::Applied { .. }
+                ),
+                "{outcome:?}"
+            );
+        }
     };
     let send_manifest = active_send()
         .await
@@ -1042,37 +1064,19 @@ async fn inbox_authority_resolves_for_any_account_name() {
         "the recorded contract names the runtime input schema: {}",
         compact.signature
     );
-    session_tools
-        .set_membership(
-            send_manifest.id.clone(),
-            false,
-            "host:tests:set_membership:905",
-        )
-        .await
-        .expect("remove send from this session catalog")
-        .settle_with(
-            &session.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
-        .await
-        .expect("fixture mutation settled");
+    select(
+        lash::tools::ToolSelection::AllExcept(vec![send_manifest.id.clone()]),
+        "deselect-send",
+    )
+    .await;
     assert!(
         active_send().await.is_none(),
-        "a non-member tool leaves the session's recorded catalog"
+        "a deselected tool leaves the session's offer"
     );
-    session_tools
-        .set_membership(send_manifest.id, true, "host:tests:set_membership:913")
-        .await
-        .expect("restore send to this session catalog")
-        .settle_with(
-            &session.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
-        .await
-        .expect("fixture mutation settled");
+    select(lash::tools::ToolSelection::all(), "reselect-send").await;
     assert!(
         active_send().await.is_some(),
-        "membership restores the tool to the session's recorded catalog"
+        "the selection restores the tool to the session's offer"
     );
 
     for account in ["test", "live"] {

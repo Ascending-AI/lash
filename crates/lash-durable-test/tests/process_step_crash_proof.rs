@@ -122,10 +122,7 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash::process::ProcessCompon
 
 /// The engine: one step on its start payload, then a terminal carrying the
 /// step's payload.
-#[derive(Default)]
-struct WriteEngine {
-    unavailable: Option<Arc<std::sync::atomic::AtomicBool>>,
-}
+struct WriteEngine;
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
@@ -133,6 +130,15 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 
 #[async_trait::async_trait]
 impl ProcessEngine for WriteEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core_execution::testing::performs(&[
+            ext_write_definition(),
+        ]))
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -195,20 +201,13 @@ impl ProcessEngine for WriteEngine {
         _state: EngineState,
         event: EngineEvent,
     ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
-        if self
-            .unavailable
-            .as_ref()
-            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
-        {
-            return Err(infra("the process engine is temporarily unavailable"));
-        }
         let action = match event {
             EngineEvent::Started { payload } => {
                 let step = lash_core_execution::StepName("write".to_owned());
                 EngineAction::Steps {
                     steps: vec![lash_core_execution::StepRequest::Tool {
                         step,
-                        tool: lash_sansio::ToolId::new(TOOL),
+                        effect: lash_core_execution::testing::effect_of(&ext_write_definition()),
                         input: payload,
                         site: None,
                     }],
@@ -284,13 +283,14 @@ fn environment() -> lash_core::ProcessEnv {
 
 /// An environment that names the `ext_write` component and admits `tools`.
 fn environment_admitting(tools: Vec<lash_core::ToolDefinition>) -> lash_core::ProcessEnv {
-    lash_core::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted(tools).expect("the admitted tools"),
-        lash::MaxToolCalls::new(16),
-    )
-    .component(EXT_WRITE, &())
-    .build()
-    .expect("the environment builds")
+    tools
+        .iter()
+        .fold(
+            lash_core::ProcessEnv::builder(lash::MaxToolCalls::new(16)).component(EXT_WRITE, &()),
+            |env, tool| env.link_tool(EXT_WRITE.tool_provider("tools"), tool),
+        )
+        .build()
+        .expect("the environment builds")
 }
 
 struct StepProof {
@@ -331,7 +331,6 @@ impl StepProof {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .process_component(ext_write(&self.world), EXT_WRITE);
@@ -380,7 +379,7 @@ impl Scenario for StepProof {
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
         let backend = lash::durable::DurableBackendBuilder::new(stores)
-            .process_engine(Arc::new(WriteEngine::default()))
+            .process_engine(Arc::new(WriteEngine))
             .build()
             .expect("the backend assembles");
         *self.backend.lock_recover() = Some(backend);
@@ -558,138 +557,4 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
             "the matrix never cut {label}"
         );
     }
-}
-
-/// FIG-5582: a process's restricted authority survives a file-store reopen
-/// and the engine's redrive of its parked activation. Its environment names
-/// the `ext_write` component but admits none of its tools: the recorded
-/// environment still says so after the reopen, and the tool never runs.
-#[tokio::test]
-async fn restricted_process_tool_access_survives_reopen_and_redrive() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let directory = tempfile::tempdir().expect("SQLite directory");
-    let path = directory.path().join("authority.db");
-    let clock = SimClock::new();
-    let world = Arc::new(ExternalWorld::default());
-    let unavailable = Arc::new(AtomicBool::new(true));
-    let env = environment_admitting(Vec::new());
-    let mut process = None;
-
-    for boot in 0..2 {
-        let stores = sim::file(&path, Arc::clone(&clock)).await;
-        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
-        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
-            .process_engine(Arc::new(WriteEngine {
-                unavailable: Some(Arc::clone(&unavailable)),
-            }))
-            .build()
-            .expect("backend");
-        let core = lash::LashCore::standard_builder(backend.clone())
-            .serve_sessions(false)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .data_retention(lash::DataRetention::standard())
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
-            .execution_budgets(lash::ExecutionBudgets::recommended())
-            .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .process_component(ext_write(&world), EXT_WRITE)
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                lash::persistence::LeaseOwnerId::new("authority-law"),
-                lash::persistence::LeaseIncarnationId::new(format!("boot-{boot}")),
-            ))
-            .expect("core");
-        if boot == 0 {
-            let reference = core
-                .host_artifacts()
-                .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
-                .await
-                .expect("publish environment");
-            process = Some(
-                core.processes()
-                    .start(
-                        lash_core::ProcessStartRequest::engine(
-                            ENGINE.to_owned(),
-                            serde_json::json!({ "x": 7 }),
-                            lash_core::EngineLaunch::new(reference, None),
-                            lash_core::ProcessOriginator::host(),
-                            lash_core::LifetimeDecision::Detached,
-                        ),
-                        core.effect_host(),
-                    )
-                    .await
-                    .expect("start process")
-                    .process_id,
-            );
-        } else {
-            unavailable.store(false, Ordering::SeqCst);
-            assert!(
-                backend
-                    .redrive_process(process.as_ref().expect("process"), "authority-law")
-                    .await
-                    .expect("redrive")
-            );
-        }
-        let id = process.as_ref().expect("process");
-        let (node, activation) =
-            lash::testing::node_activation(&core, Arc::new(Tripwire::default()))
-                .expect("node activation");
-        let nodes = SimNodes::new(
-            database,
-            Arc::clone(&clock),
-            lash_durable_test::Script::new(),
-            SimNodesConfig {
-                lease: Matrix::test_lease(),
-                decodes: node.formats().decodes(),
-                serves: lash::testing::node_serves(&core),
-                max_active: 4,
-            },
-            activation,
-        );
-        nodes.start("authority-node");
-        let expected = if boot == 0 {
-            ActorState::Parked
-        } else {
-            ActorState::Terminal
-        };
-        let mut reached = false;
-        for _ in 0..400 {
-            nodes.quiesce().await;
-            if nodes
-                .database()
-                .actor(&process_actor(id))
-                .await
-                .expect("actor")
-                .is_some_and(|actor| actor.state == expected)
-            {
-                reached = true;
-                break;
-            }
-            if nodes.step().await.is_none() {
-                clock.advance_by(1000).await;
-            }
-        }
-        assert!(reached, "the process reaches {expected:?}");
-        let record = backend
-            .process_registry()
-            .get_process(id)
-            .await
-            .expect("read the process")
-            .expect("the process is recorded");
-        let recorded = lash_core::runtime::load_process_env(
-            backend.process_env_store().as_ref(),
-            record
-                .env_ref()
-                .expect("an engine process records its environment"),
-        )
-        .await
-        .expect("the recorded environment loads");
-        assert_eq!(recorded, env, "the process keeps its restriction");
-        nodes.stop("authority-node");
-        nodes.quiesce().await;
-        core.shutdown().await.expect("shutdown");
-    }
-    assert!(
-        world.writes.lock_recover().is_empty(),
-        "a restricted process cannot call the deployment's resident tool"
-    );
 }

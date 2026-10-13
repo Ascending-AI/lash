@@ -8,7 +8,6 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     core.session(session("relation-child"))
         .create(crate::SessionCreation::child_of(
-            crate::plugins::SessionToolAccess::ambient(),
             SessionId::from("relation-parent"),
             mock_session_spec(),
         ))
@@ -35,7 +34,6 @@ async fn parent_relation_is_read_back_and_a_conflicting_create_is_refused() {
     let error = match core
         .session(session("relation-child"))
         .create(crate::SessionCreation::child_of(
-            crate::plugins::SessionToolAccess::ambient(),
             SessionId::from("other-parent"),
             mock_session_spec(),
         ))

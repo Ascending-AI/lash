@@ -193,6 +193,21 @@ pub(super) async fn run(
         Some(view) => {
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
             round::require_admitted(&opener, run, &drafts, &calls).map_err(exec)?;
+            // A member that will run a body again runs it only on a node
+            // that serves its recorded entry undrifted; one with an outcome
+            // or a park replays without its provider.
+            let runnable = view
+                .members()
+                .iter()
+                .filter(|member| {
+                    member.outcome().is_none()
+                        && !matches!(member.state(), round::MemberState::Waiting { .. })
+                })
+                .filter_map(|member| calls.iter().find(|call| &call.call_id == member.call()))
+                .collect::<Vec<_>>();
+            if let Some(drift) = tools.drift(&runnable) {
+                return Err(TurnError::Runtime(drift));
+            }
             let owed = view.owed_trace_exports();
             if !owed.is_empty() {
                 for scope in owed {
@@ -206,6 +221,11 @@ pub(super) async fn run(
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
+            // A call whose recorded entry drifted on this node parks the
+            // turn before anything of the round is admitted (S5).
+            if let Some(drift) = tools.drift(&calls.iter().collect::<Vec<_>>()) {
+                return Err(TurnError::Runtime(drift));
+            }
             // The admission's open is its one read: the turn's accepted
             // cancel and the store's clock come with it. An `AfterStep`
             // request lets the step's round run; the turn honours it
@@ -395,6 +415,7 @@ pub(super) fn record_refused(
                     },
                     park: None,
                     declaration: None,
+                    binding: None,
                 },
             )
         })

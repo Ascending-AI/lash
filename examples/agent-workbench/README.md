@@ -225,9 +225,10 @@ recorded prompt keeps what it was sent.
 
 Six low-frequency data utilities under `text`, `json`, and `list` are kept out
 of the resident RLM tool catalog. The prompt carries only a capped catalogue
-preview and the resident `tools.search` contract. Search results persist full
-execution grants in `<data-dir>/deferred-tool-grants.db`; the RLM factory's
-production `DeferredToolResolver` authorizes only those stored call paths. The
+preview and the resident `tools.search` contract. Search results persist their
+call paths in `<data-dir>/deferred-tool-grants.db`; the workbench plugin's
+deferred provider resolves only those stored paths, each to a match whose
+execution binding names its path, and a call's match is recorded once. The
 search tool's own description states the handshake constraint: discovered
 operations become callable in the next code block. Grants remain available in later turns.
 Persistence across a cold process replacement remains the required contract, but its live step is
@@ -616,20 +617,23 @@ output retention, attachment limits and expiry, recovery lease and pass
 budgets, termination, abort drain grace, process observation, live replay and trace context. Those deployment policies are
 chosen before building the core; session changes use recorded commands.
 
-### Tool catalogue membership
+### Tool selection
 
-Open **tools** beside the model picker to curate the current session's recorded
-catalogue. Uncheck a tool to remove it from the next turn's catalogue; check it
-again to restore it. Removed tools stay listed. A change during a running turn
-is queued until that turn finishes, and the panel shows the recorded state until
-the command settles. Source-unavailable tools cannot be enabled here. Before
-a session has recorded its tools, send a turn and refresh the panel.
+Open **tools** beside the model picker to see what the current session is
+offered and to switch its mail tools on and off. What a session is offered is
+its providers' config: the workbench's own config namespace holds a mail-tool
+selection, and unchecking a tool records a selection that leaves it out from
+the next turn; checking it offers it again. A deselected tool stays listed.
+A change during a running turn applies once that turn finishes; the turn keeps
+the surface it recorded when it started.
 
-`GET /api/tools?session_id=<id>` reads the recorded catalogue and pending state;
-`POST /api/tools/membership?session_id=<id>` accepts `tool_id`, `member`, and
-a client `request_id` for durable idempotency. It uses `ToolAdmin::set_membership`,
-returns an applied generation or a pending command receipt, and checks the
-host's session-scoped `ManageTools` policy. The sample allows all operators;
+`GET /api/tools?session_id=<id>` reads what the session's providers offer under
+its recorded config, with each mail tool the selection leaves out;
+`POST /api/tools/selection?session_id=<id>` accepts `tool_id`, `offered`, and a
+client `request_id` for durable idempotency. It writes the workbench's
+`set_tools` config command against the session's config revision, returns the
+applied revision or a pending config receipt, and checks the host's
+session-scoped `ManageTools` policy. The sample allows all operators;
 deployments supply their own authorizer.
 
 The browser referee is [workbench-tool-membership](../../runbooks/workbench-tool-membership/runbook.md).

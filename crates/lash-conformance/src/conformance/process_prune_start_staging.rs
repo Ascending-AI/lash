@@ -536,6 +536,13 @@ struct ModuleNamingEngine;
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for ModuleNamingEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        Ok(lash_core::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core::ProcessSignature,
@@ -898,20 +905,17 @@ pub async fn two_starts_share_one_captured_environment(
     reason = "the law's setup and reads are its assertions"
 )]
 pub async fn env_authority_read(stores: Arc<dyn crate::StoreSet>) -> Vec<crate::ProcessRecord> {
-    let env = crate::ProcessEnv::builder(
-        crate::SessionToolAccess::restricted([]).expect("empty restricted tools"),
-        crate::MaxToolCalls::new(2),
-    )
-    .capability(
-        crate::SlotId::new("integration"),
-        crate::CapabilityRef {
-            binding: crate::BindingId::new("binding:recorded"),
-            contract: crate::ContractRef::new("integration", 7),
-            args: serde_json::json!({"account": "recorded", "scope": ["read"]}),
-        },
-    )
-    .build()
-    .expect("environment");
+    let env = crate::ProcessEnv::builder(crate::MaxToolCalls::new(2))
+        .capability(
+            crate::SlotId::new("integration"),
+            crate::CapabilityRef {
+                binding: crate::BindingId::new("binding:recorded"),
+                contract: crate::ContractRef::new("integration", 7),
+                args: serde_json::json!({"account": "recorded", "scope": ["read"]}),
+            },
+        )
+        .build()
+        .expect("environment");
     let env_ref = env.stable_ref().expect("ref");
     let bytes = env.to_store_bytes().expect("bytes");
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
@@ -981,7 +985,6 @@ pub async fn env_authority_read(stores: Arc<dyn crate::StoreSet>) -> Vec<crate::
     let mut children = Vec::new();
     for named in [false, true] {
         let mut request = crate::SessionCreateRequest::root(
-            crate::SessionToolAccess::restricted([]).expect("tools"),
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::empty(),
         );

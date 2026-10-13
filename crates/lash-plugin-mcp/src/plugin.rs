@@ -148,6 +148,24 @@ impl PluginFactory for McpPluginFactory {
         Ok(())
     }
 
+    /// The `mcp` namespace holds which servers' tools a run is offered:
+    /// [`lash_tool_support::SetToolSelection`] changes it sticky, and the run
+    /// options under [`MCP_RUN_OPTIONS`] for one run.
+    fn register_config(
+        &self,
+        reg: &mut lash_core::plugin::ConfigRegistrar,
+    ) -> Result<(), lash_core::plugin::ConfigRegistrationError> {
+        reg.owner_with_run_options(lash_tool_support::ToolSelectionOwner, MCP_RUN_OPTIONS)?;
+        reg.command::<lash_tool_support::SetToolSelection>(|_recorded, command| {
+            Ok(lash_core::plugin::OwnerChange {
+                recorded: lash_tool_support::ToolSelectionConfig {
+                    tools: Some(command.tools),
+                },
+                output: (),
+            })
+        })
+    }
+
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(McpSessionPlugin {
             pool: Arc::clone(&self.pool),
@@ -200,7 +218,36 @@ impl McpToolProvider {
     pub fn new(pool: Arc<McpConnectionPool>) -> Self {
         Self { pool }
     }
+
+    /// The servers' tools the `mcp` namespace's [`ToolSelection`] admits
+    /// under `config`. A selection that does not decode offers nothing.
+    ///
+    /// [`ToolSelection`]: lash_tool_support::ToolSelection
+    fn offered(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolDefinition> {
+        let Ok(selection) = lash_tool_support::ToolSelection::of(config, MCP_PLUGIN_ID) else {
+            return Vec::new();
+        };
+        self.pool
+            .advertised_tools()
+            .into_iter()
+            .filter(|tool| selection.admits(&tool.manifest.id))
+            .collect()
+    }
 }
+
+/// The MCP plugin's id, which names its config namespace.
+const MCP_PLUGIN_ID: &str = "mcp";
+
+/// The key a send states the `mcp` namespace's run options under: a
+/// [`ToolSelection`](lash_tool_support::ToolSelection) for that run alone.
+pub const MCP_RUN_OPTIONS: lash_core::RunOptionsKey<lash_tool_support::ToolSelectionConfig> =
+    lash_core::RunOptionsKey::new(MCP_PLUGIN_ID);
+
+/// The execution binding format MCP's deferred provider writes and reads:
+/// `{"kind": "mcp", "server": <server>, "tool_id": <tool id>}`.
+/// version_surface = "coexist"
+/// version_guard(items(MCP_BINDING_FORMAT, mcp_binding))
+pub const MCP_BINDING_FORMAT: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
 
 /// Non-resident MCP catalog provider for explicit code mode execution grants.
 ///
@@ -225,13 +272,14 @@ impl McpDeferredToolProvider {
 
     fn validate_execution_binding(
         tool_id: &ToolId,
-        binding: &serde_json::Value,
+        binding: Option<&lash_core::ExecutionBinding>,
     ) -> Result<(), ToolOutcome> {
-        let valid = binding
+        let payload = binding.map_or(&serde_json::Value::Null, |binding| &binding.payload);
+        let valid = payload
             .get("kind")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|kind| kind == "mcp")
-            && binding
+            && payload
                 .get("tool_id")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|bound_id| bound_id == tool_id.as_str());
@@ -241,7 +289,7 @@ impl McpDeferredToolProvider {
         Err(
             crate::call_failure::McpCallFailure::InvalidExecutionBinding {
                 tool_id: tool_id.to_string(),
-                binding: binding.clone(),
+                binding: payload.clone(),
             }
             .into(),
         )
@@ -250,17 +298,19 @@ impl McpDeferredToolProvider {
 
 #[async_trait]
 impl ToolProvider for McpToolProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.pool
-            .advertised_tools()
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
+        self.offered(config)
             .into_iter()
             .map(|tool| tool.manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        self.pool
-            .advertised_tools()
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        self.offered(config)
             .into_iter()
             .find(|tool| tool.name() == name)
             .map(|tool| Arc::new(tool.contract()))
@@ -280,25 +330,45 @@ impl ToolProvider for McpToolProvider {
 
 #[async_trait]
 impl ToolProvider for McpDeferredToolProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<ToolManifest> {
         Vec::new()
     }
 
-    fn resolve_manifest(&self, _name: &str) -> Option<ToolManifest> {
+    fn resolve_manifest(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<ToolManifest> {
         None
     }
 
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<ToolManifest> {
         self.definition_by_id(id).map(|tool| tool.manifest())
     }
 
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        _name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         None
     }
 
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
+    fn resolve_contract_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         self.definition_by_id(id)
             .map(|tool| Arc::new(tool.contract()))
+    }
+
+    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+        &[MCP_BINDING_FORMAT]
     }
 
     async fn prepare_tool_call(
@@ -319,22 +389,32 @@ impl ToolProvider for McpDeferredToolProvider {
             Ok(binding) => binding,
             Err(failure) => return failure.into(),
         };
-        if call
+        let payload = call
             .context
             .tool_execution_binding()
-            .get("server")
-            .and_then(serde_json::Value::as_str)
+            .map_or(&serde_json::Value::Null, |binding| &binding.payload);
+        if payload.get("server").and_then(serde_json::Value::as_str)
             != Some(binding.server.as_str())
         {
             return ToolOutcome::from(
                 crate::call_failure::McpCallFailure::InvalidExecutionBinding {
                     tool_id: call.tool_id().to_string(),
-                    binding: call.context.tool_execution_binding().clone(),
+                    binding: payload.clone(),
                 },
             )
             .into();
         }
         self.pool.call_admitted_tool(call).await.into()
+    }
+}
+
+/// `payload` as the execution binding MCP's deferred provider reads.
+#[cfg(test)]
+pub(crate) fn mcp_binding(payload: serde_json::Value) -> lash_core::ExecutionBinding {
+    lash_core::ExecutionBinding {
+        codec: lash_core::plugin::PluginCallbackIdentity::tool_provider(MCP_PLUGIN_ID, "deferred"),
+        format: MCP_BINDING_FORMAT,
+        payload,
     }
 }
 
@@ -460,8 +540,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_law_binding_and_catalog_name_keep_request_causes() {
         let id = lash_core::ToolId::new("mcp:fixture/work");
-        let binding =
-            McpDeferredToolProvider::validate_execution_binding(&id, &json!({})).unwrap_err();
+        let binding = McpDeferredToolProvider::validate_execution_binding(&id, None).unwrap_err();
         let context = lash_core::testing::mock_attempt_context();
         let missing = McpConnectionPool::empty()
             .call_tool("missing", &json!({}), &context)

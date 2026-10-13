@@ -40,7 +40,11 @@
 //!   finish tool whose host retypes its value once the call's body ran.
 //!   Cut anywhere, the run answers the call's value under the schema the
 //!   call was admitted under, which its committed outcome records: a
-//!   settled call is never judged again under the live declaration.
+//!   settled call is never judged again under the live declaration. A cut
+//!   that loses the call's outcome leaves it to run again, on a node that
+//!   offers the retyped tool: that node does not serve the surface the call
+//!   was admitted under, so the session parks on the drifted call, typed,
+//!   and the run answers nothing under the live schema (FIG-6074, §5a).
 //! - **Process plugin state (FIG-5268):** a host engine's tool steps run on
 //!   the process's own plugin session through the core's node. A step's
 //!   change cut at its `step.outcome` is what the process's next step sees
@@ -482,11 +486,15 @@ struct Probe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probe {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![probe_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == PROBE).then(|| Arc::new(probe_definition().contract()))
     }
 
@@ -551,11 +559,15 @@ impl Submit {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Submit {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![self.definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == SUBMIT).then(|| Arc::new(self.definition().contract()))
     }
 
@@ -601,11 +613,15 @@ struct Puts {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Puts {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![put_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == PUT).then(|| Arc::new(put_definition().contract()))
     }
 
@@ -773,13 +789,17 @@ struct StateTools {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for StateTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [STATE_SET, STATE_OBSERVE]
             .map(|name| state_definition(name).manifest())
             .into()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [STATE_SET, STATE_OBSERVE]
             .contains(&name)
             .then(|| Arc::new(state_definition(name).contract()))
@@ -890,7 +910,7 @@ impl Crash {
                 let builder = if self.turn.code() {
                     lash::LashCore::rlm_builder(
                         backend.clone(),
-                        served::rlm(&backend, None, sim::workers(&clock)),
+                        served::rlm(&backend, sim::workers(&clock)),
                     )
                 } else {
                     lash::LashCore::standard_builder(backend.clone())
@@ -927,7 +947,6 @@ impl Crash {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
@@ -954,6 +973,9 @@ impl Crash {
 
     /// The laws of one run, cut at `cut`.
     async fn laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        if self.turn == Turn::Finish && self.parked(nodes).await {
+            return self.drifted_finish_laws(nodes).await;
+        }
         let mut violations = Vec::new();
         let database = nodes.database();
         let trace = nodes.script().trace();
@@ -1168,6 +1190,46 @@ impl Crash {
         }
     }
 
+    /// Whether the session is parked, set aside for its operator.
+    async fn parked(&self, nodes: &SimNodes) -> bool {
+        matches!(
+            nodes.database().actor(&actor()).await,
+            Ok(Some(snapshot)) if snapshot.state == ActorState::Parked
+        )
+    }
+
+    /// The [`Turn::Finish`] laws once the session parked: it parked on the
+    /// submit call, whose admitted surface the retyped tool no longer
+    /// serves, and the run never ended.
+    async fn drifted_finish_laws(&self, nodes: &SimNodes) -> Vec<String> {
+        let mut violations = Vec::new();
+        match self.core().session(session()).durable().await {
+            Ok(durable) => match durable.park_reason().await {
+                Ok(Some(park)) => {
+                    let rendered = format!("{park:?}");
+                    if !(rendered.contains("BindingDrift") && rendered.contains(SUBMIT)) {
+                        violations.push(format!(
+                            "the session parked, but not on the drifted submit call: {rendered}"
+                        ));
+                    }
+                }
+                other => violations.push(format!("the parked session has no park: {other:?}")),
+            },
+            Err(error) => violations.push(format!("resolve the session: {error}")),
+        }
+        let run = self
+            .host
+            .lock_recover()
+            .as_ref()
+            .and_then(|(_, handle)| handle.id().cloned());
+        if let Some(run) = run
+            && let Ok(Some(end)) = nodes.database().turn_end(&session(), &run).await
+        {
+            violations.push(format!("a drifted call's run ended: {end:?}"));
+        }
+        violations
+    }
+
     /// The value of [`STATE_KEY`] in the session's committed plugin state.
     async fn committed_state(&self) -> Result<Option<serde_json::Value>, String> {
         let factory = self.backend().stores().session_store_factory();
@@ -1375,7 +1437,7 @@ impl Scenario for Crash {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -1394,10 +1456,7 @@ impl Scenario for Crash {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                self.turn.spec(),
-            ))
+            .create(lash::SessionCreation::root(self.turn.spec()))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         if self.turn == Turn::Activity {
@@ -1449,6 +1508,7 @@ impl Scenario for Crash {
         matches!(
             nodes.database().actor(&actor()).await,
             Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
+                || (self.turn == Turn::Finish && snapshot.state == ActorState::Parked)
         )
     }
 
@@ -1524,7 +1584,7 @@ struct StateEngine {
 fn tool_step(step: &str, tool: &str, label: &str) -> lash_core_execution::StepRequest {
     lash_core_execution::StepRequest::Tool {
         step: lash_core_execution::StepName(step.to_owned()),
-        tool: lash_sansio::ToolId::new(format!("tool:{tool}")),
+        effect: lash_core_execution::testing::effect(&format!("tools.{tool}")),
         input: serde_json::json!({ "label": label }),
         site: None,
     }
@@ -1536,6 +1596,17 @@ fn engine_failure(error: impl std::fmt::Display) -> lash_core_execution::Process
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEngine for StateEngine {
+    async fn performed_effects(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<lash_core::PerformedEffects, lash_core::ProcessEnvRefusal> {
+        // Its env links both tools; one-step runs perform the set alone.
+        Ok(lash_core_execution::testing::performs(&[
+            state_definition(STATE_SET),
+            state_definition(STATE_OBSERVE),
+        ]))
+    }
+
     async fn check_args(
         &self,
         _signature: &lash_core_execution::ProcessSignature,
@@ -1693,17 +1764,23 @@ impl lash_core_execution::ProcessEngine for StateEngine {
     }
 }
 
-/// The environment a host start states in these laws: no tools and no
-/// components.
+/// The environment a host start states in these laws: the state
+/// component, its two tools linked.
 fn process_environment() -> lash_core::ProcessEnv {
-    lash_core::ProcessEnv::builder(
-        lash_core::SessionToolAccess::restricted([STATE_SET, STATE_OBSERVE].map(state_definition))
-            .expect("the state tools"),
-        lash_core::MaxToolCalls::new(16),
-    )
-    .component(STATE_COMPONENT, &())
-    .build()
-    .expect("the process environment builds")
+    [STATE_SET, STATE_OBSERVE]
+        .into_iter()
+        .fold(
+            lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(16))
+                .component(STATE_COMPONENT, &()),
+            |builder, tool| {
+                builder.link_tool(
+                    STATE_COMPONENT.tool_provider("state"),
+                    &state_definition(tool),
+                )
+            },
+        )
+        .build()
+        .expect("the process environment builds")
 }
 
 /// The process scenario on one dialect, fresh for every matrix cell: a
@@ -1755,7 +1832,6 @@ impl ProcessCrash {
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .process_component(
@@ -2261,3 +2337,14 @@ mod puts {
 
 #[path = "support/turn_commit_bound.rs"]
 mod turn_commit_bound;
+
+#[path = "tool_crash_laws/presentation_obligations.rs"]
+mod presentation_obligations;
+
+/// OBLIGATIONS-COVER-CALLBACKS on every store tier (law 19).
+mod obligations {
+    use super::presentation_obligations::a_parked_members_recorded_presentation_plan_is_required_until_it_presents;
+    use super::served;
+
+    crate::tiered_laws!(a_parked_members_recorded_presentation_plan_is_required_until_it_presents);
+}

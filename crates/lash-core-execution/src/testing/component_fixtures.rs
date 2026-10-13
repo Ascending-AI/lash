@@ -50,11 +50,8 @@ pub fn native_format_two_component(id: &'static str) -> crate::plugin::ProcessCo
 
 /// An environment of no tools naming component `id` at config `format`.
 pub fn component_env(id: &'static str, format: crate::FormatVersion) -> crate::ProcessEnv {
-    crate::ProcessEnv::builder(
-        crate::SessionToolAccess::restricted(std::iter::empty()).expect("no tools"),
-        crate::MaxToolCalls::new(16),
-    )
-    .component(crate::ProcessConfigKey::<()>::new(id, format), &())
-    .build()
-    .expect("the environment builds")
+    crate::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+        .component(crate::ProcessConfigKey::<()>::new(id, format), &())
+        .build()
+        .expect("the environment builds")
 }

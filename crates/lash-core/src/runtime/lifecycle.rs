@@ -168,11 +168,8 @@ impl LashRuntime {
         // (FIG-4531): a head that records no model is refused below,
         // whatever the opener selects.
         let unrecorded = state.checkpoint_ref.is_none() && state.head_revision == 0;
-        if unrecorded {
-            if state.policy.model.is_none() {
-                state.policy = policy.clone();
-            }
-            state.authority.tool_access = services.plugins.tool_access();
+        if unrecorded && state.policy.model.is_none() {
+            state.policy = policy.clone();
         }
         {
             use crate::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
@@ -270,12 +267,10 @@ impl LashRuntime {
                 Err(error) => return Err(error.into()),
             }
         }
-        let (session, tool_restore_report) = if admitted_capabilities {
-            let (session, report) =
-                Self::restore_constructed_session(&host, &services, &mut state).await?;
-            (Some(session), report)
+        let session = if admitted_capabilities {
+            Some(Self::restore_constructed_session(&services, &mut state).await?)
         } else {
-            (None, None)
+            None
         };
         let resident_session = ResidentSessionContinuity::fresh();
         let turn_phase_probe = host
@@ -292,41 +287,14 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe,
             resident_session,
-            tool_restore_report,
         })
     }
 
     pub(in crate::runtime) async fn restore_constructed_session(
-        host: &RuntimeHost,
         services: &RuntimeServices,
         state: &mut RuntimeSessionState,
-    ) -> Result<(Session, Option<crate::ToolRestoreReport>), SessionError> {
+    ) -> Result<Session, SessionError> {
         let mut session = Session::new(services.clone(), &state.session_id).await?;
-        let mut tool_restore_report = None;
-        if let Some(tool_state) = state.tool_state_snapshot().cloned() {
-            // Cold rebuild reconciles the persisted catalog over live tools,
-            // adopting its generation when the surface is unchanged.
-            // `apply_state` (a delta-apply that
-            // requires `snapshot.generation == base` and bumps) would reject a
-            // session whose surface reached generation ≥ 2 onto a fresh base-1
-            // registry — the worker-rebuild / restart divergence. `restore_state`
-            // is not generation-fenced against the fresh registry, so any
-            // persisted generation rebuilds. A changed live surface bumps once
-            // to make the next commit capture it.
-            //
-            // Unresolved ids never refuse: a turn run decided `ToolSourcePolicy::Require`
-            // before it built this session (FIG-5134).
-            let registry = session.plugins().tool_registry();
-            tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
-                registry.as_ref(),
-                tool_state,
-                crate::runtime::tool_restore::ToolRestoreContext::new(
-                    &state.session_id,
-                    crate::runtime::ToolRestoreSite::SessionConstruction,
-                    &host.core.tracing,
-                ),
-            )?);
-        }
         let catalog = session.resolved_tool_catalog()?;
         session
             .plugins()
@@ -336,7 +304,7 @@ impl LashRuntime {
                 Some(&crate::plugin::ProtocolSessionRestoreView::new(state)),
             )
             .await?;
-        session.refresh_tool_catalog().await?;
+        session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();
         protocol_session
@@ -360,7 +328,7 @@ impl LashRuntime {
         {
             tracing::warn!(?error, "session restore observer failed");
         }
-        Ok((session, tool_restore_report))
+        Ok(session)
     }
 
     pub(in crate::runtime) async fn materialize_published_session(
@@ -368,11 +336,9 @@ impl LashRuntime {
     ) -> Result<(), SessionError> {
         self.services.plugins.materialize()?;
         if self.session.is_none() {
-            let (session, report) =
-                Self::restore_constructed_session(&self.host, &self.services, &mut self.state)
-                    .await?;
+            let session =
+                Self::restore_constructed_session(&self.services, &mut self.state).await?;
             self.session = Some(session);
-            self.tool_restore_report = report;
         }
         Ok(())
     }
@@ -582,7 +548,6 @@ impl LashRuntime {
         // The session's recorded plugin configuration, as recorded: every
         // open delivers it unchanged (FIG-4379).
         let authority = crate::plugin::SessionAuthorityContext {
-            tool_access: state.authority.tool_access.clone(),
             plugin_config: state.admitted_plugin_config(),
         };
         let plugin_session = match state.plugin_state() {
@@ -658,7 +623,6 @@ impl LashRuntime {
             store,
             policy: self.state.effective_policy().clone(),
             authority: crate::RuntimeSessionAuthority::new(
-                self.state.authority.tool_access.clone(),
                 self.state.authority.plugin_config.clone(),
                 self.state.authority.prompt_plan.clone(),
             ),
@@ -700,17 +664,10 @@ impl LashRuntime {
         // its own boundary (turn final commit, session commands), so a runtime
         // between boundaries already equals its last commit. Flushing is only
         // needed when the state has never been persisted, has accepted plugin
-        // writes, changed tool curation, or pending graph nodes; an unconditional
-        // commit here would bump the head revision on every park/close, disturbing
-        // host-side head-CAS expectations for what is durably a no-op.
-        // Capability admission can publish the first checkpoint before host
-        // curation (FIG-4857). Compare the captured catalog with its durable
-        // content address: stamping alone does not make an unchanged park dirty.
-        let tools_changed = self.state.tool_state_is_dirty().map_err(|source| {
-            session_commit_error("failed to compare parked tool state", source)
-        })?;
+        // writes, or pending graph nodes; an unconditional commit here would
+        // bump the head revision on every park/close, disturbing host-side
+        // head-CAS expectations for what is durably a no-op.
         if self.state.checkpoint_ref.is_some()
-            && !tools_changed
             && !self.state.plugin_state_is_dirty()
             && self.state.pending_graph_commit().nodes().is_empty()
         {
@@ -821,14 +778,13 @@ mod tests {
         let plugins = crate::testing::test_plugin_host(Vec::new())
             .build_session(crate::plugin::PluginSessionRequest::creation(
                 state.session_id.clone(),
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+                crate::plugin::SessionAuthorityContext::fixture(),
             ))
             .expect("plugin session");
         let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
             crate::testing::sqlite_memory_store_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
-            crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
             crate::DataRetentionConfig::standard(),
@@ -856,7 +812,7 @@ mod tests {
     async fn a_recorded_head_with_no_model_is_refused_and_never_filled_from_the_opener() {
         let mut recorded = crate::RuntimeSessionState {
             session_id: SessionId::from("recorded-without-model"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -876,7 +832,7 @@ mod tests {
 
         let unrecorded = crate::RuntimeSessionState {
             session_id: SessionId::from("never-committed"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -895,7 +851,7 @@ mod tests {
     fn initial_park_identity_is_stable_for_replay_and_distinguishes_content() {
         let mut state = crate::RuntimeSessionState {
             session_id: SessionId::from("park-identity"),
-            ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
@@ -948,10 +904,7 @@ mod tests {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::fixture(session_id.to_string()),
             relation: crate::SessionRelation::Root,
-            config: crate::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                crate::SessionToolAccess::ambient(),
-            ),
+            config: crate::PersistedSessionConfig::from_policy(&policy.clone()),
             head: crate::SessionCreationHead::Config,
             retention: crate::Retention::UntilGc,
         };
@@ -974,7 +927,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(session_id.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
@@ -1031,10 +984,7 @@ mod tests {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::fixture(session_id.to_string()),
                 relation: crate::SessionRelation::Root,
-                config: crate::PersistedSessionConfig::from_policy(
-                    &policy.clone(),
-                    crate::SessionToolAccess::ambient(),
-                ),
+                config: crate::PersistedSessionConfig::from_policy(&policy.clone()),
                 head: crate::SessionCreationHead::Config,
                 retention: crate::Retention::UntilGc,
             },
@@ -1062,7 +1012,7 @@ mod tests {
             crate::RuntimeSessionState {
                 session_id: SessionId::fixture(session_id.to_string()),
                 policy,
-                ..crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+                ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
                     crate::TurnBudget::Unbounded,
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),

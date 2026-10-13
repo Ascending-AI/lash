@@ -525,11 +525,15 @@ impl DeclaringProbe {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for DeclaringProbe {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![probe_tool().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == PROBE_TOOL).then(|| Arc::new(probe_tool().contract()))
     }
 
@@ -763,19 +767,13 @@ fn delegation(
     rlm: bool,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     let factory = match lifetimes {
-        Lifetimes::Starter => delegation::DelegationPluginFactory::new(
-            lash::plugins::SessionToolAccess::ambient(),
-            served::spec(64),
-            lash_core::lifetime::starter,
-        ),
-        Lifetimes::Session => delegation::DelegationPluginFactory::new(
-            lash::plugins::SessionToolAccess::ambient(),
-            served::spec(64),
-            |cx| {
-                cx.session()
-                    .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
-            },
-        ),
+        Lifetimes::Starter => {
+            delegation::DelegationPluginFactory::new(served::spec(64), lash_core::lifetime::starter)
+        }
+        Lifetimes::Session => delegation::DelegationPluginFactory::new(served::spec(64), |cx| {
+            cx.session()
+                .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
+        }),
     };
     Arc::new(if rlm {
         factory.with_rlm_children()
@@ -805,7 +803,7 @@ impl World {
                     let builder = if shape.producer == Producer::PromiseAll {
                         lash::LashCore::rlm_builder(
                             backend.clone(),
-                            served::rlm(backend, None, sim::untimed_workers()),
+                            served::rlm(backend, sim::untimed_workers()),
                         )
                     } else {
                         lash::LashCore::standard_builder(backend.clone())

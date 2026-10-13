@@ -61,17 +61,14 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
                 ..Default::default()
             }),
     ));
-    let spec = ProcessEnv::builder(
-        crate::SessionToolAccess::restricted(std::iter::empty()).unwrap(),
-        crate::MaxToolCalls::new(1024),
-    )
-    .model(crate::ProcessModel::new(
-        profile,
-        Default::default(),
-        Default::default(),
-    ))
-    .build()
-    .unwrap();
+    let spec = ProcessEnv::builder(crate::MaxToolCalls::new(1024))
+        .model(crate::ProcessModel::new(
+            profile,
+            Default::default(),
+            Default::default(),
+        ))
+        .build()
+        .unwrap();
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
     ))

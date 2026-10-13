@@ -40,10 +40,7 @@ async fn absent_sessions_answer_not_accepted_promptly() -> Result<()> {
     let created = fixture
         .core
         .session(id.clone())
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     assert!(created.pending_turn_inputs().await?.is_empty());
     let administration = fixture.core.session_administration().await;
@@ -197,7 +194,6 @@ async fn fixture_over_with_batching(
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(batching)
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
@@ -887,10 +883,7 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
-            config: lash_core::PersistedSessionConfig::from_policy(
-                &policy,
-                lash_core::SessionToolAccess::ambient(),
-            ),
+            config: lash_core::PersistedSessionConfig::from_policy(&policy),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::Retention::UntilGc,
         },
@@ -960,10 +953,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
     .build(crate::testing::runtime_lease_owner())?;
     let durable = core
         .session(crate::SessionId::parse("engine-first").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
@@ -1340,10 +1330,7 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     fixture
         .core
         .session(crate::SessionId::parse("reserved-batch").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture
         .core
@@ -1393,10 +1380,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     fixture
         .core
         .session(crate::SessionId::parse("send-batch").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture
         .core
@@ -1516,10 +1500,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let created = fixture
         .core
         .session(crate::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let held = created
         .send(TurnInput::text(HELD))

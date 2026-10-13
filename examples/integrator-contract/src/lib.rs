@@ -31,19 +31,35 @@ pub mod stores;
 
 #[lash::async_trait]
 impl ToolProvider for Integrator {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
         unreachable!("external signature witness")
     }
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
+    fn resolve_manifest(
+        &self,
+        name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<ToolManifest> {
         unreachable!("external signature witness")
     }
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<ToolManifest> {
         unreachable!("external signature witness")
     }
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         unreachable!("external signature witness")
     }
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
+    fn resolve_contract_by_id(
+        &self,
+        id: &ToolId,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         unreachable!("external signature witness")
     }
     async fn prepare_tool_call(
@@ -222,6 +238,13 @@ impl ProtocolDriverPlugin for Integrator {
 
 #[lash::async_trait]
 impl ProcessEngine for Integrator {
+    async fn performed_effects(
+        &self,
+        _payload: &lash::messages::JsonValue,
+    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
+        Ok(lash::process::PerformedEffects::new())
+    }
+
     async fn check_args(
         &self,
         _signature: &lash::process::ProcessSignature,

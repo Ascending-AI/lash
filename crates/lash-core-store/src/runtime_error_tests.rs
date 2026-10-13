@@ -193,13 +193,14 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::RecordedCallbackUnavailable,
             RuntimeErrorCode::StreamStateFormatUnreadable,
             RuntimeErrorCode::LashVmCellBindingDrift,
+            RuntimeErrorCode::ExecutionBindingUnreadable,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::VmWorkerUnavailable,
         ]
         .iter()
         .map(RuntimeErrorCode::as_str)
         .collect::<std::collections::BTreeSet<_>>(),
-        "replay and worker deployment refusals park"
+        "replay, binding readability and worker deployment refusals park"
     );
     // A foreign code carries the class its minting host chose on the error.
     for (cause, terminal) in [

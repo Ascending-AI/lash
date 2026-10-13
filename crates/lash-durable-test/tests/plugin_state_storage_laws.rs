@@ -275,11 +275,15 @@ impl lash::plugins::SessionPlugin for StoragePlugin {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for StoragePlugin {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![tool_definition(self.tool()).manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == self.tool()).then(|| Arc::new(tool_definition(name).contract()))
     }
 
@@ -545,7 +549,7 @@ impl Storage {
                 let builder = match self.shape {
                     Shape::Cell => lash::LashCore::rlm_builder(
                         backend.clone(),
-                        served::rlm(&backend, None, sim::workers(&clock)),
+                        served::rlm(&backend, sim::workers(&clock)),
                     ),
                     Shape::Step => lash::LashCore::standard_builder(backend.clone()),
                 };
@@ -554,7 +558,6 @@ impl Storage {
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
                     .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-                    .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
@@ -718,7 +721,7 @@ impl Scenario for Storage {
         SimNodesConfig {
             lease: Matrix::test_lease(),
             decodes: self.backend().formats().decodes(),
-            serves: Vec::new(),
+            serves: lash::testing::node_serves(&self.core()),
             max_active: 4,
         }
     }
@@ -741,10 +744,7 @@ impl Scenario for Storage {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                served::spec(64),
-            ))
+            .create(lash::SessionCreation::root(served::spec(64)))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         *self.host.lock_recover() = Some(session);
@@ -1217,10 +1217,7 @@ async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedConte
     let host = storage
         .core()
         .session(session())
-        .create(lash::SessionCreation::root(
-            lash::plugins::SessionToolAccess::ambient(),
-            served::spec(64),
-        ))
+        .create(lash::SessionCreation::root(served::spec(64)))
         .await
         .expect("the session is created");
     *storage.host.lock_recover() = Some(host);

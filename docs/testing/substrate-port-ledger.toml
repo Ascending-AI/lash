@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4067 laws.
+# 1731 rows over 869 files, 4066 laws.
 # By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 189, deleted 1542.
@@ -1490,9 +1490,9 @@ lane = "L9b"
 laws = [
   "a_resident_resync_on_a_require_core_reloads_and_reports",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: a session's capabilities live only in a run on the node, and the resident re-sync runs inside the command run that applies a host restore (tool_state_commands reloads before it applies); that run on a Require core reports the loss and does not fail"
+note = "FIG-5310: a session's capabilities live only in a run on the node, and the resident re-sync runs inside the command run that applies a host restore (tool_state_commands reloads before it applies); that run on a Require core reports the loss and does not fail FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_restore_report.rs"
@@ -1504,9 +1504,9 @@ lane = "L9b"
 laws = [
   "a_persisted_state_install_on_a_require_core_reports_instead_of_refusing",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: an open builds no capabilities, so a facade persisted-state install has no registry to install onto; the install a session's tool state gets is its run's, which the host-restore law drives on a Require core"
+note = "FIG-5310: an open builds no capabilities, so a facade persisted-state install has no registry to install onto; the install a session's tool state gets is its run's, which the host-restore law drives on a Require core FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::a_host_restore_on_a_require_core_reports_instead_of_refusing) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1547,9 +1547,9 @@ lane = "L9d"
 laws = [
   "parked_resume_keeps_the_store_bound_session_id",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: the law asserts the resumed session keeps its store-bound id"
+note = "FIG-5310: the law asserts the resumed session keeps its store-bound id FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::updated_tool_access_survives_park_and_resume) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1561,9 +1561,9 @@ lane = "L9d"
 laws = [
   "park_resume_restores_tool_and_subagent_authority",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: the tool half: a tool advertised only after the restart stays hidden by the recorded authority; the subagent half is subject-deleted: FIG-5296 (35b70ca82b) deleted subagent session context and inheritance"
+note = "FIG-5310: the tool half: a tool advertised only after the restart stays hidden by the recorded authority; the subagent half is subject-deleted: FIG-5296 (35b70ca82b) deleted subagent session context and inheritance FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::updated_tool_access_survives_park_and_resume) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1575,9 +1575,9 @@ lane = "L9d"
 laws = [
   "park_resume_uses_broader_persisted_authority_over_narrower_live_authority",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::updated_tool_access_survives_park_and_resume"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: an open supplies no live authority (FIG-4857); a run reads only the recorded access, which the law changes by its config command and reads back after a restart"
+note = "FIG-5310: an open supplies no live authority (FIG-4857); a run reads only the recorded access, which the law changes by its config command and reads back after a restart FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::updated_tool_access_survives_park_and_resume) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1589,9 +1589,9 @@ lane = "L9d"
 laws = [
   "tool_access_setter_changes_live_plugin_discovery_in_both_directions",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::tool_access_setter_changes_the_next_model_request_in_both_directions"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: discovery is built per run from the recorded access, with no resident catalog to go stale; the model request is what discovery serves"
+note = "FIG-5310: discovery is built per run from the recorded access, with no resident catalog to go stale; the model request is what discovery serves FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::tool_access_setter_changes_the_next_model_request_in_both_directions) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1659,9 +1659,9 @@ lane = "L9d"
 laws = [
   "composed_session_catalog_discovers_callable_tool_without_exposing_hidden_tool",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/tool_surface_laws.rs::session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: a tool the source advertises after the session's last turn is offered and runs on the next, and a hidden one is neither offered nor run"
+note = "FIG-5310: a tool the source advertises after the session's last turn is offered and runs on the next, and a hidden one is neither offered nor run FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_surface_laws.rs::session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy) went with them."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tracing.rs"
@@ -2624,7 +2624,6 @@ laws = [
   "lash_conformance::store_maintenance_fault_tests!",
   "lash_conformance::store_maintenance_tests!",
   "lash_conformance::store_recovery_tests!",
-  "lash_conformance::tool_access_persistence_tests!",
   "lash_conformance::tool_intent_retention_tests!",
   "lash_conformance::trigger_occurrence_tombstone_retention_tests!",
   "lash_conformance::trigger_retention_fault_tests!",
@@ -12244,10 +12243,10 @@ lane = "L9c"
 laws = [
   "dispatch_rejects_hidden_tool_before_contract_resolution",
 ]
-disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_rejects_hidden_tool_before_contract_resolution"
+disposition = "subject-deleted"
 status = "deleted"
 owed = "dispatch rejects hidden tool before contract resolution"
-note = "the refusal ends before any attempt, so it runs with no effects"
+note = "the refusal ends before any attempt, so it runs with no effects FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tests.rs::dispatch_rejects_hidden_tool_before_contract_resolution) went with them."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs"
@@ -16566,10 +16565,10 @@ laws = [
   "a_per_open_override_states_the_policy_for_one_session",
   "require_refuses_a_shift_rebuild_that_lost_a_tool_source",
 ]
-disposition = "replaced-by:crates/lash/src/tests/tool_restore_report.rs"
+disposition = "subject-deleted"
 status = "deleted"
 owed = "the restoring run delivers the tool restore report to the host; and 3 more law(s) of the file, by test name"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; require_refuses_a_shift_rebuild_that_lost_a_tool_source is require_refuses_a_cold_rebuild_that_lost_a_tool_source (a node rebuilds a session's runtime from its head, not per shift); a_per_open_override_states_the_policy_for_one_session is subject-deleted: SessionBuilder::tool_source_policy is gone (8f0d6b2d05)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; require_refuses_a_shift_rebuild_that_lost_a_tool_source is require_refuses_a_cold_rebuild_that_lost_a_tool_source (a node rebuilds a session's runtime from its head, not per shift); a_per_open_override_states_the_policy_for_one_session is subject-deleted: SessionBuilder::tool_source_policy is gone (8f0d6b2d05) FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_restore_report.rs) went with them."
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -17540,10 +17539,10 @@ lane = "L9h"
 laws = [
   "a_run_that_lost_a_tool_renders_the_loss_to_the_user",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/tool_loss.rs::a_run_that_lost_a_tool_renders_the_loss_to_the_user"
+disposition = "subject-deleted"
 status = "deleted"
 owed = "a run that lost a tool renders the loss to the user"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the seeding workbench serves the tool as a host tool; the restarted one, over the same stores, does not, and its routed turn's follower renders the loss"
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the seeding workbench serves the tool as a host tool; the restarted one, over the same stores, does not, and its routed turn's follower renders the loss FIG-6074: tool access, tool state, source policy and restore reports are deleted; the law it pointed to (tool_loss.rs::a_run_that_lost_a_tool_renders_the_loss_to_the_user) went with them."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs"

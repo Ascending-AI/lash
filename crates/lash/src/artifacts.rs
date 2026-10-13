@@ -106,8 +106,8 @@ impl HostArtifacts {
         }
     }
 
-    /// Observe the serving build's component tools intersected with `env.tools`.
-    /// Admits the environment and builds only its named components with
+    /// Observe the tools the serving build's components serve for `env`'s
+    /// effect links. Admits the environment and builds only its named components with
     /// `process: None`. This is an observation of the serving build, not the
     /// catalog at the time the process started.
     pub fn process_catalog(&self, env: &ProcessEnv) -> Result<Arc<ToolCatalog>> {

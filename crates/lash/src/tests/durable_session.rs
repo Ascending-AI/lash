@@ -106,10 +106,7 @@ fn turn(text: &str) -> crate::TurnId {
 
 async fn create(core: &LashCore, session: &str) -> crate::DurableSession {
     core.session(id(session))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("create the session")
 }
@@ -362,12 +359,11 @@ async fn open_of_a_missing_id_is_unknown_session_and_writes_no_row() {
     };
     assert!(is_unknown(core.session(id("never-opened")).open().await));
     let state = || {
-        let mut state =
-            lash_core::RuntimeSessionState::ambient_fixture(lash_core::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ));
+        let mut state = lash_core::RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        ));
         state.session_id = missing.clone();
         state
     };
@@ -413,10 +409,7 @@ async fn concurrent_creates_of_one_id_give_exactly_one_ok() {
             tokio::spawn(async move {
                 barrier.wait().await;
                 core.session(id("raced-create"))
-                    .create(crate::SessionCreation::root(
-                        crate::plugins::SessionToolAccess::ambient(),
-                        mock_session_spec(),
-                    ))
+                    .create(crate::SessionCreation::root(mock_session_spec()))
                     .await
                     .map(drop)
             })
@@ -1000,18 +993,17 @@ async fn persisted_tool_state(backend: &lash_core::Backend, session_id: &Session
 }
 
 /// FIG-3353: a grantless core polls and edits a session's queue without
-/// building a runtime, so nothing is orphaned and nothing is restored.
+/// building a runtime, so nothing is materialized and the head is unchanged.
 ///
 /// The law asserts its own precondition — a run on a grantless core *does*
-/// orphan the persisted tool — and then counts, on the `durable()` path,
-/// every step of a runtime build.
+/// materialize plugins — and then counts, on the `durable()` path, every
+/// step of a runtime build.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
     let session_id = SessionId::from("fig-3353-durable-poll");
-    let app_lookup = lash_core::ToolId::from("tool:app_lookup");
     let backend = sqlite_memory_store_backend().await;
 
-    // A core that carries the session's tool source, to persist tool state.
+    // A core that carries the session's tool source, to record its surface.
     let granting = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .tools(crate::hook_key!("tools"), Arc::new(AppTools))
@@ -1020,17 +1012,17 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
     let granted = create(&granting, session_id.as_str()).await;
     granted
         .send(crate::TurnInput::text(
-            "persist a checkpoint with tool state",
+            "persist a checkpoint with a recorded surface",
         ))
         .output()
         .await
         .expect("the granted turn commits");
     granting.shutdown().await.expect("shutdown");
 
-    // Precondition: a run on a grantless core really does orphan the tool.
+    // Precondition: a run on a grantless core really does build a runtime.
     let run_counters = Arc::new(RuntimeBuildCounters::default());
     let grantless_runner = probed_core(backend.clone(), &run_counters, true);
-    let output = grantless_runner
+    grantless_runner
         .session(id(session_id.as_str()))
         .durable()
         .await
@@ -1039,13 +1031,6 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
         .output()
         .await
         .expect("the grantless turn commits");
-    assert_eq!(
-        output
-            .tool_restore_report()
-            .map(|report| report.lost_members.clone()),
-        Some(vec![app_lookup.clone()]),
-        "precondition: a run on a core without the tool's source orphans it"
-    );
     let (plugins, _) = run_counters.snapshot();
     assert!(
         plugins > 0,
@@ -1324,10 +1309,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() {
     .expect("delete the session");
     let error = core
         .session(id("create-deleted"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .err()
         .expect("creating a retired id is refused");
@@ -1859,12 +1841,16 @@ struct SecondLookupHeld {
 #[cfg(feature = "rlm")]
 #[async_trait]
 impl ToolProvider for SecondLookupHeld {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        AppTools.tool_manifests()
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        AppTools.tool_manifests(config)
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        AppTools.resolve_contract(name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        AppTools.resolve_contract(name, config)
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -2352,10 +2338,7 @@ async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
     )
     .no_progress_budget(crate::NoProgressBudget::bounded(12));
     core.session(id("finish-at-the-limit"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            spec,
-        ))
+        .create(crate::SessionCreation::root(spec))
         .await?;
     let session = core.session(id("finish-at-the-limit")).open().await?;
     let settled = session

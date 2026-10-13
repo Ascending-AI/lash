@@ -3,65 +3,6 @@ use std::sync::Arc;
 
 use lash_core::facade_support::PluginHost;
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the session fixture always admits a tool catalog view for the root session"
-)]
-fn tool_names(session: &lash_core::facade_support::PluginSession) -> Vec<String> {
-    session
-        .resolved_tool_catalog()
-        .expect("tool catalog")
-        .tool_names()
-        .as_ref()
-        .clone()
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the fixture host build always succeeds for these session fixtures"
-)]
-fn standard_session_with_access(
-    session_id: &str,
-    tool_access: lash_core::SessionToolAccess,
-) -> Arc<lash_core::facade_support::PluginSession> {
-    let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
-    PluginHost::new(
-        vec![
-            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
-            Arc::new(lash_core::plugin::StaticPluginFactory::new(
-                lash_core::plugin::PluginDeclaration::initial("native-tools-fixture"),
-                lash_core::facade_support::PluginSpec::new()
-                    .with_tool_provider(lash_core::hook_key!("tools"), fixture),
-            )),
-        ],
-        lash_core::ExecutionBudgets::recommended(),
-        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
-            lash_core::facade_support::SystemClock,
-        )),
-    )
-    .build_session(PluginSessionRequest::creation(
-        lash_core::SessionId::fixture(session_id),
-        lash_core::plugin::SessionAuthorityContext {
-            tool_access,
-            ..lash_core::plugin::SessionAuthorityContext::ambient_fixture()
-        },
-    ))
-    .expect("standard protocol session")
-}
-
-#[test]
-fn standard_protocol_distinguishes_ambient_from_restricted_empty_access() {
-    let ambient =
-        standard_session_with_access("standard-ambient", lash_core::SessionToolAccess::ambient());
-    assert!(tool_names(&ambient).contains(&lash_core::testing::FIXTURE_ECHO_TOOL.to_string()));
-
-    let restricted = standard_session_with_access(
-        "standard-restricted-empty",
-        lash_core::SessionToolAccess::restricted([]).expect("restricted empty is valid"),
-    );
-    assert!(tool_names(&restricted).is_empty());
-}
-
 /// A catalogue tool named `batch` could never be called while the sugar names
 /// it in every request, so it is refused; withheld, the name is free.
 #[test]
@@ -88,7 +29,7 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
         )
         .build_session(PluginSessionRequest::creation(
             "root",
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+            lash_core::plugin::SessionAuthorityContext::fixture(),
         ))?;
         Ok(session
             .resolved_tool_catalog()?
@@ -130,11 +71,15 @@ fn named_batch() -> lash_core::ToolDefinition {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NamedBatch {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![named_batch().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         (name == "batch").then(|| Arc::new(named_batch().contract()))
     }
 

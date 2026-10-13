@@ -170,8 +170,6 @@ pub(crate) use file_replace::*;
 mod host_ingress;
 #[path = "main_sections/session_fence.rs"]
 mod session_fence;
-#[path = "main_sections/tool_loss_notice.rs"]
-mod tool_loss_notice;
 pub(crate) use session_fence::*;
 #[path = "main_sections/plugins.rs"]
 mod plugins;

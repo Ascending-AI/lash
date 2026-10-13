@@ -103,9 +103,6 @@ pub mod state;
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
-mod tool_restore;
-mod tool_state_commands;
-pub use tool_restore::ToolRestoreSite;
 mod turn_boundary;
 mod turn_commit_draft;
 #[cfg(feature = "testing")]
@@ -281,42 +278,43 @@ pub use process::ProcessChangeSubscription;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
-    CanonicalProcessEventAppend, DeclaredLaunch, DeclaredProcessIdentity, DefinitionAcquisition,
-    EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
-    EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStepKind, EngineStepRefusal,
-    EngineStepRun, EngineSteps, HandleId, HoldEnvError, InspectedProcessDefinition,
-    InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
-    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE,
-    NonTerminalProcessPage, ObservedProcess, ObservedProcessChange, ObservedProcessEvent,
-    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
-    ObservedWorkItem, ObservedWorkItemState, PROCESS_EFFECT_OCCURRENCE_CAP,
-    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan, PreparedProcessRegistration,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeBounds,
-    ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
-    ProcessComponentIdError, ProcessConfigKey, ProcessDefinition, ProcessDefinitionDraft,
-    ProcessDefinitionDraftError, ProcessDefinitionError, ProcessDefinitionId, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionStore,
-    ProcessDefinitionStoredError, ProcessDefinitionTarget, ProcessDefinitionValue, ProcessDocument,
-    ProcessDocumentProvider, ProcessDocumentRead, ProcessDocumentRefRead, ProcessEffectNodeReport,
-    ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, ProcessEngine,
-    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy,
-    ProcessEnvPolicyError, ProcessEnvPorts, ProcessEnvRef, ProcessEnvRefusal, ProcessEnvSelection,
-    ProcessEnvStore, ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
-    ProcessEventLog, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
-    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease, ProcessEventSink,
-    ProcessExecutionContext, ProcessExecutionDocumentRead, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity,
-    ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLifecycleFact, ProcessLifecycleState,
-    ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
-    ProcessModel, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeNotRetained, ProcessParkReason,
-    ProcessParkState, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
+    CanonicalProcessEventAppend, DeclaredDefinitionLaunch, DeclaredLaunch, DeclaredProcessIdentity,
+    DefinitionAcquisition, EnclosingProcess, EngineAction, EngineEvent, EngineLaunch,
+    EngineSettings, EngineState, EngineStateFormat, EngineStateMigration, EngineStateRefusal,
+    EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, FitPolicy, HandleId,
+    HoldEnvError, InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, KeyName,
+    Lifetime, LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+    MAX_PROCESS_ROSTER_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess, ObservedProcessChange,
+    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan,
+    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeBounds, ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
+    ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError, ProcessConfigKey,
+    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionError,
+    ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionStore, ProcessDefinitionStoredError,
+    ProcessDefinitionTarget, ProcessDefinitionValue, ProcessDocument, ProcessDocumentProvider,
+    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEffectNodeReport, ProcessEffectOccurrence,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectReport, ProcessEffectReportError, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEnv,
+    ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
+    ProcessEnvPorts, ProcessEnvRef, ProcessEnvRefusal, ProcessEnvSelection, ProcessEnvStore,
+    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventLog,
+    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+    ProcessEventReadOutcome, ProcessEventRelease, ProcessEventSink, ProcessExecutionContext,
+    ProcessExecutionDocumentRead, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
+    ProcessLifecycle, ProcessLifecycleFact, ProcessLifecycleState, ProcessLimits, ProcessLineage,
+    ProcessListFilter, ProcessListMode, ProcessLiveReferenceView, ProcessModel, ProcessObserverBy,
+    ProcessObserverRegistry, ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessOutcome, ProcessOutcomeNotRetained, ProcessParkReason, ProcessParkState,
+    ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar,
+    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
     ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
     ProcessRetention, ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords,
     ProcessRosterTokenError, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport,
@@ -331,7 +329,7 @@ pub use process::{
     SessionScopeId, StagedProcessStart, StartCx, StartCxError, StartKey, StepName, StepRequest,
     StoreRealization, TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState,
     WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
-    apply_process_event_projection, artifact_store_plugin_error, check_retained_start,
+    apply_process_event_projection, artifact_store_plugin_error, check_links, check_retained_start,
     current_epoch_ms, fold_process_record, hold_process_env, lifetime, load_process_env,
     mint_process_id, prepare_process_event_append, prepare_process_registration,
     prepare_process_start, prepare_process_transition, process_child_session_id,
@@ -444,12 +442,6 @@ pub struct LashRuntime {
     /// last commit ran under. Its reload and invalidation rules are methods on
     /// [`ResidentSessionContinuity`].
     pub resident_session: ResidentSessionContinuity,
-    /// The report of the latest persisted-tool-state install on this runtime
-    /// that no turn has reported yet: the run transition that built its
-    /// capabilities, or a later host restore, persisted-state install or
-    /// resident re-sync. The next turn takes it and reports it as
-    /// `TurnEvent::ToolRestoreReported` (FIG-3367, FIG-5134).
-    pub tool_restore_report: Option<crate::ToolRestoreReport>,
 }
 
 #[doc(hidden)]

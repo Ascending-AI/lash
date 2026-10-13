@@ -4,69 +4,13 @@
 //! it through a live plugin session, so they run here.
 
 use super::RuntimeSessionState;
-use crate::SessionId;
-use crate::facade_support::ToolStateFacadeOps;
-use lash_sansio::sync::MutexExt;
-
-use std::sync::{Arc, Mutex};
-
-struct DynamicSnapshotTools {
-    names: Arc<Mutex<Vec<String>>>,
-}
-
-#[async_trait::async_trait]
-impl crate::ToolProvider for DynamicSnapshotTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        self.names
-            .lock_recover()
-            .iter()
-            .map(|name| {
-                crate::ToolDefinition::raw(
-                    format!("tool:{name}"),
-                    name,
-                    "dynamic snapshot tool",
-                    crate::ToolDefinition::default_input_schema(),
-                    serde_json::json!({}),
-                )
-                .expect("valid declared tool schemas")
-                .with_execution(std::time::Duration::from_secs(120))
-                .manifest()
-            })
-            .collect()
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        self.names
-            .lock_recover()
-            .iter()
-            .any(|candidate| candidate == name)
-            .then(|| {
-                Arc::new(
-                    crate::ToolDefinition::raw(
-                        format!("tool:{name}"),
-                        name,
-                        "dynamic snapshot tool",
-                        crate::ToolDefinition::default_input_schema(),
-                        serde_json::json!({}),
-                    )
-                    .expect("valid declared tool schemas")
-                    .with_execution(std::time::Duration::from_secs(120))
-                    .contract(),
-                )
-            })
-    }
-
-    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        crate::ToolOutcome::ok(serde_json::json!("ok")).into()
-    }
-}
 
 #[tokio::test]
 async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency() {
     use crate::store::SessionCommitStore as _;
 
     let store = crate::testing::unbound_recording_store().await;
-    let mut generation_a = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
+    let mut generation_a = RuntimeSessionState::fixture(crate::SessionPolicy::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(1024),
         crate::NoProgressBudget::bounded(12),
@@ -145,44 +89,4 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
-
-#[test]
-fn reconciled_generation_forces_next_plugin_state_export() {
-    let names = Arc::new(Mutex::new(vec!["dynamic_one".to_string()]));
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(DynamicSnapshotTools {
-        names: Arc::clone(&names),
-    });
-    let plugins =
-        crate::runtime::tests::helpers::plugin_session_with_tools(&SessionId::from("root"), tools);
-    let snapshot = plugins.tool_registry().export_state();
-    let persisted_generation = snapshot.generation();
-    let mut projected = RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        crate::NoProgressBudget::bounded(12),
-    ))
-    .to_snapshot();
-    projected.tool_state_ref = Some("persisted-tool-state".to_string().into());
-    projected.tool_state_generation = Some(persisted_generation);
-    let mut state = RuntimeSessionState::from_snapshot(
-        projected,
-        crate::RuntimeSessionAuthority::ambient_fixture(),
-    );
-
-    names.lock_recover().push("dynamic_two".to_string());
-    let report = plugins
-        .tool_registry()
-        .restore_state(snapshot)
-        .expect("live surface restore");
-    assert_eq!(report.generation, persisted_generation + 1);
-
-    state
-        .refresh_plugin_states(&plugins)
-        .expect("the live plugin state is captured");
-    let refreshed = state
-        .tool_state_snapshot()
-        .expect("generation change re-exports the tool snapshot");
-    assert_eq!(refreshed.generation(), report.generation);
-    assert!(refreshed.contains(&crate::ToolId::from("tool:dynamic_two")));
 }

@@ -84,8 +84,6 @@ pub(in crate::runtime) enum ResidentReloadStage {
     None,
     DurableHeadRefresh,
     SessionAvailability,
-    ToolStateRestore,
-    ToolCatalogRefresh,
     ProtocolSessionRestore,
 }
 
@@ -95,8 +93,6 @@ impl ResidentReloadStage {
             Self::None => "none",
             Self::DurableHeadRefresh => "durable_head_refresh",
             Self::SessionAvailability => "session_availability",
-            Self::ToolStateRestore => "tool_state_restore",
-            Self::ToolCatalogRefresh => "tool_catalog_refresh",
             Self::ProtocolSessionRestore => "protocol_session_restore",
         }
     }
@@ -337,7 +333,7 @@ impl LashRuntime {
         self.reload_invalidated_resident_session().await
     }
 
-    /// Restore the session's tool registry, plugin state and protocol session
+    /// Restore the session's plugin state and protocol session
     /// (its code executor) from `durable_state`, the state that is about to
     /// become resident.
     ///
@@ -350,10 +346,8 @@ impl LashRuntime {
     pub(in crate::runtime) async fn restore_resident_session_components(
         &mut self,
         durable_state: &mut crate::RuntimeSessionState,
-        tracing: &crate::trace::TraceRuntime,
-    ) -> Result<Option<crate::ToolRestoreReport>, (ResidentReloadStage, RuntimeError)> {
+    ) -> Result<(), (ResidentReloadStage, RuntimeError)> {
         let has_store = self.services.store.is_some();
-        let mut tool_restore = None;
         let session = self.session.as_mut().ok_or_else(|| {
             (
                 ResidentReloadStage::SessionAvailability,
@@ -377,37 +371,7 @@ impl LashRuntime {
                 (*session.plugins().admitted_plugin_config().config).clone();
         }
         session.invalidate_runtime_caches();
-        if let Some(tool_state) = durable_state.tool_state_snapshot().cloned() {
-            // The re-sync has no return value to hand the host, so the
-            // installer's delivery is the contract: trace evidence plus the
-            // typed report the runtime keeps for its next turn's
-            // `TurnEvent::ToolRestoreReported` (FIG-5134).
-            let registry = session.plugins().tool_registry();
-            let report = crate::runtime::tool_restore::install_persisted_tool_state(
-                registry.as_ref(),
-                tool_state,
-                // A source that went away degrades the session, it does
-                // not fail the reload (FIG-3367).
-                crate::runtime::tool_restore::ToolRestoreContext::new(
-                    &durable_state.session_id,
-                    crate::runtime::ToolRestoreSite::ResidentReload,
-                    tracing,
-                ),
-            )
-            .map_err(|err| {
-                (
-                    ResidentReloadStage::ToolStateRestore,
-                    restore_session_error(err),
-                )
-            })?;
-            tool_restore = Some(report);
-        }
-        session.refresh_tool_catalog().await.map_err(|err| {
-            (
-                ResidentReloadStage::ToolCatalogRefresh,
-                restore_session_error(err),
-            )
-        })?;
+        session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();
         protocol_session
@@ -438,7 +402,7 @@ impl LashRuntime {
         {
             tracing::warn!(?error, "resident session restore observer failed");
         }
-        Ok(tool_restore)
+        Ok(())
     }
 
     pub(super) async fn reload_invalidated_resident_session(&mut self) -> Result<(), RuntimeError> {
@@ -473,8 +437,6 @@ impl LashRuntime {
         };
         let mut durable_state = self.state.clone();
         let mut durable_head_revision = durable_state.head_revision;
-        let tracing = self.host.core.tracing.clone();
-        let mut reloaded_tool_restore = None;
         let reload_result: Result<(), (ResidentReloadStage, RuntimeError)> = async {
             if let Some(store) = store.as_ref() {
                 let headed = crate::store::refresh_session_window(store, &mut durable_state)
@@ -513,10 +475,7 @@ impl LashRuntime {
             // plugin transition publishes. It has durable state to reload,
             // but no protocol session to restore until that publication.
             if self.session.is_some() {
-                reloaded_tool_restore = Box::pin(
-                    self.restore_resident_session_components(&mut durable_state, &tracing),
-                )
-                .await?;
+                Box::pin(self.restore_resident_session_components(&mut durable_state)).await?;
             }
             self.install_resident_state(durable_state)
                 .map_err(|error| {
@@ -533,9 +492,6 @@ impl LashRuntime {
         }
         .await;
 
-        if reloaded_tool_restore.is_some() {
-            self.tool_restore_report = reloaded_tool_restore;
-        }
         match reload_result {
             Ok(()) => {
                 self.trace_resident_session_reload_decision(ResidentSessionReloadDecision {

@@ -62,12 +62,16 @@ struct CountingFirstPartyProvider {
 
 #[async_trait::async_trait]
 impl ToolProvider for CountingFirstPartyProvider {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        self.inner.tool_manifests()
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        self.inner.tool_manifests(config)
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        self.inner.resolve_contract(name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        self.inner.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -114,7 +118,7 @@ fn model(
 
 async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier: Tier) {
     let provider: Arc<dyn ToolProvider> = Arc::new(lash_llm_tools::llm_query_provider());
-    let manifests = provider.tool_manifests();
+    let manifests = provider.tool_manifests(&lash_core::OwnerConfigView::default());
     assert!(
         !manifests.is_empty(),
         "the first-party tool registry must not be empty"
@@ -139,7 +143,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
             move |backend| {
                 lash::LashCore::rlm_builder(
                     backend.clone(),
-                    served::rlm(backend, None, sim::untimed_workers()),
+                    served::rlm(backend, sim::untimed_workers()),
                 )
                 .tools(lash::hook_key!("tools"), tools)
             },

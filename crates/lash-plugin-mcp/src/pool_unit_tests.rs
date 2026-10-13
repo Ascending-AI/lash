@@ -219,7 +219,7 @@ async fn execute_by_id<P: ToolProvider>(
     context: &lash_core::AttemptContext<'_>,
 ) -> ToolOutcome {
     let manifest = provider
-        .resolve_manifest_by_id(tool_id)
+        .resolve_manifest_by_id(tool_id, &lash_core::OwnerConfigView::default())
         .expect("manifest resolves for tool id");
     execute_with_manifest(provider, &manifest, args, context).await
 }
@@ -616,17 +616,21 @@ struct NativeAndMcpProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NativeAndMcpProvider {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         let mut manifests = vec![self.native.manifest()];
-        manifests.extend(self.mcp.tool_manifests());
+        manifests.extend(self.mcp.tool_manifests(config));
         manifests
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         if name == self.native.name() {
             return Some(Arc::new(self.native.contract()));
         }
-        self.mcp.resolve_contract(name)
+        self.mcp.resolve_contract(name, config)
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -703,12 +707,18 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         }),
     );
 
+    let registry =
+        Arc::new(rebuilt.expect("a rejected collision must not kill the mixed native/MCP catalog"));
+    // A provider advertises live, under each run's config: the catalog is
+    // read while the original server still serves.
+    let entries = registry
+        .advertise(&lash_core::OwnerConfigView::default())
+        .expect("the rebuilt providers advertise");
+    let registry = lash_core::SurfaceTools::of_entries(entries, registry);
+    let manifests = registry.tool_manifests(&lash_core::OwnerConfigView::default());
+
     // With the reservation reverted, the rejected attach above becomes a second child.
     pool.shutdown_all().await;
-
-    let registry =
-        rebuilt.expect("a rejected collision must not kill the mixed native/MCP catalog");
-    let manifests = registry.tool_manifests();
     assert_eq!(manifests.len(), 2, "native and original MCP tools survive");
     assert!(
         manifests
@@ -878,14 +888,18 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
         .clone();
     let resident = crate::McpToolProvider::new(Arc::clone(&pool));
     let survivor_manifest = resident
-        .resolve_manifest_by_id(&survivor_id)
+        .resolve_manifest_by_id(&survivor_id, &lash_core::OwnerConfigView::default())
         .expect("survivor");
     let survivor_fixture = crate::plugin::prepared_test_call(&resident, &survivor_manifest)
         .await
-        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":survivor_id}));
+        .execution_binding(Some(crate::plugin::mcp_binding(
+            json!({"kind":"mcp", "server":"directory", "tool_id":survivor_id}),
+        )));
     let dropped_fixture = crate::plugin::prepared_test_call(&resident, &dropped_manifest)
         .await
-        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":dropped_id}));
+        .execution_binding(Some(crate::plugin::mcp_binding(
+            json!({"kind":"mcp", "server":"directory", "tool_id":dropped_id}),
+        )));
     std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");
 
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -1017,11 +1031,13 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     pool.set_resolved_target_hook(Some(Arc::clone(&resolved)));
     let resident = crate::McpToolProvider::new(Arc::clone(&pool));
     let saved_manifest = resident
-        .resolve_manifest_by_id(&saved_id)
+        .resolve_manifest_by_id(&saved_id, &lash_core::OwnerConfigView::default())
         .expect("saved tool resolves");
     let fixture = crate::plugin::prepared_test_call(&resident, &saved_manifest)
         .await
-        .execution_binding(json!({"kind":"mcp", "server":"directory", "tool_id":saved_id}));
+        .execution_binding(Some(crate::plugin::mcp_binding(
+            json!({"kind":"mcp", "server":"directory", "tool_id":saved_id}),
+        )));
     let call_pool = Arc::clone(&pool);
     let call_id = saved_id.clone();
     let call = tokio::spawn(async move {

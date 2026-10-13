@@ -495,6 +495,7 @@ mod tests {
         config.insert(
             crate::RLM_PROTOCOL_PLUGIN_ID,
             serde_json::to_value(crate::RlmRecordedConfig {
+                finish_value_schema: None,
                 render: None,
                 termination: None,
                 channel: Some(crate::RlmChannel::Cell),

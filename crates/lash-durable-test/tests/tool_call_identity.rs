@@ -130,14 +130,18 @@ struct Probes {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Probes {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         [PROBE, DEFERRED]
             .into_iter()
             .map(|name| probe_definition(name).manifest())
             .collect()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         [PROBE, DEFERRED]
             .contains(&name)
             .then(|| Arc::new(probe_definition(name).contract()))

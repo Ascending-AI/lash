@@ -104,7 +104,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             turn_context,
             logical_run: None,
             resolved_run: None,
-            live_tool_catalog: None,
             // This build's own epoch until the caller binds its store's
             // recorded `F` with `with_fleet_format`, as every context over a
             // durable store must (the session's and the process runner's).

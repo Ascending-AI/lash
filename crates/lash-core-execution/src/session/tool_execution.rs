@@ -167,13 +167,28 @@ pub(crate) fn tool_call_limit_failure(exceeded: crate::ToolCallLimitExceeded) ->
 
 impl RuntimeExecutionContext<'_> {
     /// The one provider identity a call of `tool` binds to and dispatches
-    /// through: the provider `granted` names, else the catalog's.
+    /// through: the provider `granted` names, else its surface entry's.
+    /// The binding formats the provider registered under `codec` reads on
+    /// this node; `None` when this node registers no provider under it.
+    pub fn binding_formats(
+        &self,
+        codec: &crate::plugin::PluginCallbackIdentity,
+    ) -> Option<&'static [crate::FormatVersion]> {
+        self.dispatch
+            .routes
+            .registry()
+            .provider(codec)
+            .map(|provider| provider.readable_binding_formats())
+    }
+
     pub fn tool_provider(
         &self,
         tool: &crate::ToolId,
         granted: Option<&crate::plugin::PluginCallbackIdentity>,
     ) -> Result<crate::plugin::PluginCallbackIdentity, crate::PluginError> {
-        self.dispatch.composition.tool_provider(tool, granted)
+        self.dispatch
+            .composition
+            .tool_provider(tool, self.dispatch.routed_provider(tool, granted))
     }
 
     /// `call_key` is the material the call's observation lanes key under —

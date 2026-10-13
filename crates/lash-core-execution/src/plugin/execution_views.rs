@@ -13,6 +13,13 @@ enum OwnerConfigSource {
     Components(Arc<crate::ProcessEnv>),
 }
 
+impl Default for OwnerConfigView {
+    /// A session's view of no recorded configuration.
+    fn default() -> Self {
+        Self::session(AdmittedPluginConfig::default())
+    }
+}
+
 impl OwnerConfigView {
     pub fn session(config: AdmittedPluginConfig) -> Self {
         Self(OwnerConfigSource::Session(config))

@@ -6908,10 +6908,9 @@
         if (generation !== toolCatalogGeneration || sessionId !== shownSessionId()) return;
         if (!response.ok) throw new Error(body.error || "Could not load tools. Refresh to try again.");
         if (body.session_id !== sessionId) return;
-        toolCatalogStatus.textContent = body.pending
-          ? "Change queued. It applies when the current turn finishes."
-          : body.tools.length ? "Checked tools are in the model's catalogue."
-          : "No recorded tools yet. Send a turn, then refresh tools.";
+        toolCatalogStatus.textContent = body.tools.length
+          ? "Checked tools are offered to the model. Mail tools can be switched on and off; a change applies from the next turn."
+          : "No tools are offered yet.";
         const signature = JSON.stringify(body);
         if (signature === toolCatalogSignature) return;
         toolCatalogSignature = signature;
@@ -6921,18 +6920,13 @@
           label.className = "tool-catalog-row";
           const input = document.createElement("input");
           input.type = "checkbox";
-          input.checked = tool.member;
-          input.disabled = body.pending || tool.orphaned;
+          input.checked = tool.offered;
+          input.disabled = !tool.selectable;
           input.dataset.toolId = tool.id;
           const name = document.createElement("span");
           name.textContent = tool.name;
           label.append(input, name);
-          if (tool.orphaned) {
-            const status = document.createElement("small");
-            status.textContent = "source unavailable";
-            label.append(status);
-          }
-          input.addEventListener("change", () => changeToolMembership(sessionId, tool, input.checked));
+          input.addEventListener("change", () => changeToolSelection(sessionId, tool, input.checked));
           toolCatalogList.append(label);
         }
       } catch (error) {
@@ -6944,22 +6938,22 @@
       }
     }
 
-    async function changeToolMembership(sessionId, tool, member) {
+    async function changeToolSelection(sessionId, tool, offered) {
       if (sessionId !== shownSessionId() || toolCatalogWriting) return;
       toolCatalogWriting = true;
       ++toolCatalogGeneration;
       showToolCatalogError("");
-      toolCatalogStatus.textContent = "Saving tool membership…";
+      toolCatalogStatus.textContent = "Saving the tool selection…";
       for (const input of toolCatalogList.querySelectorAll("input")) input.disabled = true;
       try {
-        const response = await fetch("/api/tools/membership?session_id=" + encodeURIComponent(sessionId), {
+        const response = await fetch("/api/tools/selection?session_id=" + encodeURIComponent(sessionId), {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ tool_id: tool.id, member, request_id: crypto.randomUUID() })
+          body: JSON.stringify({ tool_id: tool.id, offered, request_id: crypto.randomUUID() })
         });
         const body = await response.json();
-        if (!response.ok) throw new Error(body.error || "Could not save membership. Refresh before trying again.");
+        if (!response.ok) throw new Error(body.error || "Could not save the selection. Refresh before trying again.");
       } catch (error) {
-        if (sessionId === shownSessionId()) showToolCatalogError(error.message || "Could not confirm membership. Refresh before trying again.");
+        if (sessionId === shownSessionId()) showToolCatalogError(error.message || "Could not confirm the selection. Refresh before trying again.");
       } finally {
         toolCatalogWriting = false;
         toolCatalogSignature = "";

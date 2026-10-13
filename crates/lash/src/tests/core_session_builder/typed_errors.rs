@@ -1,12 +1,9 @@
 //! Typed causes survive the facade on the durable substrate (FIG-5307).
 
 use super::*;
-use lash_core::facade_support::{
-    PluginRegistrar, PluginSessionContext, ReconfigureError, SessionPlugin,
-};
+use lash_core::facade_support::{PluginRegistrar, PluginSessionContext, SessionPlugin};
 use lash_core::plugin::SessionReadyContext;
 use lash_core::{PluginError, PluginStateError};
-use std::error::Error;
 
 /// FIG-5500: cold open requires recorded identity even when the row is root.
 #[tokio::test]
@@ -33,10 +30,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     for id in ["root", "host-chosen-session"] {
         creating
             .session(crate::SessionId::from(id))
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            ))
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("create with explicit identity");
     }
@@ -85,59 +79,6 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
         assert!(!error.is_retryable(), "{error:?}");
     }
     refusing.shutdown().await.expect("shutdown refusing core");
-}
-
-/// A refused tool-membership change answers its typed validation cause,
-/// changes nothing and submits nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_native_tool_membership_refusal_preserves_its_cause() {
-    use lash_core::facade_support::ToolStateFacadeOps as _;
-    let core = standard_core_over(sqlite_memory_store_backend().await);
-    core.session(crate::SessionId::parse("typed-tools").expect("id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
-        .await
-        .expect("created")
-        .send(crate::TurnInput::text("materialize the session"))
-        .output()
-        .await
-        .expect("the first turn answers");
-    let session = core
-        .session(crate::SessionId::parse("typed-tools").expect("id"))
-        .open()
-        .await
-        .expect("open");
-    let tools = session.admin().tools();
-    let before = tools.state().await.expect("tool state");
-    let error = tools
-        .set_membership_many(
-            &[("tool:absent".into(), false)],
-            "host:typed_errors:set_membership_many:33",
-        )
-        .await
-        .expect_err("unknown membership refuses");
-    assert!(
-        matches!(error.source().and_then(|e| e.downcast_ref::<ReconfigureError>()), Some(ReconfigureError::Validation(message)) if message == "unknown tool id `tool:absent`"),
-        "validation is typed: {error:?}"
-    );
-    let after = tools.state().await.expect("tool state");
-    assert_eq!(
-        before.recorded().map(|state| state.generation()),
-        after.recorded().map(|state| state.generation())
-    );
-    assert_eq!(
-        before.recorded().map(|state| state.tool_manifests()),
-        after.recorded().map(|state| state.tool_manifests())
-    );
-    assert!(
-        after.pending().is_empty(),
-        "a refused change is never submitted"
-    );
-    assert!(error.is_terminal());
-    assert!(!error.is_retryable());
-    core.shutdown().await.expect("shutdown");
 }
 
 /// A plugin whose readiness records the value its namespace holds at `k`
@@ -229,10 +170,7 @@ impl SessionPlugin for StateHook {
 async fn run_first_turn(backend: &crate::Backend, hook: &StateHook, id: &str) {
     let core = hook.core(backend.clone());
     core.session(crate::SessionId::parse(id).expect("id"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
         .send(crate::TurnInput::text("ready"))
@@ -308,25 +246,11 @@ async fn a_cold_sessions_readiness_state_refusal_reaches_the_host_typed() {
     }
 }
 
-/// FIG-5431: a host must choose how a deployment handles missing tool sources.
-#[tokio::test]
-async fn a_core_without_a_tool_loss_choice_is_refused() {
-    let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .data_retention(crate::DataRetention::standard())
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1));
-    assert!(matches!(
-        builder.build(crate::testing::runtime_lease_owner()),
-        Err(EmbedError::MissingToolSourcePolicy)
-    ));
-}
-
 fn stated_commit_and_retention(backend: crate::Backend) -> crate::LashCoreBuilder {
     LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
 }
 
 /// FIG-5491: execution budgets and delta coalescing are host decisions with
@@ -380,31 +304,6 @@ async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// FIG-5491: tool authority is the creator's decision, and the session
-/// records the one it states.
-#[tokio::test]
-async fn a_session_records_the_tool_authority_its_creator_states() {
-    let core = standard_core_over(sqlite_memory_store_backend().await);
-    let restricted = crate::plugins::SessionToolAccess::restricted([]).expect("no tools");
-    assert_ne!(restricted, crate::plugins::SessionToolAccess::ambient());
-    let id = crate::SessionId::from("restricted-at-creation");
-    core.session(id.clone())
-        .create(crate::SessionCreation::root(
-            restricted.clone(),
-            mock_session_spec(),
-        ))
-        .await
-        .expect("created");
-    let recorded =
-        lash_core::SessionCommitStore::load_session_head_meta(core.store_factory.as_ref(), &id)
-            .await
-            .expect("head read")
-            .expect("persisted head")
-            .config;
-    assert_eq!(recorded.tool_access, restricted);
-    core.shutdown().await.expect("shutdown");
-}
-
 /// D-DEFAULTS2: a host must state what it keeps; lash has no data retention
 /// of its own to fall back on.
 #[tokio::test]
@@ -412,7 +311,6 @@ async fn a_core_without_a_data_retention_statement_is_refused() {
     let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
         .delta_coalescing(crate::DeltaCoalescing::recommended());
     assert!(matches!(
@@ -443,10 +341,7 @@ async fn a_created_session_records_the_revision_retention_its_host_states() {
         .expect("a core under a stated retention");
         let id = crate::SessionId::from("stated-retention");
         core.session(id.clone())
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            ))
+            .create(crate::SessionCreation::root(mock_session_spec()))
             .await
             .expect("create");
         let session = core.session(id).open().await.expect("open");
@@ -466,10 +361,7 @@ async fn a_session_without_a_stall_bound_is_refused() {
     );
     assert!(matches!(
         core.session(crate::SessionId::from("no-stall-choice"))
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                spec
-            ))
+            .create(crate::SessionCreation::root(spec))
             .await,
         Err(EmbedError::MissingNoProgressBudget)
     ));
@@ -481,10 +373,7 @@ async fn a_session_without_a_stall_bound_is_refused() {
 async fn a_retried_admin_mutation_with_the_same_host_key_applies_once() {
     let core = standard_core_over(sqlite_memory_store_backend().await);
     core.session(crate::SessionId::from("retry-keyed-append"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
+        .create(crate::SessionCreation::root(mock_session_spec()))
         .await
         .expect("create");
     let session = core

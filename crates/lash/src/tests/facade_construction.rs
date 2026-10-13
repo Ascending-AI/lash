@@ -37,7 +37,7 @@ fn run_identity_validates_and_retains_operation_spelling() {
 }
 
 #[test]
-fn process_tool_accessor_selects_each_capability_contract() {
+fn process_tool_definition_selects_each_capability_contract() {
     use crate::process_controls::{ProcessControlTool as Tool, process_tool_definition};
     for (tool, name) in [
         (Tool::Start, "start_process"),
@@ -73,10 +73,7 @@ async fn facade_change_feeds_share_bounded_pages_and_typed_cutoffs() -> crate::R
     // empty page retains the caller's cursor instead of restarting the feed.
     for label in ["fault-a", "fault-b"] {
         core.session(crate::SessionId::parse(label).expect("nonblank host identity"))
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                super::mock_session_spec(),
-            ))
+            .create(crate::SessionCreation::root(super::mock_session_spec()))
             .await?;
         let record = crate::SessionFaultRecord::new(
             crate::SessionFaultOrigin::DriveAdmission,

@@ -30,7 +30,7 @@ use lash_core::facade_support::{TraceRecord, TraceSink, TraceSinkError};
 use lash_sansio::sync::MutexExt as _;
 
 use served::{Tier, World};
-use web_fetch::{Fetch, GrantFetch};
+use web_fetch::Fetch;
 
 /// Every language-execution and step-body record the core traced.
 #[derive(Default)]
@@ -70,22 +70,20 @@ async fn world_with_tools(
 ) -> Option<World> {
     let sink = Arc::clone(sink);
     World::new(tier, move |backend| {
-        lash::LashCore::rlm_builder(
-            backend.clone(),
-            served::rlm(backend, Some(Arc::new(GrantFetch)), workers),
-        )
-        .plugin(Arc::new(
-            lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-                lash_core::testing::run_policy_naming(&[TOOLS_COMPONENT]),
-            ),
-        ))
-        .process_component(
-            lash_core::testing::tool_component(TOOLS_COMPONENT, Arc::clone(&tools)),
-            TOOLS_COMPONENT,
-        )
-        .tools(lash::hook_key!("tools"), tools)
-        .trace_sink(sink)
+        lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers))
+            .plugin(Arc::new(
+                lash::process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                    lash_core::testing::run_policy_naming(&[TOOLS_COMPONENT]),
+                ),
+            ))
+            .process_component(
+                lash_core::testing::tool_component(TOOLS_COMPONENT, Arc::clone(&tools)),
+                TOOLS_COMPONENT,
+            )
+            .tools(lash::hook_key!("tools"), tools)
+            .plugin(web_fetch::grant_fetch())
+            .trace_sink(sink)
     })
     .await
 }
@@ -150,12 +148,20 @@ struct ReadingFetch {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for ReadingFetch {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![web_fetch::fetch_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        lash_core::ToolProvider::resolve_contract(&Fetch, name)
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        lash_core::ToolProvider::resolve_contract(
+            &Fetch,
+            name,
+            &lash_core::OwnerConfigView::default(),
+        )
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

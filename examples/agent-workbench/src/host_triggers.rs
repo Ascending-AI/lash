@@ -1135,15 +1135,9 @@ fn subscription_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Subscription> {
 
 /// What every delivered process runs with: the host's choice, not the
 /// registering session's environment. The workbench installs no process
-/// component, so a delivered process calls no tool.
+/// component, so a delivered process links no effect and calls no tool.
 fn delivered_process_environment() -> Result<lash::process::ProcessEnv, HostTriggerError> {
-    let tools =
-        lash::plugins::SessionToolAccess::restricted(std::iter::empty()).map_err(|error| {
-            HostTriggerError::Lash(lash::EmbedError::from(
-                lash::plugins::PluginError::Registration(error.to_string()),
-            ))
-        })?;
-    lash::process::ProcessEnv::builder(tools, lash::MaxToolCalls::new(1024))
+    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .build()
         .map_err(|refusal| {
             HostTriggerError::Lash(lash::EmbedError::from(
@@ -1217,11 +1211,15 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
 
 #[async_trait]
 impl ToolProvider for TriggerRegistrationProvider {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
+    fn tool_manifests(&self, _config: &lash::tools::OwnerConfigView) -> Vec<ToolManifest> {
         vec![register_trigger_tool_definition().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash::tools::OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
         (name == REGISTER_TRIGGER_TOOL_NAME)
             .then(|| Arc::new(register_trigger_tool_definition().contract()))
     }

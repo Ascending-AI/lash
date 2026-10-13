@@ -14,9 +14,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lash_core::{
-    ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall,
-    ToolPrepareContext, ToolProvider, sansio::PendingToolCall,
+    OwnerConfigView, ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome,
+    ToolPrepareCall, ToolPrepareContext, ToolProvider, sansio::PendingToolCall,
 };
+
+use crate::ToolSelection;
 
 /// Per-call execution behavior for a [`StaticToolProvider`].
 ///
@@ -46,11 +48,13 @@ pub trait StaticToolExecute: Send + Sync + 'static {
 }
 
 /// A [`ToolProvider`] that serves a fixed set of [`ToolDefinition`]s from a
-/// cache, delegating execution to an [`StaticToolExecute`].
+/// cache, delegating execution to an [`StaticToolExecute`]. Selected by an
+/// owner ([`Self::selected_by`]), it offers only the tools that owner's
+/// [`ToolSelection`] admits under the run's config.
 pub struct StaticToolProvider<E: StaticToolExecute> {
     manifests: Vec<ToolManifest>,
-    contracts: HashMap<String, Arc<ToolContract>>,
     contracts_by_id: HashMap<ToolId, Arc<ToolContract>>,
+    selected_by: Option<String>,
     executor: E,
 }
 
@@ -59,21 +63,35 @@ impl<E: StaticToolExecute> StaticToolProvider<E> {
     /// of the provider.
     pub fn new(definitions: Vec<ToolDefinition>, executor: E) -> Self {
         let mut manifests = Vec::with_capacity(definitions.len());
-        let mut contracts = HashMap::with_capacity(definitions.len());
         let mut contracts_by_id = HashMap::with_capacity(definitions.len());
         for def in &definitions {
             let manifest = def.manifest();
             let contract = Arc::new(def.contract());
-            contracts.insert(manifest.name.clone(), Arc::clone(&contract));
             contracts_by_id.insert(manifest.id.clone(), contract);
             manifests.push(manifest);
         }
         Self {
             manifests,
-            contracts,
             contracts_by_id,
+            selected_by: None,
             executor,
         }
+    }
+
+    /// Offer only the tools the [`ToolSelection`] in `owner`'s config
+    /// namespace admits, under each run's config.
+    #[must_use]
+    pub fn selected_by(mut self, owner: impl Into<String>) -> Self {
+        self.selected_by = Some(owner.into());
+        self
+    }
+
+    /// Whether this provider offers `tool` under `config`. A selection that
+    /// does not decode offers nothing.
+    fn offers(&self, tool: &ToolId, config: &OwnerConfigView) -> bool {
+        self.selected_by.as_deref().is_none_or(|owner| {
+            ToolSelection::of(config, owner).is_ok_and(|selection| selection.admits(tool))
+        })
     }
 
     /// Borrow the underlying executor. Useful for tests that need to inspect
@@ -85,30 +103,45 @@ impl<E: StaticToolExecute> StaticToolProvider<E> {
 
 #[async_trait::async_trait]
 impl<E: StaticToolExecute> ToolProvider for StaticToolProvider<E> {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        self.manifests.clone()
-    }
-
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
+    fn tool_manifests(&self, config: &OwnerConfigView) -> Vec<ToolManifest> {
         self.manifests
             .iter()
-            .find(|manifest| manifest.name == name)
+            .filter(|manifest| self.offers(&manifest.id, config))
+            .cloned()
+            .collect()
+    }
+
+    fn resolve_manifest(&self, name: &str, config: &OwnerConfigView) -> Option<ToolManifest> {
+        self.manifests
+            .iter()
+            .find(|manifest| manifest.name == name && self.offers(&manifest.id, config))
             .cloned()
     }
 
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
+    fn resolve_manifest_by_id(
+        &self,
+        id: &ToolId,
+        config: &OwnerConfigView,
+    ) -> Option<ToolManifest> {
         self.manifests
             .iter()
-            .find(|manifest| manifest.id == *id)
+            .find(|manifest| manifest.id == *id && self.offers(id, config))
             .cloned()
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        self.contracts.get(name).cloned()
+    fn resolve_contract(&self, name: &str, config: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+        self.resolve_manifest(name, config)
+            .and_then(|manifest| self.contracts_by_id.get(&manifest.id).cloned())
     }
 
-    fn resolve_contract_by_id(&self, id: &ToolId) -> Option<Arc<ToolContract>> {
-        self.contracts_by_id.get(id).cloned()
+    fn resolve_contract_by_id(
+        &self,
+        id: &ToolId,
+        config: &OwnerConfigView,
+    ) -> Option<Arc<ToolContract>> {
+        self.offers(id, config)
+            .then(|| self.contracts_by_id.get(id).cloned())
+            .flatten()
     }
 
     async fn prepare_tool_call(

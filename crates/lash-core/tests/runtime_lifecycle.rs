@@ -60,6 +60,6 @@ mod runtime {
         pub(crate) use std::sync::{Arc, Mutex};
         pub(crate) use tokio_util::sync::CancellationToken;
 
-        mod tool_surface_lifecycle;
+        mod process_engine_admission;
     }
 }

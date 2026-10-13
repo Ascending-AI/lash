@@ -323,7 +323,6 @@ pub(super) async fn run(operations: usize, ledger_cap: usize) -> Result<Receipt>
             let id = lash::SessionId::try_from(format!("slots-{n}"))?;
             core.session(id.clone())
                 .create(lash::SessionCreation::root(
-                    lash::plugins::SessionToolAccess::ambient(),
                     facade::spec()?.attachment_acceptance(Arc::new(catalogue.clone())),
                 ))
                 .await?;

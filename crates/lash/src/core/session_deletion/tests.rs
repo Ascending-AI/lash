@@ -249,7 +249,6 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
     .expect("the non-serving core builds");
     core.session(session.clone())
         .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
             crate::tests::mock_session_spec(),
         ))
         .await

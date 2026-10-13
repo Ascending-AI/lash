@@ -228,15 +228,6 @@ pub enum TurnEvent {
     TurnStarted {
         turn_id: TurnId,
     },
-    /// The run's construction restored the session's persisted tool state
-    /// and some persisted id had no registered source (FIG-5134). It
-    /// follows the run's first `TurnStarted`; a clean restore emits nothing.
-    /// Under `ToolSourcePolicy::Tolerate` the run goes on without the lost
-    /// members; under `Require` a run that would lose one is refused with
-    /// `RuntimeErrorCode::ToolSourcesUnavailable` instead and never starts.
-    ToolRestoreReported {
-        report: crate::ToolRestoreReport,
-    },
     ModelRequestStarted {
         protocol_iteration: usize,
     },

@@ -72,7 +72,6 @@ async fn paged_reclamation_keeps_rooted_blobs_across_delete_and_put_between_page
                 lash_core::TurnBudget::Unbounded,
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
-                lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
             retention: lash_core::store::Retention::UntilGc,

@@ -281,7 +281,7 @@ impl Flow<'_> {
     }
 }
 
-fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
+pub(crate) fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
     let (many, one): (&[AtomNode], Option<&AtomNode>) = match action {
         ActionNode::Call { args, .. }
         | ActionNode::Spawn { args, .. }

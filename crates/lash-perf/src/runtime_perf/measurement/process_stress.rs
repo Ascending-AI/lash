@@ -175,15 +175,12 @@ pub(super) async fn run_once_process_list_stress(
                 for hash_index in 0..ENV_HASHES_PER_TURN {
                     const STRESS: lash_core::ProcessConfigKey<serde_json::Value> =
                         lash_core::ProcessConfigKey::new("stress", lash_core::FormatVersion::ONE);
-                    let spec = lash_core::ProcessEnv::builder(
-                        lash_core::SessionToolAccess::restricted(std::iter::empty())?,
-                        lash_core::MaxToolCalls::new(1024),
-                    )
-                    .component(
-                        STRESS,
-                        &serde_json::json!({ "turn": turn_index, "n": hash_index }),
-                    )
-                    .build()?;
+                    let spec = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
+                        .component(
+                            STRESS,
+                            &serde_json::json!({ "turn": turn_index, "n": hash_index }),
+                        )
+                        .build()?;
                     let env_ref = spec
                         .stable_ref()
                         .map_err(|err| anyhow::anyhow!("env spec hashing failed: {err}"))?;

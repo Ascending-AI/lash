@@ -69,14 +69,18 @@ struct ApprovalTools {
 
 #[async_trait]
 impl ToolProvider for ApprovalTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
         vec![
             tool("app_lookup", false).manifest(),
             tool("app_approve", true).manifest(),
         ]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
         ["app_lookup", "app_approve"]
             .contains(&name)
             .then(|| Arc::new(tool(name, name == "app_approve").contract()))

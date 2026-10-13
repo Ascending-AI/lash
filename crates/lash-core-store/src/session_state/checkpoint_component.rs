@@ -10,10 +10,6 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) enum ResidentCheckpointComponentBody {
-    ToolState {
-        snapshot: Option<crate::ToolState>,
-        generation: Option<u64>,
-    },
     PluginState {
         snapshot: Option<crate::PluginState>,
         map: PluginStateRecord,
@@ -62,10 +58,6 @@ impl PluginStateRecord {
 /// payload is always present.
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) enum PendingCheckpointComponentBody {
-    ToolState {
-        snapshot: crate::ToolState,
-        generation: Option<u64>,
-    },
     PluginState {
         snapshot: crate::PluginState,
         map: PluginStateRecord,
@@ -78,13 +70,6 @@ impl PendingCheckpointComponentBody {
     /// authoritative and the payload stays a second copy until released.
     pub(super) fn into_resident(self) -> ResidentCheckpointComponentBody {
         match self {
-            Self::ToolState {
-                snapshot,
-                generation,
-            } => ResidentCheckpointComponentBody::ToolState {
-                snapshot: Some(snapshot),
-                generation,
-            },
             Self::PluginState { snapshot, map } => ResidentCheckpointComponentBody::PluginState {
                 snapshot: Some(snapshot),
                 map,
@@ -121,34 +106,6 @@ impl ResidentCheckpointComponent {
         match self {
             Self::Unchanged { descriptor, .. } => Some(descriptor),
             Self::Changed { descriptor, .. } => descriptor.as_ref(),
-        }
-    }
-
-    pub(super) fn tool_state_snapshot(&self) -> Option<&crate::ToolState> {
-        match self {
-            Self::Unchanged {
-                body: ResidentCheckpointComponentBody::ToolState { snapshot, .. },
-                ..
-            } => snapshot.as_ref(),
-            Self::Changed {
-                body: PendingCheckpointComponentBody::ToolState { snapshot, .. },
-                ..
-            } => Some(snapshot),
-            _ => None,
-        }
-    }
-
-    pub(super) fn tool_state_generation(&self) -> Option<u64> {
-        match self {
-            Self::Unchanged {
-                body: ResidentCheckpointComponentBody::ToolState { generation, .. },
-                ..
-            } => *generation,
-            Self::Changed {
-                body: PendingCheckpointComponentBody::ToolState { generation, .. },
-                ..
-            } => *generation,
-            _ => None,
         }
     }
 
@@ -218,7 +175,6 @@ impl ResidentCheckpointComponent {
         let released = match self {
             Self::Unchanged { body, .. } => {
                 match body {
-                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
                     ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
                         *snapshot = None
                     }
@@ -228,12 +184,6 @@ impl ResidentCheckpointComponent {
             }
             Self::Changed { descriptor, body } => {
                 let released = match body {
-                    PendingCheckpointComponentBody::ToolState { generation, .. } => {
-                        ResidentCheckpointComponentBody::ToolState {
-                            snapshot: None,
-                            generation: *generation,
-                        }
-                    }
                     PendingCheckpointComponentBody::PluginState { map, .. } => {
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
@@ -266,7 +216,6 @@ impl ResidentCheckpointComponent {
         let released = match self {
             Self::Unchanged { body, .. } => {
                 match body {
-                    ResidentCheckpointComponentBody::ToolState { snapshot, .. } => *snapshot = None,
                     ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
                         *snapshot = None
                     }
@@ -276,12 +225,6 @@ impl ResidentCheckpointComponent {
             }
             Self::Changed { descriptor, body } => {
                 let released = match body {
-                    PendingCheckpointComponentBody::ToolState { generation, .. } => {
-                        ResidentCheckpointComponentBody::ToolState {
-                            snapshot: None,
-                            generation: *generation,
-                        }
-                    }
                     PendingCheckpointComponentBody::PluginState { map, .. } => {
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
