@@ -203,3 +203,24 @@ async fn closed_benchmark_runtime_has_stopped_its_node() {
         .expect("benchmark core serves a node")
         .expect("benchmark node stopped cleanly");
 }
+
+// PERF-SEED-SERVING: a stopped serving node cannot strand a fixture command.
+#[tokio::test]
+async fn seeding_refuses_a_stopped_benchmark_node() {
+    let mut runtime = build_runtime(RuntimePerfScenario::Standard, None)
+        .await
+        .expect("build SQLite benchmark runtime");
+    runtime.core().shutdown().await.expect("stop fixture node");
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        seed_runtime_state(&mut runtime, RuntimePerfScenario::Standard),
+    )
+    .await
+    .expect("a stopped benchmark node must refuse seeding promptly");
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("benchmark node stopped")
+    );
+}

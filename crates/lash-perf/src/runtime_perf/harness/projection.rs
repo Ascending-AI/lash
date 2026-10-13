@@ -11,11 +11,25 @@ use crate::runtime_perf::scenarios::RuntimePerfScenario;
 
 use super::{BenchmarkRuntime, HISTORY_EXCHANGES, validate_runtime_perf_turn};
 
+pub(crate) async fn seed_runtime_state(
+    runtime: &mut BenchmarkRuntime,
+    scenario: RuntimePerfScenario,
+) -> anyhow::Result<()> {
+    let core = runtime.core();
+    tokio::select! {
+        biased;
+        stopped = core.node_stopped() => {
+            anyhow::bail!("benchmark node stopped during fixture seeding: {stopped:?}")
+        }
+        result = seed_live_runtime_state(runtime, scenario) => result,
+    }
+}
+
 #[expect(
     clippy::expect_used,
-    reason = "the serialized benchmark messages are appended through the benchmark runtime's admin session, taken by set_up"
+    reason = "the benchmark session is installed before its fixture commands are submitted"
 )]
-pub(crate) async fn seed_runtime_state(
+async fn seed_live_runtime_state(
     runtime: &mut BenchmarkRuntime,
     scenario: RuntimePerfScenario,
 ) -> anyhow::Result<()> {

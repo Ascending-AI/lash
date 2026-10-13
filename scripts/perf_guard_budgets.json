@@ -85,10 +85,6 @@
               "budget_ms": 128.565,
               "required": true
             },
-            "process.await_handle": {
-              "budget_ms": 194.71,
-              "required": true
-            },
             "prompt_build": {
               "budget_ms": 19.555,
               "required": true
@@ -109,45 +105,13 @@
               "budget_ms": 5.235,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 194.872,
-              "required": true
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 0.736,
-              "required": false
-            },
-            "codemode_process.close_groups": {
-              "budget_ms": 0.136,
-              "required": true
-            },
-            "codemode_process.compile": {
-              "budget_ms": 0.415,
-              "required": false
-            },
-            "codemode_process.execute": {
-              "budget_ms": 170.041,
-              "required": false
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 0.253,
-              "required": false
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 1.514,
-              "required": false
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 0.478,
-              "required": false
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.123,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.361,
+              "required": true
             }
           }
         }
@@ -156,7 +120,7 @@
         "guarded_span": "whole_run",
         "enforced_allocation": {
           "alloc_bytes_max": 1488000,
-          "steady_state_turn_alloc_bytes_max": 39000
+          "steady_state_turn_alloc_bytes_max": 103000
         },
         "advisory_duration": {
           "ms_max": 3.824,
@@ -166,12 +130,13 @@
               "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration cfb1ca931d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=509982, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(39000 + 509982 / 12 * 1.5), rounded up to 103000. Other measured growth receives no ceiling credit."
       },
       "durable_agent_child_turn_sqlite": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 301668908,
+          "alloc_bytes_max": 452504000,
           "steady_state_turn_alloc_bytes_max": 40170510
         },
         "advisory_duration": {
@@ -221,46 +186,19 @@
               "budget_ms": 1.082,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 671.426,
-              "required": false
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 1.576,
-              "required": false
-            },
-            "codemode_process.compile": {
-              "budget_ms": 0.874,
-              "required": false
-            },
-            "codemode_process.execute": {
-              "budget_ms": 543.604,
-              "required": false
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 4.952,
-              "required": false
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 4.766,
-              "required": false
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 3.86,
-              "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 6.454,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.403,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 calibrated eight turns; the all guard runs twelve. Attributed warm requested bytes A=0, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(301668908 * 1.5 + 0 * 1.5), rounded up to 452504000. Other measured growth receives no ceiling credit."
       },
       "durable_checkpoint_curve_sqlite": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1095642517,
-          "steady_state_turn_alloc_bytes_max": 125432750
+          "alloc_bytes_max": 2231168000,
+          "steady_state_turn_alloc_bytes_max": 174409000
         },
         "advisory_duration": {
           "ms_max": 820.034,
@@ -362,13 +300,14 @@
               "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; e71aa8ada6 terminal-graph integrity decoding. Attributed warm requested bytes A=391802542, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(1095642517 * 1.5 + 391802542 * 1.5), rounded up to 2231168000; steady_state_turn_alloc_bytes_max: ceil(125432750 + 391802542 / 12 * 1.5), rounded up to 174409000. Other measured growth receives no ceiling credit."
       },
       "durable_rlm_checkpoint_turn_sqlite": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 93712082,
-          "steady_state_turn_alloc_bytes_max": 11571768
+          "alloc_bytes_max": 213632000,
+          "steady_state_turn_alloc_bytes_max": 17661000
         },
         "advisory_duration": {
           "ms_max": 269.13,
@@ -413,12 +352,13 @@
               "budget_ms": 1.004,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 6.184,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.379,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration c647027a83; c647027a83 eight-to-twelve-turn geometry; 6bc0ef141a schema admission; 203398827d canonical bodies; 67e5d4a45d complete tool shapes; a5e2ebd846 atomic phase-root reclamation. Attributed warm requested bytes A=48708964, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93712082 * 1.5 + 48708964 * 1.5), rounded up to 213632000; steady_state_turn_alloc_bytes_max: ceil(11571768 + 48708964 / 12 * 1.5), rounded up to 17661000. Other measured growth receives no ceiling credit."
       },
       "durable_standard_tool_turn_sqlite": {
         "guarded_span": "whole_run",
@@ -465,10 +405,6 @@
             "prompt_build": {
               "budget_ms": 1.054,
               "required": true
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 7.278,
-              "required": false
             }
           }
         }
@@ -476,13 +412,14 @@
       "embed_rlm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 93493000,
-          "steady_state_turn_alloc_bytes_max": 7587000
+          "alloc_bytes_max": 112972000,
+          "steady_state_turn_alloc_bytes_max": 9211000
         },
         "advisory_duration": {
           "ms_max": 309.726,
           "phases": {}
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=12985495, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(93493000 * 1 + 12985495 * 1.5), rounded up to 112972000; steady_state_turn_alloc_bytes_max: ceil(7587000 + 12985495 / 12 * 1.5), rounded up to 9211000. Other measured growth receives no ceiling credit."
       },
       "embed_standard": {
         "guarded_span": "whole_run",
@@ -540,12 +477,12 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 1.852,
-              "required": true
-            },
             "turn_input_ingress.enqueue_to_admission_to_projection": {
               "budget_ms": 365.589,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 1.47,
               "required": true
             }
           }
@@ -628,9 +565,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 3.091,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.986,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.783,
+              "required": true
             }
           }
         }
@@ -686,14 +627,6 @@
             },
             "process_list_stress.render_live_json": {
               "budget_ms": 340.799,
-              "required": true
-            },
-            "process_list_stress.signal_append": {
-              "budget_ms": 3.261,
-              "required": true
-            },
-            "process_list_stress.wait_roundtrip": {
-              "budget_ms": 2.456,
               "required": true
             }
           }
@@ -884,9 +817,9 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.945,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.338,
+              "required": true
             }
           }
         }
@@ -944,9 +877,9 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.287,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.321,
+              "required": true
             }
           }
         }
@@ -954,8 +887,8 @@
       "rlm_globals": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 192173000,
-          "steady_state_turn_alloc_bytes_max": 14464000
+          "alloc_bytes_max": 235690000,
+          "steady_state_turn_alloc_bytes_max": 18091000
         },
         "advisory_duration": {
           "ms_max": 481.543,
@@ -996,18 +929,19 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.337,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.32,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=29011050, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(192173000 * 1 + 29011050 * 1.5), rounded up to 235690000; steady_state_turn_alloc_bytes_max: ceil(14464000 + 29011050 / 12 * 1.5), rounded up to 18091000. Other measured growth receives no ceiling credit."
       },
       "rlm_large_print": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 781900000,
-          "steady_state_turn_alloc_bytes_max": 66543000
+          "alloc_bytes_max": 973968000,
+          "steady_state_turn_alloc_bytes_max": 82549000
         },
         "advisory_duration": {
           "ms_max": 589.501,
@@ -1056,12 +990,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.059,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.398,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical bodies; e71aa8ada6 hybrid checkpoint integrity and session graph codec. Attributed warm requested bytes A=128044912, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(781900000 * 1 + 128044912 * 1.5), rounded up to 973968000; steady_state_turn_alloc_bytes_max: ceil(66543000 + 128044912 / 12 * 1.5), rounded up to 82549000. Other measured growth receives no ceiling credit."
       },
       "rlm_large_tool_catalog": {
         "guarded_span": "whole_run",
@@ -1108,9 +1043,9 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 1.905,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.522,
+              "required": true
             }
           }
         }
@@ -1168,9 +1103,9 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.554,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.349,
+              "required": true
             }
           }
         }
@@ -1204,10 +1139,6 @@
               "budget_ms": 403.699,
               "required": true
             },
-            "process.await_handle": {
-              "budget_ms": 1873.683,
-              "required": true
-            },
             "prompt_build": {
               "budget_ms": 5.863,
               "required": true
@@ -1228,45 +1159,13 @@
               "budget_ms": 2.954,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 1884.945,
-              "required": true
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 15.85,
-              "required": true
-            },
-            "codemode_process.close_groups": {
-              "budget_ms": 1.913,
-              "required": true
-            },
-            "codemode_process.compile": {
-              "budget_ms": 3.29,
-              "required": true
-            },
-            "codemode_process.execute": {
-              "budget_ms": 1708.063,
-              "required": true
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 2.565,
-              "required": true
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 72.388,
-              "required": true
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 9.304,
-              "required": true
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.307,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.587,
+              "required": true
             }
           }
         }
@@ -1324,45 +1223,13 @@
               "budget_ms": 2.809,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 279.391,
-              "required": true
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 44.013,
-              "required": true
-            },
-            "codemode_process.close_groups": {
-              "budget_ms": 2.314,
-              "required": true
-            },
-            "codemode_process.compile": {
-              "budget_ms": 7.046,
-              "required": true
-            },
-            "codemode_process.execute": {
-              "budget_ms": 80.633,
-              "required": true
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 13.87,
-              "required": true
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 101.282,
-              "required": true
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 17.243,
-              "required": true
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.508,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.373,
+              "required": true
             }
           }
         }
@@ -1420,45 +1287,13 @@
               "budget_ms": 3.243,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 175.078,
-              "required": true
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 151.375,
-              "required": true
-            },
-            "codemode_process.close_groups": {
-              "budget_ms": 2.333,
-              "required": true
-            },
-            "codemode_process.compile": {
-              "budget_ms": 8.526,
-              "required": true
-            },
-            "codemode_process.execute": {
-              "budget_ms": 74.029,
-              "required": true
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 15.6,
-              "required": true
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 158.804,
-              "required": true
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 47.78,
-              "required": true
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.359,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.506,
+              "required": true
             }
           }
         }
@@ -1508,9 +1343,9 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 10.051,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.345,
+              "required": true
             }
           }
         }
@@ -1568,45 +1403,13 @@
               "budget_ms": 3.27,
               "required": false
             },
-            "codemode_process.await_handle": {
-              "budget_ms": 1994.297,
-              "required": false
-            },
-            "codemode_process.build_context": {
-              "budget_ms": 10.947,
-              "required": false
-            },
-            "codemode_process.close_groups": {
-              "budget_ms": 1.685,
-              "required": true
-            },
-            "codemode_process.compile": {
-              "budget_ms": 1.895,
-              "required": false
-            },
-            "codemode_process.execute": {
-              "budget_ms": 1676.023,
-              "required": false
-            },
-            "codemode_process.load_artifact": {
-              "budget_ms": 3.478,
-              "required": false
-            },
-            "codemode_process.resolve_environment": {
-              "budget_ms": 31.803,
-              "required": false
-            },
-            "codemode_process.shutdown": {
-              "budget_ms": 12.298,
-              "required": false
-            },
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 3.839,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.349,
+              "required": true
             }
           }
         }
@@ -1614,8 +1417,8 @@
       "rlm_tool_calls": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 186243000,
-          "steady_state_turn_alloc_bytes_max": 14990000
+          "alloc_bytes_max": 219565000,
+          "steady_state_turn_alloc_bytes_max": 17767000
         },
         "advisory_duration": {
           "ms_max": 411.477,
@@ -1664,12 +1467,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.569,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.343,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=22214010, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(186243000 * 1 + 22214010 * 1.5), rounded up to 219565000; steady_state_turn_alloc_bytes_max: ceil(14990000 + 22214010 / 12 * 1.5), rounded up to 17767000. Other measured growth receives no ceiling credit."
       },
       "rlm_tool_catalog_cold": {
         "guarded_span": "whole_run",
@@ -1716,9 +1520,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 1.849,
-              "required": false
+            "commit_admission.product_attempt": {
+              "budget_ms": 76.04,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 1.595,
+              "required": true
             }
           }
         }
@@ -1768,9 +1576,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.03,
-              "required": false
+            "commit_admission.product_attempt": {
+              "budget_ms": 3.897,
+              "required": true
+            },
+            "context_transform": {
+              "budget_ms": 1.576,
+              "required": true
             }
           }
         }
@@ -1816,9 +1628,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 1.38,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.005,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.792,
+              "required": true
             }
           }
         }
@@ -1827,7 +1643,7 @@
         "guarded_span": "whole_run",
         "enforced_allocation": {
           "alloc_bytes_max": 147720000,
-          "steady_state_turn_alloc_bytes_max": 6153000
+          "steady_state_turn_alloc_bytes_max": 8398000
         },
         "advisory_duration": {
           "ms_max": 3538.362,
@@ -1868,12 +1684,17 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 136.928,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.919,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.74,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration ee91e66c6d; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=17952008, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: steady_state_turn_alloc_bytes_max: ceil(6153000 + 17952008 / 12 * 1.5), rounded up to 8398000. Other measured growth receives no ceiling credit."
       },
       "standard": {
         "guarded_span": "whole_run",
@@ -1923,10 +1744,6 @@
             "tool_intent.parent_end": {
               "budget_ms": 0.69,
               "required": false
-            },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.664,
-              "required": false
             }
           }
         }
@@ -1972,9 +1789,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.905,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.977,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.765,
+              "required": true
             }
           }
         }
@@ -1982,7 +1803,7 @@
       "standard_tool_calls": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 96560000,
+          "alloc_bytes_max": 126700000,
           "steady_state_turn_alloc_bytes_max": 6565000
         },
         "advisory_duration": {
@@ -2020,12 +1841,17 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.389,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.965,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.765,
+              "required": true
             }
           }
-        }
+        },
+        "allocation_attribution": "FIG-6141: calibration 5b5a98446e; 6bc0ef141a schema admission; 203398827d canonical provider-body decoding. Attributed warm requested bytes A=20092872, excluding cold helper assembly and native SQLite allocations; unions count each allocation site once. Existing 1.5x headroom: alloc_bytes_max: ceil(96560000 * 1 + 20092872 * 1.5), rounded up to 126700000. Other measured growth receives no ceiling credit."
       },
       "store_hardening_hot_paths": {
         "guarded_span": "whole_run",
@@ -2038,10 +1864,6 @@
           "phases": {
             "store_hardening.identity.process_registration": {
               "budget_ms": 14.916,
-              "required": true
-            },
-            "store_hardening.identity.trigger_occurrence": {
-              "budget_ms": 1.37,
               "required": true
             },
             "store_hardening.memory.append_receipt_replay": {
@@ -2216,9 +2038,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 4.8,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.993,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.786,
+              "required": true
             }
           }
         }
@@ -2264,9 +2090,13 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.922,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.874,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.741,
+              "required": true
             }
           }
         }
@@ -2320,9 +2150,9 @@
               "budget_ms": 0.906,
               "required": true
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 8.062,
-              "required": false
+            "context_transform": {
+              "budget_ms": 1.251,
+              "required": true
             }
           }
         }
@@ -2372,9 +2202,13 @@
               "budget_ms": 4.72,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.032,
-              "required": false
+            "context_transform": {
+              "budget_ms": 0.858,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.712,
+              "required": true
             }
           }
         }
@@ -2424,8 +2258,12 @@
               "budget_ms": 215.055,
               "required": true
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 3.097,
+            "context_transform": {
+              "budget_ms": 0.906,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.744,
               "required": true
             }
           }
@@ -2496,8 +2334,12 @@
               "budget_ms": 0.69,
               "required": false
             },
-            "turn_cancel.start_gate": {
-              "budget_ms": 2.285,
+            "context_transform": {
+              "budget_ms": 0.892,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 0.718,
               "required": true
             }
           }

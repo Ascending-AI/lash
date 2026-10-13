@@ -151,6 +151,11 @@ async fn run_contention_wave(
         validation_ms.push(validated_ms);
     }
 
+    eprintln!(
+        "runtime perf contention {} {} same_session={expect_contention}: arm holder",
+        scenario.name(),
+        operation.name()
+    );
     control.arm();
     let provider_started = control.provider_started.notified();
     let holder_entry = turn_entry.clone();
@@ -167,6 +172,11 @@ async fn run_contention_wave(
             .await
     });
     provider_started.await;
+    eprintln!(
+        "runtime perf contention {} {} same_session={expect_contention}: holder started",
+        scenario.name(),
+        operation.name()
+    );
     let release_latency_started = Instant::now();
 
     let waiter_barrier = Arc::new(tokio::sync::Barrier::new(target_sessions.len() + 1));
@@ -194,6 +204,11 @@ async fn run_contention_wave(
             "writer contention witness: a waiter completed before the held writer was released"
         );
     } else {
+        eprintln!(
+            "runtime perf contention {} {}: drain peer waiters",
+            scenario.name(),
+            operation.name()
+        );
         while let Some(result) = waiters.join_next().await {
             let (operation_ms, validated_ms) = result.map_err(anyhow::Error::from)??;
             contended_ms.push(operation_ms);
@@ -214,6 +229,11 @@ async fn run_contention_wave(
         validation_ms.push(validated_ms);
     }
     holder.await.map_err(anyhow::Error::from)??;
+    eprintln!(
+        "runtime perf contention {} {} same_session={expect_contention}: holder finished",
+        scenario.name(),
+        operation.name()
+    );
     contended_ms.sort_by(f64::total_cmp);
     execution_ms.sort_by(f64::total_cmp);
     // Latencies are benchmark evidence only. The same-session assertion witnesses

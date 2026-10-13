@@ -164,8 +164,9 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     experiment.read_postgres_settings(&scenarios).await;
     let stack_profile = stack_profile(worker_stack_bytes);
 
-    for _ in 0..warmups {
+    for warmup in 0..warmups {
         for scenario in &scenarios {
+            eprintln!("runtime perf warmup {warmup}: {}", scenario.name());
             let _ = super::smoke::execute(
                 smoke,
                 *scenario,
@@ -206,8 +207,9 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         "runtime perf dhat profiling requires a lash-perf build with --features dhat-heap",
     )?;
     let mut results = Vec::with_capacity(runs * scenarios.len());
-    for _ in 0..runs {
+    for sample in 0..runs {
         for scenario in &scenarios {
+            eprintln!("runtime perf sample {sample}: {}", scenario.name());
             let mut result = super::smoke::execute(
                 smoke,
                 *scenario,
@@ -662,10 +664,8 @@ fn summarize_optional_metric(values: Vec<f64>) -> Option<RuntimePerfMetricSummar
 #[cfg(test)]
 mod tests {
     use super::budgets::{
-        allocation_budget_bytes, phase_wall_clock_budget_ms,
-        steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
+        allocation_budget_bytes, steady_state_turn_allocation_budget_bytes, wall_clock_budget_ms,
     };
-    use super::guards::required_phases;
     use super::*;
     use crate::runtime_perf::openai_compat::openai_compat_sse_body;
     use crate::runtime_perf::providers::benchmark_stream_profile;
@@ -1235,28 +1235,6 @@ mod tests {
         assert!(
             wall_clock_budget_ms(RuntimePerfScenario::RlmProcessAsyncToolCompletion) < 10_000.0
         );
-    }
-
-    #[test]
-    fn turn_lifecycle_hot_paths_have_specific_phase_budgets() {
-        for (scenario, phase) in [
-            (RuntimePerfScenario::TurnStartGate, "turn_cancel.start_gate"),
-            (
-                RuntimePerfScenario::TurnCancelRoundTrip,
-                "turn_cancel.request_to_token_to_seal",
-            ),
-            (
-                RuntimePerfScenario::IngressAdmissionProjection,
-                "turn_input_ingress.enqueue_to_admission_to_projection",
-            ),
-        ] {
-            assert!(required_phases(scenario).contains(&phase));
-            let total_budget_ms = wall_clock_budget_ms(scenario);
-            assert!(
-                phase_wall_clock_budget_ms(scenario, phase)
-                    .is_some_and(|budget_ms| budget_ms > 0.0 && budget_ms < total_budget_ms)
-            );
-        }
     }
 
     #[test]

@@ -41,10 +41,12 @@ They do not promise one pair per logical run or committed turn.
 Named callbacks carry the exact name emitted by the caller. There are two
 current naming forms:
 
-- Runtime operations use dotted owner and operation names, with snake-case
-  components, such as `turn_cancel.start_gate`,
-  `commit_admission.product_attempt`, `codemode_process.await_handle` and
-  `codemode_lash_vm.cell_tool_bindings`. `RuntimeNamedPhase::begin` accepts a
+- Runtime operations use snake-case components, standalone or under dotted
+  owner names, such as `context_transform`,
+  `commit_admission.product_attempt` and `codemode_lash_vm.resolve_projected_bindings`.
+  Session commands emit local commit admission; served turns commit through
+  engine phase transactions. Kernel process steps use durable terminal waits,
+  so retired `codemode_process.*` and turn start-gate names have no producer. `RuntimeNamedPhase::begin` accepts a
   static string; dropping its guard emits the corresponding end, including
   when an async future is cancelled or unwinds.
 - Plugin dispatch uses `plugin_hook.{hook_kind}.{plugin_id}`. The current

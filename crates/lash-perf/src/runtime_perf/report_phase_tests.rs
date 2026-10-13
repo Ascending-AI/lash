@@ -611,3 +611,70 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
         }
     }
 }
+
+/// PERF-INVENTORY: served turns require the phases their current producer emits;
+/// retired process, trigger and start-gate machinery has no probe requirement.
+#[test]
+fn served_phase_inventory_tracks_current_producers() {
+    for scenario in RuntimePerfScenario::KNOWN {
+        if !scenario.has_guard_budget() {
+            continue;
+        }
+        let phases = configured_phase_names(scenario).collect::<BTreeSet<_>>();
+        for phase in &phases {
+            assert!(
+                !phase.starts_with("codemode_process.")
+                    && !matches!(
+                        *phase,
+                        "turn_cancel.start_gate"
+                            | "process_list_stress.signal_append"
+                            | "process_list_stress.wait_roundtrip"
+                            | "store_hardening.identity.trigger_occurrence"
+                    ),
+                "{} still budgets retired producer {phase}",
+                scenario.name()
+            );
+        }
+        if matches!(
+            scenario,
+            RuntimePerfScenario::DeepTurnComposition | RuntimePerfScenario::RlmObliqueStackMix
+        ) {
+            assert!(
+                !phases.contains("process.await_handle"),
+                "{} uses durable terminal waits rather than the session await helper",
+                scenario.name()
+            );
+        }
+        let operation = match scenario {
+            RuntimePerfScenario::TurnCancelRoundTrip => {
+                Some("turn_cancel.request_to_token_to_seal")
+            }
+            RuntimePerfScenario::IngressAdmissionProjection => {
+                Some("turn_input_ingress.enqueue_to_admission_to_projection")
+            }
+            _ => None,
+        };
+        if let Some(operation) = operation {
+            assert!(
+                required_phases(scenario).contains(&operation),
+                "{} must require {operation}",
+                scenario.name()
+            );
+        }
+        if phases.contains("effect_loop") {
+            assert!(
+                required_phases(scenario).contains(&"context_transform"),
+                "{} must require its context transform",
+                scenario.name()
+            );
+            if scenario.uses_standard_compaction() {
+                assert!(
+                    required_phases(scenario)
+                        .contains(&"plugin_hook.context_pressure.standard_compaction"),
+                    "{} must require its standard compaction hook",
+                    scenario.name()
+                );
+            }
+        }
+    }
+}
