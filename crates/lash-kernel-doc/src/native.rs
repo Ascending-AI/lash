@@ -154,6 +154,33 @@ pub struct NativeCall<'a> {
 /// again with equal arguments it returns an equal result, raises the same
 /// error, or passes its guard at the same count (`K-LIB-006`).
 ///
+/// Release compatibility (`K-LIB-011`) is checked by replaying the checked-in
+/// answer corpus in `lash-vm-releases/src/build/corpus_data`. It records values
+/// (including signed zero and reached objects), raised kinds/messages/data,
+/// guard refusals and counts, declared charge, reservation requests/refusals,
+/// and any differing prepared answer. Matching answers keep the release's
+/// fingerprint even when Rust code or prepared-operation labels change.
+///
+/// The corpus includes every legacy probe input, signature-directed numeric,
+/// Unicode, size and nesting edges, zero-work/zero-room calls, and 64 random
+/// calls seeded by the function identity. It is bounded to 1024 calls per
+/// native. Each generated input is stored in full: a failing random seed stays
+/// permanent rather than being resampled. A corpus match proves agreement on
+/// those calls only; it does not prove equivalence for all inputs, termination,
+/// purity, or that a charge bounds all real work. The native laws and review
+/// still establish those contracts.
+///
+/// A new identity is recorded explicitly with
+/// `kiln run //crates/lash-kernel-conformance:native_corpus__example -- <checkout root>`.
+/// The recorder shares unchanged blobs across releases and cannot replace a
+/// pinned answer. `--extend` appends newly generated cases without replacing
+/// prior cases or their anchor. Keep discovered counterexamples as additional
+/// recorded cases.
+/// A differing answer fails the build with its native, input and old/new
+/// observations: fix the regression, or state a new native version while
+/// retaining the old release and its implementation for parked runs. Compatible
+/// refactors need no native version bump or corpus regeneration.
+///
 /// Failure mode: a call runs to its end inside one machine step, and the
 /// machine accounts its result only when it returns. Nothing stops it in
 /// between: no deadline, no cancel, no charge, and a guard counts work, not

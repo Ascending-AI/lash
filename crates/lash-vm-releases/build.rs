@@ -32,6 +32,8 @@
     )
 )]
 
+#[path = "src/build/corpus.rs"]
+mod corpus;
 #[path = "src/declared.rs"]
 mod declared;
 #[path = "src/library.rs"]
@@ -121,7 +123,17 @@ fn dialect(
     let validated = registry.validate_functions(helpers)?;
     write("helpers.json", &validated.to_json()?)?;
 
-    let fingerprints = probe::fingerprints(&registry);
+    let corpus = corpus::Corpus::recorded()?;
+    let building = declared::RETAINED_HELPER_RELEASES
+        .last()
+        .ok_or("no retained release")?
+        .0;
+    for (release, _) in declared::RETAINED_HELPER_RELEASES {
+        if *release != building {
+            corpus.verify_release(&registry, dialect, release)?;
+        }
+    }
+    let fingerprints = corpus.certify(&registry, dialect, building)?;
     let sealed = sealed::SEALED
         .iter()
         .find(|(kept, _)| *kept == dialect)

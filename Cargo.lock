@@ -2854,8 +2854,11 @@ name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
  "arbitrary",
+ "blake3",
  "kernel-embedder",
+ "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
+ "lash-ext-url-whatwg",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",

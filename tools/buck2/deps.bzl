@@ -981,7 +981,8 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0371"
         },
         "dev": {
-            "blake3": "//third-party/rust:p0032"
+            "blake3": "//third-party/rust:p0032",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1068,8 +1069,11 @@ PACKAGE_DEPS = {
     "lash-kernel-conformance": {
         "build": {},
         "dev": {
+            "blake3": "//third-party/rust:p0032",
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
         },
         "normal": {
