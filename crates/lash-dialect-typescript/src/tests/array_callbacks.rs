@@ -473,3 +473,66 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
         );
     }
 }
+
+/// Direct Map calls are new source documents: every executed form is charged
+/// once, and every statement and effect boundary can be exported and resumed
+/// without changing values, effects or that charge (K-CHG-007, K-MACH-008).
+#[test]
+fn direct_map_calls_account_for_their_work_and_resume_at_every_statement() {
+    let program = lowered(
+        after(),
+        r#"
+        const m = new Map();
+        m.set('key', await echo(7));
+        const alias = m;
+        const read = () => alias.get('key');
+        console.log(read(), alias.has('key'), m.get('missing'));
+        const generic = (o, key) => o.get(key);
+        console.log(generic(m, await echo('key')));
+    "#,
+    );
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        BOUNDS,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        },
+    )
+    .unwrap();
+    machine.count_work();
+    let mut console = Console::default();
+    loop {
+        match machine.run(&mut console, u64::MAX).unwrap() {
+            Step::Ended(End::Finished(_)) => break,
+            Step::Parked(park) => {
+                for request in park.requests {
+                    let Request::Effect(effect) = request else {
+                        panic!("effect expected")
+                    };
+                    let answer = effect.args.first().cloned().unwrap_or(Datum::Null);
+                    machine
+                        .deliver(effect.wait, Outcome::Completed(answer))
+                        .unwrap();
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    let work = machine.work().unwrap();
+    assert_eq!(work.charged, machine.meters().charged);
+    assert_eq!(work.residual(), 0);
+    assert_eq!(work.unattributed_charge, 0);
+    assert_eq!(work.insertion_residual(), 0);
+    for name in ["ts.member.get", "ts.member.set", "ts.member.has"] {
+        assert!(
+            !work.codes.iter().any(|code| code.symbol.name == name),
+            "Map calls must directly invoke their helper: {name}"
+        );
+    }
+    let straight = observe(program.clone(), false);
+    assert!(matches!(straight.end, End::Finished(_)), "{straight:?}");
+    assert_eq!(straight.charged, work.charged);
+    assert_eq!(observe(program, true), straight);
+}

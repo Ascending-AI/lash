@@ -303,6 +303,32 @@ fn a_value_changed_through_an_alias_reads_what_it_now_holds() {
 fn a_method_is_read_before_its_arguments_run() {
     assert_eq!(
         finished(
+            r#"
+        let current = new Map([[1, 'old']]);
+        const alias = current;
+        const captured = () => current.get(1);
+        const change = () => { current = new Map([[1, 'new']]); return 1; };
+        const first = current.get(change());
+        const generic = (o, change) => o.get(change());
+        const o = { get(x) { return 'own' + x; } };
+        const replace = () => { o.get = (x) => 'replacement' + x; return 2; };
+        const own = generic(o, replace);
+        let order = '';
+        const arg = (x) => { order += x; return x; };
+        const same = alias.set(arg('k'), arg('v'), arg('ignored')) === alias;
+        alias.set(...['spread', 8]);
+        const missing = alias.get() === undefined && !alias.has();
+        const borrowed = alias.get;
+        await finish(JSON.stringify([first, captured(), alias.get(1), own,
+            same, order, alias.has('k'), alias.get('spread'), missing,
+            borrowed.call(alias, 1)]));
+    "#
+        ),
+        r#"["old","new","old","own2",true,"kvignored",true,8,true,"old"]"#
+    );
+
+    assert_eq!(
+        finished(
             "const o = { f: (x) => 'old' + x }; \
              const replace = () => { o.f = (x) => 'new' + x; return 1; }; \
              const first = o.f(replace()); const second = o.f(2); \

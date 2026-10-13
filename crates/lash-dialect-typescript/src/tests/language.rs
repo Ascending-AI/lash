@@ -148,6 +148,21 @@ fn spans_and_labels_annotate_sites() {
 #[test]
 fn member_reference_failure_precedes_argument_effects() {
     use super::machine::{Ended, end};
+    for method in ["get", "set", "has"] {
+        assert_eq!(
+            end(&format!(
+                "function receiver() {{ return null; }} let ran = false; try {{ receiver().{method}(ran = true); }} catch(e) {{}} await finish(ran);"
+            )),
+            Ended::Finished(lash_kernel_doc::Datum::Bool(false))
+        );
+    }
+    // An accessor is refused at admission, including one named like a Map method.
+    assert_eq!(
+        super::lower("const o = { get get() { throw 1; } }; o.get(2);")
+            .unwrap_err()
+            .code,
+        crate::DiagnosticCode::AccessorUnsupported
+    );
     assert_eq!(
         end(
             "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} await finish(ran);"

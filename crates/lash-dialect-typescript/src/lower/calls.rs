@@ -886,6 +886,11 @@ impl Lowerer<'_> {
                 {
                     return Ok(called);
                 }
+                if let Key::Static(name) = &key
+                    && let Some(called) = self.call_map(&object, name, args)?
+                {
+                    return Ok(called);
+                }
                 let function = self.get_member(&object, &key)?;
                 let function = self.pin(function);
                 let args = self.arguments(args)?;
@@ -908,6 +913,48 @@ impl Lowerer<'_> {
                 self.apply(function, Operand::undefined(), args, declared)
             }
         }
+    }
+
+    /// A Map cannot carry guest fields: its method read always selects its
+    /// built-in row. Test its kind at the member-read site, before arguments
+    /// can change bindings or park. Other receivers read and pin their method
+    /// before arguments, retaining own fields, failures and borrowed methods.
+    /// These are new document forms, charged normally by the kernel.
+    fn call_map(
+        &mut self,
+        object: &Operand,
+        name: &str,
+        args: &[ast::CallArg],
+    ) -> Lowering<Option<Operand>> {
+        if !matches!(object.ty, Ty::Unknown | Ty::Union(_)) {
+            return Ok(None);
+        }
+        let function = match name {
+            "get" => "ts.map.get",
+            "set" => "ts.map.set",
+            "has" => "ts.map.has",
+            _ => return Ok(None),
+        };
+        let kind = self.native("kind", vec![object.expr()])?;
+        let test = self.same(kind, Operand::text("map").expr())?;
+        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+        let place = Place::Variable(super::statements::variable_of(&result));
+        let direct = self.block(|this| {
+            let passed = this.arguments(args)?;
+            let value = this.invoke(function, &[object.clone(), passed], Ty::Unknown)?;
+            this.store(place.clone(), value);
+            Ok(())
+        })?;
+        let fallback = self.block(|this| {
+            let method = this.get_member(object, &Key::Static(name.into()))?;
+            let method = this.pin(method);
+            let passed = this.arguments(args)?;
+            let value = this.apply(method, object.clone(), passed, false)?;
+            this.store(place, value);
+            Ok(())
+        })?;
+        self.emit_if(test, direct, fallback);
+        Ok(Some(result))
     }
 
     /// `object.name(args)` where the object's type is one built-in kind
