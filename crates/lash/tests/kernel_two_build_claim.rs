@@ -9,10 +9,10 @@
 //! version as its first commit, and the process resumes under that
 //! version to the answer it would have reached.
 //!
-//! The refusal law beside it: a process parked inside a library function's
-//! kernel body, which the synthetic migration declares it cannot carry, is
-//! listed with that typed reason by the survey `lashctl kernel-migration
-//! list` prints, and build N+1 parks it with the same reason at the claim.
+//! The refusal laws beside it: a process and a session cell pin helper
+//! release 1.0, whose manifest cannot supply the next kernel encoding.
+//! The survey names that release with a typed refusal, and build N+1 parks
+//! the run without publishing a rewritten document or cell snapshot.
 //!
 //! The helper-release laws (FIG-5799) run build N against a build that
 //! keeps its kernel version and changes a helper, `ts.array.forEach`: a
@@ -434,8 +434,10 @@ main {{
     )
 }
 
+/// FIG-6127 / D2: the survey and claim refuse a format-incompatible pinned
+/// helper release by name, leaving the process in its original format.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_the_migration_cannot_carry_is_listed_and_parked_with_its_typed_reason() {
+async fn a_process_format_carry_refuses_helpers_missing_from_its_pinned_release() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -461,7 +463,14 @@ async fn a_process_the_migration_cannot_carry_is_listed_and_parked_with_its_type
     assert_eq!(listed["process"], serde_json::json!(process), "{survey}");
     assert_eq!(listed["refusal"]["refused"], "parked", "{survey}");
     assert_eq!(
-        listed["refusal"]["refusal"]["reason"], "site_not_carried",
+        listed["refusal"]["refusal"]["reason"], "state_not_carried",
+        "{survey}"
+    );
+    assert!(
+        listed["refusal"]["refusal"]["detail"]
+            .as_str()
+            .expect("the pinned-release reason")
+            .contains("helper release 1.0"),
         "{survey}"
     );
 
@@ -655,24 +664,23 @@ fn cell_finishes(view: &lash::persistence::SessionReadView) -> Vec<serde_json::V
 /// kernel version and moves the session to its own format set in one
 /// commit, and the cell resumes, calling the function its document
 /// declares, to the answer it would have reached.
+/// FIG-6127 / D2: a cell whose retained helper manifest cannot supply the
+/// next kernel encoding parks typed, with its original snapshot intact.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_plus_1() {
+async fn a_session_cell_format_carry_refuses_helpers_missing_from_its_pinned_release() {
     const SESSION: &str = "kernel-two-build-session";
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("an in-memory store set opens"),
+            .expect("a SQLite memory store set opens"),
     );
     let actor = ActorKey::session(SESSION).expect("a session actor key");
-
-    // Build N runs on a runtime of its own, which the law shuts down under
-    // it: a node lets go of a turn whose cell sleeps only by dying.
     let build_n = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
         .expect("build N's runtime");
-    let written = build_n
+    let (backend, written) = build_n
         .spawn({
             let stores = Arc::clone(&stores);
             async move {
@@ -680,97 +688,75 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
                     &stores,
                     Build::N,
                     "build-n",
-                    &[
-                        "function double(n: number) { return n * 2; }\nawait control.finish('bound');",
-                        "await sleep(3000);\nawait control.finish(double(21));",
-                    ],
+                    &["await sleep(60000);\nawait control.finish(21 * 2);"],
                 );
                 let opened = session(&old, SESSION).await;
-                let bound = opened
-                    .send(lash::TurnInput::text("bind the function"))
-                    .output()
-                    .await
-                    .expect("the binding turn");
-                assert!(bound.is_success(), "the binding turn: {bound:?}");
                 tokio::spawn(async move {
                     let _ = opened
-                        .send(lash::TurnInput::text("sleep, then call it"))
+                        .send(lash::TurnInput::text("sleep, then multiply"))
                         .output()
                         .await;
                 });
-                // The cell parks in its sleep.
                 let parked = parked_cell(&old_backend, SESSION).await;
-                // The core is kept from its drop, which would let the
-                // session go in order.
                 std::mem::forget(old);
-                parked.formats
+                (old_backend, parked.formats)
             }
         })
         .await
         .expect("build N parks the cell");
     assert!(
         written.as_str().contains("kernel-parked-state@1"),
-        "the parked session is in build N's format set: {written:?}"
+        "{written:?}"
     );
     build_n.shutdown_background();
 
-    // Build N+1 reaps the dead node, claims the session and carries the
-    // cell before the cell runs again: the session is in its format set
-    // while no later turn has been admitted.
-    let (new_backend, new) = serving(
-        &stores,
-        Build::NPlus1,
-        "build-n-plus-1",
-        &["await control.finish('after');"],
-    );
-    let mut carried = None;
-    for _ in 0..6000 {
-        let row = new_backend
-            .durable()
-            .actor(&actor)
-            .await
-            .expect("the actor row is read")
-            .expect("the session has its actor");
-        if row.formats != written {
-            carried = Some(row);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let carried = carried.expect("build N+1 carries the session within a minute");
-    assert!(
-        carried.formats.as_str().contains("kernel-parked-state@2"),
-        "the session is in build N+1's format set: {:?}",
-        carried.formats
-    );
-
-    let later = tokio::time::timeout(
-        Duration::from_secs(60),
-        session(&new, SESSION)
-            .await
-            .send(lash::TurnInput::text("call it again"))
-            .output(),
-    )
-    .await
-    .expect("the later turn ends within a minute")
-    .expect("the later turn");
-    assert!(later.is_success(), "the later turn: {later:?}");
-    let finishes = cell_finishes(
-        &new.session(lash::SessionId::fixture(SESSION))
-            .durable()
-            .await
-            .expect("durable session")
-            .read()
-            .await
-            .expect("committed read")
-            .expect("head"),
-    );
+    let listed = survey(&backend).await;
+    let refusal = &listed["sessions"][0]["refused"][0]["refusal"];
+    assert_eq!(refusal["refused"], "parked", "{listed}");
     assert_eq!(
-        finishes.get(1),
-        Some(&serde_json::json!(42)),
-        "the parked cell resumed under build N+1 to its answer: {finishes:?}"
+        refusal["refusal"]["reason"], "state_not_carried",
+        "{listed}"
     );
-    assert_eq!(finishes.last(), Some(&serde_json::json!("after")));
+    assert!(
+        refusal["refusal"]["detail"]
+            .as_str()
+            .expect("the release reason")
+            .contains("helper release 1.0"),
+        "{listed}"
+    );
+    let session = lash::SessionId::fixture(SESSION);
+    let turn = backend
+        .durable()
+        .turn(&session)
+        .await
+        .expect("turn read")
+        .expect("an open turn");
+    let roots = backend
+        .durable()
+        .cell_roots(&session, &turn.run)
+        .await
+        .expect("the original roots");
+
+    let (new_backend, _new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
+    let parked = in_state(&new_backend, &actor, ActorState::Parked).await;
+    let reason: serde_json::Value =
+        serde_json::from_str(parked.park.as_deref().expect("the actor names its refusal"))
+            .expect("a JSON park reason");
+    assert_eq!(reason["reason"], "undecodable_state", "{reason}");
+    assert!(
+        reason.to_string().contains("helper release 1.0"),
+        "{reason}"
+    );
+    assert_eq!(parked.formats, written);
+    assert_eq!(
+        new_backend
+            .durable()
+            .cell_roots(&session, &turn.run)
+            .await
+            .expect("the parked roots"),
+        roots,
+        "a refused carry publishes no rewritten cell",
+    );
 }
 
 /// `worker()` of [`WORKER`], its sleep an hour long: a process that no node
@@ -1030,96 +1016,6 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
         )
         .last(),
         Some(&serde_json::json!(42))
-    );
-}
-
-/// FIG-5787: `lashctl kernel-migration list` names a session whose open
-/// turn stopped in a cell the migration would refuse, with the typed
-/// reason. The cell awaits a promise it made of a sleep, so its run is
-/// parked inside the dialect's `ts.await`, a library function's kernel
-/// body, which the synthetic migration declares it cannot carry.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_listing_names_a_refused_session_cell_with_its_reason() {
-    const SESSION: &str = "kernel-refused-cell-session";
-    let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("an in-memory store set opens"),
-    );
-    let actor = ActorKey::session(SESSION).expect("a session actor key");
-    // Build N runs on a runtime of its own, which the law shuts down under
-    // it once the cell is parked: a node lets go of a sleeping cell only by
-    // dying.
-    let build_n = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("build N's runtime");
-    let backend = build_n
-        .spawn({
-            let stores = Arc::clone(&stores);
-            let actor = actor.clone();
-            async move {
-                let (old_backend, old) = serving(
-                    &stores,
-                    Build::N,
-                    "build-n",
-                    &["const nap = sleep(60000);\nawait nap;\nawait control.finish('woke');"],
-                );
-                let opened = session(&old, SESSION).await;
-                tokio::spawn(async move {
-                    let _ = opened
-                        .send(lash::TurnInput::text("await the nap"))
-                        .output()
-                        .await;
-                });
-                // The cell parks in its await: its snapshot is committed
-                // under the open turn until the sleep is over.
-                let id = lash::SessionId::parse(SESSION).expect("a session id");
-                let reads = old_backend.durable();
-                let mut last = None;
-                for _ in 0..3000 {
-                    last = reads.turn(&id).await.expect("the turn row is read");
-                    if let Some(turn) = &last
-                        && !reads
-                            .cell_roots(&id, &turn.run)
-                            .await
-                            .expect("the cell roots are read")
-                            .is_empty()
-                    {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                let parked = match &last {
-                    Some(turn) => reads
-                        .cell_roots(&id, &turn.run)
-                        .await
-                        .expect("the cell roots are read"),
-                    None => Vec::new(),
-                };
-                assert!(
-                    !parked.is_empty(),
-                    "the cell did not park within half a minute: {last:?}, {:?}",
-                    reads.actor(&actor).await
-                );
-                std::mem::forget(old);
-                old_backend
-            }
-        })
-        .await
-        .expect("build N parks the cell");
-    build_n.shutdown_background();
-
-    let survey = survey(&backend).await;
-    assert_eq!(survey["unmigrated"], 1, "{survey}");
-    let listed = &survey["sessions"][0];
-    assert_eq!(listed["session"], SESSION, "{survey}");
-    let refused = &listed["refused"][0];
-    assert_eq!(refused["refusal"]["refused"], "parked", "{survey}");
-    assert_eq!(
-        refused["refusal"]["refusal"]["reason"], "site_not_carried",
-        "{survey}"
     );
 }
 

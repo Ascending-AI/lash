@@ -23,6 +23,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::ProcessId;
+use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionId, FunctionName, FunctionRegistry,
     KernelVersion, Site, Unit, validate_document,
@@ -206,6 +207,18 @@ pub fn plan_carry(
     })
 }
 
+/// The release an explicit successor pair selects within the pinned
+/// dialect's line. A kernel-format carry never calls this selector.
+fn current_release(pinned: &ChildRef) -> Result<ChildRef, String> {
+    let releases = lash_vm_broker::kernel::state::release_manifests()
+        .map_err(|failure| failure.to_string())?;
+    releases
+        .manifests
+        .dialect_of(pinned)
+        .and_then(|dialect| releases.manifests.current(dialect))
+        .ok_or_else(|| "the run pins a helper release this build does not hold".to_owned())
+}
+
 /// `parked`, a run of `base`, carried onto `rewritten` under its own kernel
 /// version and owner, pinning the build's helper release.
 fn adopt_run(
@@ -249,7 +262,7 @@ fn adopt_run(
     capture_whole(
         &OpenedRun {
             run: carried,
-            release: super::migrate::current_release(&opened.release).map_err(state)?,
+            release: current_release(&opened.release).map_err(state)?,
             binding: opened.binding,
         },
         u64::MAX,

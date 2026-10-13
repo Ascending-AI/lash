@@ -95,7 +95,7 @@ impl KernelCarry {
 
     /// `cell`, a cell's stored root, carried to the kernel version this
     /// plugin writes: its document rewritten, its parked run carried onto
-    /// the rewrite under the build's helper release, and each wait it
+    /// the rewrite under its original pinned helper release, and each wait it
     /// stands on re-admitted under the identity the rewrite gives it, in a
     /// new complete root. `None` when the cell's document is in that
     /// version already, or the cell has ended.

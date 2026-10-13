@@ -576,6 +576,7 @@ commands = [
   ["cargo", "test", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript,synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-runtime", "--test", "kernel_two_build_claim", "--no-default-features", "--features", "rlm,sqlite,testing,typescript,synthetic-next", "--locked"],

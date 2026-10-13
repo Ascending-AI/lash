@@ -560,6 +560,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_7689e7fa": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-releases:lash-vm-releases__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test": {"cpu_count": 2, "memory_kb": 262144},
+    "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_4835aec7": {"cpu_count": 2, "memory_kb": 262144},
     "//crates/lash-vm-worker:lash-vm-worker__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-worker:lash-vm-worker__unit_test__fv_3e6e26e7": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-worker:lash-vm-worker__unit_test__fv_3ea43af8": {"cpu_count": 1, "memory_kb": 262144},

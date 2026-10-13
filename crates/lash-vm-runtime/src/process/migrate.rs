@@ -24,7 +24,6 @@ use std::sync::Arc;
 
 use lash_core::{EngineState, EngineStateFormat, EngineStateRefusal, ProcessId};
 use lash_core_store::checkpoint_graph::DecodeLimits;
-use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
 use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Rewritten, migration_from};
 use lash_kernel_state::AdmittedWait;
@@ -163,9 +162,10 @@ pub fn migrate_saved_function(
 }
 
 /// The run `parked` under `base`, each wait's request in `admitted`,
-/// carried onto `plan`'s rewrite of it and pinning the build's helper
-/// release for the dialect of the release it pinned, which the rewritten
-/// document is admitted against.
+/// carried onto `plan`'s rewrite while keeping its exact pinned helper
+/// release. The retained manifest must supply every rewritten helper;
+/// otherwise the carry refuses, naming the release. Only an explicit
+/// successor pair can move the run onto another helper release (D2).
 ///
 /// # Errors
 ///
@@ -176,6 +176,22 @@ pub fn migrate_run(
     base: &Document,
     plan: &PlannedMigration,
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
+) -> Result<WholeState, KernelMigrationRefusal> {
+    let releases = lash_vm_broker::kernel::state::release_manifests().map_err(|failure| {
+        KernelMigrationRefusal::State {
+            message: failure.to_string(),
+        }
+    })?;
+    migrate_run_with_releases(parked, admitted, base, plan, limits, &releases)
+}
+
+pub(super) fn migrate_run_with_releases(
+    parked: &WholeState,
+    admitted: &[AdmittedWait],
+    base: &Document,
+    plan: &PlannedMigration,
+    limits: DecodeLimits,
+    releases: &lash_vm_broker::kernel::state::ReleaseGraph,
 ) -> Result<WholeState, KernelMigrationRefusal> {
     let state = |message: String| KernelMigrationRefusal::State { message };
     let refused = |refusal| KernelMigrationRefusal::Parked {
@@ -188,12 +204,40 @@ pub fn migrate_run(
             from: base.manifest.kernel,
         }));
     };
-    let opened = open_run(parked, admitted, base, limits).map_err(state)?;
+    let opened = open_whole(
+        parked,
+        releases,
+        admitted,
+        base.manifest.functions.keys().copied().collect(),
+        limits,
+    )
+    .map_err(|failure| state(failure.to_string()))?;
+    let pinned = lash_core_store::checkpoint_graph::NodeId(opened.release.0).to_hex();
+    let manifest = releases.manifests.get(&opened.release).ok_or_else(|| {
+        refused(ParkedRefusal::StateNotCarried {
+            detail: format!("helper release manifest {pinned} is not retained by this build"),
+        })
+    })?;
+    // Redeclaring a function for the next kernel encoding is not permission
+    // to escape the pinned release. Its immutable catalog must already hold
+    // that encoding of the helper, rather than this build's replacement.
+    for (from, to) in &plan.rewritten.functions {
+        if releases.manifests.releases(from) && !manifest.holds(to) {
+            return Err(refused(ParkedRefusal::StateNotCarried {
+                detail: format!(
+                    "helper release {} ({pinned}) cannot carry helper {from} to kernel {}: \
+                     its manifest does not hold rewritten function {to}",
+                    manifest.release,
+                    plan.to.number(),
+                ),
+            }));
+        }
+    }
     let carried = (migration.parked)(&opened.run, base, &plan.rewritten).map_err(refused)?;
     capture_whole(
         &OpenedRun {
             run: carried,
-            release: current_release(&opened.release).map_err(state)?,
+            release: opened.release,
             binding: opened.binding,
         },
         u64::MAX,
@@ -222,19 +266,6 @@ pub(crate) fn open_run(
     .map_err(|failure| failure.to_string())
 }
 
-/// The helper release this build pins a carried run to: the one it builds
-/// for the dialect of `pinned`, the release the run was written under. A
-/// run stays in its dialect's release line.
-pub(crate) fn current_release(pinned: &ChildRef) -> Result<ChildRef, String> {
-    let releases = lash_vm_broker::kernel::state::release_manifests()
-        .map_err(|failure| failure.to_string())?;
-    releases
-        .manifests
-        .dialect_of(pinned)
-        .and_then(|dialect| releases.manifests.current(dialect))
-        .ok_or_else(|| "the run pins a helper release this build does not hold".to_owned())
-}
-
 /// A sealed parked run as a whole state again.
 pub(crate) fn unsealed(parked: &SealedRun) -> Result<WholeState, String> {
     WholeState::of_sealed(&parked.0, &DecodeLimits::within_total(parked.0.byte_len()))
@@ -251,7 +282,8 @@ pub struct KernelStateMigration {
 impl KernelStateMigration {
     /// The migration of `engine`'s processes, or `None` when its build
     /// ships none: it interprets one kernel version. A process pinned to a
-    /// helper release is never carried off it here (FIG-6074, D2).
+    /// helper release keeps that exact manifest through a format carry
+    /// (FIG-6074, D2); incompatible retained helpers refuse the carry.
     pub fn of(engine: Arc<KernelProcessEngine>) -> Option<Self> {
         let carries = engine.writes.previous().is_some_and(|previous| {
             migration_from(previous).is_some_and(|migration| migration.to == engine.writes)
