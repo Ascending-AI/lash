@@ -364,3 +364,91 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
         }
     }
 }
+
+/// Executes with a fresh serialized import at slices and parks. Neither
+/// source facts nor operand metadata may be required by resumed execution.
+fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
+    let program = Program {
+        document: Arc::new(
+            super::lower_with_effects(source)
+                .expect("law source")
+                .document,
+        ),
+        library: prepared().clone(),
+    };
+    let (mut machine, _) = start(source);
+    if !restore {
+        machine.count_work();
+    }
+    let mut result = None;
+    let mut imports = 0;
+    loop {
+        let step = machine
+            .run(&mut Console::default(), slice)
+            .expect("law run");
+        if restore && matches!(step, Step::Slice | Step::Parked(_)) {
+            let bytes = serde_json::to_vec(&machine.export().expect("export")).expect("serialize");
+            let parked = serde_json::from_slice(&bytes).expect("deserialize");
+            machine = KernelMachine::import(program.clone(), BOUNDS, parked).expect("import");
+            imports += 1;
+        }
+        match step {
+            Step::Slice => {}
+            Step::Parked(park) => {
+                for request in park.requests {
+                    let Request::Effect(effect) = request else {
+                        panic!("effect only")
+                    };
+                    let value = effect.args.first().cloned().unwrap_or(Datum::Null);
+                    if effect.effect.as_str() == "finish" {
+                        result = Some(value.clone());
+                    }
+                    machine
+                        .deliver(effect.wait, Outcome::Completed(value))
+                        .expect("deliver");
+                }
+            }
+            Step::Ended(End::Finished(_)) => {
+                let charged = machine.meters().charged;
+                if !restore {
+                    let work = machine.work().expect("work counted");
+                    assert_eq!(work.charged, charged);
+                    assert_eq!(work.residual(), 0);
+                    assert_eq!(work.insertion_residual(), 0);
+                }
+                return (result.expect("finish result"), charged, imports);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+/// TS-PLAIN-PARK: a nonterminal await invalidates source facts for the
+/// cell, including an await between a member reference and its write.
+#[test]
+fn plain_record_mid_path_park_resumes_the_guarded_heap() {
+    let source = "const r = { next: { leaf: 0 } }; r.next.leaf = await echo(7); await finish(r);";
+    let text = super::main_text_with_effects(source);
+    assert!(text.contains("__ts_brand"), "{text}");
+    let plain = plain_record_resume(source, u64::MAX, false);
+    let restored = plain_record_resume(source, u64::MAX, true);
+    assert_eq!((&plain.0, plain.1), (&restored.0, restored.1));
+    assert_eq!(restored.2, 2, "echo and finish parks were imported");
+    assert_eq!(
+        end("const r = { next: { leaf: 7 } }; await finish(r);"),
+        Ended::Finished(plain.0)
+    );
+}
+
+/// K-CHG-007, K-MACH-007, TS-PLAIN-PATH: direct member work has zero
+/// accounting residual and the same exact charge over serialized slices.
+#[test]
+fn plain_record_paths_account_charge_across_slice_resume() {
+    let source = "const r = { next: { leaf: 0 } }; for (let n = 0; n < 3; n++) { r.next.leaf = n; } await finish(r);";
+    let text = super::main_text_with_effects(source);
+    assert!(!text.contains("__ts_brand"), "{text}");
+    let plain = plain_record_resume(source, u64::MAX, false);
+    let sliced = plain_record_resume(source, 1, true);
+    assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));
+    assert!(sliced.2 > 10, "multiple member steps were imported");
+}

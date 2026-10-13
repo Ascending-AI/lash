@@ -67,12 +67,15 @@ enum Role {
 struct Collector<'a> {
     entries: HashMap<&'a str, Entry<'a>>,
     order: Vec<&'a str>,
+    plain: super::plain::Collector<'a>,
+    function_depth: usize,
     aliases: Vec<(&'a str, &'a TypeAnnotation)>,
 }
 
 /// What the analysis found.
 #[derive(Debug, Default)]
 pub(crate) struct Facts {
+    plain: super::plain::Facts,
     types: HashMap<String, Ty>,
     narrowable: HashSet<String>,
     aliases: BTreeMap<String, Ty>,
@@ -81,11 +84,16 @@ pub(crate) struct Facts {
 impl Facts {
     /// Analyses a program. `session` names the bindings earlier cells left:
     /// nothing is known of them, whatever this cell declares.
-    pub(crate) fn analyse(program: &Program, session: &BTreeSet<Name>) -> Self {
+    pub(crate) fn analyse(
+        program: &Program,
+        session: &BTreeSet<Name>,
+        terminal: &BTreeSet<String>,
+    ) -> Self {
         let mut collector = Collector::default();
         collector.statements(&program.statements);
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
         let mut facts = Self {
+            plain: std::mem::take(&mut collector.plain).finish(session, terminal),
             types: collector
                 .order
                 .iter()
@@ -126,6 +134,10 @@ impl Facts {
             .map(|(name, _)| (*name).to_string())
             .collect();
         facts
+    }
+
+    pub(crate) fn plain(&self, expr: &Expr) -> Option<super::PlainRecord> {
+        self.plain.of(expr)
     }
 
     /// The type of the source's bindings named `name`, or `None` when the
@@ -294,6 +306,11 @@ impl<'a> Collector<'a> {
     }
 
     fn name(&mut self, name: &'a str, role: Role, source: Source<'a>) {
+        let value = match &source {
+            Source::Value(value) if self.function_depth == 0 => Some(*value),
+            _ => None,
+        };
+        self.plain.name(name, value);
         let entry = self.entry(name);
         match role {
             Role::Declared { hoisted } => {
@@ -320,6 +337,7 @@ impl<'a> Collector<'a> {
             }
             Pattern::Rest(inner) => self.pattern(inner, role),
             Pattern::Member { object, property } => {
+                self.plain.write(property);
                 self.expr(object);
                 self.property(property);
             }
@@ -353,7 +371,12 @@ impl<'a> Collector<'a> {
     fn bound(&mut self, pattern: &'a Pattern, role: Role, source: Source<'a>) {
         match pattern {
             Pattern::Ident(name, None) => self.name(name, role, source),
-            _ => self.pattern(pattern, role),
+            _ => {
+                if let Source::Value(value) = source {
+                    self.plain.escape(value);
+                }
+                self.pattern(pattern, role);
+            }
         }
     }
 
@@ -442,6 +465,7 @@ impl<'a> Collector<'a> {
                     loop_role(*kind),
                     loop_source(*kind, Source::ElementOf(iterable)),
                 );
+                self.plain.escape(iterable);
                 self.expr(iterable);
                 self.statement(body);
             }
@@ -457,6 +481,7 @@ impl<'a> Collector<'a> {
                     loop_role(*kind),
                     loop_source(*kind, Source::Is(Ty::Text)),
                 );
+                self.plain.escape(object);
                 self.expr(object);
                 self.statement(body);
             }
@@ -492,6 +517,7 @@ impl<'a> Collector<'a> {
     }
 
     fn function(&mut self, function: &'a Function) {
+        self.function_depth += 1;
         for param in &function.params {
             self.pattern(param, Role::Declared { hoisted: false });
         }
@@ -499,10 +525,12 @@ impl<'a> Collector<'a> {
             FunctionBody::Block(body) => self.statements(body),
             FunctionBody::Expression(value) => self.expr(value),
         }
+        self.function_depth -= 1;
     }
 
     fn property(&mut self, property: &'a MemberProperty) {
         if let MemberProperty::Index(index) = property {
+            self.plain.escape(index);
             self.expr(index);
         }
     }
@@ -521,14 +549,28 @@ impl<'a> Collector<'a> {
                 self.name(name, Role::Assigned, source);
             }
             AssignTarget::Member { object, property } => {
+                self.plain.write(property);
+                if let Source::Value(value) = source {
+                    self.plain.escape(value);
+                }
                 self.expr(object);
                 self.property(property);
             }
-            AssignTarget::Pattern(pattern) => self.pattern(pattern, Role::Assigned),
+            AssignTarget::Pattern(pattern) => {
+                if let Source::Value(value) = source {
+                    self.plain.escape(value);
+                }
+                self.pattern(pattern, Role::Assigned);
+            }
         }
     }
 
     fn expr(&mut self, expr: &'a Expr) {
+        if self.function_depth > 0
+            && let Expr::Ident(name, _) = expr
+        {
+            self.plain.exclude(name);
+        }
         match expr {
             Expr::Null
             | Expr::Bool(_)
@@ -542,6 +584,7 @@ impl<'a> Collector<'a> {
                 for element in elements {
                     match element {
                         ArrayElement::Value(value) | ArrayElement::Spread(value) => {
+                            self.plain.escape(value);
                             self.expr(value);
                         }
                         ArrayElement::Hole => {}
@@ -557,7 +600,10 @@ impl<'a> Collector<'a> {
                             }
                             self.expr(value);
                         }
-                        ObjectProperty::Spread(value) => self.expr(value),
+                        ObjectProperty::Spread(value) => {
+                            self.plain.escape(value);
+                            self.expr(value);
+                        }
                     }
                 }
             }
@@ -571,17 +617,35 @@ impl<'a> Collector<'a> {
                 self.expr(value);
             }
             Expr::Update { target, .. } => self.target(target, Source::Is(Ty::Float)),
-            Expr::Member {
-                object, property, ..
-            }
-            | Expr::Delete { object, property } => {
+            Expr::Delete { object, property } => {
+                self.plain.write(property);
                 self.expr(object);
                 self.property(property);
             }
-            Expr::Unary { value, .. } | Expr::Await { value, .. } | Expr::As { value, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
+                self.expr(object);
+                self.property(property);
+            }
+            Expr::Await { value, .. } => {
+                self.plain.await_value(value);
                 self.expr(value);
             }
-            Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
+            Expr::Unary { value, .. } => {
+                self.plain.escape(value);
+                self.expr(value);
+            }
+            Expr::As { value, .. } => {
+                self.expr(value);
+            }
+            Expr::Binary { left, right, .. } => {
+                self.plain.escape(left);
+                self.plain.escape(right);
+                self.expr(left);
+                self.expr(right);
+            }
+            Expr::Logical { left, right, .. } => {
                 self.expr(left);
                 self.expr(right);
             }
@@ -596,6 +660,7 @@ impl<'a> Collector<'a> {
             }
             Expr::Template { expressions, .. } => {
                 for expression in expressions {
+                    self.plain.escape(expression);
                     self.expr(expression);
                 }
             }
@@ -610,16 +675,30 @@ impl<'a> Collector<'a> {
                 self.function(function);
             }
             Expr::Call { callee, args, .. } => {
+                self.plain.call(callee, args);
                 self.expr(callee);
                 self.args(args);
             }
-            Expr::New { args, .. } => self.args(args),
+            Expr::New { args, .. } => {
+                for arg in args {
+                    let (CallArg::Value(value) | CallArg::Spread(value)) = arg;
+                    self.plain.escape(value);
+                }
+                self.args(args);
+            }
             Expr::OptionalChain { base, operations } => {
+                self.plain.escape(base);
                 self.expr(base);
                 for operation in operations {
                     match operation {
                         OptionalOperation::Member { property, .. } => self.property(property),
-                        OptionalOperation::Call { args, .. } => self.args(args),
+                        OptionalOperation::Call { args, .. } => {
+                            for arg in args {
+                                let (CallArg::Value(value) | CallArg::Spread(value)) = arg;
+                                self.plain.escape(value);
+                            }
+                            self.args(args);
+                        }
                     }
                 }
             }

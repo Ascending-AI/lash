@@ -206,6 +206,7 @@ impl Lowerer<'_> {
         self.entries
             .insert(entry.clone(), Signature { params, result });
         Ok(Operand {
+            plain: None,
             atom: Atom::Literal(Literal::Function(entry)),
             ty: Ty::Unknown,
         })
@@ -313,6 +314,7 @@ impl Lowerer<'_> {
         self.entries
             .insert(entry.clone(), Signature { params, result });
         Ok(Operand {
+            plain: None,
             atom: Atom::Literal(Literal::Function(entry)),
             ty: Ty::Unknown,
         })

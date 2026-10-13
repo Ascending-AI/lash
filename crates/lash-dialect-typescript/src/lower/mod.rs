@@ -30,7 +30,7 @@ use lash_kernel_doc::{
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
 use crate::node_label::NodeLabel;
-use crate::types::{Facts, Ty};
+use crate::types::{Facts, PlainRecord, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod annotate;
@@ -126,6 +126,9 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
 pub(crate) struct Operand {
     pub(crate) atom: Atom,
     pub(crate) ty: Ty,
+    /// Proven representation and stable nested fields, never an annotation
+    /// or part of a saved value. Boundness is checked before this is attached.
+    pub(crate) plain: Option<PlainRecord>,
 }
 
 impl Operand {
@@ -133,6 +136,7 @@ impl Operand {
         Self {
             atom: Atom::Literal(Literal::Absent),
             ty: Ty::Undefined,
+            plain: None,
         }
     }
 
@@ -140,6 +144,7 @@ impl Operand {
         Self {
             atom: Atom::Literal(Literal::Null),
             ty: Ty::Null,
+            plain: None,
         }
     }
 
@@ -147,6 +152,7 @@ impl Operand {
         Self {
             atom: Atom::Literal(Literal::Bool(value)),
             ty: Ty::Bool,
+            plain: None,
         }
     }
 
@@ -154,6 +160,7 @@ impl Operand {
         Self {
             atom: Atom::Literal(Literal::Float(Float::new(value))),
             ty: Ty::Float,
+            plain: None,
         }
     }
 
@@ -161,6 +168,7 @@ impl Operand {
         Self {
             atom: Atom::Literal(Literal::Text(value.into())),
             ty: Ty::Text,
+            plain: None,
         }
     }
 
@@ -168,6 +176,7 @@ impl Operand {
         Self {
             atom: Atom::Variable(name),
             ty,
+            plain: None,
         }
     }
 
@@ -398,7 +407,18 @@ fn lower_program(
         span: None,
         used: BTreeMap::new(),
         private: BTreeSet::new(),
-        facts: Facts::analyse(program, environment.bindings),
+        facts: Facts::analyse(
+            program,
+            environment.bindings,
+            &environment
+                .controls
+                .iter()
+                .filter(|(_, controls)| {
+                    controls.contains(&lash_kernel_dialect::EffectControl::Finish)
+                })
+                .map(|(name, _)| name.as_str().to_string())
+                .collect(),
+        ),
         assigned: &program.assigned,
         narrowed: Vec::new(),
         declared: BTreeMap::new(),
@@ -1110,7 +1130,9 @@ impl Lowerer<'_> {
     fn pin(&mut self, operand: Operand) -> Operand {
         match &operand.atom {
             Atom::Variable(name) if !self.temporaries.contains(name) => {
-                self.let_expr(operand.expr(), operand.ty.clone())
+                let mut pinned = self.let_expr(operand.expr(), operand.ty.clone());
+                pinned.plain = operand.plain;
+                pinned
             }
             _ => operand,
         }

@@ -247,7 +247,9 @@ impl Lowerer<'_> {
     fn direct_read(&mut self, object: &Operand, key: &Key) -> Lowering<Option<Direct>> {
         match key {
             Key::Static(name)
-                if name == "length" && !matches!(object.ty, Ty::Object | Ty::Record(_)) =>
+                if name == "length"
+                    && object.plain.is_none()
+                    && !matches!(object.ty, Ty::Object | Ty::Record(_)) =>
             {
                 let Some(tests) = self.list_tests(object)? else {
                     return Ok(None);
@@ -326,6 +328,9 @@ impl Lowerer<'_> {
     /// The tests that `object` is a plain record: none when it is a record
     /// the source built, and `None` when its type says it is no record.
     fn record_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
+        if object.plain.is_some() {
+            return Ok(Some(Vec::new()));
+        }
         let mut tests = Vec::new();
         match object.ty {
             Ty::Object => {}

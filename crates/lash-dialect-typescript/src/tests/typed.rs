@@ -392,3 +392,153 @@ fn a_built_in_array_methods_new_array_is_a_list() {
         "[4,false,8,[3,4]]"
     );
 }
+
+/// TS-PLAIN-PATH: a closed, source-built record spine needs no repeated
+/// kind/brand admission, and leaf writes preserve its heap graph.
+#[test]
+fn plain_record_spines_skip_admission_and_preserve_heap_state() {
+    let mut source = "const t24 = { leaf: [0] };\n".to_string();
+    for level in (0..24).rev() {
+        source.push_str(&format!("const t{level} = {{ next: t{} }};\n", level + 1));
+    }
+    let half = ".next".repeat(12);
+    source.push_str(&format!(
+        "const tree = t0;\nfor (let n = 0; n < 3; n++) {{ \
+         const middle = tree{half}; middle{half}.leaf = [n]; }}\n\
+         await finish(tree);"
+    ));
+    let text = super::main_text_with_effects(&source);
+    assert!(!text.contains("__ts_brand"), "{text}");
+    assert!(!text.contains("kind("), "{text}");
+    let guarded = source.replace(
+        "const tree = t0;",
+        "function opaque(x) { return x; } const tree = opaque(t0);",
+    );
+    assert!(super::main_text_with_effects(&guarded).contains("__ts_brand"));
+    assert_eq!(super::machine::end(&source), super::machine::end(&guarded));
+}
+
+fn plain_fallback(source: &str) {
+    let text = super::main_text_with_effects(source);
+    assert!(text.contains(".__ts_brand, ())"), "{text}");
+    assert_eq!(
+        super::machine::end(source),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// TS-PLAIN-ALIAS-WRITE: writes through another name invalidate the field
+/// everywhere; internal brands remain invisible as guest properties.
+#[test]
+fn plain_record_alias_writes_keep_nested_admission() {
+    plain_fallback(
+        "const r = { next: {} }; const alias = r; alias.next = new Date(7); await finish(r.next.__ts_brand === undefined);",
+    );
+    // A computed alias write may replace any structural link.
+    plain_fallback(
+        "const r = { next: {} }; const alias = r; let key = 'next'; alias[key] = new Date(7); await finish(r.next.__ts_brand === undefined);",
+    );
+    // Deletion removes presence, even when the old field was a record.
+    assert_eq!(
+        super::machine::end(
+            "const r = { next: {} }; delete r.next; await finish(r.next === undefined);"
+        ),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// TS-PLAIN-CALL-ESCAPE: an unknown callee can mutate a passed record or
+/// a field, including through an alias kept in another fresh record.
+#[test]
+fn plain_record_mutating_calls_keep_admission() {
+    plain_fallback(
+        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await finish(r.next.__ts_brand === undefined);",
+    );
+    plain_fallback(
+        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await finish(inner.next.__ts_brand === undefined);",
+    );
+}
+
+/// TS-PLAIN-CAPTURE: a closure may change any captured binding or field.
+#[test]
+fn plain_record_captures_keep_admission() {
+    plain_fallback(
+        "const r = { next: {} }; const change = () => { r.next = new Date(7); }; change(); await finish(r.next.__ts_brand === undefined);",
+    );
+}
+
+/// TS-PLAIN-REASSIGN: neither an annotation nor a former literal proves a
+/// reassigned internal receiver plain. User classes keep their refusal.
+#[test]
+fn plain_record_reassignment_keeps_brand_admission() {
+    plain_fallback("let r = {}; r = new Date(7); await finish(r.__ts_brand === undefined);");
+    assert_eq!(
+        super::lower("let r = {}; class C {} r = new C(); r.x;")
+            .unwrap_err()
+            .code,
+        crate::DiagnosticCode::ClassUnsupported
+    );
+}
+
+/// TS-PLAIN-ACCESSOR: the existing source refusal cannot become a literal
+/// proof; no getter can enter the guard-free record path.
+#[test]
+fn plain_record_getters_keep_the_accessor_refusal() {
+    assert_eq!(
+        super::lower("const r = { next: { get value() { return 7; } } }; r.next.value;")
+            .unwrap_err()
+            .code,
+        crate::DiagnosticCode::AccessorUnsupported
+    );
+}
+
+/// TS-PLAIN-DEFINITION: every definition and field must agree. Spread,
+/// absent/duplicate fields, circular aliases and restored names prove nothing.
+#[test]
+fn plain_record_unknown_definitions_keep_admission() {
+    for source in [
+        "const r = { next: {}, next: new Date(7) }; await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {} }; const copy = { ...r }; copy.next = new Date(7); await finish(copy.next.__ts_brand === undefined);",
+        "let r = { next: {} }; r = { next: new Date(7) }; await finish(r.next.__ts_brand === undefined);",
+    ] {
+        plain_fallback(source);
+    }
+    assert_eq!(
+        super::machine::end("let r = { next: {} }; r = {}; await finish(r.next === undefined);"),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+    let text = lash_kernel_doc::print_document(
+        &super::lower_in_session("const r = { next: {} }; r.next.x;", &["r"])
+            .unwrap()
+            .document,
+    );
+    assert!(text.contains("__ts_brand"), "{text}");
+    // Cyclic definitions cannot manufacture a proof or expand it without
+    // bound before the ordinary boundness refusal runs.
+    assert_eq!(
+        super::lower("const a = { left: b, right: b }; const b = { left: a, right: a }; a.left.x;")
+            .unwrap_err()
+            .code,
+        crate::DiagnosticCode::TemporalDeadZone
+    );
+    // The root exists before a var initializer executes.
+    assert_eq!(
+        super::machine::end("await finish(r === undefined); var r = { next: {} };"),
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// TS-PLAIN-COERCION: coercion calls user code with the record as receiver;
+/// destructuring and assertions cannot hide aliases from escape exclusions.
+#[test]
+fn plain_record_implicit_calls_and_hidden_aliases_keep_admission() {
+    plain_fallback(
+        "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'x'; } }; const text = '' + r; await finish(r.next.__ts_brand === undefined);",
+    );
+    plain_fallback(
+        "const inner = { next: {} }; const r = ({ inner } as any); Object.assign(r.inner, { next: new Date(7) }); await finish(inner.next.__ts_brand === undefined);",
+    );
+    plain_fallback(
+        "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await finish(r.next.child.__ts_brand === undefined);",
+    );
+}

@@ -40,6 +40,12 @@ fn binary_helper(op: BinaryOp) -> &'static str {
 
 impl Lowerer<'_> {
     pub(crate) fn lower_expr(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
+        let mut value = self.lower_expr_inner(expr)?;
+        value.plain = self.facts.plain(expr);
+        Ok(value)
+    }
+
+    fn lower_expr_inner(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
         match expr {
             ast::Expr::Null => Ok(Operand::null()),
             ast::Expr::Bool(value) => Ok(Operand::bool(*value)),
@@ -154,6 +160,7 @@ impl Lowerer<'_> {
                 Ok(Operand {
                     atom: value.atom,
                     ty: self.facts.believed(ty),
+                    plain: value.plain,
                 })
             }
             ast::Expr::Delete { object, property } => {

@@ -185,6 +185,7 @@ impl Lowerer<'_> {
         }
         let closure = self.emit_closure(vec![this, args], body);
         Ok(Operand {
+            plain: None,
             atom: closure.atom,
             ty: self.facts.function(function.return_ty.as_ref()),
         })

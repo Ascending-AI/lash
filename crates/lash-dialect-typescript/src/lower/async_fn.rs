@@ -266,6 +266,7 @@ impl Lowerer<'_> {
                         continue;
                     }
                     let value = Operand {
+                        plain: None,
                         atom,
                         ty: Ty::Unknown,
                     };

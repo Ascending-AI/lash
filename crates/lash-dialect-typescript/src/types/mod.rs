@@ -31,9 +31,11 @@ use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
 mod facts;
 mod narrow;
+mod plain;
 
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
+pub(crate) use plain::PlainRecord;
 
 /// The array methods whose result is a new kernel list whatever array they
 /// are called on: each returns a list it builds, from `[]` or by
