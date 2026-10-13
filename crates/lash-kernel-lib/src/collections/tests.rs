@@ -1101,6 +1101,12 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         }
     }
     cases.extend([
+        (
+            "key.identity".into(),
+            "absent, 7, \"error\"".into(),
+            Ok(int(7)),
+        ),
+        ("list.get_or".into(), "[7], 2, 9".into(), Ok(int(9))),
         ("bool.not".into(), "true".into(), Ok(Datum::Bool(false))),
         (
             "error.new".into(),
@@ -1174,4 +1180,102 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         exercised, natives,
         "every collection native needs a named corpus case"
     );
+}
+
+/// K-COL-017: identity projection never reads the objects it keys. Its
+/// formula pays for each visited tuple slot and the immutable result only.
+#[test]
+fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
+    use lash_kernel_doc::{
+        Float, Identity, NativeCall, NativeHeap, Object, Operand, Value, WorkCounter,
+    };
+    let registry = registry();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, f)| f.definition.name.as_str() == "key.identity")
+        .unwrap();
+    let native = function.native.as_ref().unwrap();
+    let mut heap = crate::tests::Heap::default();
+    let object = heap
+        .allocate(Object::List(vec![Value::Null; 4096]))
+        .unwrap();
+    for length in [0, 1, 8, 64] {
+        let args = [
+            Value::Tuple(vec![Value::List(object); length].into()),
+            Value::Tuple(vec![Value::text("missing")].into()),
+            Value::text("fault"),
+        ];
+        let mut work = WorkCounter::new(None);
+        let out = native
+            .call(NativeCall {
+                args: &args,
+                heap: &mut heap,
+                counter: &mut work,
+            })
+            .unwrap();
+        assert_eq!(
+            out,
+            Value::Tuple(vec![Value::Ref(Identity::Object(object)); length].into())
+        );
+        let charged = function.definition.charge.evaluate(&mut |operand, _| {
+            assert_eq!(*operand, Operand::Result);
+            1 + length as u64
+        });
+        assert_eq!(charged, 2 + length as u64);
+        assert_eq!(work.spent(), 1 + length as u64);
+        assert!(charged >= work.spent());
+    }
+    for (value, expected) in [
+        (
+            Value::Absent,
+            Value::Tuple(vec![Value::text("missing")].into()),
+        ),
+        (
+            Value::Float(Float::new(-0.0)),
+            Value::Float(Float::new(0.0)),
+        ),
+        (Value::List(object), Value::Ref(Identity::Object(object))),
+    ] {
+        let args = [
+            value,
+            Value::Tuple(vec![Value::text("missing")].into()),
+            Value::text("fault"),
+        ];
+        let out = native
+            .call(NativeCall {
+                args: &args,
+                heap: &mut heap,
+                counter: &mut WorkCounter::new(None),
+            })
+            .unwrap();
+        assert_eq!(out, expected);
+        if let Value::Float(zero) = out {
+            assert_eq!(zero.get().to_bits(), 0.0_f64.to_bits());
+        }
+    }
+    assert_eq!(
+        body(
+            "let a = {} let b = {} let ea = error.new(\"k\", \"m\", a) let eb = error.new(\"k\", \"m\", b) return (same(key.identity(ea, 0, \"fault\"), (\"fault\", ref(a), \"k\", \"m\")), same(key.identity(ea, 0, \"fault\"), key.identity(eb, 0, \"fault\")))"
+        ),
+        tuple(vec![Datum::Bool(true), Datum::Bool(false)])
+    );
+}
+
+/// K-COL-018: only a nonnegative integral position outside the list uses
+/// the supplied default; a present absent is not replaced by that default.
+#[test]
+fn list_get_or_distinguishes_missing_positions_from_present_absent() {
+    assert_eq!(
+        body(
+            "return (list.get_or([absent, 7], 0, 9), list.get_or([absent, 7], 1, 9), list.get_or([absent, 7], 2, 9), list.get_or([], 0), list.get_or([], 99999999999999999999999999, 8))"
+        ),
+        tuple(vec![Datum::Absent, int(7), int(9), Datum::Absent, int(8)])
+    );
+    for index in ["-1", "0.5", "nan", "inf"] {
+        assert_eq!(
+            error(&format!("return list.get_or([], {index}, 9)")),
+            "index_out_of_range"
+        );
+    }
+    assert_eq!(error("return list.get_or([], \"0\", 9)"), "type_error");
 }

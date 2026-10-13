@@ -2,8 +2,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Element, FunctionDefinition, Integer, NativeCall, NativeError, NativeFunction, NativeHeap,
-    Object, ObjectId, Value, parse_definition,
+    Element, Float, FunctionDefinition, Identity, Integer, NativeCall, NativeError, NativeFunction,
+    NativeHeap, Object, ObjectId, Value, parse_definition,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -25,6 +25,7 @@ enum Kind {
 enum Op {
     Len,
     Get,
+    GetOr,
     At,
     InsertIndex,
     Slice,
@@ -259,6 +260,15 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
                 ),
             ]),
         }
+        if matches!(kind, Kind::List) {
+            ops.push((
+                "get_or",
+                Op::GetOr,
+                ", index: Number, default?: Any",
+                "Any",
+                "sum(1, size(index))",
+            ));
+        }
         for (name, op, params, result, charge) in ops {
             if matches!(kind, Kind::Tuple) && matches!(op, Op::Check | Op::InsertIndex) {
                 continue;
@@ -320,6 +330,10 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
     )
     .map_err(CollectionError::Parse)?;
     functions.push((definition, Arc::new(HoldsNone) as _));
+    let definition = parse_definition(
+        "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
+    ).map_err(CollectionError::Parse)?;
+    functions.push((definition, Arc::new(IdentityKey) as _));
     Ok(functions)
 }
 /// `collection.holds_none(value, kinds)`: whether a deep copy of `value`
@@ -634,6 +648,7 @@ impl NativeFunction for Native {
             | Op::Check
             | Op::InsertIndex
             | Op::Get
+            | Op::GetOr
             | Op::At
             | Op::Contains
             | Op::IndexOf => unreachable!("an operation that only reads was read above"),
@@ -736,7 +751,14 @@ impl Native {
     fn read(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Result<Value, NativeError>> {
         matches!(
             self.op,
-            Op::Len | Op::Check | Op::InsertIndex | Op::Get | Op::At | Op::Contains | Op::IndexOf
+            Op::Len
+                | Op::Check
+                | Op::InsertIndex
+                | Op::Get
+                | Op::GetOr
+                | Op::At
+                | Op::Contains
+                | Op::IndexOf
         )
         .then(|| self.reading(args, heap))
     }
@@ -761,14 +783,20 @@ impl Native {
                 }
                 Ok(Value::Int(n))
             }
-            Op::Get | Op::At => match xs {
+            Op::Get | Op::GetOr | Op::At => match xs {
                 Value::List(id) => {
                     let index = integer(nth(args, 1)?)?;
-                    if matches!(self.op, Op::Get) && index.is_negative() {
+                    if matches!(self.op, Op::Get | Op::GetOr) && index.is_negative() {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
                         ));
+                    }
+                    if matches!(self.op, Op::GetOr) {
+                        return Ok(index
+                            .to_usize()
+                            .and_then(|i| heap.list_get(*id, i))
+                            .unwrap_or_else(|| args.get(2).cloned().unwrap_or(Value::Absent)));
                     }
                     let i = position(&index, length, false)?;
                     heap.list_get(*id, i)
@@ -776,7 +804,7 @@ impl Native {
                 }
                 Value::Tuple(items) => {
                     let index = integer(nth(args, 1)?)?;
-                    if matches!(self.op, Op::Get) && index.is_negative() {
+                    if matches!(self.op, Op::Get | Op::GetOr) && index.is_negative() {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
@@ -885,4 +913,85 @@ fn index_of_range(call: NativeCall<'_>) -> Result<Value, NativeError> {
     });
     call.heap.reserve(0, bytes)?;
     Ok(found.map_or_else(|| Value::Int(Integer::from(-1)), int))
+}
+
+/// K-COL-017: project immutable tuple structure, never object contents.
+/// Encodings for absent and errors are supplied by the caller; no source
+/// dialect's tokens or kind names are recognized here.
+struct IdentityKey;
+impl NativeFunction for IdentityKey {
+    fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+        let value = arg(&call, 0)?.clone();
+        let absent = arg(&call, 1)?.clone();
+        let tag = arg(&call, 2)?.clone();
+        field(&tag)?;
+        project_identity(&value, &absent, &tag, 0, &mut call)
+    }
+
+    fn fast(&self, args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
+        field(args.get(2)?).ok()?;
+        scalar_identity(args.first()?, args.get(1)?)
+    }
+}
+
+fn scalar_identity(value: &Value, absent: &Value) -> Option<Value> {
+    Some(match value {
+        Value::Tuple(_) | Value::Error(_) => return None,
+        Value::Absent => absent.clone(),
+        Value::Float(n) if n.get() == 0.0 => Value::Float(Float::new(0.0)),
+        Value::Task(task) => Value::Ref(Identity::Task(*task)),
+        other => other
+            .object()
+            .map_or_else(|| other.clone(), |id| Value::Ref(Identity::Object(id))),
+    })
+}
+
+fn project_identity(
+    value: &Value,
+    absent: &Value,
+    tag: &Value,
+    depth: usize,
+    call: &mut NativeCall<'_>,
+) -> Result<Value, NativeError> {
+    if depth > call.heap.value_depth_limit().min(128) {
+        return Err(raise(
+            "too_deep",
+            "identity key exceeds the configured value depth",
+        ));
+    }
+    call.counter.spend(1)?;
+    if let Some(value) = scalar_identity(value, absent) {
+        return Ok(value);
+    }
+    match value {
+        Value::Tuple(items) => {
+            call.heap.reserve(items.len() as u64, 0)?;
+            let projected = items
+                .iter()
+                .map(|item| project_identity(item, absent, tag, depth + 1, call))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::Tuple(projected.into()))
+        }
+        Value::Error(error) => {
+            let data = match &error.data {
+                Value::Task(task) => Value::Ref(Identity::Task(*task)),
+                other => {
+                    Value::Ref(Identity::Object(other.object().ok_or_else(|| {
+                        raise("type_error", "ref requires an object or task")
+                    })?))
+                }
+            };
+            call.heap.reserve(4, 0)?;
+            Ok(Value::Tuple(
+                vec![
+                    tag.clone(),
+                    data,
+                    Value::text(error.kind.clone()),
+                    Value::text(error.message.clone()),
+                ]
+                .into(),
+            ))
+        }
+        _ => unreachable!("scalar identity covered other values"),
+    }
 }

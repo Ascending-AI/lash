@@ -50,6 +50,24 @@ fn map_keys_use_same_value_zero_and_explicit_object_identity() {
     );
 }
 
+/// ECMA-262 Map methods default missing arguments only after evaluating
+/// every supplied argument, and borrowed methods reject the receiver first.
+#[test]
+fn map_methods_preserve_missing_arguments_receiver_errors_and_evaluation_order() {
+    agrees(
+        r#"const m = new Map(); let order = ''; function mark(tag, value) { order += tag; return value; } m.set(); const missing = m.has() && m.get() === undefined; m.set(undefined, 9); const replaced = m.get() === 9 && m.size === 1; m.set(1); const valueMissing = m.has(1) && m.get(1) === undefined; const key = {}; m.set(mark('k', key), mark('v', 7), mark('x', 8)); const extraGet = m.get(mark('g', key), mark('y', 0)); const has = m.has(mark('h', key), mark('z', 0)); const removed = m.delete(mark('d', key), mark('w', 0)); let rejected = 0; for (const method of [Map.prototype.get, Map.prototype.set, Map.prototype.has, Map.prototype.delete]) { try { method.call({}, mark('a', {}), mark('b', 1)); } catch (e) { if (e.name === 'TypeError') rejected++; } } const unknown = {get: function(value) { return this.value + value; }, value: 4}; const absentRemoved = m.delete(); await finish(missing && replaced && valueMissing && extraGet === 7 && has && removed && order === 'kvxgyhzdwabababab' && rejected === 4 && unknown.get(3) === 7 && absentRemoved && !m.has());"#,
+    );
+}
+
+/// ECMA-262 SameValueZero: mutation cannot change an object's identity key;
+/// functions and errors retain their identities when the keys are enumerated.
+#[test]
+fn map_identity_keys_survive_mutation_and_key_roundtrips() {
+    agrees(
+        r#"const a = {}; const b = {}; const list = []; const map = new Map(); const set = new Set(); const f = () => 1; const g = () => 1; const e = new Error('x'); const other = new Error('x'); const m = new Map([[a, 1], [b, 2], [list, 3], [map, 4], [set, 5], [f, 6], [g, 7], [e, 8], [other, 9], [undefined, 10], [-0, 11], [NaN, 12]]); a.x = 99; list.push(99); map.set(99, 99); set.add(99); const keys = m.keys(); await finish(m.size === 12 && m.get(a) === 1 && m.get(b) === 2 && m.get(list) === 3 && m.get(map) === 4 && m.get(set) === 5 && m.get(f) === 6 && m.get(g) === 7 && m.get(e) === 8 && m.get(other) === 9 && keys[0] === a && keys[2] === list && keys[5] === f && keys[7] === e && keys[9] === undefined && Object.is(keys[10], 0) && Number.isNaN(keys[11]) && m.has(-0) && m.has(NaN));"#,
+    );
+}
+
 #[test]
 fn set_mutation_and_algebra_keep_insertion_order_and_zero_keys() {
     agrees(

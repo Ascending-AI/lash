@@ -1,16 +1,16 @@
 # JavaScript map behavior, expressed in kernel code.
 use ts.callable
 use deref
-use eq
 use error.new
 use kind
 use list.len
+use list.get_or
+use key.identity
 use map.contains
 use map.keys
 use map.len
 use num.add
 use num.to_float
-use ref
 use same
 use ts.get
 use ts.is_nullish
@@ -46,30 +46,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  let k = kind(value)
-  # Numbers need no object-kind list. SameValueZero spells either zero +0.
-  if same(k, "integer") { return value }
-  if same(k, "float") { if eq(value, 0) { return 0.0 } return value }
-  if same(k, "absent") { return ("undefined", "key") }
-  for object in ["list", "map", "set", "record", "closure", "task"] {
-    if same(k, object) { return ref(value) }
-  }
-  if same(k, "error") { return ("error", ref(value.data), value.kind, value.message) }
-  if same(k, "tuple") {
-    if same(value, ()) {} else {
-      # A function's token holds the closure that calls it, which is keyed
-      # as the object it is, or the reference to the declared function a
-      # saved one is, which is a key itself; the deleted record of one the
-      # program made is keyed as the object it is.
-      if same(value[0], "ts.function") {
-        let callable = value[4]
-        if same(kind(callable), "function") {} else { set callable = ref(callable) }
-        if same(value[1], "") { return ("ts.function", "", value[2], value[3], callable, ref(value[5])) }
-        return ("ts.function", value[1], value[2], value[3], callable)
-      }
-    }
-  }
-  return value
+  return key.identity(value, ("undefined", "key"), "error")
 }
 
 function ts.map.value(key: Any) -> Any
@@ -141,10 +118,8 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let args = invoke ts.pad(args, 2)
-  let builtin_arg_0 = args[0]
-let key = invoke ts.map.key(builtin_arg_0)
-  set this[key] = args[1]
+  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
+  set this[key] = list.get_or(args, 1)
   return this
 }
 
@@ -154,9 +129,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let args = invoke ts.pad(args, 1)
-  let builtin_arg_1 = args[0]
-let key = invoke ts.map.key(builtin_arg_1)
+  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
   if map.contains(this, key) { return this[key] }
   return absent
 }
@@ -167,9 +140,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let args = invoke ts.pad(args, 1)
-  let builtin_arg_2 = args[0]
-let key = invoke ts.map.key(builtin_arg_2)
+  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
   return map.contains(this, key)
 }
 
@@ -179,9 +150,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
-  let args = invoke ts.pad(args, 1)
-  let builtin_arg_3 = args[0]
-let key = invoke ts.map.key(builtin_arg_3)
+  let key = key.identity(list.get_or(args, 0), ("undefined", "key"), "error")
   let had = map.contains(this, key)
   remove this[key]
   return had

@@ -676,3 +676,18 @@ fn stable_ancestor_paths_traverse_once_and_resume_exactly() {
     assert_eq!((&deep_many.0, deep_many.1), (&sliced.0, sliced.1));
     assert!(sliced.2 > 24);
 }
+
+/// K-MACH-007/008, K-CHG-007 and ECMA SameValueZero: atomic admission
+/// survives argument parks and serialized charge cuts with exactly the same
+/// total charge, key identities and results as uninterrupted execution.
+#[test]
+fn map_admission_preserves_exact_charge_across_slices_and_argument_parks() {
+    let source = "const key = {}; const f = () => 1; const m = new Map(); m.set(-0, 1); m.set(NaN, 2); m.set(key, 3); m.set(f, await echo(7)); m.set(); key.x = 9; const checks = [m.size === 5, m.get(0) === 1, m.get(NaN) === 2, m.get(key) === 3, m.get(f) === 7, m.has(), m.get() === undefined, m.delete(f), !m.has(f)]; let valid = true; for (const check of checks) { valid = valid && check; } await finish(valid);";
+    let plain = plain_record_resume(source, u64::MAX, false);
+    assert_eq!(plain.0, Datum::Bool(true));
+    for slice in [1, 7, u64::MAX] {
+        let restored = plain_record_resume(source, slice, true);
+        assert_eq!((&plain.0, plain.1), (&restored.0, restored.1));
+        assert!(restored.2 >= 2, "both effect parks were imported");
+    }
+}

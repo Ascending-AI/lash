@@ -99,3 +99,18 @@ and the dialects:
   cycle or a value nested past 128 levels answers false. It reserves one
   value of room for each collection it reads, and is charged
   `1 + size(kinds) + deep(value)`.
+
+- **K-COL-017.** `key.identity(value, absent_key, error_tag)` projects object
+  and task identities to refs and floating zero to positive zero, preserving
+  other scalars (including NaN bits). It recursively projects tuple members,
+  without reading object contents. Absent becomes the caller's `absent_key`;
+  an error becomes `(error_tag, ref(data), kind, message)`, requiring object or
+  task data. `error_tag` must be text. The configured value depth bounds tuple
+  traversal. The charge is `1 + deep(result)`, bounding each projected slot
+  without charging an object's contents. Key legality remains the consuming
+  map/set operation's responsibility.
+- **K-COL-018.** `list.get_or(xs, index, default?)` reads a nonnegative integral
+  numeric position, returning `default` (absent when omitted) only when the
+  position is missing. Present absent is preserved. Negative, fractional or
+  non-finite indices raise `index_out_of_range`; non-numbers raise `type_error`.
+  Charge is `1 + size(index)`; it reads one slot and allocates no container.
