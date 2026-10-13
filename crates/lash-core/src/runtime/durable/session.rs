@@ -34,7 +34,6 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::runtime::actor::activation_loop;
 use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -888,38 +887,22 @@ impl Activation for SessionActivation {
             CancellationToken::new(),
             Arc::clone(&self.probe),
         );
-        // A session whose claim requirements this node does not serve was
-        // claimed for its close or an `Immediate` cancel alone (FIG-6072).
-        if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
-            return turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session).await;
+        // A session whose claims ended the activation-loop budget's claims
+        // in a row with nothing committed (a panic, a read given up, a stop
+        // that failed) parks, or ends a pending stop first (FIG-6096,
+        // FIG-6099). A session whose claim requirements this node does not
+        // serve was claimed for its close or an `Immediate` cancel alone
+        // (FIG-6072).
+        let cancel_only = owned.purpose() == lash_durable::ClaimPurpose::CancelOnly;
+        match park::at_claim(&owned, &cx, &session, self.services.tracing()).await {
+            Ok(park::Budget::Within) if !cancel_only => {}
+            Ok(_) => {
+                return turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session)
+                    .await;
+            }
+            Err(exit) => return exit,
         }
         witness_claim(owned.claimed_on());
-        // A session whose activations ended the activation-loop budget's
-        // claims in a row with nothing committed (a panic, a read given up)
-        // parks as a process does (FIG-6096). An `Immediate` cancel or a
-        // close requested before the claim ends first, engine-free, so the
-        // park never holds the session's one way out.
-        let budget = self.backend.config().settings().activation_loop_budget;
-        let failed_activations = match activation_loop::claimed_row(&owned).await {
-            Ok(snapshot) => snapshot.failed_activations,
-            Err(exit) => return exit,
-        };
-        if activation_loop::reached(failed_activations, budget) {
-            return match turn_cancel::immediate(&cx).await {
-                Ok(true) => {
-                    turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session).await
-                }
-                Ok(false) => {
-                    let reason = SessionParkReason::ActivationLoop { failed_activations };
-                    match park(&cx, &reason, self.services.tracing()).await {
-                        Ok(()) | Err(DurableError::OwnershipLost(_)) => Exit::Released,
-                        Err(_) => Exit::Abandoned,
-                    }
-                }
-                Err(TurnError::Durable(DurableError::OwnershipLost(_))) => Exit::Released,
-                Err(_) => Exit::Abandoned,
-            };
-        }
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or poll, then releases it.
         let idle_evict = self.backend.config().settings().idle_evict;
@@ -980,9 +963,14 @@ impl Activation for SessionActivation {
                         }),
                     };
                     if let Some(reason) = reason {
-                        match park(&cx, &reason, self.services.tracing()).await {
-                            Ok(()) => return Exit::Released,
-                            Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                        match park(&cx, &session, &reason, self.services.tracing()).await {
+                            Ok(park::Parking::Committed) | Err(DurableError::OwnershipLost(_)) => {
+                                return Exit::Released;
+                            }
+                            // A stop is pending, and may be what failed: it
+                            // is never parked over. The next claim runs it
+                            // first and counts this one (FIG-6099).
+                            Ok(park::Parking::Stopping) => return Exit::Abandoned,
                             Err(park_error) => tracing::warn!(
                                 session_id = %session,
                                 %error,

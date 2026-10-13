@@ -97,10 +97,11 @@ crate::statements! {
              WHERE actor_key = ?1 AND state <> 'terminal'
              RETURNING mail_seq, state, owner_node, owner_boot";
 
-        /// Whether actor `?1` has an unacknowledged mail of kind `?2`.
-        pending_mail_of_kind = "SELECT 1 FROM actor_mail m, actors a
-             WHERE a.actor_key = ?1 AND m.actor_key = ?1 AND m.seq > a.acked_seq
-               AND m.kind = ?2
+        /// Whether actor `?1` has mail of kind `?3` or `?4` (a cancel or a
+        /// session close) past mailbox position `?2`: a stop that reached
+        /// it after an owner's read there, which its park must not strand.
+        stop_mail_after = "SELECT 1 FROM actor_mail
+             WHERE actor_key = ?1 AND seq > ?2 AND kind IN (?3, ?4)
              LIMIT 1";
 
         /// Release actor `?1` parked, its epoch bumped.

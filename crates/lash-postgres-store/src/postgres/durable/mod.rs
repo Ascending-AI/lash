@@ -334,29 +334,6 @@ lash_store_sql::statements! {
              )
              DELETE FROM actor_mail WHERE actor_key = ?1 AND seq <= ?2";
 
-        /// Park actor `?1`, its epoch bumped, unless mail of kind `?3` (a
-        /// cancel) is pending: then it is released `ready` at `?2` instead,
-        /// its park kept, as a release to `idle` with mail would be. Returns
-        /// the state it took.
-        park_unless_pending = "WITH pending AS (
-                 SELECT EXISTS (
-                     SELECT 1 FROM actor_mail m, actors p
-                     WHERE p.actor_key = ?1 AND m.actor_key = ?1 AND m.seq > p.acked_seq
-                       AND m.kind = ?3
-                 ) AS mail
-             )
-             UPDATE actors AS a
-             SET state = CASE WHEN NOT pending.mail THEN 'parked'
-                              WHEN a.mail_seq > a.acked_seq THEN 'ready'
-                              ELSE 'idle' END,
-                 ready_at_ms = CASE WHEN pending.mail AND a.mail_seq > a.acked_seq
-                                    THEN CAST(?2 AS BIGINT) ELSE NULL END,
-                 next_due_ms = NULL,
-                 epoch = a.epoch + 1, owner_node = NULL, owner_boot = NULL
-             FROM pending
-             WHERE a.actor_key = ?1
-             RETURNING a.state";
-
         /// Send notification payload `?2[i]` on channel `?1[i]`, for each
         /// `i`, outside any writing transaction.
         notify = "SELECT pg_notify(t.channel, t.payload)
@@ -1058,7 +1035,7 @@ async fn apply_mail(
                 );
             }
             MailWrite::Append { actor, .. } | MailWrite::Wake { actor } => {
-                let (woken, seq) = wake_within(tx, actor, false, now).await?;
+                let (woken, seq) = wake_within(tx, actor, write.controls(), now).await?;
                 if let MailWrite::Append { kind, body, .. } = write {
                     crate::observed_sql::query(SQL.mail.append.sql())
                         .bind(actor.as_str())

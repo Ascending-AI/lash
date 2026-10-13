@@ -22,7 +22,7 @@ pub use lash_core_execution::testing::{
     ScriptedError, StoreOp,
 };
 pub use lash_core_execution::testing::{
-    EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
+    DurableCommitHook, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
     HELD_PROCESS_ENGINE_KIND, HeldProcessEngine, MockSessionManager, NonTerminalPagePause,
     NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
     RuntimeCommitBudgetMeasurement, TestClock, TestExecutionContextBuilder, TestExecutionPorts,

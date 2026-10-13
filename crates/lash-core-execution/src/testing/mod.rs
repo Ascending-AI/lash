@@ -31,6 +31,7 @@ pub mod behavior_transcript;
 pub mod trace_capture;
 
 mod component_fixtures;
+mod durable_hooks;
 pub mod execution_context_builder;
 #[cfg(feature = "testing")]
 pub mod kernel_internals;
@@ -42,6 +43,7 @@ pub mod sansio_transcript;
 pub mod sql_work;
 pub mod tool_fixtures;
 pub use component_fixtures::{component_env, native_format_two_component};
+pub use durable_hooks::DurableCommitHook;
 
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::process::{

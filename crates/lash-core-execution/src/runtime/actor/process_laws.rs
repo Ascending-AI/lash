@@ -48,6 +48,7 @@ macro_rules! ensure {
 }
 
 mod blockers;
+mod cancel_loop;
 mod contended_cancel;
 mod engine_keys;
 mod panicking;
@@ -60,6 +61,7 @@ pub use blockers::{
     a_sleeping_process_reads_waiting_on_its_sleep_and_its_site,
 };
 
+pub use cancel_loop::a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it;
 pub use contended_cancel::a_contended_cancel_commit_still_ends_the_process_once;
 
 pub use engine_keys::{
@@ -706,6 +708,17 @@ fn serve_as(backend: &Backend, node: &str) -> Serving {
 /// Serve `backend` as node `node`, which also claims actors written in
 /// `claimed`: format sets its build does not decode.
 fn serve_decoding(backend: &Backend, node: &str, claimed: Vec<lash_durable::FormatSet>) -> Serving {
+    serve_over(backend, node, claimed, Arc::clone(backend.durable()))
+}
+
+/// [`serve_decoding`] whose runner, and every activation it runs, commits
+/// through `store` over `backend`'s durable store.
+fn serve_over(
+    backend: &Backend,
+    node: &str,
+    claimed: Vec<lash_durable::FormatSet>,
+    store: Arc<dyn lash_durable::DurableStore>,
+) -> Serving {
     let mut decodes = backend.formats().decodes();
     decodes.extend(claimed);
     let config = RunnerConfig::new(NodeId::new(node), decodes, backend.config());
@@ -714,13 +727,8 @@ fn serve_decoding(backend: &Backend, node: &str, claimed: Vec<lash_durable::Form
         Arc::new(LawSteps),
         Arc::new(NoProbe),
     ));
-    let runner = Runner::new(
-        Arc::clone(backend.durable()),
-        backend.clock(),
-        config,
-        activation,
-    )
-    .with_hints(backend.hints().clone());
+    let runner =
+        Runner::new(store, backend.clock(), config, activation).with_hints(backend.hints().clone());
     let stop = CancellationToken::new();
     let until = stop.clone();
     let task = crate::task::spawn(async move { runner.run(until.cancelled_owned()).await });

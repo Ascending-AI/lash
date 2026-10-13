@@ -332,7 +332,6 @@ fn mechanics() -> Vec<&'static str> {
         graph::peel_level().sql(),
         SQL.actor.stamp_formats.sql(),
         SQL.postgres.ack_through.sql(),
-        SQL.postgres.park_unless_pending.sql(),
         SQL.mail.delete_all.sql(),
         SQL.actor.end.sql(),
         SQL.actor.release.sql(),
@@ -515,7 +514,9 @@ impl Call {
         }
         (call.release, call.due) = match tx.release() {
             None => (None, None),
-            Some(Release::Parked) => (Some("parked"), None),
+            // A park reads what reached the actor since its owner's read,
+            // which the explicit-transaction form compares (FIG-6099).
+            Some(Release::Parked) => return None,
             Some(Release::Terminal) => (Some("terminal"), None),
             Some(Release::Waiting { next_due }) => (Some("waiting"), next_due.map(|due| due.0)),
             // A ready release that writes nothing else keeps the claim's

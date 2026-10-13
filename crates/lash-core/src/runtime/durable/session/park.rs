@@ -1,11 +1,22 @@
 //! Why a session actor parks, and its park (FIG-5230, FIG-5592, FIG-5401):
 //! the typed reason the actor's row records, which an
 //! operator reads (`LashSession::park_reason`) before redriving the session.
+//!
+//! A park never strands a stop (FIG-6099): an `Immediate` cancel of the
+//! session's open turn, its close requested, or its close under way. A
+//! stop the park's own read finds is run, not parked over, and one that
+//! reaches the session after that read readies it as the park commits.
+//! Only a stop that failed the activation-loop budget's claims in a row
+//! parks, `CancelLoop`, and stays recorded: an operator's redrive, or a
+//! further close request, runs it again.
 
-use lash_durable::{CommitLabel, DomainWrite, DurableError, Release};
+use lash_core_execution::runtime::actor::activation_loop;
+use lash_core_execution::runtime::turn_control::immediate_in;
+use lash_durable::runner::{Exit, Owned};
+use lash_durable::{ActorTx, ClaimPurpose, CommitLabel, DomainWrite, DurableError, Release};
 
 use super::{TurnError, TurnRestoreError};
-use crate::ActorContext;
+use crate::{ActorContext, SessionId};
 
 /// Why a session actor parked: the actor row's typed reason. A parked
 /// session runs nothing until an operator redrives it or a control wake (a
@@ -27,6 +38,15 @@ pub enum SessionParkReason {
     /// activation-loop budget, which the store counts across claims, as a
     /// process's (FIG-6096).
     ActivationLoop {
+        /// The claims in a row that committed nothing.
+        failed_activations: u32,
+    },
+    /// A stop of the session (an `Immediate` cancel of its open turn, or its
+    /// close) failed every claim that ran it, `failed_activations` claims
+    /// in a row with nothing committed: the activation-loop budget
+    /// (FIG-6099). The stop stays recorded, and an operator's redrive or a
+    /// further close request runs it again.
+    CancelLoop {
         /// The claims in a row that committed nothing.
         failed_activations: u32,
     },
@@ -165,6 +185,7 @@ impl SessionParkReason {
         match self {
             Self::PassLoop { .. } => "pass_loop",
             Self::ActivationLoop { .. } => "activation_loop",
+            Self::CancelLoop { .. } => "cancel_loop",
             Self::UndecodableState { .. } => "undecodable_state",
         }
     }
@@ -175,7 +196,9 @@ impl SessionParkReason {
     pub fn profile_key(&self) -> Option<&crate::LlmProfileKey> {
         match self {
             Self::PassLoop { error, .. } => error.profile_key(),
-            Self::ActivationLoop { .. } | Self::UndecodableState { .. } => None,
+            Self::ActivationLoop { .. }
+            | Self::CancelLoop { .. }
+            | Self::UndecodableState { .. } => None,
         }
     }
 
@@ -190,16 +213,117 @@ impl SessionParkReason {
     }
 }
 
-/// Park the session with `reason`: its current reason and its release as
+/// What a park of the session did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Parking {
+    /// The park committed, and the actor is released: parked, or ready for
+    /// a stop that reached it after the park's read.
+    Committed,
+    /// The park's read found a stop pending, and nothing committed: the
+    /// stop runs before the session parks for anything else.
+    Stopping,
+}
+
+/// Park the session with `reason`, unless the park's read finds a stop
+/// pending ([`Parking::Stopping`]): its current reason and its release as
 /// `parked`, one commit, counted as parked work on `tracing`'s metrics. Its
 /// unread mail stays for the claim that follows a redrive.
 pub(super) async fn park(
     cx: &ActorContext,
+    session: &SessionId,
+    reason: &SessionParkReason,
+    tracing: Option<&crate::trace::TraceRuntime>,
+) -> Result<Parking, DurableError> {
+    let tx = cx.begin().await?;
+    if stop_pending(cx, &tx, session).await? {
+        return Ok(Parking::Stopping);
+    }
+    commit(cx, tx, reason, tracing).await?;
+    Ok(Parking::Committed)
+}
+
+/// What a claim at the activation-loop budget leaves to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Budget {
+    /// The claim runs as any claim does.
+    Within,
+    /// The claim ends the pending stop engine-free, from the session's rows
+    /// alone.
+    Stop,
+}
+
+/// Check the activation-loop budget as the claim `owned` of `session`
+/// reads it (FIG-6096, FIG-6099): the store counts the claims in a row
+/// that ended with nothing committed. At the budget:
+///
+/// - with no stop pending, the session parks `ActivationLoop`;
+/// - with a stop pending, the stop runs engine-free ([`Budget::Stop`]) on a
+///   claim that runs the session, as a process's cancel ends it
+///   engine-free: the failed claims were the session's own work;
+/// - a stop that failed on its own claims (every claim of a node that only
+///   ends it, or one more claim past the budget after its engine-free run)
+///   parks `CancelLoop`, and stays recorded.
+///
+/// `Err` is the claim's exit, once it parked or lost the session.
+pub(super) async fn at_claim(
+    owned: &Owned,
+    cx: &ActorContext,
+    session: &SessionId,
+    tracing: Option<&crate::trace::TraceRuntime>,
+) -> Result<Budget, Exit> {
+    let budget = cx.backend().config().settings().activation_loop_budget;
+    let failed_activations = activation_loop::claimed_row(owned)
+        .await?
+        .failed_activations;
+    if !activation_loop::reached(failed_activations, budget) {
+        return Ok(Budget::Within);
+    }
+    let cancel_only = owned.purpose() == ClaimPurpose::CancelOnly;
+    let stop_failed = cancel_only || failed_activations > budget;
+    let parked = async {
+        let tx = cx.begin().await?;
+        let reason = match (stop_pending(cx, &tx, session).await?, stop_failed) {
+            (true, true) => SessionParkReason::CancelLoop { failed_activations },
+            (true, false) => return Ok(Some(Budget::Stop)),
+            // A claim only for a stop that is no longer pending lets the
+            // session go as any such claim does.
+            (false, _) if cancel_only => return Ok(Some(Budget::Within)),
+            (false, _) => SessionParkReason::ActivationLoop { failed_activations },
+        };
+        commit(cx, tx, &reason, tracing).await?;
+        Ok::<_, DurableError>(None)
+    };
+    match parked.await {
+        Ok(Some(budget)) => Ok(budget),
+        Ok(None) | Err(DurableError::OwnershipLost(_)) => Err(Exit::Released),
+        Err(_) => Err(Exit::Abandoned),
+    }
+}
+
+/// Whether a stop of `session` is pending as of `tx`'s read: an `Immediate`
+/// cancel its open turn accepted, its close requested, or its close under
+/// way.
+async fn stop_pending(
+    cx: &ActorContext,
+    tx: &ActorTx,
+    session: &SessionId,
+) -> Result<bool, DurableError> {
+    Ok(immediate_in(tx)
+        || cx
+            .durable_reads()?
+            .session_close(session)
+            .await?
+            .is_some_and(|close| !close.is_tombstone()))
+}
+
+/// Commit the session's park with `reason` on `tx`.
+async fn commit(
+    cx: &ActorContext,
+    mut tx: ActorTx,
     reason: &SessionParkReason,
     tracing: Option<&crate::trace::TraceRuntime>,
 ) -> Result<(), DurableError> {
     tracing::warn!(actor = %cx.actor(), reason = %reason.encode(), "session parked");
-    let mut tx = cx.begin().await?;
     tx.write(DomainWrite::ActorPark {
         reason_json: Some(reason.encode()),
     });
@@ -234,6 +358,9 @@ mod tests {
                 },
             },
             SessionParkReason::ActivationLoop {
+                failed_activations: 3,
+            },
+            SessionParkReason::CancelLoop {
                 failed_activations: 3,
             },
             SessionParkReason::UndecodableState {

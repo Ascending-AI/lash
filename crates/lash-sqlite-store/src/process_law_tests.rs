@@ -54,4 +54,5 @@ law!(
     a_process_with_two_parked_calls_lists_both_without_their_keys,
     a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
     a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
+    a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it,
 );

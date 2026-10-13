@@ -15,21 +15,32 @@
 //! committed. The session parks with its typed `ActivationLoop` park once
 //! the store counts the budget's claims in a row, and a cancel of the parked
 //! turn still ends it.
+//!
+//! CANCEL-DURING-SESSION-PARK-HONOURED (FIG-6099): a turn cancel committed
+//! while either park is on its way, after the park's read and before its
+//! commit, is not stranded by it: the session stays claimable, and the
+//! cancel ends the turn.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
 mod served;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
+use lash_core::durable_port::{ActorKey, Release};
 use lash_core::llm::types::LlmRequest;
+use lash_core::testing::DurableCommitHook;
+use lash_sansio::sync::MutexExt as _;
 
 use served::{Tier, World};
 
 const PLUGIN: &str = "live-fault-catalog";
 const FAULT: &str = "park-fault: the contributor's store did not answer";
+
+/// How long a cancel the park left claimable may take to end its turn.
+const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The contributor's faults: how many of its next runs answer [`FAULT`],
 /// and whether every run panics instead.
@@ -134,6 +145,39 @@ async fn world(tier: Tier) -> Option<(World, Arc<Faults>, Arc<AtomicUsize>)> {
     )
     .await?;
     Some((world, faults, calls))
+}
+
+/// A world whose sessions run under the faulting catalog, over a durable
+/// store that runs the law's hook before each owner commit.
+async fn hooked_world(
+    tier: Tier,
+) -> Option<(World, Arc<Faults>, Arc<AtomicUsize>, Arc<DurableCommitHook>)> {
+    let faults = Arc::new(Faults::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let hook = Arc::new(std::sync::OnceLock::<Arc<DurableCommitHook>>::new());
+    let plugin = FaultingCatalog {
+        faults: Arc::clone(&faults),
+    };
+    let world = World::layered_with_model(
+        tier,
+        {
+            let hook = Arc::clone(&hook);
+            move |stores| {
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .map_durable_store(move |inner| {
+                        let hooked = Arc::new(DurableCommitHook::over(inner));
+                        let _ = hook.set(Arc::clone(&hooked));
+                        hooked
+                    })
+                    .into_store_set()
+            }
+        },
+        counted_model(Arc::clone(&calls)),
+        move |backend| lash::LashCore::standard_builder(backend.clone()).plugin(Arc::new(plugin)),
+    )
+    .await?;
+    let hook = Arc::clone(hook.get().expect("the durable store is hooked"));
+    Some((world, faults, calls, hook))
 }
 
 /// The session actor's park, once it parked: its recorded reason.
@@ -277,7 +321,96 @@ async fn a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_stil
     world.shutdown().await;
 }
 
+/// CANCEL-DURING-SESSION-PARK-HONOURED (FIG-6099): an `Immediate` cancel
+/// of a session's turn that commits while the session parks, after the
+/// park's read and before its commit, is not stranded by the park, for an
+/// `ActivationLoop` park (a contributor that panics on every claim) and a
+/// `PassLoop` one (a contributor that fails every pass) alike. The park
+/// commit is held at that point while the cancel commits: the session is
+/// left claimable, its park kept, and the cancel ends the turn with no model
+/// call and no surface installed for it.
+async fn a_cancel_committed_while_a_session_parks_still_ends_its_turn(tier: Tier) {
+    let Some((world, faults, calls, hook)) = hooked_world(tier).await else {
+        return;
+    };
+    for (name, panics) in [
+        ("park-cancel-activation", true),
+        ("park-cancel-pass", false),
+    ] {
+        let actor = ActorKey::session(name).expect("a session actor key");
+        let (reached, at_park) = tokio::sync::oneshot::channel::<()>();
+        let (go, released) = tokio::sync::oneshot::channel::<()>();
+        let hold = Arc::new(Mutex::new(Some((reached, released))));
+        hook.arm(move |tx, _| {
+            let held = if tx.actor() == &actor && tx.release() == Some(Release::Parked) {
+                hold.lock_recover().take()
+            } else {
+                None
+            };
+            async move {
+                if let Some((reached, released)) = held {
+                    let _ = reached.send(());
+                    let _ = released.await;
+                }
+                Ok(())
+            }
+        });
+        let session = world.session(name, served::spec(16)).await;
+        if panics {
+            faults.panics.store(true, Ordering::SeqCst);
+        } else {
+            faults.arm(usize::MAX);
+        }
+        let turn = session
+            .send(lash::TurnInput::text(name))
+            .await
+            .expect("the turn's input is accepted");
+        tokio::time::timeout(served::WATCHDOG, at_park)
+            .await
+            .unwrap_or_else(|_| panic!("{name}: the session never parked"))
+            .expect("the held park reached the hook");
+        let runs = faults.runs.load(Ordering::SeqCst);
+        let cancelled = turn
+            .cancel()
+            .request_id(name)
+            .mode(lash::TurnCancelMode::Immediate)
+            .await
+            .expect("the cancel is requested");
+        assert!(
+            matches!(cancelled, lash::CancelReceipt::Cancelled { .. }),
+            "{name}: the cancel addressed the turn: {cancelled:?}"
+        );
+        go.send(()).expect("the held park waits");
+        let output = tokio::time::timeout(ENDS_WITHIN, turn.output())
+            .await
+            .unwrap_or_else(|_| panic!("{name}: the park stranded the cancel"))
+            .unwrap_or_else(|error| panic!("{name}: the park stranded the cancel: {error:?}"));
+        let evidence = output.result.cancellation().unwrap_or_else(|| {
+            panic!(
+                "{name}: the turn ended cancelled: {:?}",
+                output.result.outcome
+            )
+        });
+        assert_eq!(evidence.request_id, name);
+        assert_eq!(
+            faults.runs.load(Ordering::SeqCst),
+            runs,
+            "{name}: the cancel installed no surface"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "{name}: no model was called"
+        );
+        hook.disarm();
+        faults.panics.store(false, Ordering::SeqCst);
+        faults.arm(0);
+    }
+    world.shutdown().await;
+}
+
 tiered_laws!(
     a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_clears_completes_once,
-    a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_still_ends_its_turn
+    a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_still_ends_its_turn,
+    a_cancel_committed_while_a_session_parks_still_ends_its_turn
 );

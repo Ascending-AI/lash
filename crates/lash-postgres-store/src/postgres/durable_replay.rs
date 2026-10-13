@@ -341,17 +341,37 @@ pub(super) async fn apply_owner(
     let state = match write.release() {
         None => ActorState::Owned,
         Some(Release::Parked) => {
-            // A cancel that arrived since the owner's read is not lost to the
-            // park: the actor goes ready instead, its park kept, and its
-            // claimer ends it engine-free.
-            let stored: String =
-                crate::observed_sql::query_scalar(SQL.postgres.park_unless_pending.sql())
+            // A stop that reached the actor since the owner's read is not
+            // lost to the park: the actor goes ready instead, its park kept,
+            // and its claimer runs the stop (FIG-6099). A stop that commits
+            // after this transaction's fence waits on the actor row it
+            // locked, and its control wake readies the parked actor.
+            let stopped = write.immediate_cancel_since_read(fence.turn_cancel.as_ref())
+                || crate::observed_sql::query(SQL.park.stop_mail_after.sql())
                     .bind(actor)
-                    .bind(now.0)
+                    .bind(write.seen().0)
                     .bind(lash_durable::domain::CANCEL_MAIL)
+                    .bind(lash_durable::domain::SESSION_CLOSE_MAIL)
+                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?
+                    .is_some();
+            let stored: String = if stopped {
+                crate::observed_sql::query_scalar(SQL.actor.release.sql())
+                    .bind(actor)
+                    .bind("ready")
+                    .bind(Option::<i64>::None)
+                    .bind(now.0)
                     .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
-                    .map_err(sqlx_failure)?;
+                    .map_err(sqlx_failure)?
+            } else {
+                crate::observed_sql::query_scalar(SQL.park.park.sql())
+                    .bind(actor)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?
+            };
             actor_state(&stored)?
         }
         Some(Release::Terminal) => {

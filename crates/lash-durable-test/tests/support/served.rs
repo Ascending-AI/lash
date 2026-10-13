@@ -343,6 +343,7 @@ impl World {
         let scripts = Arc::new(Scripts::default());
         Self::serving(
             tier,
+            std::convert::identity,
             None,
             engines,
             model(Arc::clone(&scripts)),
@@ -362,6 +363,7 @@ impl World {
         let scripts = Arc::new(Scripts::default());
         Self::serving(
             tier,
+            std::convert::identity,
             Some(settings),
             Vec::new(),
             model(Arc::clone(&scripts)),
@@ -382,6 +384,7 @@ impl World {
     ) -> Option<Self> {
         Self::serving(
             tier,
+            std::convert::identity,
             None,
             engines,
             model,
@@ -402,6 +405,7 @@ impl World {
     ) -> Option<Self> {
         Self::serving(
             tier,
+            std::convert::identity,
             None,
             Vec::new(),
             model,
@@ -412,8 +416,34 @@ impl World {
         .await
     }
 
+    /// [`World::with_model`] whose backend runs over what `layer` makes of
+    /// the tier's store set: a law's decorator over one of its ports.
+    pub async fn layered_with_model(
+        tier: Tier,
+        layer: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
+        model: ProviderHandle,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Option<Self> {
+        Self::serving(
+            tier,
+            layer,
+            None,
+            Vec::new(),
+            model,
+            Arc::default(),
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "every constructor's choices, passed through once"
+    )]
     async fn serving(
         tier: Tier,
+        layer: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
         settings: Option<lash_core_execution::DurableSettings>,
         engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
         model: ProviderHandle,
@@ -425,6 +455,7 @@ impl World {
             eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
             return None;
         };
+        let stores = layer(stores);
         let backend = match settings {
             Some(settings) => configured_backend(stores, settings, engines),
             None => backend_with(stores, engines),

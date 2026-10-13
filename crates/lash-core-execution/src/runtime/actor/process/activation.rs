@@ -783,7 +783,12 @@ impl ProcessActivation {
         reason: &ProcessParkReason,
     ) -> Result<Pass, DurableError> {
         tracing::warn!(actor = %owned.actor(), reason = %reason.encode(), "process parked");
-        tx.ack_seen();
+        // A cancel-loop park keeps its cancel mail pending: it keeps the
+        // process claimable for its cancel by a node that only ends it, once
+        // a redrive readies it (FIG-6099).
+        if !matches!(reason, ProcessParkReason::CancelLoop { .. }) {
+            tx.ack_seen();
+        }
         record_park(&mut tx, reason);
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         if let Some(tracing) = &self.tracing {
@@ -824,10 +829,15 @@ impl ProcessActivation {
             .await
     }
 
-    /// A process claimed in a format set this node does not decode: it was
-    /// claimed only for its pending cancel, which ends it from registry
-    /// state. Without one (the cancel already ended it, or its mail was
-    /// something else) it goes back to idle, read nothing.
+    /// A process claimed in a format set this node does not decode, or with
+    /// a claim requirement it does not serve: it was claimed only for its
+    /// pending cancel, which ends it from registry state. Without one (the
+    /// cancel already ended it, or its mail was something else) it goes
+    /// back to idle, read nothing.
+    ///
+    /// A claim that finds the activation-loop budget's claims in a row
+    /// ended with nothing committed parks it `CancelLoop` instead, its
+    /// cancel kept (FIG-6099): ending it failed every time.
     async fn end_undecodable(
         &self,
         owned: &Owned,
@@ -835,6 +845,7 @@ impl ProcessActivation {
         process: &ProcessId,
         live: &mut Live,
     ) -> Result<Pass, DurableError> {
+        let first_pass = std::mem::replace(&mut live.first_pass, false);
         let cancel = self
             .backend
             .process_registry()
@@ -848,6 +859,18 @@ impl ProcessActivation {
                     .map(|request| request.origin)
             });
         match cancel {
+            Some(_)
+                if first_pass
+                    && activation_loop::reached(
+                        live.failed_activations,
+                        self.backend.config().settings().activation_loop_budget,
+                    ) =>
+            {
+                let reason = ProcessParkReason::CancelLoop {
+                    failed_activations: live.failed_activations,
+                };
+                self.park(owned, tx, &reason).await
+            }
             Some(origin) => self.end_engine_free(owned, tx, process, live, origin).await,
             None => {
                 tx.give_up(Release::Idle);

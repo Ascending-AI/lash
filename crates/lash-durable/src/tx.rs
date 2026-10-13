@@ -52,8 +52,12 @@ pub enum Release {
     },
     /// Set aside for an operator with the current reason recorded on the
     /// actor row ([`DomainWrite::ActorPark`]):
-    /// only a control wake readies it. A pending cancel mail readies it at
-    /// once instead.
+    /// only a control wake readies it. A stop that reached the actor since
+    /// the owner's read readies it at once instead, its park kept, so the
+    /// park never strands it (FIG-6099): cancel or session close mail past
+    /// the read's mailbox position ([`ActorTx::seen`]), or an `Immediate`
+    /// cancel of a session's unfinished turn that the read did not hold
+    /// ([`ActorTx::immediate_cancel_since_read`]).
     Parked,
     /// Finished: never claimed again, and its mailbox refuses mail.
     Terminal,
@@ -193,6 +197,18 @@ impl ActorTx {
     #[must_use]
     pub fn turn_cancel(&self) -> Option<&TurnCancelRequest> {
         self.turn_cancel.as_ref()
+    }
+
+    /// Whether `fenced`, the cancel request a commit's fence read for this
+    /// session's unfinished turn, is an `Immediate` one that this
+    /// transaction's open read did not hold ([`Self::turn_cancel`]): a stop
+    /// that reached the session since its owner read it (FIG-6099).
+    #[must_use]
+    pub fn immediate_cancel_since_read(&self, fenced: Option<&TurnCancelRequest>) -> bool {
+        let immediate = |request: Option<&TurnCancelRequest>| {
+            request.is_some_and(|request| request.mode == lash_sansio::TurnCancelMode::Immediate)
+        };
+        immediate(fenced) && !immediate(self.turn_cancel())
     }
 
     /// The domain rows this transaction writes, in order.
@@ -418,6 +434,20 @@ pub enum MailWrite {
     Domain(MailDomainWrite),
 }
 
+impl MailWrite {
+    /// Whether this append or wake is a control wake, which readies a
+    /// parked actor as a cancel or a redrive does: a session's close mail
+    /// ([`SESSION_CLOSE_MAIL`](crate::domain::SESSION_CLOSE_MAIL)), so a
+    /// park never holds a close back (FIG-6099).
+    #[must_use]
+    pub fn controls(&self) -> bool {
+        matches!(
+            self,
+            Self::Append { kind, .. } if kind.as_str() == crate::domain::SESSION_CLOSE_MAIL
+        )
+    }
+}
+
 /// A non-owner's transaction: it creates actors, appends mail and wakes,
 /// and nothing else. It has no owner-state writer.
 #[derive(Clone, Debug, Default)]
@@ -444,7 +474,8 @@ impl MailTx {
         self
     }
 
-    /// Append mail to `actor` and wake it.
+    /// Append mail to `actor` and wake it; session close mail wakes it as
+    /// a control wake ([`MailWrite::controls`]).
     pub fn append(
         &mut self,
         actor: ActorKey,

@@ -981,6 +981,18 @@ clears a process's park and activation count so its engine runs again from
 committed state; it answers whether the process was parked. Cancelling a
 parked process ends it without running its engine.
 
+A park never strands a stop (FIG-6099). A process's cancel, a session's
+`Immediate` turn cancel or its close (the close request is a control wake)
+that reaches the actor after the owner read it for its park leaves the actor
+ready, its park kept, and its next claim runs the stop. A session's park reads
+the stop first: it runs a stop it finds rather than park over it. A stop that
+fails the activation-loop budget's claims in a row (a claim of a node that only
+ends it, or the session's engine-free stop after its own budget) parks
+`CancelLoop` and stays recorded: the cancel on the process record or the turn,
+the close on the session's mail or close row. A redrive runs it again; so does
+a further close request of a session. A repeated cancel request is answered
+from the recorded one and wakes nothing.
+
 ### Cancel and the cascade
 
 A cancel request is a mailbox row; it wakes its actor, including a parked one.

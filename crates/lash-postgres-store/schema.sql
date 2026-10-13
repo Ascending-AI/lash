@@ -1243,9 +1243,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 7685bb1d56ff1925); a call
+    -- Generated from this build's statements (registry b3364a73f837fe52); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '7685bb1d56ff1925'
+    IF p_registry IS DISTINCT FROM 'b3364a73f837fe52'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2481,26 +2481,6 @@ BEGIN
              DELETE FROM lash_actor_mail WHERE actor_key = (p_actor) AND seq <= (p_ack);
     END IF;
     CASE p_release
-    WHEN 'parked' THEN
-        WITH pending AS (
-                 SELECT EXISTS (
-                     SELECT 1 FROM lash_actor_mail m, lash_actors p
-                     WHERE p.actor_key = (p_actor) AND m.actor_key = (p_actor) AND m.seq > p.acked_seq
-                       AND m.kind = ('cancel')
-                 ) AS mail
-             )
-             UPDATE lash_actors AS a
-             SET state = CASE WHEN NOT pending.mail THEN 'parked'
-                              WHEN a.mail_seq > a.acked_seq THEN 'ready'
-                              ELSE 'idle' END,
-                 ready_at_ms = CASE WHEN pending.mail AND a.mail_seq > a.acked_seq
-                                    THEN CAST((v_now) AS BIGINT) ELSE NULL END,
-                 next_due_ms = NULL,
-                 epoch = a.epoch + 1, owner_node = NULL, owner_boot = NULL
-             FROM pending
-             WHERE a.actor_key = (p_actor)
-             RETURNING a.state
-        INTO v_state;
     WHEN 'terminal' THEN
         DELETE FROM lash_actor_mail WHERE actor_key = (p_actor);
         UPDATE lash_actors

@@ -757,20 +757,26 @@ fn apply_owner(
     let state = match write.release() {
         None => ActorState::Owned,
         Some(Release::Parked) => {
-            // A cancel that arrived since the owner's read is not lost to the
-            // park: the actor goes ready instead, its park kept, and its
-            // claimer ends it engine-free.
-            let cancel_pending = tx
-                .prepare_cached(SQL.park.pending_mail_of_kind.sql())?
-                .query_row(
-                    rusqlite::params![actor, lash_durable::domain::CANCEL_MAIL],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some();
-            let stored: String = if cancel_pending {
+            // A stop that reached the actor since the owner's read is not
+            // lost to the park: the actor goes ready instead, its park kept,
+            // and its claimer runs the stop (FIG-6099).
+            let stopped = write.immediate_cancel_since_read(turn_cancel.as_ref())
+                || tx
+                    .prepare_cached(SQL.park.stop_mail_after.sql())?
+                    .query_row(
+                        rusqlite::params![
+                            actor,
+                            write.seen().0,
+                            lash_durable::domain::CANCEL_MAIL,
+                            lash_durable::domain::SESSION_CLOSE_MAIL
+                        ],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+            let stored: String = if stopped {
                 tx.prepare_cached(SQL.actor.release.sql())?.query_row(
-                    rusqlite::params![actor, "idle", Option::<i64>::None, now.0],
+                    rusqlite::params![actor, "ready", Option::<i64>::None, now.0],
                     |row| row.get(0),
                 )?
             } else {
@@ -1038,7 +1044,7 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
                 );
             }
             MailWrite::Append { actor, .. } | MailWrite::Wake { actor } => {
-                let woken = match wake_within(tx, actor, false, now)? {
+                let woken = match wake_within(tx, actor, write.controls(), now)? {
                     Ok(woken) => woken,
                     Err(error) => return refuse(error),
                 };

@@ -18,7 +18,7 @@ use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::TurnCancelOutcome;
 
 /// How long a stop may take to reach its terminal.
-const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
+pub(super) const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long a pending `AfterStep` cancel is watched for not ending.
 const STAYS_PENDING_FOR: std::time::Duration = std::time::Duration::from_secs(2);
 const TOOL: &str = "held_tool";
@@ -38,14 +38,14 @@ async fn stores(storage: &str) -> (Arc<dyn lash_core::StoreSet>, Vec<Box<dyn std
 /// What the law's providers were asked to do: each tool body and each model
 /// call.
 #[derive(Clone, Default)]
-struct Calls {
+pub(super) struct Calls {
     tool: Arc<AtomicUsize>,
     model: Arc<AtomicUsize>,
     entered: Arc<tokio::sync::Notify>,
 }
 
 impl Calls {
-    fn counts(&self) -> (usize, usize) {
+    pub(super) fn counts(&self) -> (usize, usize) {
         (
             self.tool.load(Ordering::SeqCst),
             self.model.load(Ordering::SeqCst),
@@ -124,7 +124,7 @@ fn deploy(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
 
 /// A deployment of the same model that registers no provider of the held
 /// tool: it serves none of the stranded session's requirements.
-fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
+pub(super) fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(tool_calling_model(calls), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -133,10 +133,10 @@ fn deploy_unserving(backend: &lash_core::Backend, calls: &Calls) -> Result<LashC
 /// A session whose turn is in flight in its tool call when its node stops,
 /// its admitted call holding the held tool's provider required; with the
 /// provider calls counted when the node stopped.
-struct Stranded {
-    backend: lash_core::Backend,
-    calls: Calls,
-    before: (usize, usize),
+pub(super) struct Stranded {
+    pub(super) backend: lash_core::Backend,
+    pub(super) calls: Calls,
+    pub(super) before: (usize, usize),
 }
 
 impl Stranded {
@@ -151,8 +151,17 @@ impl Stranded {
 const RUN: &str = "stranded-turn";
 
 async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std::any::Any>>)> {
+    stranded_over(storage, id, std::convert::identity).await
+}
+
+/// [`stranded`] over what `layer` makes of the storage's store set.
+pub(super) async fn stranded_over(
+    storage: &str,
+    id: &str,
+    layer: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet>,
+) -> Result<(Stranded, Vec<Box<dyn std::any::Any>>)> {
     let (stores, held) = stores(storage).await;
-    let backend = lash_conformance::backend_over(stores);
+    let backend = lash_conformance::backend_over(layer(stores));
     let calls = Calls::default();
     let core = deploy(&backend, &calls)?;
     let session = core

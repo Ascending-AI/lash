@@ -18,6 +18,15 @@ pub enum ProcessParkReason {
         /// The claims in a row that committed nothing.
         failed_activations: u32,
     },
+    /// The claims that only end it for its pending cancel (a node that does
+    /// not decode or serve it) crashed without progress
+    /// `failed_activations` times in a row: the activation-loop budget
+    /// (FIG-6099). The cancel stays recorded, and its mail stays pending:
+    /// an operator's redrive runs it again.
+    CancelLoop {
+        /// The claims in a row that committed nothing.
+        failed_activations: u32,
+    },
     /// No engine of its kind is installed on the node that claimed it.
     UnknownEngine {
         /// The engine kind its row names.
@@ -168,6 +177,7 @@ impl ProcessParkReason {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::ActivationLoop { .. } => "activation_loop",
+            Self::CancelLoop { .. } => "cancel_loop",
             Self::UnknownEngine { .. } => "unknown_engine",
             Self::UndecodableState { .. } => "undecodable_state",
             Self::MigrationRefused { .. } => "migration_refused",

@@ -471,6 +471,7 @@ mod response_phase_replay;
 mod round_cancel_state;
 mod run_effects;
 mod send_handle;
+mod session_cancel_loop;
 mod session_cancel_without_provider;
 mod session_control;
 mod session_create;

@@ -13,8 +13,6 @@
 //! formats stamp, the acknowledgement and the release end it; a `ready`
 //! release that writes nothing else keeps the claim's no-progress mark.
 
-use lash_durable::domain::CANCEL_MAIL;
-
 use super::executor::{EXECUTOR_SQL, FUNCTION, LATCH_HORIZON_MS, REGISTRY, entries};
 use super::steps::{Collect, END_LOCAL_PARAMS, Entry, Shape, Ty};
 use super::{SQL, graph, prompts};
@@ -319,14 +317,6 @@ pub(crate) fn function_ddl() -> String {
     let wake = inline(SQL.actor.wake.sql(), &["v_owner", "v_now"]);
     let stamp_formats = inline(SQL.actor.stamp_formats.sql(), &["p_actor", "p_formats"]);
     let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
-    let park = inline(
-        SQL.postgres.park_unless_pending.sql(),
-        &[
-            "p_actor",
-            "v_now",
-            &format!("'{}'", CANCEL_MAIL.replace('\'', "''")),
-        ],
-    );
     let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
     let end = inline(SQL.actor.end.sql(), &["p_actor"]);
     let release = inline(
@@ -555,9 +545,6 @@ BEGIN
         {ack_through};
     END IF;
     CASE p_release
-    WHEN 'parked' THEN
-        {park}
-        INTO v_state;
     WHEN 'terminal' THEN
         {delete_mail};
         {end}
