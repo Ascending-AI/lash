@@ -1,0 +1,810 @@
+# Persistent semantic heap: the frozen seams
+
+Status: frozen design for the FIG-6187 arc, delivered by FIG-6195 on branch
+`lanes/hp-seams`. Source anchors are at `195ed4db93` (main when the arc
+fanned out). It does not repeat the arc's specification; read it with the
+four design reports (the decision and cost contract, representation and
+identities, page access and publication, exact memory and collection). Where
+this document and those reports differ, this document wins: §2 records each
+difference.
+
+The arc replaces whole-state checkpointing with one persistent semantic heap.
+Execution and checkpoints use the same paged heap. A checkpoint freezes the
+changed pages and atomically publishes a root. A fresh worker loads only the
+pages its next operation needs. Five layer lanes build on this branch in
+parallel. One integrator lands the arc as a single clean cutover:
+
+| Lane | Ticket | Outcome |
+| --- | --- | --- |
+| hp-heap | FIG-6188 | The unified heap and the execution records |
+| hp-memory | FIG-6189 | Accounting: the census, reservation and exact refinement |
+| hp-paging | FIG-6190 | Worker demand reads and private staging |
+| hp-publish | FIG-6191 | SQL publication, leases and reclamation |
+| hp-life | FIG-6192 | Cells, frozen results and saved functions (stacked on hp-heap) |
+| hp-integrate | FIG-6193 | Deletions, callers, fixtures, ADRs and end-to-end laws |
+
+## 1. Rules every lane keeps
+
+- The seam declarations are frozen. They live in the files listed in §3 and
+  change only by an orchestrator ruling. A ruled change lands on
+  `lanes/hp-seams` first and every lane rebases onto it. A lane implements a
+  seam in its own files and never edits another lane's seam or files (§4).
+- Declarations that replace a current type sit in a `heap` or `paged` module
+  under their final names: `lash_kernel_doc::heap::{Value, NativeHeap, ..}`
+  and `lash_kernel_vm::paged::Machine`. At the cutover the owning lane
+  changes the crate-root re-export to them and deletes the old item. Nothing
+  is renamed, and there is no adapter between the old and new types.
+- Error taxonomy, the same at every seam:
+  - a **guest error** is a raised value whose kind the operation's semantics
+    define (`type_error`, `index_out_of_range`, an illegal key);
+  - a **guest bound** is `Bound::Memory`, and only exact refinement (S7)
+    produces it;
+  - an **infrastructure failure** is `HeapFault`, `PageRefusal`,
+    `StageFault` or a `DurableError`. It is never catchable, never a guest
+    value and never a guest bound. The activation ends and resumes from its
+    last committed root.
+- Old-format images are refused, and there are no dual readers, no flags and
+  no migrations. No live data is deleted.
+
+## 2. Decisions
+
+Each decision settles a question where the reports disagree or leave a choice
+open that two lanes would otherwise settle differently.
+
+- **D-SEAL.** The kernel never hashes. `PageSource::seal` frames a logical
+  body in the generic envelope, computes its digest and keeps it readable. The
+  kernel crates stay free of the store and of blake3, and a page has one
+  digest function: the store's.
+- **D-LOGICAL.** The kernel sees logical page bodies only, with child
+  references written as full digests (`TypedBody::logical`). The embedder
+  converts between logical bodies and the envelope's child-table slots.
+  Envelope framing stays the store's.
+- **D-ENV.** Semantic pages use the existing generic envelope
+  (`"LASH" | kind | child table | body`) with the blob-domain blake3 digest
+  `LASH_BLOB_DOMAIN_VERSION`. The registry's reserved range 1000–1999 becomes
+  the semantic page range. Kinds 1000–1008 are declared in
+  `paged::source::PageKind`. All of them are direct-bodied and node-bounded
+  except `CHECKPOINT_ROOT`, which is root-bounded (4096 bytes). hp-heap owns
+  the canonical body encodings. hp-publish registers the range in the node
+  registry and points `ExecRoot.state` and `ProcessState::Kernel` at
+  `CHECKPOINT_ROOT`. `check_envelope` already accepts any nonzero kind, so
+  install needs no registry change before then.
+- **D-IMM.** Two rules govern an immutable payload (text, bytes, integer
+  digits). (1) It is `Payload::Resident` when it is at most
+  `IMMUTABLE_INLINE_MAX` (256) bytes or was built in this activation and not
+  yet placed in pages. Otherwise it is `Payload::Paged`. (2) Payload trees
+  are **canonical**: greedy leaves of at most `PAYLOAD_LEAF_BYTES` (4096)
+  that end on UTF-8 scalar boundaries, with fanout-32 indexes built bottom-up
+  and carrying byte, character and UTF-16 counts. Two paged payloads are
+  therefore equal exactly when their root digests are, so equality and key
+  normalization need no page read, and equal payloads share pages. This
+  rejects the representation report's "root-preserving partial chunks". A
+  concatenation or slice re-chunks its output in O(output), which is already
+  the cost of today's `Arc` copy.
+- **D-EQ.** The new `Value` has no Rust `PartialEq`, `Ord` or `Hash`. Guest
+  equality and key normalization are `SemanticHeap::equal` and `normal_key`,
+  which are fallible because a tuple or a resident-against-paged comparison
+  can read pages. No I/O hides behind an infallible `Ord`.
+- **D-KEY.** A key's normal form (`NormalKey`) holds its canonical
+  normalized key tokens when they are at most 256 bytes. A longer key is the
+  domain-separated SHA-256 of its full normalized tokens. The lookup index
+  orders keys by `NormalKey`. That order is internal: iteration follows
+  insertion sequence (`K-ITER-003`). Normalizing a paged key can fault, but
+  comparing two normal forms never does.
+- **D-CAP.** Start values, which measurement tunes later: index fanout 32;
+  64 cells per sequence leaf; 64 rows per keyed leaf; leaves packed up to
+  8 KiB (`PAGE_TARGET_BYTES`) under the absolute 64 KiB node bound;
+  object bodies inline in directory rows up to 256 token bytes; payload
+  leaves of 4 KiB; read batches of 64 pages and 4 MiB. Host budgets per
+  worker: 64 MiB clean residency, 32 MiB dirty, 8 MiB pinned. Staging quota:
+  1 GiB per activation. The worker settings (`WorkerTuning`) and protocol
+  bounds expose the host budgets. The format constants are the `paged`
+  modules' `const`s.
+- **D-GRANT.** The heap stores a 48-byte opaque `PageGrant` beside each
+  `PageId` in its resident links and passes it back unread. On a worker the
+  grant is the parent's `PageCapability`: authority (8 bytes: a root or
+  stage lease), activation epoch (8) and a MAC (32). The MAC is keyed blake3
+  over (page, authority, epoch), and its key never leaves the parent. Reading
+  a page yields grants for exactly the children in its envelope's child
+  table. Grants are never persisted: a persisted link is a bare `PageId`, and
+  every activation derives fresh grants from its leased root. In-process
+  embedders use `PageGrant::NONE`.
+- **D-LEASE.** A root lease is a root-catalog owner row
+  `(id, owner, root, actor, epoch, expires_at)`, acquired in one transaction
+  that checks the owner's current root under the actor's fence. The store's
+  clock decides expiry. After expiry, every read and renewal under the lease
+  is refused (`LeaseLost`), but the row still protects its root until the
+  owner releases it or a retirement step removes it. Reads are transactional
+  and check the lease inside the same transaction that returns the bytes. A
+  candidate's commit protects what it reuses with its own key-share locks,
+  so lease expiry needs no grace period. The parent renews a live
+  activation's lease at a third of its ttl (start value 60 s). Expiry fences
+  the activation.
+- **D-SPOOL.** A spool lives exactly as long as its stage lease: the
+  activation plus the resolution of its last publication. On an
+  authoritative commit it is settled and deleted. On an authoritative
+  refusal (fence or revision conflict) it is discarded with the activation.
+  An ambiguous publication (transport loss, timeout) keeps the spool. The
+  parent then reads `PageStore::candidate_state`. If the execution row holds
+  the candidate's root and commit identity, the candidate committed. If the
+  row still holds the base, the parent retries the exact candidate, which is
+  idempotent by commit identity, or discards it. Worker disconnection alone
+  never settles a candidate. A spool does not survive its parent process:
+  that activation is lost and resumes from the durable root.
+- **D-RET.** Replacing or retiring a root no longer peels synchronously in
+  the publication transaction. The transaction moves the old root to a
+  retirement hold, a new root source in the catalog. Each bounded step takes
+  one hold, deletes in digest order the nodes under it that no owner, lease
+  or inbound edge keeps, and installs holds on their surviving children, all
+  in one transaction. Steps run under the shared graph gate and use row
+  locks, so they never stop publication. Hosts apply backpressure from
+  `retirement_backlog` and staging usage.
+- **D-ADM.** One semantic admission is recorded per published root, keyed by
+  the root, in the publishing transaction:
+  `(root, kernel, page_format, validator, commit)`. The validator string
+  names the kernel version, the page format and the digest of the validating
+  build's page schema. Unchanged pages inherit admission. Changed pages are
+  validated by the producing worker before sealing. A root admitted under
+  another validator, or a foreign image, enters the trusted population only
+  after the full validation pass (`lash-kernel-migrate`'s carry path). It
+  never inherits an incompatible attestation.
+- **D-WAITS.** `WaitsSummary` is the count of the handed-out waits and the
+  XOR of each wait's domain-separated SHA-256 over (wait number, canonical
+  effect identity). It is maintained with the waits table's page edits. The
+  parent maintains the same summary incrementally from its admission rows
+  and the park's admission delta, and refuses a mismatch as a protocol
+  breach. The check guards consistency for a trusted producer; it is not an
+  authenticator.
+- **D-FRAME.** Persisted frames hold semantic coordinates only: the pending
+  statement's `Site`, bindings by declaring site, loops (a map or set
+  position is a `TableCursor`), `finally` departures and held values. This
+  fits the flat-KIR machine (FIG-6161). Its `Frame { code, slots, control,
+  awaiting, library, inline }` keeps the same control shape. Its registers
+  belong to a slice and are cleared before any park. An inline frame runs to
+  its end inside its expression. So neither registers nor inline frames
+  exist at a checkpoint, and compiled `CodeId`/`StmtId`/slot indexes are
+  rebuilt caches.
+- **D-SEALTIME.** A seal happens at a park, and dirty eviction seals the
+  pages it evicts. A `Slice` step does not seal. Pressure refinement never
+  creates a checkpoint opportunity mid-statement.
+- **D-FAM.** `FamilyId::PRIMARY` (0) is a heap's ordinary allocation. Its
+  next ordinal is in `HeapRoot`, and a session's next cell continues it. Each
+  lazy instantiation takes `HeapRoot::next_family`. Entity `(f, n)` is the
+  n-th mutable occurrence, in preorder, of family f's frozen base, so equal
+  subtrees at distinct positions are distinct entities. Membership is a
+  keyed run of `MembershipRun`s: a swept ordinal is absent, an edit is an
+  override row in the same directory, and a lookup checks membership before
+  it reads the base. A fork shares pages and owns its directory version from
+  then on. Two forks may later mint the same `EntityId`, which is harmless
+  because they never share a directory again.
+- **D-NATIVE.** `NativeHeap` reads return `Result<_, HeapFault>`, and
+  `NativeError` gains `Heap(HeapFault)`. A call that faulted is never resumed
+  as a result. Prepared native entries read no page: a paged operand makes
+  them return `None`, which takes the general call.
+- **D-METRIC.** `AccountingMetric::LocalCostV1` is today's pricing
+  (`OBJECT_BYTES` 32, `VALUE_BYTES` 16, payload bytes at each holding
+  location, shared entities once per identity), unchanged. hp-heap moves it
+  into page summaries. hp-memory owns U, reservation, refinement and the
+  certificate. `MIN_ENTITY_COST` is 32 bytes.
+- **D-ORDER.** No guest-visible order derives from entity identities; only
+  insertion order and value order are visible. hp-heap verifies this when it
+  ports `lash-kernel-lib/src/keys.rs`.
+- **D-RES.** Resident pages are interior, single-threaded state, so heap
+  reads take `&self` and a visit can lend elements of a pinned page.
+- **D-MSG.** The page exchange's wire types live in `lash-vm-protocol`
+  (`page.rs`), not `lash-vm-worker`. The parent (`lash-vm-client`,
+  `lash-vm-broker`) must decode them, and it cannot depend on the worker
+  crate. `host.rs` implements the worker side. This differs from the unit
+  notes for this reason only.
+- **D-FREEZE.** The protocol version, store format and schema stay one 1.0
+  baseline: changes are made in place, and nothing bumps a version constant.
+- **D-ADMIT.** `AdmittedWait` and `AdmittedRequest` survive unchanged.
+  Whoever deletes `lash-kernel-state/src/whole.rs` (the integrator) moves
+  them into `paged/root.rs`.
+
+## 3. The seams
+
+Every seam below states its declaration file, owning crate and implementing
+lane, its invariants, its errors and the law that pins it. A law named here
+is a contract: the implementing lane writes it at the stated path and tier.
+Tiers follow `docs/agents/test-backends.md`. "Kernel unit" means the crate's
+`__unit_test` target with an in-memory test `PageSource`; store tiers are
+SQLite memory, SQLite file and PostgreSQL.
+
+### S1 `SemanticHeap` and the native contract
+
+Declarations:
+
+- `crates/lash-kernel-state/src/paged/heap.rs`: `SemanticHeap`,
+  `ObjectInit`, `ObjectKind`, `ClosureView`, `FieldName`, `NormalKey`,
+  `TableCursor`, `EditEpoch`, `SealBudget`, `SealedHeap`,
+  `HeapWriteError`.
+- `crates/lash-kernel-doc/src/heap.rs`: `Value`, `Object`, `Element`,
+  `Chunk`, the immutable descriptors (`TextRef`, `BytesRef`, `IntRef`,
+  `TupleRef`, `ErrorRef`, `Payload`, the summaries), `NativeHeap`,
+  `NativeCall`, `NativeFunction`, `PreparedNative`, `NativeError`,
+  `HeapFault`, `HostResource`.
+- `crates/lash-kernel-vm/src/paged.rs`: `Machine`, `CellStart`,
+  `SealedRoot`, `Finished`, `MachineError`, `OpenError`, `SealError`.
+
+```rust
+pub trait SemanticHeap: NativeHeap {
+    fn open(root: &HeapRoot, source: Box<dyn PageSource>, epoch: EditEpoch) -> Result<Self, HeapFault>;
+    fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self;
+    fn kind(&self, entity: EntityId) -> Result<Option<ObjectKind>, HeapFault>;
+    fn table_after(&self, table: EntityId, after: Option<TableCursor>) -> Result<Option<(TableCursor, Value)>, HeapFault>;
+    fn allocate_object(&mut self, init: ObjectInit) -> Result<EntityId, HeapWriteError>;
+    fn list_write(&mut self, list: EntityId, index: u64, value: Value) -> Result<(), HeapWriteError>;
+    fn map_write(&mut self, map: EntityId, key: Value, value: Value) -> Result<(), HeapWriteError>;
+    fn record_write(&mut self, record: EntityId, field: FieldName<'_>, value: Value) -> Result<(), HeapWriteError>;
+    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
+    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;
+    fn reserve_logical(&mut self, bytes: LogicalBytes, transient: &TransientRoots<'_>) -> Result<(), HeapWriteError>;
+    fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault>;
+    fn evict(&mut self) -> Result<(), HeapFault>;
+    // and the remaining views and edits in the declaration
+}
+```
+
+- Owning crates: `lash-kernel-state` (the paged heap), `lash-kernel-doc`
+  (value and native contracts), `lash-kernel-vm` (the machine).
+- Implementing lane: hp-heap. Consumers: hp-memory (through `CensusGraph`),
+  hp-life (through `HeapLifecycle` and `FamilyBase`), and every native crate.
+
+**How natives and the VM reach the heap after KIR.** `KernelMachine` owns
+one `PagedHeap: SemanticHeap` and reaches it monomorphically. KIR ops call
+the checked edits: `write_index` becomes `list_write`, `map_write` or
+`set_write`, and `remove_index` becomes `list_remove` or `table_remove`. A
+native call passes `&mut PagedHeap` as `&mut dyn NativeHeap` in a
+`NativeCall`. The VM builds `TransientRoots` from its register window, its
+pins, the call's arguments and its fresh allocations for every reservation.
+The native memory retry in today's `call_lib`
+(`machine/ops.rs::call_lib`, the `NativeError::Memory` collect-and-retry
+loop) is deleted: refinement happens inside `reserve_logical` and
+`NativeHeap::reserve`, so no native is re-executed. A page miss blocks inside
+the port with the Rust stack intact.
+
+Invariants:
+
+- No `&mut` object, `&mut Vec<Value>` or mutating iterator escapes the heap.
+- Before an edit is readable, it has updated together: the collection path,
+  the directory head, the logical-cost delta and the identity-edge summary.
+- Alias writes through any `EntityId` are seen by every holder. Equal but
+  distinct objects stay distinct.
+- A point update touches one bounded leaf and its index path. Unchanged
+  children keep their sealed links without being rescanned.
+- An editable page belongs to one epoch and changes in place until the next
+  seal. A sealed page never changes.
+- A length read touches the descriptor, never the payload.
+- Map and record lookup and insertion sequence change together. First-written
+  key spelling, live iteration and reinsertion at a new sequence hold
+  (`K-KEY-003`, `K-ITER-003`).
+- Physical page sharing never merges identities.
+
+Errors: guest errors are `HeapWriteError::Raised { kind, message }`, the
+guest bound is `HeapWriteError::Memory` and `NativeError::Memory`, and
+infrastructure is `HeapFault` (in `MachineError::Heap`, `OpenError::Heap`
+and `SealError::Heap`).
+
+Laws:
+
+- Kernel unit, `//crates/lash-kernel-state:lash-kernel-state__unit_test`, in
+  `crates/lash-kernel-state/src/paged/laws/heap.rs`:
+  - `a_point_write_in_a_huge_list_seals_one_leaf_path`
+  - `a_tiny_update_among_many_objects_seals_one_directory_path`
+  - `aliases_see_one_mutation_across_seal_and_open`
+  - `cycles_seal_as_a_page_dag`
+  - `map_iteration_survives_removal_and_reinsertion_across_seal`
+  - `a_text_length_read_touches_no_payload_page`
+  - `equal_payloads_share_one_canonical_root`
+- Kernel unit, `//crates/lash-kernel-vm:lash-kernel-vm__unit_test`, in
+  `crates/lash-kernel-vm/src/laws/paged.rs`:
+  - `a_page_fault_mid_native_neither_reruns_nor_recharges`
+  - `a_missing_page_is_infrastructure_never_guest_absence`
+  - `every_charge_is_the_same_on_the_paged_heap`, the KIR charge-bound
+    differential re-run under even, odd and body layouts
+
+### S2 Identities
+
+Declaration: `crates/lash-kernel-doc/src/heap.rs`, with `FamilyId`,
+`EntityId { family, ordinal }`, `PageId([u8; 32])`, `PageGrant`, `PageRef`,
+`LogicalBytes` and `Identity { Object(EntityId), Task(TaskId) }`. The owning
+crate is `lash-kernel-doc`, and hp-heap implements it.
+
+- `ref(x)` is `Value::Ref(Identity::Object(id))` for the entity `x` names,
+  and `same` compares two `EntityId`s for equality. As a key, a ref
+  normalizes to its identity's canonical tokens (D-KEY).
+- No integer conversion or debug number of an entity is guest-visible. A
+  diagnostic that needs numeric labels assigns ranks while it produces
+  itself.
+- A `PageId` names immutable bytes, and an `EntityId` names a mutable object.
+  No API converts one into the other. A `PageId` is never evidence of
+  durable ownership.
+- `PageId` is the same 32 bytes as the store's `NodeId`. The conversions
+  (`From`) live in `lash-core-store`, which depends on `lash-kernel-doc`.
+
+Laws, kernel unit (`lash-kernel-vm`, `laws/paged.rs`):
+
+- `ref_same_and_key_equality_follow_entity_ids`
+- `equal_frozen_subtrees_instantiate_distinct_entities`
+- `no_guest_observation_depends_on_ordinals`, a differential that runs one
+  program over two allocation histories
+
+### S3 `PageSource` and the page exchange
+
+Declarations:
+
+- `crates/lash-kernel-state/src/paged/source.rs`: `PageSource`,
+  `PageBody`, `PageAnswer`, `PageKind` and the capacity constants.
+- `crates/lash-vm-protocol/src/page.rs`: `PageExchangeId`,
+  `PageAuthority`, `PageCapability`, `PageEnvelope`, `PageRequest`,
+  `ReadPage`, `PageReply`, `PageRefusal`.
+
+```rust
+pub trait PageSource {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault>;
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault>;
+}
+```
+
+The implementing lane is hp-paging: `WirePageSource` in
+`crates/lash-vm-worker/src/host.rs`, the parent page service and spool under
+`crates/lash-vm-broker/src/kernel/pages/`, and an in-process source for
+embedders without a parent. hp-paging also adds two message variants to
+`crates/lash-vm-protocol/src/message.rs`:
+
+- `WorkerMessage::Pages { id: PageExchangeId, request: PageRequest }`
+- `ParentMessage::Pages { id: PageExchangeId, reply: PageReply }`
+
+The worker sends a `Pages` request mid-slice under the run's fence and reads
+exactly one reply, exactly as `Wire::read` does for a host read. That
+exchange is the one beside `Wire::read` in `host.rs`. `Start.from`'s
+`ParkedGraph` becomes a checkpoint reference (root digest, the root's grant,
+admissions). `Parked` carries the candidate root and its header in place of a
+`SealedGraphState`.
+
+Invariants:
+
+- A request names at most `READ_BATCH_PAGES` pages and `READ_BATCH_BYTES`
+  bytes.
+- Every answered envelope is re-hashed and re-framed by the worker before
+  the kernel decodes it. Every sealed envelope is re-hashed by the parent.
+- The parent authorizes each child of a sealed page by a capability or an
+  earlier page in the same batch.
+- Reading page P yields capabilities for exactly P's envelope children.
+- The parent's memory per activation stays bounded: it keeps the lease, the
+  MAC key and the spool index, never a set of visited pages.
+- The page service runs in the parent's store and spool I/O lane and never
+  checks out another VM worker (a one-worker pool still serves its child).
+- Prefetch and eviction change latency only, never values or charges.
+- One absolute activation deadline covers every page exchange. Progress
+  frames do not extend it.
+
+Errors: `PageRefusal` on the wire, `HeapFault` in the kernel. All of them
+are infrastructure.
+
+Laws:
+
+- Worker unit, `//crates/lash-vm-worker:lash-vm-worker__unit_test`, in
+  `crates/lash-vm-worker/src/page_laws.rs`, over a real worker process with
+  a SQLite memory store behind the parent:
+  - `a_forged_foreign_or_stale_capability_reads_nothing`
+  - `a_fault_mid_native_resumes_on_the_same_stack`
+  - `a_one_worker_pool_serves_pages_without_another_worker`
+  - `a_fresh_worker_reads_the_header_and_touched_pages_only` (counted pages)
+- Wire codec bounds in `crates/lash-vm-protocol/src/codec/tests.rs`:
+  `page_exchanges_respect_batch_bounds`.
+
+### S4 The execution root and its records
+
+Declaration: `crates/lash-kernel-state/src/paged/root.rs`, with
+`CheckpointRoot`, `HeapRoot`, `KeyedRoot`, `SequenceRoot`, `RootStatus`,
+`EndedRecord`, `SavedMeters`, `WaitsSummary`, `TaskRecord`,
+`TaskStateRecord`, `JoinerRecord`, `IncomingRecord`, `EndedTask`,
+`FrameRecord`, `BindingRecord`, `BoundRecord`, `LoopRecord`,
+`FinallyRecord`, `EnteredRecord`, `HeldRecord`, `WaitRecord`,
+`WaitKindRecord`, `WaitStateRecord`, `CommittedOutcomeRecord` and
+`ListJoinRecord`. The owning crate is `lash-kernel-state`.
+
+The canonical encodings belong to hp-heap, which writes the `TokenCodec`
+impls beside the paged heap in `lash-kernel-state`. The envelope belongs to
+the store (`lash-core-store/src/checkpoint_graph/node.rs`), and its kind
+registration to hp-publish.
+
+The **page envelope** is the generic node envelope
+`"LASH" | kind (1000–1008) | child_count | sorted child digests | body_len | body`.
+Its digest is the blob-domain blake3. The body is graph tokens in which a
+child reference is a slot of the child table. An envelope is at most 64 KiB,
+and a `CHECKPOINT_ROOT` at most 4096 bytes.
+
+Invariants:
+
+- A root is complete. The machine needs nothing else to resume: no earlier
+  root, no delta replay and no worker cache.
+- An unbounded table is a tree root, so a fresh worker reads the root page,
+  then only the paths it touches.
+- A frame persists semantic coordinates only (D-FRAME).
+- A wait persists its identity and kind, never its arguments: the parent
+  supplies admissions at open.
+- A committed outcome is a `FrozenRef`, delivered as a fresh family (S8).
+- `waits_summary` changes with the waits table (D-WAITS).
+- `release` and `owner` are the existing ReleaseManifest and OwnerBinding
+  nodes. The parent reads them from this header and never decodes the heap
+  to find a release.
+
+Errors: `OpenError::{DocumentMismatch, KernelVersion, Malformed, Heap}` and
+`SealError`. A root of a superseded format (a `KernelWhole`) is refused, not
+read.
+
+Laws:
+
+- Kernel unit, `crates/lash-kernel-state/src/paged/laws/root.rs`:
+  - `every_record_round_trips_canonically`
+  - `a_checkpoint_root_fits_its_root_bound`
+  - `a_kernel_whole_root_is_refused`
+- Kernel unit, `crates/lash-kernel-vm/src/laws/paged.rs`:
+  - `a_frame_resumes_at_its_semantic_site_in_every_layout`
+  - `every_step_seals_the_same_root_in_every_layout`, the KIR image law
+    carried over to roots
+- Integrator, SQLite: `//crates/lash-durable-test:format_fixtures__test` and
+  `//crates/lash-durable-test:vertical_crash_proof__test`, re-recorded once
+  on the integrated tree.
+
+### S5 Staging: the spool and the candidate manifest
+
+Declaration: `crates/lash-core-store/src/checkpoint_graph/stage.rs`, with
+`StageSpool`, `CandidateManifest`, `ManifestEntry`, `ManifestSummary`,
+`StageLeaseId`, `StageUsage` and `StageFault`. The owning crate is
+`lash-core-store`: the seam is generic, carries no kernel types and is
+reachable from both the broker and the stores. hp-paging implements the
+spool in `lash-vm-broker`. hp-publish consumes the manifest.
+
+```rust
+pub trait StageSpool: Send {
+    fn seal(&mut self, page: EncodedNode, protected: &dyn Fn(&NodeId) -> bool) -> Result<(), StageFault>;
+    fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault>;
+    fn candidate(&mut self, root: NodeId, base: Option<NodeId>, commit: CommitId)
+        -> Result<Box<dyn CandidateManifest>, StageFault>;
+    fn settle(&mut self, commit: CommitId) -> Result<(), StageFault>;
+    fn discard(self: Box<Self>);
+}
+pub trait CandidateManifest: Send {
+    fn summary(&self) -> ManifestSummary;
+    fn entries(&mut self, after: Option<NodeId>, limit: usize) -> Result<Vec<ManifestEntry>, StageFault>;
+}
+```
+
+Invariants:
+
+- The spool is content-addressed and disk-indexed with bounded buffers and a
+  quota. It is never an unbounded parent map.
+- A staged page's children are protected committed pages or pages staged
+  earlier, so the staged graph is acyclic by construction.
+- `candidate` walks the root's staged DAG only and stops at protected
+  references. It drops unreachable staged pages and yields one ascending
+  digest stream of `External` and `Fresh` entries. The stream is
+  restartable by cursor, because the store reads it once for nodes, once for
+  edges and again on a retry.
+- Spilling neither publishes nor admits.
+- Spool lifetime follows D-SPOOL.
+
+Errors: `StageFault`. All of them are host outcomes; none is a guest memory
+bound.
+
+Laws: unit, `//crates/lash-vm-broker:lash-vm-broker__unit_test`, in
+`crates/lash-vm-broker/src/kernel/pages/spool_laws.rs`:
+
+- `a_manifest_is_the_reachable_staged_dag_in_digest_order`
+- `staging_refuses_an_unprotected_child`
+- `an_ambiguous_publication_keeps_its_spool_until_resolved`
+- `a_quota_failure_is_a_host_outcome`
+
+### S6 Store publication
+
+Declaration: `crates/lash-durable/src/domain/pages.rs`, with `PageStore`,
+`RootLeaseId`, `RootLeaseRequest`, `RootLease`, `StoredPage`,
+`SemanticAdmission`, `CandidatePublication`, `CandidateReceipt`,
+`RetirementBudget`, `RetirementProgress` and `RetirementBacklog`. The owning
+crate is `lash-durable`, beside `graph_commit.rs`. hp-publish implements it
+for the SQLite and PostgreSQL durable stores.
+
+```rust
+#[async_trait] pub trait PageStore: DurableStore {
+    async fn acquire_root_lease(&self, request: RootLeaseRequest) -> Result<RootLease, DurableError>;
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError>;
+    async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError>;
+    async fn read_pages(&self, lease: &RootLease, pages: &[NodeId]) -> Result<Vec<StoredPage>, DurableError>;
+    async fn commit_candidate(&self, tx: ActorTx, candidate: CandidatePublication, label: CommitLabel)
+        -> Result<CandidateReceipt, DurableError>;
+    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError>;
+    async fn candidate_state(&self, exec: &ExecKey) -> Result<Option<(NodeId, CommitId)>, DurableError>;
+    async fn retire_step(&self, budget: RetirementBudget) -> Result<RetirementProgress, DurableError>;
+    async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError>;
+}
+```
+
+`commit_candidate` runs the existing fenced owner transaction, in the
+existing `LockStep` order:
+
+1. The graph gate is taken shared, then the fence.
+2. The candidate's manifest is merged with the `ActorTx`'s own small staged
+   nodes (ExecRoot, HostRoot, admissions) in global digest order. Externals
+   are key-share locked and existence-checked, and fresh nodes are inserted
+   in batches (canonical bytes are compared on conflict, as today).
+3. Edges are inserted after every node row exists.
+4. The domain writes (execution root, effect admissions, waits, host and
+   session rows) and the `SemanticAdmission` are written.
+5. A replaced root moves to a retirement hold (D-RET).
+
+The store reuses `check_graph`'s direct-reference rule: it validates each
+supplied envelope and its exact child table, and checks immediate external
+references only. It never walks an old closure. Effects dispatch only after
+the receipt confirms the commit.
+
+New catalog sources are `RootSource::ReadLease` and
+`RootSource::RetirementHold`. New tables (`root_leases`,
+`retirement_holds`, `semantic_admissions`) go straight into both 1.0
+baselines. Normal activation stops using `DurableReads::hydrate`; the
+integrator deletes it.
+
+Errors: `DurableError::OwnershipLost` for a stale epoch; the graph refusals
+`RevisionConflict`, `RootRetired`, `MissingNode`, `ContentConflict` and
+`HashMismatch`; and a lease past expiry, which hp-publish adds to
+`GraphRefusal` as `LeaseLost`. Each is infrastructure for the activation.
+
+Laws:
+
+- Store laws in `crates/lash-durable/src/laws/pages.rs`, mounted from
+  `crates/lash-sqlite-store/src/graph_store_tests.rs` (SQLite memory and
+  file, `//crates/lash-sqlite-store:lash-sqlite-store__unit_test`) and
+  `crates/lash-postgres-store/src/postgres/graph_store_tests.rs`
+  (PostgreSQL, service gate `pg-store`):
+  - `a_candidate_installs_only_new_nodes_and_direct_references`
+  - `publication_is_atomic_with_admissions_and_semantic_admission`
+  - `a_leased_root_survives_concurrent_retirement`
+  - `an_expired_lease_reads_nothing`
+  - `retirement_advances_in_bounded_steps_and_reclaims_everything_unowned`
+  - `the_lost_receipt_resolves_by_commit_identity`
+  - `publication_keeps_global_digest_lock_order`
+- The storage differential:
+  `//crates/lash-sim:cross_backend_store_differential__test`, where the new
+  methods join the sweep and `store_trait_surface_is_fully_gated`.
+- Crash cuts, run by the integrator in `vertical_crash_proof`: after a
+  spill, after candidate sealing, after node insertion, after root
+  publication, and a lost receipt.
+
+### S7 The memory census
+
+Declaration: `crates/lash-kernel-state/src/paged/census.rs`, with
+`AllocationCensus`, `CensusGraph`, `AccountingCertificate`,
+`AccountingMetric`, `EntityCost`, `LogicalPermit`, `PendingReservation`,
+`ReservationDecision`, `RefinedDecision`, `TransientRoots`, `CensusFault`
+and `MIN_ENTITY_COST`. The owning crate is `lash-kernel-state`. hp-memory
+implements `AllocationCensus`; hp-heap implements `CensusGraph` and the
+persisted summaries.
+
+```rust
+pub trait AllocationCensus {
+    fn restore(certificate: AccountingCertificate, bound: LogicalBytes) -> Result<Self, CensusFault>;
+    fn added(&mut self, cost: LogicalBytes) -> Result<(), CensusFault>;
+    fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault>;
+    fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision;
+    fn refine(&mut self, graph: &mut dyn CensusGraph, transient: &TransientRoots<'_>,
+              pending: PendingReservation) -> Result<RefinedDecision, CensusFault>;
+}
+```
+
+The **certified upper bound** U is the census's local costs plus the
+persistent roots' costs. `reserve` grants when checked `U + bytes <= bound`.
+Otherwise, and on overflow, it returns `NeedsPrecision`.
+
+The **exact refinement trace** freezes mutation. It traces from
+`CensusGraph::persistent_roots` and from `TransientRoots`: registers, pins,
+native arguments, fresh entities and outstanding reservations. It follows
+`entity_edges` (edge summaries, never payload bytes) and counts
+`task_result` only through reachable handles. It sweeps what it did not
+reach, sets U to the exact total and decides again. Only
+`RefinedDecision::Refused` becomes `Bound::Memory`.
+
+The **persisted summary** is `HeapRoot::accounting`: the metric, U, the
+entity count and the refinement count. U is labelled an upper bound and is
+never reported as live bytes.
+
+Invariants:
+
+- No collection runs to park, resume or release a worker.
+- No trace state is ever persisted, and there is no concurrent collector.
+- Losing a reference never subtracts its referent.
+- Overflow forces precision. It never wraps and never grants.
+- An unreachable cycle never causes a refusal.
+- Eviction and residency never change a verdict.
+- A refinement that runs out of host work, or faults, is `CensusFault`
+  (infrastructure), never `Bound::Memory`.
+- An admitted certificate is trusted inductively. One from a foreign image
+  is validated in full before it can grant anything (D-ADM).
+
+Laws:
+
+- Kernel unit, `crates/lash-kernel-state/src/paged/laws/census.rs`:
+  - `overflow_refines_and_never_grants`
+  - `an_undercounted_certificate_is_refused_before_it_grants`
+  - `last_and_nonlast_alias_removal_keep_u_an_upper_bound`
+- Kernel unit, `crates/lash-kernel-vm/src/laws/census.rs`:
+  - `an_unreachable_cycle_never_fails_an_allocation`
+  - `the_verdict_is_the_same_warm_evicted_and_reopened`
+  - `refinement_counts_registers_native_args_and_reservations`
+  - `a_large_partially_shared_detach_frees_only_the_dead_part`
+  - `an_interrupted_refinement_is_infrastructure`
+  - `parks_never_collect`
+  - `census_garbage_stays_within_the_logical_bound`
+
+### S8 Frozen families and cell carry
+
+Declaration: `crates/lash-kernel-state/src/paged/family.rs`, with
+`HeapLifecycle`, `FamilyBase`, `FrozenRef`, `FrozenSummary`, `FamilyRecord`,
+`MembershipRun`, `SessionRoot`, `DataOnlyCertificate`,
+`CarryClassification` and `CarryRoots`. The owning crate is
+`lash-kernel-state`. hp-life implements `HeapLifecycle` and `FamilyBase`.
+hp-heap calls `FamilyBase` on a directory miss and `instantiate` when it
+delivers an outcome.
+
+```rust
+pub trait HeapLifecycle {
+    fn freeze(&mut self, value: &Value, data_only: bool) -> Result<FrozenRef, HeapWriteError>;
+    fn instantiate(&mut self, frozen: &FrozenRef) -> Result<Value, HeapWriteError>;
+    fn classify_carry(&mut self, bindings: &[(Name, Value)]) -> Result<CarryClassification, HeapFault>;
+    fn carry(&mut self, roots: CarryRoots) -> Result<SessionRoot, HeapFault>;
+    fn adopt(&mut self, session: &SessionRoot) -> Result<Vec<(Name, Value)>, HeapFault>;
+}
+pub trait FamilyBase {
+    fn base_object(&mut self, entity: EntityId) -> Result<Option<ObjectInit>, HeapFault>;
+    fn member(&mut self, entity: EntityId) -> Result<bool, HeapFault>;
+}
+```
+
+The **cell-carry API**:
+
+- **Carry roots.** A terminal cell selects `CarryRoots`: its bindings and its
+  saved-function bundle nodes. `carry` seals them into a `SessionRoot`, which
+  holds the heap root, the binding table, the function table and the
+  certificate.
+- **Next cell.** The next cell opens `SessionRoot.heap` with
+  `SemanticHeap::open` and calls `adopt`. Entity identities are kept, and
+  nothing is renamed, loaded or copied.
+- **Data-only certificate.** A `DataOnlyCertificate` of zero closures and
+  zero task edges over the whole census makes classification read nothing.
+  Otherwise one union traversal with shared visited state classifies every
+  candidate binding (`K-SES-003`).
+- **Fork isolation.** A fork shares the session root's pages and owns its own
+  directory version. Edits never cross forks (D-FAM).
+- **Saved functions.** A saved function's captures are frozen once, at the
+  semantic boundary, into a `FrozenRef` inside its bundle. They are never a
+  pointer into the live directory.
+
+Invariants:
+
+- Equal frozen subtrees at distinct positions instantiate distinct entities.
+- A mutation never changes the frozen base.
+- A swept ordinal stays absent and never falls back to its frozen body.
+- Membership is checked before the base is read.
+- Every held identity, including a ref used as a key, is a trace edge.
+- An instantiation reserves its whole logical cost and identity range up
+  front, without building entities.
+- Freezing rejects a cycle or a non-data value where `K-EFF-002` requires
+  data.
+
+Errors: `HeapWriteError` (`Raised` for non-data, `Memory` for reservation)
+and `HeapFault`.
+
+Laws:
+
+- Kernel unit, `crates/lash-kernel-vm/src/laws/lifecycle.rs`:
+  - `a_noop_next_cell_copies_nothing`
+  - `a_fork_isolates_later_mutations`
+  - `a_frozen_capture_ignores_later_live_writes`
+  - `a_swept_family_ordinal_never_resurrects`
+  - `a_lazy_result_length_read_instantiates_nothing`
+  - `data_only_carry_reads_no_binding`
+- Kernel unit, `crates/lash-kernel-dialect/src/saved/laws.rs`:
+  `a_saved_function_bundle_keeps_its_frozen_capture`.
+- SQLite, `//crates/lash-durable-test:rlm_session_globals__test`: carried
+  aliases survive cell boundaries and worker resets.
+
+## 4. Layer ownership
+
+Each lane edits only the files in its row. A row's "new files" are created
+by that lane. Seam declaration files (§3) are read-only for every lane.
+
+| Lane | Owns and edits | Implements | Consumes |
+| --- | --- | --- | --- |
+| hp-heap | `lash-kernel-doc/src/{value,native,lib,graph_codec,graph_codec_forms}.rs`; new `lash-kernel-state/src/paged/{tree,directory,payload,codec,heap_impl,laws/heap,laws/root}.rs`; `lash-kernel-vm/src/{heap,interface,data,costs,functions,compile*,lib}.rs`; `lash-kernel-vm/src/machine/{mod,exec,ops,stream,actions,steps,observing}.rs`; new `lash-kernel-vm/src/machine/paged.rs`; `lash-kernel-vm/src/laws/{paged,stream,forms,bounds,tasks,embedder,fast,observe,layout}.rs`; `lash-kernel-lib/**`; `lash-ext-*/**`; `lash-vm-library/**`; the `Value` uses in `lash-kernel-exec`, `lash-kernel-check`, `lash-dialect-typescript` and `lash-dialect-python`; `lash-kernel-conformance` machine adapters | S1, S2, S4 encodings, `CensusGraph` | S3 (as `PageSource` test double), S7 (`AllocationCensus`), S8 (`FamilyBase`, `instantiate`) |
+| hp-memory | new `lash-kernel-state/src/paged/census_impl/**` (U ledger, reservation, tracer, sweeper, mark state with spill, certificate validation); new `lash-kernel-state/src/paged/laws/census.rs`; new `lash-kernel-vm/src/laws/census.rs` | S7 `AllocationCensus` | S1 (`CensusGraph`, `TransientRoots`) |
+| hp-paging | `lash-vm-worker/src/{host,worker,entry,service}.rs`; new `lash-vm-worker/src/page_laws.rs`; `lash-vm-protocol/src/{message,codec,bounds,outcome}.rs` (variants, bounds, refusals); `lash-vm-client/src/{machine,pool,wire,ipc,config}.rs`; new `lash-vm-broker/src/kernel/pages/**` (page service, capability MAC, spool, `spool_laws.rs`); `lash-core-store/src/checkpoint_graph/node.rs` (a public framing function for direct semantic kinds) | S3, S5 `StageSpool` | S6 (`acquire_root_lease`, `read_pages`) |
+| hp-publish | `lash-durable/src/domain/{graph,graph_commit,mod}.rs`; `lash-durable/src/{tx,port}.rs` (only if `commit_candidate` needs `ActorTx` accessors); new `lash-durable/src/laws/pages.rs`; `lash-core-store/src/checkpoint_graph/{registry,roots,bodies,refusal,commit}.rs`; `lash-sqlite-store/src/durable/**`, `lash-sqlite-store/src/schema.rs`, `lash-sqlite-store/src/graph_store_tests.rs`; `lash-postgres-store/src/postgres/durable/**`, its schema, `migrate.rs`, `schema_shape.rs`, `schema-shape.txt`, `graph_store_tests.rs`; `lash-sim/tests/cross_backend_store_differential/**`; `lash-vm-broker/src/kernel/store.rs` (lease acquisition, `commit_candidate`, `pin_release` from the root header) | S6, D-RET, D-ADM | S5 (`CandidateManifest`) |
+| hp-life | new `lash-kernel-state/src/paged/family_impl/**`; `lash-kernel-vm/src/machine/session.rs`; new `lash-kernel-vm/src/laws/lifecycle.rs`; `lash-protocol-rlm/src/executor/session.rs`, `session/graph.rs`; `lash-kernel-dialect/src/saved.rs`, `saved/graph.rs`, new `saved/laws.rs` | S8 | S1 |
+| hp-integrate | `lash-vm-broker/src/kernel/{state,run,graph,ledger,value}.rs`; `lash-vm-runtime/src/process/**`, `formats.rs`; `lash-core-execution/src/runtime/actor/process/state_graph.rs`; `lash-kernel-migrate/**`; `lash-kernel-conformance/src/{migration,smith}/**`; `lash-vm-protocol/src/graph_state*.rs`; `lash-durable/src/domain/mod.rs` (`DurableReads::hydrate`) and every implementation; `lash-durable-test/**` fixtures and crash laws; `lash-perf/**`; `examples/**`; `lash-kernel-state/src/{schema,fragments,whole,terminal,codec_variants,tests}.rs` and `bin/parked_schema_generator.rs`; `lash-kernel-vm/src/whole.rs`, `machine/parked*`; `docs/kernel/**`, `docs/adr/**`; facade and schema exports | end-to-end wiring of activation (lease → page service → seal → candidate → commit) | all |
+
+**Shared touch points** and who resolves each:
+
+1. **Module declaration lines.** These are `lash-kernel-state/src/paged/mod.rs`,
+   `lash-kernel-vm/src/laws/mod.rs` and the crate `lib.rs` files. Each lane
+   adds only its own `mod` lines. The integrator takes the union.
+2. **Generated files.** These are `BUCK` files and
+   `tools/buck2/target-inventory.json`. Each lane regenerates them with
+   `kiln sync`. The integrator regenerates them after merging and never
+   hand-merges.
+3. **Native memory retry** (`machine/ops.rs::call_lib`). hp-heap deletes the
+   retry and calls `reserve_logical`; hp-memory never edits `ops.rs`.
+4. **Outcome delivery** (`machine/actions.rs`). hp-heap calls
+   `HeapLifecycle::instantiate`, and hp-life implements it.
+5. **Directory miss.** hp-heap calls `FamilyBase`, and hp-life implements
+   it.
+6. **Broker activation** (`lash-vm-broker/src/kernel/run.rs`). Only the
+   integrator wires paging and publication together. Each lane proves its
+   half with its own laws.
+7. **Node registry** (`registry.rs`). hp-publish adds the semantic range. The
+   integrator deletes `KERNEL_WHOLE`, `TERMINAL_WHOLE` and
+   `SESSION_EXECUTION`.
+8. **`message.rs`.** Only hp-paging edits it. The integrator deletes
+   `ExportGraph`/`ExportedGraph` and `SealedGraphState` with their callers.
+9. **Fixtures and committed images.** Only the integrator re-records them,
+   once, on the integrated tree rebased on current main.
+10. **Kernel rules and ADRs.** The integrator edits them. Each lane's report
+    names the rule text its change needs: the `K-MACH-001` clarification,
+    `K-BND-003`'s upper-bound wording, demand-validation timing and the
+    saved-state shape.
+11. **The seams.** Changes to seam files need an orchestrator ruling and land
+    here first.
+
+## 5. Deletion inventory
+
+The anchors are at `195ed4db93`. "I" marks a deletion only the integrator
+can make, because its callers span lanes. The deleting lane removes the
+symbol together with every caller in its own files.
+
+| Path : symbol | Deleted by |
+| --- | --- |
+| `lash-kernel-vm/src/heap.rs`: `Table` (105), `Obj` (265), `Held` (342), `Chunk` (356), `Heap` (392) and `Heap::{get_mut,restore,written,collect}` (457, 502, 559, 606), `NativeView` and its `NativeHeap` impl (668, 688) | hp-heap |
+| `lash-kernel-vm/src/machine/ops.rs`: `get_mut` writes in `write_index` (271), `write_record_field` (335), `remove_field` (347), `remove_index` (358); the native memory retry around `NativeView` (527) | hp-heap |
+| `lash-kernel-vm/src/machine/exec.rs:572`: the `Obj::Variable` `get_mut` write | hp-heap |
+| `lash-kernel-doc/src/native.rs`: infallible `NativeHeap`, `NativeCall`, `NativeError`, `Element`; `value.rs`: `Value`, `Object`, `ObjectId`, `Identity`, `ClosureObject` (replaced by `heap::*`) | hp-heap |
+| `lash-kernel-vm/src/machine/session.rs`: `load` (145), `reach_closures` (250), `reach` (286), `carried` (328), `named` (348), `rename` (366) | hp-life |
+| `lash-protocol-rlm/src/executor/session.rs`: `SLOT_OBJECTS` (51), `adopt` (406), `data` (475), `binding_data` (504), `check_reached` (535), `value_objects` (559), `object_objects` (579), `rename_value` (599), `rename_object` (622) | hp-life |
+| `lash-protocol-rlm/src/executor/session/graph.rs`: `SessionExecutionBody` (32), `AliasRow` (49) and their codecs | hp-life |
+| `lash-kernel-dialect/src/saved.rs`: `SavedFunction::captures` as `Datum` (48); `saved/graph.rs`: `Bundle::stage`/`assemble` Datum flattening (132, 164) | hp-life |
+| SQLite `durable/graph.rs::reclaim` (663) and PostgreSQL `durable/graph/reclaim.rs::reclaim` (83): synchronous last-owner peel on commit (replaced by holds and `retire_step`) | hp-publish |
+| `lash-vm-broker/src/kernel/store.rs::pin_release` (942): decoding a `KernelWhole` to find the release | hp-publish |
+| `lash-vm-broker/src/kernel/store.rs`: `hydrate` calls (975, 1024) on normal activation | I |
+| `lash-durable/src/domain/mod.rs:503`: `DurableReads::hydrate` and `HydratedGraph`; SQLite `durable/graph.rs::hydrate_in` (561); PostgreSQL `durable/graph.rs::{hydrate_in, hydrate_owner}` (661, 1053) | I |
+| `lash-kernel-state/src/schema.rs`: `ParkedRun` and the whole JSON schema; `fragments.rs`: `Baseline`, `Saved`, `save`, `load`; `bin/parked_schema_generator.rs` | I |
+| `lash-kernel-state/src/whole.rs`: `KernelWhole` (66), `WholeTask`, `WholeWait`, `capture` (196), `restore` (253); `terminal.rs`: `TerminalWhole` (21) | I |
+| `lash-kernel-vm/src/whole.rs`: `export_whole` (69), `import_whole*` (112, 129), `terminal_whole` (181), `terminal_end` (273) | I |
+| `lash-kernel-vm/src/machine/parked.rs` and `parked/{capture,restore}.rs`: `export` (419), `save` (440), `import` (458); `machine/mod.rs`: `type Parked` (879), `save` (481), `import_with_*` (430, 460), `Machine::{export,import}` (946, 950) | I |
+| `lash-vm-broker/src/kernel/state.rs`: `WholeState` (177), `export_parked` (287), `export_whole_state` (303), `OpenedRun` (333), `open_whole` (349), `capture_whole` (408), `import_parked` (487), `import_whole_state` (519), `export_end*` (640, 655), `read_end*` (688, 698) | I |
+| `lash-vm-protocol/src/graph_state.rs`: `SealedGraphState`, `GraphNodeBytes`, `GraphRoot`; `message.rs`: `StartFrom::ParkedGraph`, `ParkedGraph`, `ParentMessage::ExportGraph`, `WorkerMessage::ExportedGraph`, `Parked.state` | I |
+| `lash-vm-client/src/machine.rs`: `export` returning `WholeState` (482), `resume_sealed` (320); `pool.rs::export_graph` (650) | I |
+| `lash-vm-worker/src/worker.rs`: `export_graph` (767) and the `staged` `SealedGraphState` (46, 402) | I |
+| `lash-vm-runtime/src/process/state.rs`: `SealedRun` (101), base64 whole material; `process/migrate.rs` whole carry | I |
+| `lash-core-execution/src/runtime/actor/process/state_graph.rs`: `stage_engine_state`, `write_engine_state`, `read_engine_state`, `load_engine_state` for kernel processes (36, 91, 119, 144); opaque foreign-engine bytes stay | I |
+| `lash-kernel-migrate/src/carry.rs::carry` (31) over `ParkedRun`: becomes the full validator and migrator over page roots | I |
+| `lash-core-store/src/checkpoint_graph/registry.rs`: `KERNEL_WHOLE` (16), `TERMINAL_WHOLE` (27), `SESSION_EXECUTION` (29) rows. `WHOLE_STREAM`, `STRUCTURE_BLOCK` and `STREAM_INDEX` stay: other enveloped kinds use them. | I |
+| `lash-core-store/src/checkpoint_graph/encode.rs`: the FIG-6157 encoding cache stays (it is generic, used by other domains); only the kernel's whole-input encode path through it goes | I |
+| Tests, fixtures and docs whose subject is the removed shapes: `lash-kernel-state/src/tests.rs`; `lash-kernel-vm/src/laws/{parked,whole}.rs`; `lash-vm-worker/src/graph_laws.rs`; `lash-vm-protocol/src/graph_state_tests.rs`; `lash-vm-broker/src/kernel/graph_tests.rs`; `lash-durable-test` format fixtures; `docs/kernel/parked-state.md`. Each deleted test is listed in the commit with the law that now covers its property. | I |
+
+## 6. Risks to independent building
+
+- **hp-heap is the critical path.** Every other lane compiles against the
+  declarations alone, but its laws need a working paged heap. hp-memory
+  tests against a scripted `CensusGraph`. hp-life is stacked on hp-heap.
+  hp-paging tests the exchange with a scripted `PageSource` client until a
+  machine runs on the paged heap.
+- **The `Value` cutover is large.** About 18 `lash-kernel-lib` files, the
+  three `lash-ext-*` crates, both dialects, the VM and the conformance
+  adapters move to fallible, descriptor-based values in one lane.
+- **The first end-to-end proof is late.** Paging and publication meet only
+  in the integrator's `run.rs` wiring, so the first end-to-end proof is the
+  integrator's.
+- **Declared signatures can prove wrong.** A trait signature may turn out
+  wrong once implemented: for example, `SemanticHeap::open` as a trait
+  constructor, or reads through `&self` with interior residency. Such a
+  change is a seam ruling, not a local edit.

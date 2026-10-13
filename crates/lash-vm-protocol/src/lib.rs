@@ -28,6 +28,9 @@ pub mod codec;
 pub mod graph_state;
 pub mod message;
 pub mod outcome;
+/// The page exchange of the persistent heap (FIG-6195): declared ahead of
+/// the cutover, sent by nothing yet.
+pub mod page;
 pub mod state;
 mod version;
 

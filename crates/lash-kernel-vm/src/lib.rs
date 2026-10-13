@@ -34,6 +34,9 @@ mod heap;
 mod interface;
 mod machine;
 pub mod observe;
+/// The machine's face after the persistent-heap cutover (FIG-6195):
+/// declared ahead of it, implemented by nothing yet.
+pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
 mod whole;

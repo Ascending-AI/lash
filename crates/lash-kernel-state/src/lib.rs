@@ -28,6 +28,9 @@
 
 mod codec_variants;
 mod fragments;
+/// The persistent semantic heap's page-level seams (FIG-6195): declared
+/// ahead of the heap cutover, called by nothing yet.
+pub mod paged;
 mod schema;
 mod terminal;
 mod whole;

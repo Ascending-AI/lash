@@ -23,6 +23,9 @@ mod graph_codec;
 /// of the document vocabulary.
 #[doc(hidden)]
 pub mod graph_tokens;
+/// The persistent semantic heap's frozen target vocabulary (FIG-6195): the
+/// heap cutover moves it to the crate root.
+pub mod heap;
 mod identity;
 mod name;
 mod native;
