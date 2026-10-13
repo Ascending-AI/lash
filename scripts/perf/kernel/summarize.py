@@ -6,20 +6,22 @@ import statistics
 
 COUNTS = ('allocations_run', 'allocations_start_and_run', 'reallocations_run',
           'reallocations_start_and_run', 'charged')
-IDENTITY = ('workload_sha256', 'compiler', 'build_profile', 'debug_assertions',
+IDENTITY = ('workload_sha256', 'result_sha256', 'observe', 'compiler', 'build_profile', 'debug_assertions',
             'allocator', 'split', 'fixed_iterations', 'cap', 'iterations', 'warmups', 'rounds')
 
 
 def validate(row):
     rounds = row.get('rounds', 1)
+    if row.get('observe') != 'nothing':
+        raise ValueError('comparison requires explicit unobserved identity (observe=nothing)')
     if row['split'] or not row['fixed_iterations'] or row['cap'] < 1 or rounds < 1:
         raise ValueError('comparison requires fixed, unsplit samples')
     if (row['iterations'] != row['cap'] or row['warmups'] != min(row['cap'], 20)
             or len(row['samples']) != row['iterations'] * rounds):
         raise ValueError('incomplete iteration population')
-    for field in ('artifact_sha256', 'workload_sha256'):
-        value = row[field]
-        if len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+    for field in ('artifact_sha256', 'workload_sha256', 'result_sha256'):
+        value = row.get(field)
+        if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
             raise ValueError(f'missing {field}')
     for field in ('program', 'compiler', 'build_profile', 'allocator'):
         if not row[field].strip():

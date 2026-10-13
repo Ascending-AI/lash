@@ -28,6 +28,8 @@ pub(crate) struct KernelObservation {
     pub(crate) program: String,
     pub(crate) artifact_sha256: String,
     pub(crate) workload_sha256: String,
+    pub(crate) result_sha256: String,
+    pub(crate) observe: String,
     pub(crate) compiler: String,
     pub(crate) build_profile: String,
     pub(crate) debug_assertions: bool,
@@ -50,6 +52,69 @@ struct KernelReceipt {
     rows: Vec<KernelObservation>,
 }
 
+fn validate(row: &KernelObservation) -> anyhow::Result<()> {
+    if row.cap == 0
+        || row.rounds == 0
+        || !row.fixed_iterations
+        || row.split
+        || row.observe != "nothing"
+        || row.iterations != row.cap
+        || row.samples.len()
+            != row
+                .cap
+                .checked_mul(row.rounds)
+                .context("kernel sample count overflow")?
+        || row.warmups != row.cap.min(20)
+    {
+        bail!("{}: incomplete or observed kernel population", row.program);
+    }
+    for (field, hash) in [
+        ("artifact_sha256", &row.artifact_sha256),
+        ("workload_sha256", &row.workload_sha256),
+        ("result_sha256", &row.result_sha256),
+    ] {
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            bail!("{}: missing or invalid {field}", row.program);
+        }
+    }
+    let first = &row.samples[0];
+    for (index, sample) in row.samples.iter().enumerate() {
+        if sample.round != index / row.cap + 1
+            || sample.iteration != index % row.cap
+            || sample.ns_run == 0
+            || sample.ns_start_and_run < sample.ns_run
+            || count_values(sample) != count_values(first)
+        {
+            bail!(
+                "{}: invalid sample coordinates, timing or nondeterministic counts",
+                row.program
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Refuse invalid cached populations and changed results before any comparison
+/// or history mutation. Result changes must not create a new timing cohort.
+pub(crate) fn validate_history(history: &[DurationHistoryRecord]) -> anyhow::Result<()> {
+    let mut results = BTreeMap::new();
+    for record in history {
+        let Some(row) = &record.kernel else { continue };
+        validate(row)?;
+        let key = (&record.identity, &record.profile, &record.scenario);
+        if let Some(previous) = results.insert(key, &row.result_sha256)
+            && previous != &row.result_sha256
+        {
+            bail!("{}: result_sha256 identity mismatch", row.program);
+        }
+    }
+    Ok(())
+}
+
 fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>> {
     if receipt.rows.is_empty() || receipt.host.trim().is_empty() {
         bail!("kernel receipt requires host identity and nonempty rows");
@@ -60,26 +125,7 @@ fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>>
         if !selected.insert(row.program.clone()) {
             bail!("duplicate kernel row: {}", row.program);
         }
-        if row.cap == 0 || row.rounds == 0 || !row.fixed_iterations || row.split
-            || row.iterations != row.cap || row.samples.len() != row.cap.checked_mul(row.rounds).context("kernel sample count overflow")?
-            || row.warmups != row.cap.min(20)
-        {
-            bail!("{}: incomplete or observed kernel population", row.program);
-        }
-        for hash in [&row.artifact_sha256, &row.workload_sha256] {
-            if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                bail!("{}: missing artifact/workload SHA256", row.program);
-            }
-        }
-        let first = &row.samples[0];
-        for (index, sample) in row.samples.iter().enumerate() {
-            if sample.round != index / row.cap + 1 || sample.iteration != index % row.cap
-                || sample.ns_run == 0 || sample.ns_start_and_run < sample.ns_run
-                || count_values(sample) != count_values(first)
-            {
-                bail!("{}: invalid sample coordinates, timing or nondeterministic counts", row.program);
-            }
-        }
+        validate(&row)?;
         let identity = ExperimentIdentity {
             host: receipt.host.clone(),
             compiler: row.compiler.clone(),
@@ -91,6 +137,7 @@ fn records(receipt: KernelReceipt) -> anyhow::Result<Vec<DurationHistoryRecord>>
             configured_geometry: serde_json::json!({
                 "cap": row.cap, "warmups": row.warmups, "rounds": row.rounds,
                 "split": row.split, "fixed_iterations": row.fixed_iterations,
+                "observe": row.observe,
                 "window": "start+run or run; excludes destruction and receipt construction",
                 "bounds": "charge=1000000000;memory=1073741824;call_depth=200;live_tasks=100;requests_per_park=100;join_members=100",
             }).to_string(),
@@ -197,8 +244,12 @@ pub(crate) fn render_counts(history: &[DurationHistoryRecord]) -> String {
 /// Import one maintained gate-6 invocation, one observation per program.
 pub fn record_kernel_receipt(receipt: &Path, history: &Path) -> anyhow::Result<()> {
     let receipt: KernelReceipt = serde_json::from_str(&std::fs::read_to_string(receipt)?)?;
-    duration_trend::append_records(history, &records(receipt)?)?;
-    let loaded = duration_trend::load_history(history)?;
+    let incoming = records(receipt)?;
+    let mut loaded = duration_trend::load_history(history)?;
+    loaded.extend(incoming.iter().cloned());
+    validate_history(&loaded)?;
+    loaded.sort_by(|left, right| left.recorded_at.cmp(&right.recorded_at));
+    duration_trend::append_records(history, &incoming)?;
     let retained = duration_trend::retained_records(&loaded);
     duration_trend::compact_history(history, &retained, &[])?;
     duration_trend::run_duration_trend_cli(history, Some("kernel-gate6"))
@@ -208,12 +259,107 @@ pub fn record_kernel_receipt(receipt: &Path, history: &Path) -> anyhow::Result<(
 mod tests {
     use super::*;
 
+    fn receipt_json() -> serde_json::Value {
+        serde_json::json!({
+            "host": "test-host", "commit": "test-commit", "run_id": "test-run",
+            "recorded_at": "2026-10-13T00:00:00Z",
+            "rows": [{
+                "program": "baseline", "artifact_sha256": "a".repeat(64),
+                "workload_sha256": "b".repeat(64), "result_sha256": "c".repeat(64),
+                "observe": "nothing", "compiler": "test-compiler",
+                "build_profile": "test-profile", "debug_assertions": false,
+                "allocator": "system+stats_alloc", "split": false,
+                "fixed_iterations": true, "cap": 1, "iterations": 1,
+                "warmups": 1, "rounds": 1,
+                "samples": [{
+                    "round": 1, "iteration": 0, "ns_run": 10_000_000,
+                    "ns_start_and_run": 20_000_000, "allocations_run": 1,
+                    "allocations_start_and_run": 2, "reallocations_run": 0,
+                    "reallocations_start_and_run": 0, "charged": 3
+                }]
+            }]
+        })
+    }
+
+    #[test]
+    fn kernel_history_refuses_mismatched_results_before_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = dir.path().join("history.jsonl");
+        let mut raw = receipt_json();
+        let initial = records(serde_json::from_value(raw.clone()).unwrap()).unwrap();
+        duration_trend::append_records(&history, &initial).unwrap();
+        let before = std::fs::read(&history).unwrap();
+        raw["rows"][0]["result_sha256"] = "d".repeat(64).into();
+        let receipt = dir.path().join("receipt.json");
+        std::fs::write(&receipt, serde_json::to_vec(&raw).unwrap()).unwrap();
+        let error = record_kernel_receipt(&receipt, &history).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("result_sha256 identity mismatch")
+        );
+        assert_eq!(std::fs::read(&history).unwrap(), before);
+    }
+
+    #[test]
+    fn kernel_receipts_refuse_missing_or_observed_identity() {
+        for field in ["observe", "result_sha256"] {
+            let mut raw = receipt_json();
+            raw["rows"][0].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<KernelReceipt>(raw).is_err());
+        }
+        for observe in ["work", "context", "invalid"] {
+            let mut raw = receipt_json();
+            raw["rows"][0]["observe"] = observe.into();
+            assert!(records(serde_json::from_value(raw).unwrap()).is_err());
+        }
+        let mut raw = receipt_json();
+        raw["rows"][0]["result_sha256"] = "not-a-digest".into();
+        assert!(records(serde_json::from_value(raw).unwrap()).is_err());
+    }
+
+    #[test]
+    fn kernel_receipts_and_saved_history_refuse_zero_samples() {
+        let raw = receipt_json();
+        let mut saved = records(serde_json::from_value(raw.clone()).unwrap()).unwrap();
+        let mut empty = raw;
+        empty["rows"][0]["samples"] = serde_json::json!([]);
+        assert!(records(serde_json::from_value(empty).unwrap()).is_err());
+        saved[0].kernel.as_mut().unwrap().samples.clear();
+        let dir = tempfile::tempdir().unwrap();
+        let history = dir.path().join("history.jsonl");
+        duration_trend::append_records(&history, &saved).unwrap();
+        assert!(duration_trend::load_history(&history).is_err());
+    }
+
+    #[test]
+    fn cached_kernel_history_cannot_drop_missing_identity_or_compare_changed_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = dir.path().join("history.jsonl");
+        let records = records(serde_json::from_value(receipt_json()).unwrap()).unwrap();
+        let valid = serde_json::to_value(&records[0]).unwrap();
+        for field in ["observe", "result_sha256"] {
+            let mut old = valid.clone();
+            old["kernel"].as_object_mut().unwrap().remove(field);
+            std::fs::write(&history, serde_json::to_vec(&old).unwrap()).unwrap();
+            assert!(duration_trend::load_history_lenient(&history).is_err());
+        }
+        let mut changed = valid.clone();
+        changed["kernel"]["result_sha256"] = "d".repeat(64).into();
+        std::fs::write(&history, format!("{valid}\n{changed}\n")).unwrap();
+        let error = duration_trend::load_history(&history).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("result_sha256 identity mismatch")
+        );
+    }
+
     #[test]
     fn sustained_kernel_regression_reaches_existing_reader_and_count_delta() {
-        let raw = include_str!("../../fixtures/kernel-baseline.json");
         let mut history = Vec::new();
         for index in 0..10 {
-            let mut receipt: KernelReceipt = serde_json::from_str(raw).unwrap();
+            let mut receipt: KernelReceipt = serde_json::from_value(receipt_json()).unwrap();
             receipt.recorded_at = format!("2026-10-10T10:{index:02}:00Z");
             if index >= 5 {
                 for row in &mut receipt.rows {

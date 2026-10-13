@@ -49,6 +49,8 @@ def main():
         parser.error('iterations and rounds must be positive')
     if bool(args.baseline) == args.record_baseline:
         parser.error('select a recorded --baseline or --record-baseline')
+    if os.environ.get('KERNEL_PERF_OBSERVE', ''):
+        parser.error('ordinary kernel comparison requires KERNEL_PERF_OBSERVE unset or empty')
     # The same cap applies to each instrument child, including history reading.
     cap = 8 * 1024**3
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)

@@ -99,7 +99,12 @@ CPU time**, including descheduling. Outputs:
   before it is `lost_to_races`; `missed` counts deadlines that passed while the
   sampler ran late; `truncated` counts samples deeper than the context's 512
   frames (a capacity, not a guest bound); `unresolved` counts samples with a
-  token the symbol table does not name.
+  token the symbol table does not name. `population` is `insufficient` with
+  zero accepted samples, otherwise `diagnostic_wall_residency`. Arithmetic
+  completeness (`adds_up`) does not establish sampling sufficiency. An empty
+  accepted population retains the raw files and exits nonzero; no shares are
+  emitted. Nonempty populations remain diagnostic, with no statistical
+  sufficiency claim.
 
 The context is a preallocated block of atomics. The machine changes the
 frame stack under a sequence lock and a read keeps only a whole one

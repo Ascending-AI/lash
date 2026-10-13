@@ -503,10 +503,20 @@ pub(crate) fn load_history_lenient(path: &Path) -> anyhow::Result<LoadedHistory>
                 preserved.push(line.to_string());
             }
             Ok(record) => records.push(record),
-            Err(error) => skipped.push(format!("line {line_number}: {error}")),
+            Err(error) => {
+                // Kernel comparisons require complete identity. A cache must
+                // not silently discard an older receipt lacking that evidence.
+                if serde_json::from_str::<serde_json::Value>(line)
+                    .is_ok_and(|value| value.get("kernel").is_some_and(|kernel| !kernel.is_null()))
+                {
+                    anyhow::bail!("invalid kernel history record at line {line_number}: {error}");
+                }
+                skipped.push(format!("line {line_number}: {error}"));
+            }
         }
     }
     records.sort_by(|left, right| left.recorded_at.cmp(&right.recorded_at));
+    super::kernel_history::validate_history(&records)?;
     Ok(LoadedHistory {
         records,
         preserved,

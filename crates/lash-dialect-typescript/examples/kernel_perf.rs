@@ -14,13 +14,16 @@
 //! charge, and where it went. The split comes from a second run that stops
 //! after every unit of charge and reads the pending statement's site from the
 //! exported state (exporting changes no charge, `K-MACH-007`): the charge and
-//! the time of each step go to TypeScript helper bodies, kernel library bodies
+//! the diagnostic wall time of each charge-sliced step go to TypeScript helper bodies, kernel library bodies
 //! or the document's own code. A helper's body is charged as it runs and
 //! its formula is not (`K-CHG-007`), so a step is a statement of the body
 //! that does the work;
 //! the body of a library function with a native implementation is covered
 //! by its formula and runs within one step. `KERNEL_PERF_SPLIT=0` skips the
-//! second run, for a profiler. Raw iteration times and allocator call counts
+//! second run, for a profiler. Split shares describe this altered dispatch
+//! geometry, perturbed by state export between steps; they are neither exact
+//! inclusive CPU shares nor shares of the ordinary unsplit run.
+//! Raw iteration times and allocator call counts
 //! accompany every row, with executable and source hashes and build identity.
 //! Counts exclude machine destruction and receipt construction. `KERNEL_PERF_FIXED=1`
 //! uses the exact cap so maintained comparisons have fixed workload geometry.
@@ -271,7 +274,8 @@ enum Mode {
 }
 
 /// What `KERNEL_PERF_OBSERVE` turns on in the timed runs.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 enum Observe {
     Nothing,
     Work,
@@ -402,7 +406,7 @@ fn main() -> Result<(), String> {
     };
     if matches!(mode, Mode::Time) {
         println!(
-            "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\trun_calls\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\thelper_time_share\tslowest_helpers\tlibrary_body_time_share\tprogram_time_share\tresult\treceipt"
+            "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\trun_calls\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\tsplit_helper_wall_share\tsplit_slowest_helpers\tsplit_library_body_wall_share\tsplit_program_wall_share\tresult\treceipt"
         );
     }
     for (name, source) in &programs {
@@ -470,10 +474,24 @@ fn main() -> Result<(), String> {
         let mean = |get: fn(&Sample) -> u128| {
             samples.iter().map(get).sum::<u128>() as f64 / f64::from(iterations)
         };
+        // Canonical Datum JSON: recursively sorted object keys, compact UTF-8.
+        // Datum's ordered collections and typed numeric spellings are preserved.
+        // Hashing and serialization happen after every measured window.
+        let mut canonical_result =
+            serde_json::to_value(&result).map_err(|error| error.to_string())?;
+        canonical_result.sort_all_objects();
+        let result_sha256 = format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&canonical_result).map_err(|error| error.to_string())?
+            )
+        );
         let receipt = serde_json::to_string(&serde_json::json!({
             "program": name,
             "artifact_sha256": artifact,
             "workload_sha256": format!("{:x}", Sha256::digest(source.as_bytes())),
+            "result_sha256": result_sha256,
+            "observe": observe,
             "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
             "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
             "debug_assertions": cfg!(debug_assertions),
@@ -543,7 +561,7 @@ fn main() -> Result<(), String> {
             std::fs::write(&path, text).map_err(|error| format!("{path:?}: {error}"))?;
             println!("{}", path.display());
         }
-        Mode::Guest(dir) => guest.write(dir),
+        Mode::Guest(dir) => guest.write(dir)?,
     }
     Ok(())
 }
@@ -754,20 +772,24 @@ impl Guest {
         clippy::disallowed_methods,
         reason = "benchmark report: it writes its files where its argument says and names them"
     )]
-    fn write(&self, dir: &Path) {
+    fn write(&self, dir: &Path) -> Result<(), String> {
         let mut folded = String::new();
         let mut symbols_tsv = String::from(
             "program\tframe\tkind\tself_samples\tinclusive_samples\tself_share\tinclusive_share\tfunction\tsite\n",
         );
         let mut statements_tsv = String::from("program\tcode\tstatement_site\tsamples\n");
         let mut completeness_tsv = String::from(
-            "program\tseconds\truns\tticks\taccepted\tinactive\tparked\tlost_to_races\tmissed\tunknown_phase\traces\ttruncated\tunresolved\tinterpret\tnative\tformula\tcollect\tadds_up\n",
+            "program\tseconds\truns\tticks\taccepted\tinactive\tparked\tlost_to_races\tmissed\tunknown_phase\traces\ttruncated\tunresolved\tinterpret\tnative\tformula\tcollect\tadds_up\tpopulation\n",
         );
         for (name, profile, symbols, took, runs) in &self.profiles {
             folded.push_str(&profile.folded(Some(name), symbols));
             let counts = profile.completeness();
-            let accepted = counts.accepted.max(1) as f64;
-            for time in profile.symbol_times(symbols) {
+            let accepted = counts.accepted as f64;
+            for time in profile
+                .symbol_times(symbols)
+                .into_iter()
+                .filter(|_| counts.accepted > 0)
+            {
                 let (kind, function, site) = describe(&time.frame, symbols);
                 let _ = writeln!(
                     symbols_tsv,
@@ -784,7 +806,7 @@ impl Guest {
             }
             let _ = writeln!(
                 completeness_tsv,
-                "{name}\t{:.3}\t{runs}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{name}\t{:.3}\t{runs}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 took.as_secs_f64(),
                 counts.ticks,
                 counts.accepted,
@@ -801,6 +823,11 @@ impl Guest {
                 counts.formula,
                 counts.collect,
                 counts.adds_up(),
+                if counts.accepted == 0 {
+                    "insufficient"
+                } else {
+                    "diagnostic_wall_residency"
+                },
             );
         }
         for (file, text) in [
@@ -813,6 +840,17 @@ impl Guest {
             std::fs::write(&path, text).unwrap_or_else(|error| panic!("{path:?}: {error}"));
             println!("{}", path.display());
         }
+        if self
+            .profiles
+            .iter()
+            .any(|(_, profile, _, _, _)| profile.completeness().accepted == 0)
+        {
+            return Err(
+                "insufficient guest population: zero accepted samples; raw diagnostics retained"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 }
 

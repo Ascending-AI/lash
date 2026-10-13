@@ -6,9 +6,17 @@ warmups precede the timed window. Each raw sample names its iteration, run and
 start-plus-run nanoseconds, allocation and reallocation call counts, and charge.
 Machine destruction and receipt construction follow the window. The receipt
 names the source SHA256, executable SHA256, actual build compiler and flags,
-allocator, fixed/adaptive iteration mode and split observer state. Means remain
+allocator, fixed/adaptive iteration mode, split state and `observe` (`nothing`,
+`work` or `context`). `result_sha256` hashes the result Datum's compact UTF-8
+JSON with recursively sorted object keys; ordered collections and typed numeric
+spellings are preserved. Hashing happens outside the measured windows. Means remain
 labelled diagnostic means. `run_calls` counts charge-sliced calls, not operations
-or exclusive CPU. Split observations cannot enter the ordinary timing history.
+or exclusive CPU. `split_*_wall_share` columns are diagnostic shares of the
+charge-sliced run with exports between steps, which changes dispatch geometry
+and perturbs execution. They are neither exact inclusive CPU shares nor shares
+of the ordinary unsplit run. Split and observed runs cannot enter ordinary
+comparison or timing history; the maintained caller rejects a nonempty
+`KERNEL_PERF_OBSERVE` before starting a process.
 
 Unknown, empty, partially matched and refused selections exit nonzero. The
 maintained caller requires exactly one complete row per selected process and
@@ -40,11 +48,15 @@ Change the current executable for a change comparison. Pairs match recorded
 kernel rounds; these are temporally separate processes, not simultaneous runs.
 `summarize.py <baseline> <current>` reproduces the table offline. The committed
 `crates/lash-perf/fixtures/kernel-baseline.json` records all 29 workloads on the
-implementation host. It is an example baseline, not a universal timing budget.
+implementation host. It is an archived example, not a universal timing budget;
+it predates result/Observe identity and is refused by current readers. Record
+a fresh local baseline to compare current receipts.
 A different host, workload, geometry, compiler, allocator or build configuration
 refuses comparison; record an explicit local baseline instead. Artifact hashes
-are evidence and can differ when comparing changes. Results and charge remain
-raw records, and charge or allocation movement appears as an integer delta.
+are evidence and can differ when comparing changes. Missing identities, result
+digest mismatches and zero-sample populations refuse before comparison or
+history mutation, including cached history. Charge or allocation movement
+appears as an integer delta.
 
 The existing Performance workflow records all workloads, retains receipts and
 feeds `lash-perf kernel-history` before saving the existing history cache. Its
