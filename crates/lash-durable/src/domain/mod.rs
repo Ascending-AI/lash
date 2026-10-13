@@ -33,6 +33,9 @@ pub mod graph;
 pub mod graph_commit;
 mod keys;
 pub mod namespace_value;
+/// Persistent-heap page publication, leases and retirement (FIG-6195):
+/// declared ahead of the cutover, implemented by nothing yet.
+pub mod pages;
 pub mod processes;
 pub mod prompts;
 pub mod run_records;

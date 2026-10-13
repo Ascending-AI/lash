@@ -46,6 +46,9 @@ pub mod node;
 pub mod refusal;
 pub mod registry;
 pub mod roots;
+/// The persistent heap's staging spool and candidate manifest (FIG-6195):
+/// declared ahead of the cutover, implemented by nothing yet.
+pub mod stage;
 #[cfg(any(test, feature = "testing"))]
 pub mod vectors;
 
