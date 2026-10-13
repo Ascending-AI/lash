@@ -1,5 +1,10 @@
 //! Host policy for server-to-client MCP requests in the workbench.
 
+#![allow(
+    deprecated,
+    reason = "this host retains sampling and roots during the MCP deprecation window"
+)]
+
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -10,11 +15,10 @@ use lash::direct::{
     NonNegativeFiniteF64,
 };
 use lash::mcp::{
-    CreateElicitationOutcome, CreateElicitationRequestParams, CreateMessageOutcome,
-    ElicitationAction, ElicitationCapability, FormElicitationCapability, McpElicitationHandler,
-    McpElicitationRequest, McpProtocolError, McpRootsProvider, McpRootsRequest, McpSamplingHandler,
-    McpSamplingRequest, McpUrlElicitationComplete, Root, SamplingMessage, SamplingMessageContent,
-    UrlElicitationCapability,
+    CreateElicitationOutcome, CreateMessageOutcome, ElicitationAction, ElicitationCapability,
+    FormElicitationCapability, McpElicitationHandler, McpElicitationParams, McpElicitationRequest,
+    McpProtocolError, McpRootsProvider, McpRootsRequest, McpSamplingHandler, McpSamplingRequest,
+    Root, SamplingMessage, SamplingMessageContentBlock, UrlElicitationCapability,
 };
 use lash::provider::{LlmResponse, ProviderHandle};
 use rmcp::model::Role;
@@ -67,7 +71,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
             let mut parts = Vec::new();
             for content in message.content.iter() {
                 match content {
-                    SamplingMessageContent::Text(text) => {
+                    SamplingMessageContentBlock::Text(text) => {
                         parts.push(DirectPart::Text(text.text.clone()));
                     }
                     _ => {
@@ -153,10 +157,9 @@ pub struct DemoElicitationHandler;
 #[async_trait]
 impl McpElicitationHandler for DemoElicitationHandler {
     fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability {
-            form: Some(FormElicitationCapability::default()),
-            url: Some(UrlElicitationCapability::default()),
-        }
+        ElicitationCapability::new()
+            .with_form(FormElicitationCapability::default())
+            .with_url(UrlElicitationCapability::default())
     }
 
     async fn create_elicitation(
@@ -173,7 +176,7 @@ impl McpElicitationHandler for DemoElicitationHandler {
             return Ok(CreateElicitationOutcome::new(ElicitationAction::Decline));
         }
         match request.params {
-            CreateElicitationRequestParams::FormElicitationParams {
+            McpElicitationParams::Form {
                 message,
                 requested_schema,
                 ..
@@ -182,7 +185,12 @@ impl McpElicitationHandler for DemoElicitationHandler {
                 // from a fixed book keyed by the prompt and the field. A
                 // question the book has not read is declined, never guessed.
                 let mut content = Map::new();
-                for name in requested_schema.properties.keys() {
+                for name in requested_schema
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .into_iter()
+                    .flat_map(|properties| properties.keys())
+                {
                     let Some(answer) = answer_book(message, name) else {
                         eprintln!(
                             "workbench has no answer on file for MCP form field `{name}` \
@@ -205,30 +213,17 @@ impl McpElicitationHandler for DemoElicitationHandler {
                     }
                 }
             }
-            CreateElicitationRequestParams::UrlElicitationParams {
-                message,
-                url,
-                elicitation_id,
-                ..
-            } => {
+            McpElicitationParams::Url { message, url, .. } => {
                 let approved = message == "Approve the workbench MCP demo in the browser"
-                    && url == "https://example.invalid/workbench/approval"
-                    && !elicitation_id.is_empty();
+                    && url == "https://example.invalid/workbench/approval";
                 Ok(CreateElicitationOutcome::new(if approved {
                     ElicitationAction::Accept
                 } else {
                     ElicitationAction::Decline
                 }))
             }
+            _ => Ok(CreateElicitationOutcome::new(ElicitationAction::Decline)),
         }
-    }
-
-    async fn url_elicitation_complete(&self, notification: McpUrlElicitationComplete<'_>) {
-        eprintln!(
-            "workbench MCP URL elicitation completed: server={}, elicitation_id={}",
-            notification.context.server_name(),
-            notification.elicitation_id
-        );
     }
 }
 

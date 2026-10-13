@@ -4,6 +4,11 @@
 //! how elicitation is presented, and which workspace roots are visible are all
 //! decisions made by the embedding host through these dyn-compatible seams.
 
+#![allow(
+    deprecated,
+    reason = "FIG-6177 retains existing sampling and roots during the MCP deprecation window"
+)]
+
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,28 +16,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use rmcp::ClientHandler;
 use rmcp::model::{
-    ClientCapabilities, ClientInfo, CreateElicitationRequestParams, CreateElicitationResult,
-    CreateMessageRequestParams, CreateMessageResult, ElicitationAction, ElicitationCapability,
-    ElicitationResponseNotificationParam, ErrorCode, ErrorData, Implementation, ListRootsResult,
-    ProtocolVersion, Root, RootsCapabilities, SamplingCapability,
+    ClientCapabilities, ClientConfig, CreateMessageRequestParams, CreateMessageResult,
+    ElicitResult, ElicitationAction, ElicitationCapability, ErrorCode, ErrorData, Implementation,
+    ListRootsResult, ProtocolVersion, Root, RootsCapabilities, SamplingCapability,
 };
-use rmcp::service::{NotificationContext, Peer, RequestContext, RoleClient};
+use rmcp::service::{NotificationContext, RequestContext, RoleClient};
 use serde_json::Value;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-/// MCP protocol revision used by the client handshake.
-///
-/// This is the revision targeted by the workspace's pinned `rmcp` release and
-/// is the first pinned revision here that includes sampling, elicitation, and
-/// roots together (including URL elicitation).
-pub const MCP_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
-
-#[async_trait]
-pub(crate) trait McpToolListChangedHandler: Send + Sync {
-    async fn refresh_tools(&self, peer: Peer<RoleClient>);
-}
+/// The sole supported MCP revision. Startup uses `server/discover`; requests
+/// carry their protocol revision, client identity and capabilities in `_meta`.
+pub const MCP_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2026_07_28;
 
 /// Per-request MCP host context.
 ///
@@ -71,9 +67,57 @@ pub struct McpSamplingRequest<'a> {
     pub context: &'a McpRequestContext,
 }
 
+/// Elicitation payload for MCP 2026-07-28. URL interactions resume by retrying
+/// the originating request with its opaque requestState, with no completion ID.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum McpElicitationParams {
+    Form {
+        message: String,
+        #[serde(rename = "requestedSchema")]
+        requested_schema: Value,
+    },
+    Url {
+        message: String,
+        url: String,
+    },
+}
+
+impl<'de> serde::Deserialize<'de> for McpElicitationParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Payload {
+            mode: Option<String>,
+            message: String,
+            requested_schema: Option<Value>,
+            url: Option<String>,
+        }
+        let payload = Payload::deserialize(deserializer)?;
+        // The current specification defaults an omitted mode to form, even
+        // when only 2026-07-28 is supported. Both spellings use this decoder.
+        match payload.mode.as_deref().unwrap_or("form") {
+            "form" => Ok(Self::Form {
+                message: payload.message,
+                requested_schema: payload
+                    .requested_schema
+                    .ok_or_else(|| serde::de::Error::missing_field("requestedSchema"))?,
+            }),
+            "url" => Ok(Self::Url {
+                message: payload.message,
+                url: payload
+                    .url
+                    .ok_or_else(|| serde::de::Error::missing_field("url"))?,
+            }),
+            mode => Err(serde::de::Error::unknown_variant(mode, &["form", "url"])),
+        }
+    }
+}
+
 pub struct McpElicitationRequest<'a> {
     /// Protocol request payload.
-    pub params: &'a CreateElicitationRequestParams,
+    pub params: &'a McpElicitationParams,
     /// Sealed request context supplied by Lash.
     pub context: &'a McpRequestContext,
     validator: Option<&'a jsonschema::Validator>,
@@ -85,17 +129,13 @@ impl McpElicitationRequest<'_> {
     /// than returning a malformed answer to Lash.
     pub fn validate_response(
         &self,
-        response: &CreateElicitationResult,
+        response: &ElicitResult,
     ) -> Result<(), McpElicitationValidationError> {
         validate_elicitation_response(self.params, response, self.validator)
     }
 
-    pub fn accept(
-        &self,
-        content: Value,
-    ) -> Result<CreateElicitationResult, McpElicitationValidationError> {
-        let response =
-            CreateElicitationResult::new(ElicitationAction::Accept).with_content(content);
+    pub fn accept(&self, content: Value) -> Result<ElicitResult, McpElicitationValidationError> {
+        let response = ElicitResult::new(ElicitationAction::Accept).with_content(content);
         self.validate_response(&response)?;
         Ok(response)
     }
@@ -104,29 +144,6 @@ impl McpElicitationRequest<'_> {
 pub struct McpRootsRequest<'a> {
     /// Sealed request context supplied by Lash.
     pub context: &'a McpRequestContext,
-}
-
-/// Context for a server notification routed to an MCP host handler.
-pub struct McpNotificationContext {
-    server_name: String,
-}
-
-impl McpNotificationContext {
-    fn new(server_name: String) -> Self {
-        Self { server_name }
-    }
-
-    /// Configured name of the MCP server that issued this notification.
-    pub fn server_name(&self) -> &str {
-        &self.server_name
-    }
-}
-
-pub struct McpUrlElicitationComplete<'a> {
-    /// Identifier from the original URL elicitation request.
-    pub elicitation_id: &'a str,
-    /// Sealed notification context supplied by Lash.
-    pub context: &'a McpNotificationContext,
 }
 
 /// A host elicitation answer did not conform to the requested MCP schema.
@@ -175,18 +192,15 @@ pub trait McpElicitationHandler: Send + Sync + 'static {
     /// when the factory builds.
     ///
     /// Returning an empty capability is invalid: an installed handler must
-    /// advertise at least form or URL elicitation honestly. Advertising URL
-    /// mode also promises a meaningful implementation of
-    /// [`url_elicitation_complete`](Self::url_elicitation_complete).
+    /// advertise at least form or URL elicitation honestly. URL interactions
+    /// return their result through `create_elicitation` before the originating
+    /// request is retried.
     fn capability(&self) -> ElicitationCapability;
 
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, ErrorData>;
-
-    /// Observe completion of a previously accepted URL elicitation.
-    async fn url_elicitation_complete(&self, notification: McpUrlElicitationComplete<'_>);
+    ) -> Result<ElicitResult, ErrorData>;
 }
 
 /// Host-owned workspace roots visible to MCP servers.
@@ -210,7 +224,10 @@ pub(crate) struct McpElicitationService {
 }
 
 impl McpHostServices {
-    #[allow(deprecated, reason = "MCP 2025-11-25 still defines sampling and roots")]
+    #[allow(
+        deprecated,
+        reason = "MCP retains sampling and roots during the deprecation window"
+    )]
     pub(crate) fn capabilities(&self) -> ClientCapabilities {
         let mut capabilities = ClientCapabilities::default();
         if self.sampling.is_some() {
@@ -221,15 +238,11 @@ impl McpHostServices {
             .as_ref()
             .map(|service| service.capability.clone());
         if self.roots.is_some() {
-            capabilities.roots = Some(RootsCapabilities {
-                list_changed: Some(true),
-            });
+            let roots = RootsCapabilities::default();
+
+            capabilities.roots = Some(roots);
         }
         capabilities
-    }
-
-    pub(crate) fn has_roots(&self) -> bool {
-        self.roots.is_some()
     }
 }
 
@@ -291,36 +304,64 @@ fn host_tasks_shut_down() -> ErrorData {
 #[derive(Clone)]
 pub(crate) struct LashMcpClientHandler {
     server_name: String,
-    client_info: ClientInfo,
+    client_info: ClientConfig,
     services: McpHostServices,
     request_tasks: Arc<McpHostRequestTasks>,
-    tool_list_changed: Option<Arc<dyn McpToolListChangedHandler>>,
+    tool_changes: Option<Arc<crate::pool::tool_changes::ToolChanges>>,
 }
 
 impl LashMcpClientHandler {
     pub(crate) fn new(server_name: &str, services: McpHostServices) -> Self {
         let implementation = Implementation::new("lash", env!("CARGO_PKG_VERSION"));
-        let client_info = ClientInfo::new(services.capabilities(), implementation)
+        let client_info = ClientConfig::new(services.capabilities(), implementation)
             .with_protocol_version(MCP_PROTOCOL_VERSION);
         Self {
             server_name: server_name.to_string(),
             client_info,
             services,
             request_tasks: Arc::new(McpHostRequestTasks::default()),
-            tool_list_changed: None,
+            tool_changes: None,
         }
     }
 
-    pub(crate) fn with_tool_list_changed_handler(
+    pub(crate) fn with_tool_changes(
         mut self,
-        handler: Arc<dyn McpToolListChangedHandler>,
+        changes: Arc<crate::pool::tool_changes::ToolChanges>,
     ) -> Self {
-        self.tool_list_changed = Some(handler);
+        self.tool_changes = Some(changes);
         self
     }
 
     pub(crate) fn request_tasks(&self) -> Arc<McpHostRequestTasks> {
         Arc::clone(&self.request_tasks)
+    }
+
+    pub(crate) async fn fulfill_elicitation(
+        &self,
+        params: McpElicitationParams,
+        cancellation: CancellationToken,
+    ) -> Result<ElicitResult, ErrorData> {
+        let Some(service) = &self.services.elicitation else {
+            return Err(Self::unavailable("elicitation", "elicitation"));
+        };
+        let handler = Arc::clone(&service.handler);
+        let host_context = McpRequestContext::new(self.server_name.clone(), cancellation);
+        self.request_tasks
+            .run(async move {
+                let validator = compile_elicitation_response_validator(&params)
+                    .map_err(McpElicitationValidationError::into_protocol_error)?;
+                let response = handler
+                    .create_elicitation(McpElicitationRequest {
+                        params: &params,
+                        context: &host_context,
+                        validator: validator.as_ref(),
+                    })
+                    .await?;
+                validate_elicitation_response(&params, &response, validator.as_ref())
+                    .map_err(McpElicitationValidationError::into_protocol_error)?;
+                Ok(response)
+            })
+            .await
     }
 
     fn unavailable(capability: &'static str, handler: &'static str) -> ErrorData {
@@ -333,7 +374,7 @@ impl LashMcpClientHandler {
 }
 
 impl ClientHandler for LashMcpClientHandler {
-    fn get_info(&self) -> ClientInfo {
+    fn get_info(&self) -> ClientConfig {
         self.client_info.clone()
     }
 
@@ -359,34 +400,6 @@ impl ClientHandler for LashMcpClientHandler {
             .await
     }
 
-    async fn create_elicitation(
-        &self,
-        params: CreateElicitationRequestParams,
-        context: RequestContext<RoleClient>,
-    ) -> Result<CreateElicitationResult, ErrorData> {
-        let Some(service) = &self.services.elicitation else {
-            return Err(Self::unavailable("elicitation", "elicitation"));
-        };
-        let handler = Arc::clone(&service.handler);
-        let host_context = McpRequestContext::new(self.server_name.clone(), context.ct);
-        self.request_tasks
-            .run(async move {
-                let validator = compile_elicitation_response_validator(&params)
-                    .map_err(McpElicitationValidationError::into_protocol_error)?;
-                let response = handler
-                    .create_elicitation(McpElicitationRequest {
-                        params: &params,
-                        context: &host_context,
-                        validator: validator.as_ref(),
-                    })
-                    .await?;
-                validate_elicitation_response(&params, &response, validator.as_ref())
-                    .map_err(McpElicitationValidationError::into_protocol_error)?;
-                Ok(response)
-            })
-            .await
-    }
-
     async fn list_roots(
         &self,
         context: RequestContext<RoleClient>,
@@ -408,48 +421,41 @@ impl ClientHandler for LashMcpClientHandler {
             .await
     }
 
-    async fn on_url_elicitation_notification_complete(
+    async fn on_subscriptions_acknowledged(
         &self,
-        params: ElicitationResponseNotificationParam,
-        _context: NotificationContext<RoleClient>,
+        params: rmcp::model::SubscriptionsAcknowledgedNotificationParams,
+        context: NotificationContext<RoleClient>,
     ) {
-        let Some(service) = &self.services.elicitation else {
-            return;
-        };
-        if service.capability.url.is_none() {
-            return;
+        if let Some(changes) = &self.tool_changes {
+            // rmcp 3.5.1 moves envelope extensions before extracting `meta`;
+            // notification metadata therefore remains in the typed extensions.
+            let id = context
+                .extensions
+                .get::<rmcp::model::NotificationMetaObject>()
+                .and_then(|meta| meta.subscription_id());
+            changes.acknowledge(params, id);
         }
-        let handler = Arc::clone(&service.handler);
-        let host_context = McpNotificationContext::new(self.server_name.clone());
-        let _ = self
-            .request_tasks
-            .run(async move {
-                handler
-                    .url_elicitation_complete(McpUrlElicitationComplete {
-                        elicitation_id: &params.elicitation_id,
-                        context: &host_context,
-                    })
-                    .await;
-                Ok(())
-            })
-            .await;
     }
 
     async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
-        if let Some(handler) = &self.tool_list_changed {
-            handler.refresh_tools(context.peer).await;
+        if let Some(changes) = &self.tool_changes {
+            let id = context
+                .extensions
+                .get::<rmcp::model::NotificationMetaObject>()
+                .and_then(|meta| meta.subscription_id());
+            changes.changed(id);
         }
     }
 }
 
 fn validate_elicitation_response(
-    request: &CreateElicitationRequestParams,
-    response: &CreateElicitationResult,
+    request: &McpElicitationParams,
+    response: &ElicitResult,
     validator: Option<&jsonschema::Validator>,
 ) -> Result<(), McpElicitationValidationError> {
     match response.action {
         ElicitationAction::Accept => match request {
-            CreateElicitationRequestParams::FormElicitationParams { .. } => {
+            McpElicitationParams::Form { .. } => {
                 let content = response.content.as_ref().ok_or_else(|| {
                     McpElicitationValidationError::new(
                         "an accepted form elicitation must contain an answer",
@@ -468,7 +474,7 @@ fn validate_elicitation_response(
                 }
                 Ok(())
             }
-            CreateElicitationRequestParams::UrlElicitationParams { .. } => {
+            McpElicitationParams::Url { .. } => {
                 if response.content.is_some() {
                     return Err(McpElicitationValidationError::new(
                         "an accepted URL elicitation must not contain form content",
@@ -485,27 +491,26 @@ fn validate_elicitation_response(
             }
             Ok(())
         }
+        _ => Err(McpElicitationValidationError::new(
+            "unsupported elicitation action",
+        )),
     }
 }
 
 fn compile_elicitation_response_validator(
-    request: &CreateElicitationRequestParams,
+    request: &McpElicitationParams,
 ) -> Result<Option<jsonschema::Validator>, McpElicitationValidationError> {
-    let CreateElicitationRequestParams::FormElicitationParams {
+    let McpElicitationParams::Form {
         requested_schema, ..
     } = request
     else {
         return Ok(None);
     };
-    let schema = serde_json::to_value(requested_schema).map_err(|error| {
-        McpElicitationValidationError::new(format!(
-            "requested schema could not be compiled: {error}"
-        ))
-    })?;
+    let schema = requested_schema;
     jsonschema::options()
-        .with_draft(jsonschema::Draft::Draft7.detect(&schema))
+        .with_draft(jsonschema::Draft::Draft202012.detect(schema))
         .should_validate_formats(true)
-        .build(&schema)
+        .build(schema)
         .map(Some)
         .map_err(|error| {
             McpElicitationValidationError::new(format!(

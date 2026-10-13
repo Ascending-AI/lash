@@ -15,6 +15,12 @@ pub enum McpError {
     Io(#[from] std::io::Error),
     #[error("invalid MCP JSON message: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("MCP server `{server}` requires {expected}, but offered {offered:?}")]
+    UnsupportedProtocolRevision {
+        server: String,
+        expected: rmcp::model::ProtocolVersion,
+        offered: Vec<rmcp::model::ProtocolVersion>,
+    },
     #[error("MCP protocol error: {0}")]
     Protocol(String),
     #[error("MCP startup timed out for `{server}` after {timeout_ms}ms")]
@@ -100,13 +106,21 @@ pub struct McpInvalidLine {
 pub struct McpStartupFailure {
     pub message: String,
     pub observation: McpStartupObservation,
+    pub protocol_refusal: Option<McpProtocolRevisionRefusal>,
+}
+
+/// Typed revision mismatch retained when an unavailable server stays configured.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpProtocolRevisionRefusal {
+    pub expected: rmcp::model::ProtocolVersion,
+    pub offered: Vec<rmcp::model::ProtocolVersion>,
 }
 
 /// Evidence from one startup attempt, retained after its bounded cleanup.
 #[derive(Clone, Debug)]
 pub struct McpStartupObservation {
     pub peer: McpPeer,
-    /// Runtime-clock deadline of the phase that failed (initialize or discovery).
+    /// Runtime-clock deadline of the phase that failed (discover or discovery).
     pub deadline: tokio::time::Instant,
     pub timeout_ms: u64,
     pub exit: McpExitObservation,

@@ -17,9 +17,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout, timeout_at};
 
 use super::admission;
-use super::{
-    McpEntry, McpServerFault, McpServerHealth, McpToolListRefresh, PublishedService, import_tools,
-};
+use super::{McpEntry, McpServerFault, McpServerHealth, PublishedService, import_tools};
 use crate::config::McpShutdownPolicy;
 use crate::diagnostics::StartupDiagnostics;
 use crate::error::McpError;
@@ -56,7 +54,6 @@ pub(super) struct LifecycleActor {
     reconnect_backoff: Duration,
     reconnect_attempts: u64,
     reconnect_at: Option<Instant>,
-    keepalive_at: Option<Instant>,
     finished: bool,
 }
 
@@ -74,9 +71,6 @@ enum CommandPhase {
     Connected {
         generation: u64,
     },
-    Probe {
-        generation: u64,
-    },
     Reaping,
     #[cfg(test)]
     TestPause,
@@ -87,8 +81,6 @@ impl CommandPhase {
         matches!(
             self,
             Self::Connected {
-                generation: current
-            } | Self::Probe {
                 generation: current
             } if current == generation
         )
@@ -162,6 +154,15 @@ async fn poll_refresh(refresh: &mut Option<CatalogRefresh>) -> CatalogRefreshRes
     }
 }
 
+async fn subscription_ended(
+    subscription: &mut Option<super::tool_changes::ToolSubscription>,
+) -> Result<rmcp::model::ServerResult, rmcp::ServiceError> {
+    match subscription {
+        Some(subscription) => subscription.waiting.as_mut().await,
+        None => pending().await,
+    }
+}
+
 struct Connection {
     cancellation: rmcp::service::RunningServiceCancellationToken,
     request_tasks: Arc<crate::host::McpHostRequestTasks>,
@@ -169,6 +170,7 @@ struct Connection {
     child: Option<StdioChildGuard>,
     stdio_close_cause: Option<StdioCloseCause>,
     refresh: Option<CatalogRefresh>,
+    subscription: Option<super::tool_changes::ToolSubscription>,
 }
 
 /// The transport's recorded read cause beats rmcp's generic quit reason: an
@@ -209,6 +211,7 @@ impl Connection {
         // Dropping the actor-owned future cancels discovery and any paused
         // publication before transport or process cleanup begins.
         self.refresh = None;
+        self.subscription = None;
         if let Some(child) = self.child.as_mut() {
             child.begin_bounded_cleanup();
         }
@@ -295,7 +298,7 @@ impl LifecycleActor {
         match command {
             LifecycleCommand::Establish { reply } => match phase {
                 CommandPhase::Idle => CommandAction::Establish { reply },
-                CommandPhase::Connected { .. } | CommandPhase::Probe { .. } => {
+                CommandPhase::Connected { .. } => {
                     let _ = reply.send(Ok(()));
                     CommandAction::Continue
                 }
@@ -353,7 +356,6 @@ impl LifecycleActor {
         active_pid: Arc<AtomicU32>,
         config: &crate::config::McpServerConfig,
     ) -> Self {
-        let keepalive_interval = config.liveness_probe_interval();
         Self {
             entry,
             commands,
@@ -367,8 +369,6 @@ impl LifecycleActor {
             reconnect_backoff: config.reconnect_initial_backoff(),
             reconnect_attempts: 0,
             reconnect_at: None,
-            keepalive_at: (!keepalive_interval.is_zero())
-                .then(|| Instant::now() + keepalive_interval),
         }
     }
 
@@ -380,7 +380,6 @@ impl LifecycleActor {
     async fn run_inner(&mut self) {
         loop {
             let reconnect_at = self.reconnect_at;
-            let keepalive_at = self.keepalive_at;
             tokio::select! {
                 command = self.commands.recv() => {
                     match Self::reduce_command(CommandPhase::Idle, command, "") {
@@ -420,10 +419,7 @@ impl LifecycleActor {
                         }
                     }
                 }
-                () = sleep_until(keepalive_at), if keepalive_at.is_some() => {
-                    self.advance_keepalive_deadline();
-                    self.rearm_exhausted_reconnect();
-                }
+
             }
         }
     }
@@ -447,13 +443,13 @@ impl LifecycleActor {
         let server_name = entry.server_name.clone();
         let config = entry.config.clone();
         let host_services = entry.host_services.clone();
+        let tool_changes = Arc::new(super::tool_changes::ToolChanges::new(
+            Arc::downgrade(&entry),
+            generation,
+        ));
         let shutdown_requested = Arc::clone(&entry.health);
         let startup_timeout = config.startup_timeout();
         let diagnostics = StartupDiagnostics::new(&config);
-        let refresh = Arc::new(McpToolListRefresh {
-            entry: Arc::downgrade(&entry),
-            service_generation: generation,
-        });
         #[cfg(test)]
         let never_finish_child_reap = entry.never_finish_child_reap.load(Ordering::SeqCst);
         #[cfg(test)]
@@ -469,7 +465,7 @@ impl LifecycleActor {
             &config,
             diagnostics.clone(),
             host_services,
-            refresh,
+            Arc::clone(&tool_changes),
             Arc::clone(&self.active_pid),
             shutdown_requested,
         ) {
@@ -550,6 +546,9 @@ impl LifecycleActor {
         };
 
         let peer = running.peer().clone();
+        peer.set_response_cache_config(rmcp::service::ClientCacheConfig::disabled())
+            .await;
+        let handler = running.service().clone();
         let mut connection = Connection {
             cancellation: running.cancellation_token(),
             request_tasks: running.service().request_tasks(),
@@ -557,6 +556,7 @@ impl LifecycleActor {
             child: stdio_child.take(),
             stdio_close_cause,
             refresh: None,
+            subscription: None,
         };
         if self.pause_mid_establish().await {
             connection.cancel_and_reap(self, &server_name).await;
@@ -566,17 +566,33 @@ impl LifecycleActor {
 
         let deadline = Instant::now() + startup_timeout;
         diagnostics.observation.lock_recover().deadline = deadline;
-        let discovery = timeout_at(
-            deadline,
-            super::catalog::discover_tools(&peer, self.data_limits),
-        );
+        let limits = self.data_limits;
+        let discovery = timeout_at(deadline, async {
+            let tools = super::catalog::discover_tools(&peer, limits).await?;
+            let subscription = if peer.peer_info().is_some_and(|info| {
+                info.capabilities
+                    .tools
+                    .as_ref()
+                    .is_some_and(|tools| tools.list_changed == Some(true))
+            }) {
+                Some(tool_changes.subscribe(&peer).await.map_err(|error| {
+                    McpError::Protocol(format!("MCP tools subscription failed: {error}"))
+                })?)
+            } else {
+                None
+            };
+            Ok::<_, McpError>((tools, subscription))
+        });
         tokio::pin!(discovery);
         let tools = loop {
             tokio::select! {
                 biased;
                 result = &mut discovery => {
                     break match result {
-                        Ok(Ok(tools)) => tools,
+                        Ok(Ok((tools, subscription))) => {
+                            connection.subscription = subscription;
+                            tools
+                        },
                         Ok(Err(error)) => {
                             let error = McpError::Protocol(format!("list_tools failed: {error}"));
                             self.record_mcp_error(&error);
@@ -679,6 +695,7 @@ impl LifecycleActor {
         self.published.send_replace(Some(Arc::new(PublishedService {
             peer: peer.clone(),
             generation,
+            handler,
         })));
         send_result(initial_reply, Ok(()));
 
@@ -690,8 +707,13 @@ impl LifecycleActor {
         tokio::pin!(healthy);
         let mut healthy_observed = false;
         loop {
-            let keepalive_at = self.keepalive_at;
             tokio::select! {
+                end = subscription_ended(&mut connection.subscription), if connection.subscription.is_some() => {
+                    self.unpublish(generation);
+                    self.record_error(format!("MCP tool subscription ended: {end:?}"));
+                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
+                    return if shutdown { ConnectionExit::Shutdown } else { ConnectionExit::Disconnected };
+                }
                 result = poll_refresh(&mut connection.refresh), if connection.refresh.is_some() => {
                     connection.refresh = None;
                     let Ok(result) = result else {
@@ -814,125 +836,7 @@ impl LifecycleActor {
                         );
                     }
                 }
-                () = sleep_until(keepalive_at), if keepalive_at.is_some() => {
-                    self.advance_keepalive_deadline();
-                    let Some(entry) = self.entry.upgrade() else {
-                        self.unpublish(generation);
-                        let _ = connection.cancel_and_reap(self, &server_name).await;
-                        return ConnectionExit::Shutdown;
-                    };
-                    if !entry.peer_supports_ping(&peer) {
-                        self.keepalive_at = None;
-                        continue;
-                    }
-                    let failure = if peer.is_transport_closed() {
-                        Some("transport closed before liveness probe".to_string())
-                    } else {
-                        let mut probe = Box::pin(entry.probe_peer(&peer));
-                        loop {
-                            #[cfg(test)]
-                            pause_probe_select_if_injected(&entry).await;
-                            tokio::select! {
-                                biased;
-                                () = &mut healthy, if !healthy_observed => {
-                                    healthy_observed = true;
-                                    if self.current_generation() == Some(generation) {
-                                        self.reconnect_backoff = self.entry.upgrade().map_or(
-                                            self.reconnect_backoff,
-                                            |entry| entry.config.reconnect_initial_backoff(),
-                                        );
-                                    }
-                                }
-                                reason = &mut connection.waiting => {
-                                    let cause = format!("MCP server `{server_name}` service quit: {reason:?}");
-                                    drop(probe);
-                                    drop(entry);
-                                    self.record_error(cause);
-                                    self.unpublish(generation);
-                                    let shutdown = connection.cancel_and_reap(self, &server_name).await;
-                                    self.maybe_panic_on_service_quit();
-                                    return if shutdown {
-                                        ConnectionExit::Shutdown
-                                    } else {
-                                        ConnectionExit::Disconnected
-                                    };
-                                }
-                                result = &mut probe => break result.err().map(|error| error.to_string()),
-                                command = self.commands.recv() => match Self::reduce_command(
-                                    CommandPhase::Probe { generation },
-                                    command,
-                                    &server_name,
-                                ) {
-                                    CommandAction::Shutdown => {
-                                        self.begin_shutdown();
-                                        drop(probe);
-                                        drop(entry);
-                                        self.unpublish(generation);
-                                        let _ = connection.cancel_and_reap(self, &server_name).await;
-                                        return ConnectionExit::Shutdown;
-                                    }
-                                    CommandAction::Disconnect { cause } => {
-                                        drop(probe);
-                                        drop(entry);
-                                        self.unpublish(generation);
-                                        self.record_error(cause);
-                                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
-                                        return if shutdown {
-                                            ConnectionExit::Shutdown
-                                        } else {
-                                            ConnectionExit::Disconnected
-                                        };
-                                    }
-                                    CommandAction::CallSucceeded => {
-                                        entry.consecutive_timeouts.store(0, Ordering::SeqCst);
-                                        self.set_health(McpServerHealth::Connected { catalog_error: None });
-                                    }
-                                    CommandAction::CallTimedOut { reply } => {
-                                        let consecutive = entry.consecutive_timeouts.fetch_add(1, Ordering::SeqCst) + 1;
-                                        let threshold = entry.config.consecutive_timeouts_before_disconnect();
-                                        if consecutive < threshold {
-                                            let _ = reply.send(None);
-                                            continue;
-                                        }
-                                        let cause = format!(
-                                            "MCP server `{server_name}` reached {consecutive} consecutive call timeouts"
-                                        );
-                                        let _ = reply.send(Some(consecutive));
-                                        drop(probe);
-                                        drop(entry);
-                                        self.unpublish(generation);
-                                        self.record_error(cause);
-                                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
-                                        return if shutdown {
-                                            ConnectionExit::Shutdown
-                                        } else {
-                                            ConnectionExit::Disconnected
-                                        };
-                                    }
-                                    CommandAction::Continue => {}
-                                    CommandAction::Establish { .. } => {
-                                        unreachable!("probe reducer returned an establish action")
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    #[cfg(test)]
-                    entry.probe_completed.notify_one();
-                    drop(entry);
-                    if let Some(failure) = failure {
-                        self.unpublish(generation);
-                        self.record_error(format!(
-                            "MCP server `{server_name}` background liveness probe failed: {failure}"
-                        ));
-                        let shutdown = connection.cancel_and_reap(self, &server_name).await;
-                        return if shutdown {
-                            ConnectionExit::Shutdown
-                        } else {
-                            ConnectionExit::Disconnected
-                        };
-                    }
-                }
+
             }
         }
     }
@@ -1021,28 +925,6 @@ impl LifecycleActor {
         self.reconnect_backoff = self.reconnect_backoff.saturating_mul(2).min(max);
     }
 
-    fn rearm_exhausted_reconnect(&mut self) {
-        if self.reconnect_at.is_none()
-            && self.entry.upgrade().is_some_and(|entry| {
-                entry.config.reconnect_max_attempts() != crate::ReconnectAttempts::Disabled
-                    && matches!(
-                        *entry.health.read_recover(),
-                        McpServerHealth::Exhausted { .. }
-                    )
-            })
-        {
-            self.reconnect_attempts = 0;
-            self.schedule_reconnect();
-        }
-    }
-
-    fn advance_keepalive_deadline(&mut self) {
-        let interval = self.entry.upgrade().map_or(Duration::ZERO, |entry| {
-            entry.config.liveness_probe_interval()
-        });
-        self.keepalive_at = (!interval.is_zero()).then(|| Instant::now() + interval);
-    }
-
     fn set_health(&self, health: McpServerHealth) {
         if let Some(entry) = self.entry.upgrade() {
             *entry.health.write_recover() = health;
@@ -1072,6 +954,15 @@ impl LifecycleActor {
             *entry.startup_failure.write_recover() = Some(crate::error::McpStartupFailure {
                 message: error.to_string(),
                 observation: (*observation).clone(),
+                protocol_refusal: match &error {
+                    McpError::UnsupportedProtocolRevision {
+                        expected, offered, ..
+                    } => Some(crate::error::McpProtocolRevisionRefusal {
+                        expected: expected.clone(),
+                        offered: offered.clone(),
+                    }),
+                    _ => None,
+                },
             });
         }
         send_result(reply, Err(error.with_startup_observation(observation)));
@@ -1086,6 +977,7 @@ impl LifecycleActor {
             | McpError::Config(_)
             | McpError::Io(_)
             | McpError::Json(_)
+            | McpError::UnsupportedProtocolRevision { .. }
             | McpError::Protocol(_)
             | McpError::StartupTimeout { .. }
             | McpError::StartupFailure { .. }
@@ -1286,15 +1178,6 @@ async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => pending().await,
-    }
-}
-
-#[cfg(test)]
-async fn pause_probe_select_if_injected(entry: &McpEntry) {
-    let hook = entry.probe_select_hook.write_recover().take();
-    if let Some(hook) = hook {
-        hook.reached.notify_one();
-        hook.release.notified().await;
     }
 }
 

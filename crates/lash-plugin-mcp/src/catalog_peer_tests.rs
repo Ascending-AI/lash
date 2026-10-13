@@ -19,6 +19,7 @@ struct PeerState {
     calls: AtomicUsize,
     stalled: Notify,
     release: Notify,
+    subscription: tokio::sync::Mutex<Option<(Value, tokio::net::tcp::OwnedWriteHalf)>>,
 }
 
 struct HttpPeer {
@@ -48,6 +49,7 @@ impl HttpPeer {
             calls: AtomicUsize::new(0),
             stalled: Notify::new(),
             release: Notify::new(),
+            subscription: tokio::sync::Mutex::new(None),
         });
         let shared = Arc::clone(&state);
         let task = tokio::spawn(async move {
@@ -84,11 +86,15 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
     stream.read_line(&mut line).await.expect("HTTP method");
     let post = line.starts_with("POST ");
     let mut length = 0;
+    let mut headers = BTreeMap::new();
     loop {
         line.clear();
         stream.read_line(&mut line).await.expect("HTTP header");
         if line == "\r\n" || line.is_empty() {
             break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
         }
         if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             length = value.trim().parse().expect("content length");
@@ -103,10 +109,33 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
     let request: Value = serde_json::from_slice(&body).expect("MCP JSON request");
     let id = &request["id"];
     let method = request["method"].as_str().expect("MCP method");
-    let mut content_type = "application/json";
+    assert_eq!(
+        headers.get("mcp-protocol-version").map(String::as_str),
+        Some("2026-07-28")
+    );
+    assert_eq!(headers.get("mcp-method").map(String::as_str), Some(method));
+    assert!(!headers.contains_key("mcp-session-id"));
+    if method == "tools/call" {
+        assert_eq!(
+            headers.get("mcp-name").map(String::as_str),
+            request["params"]["name"].as_str()
+        );
+    }
+    if method == "subscriptions/listen" {
+        let (_, mut writer) = stream.into_inner().into_split();
+        writer.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n").await.unwrap();
+        let ack = format!(
+            "event: message\ndata: {}\n\n",
+            json!({"jsonrpc":"2.0", "method":"notifications/subscriptions/acknowledged", "params":{"notifications":{"toolsListChanged":true},"_meta":{"io.modelcontextprotocol/subscriptionId":id}}})
+        );
+        write_chunk(&mut writer, &ack).await;
+        *state.subscription.lock().await = Some((id.clone(), writer));
+        return;
+    }
+    let content_type = "application/json";
     let body = match method {
-        "initialize" => json!({"jsonrpc":"2.0", "id": id, "result": {
-            "protocolVersion":"2025-11-25", "capabilities":{"tools":{"listChanged":true}},
+        "server/discover" => json!({"jsonrpc":"2.0", "id": id, "result": {
+            "supportedVersions":["2026-07-28"],"resultType":"complete","ttlMs":0,"cacheScope":"private", "capabilities":{"tools":{"listChanged":matches!(state.scenario, Scenario::Storm)}},
             "serverInfo":{"name":"catalog-http-peer","version":"1"},
             "instructions": format!("HTTP guidance generation {}", state.initializations.fetch_add(1, Ordering::SeqCst) + 1)
         }})
@@ -161,12 +190,11 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
             json!({"jsonrpc":"2.0", "id":id, "result":result}).to_string()
         }
         "tools/call" => {
-            content_type = "text/event-stream";
-            let notifications = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n".repeat(100_000);
-            format!(
-                "{notifications}event: message\ndata: {}\n\n",
-                json!({"jsonrpc":"2.0", "id":id, "result":{"content":[{"type":"text","text":"storm sent"}]}})
-            )
+            let mut subscription = state.subscription.lock().await;
+            let (subscription_id, writer) = subscription.as_mut().expect("acknowledged subscription");
+            let notification = format!("event: message\ndata: {}\n\n", json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"_meta":{"io.modelcontextprotocol/subscriptionId":subscription_id}}}));
+            write_chunk(writer, &notification.repeat(100_000)).await;
+            json!({"jsonrpc":"2.0","id":id,"result":{"resultType":"complete","content":[{"type":"text","text":"storm sent"}]}}).to_string()
         }
         _ => String::new(),
     };
@@ -181,6 +209,15 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
     );
     // Shutdown may close a deliberately stalled response's socket.
     let _ = stream.get_mut().write_all(response.as_bytes()).await;
+}
+
+async fn write_chunk(writer: &mut tokio::net::tcp::OwnedWriteHalf, body: &str) {
+    writer
+        .write_all(format!("{:x}\r\n", body.len()).as_bytes())
+        .await
+        .unwrap();
+    writer.write_all(body.as_bytes()).await.unwrap();
+    writer.write_all(b"\r\n").await.unwrap();
 }
 
 #[tokio::test]
@@ -294,7 +331,7 @@ fn guidance_sections(tools: Vec<lash_core::ToolDefinition>) -> Vec<(String, Stri
 
 /// MCP-CUT: server guidance is an admitted catalog resource. Every catalog
 /// the pool advertises pins its server's guidance; a refresh keeps it and a
-/// reconnect captures the new initialize response. The server's section
+/// reconnect captures the new discover response. The server's section
 /// renders exactly the guidance of the catalog a call was offered, and
 /// rendering never contacts the server: every render runs after the pool
 /// has shut down and the server is gone.
@@ -342,7 +379,7 @@ async fn mcp_guidance_renders_the_offered_catalogs_revision_without_the_server()
         assert_eq!(
             guidance_sections(reconnected),
             section("HTTP guidance generation 2"),
-            "a reconnect pins the new initialize response"
+            "a reconnect pins the new discover response"
         );
         assert_eq!(
             guidance_sections(connected),

@@ -40,7 +40,7 @@ impl McpPluginFactoryBuilder {
         self
     }
 
-    /// Supply workspace roots and enable roots-change notifications.
+    /// Supply workspace roots for multi round-trip input requests.
     pub fn roots_provider(mut self, provider: Arc<dyn McpRootsProvider>) -> Self {
         self.host_services.roots = Some(provider);
         self
@@ -127,11 +127,6 @@ impl McpPluginFactory {
     /// The pool clears it when the server connects successfully.
     pub fn startup_failure(&self, server_name: &str) -> Option<crate::error::McpStartupFailure> {
         self.pool.startup_failure(server_name)
-    }
-
-    /// Notify connected servers that the host's current roots changed.
-    pub async fn notify_roots_changed(&self) -> Result<(), McpError> {
-        self.pool.notify_roots_changed().await
     }
 }
 
@@ -510,11 +505,11 @@ mod tests {
     async fn plugin_shutdown_kills_stdio_child_without_drop_and_is_idempotent() {
         let scratch = tempfile::tempdir().expect("tempdir");
         let pid_file = scratch.path().join("mcp.pid");
-        let initialize = json!({
+        let discover = json!({
             "jsonrpc": "2.0",
             "id": 0,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0,"cacheScope":"private",
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "lifecycle", "version": "1.0.0" }
             }
@@ -527,7 +522,6 @@ mod tests {
         let script = "\
             printf '%s\\n' \"$$\" > \"$PID_FILE\"; \
             read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
             read -r _; printf '%s\\n' \"$RESP2\"; \
             cat >/dev/null"
             .to_string();
@@ -547,7 +541,7 @@ mod tests {
                     args: vec!["-c".to_string(), script],
                     env: BTreeMap::from([
                         ("PID_FILE".to_string(), pid_file.display().to_string()),
-                        ("RESP1".to_string(), initialize.to_string()),
+                        ("RESP1".to_string(), discover.to_string()),
                         ("RESP2".to_string(), list.to_string()),
                     ]),
                     cwd: None,

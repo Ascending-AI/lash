@@ -9,7 +9,6 @@ pub(crate) const MCP_BINDING_KEY: &str = "lash.mcp";
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RemoteCompletion {
     Inline,
-    UnsupportedTask,
 }
 
 /// Recorded with K1's manifest. Connection generations and JSON-RPC request
@@ -37,7 +36,7 @@ fn digest(value: &impl Serialize) -> Result<String, McpError> {
 pub(super) fn peer_digest(peer: &Peer<RoleClient>) -> Result<String, McpError> {
     let info = peer
         .peer_info()
-        .ok_or_else(|| McpError::Protocol("MCP initialize identity is unavailable".into()))?;
+        .ok_or_else(|| McpError::Protocol("MCP server identity is unavailable".into()))?;
     digest(&(
         &info.protocol_version,
         &info.server_info,

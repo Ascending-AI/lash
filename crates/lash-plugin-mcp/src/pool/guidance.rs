@@ -1,6 +1,6 @@
 //! MCP server guidance as an admitted catalog resource (ADR 0133).
 //!
-//! Every manifest imported from a service pins the server's initialize
+//! Every manifest imported from a service pins the server's discover
 //! instructions under [`MCP_GUIDANCE_KEY`], so the recorded catalog carries
 //! its own guidance. A call renders the guidance of exactly the catalog it
 //! was offered, a reopened session the guidance it recorded, and rendering
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) const MCP_GUIDANCE_KEY: &str = "lash.mcp.guidance";
 
 /// The guidance an imported manifest pins: its server and the server's
-/// initialize instructions.
+/// discover instructions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PinnedGuidance {
@@ -28,7 +28,7 @@ impl PinnedGuidance {
     }
 }
 
-/// Pin `peer`'s initialize instructions in every manifest of `tools`. A
+/// Pin `peer`'s discover instructions in every manifest of `tools`. A
 /// server without instructions pins nothing.
 pub(super) fn pin_guidance(
     tools: &mut BTreeMap<String, ImportedTool>,

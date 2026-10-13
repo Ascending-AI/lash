@@ -7,7 +7,7 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 lock = threading.Lock()
 behavior = os.environ['BEHAVIOR']
-protocol = os.environ.get('PROTOCOL', '2025-11-25')
+protocol = os.environ.get('PROTOCOL', '2026-07-28')
 log_path = os.environ['LOG_PATH']
 starts_path = os.environ['STARTS_PATH']
 pid_path = os.environ.get('PID_PATH')
@@ -58,9 +58,9 @@ for line in sys.stdin:
         log.write(line)
     message = json.loads(line)
     method = message.get('method')
-    if method == 'initialize' and behavior not in ('hang_initialize', 'exit_on_eof_after_hang_initialize'):
+    if method == 'server/discover' and behavior not in ('hang_discover', 'exit_on_eof_after_hang_discover'):
         send({'jsonrpc': '2.0', 'id': message['id'], 'result': {
-            'protocolVersion': protocol,
+            'supportedVersions': [protocol], 'resultType': 'complete', 'ttlMs': 0, 'cacheScope': 'private',
             'capabilities': {'tools': {}},
             'serverInfo': {'name': 'policy-mock', 'version': '1.0.0'}}})
     elif method == 'tools/list':
@@ -120,10 +120,10 @@ for line in sys.stdin:
             sys.exit(0)
         else:
             threading.Thread(target=run_call, args=(message, call_index), daemon=True).start()
-    elif method == 'ping':
-        if behavior in ('silent_ping', 'success', 'fail_twice_then_success'):
+    elif method == 'fixture/barrier':
+        if behavior in ('success', 'fail_twice_then_success'):
             send({'jsonrpc': '2.0', 'id': message['id'], 'result': {}})
-if behavior in ('ignore_eof', 'exit_on_eof_after_hang_initialize'):
+if behavior in ('ignore_eof', 'exit_on_eof_after_hang_discover'):
     with open(eof_path, 'w', encoding='utf-8') as f:
         f.write('closed')
 if behavior == 'ignore_eof':

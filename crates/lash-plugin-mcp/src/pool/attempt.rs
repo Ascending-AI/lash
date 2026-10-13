@@ -34,9 +34,13 @@ impl McpConnectionPool {
         // The actor publishes a peer/generation snapshot through `watch`.
         // Dispatch clones that cheap handle without awaiting or routing calls
         // through lifecycle coordination.
-        let (peer, service_generation) = {
+        let (peer, service_generation, handler) = {
             match entry.service_snapshot() {
-                Some(service) => (service.peer.clone(), service.generation),
+                Some(service) => (
+                    service.peer.clone(),
+                    service.generation,
+                    service.handler.clone(),
+                ),
                 None => {
                     return McpCallFailure::ServerUnavailable {
                         server: server_name,
@@ -91,53 +95,97 @@ impl McpConnectionPool {
         }
         let mut params = CallToolRequestParams::new(native_name);
         params.arguments = arguments;
-        params.meta = Some(rmcp::model::Meta(serde_json::Map::from_iter([
-            (
-                "lash.dev/tool-call-id".into(),
-                Value::String(context.call_id().to_string()),
-            ),
-            (
-                "lash.dev/tool-attempt".into(),
-                Value::from(context.attempt_number()),
-            ),
-        ])));
-        let mut options = PeerRequestOptions::with_timeout(call_timeout)
-            .with_max_total_timeout(entry.config.call_max_total_timeout());
-        if entry.config.reset_call_timeout_on_progress() {
-            options = options.reset_timeout_on_progress();
-        }
-        let response = match peer
-            .send_cancellable_request(
-                ClientRequest::CallToolRequest(Request::new(params)),
-                options,
-            )
-            .await
-        {
-            Ok(handle) => {
-                let request_id = handle.id.clone();
-                let response = handle.await_response();
-                tokio::pin!(response);
-                if let Some(token) = context.cancellation_token() {
-                    tokio::select! {
-                        biased;
-                        _ = token.cancelled() => {
-                            let reason = "Lash attempt cancelled".to_string();
-                            let _ = peer.send_notification(rmcp::model::CancelledNotification::new(
-                                rmcp::model::CancelledNotificationParam { request_id, reason: Some(reason.clone()) },
-                            ).into()).await;
-                            // Let rmcp finish request cleanup and remove its progress
-                            // watcher. The notification gives no remote termination receipt.
-                            let _ = response.await;
-                            Err(ServiceError::Cancelled { reason: Some(reason) })
+        params.meta = Some(rmcp::model::RequestMetaObject::from(
+            serde_json::Map::from_iter([
+                (
+                    "lash.dev/tool-call-id".into(),
+                    Value::String(context.call_id().to_string()),
+                ),
+                (
+                    "lash.dev/tool-attempt".into(),
+                    Value::from(context.attempt_number()),
+                ),
+            ]),
+        ));
+        let cancellation = context
+            .cancellation_token()
+            .map(tokio_util::sync::CancellationToken::child_token)
+            .unwrap_or_default();
+        let total = entry.config.call_max_total_timeout();
+        let deadline = tokio::time::Instant::now() + total;
+        let rounds = async {
+            for _ in 0..rmcp::model::DEFAULT_MRTR_MAX_ROUNDS {
+                let mut options = PeerRequestOptions::with_timeout(call_timeout)
+                    .with_max_total_timeout(
+                        deadline.saturating_duration_since(tokio::time::Instant::now()),
+                    );
+                if entry.config.reset_call_timeout_on_progress() {
+                    options = options.reset_timeout_on_progress();
+                }
+                let response = match peer
+                    .send_cancellable_request(
+                        ClientRequest::CallToolRequest(Request::new(params.clone())),
+                        options,
+                    )
+                    .await
+                {
+                    Ok(handle) => {
+                        let request_id = handle.id.clone();
+                        let response = handle.await_response();
+                        tokio::pin!(response);
+                        if let Some(token) = context.cancellation_token() {
+                            tokio::select! {
+                                biased;
+                                _ = token.cancelled() => {
+                                    let reason = "Lash attempt cancelled".to_string();
+                                    let _ = peer.send_notification(rmcp::model::CancelledNotification::new(
+                                        rmcp::model::CancelledNotificationParam::new(Some(request_id), Some(reason.clone())),
+                                    ).into()).await;
+                                    // Let rmcp finish request cleanup and remove its progress
+                                    // watcher. The notification gives no remote termination receipt.
+                                    let _ = response.await;
+                                    Err(ServiceError::Cancelled { reason: Some(reason) })
+                                }
+                                result = &mut response => result,
+                            }
+                        } else {
+                            response.await
                         }
-                        result = &mut response => result,
                     }
-                } else {
-                    response.await
+                    Err(err) => Err(err),
+                };
+
+                match response? {
+                    result @ ServerResult::CallToolResult(_) => return Ok(result),
+                    result @ (ServerResult::InputRequiredResult(_)
+                    | ServerResult::CustomResult(_)) => {
+                        let retry = tokio::select! {
+                            biased;
+                            _ = cancellation.cancelled() => return Err(ServiceError::Cancelled { reason: Some("Lash attempt cancelled".into()) }),
+                            retry = tokio::time::timeout_at(deadline, super::round_trip::fulfill(result, &handler, &peer, &cancellation)) => retry.map_err(|_| ServiceError::Timeout { timeout: total })??,
+                        };
+                        params.input_responses = retry.responses;
+                        params.request_state = retry.state;
+                    }
+                    _ => return Err(ServiceError::UnexpectedResponse),
                 }
             }
-            Err(err) => Err(err),
+            Err(ServiceError::McpError(
+                rmcp::model::ErrorData::invalid_params(
+                    "MCP multi round-trip limit exceeded",
+                    Some(serde_json::json!({"max_rounds": rmcp::model::DEFAULT_MRTR_MAX_ROUNDS})),
+                ),
+            ))
         };
+        let response = rounds.await.map_err(|error| match error {
+            ServiceError::Timeout { timeout } if timeout != call_timeout => {
+                ServiceError::Timeout { timeout: total }
+            }
+            error => error,
+        });
+        // MRTR host work observes cancellation on both local cancellation and
+        // the total deadline, including when a host task has been spawned.
+        cancellation.cancel();
 
         match response {
             Ok(ServerResult::CallToolResult(result)) => {
@@ -146,9 +194,7 @@ impl McpConnectionPool {
             }
             Ok(_) => McpCallFailure::UnexpectedResponse.into(),
             Err(ServiceError::Timeout { timeout }) => {
-                entry
-                    .handle_call_timeout(&peer, service_generation, timeout)
-                    .await
+                entry.handle_call_timeout(service_generation, timeout).await
             }
             Err(ServiceError::Cancelled { reason }) => ToolOutcome::cancelled(format!(
                 "MCP tool call on `{server_name}` was cancelled{}",

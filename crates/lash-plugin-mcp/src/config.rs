@@ -10,7 +10,6 @@ use crate::error::McpError;
 const DEFAULT_STARTUP_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS: u64 = 60_000;
 const DEFAULT_CALL_MAX_TOTAL_TIMEOUT_MS: u64 = 600_000;
-const DEFAULT_LIVENESS_PROBE_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT: u64 = 3;
 const DEFAULT_RECONNECT_INITIAL_BACKOFF_MS: u64 = 500;
 const DEFAULT_RECONNECT_MAX_BACKOFF_MS: u64 = 30_000;
@@ -26,10 +25,10 @@ const DEFAULT_CHILD_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReconnectAttempts {
-    /// Never reconnect automatically, including on background keepalive ticks.
+    /// Never reconnect automatically.
     Disabled,
     /// Pause after this many consecutive failed reconnects. A successful
-    /// connection resets the count. Enabled keepalive re-arms a spent budget.
+    /// connection resets the count.
     Finite(NonZeroU64),
     /// Keep reconnecting until shutdown, using the configured backoff.
     #[default]
@@ -68,10 +67,8 @@ fn is_default_child_exit_poll_interval(value: &Duration) -> bool {
 pub enum TimeoutDisconnectPolicy {
     /// A timeout never changes connection state.
     Never,
-    /// Probe the peer with MCP `ping`; disconnect only when the probe fails.
-    #[default]
-    PingProbe,
     /// Disconnect after the configured number of consecutive call timeouts.
+    #[default]
     ConsecutiveTimeouts,
 }
 
@@ -101,10 +98,6 @@ fn default_true() -> bool {
 
 fn default_timeout_disconnect_policy() -> TimeoutDisconnectPolicy {
     TimeoutDisconnectPolicy::default()
-}
-
-fn default_liveness_probe_timeout_ms() -> u64 {
-    DEFAULT_LIVENESS_PROBE_TIMEOUT_MS
 }
 
 fn default_consecutive_timeouts_before_disconnect() -> u64 {
@@ -147,10 +140,6 @@ fn is_default_timeout_disconnect_policy(value: &TimeoutDisconnectPolicy) -> bool
     *value == TimeoutDisconnectPolicy::default()
 }
 
-fn is_default_liveness_probe_timeout_ms(value: &u64) -> bool {
-    *value == DEFAULT_LIVENESS_PROBE_TIMEOUT_MS
-}
-
 fn is_default_consecutive_timeouts_before_disconnect(value: &u64) -> bool {
     *value == DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT
 }
@@ -161,10 +150,6 @@ fn is_default_reconnect_initial_backoff_ms(value: &u64) -> bool {
 
 fn is_default_reconnect_max_backoff_ms(value: &u64) -> bool {
     *value == DEFAULT_RECONNECT_MAX_BACKOFF_MS
-}
-
-fn is_zero(value: &u64) -> bool {
-    *value == 0
 }
 
 mod duration_millis_serde {
@@ -298,20 +283,12 @@ pub struct McpCallPolicy {
         skip_serializing_if = "is_default_timeout_disconnect_policy"
     )]
     pub timeout_disconnect_policy: TimeoutDisconnectPolicy,
-    #[serde(
-        default = "default_liveness_probe_timeout_ms",
-        skip_serializing_if = "is_default_liveness_probe_timeout_ms"
-    )]
-    pub liveness_probe_timeout_ms: u64,
     /// Consecutive idle timeouts allowed before disconnecting.
     #[serde(
         default = "default_consecutive_timeouts_before_disconnect",
         skip_serializing_if = "is_default_consecutive_timeouts_before_disconnect"
     )]
     pub consecutive_timeouts_before_disconnect: u64,
-    /// Background liveness-probe interval; zero disables keepalive.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub liveness_probe_interval_ms: u64,
     /// Initial reconnect backoff ceiling, in milliseconds.
     /// Must be greater than zero and no greater than the maximum ceiling.
     #[serde(
@@ -340,20 +317,17 @@ impl Default for McpCallPolicy {
 
 impl McpCallPolicy {
     /// Standard preset: 60 s idle timeout, 600 s total cap, progress resets
-    /// idle time, ping-probe disconnect with a 5 s probe deadline, a threshold
-    /// of 3 consecutive timeouts, keepalive off, 500 ms initial / 30 s maximum
-    /// reconnect backoff, and unlimited reconnects. These preserve historical
-    /// behavior; no workload measurement establishes universal values.
+    /// idle time, a threshold of 3 consecutive timeouts, 500 ms initial / 30 s
+    /// maximum reconnect backoff, and unlimited reconnects. No workload
+    /// measurement establishes universal values.
     pub fn standard() -> Self {
         Self {
             call_timeout_ms: default_call_timeout_ms(),
             call_max_total_timeout_ms: default_call_max_total_timeout_ms(),
             reset_call_timeout_on_progress: default_true(),
             timeout_disconnect_policy: default_timeout_disconnect_policy(),
-            liveness_probe_timeout_ms: default_liveness_probe_timeout_ms(),
             consecutive_timeouts_before_disconnect: default_consecutive_timeouts_before_disconnect(
             ),
-            liveness_probe_interval_ms: 0,
             reconnect_initial_backoff_ms: default_reconnect_initial_backoff_ms(),
             reconnect_max_backoff_ms: default_reconnect_max_backoff_ms(),
             reconnect_max_attempts: ReconnectAttempts::Unlimited,
@@ -368,14 +342,6 @@ impl McpCallPolicy {
 
     pub(crate) fn call_max_total_timeout(&self) -> Duration {
         Duration::from_millis(self.call_max_total_timeout_ms)
-    }
-
-    pub(crate) fn liveness_probe_timeout(&self) -> Duration {
-        Duration::from_millis(self.liveness_probe_timeout_ms)
-    }
-
-    pub(crate) fn liveness_probe_interval(&self) -> Duration {
-        Duration::from_millis(self.liveness_probe_interval_ms)
     }
 
     pub(crate) fn reconnect_initial_backoff(&self) -> Duration {
@@ -604,16 +570,8 @@ impl McpServerConfig {
         self.call_policy().timeout_disconnect_policy
     }
 
-    pub(crate) fn liveness_probe_timeout(&self) -> Duration {
-        self.call_policy().liveness_probe_timeout()
-    }
-
     pub(crate) fn consecutive_timeouts_before_disconnect(&self) -> u64 {
         self.call_policy().consecutive_timeouts_before_disconnect
-    }
-
-    pub(crate) fn liveness_probe_interval(&self) -> Duration {
-        self.call_policy().liveness_probe_interval()
     }
 
     pub(crate) fn reconnect_initial_backoff(&self) -> Duration {

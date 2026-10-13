@@ -10,6 +10,16 @@
 //!   It is also how SSE-capable servers are reached: the current MCP HTTP
 //!   transport negotiates SSE responses itself.
 //!
+//! rmcp 3.5.1 filters valid nested `x-mcp-header` annotations out of HTTP
+//! tool catalogs before Lash receives them, so those tools are unavailable.
+//! The 2026-07-28 Streamable HTTP specification permits nested paths reached
+//! solely through `properties` (`basic/transports/streamable-http.mdx:388-398`),
+//! but rmcp rejects them in `src/transport/common/mcp_headers.rs:155-163` and
+//! only extracts top-level values at `:102-114`. Its HTTP worker filters the
+//! list at `src/transport/streamable_http_client.rs:93-118`, emitting a warning
+//! without exposing a structured rejection to Lash. This needs an upstream
+//! SDK fix; hosts cannot recover a missing tool through a catalog diagnostic.
+//!
 //! Stdio receives retain partial lines across cancellation by the SDK service
 //! loop. Framing and message compatibility use the SDK codec.
 //!
@@ -37,10 +47,10 @@
 //! refresh closes its service at the startup timeout and reconnects, retaining
 //! the last catalog while clearing unanswered protocol requests.
 //!
-//! Initialize instructions are server guidance, an admitted catalog resource:
+//! Discovery instructions are server guidance, an admitted catalog resource:
 //! every imported manifest pins its server's text, so a recorded catalog
 //! carries the guidance it was admitted with. Tool refreshes retain it;
-//! reconnects capture the new initialize response. The plugin's `server`
+//! reconnects capture the new discovery response. The plugin's `server`
 //! prompt section family contributes one section per offered server,
 //! `mcp/server.<prefix>`, rendering the guidance the offered manifests pin
 //! without contacting the server.
@@ -56,8 +66,8 @@
 //! Transport timeouts are body failures. Cancellation is advisory to the
 //! server and records a local cancelled attempt, with no remote termination
 //! claim. Neither a socket nor a non-resident catalog grant supplies a durable
-//! completion source or process adapter; required remote tasks, deferred work
-//! and isolation refuse before send.
+//! completion source or process adapter; deferred work and isolation refuse
+//! before send.
 
 mod call_failure;
 pub mod config;
@@ -77,23 +87,27 @@ pub use config::{
 };
 pub use error::{
     McpDecodeCause, McpDiagnosticContent, McpError, McpExitObservation, McpInvalidLine, McpPeer,
-    McpStartupFailure, McpStartupObservation,
+    McpProtocolRevisionRefusal, McpStartupFailure, McpStartupObservation,
 };
 pub use host::{
-    MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationRequest,
-    McpElicitationValidationError, McpNotificationContext, McpRequestContext, McpRootsProvider,
-    McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpUrlElicitationComplete,
+    MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationParams, McpElicitationRequest,
+    McpElicitationValidationError, McpRequestContext, McpRootsProvider, McpRootsRequest,
+    McpSamplingHandler, McpSamplingRequest,
 };
 pub use plugin::{
     MCP_BINDING_FORMAT, MCP_RUN_OPTIONS, McpDeferredToolProvider, McpPluginFactory,
     McpPluginFactoryBuilder, McpToolProvider,
 };
 pub use pool::{McpConnectionPool, McpServerFault, McpServerHealth, McpServerStatus};
+#[allow(
+    deprecated,
+    reason = "existing sampling and roots are retained during the MCP deprecation window"
+)]
 pub use rmcp::model::{
-    CreateElicitationRequestParams, CreateElicitationResult as CreateElicitationOutcome,
-    CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome, ElicitationAction,
-    ElicitationCapability, ErrorData as McpProtocolError, FormElicitationCapability, Root,
-    SamplingMessage, SamplingMessageContent, UrlElicitationCapability,
+    CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome,
+    ElicitResult as CreateElicitationOutcome, ElicitationAction, ElicitationCapability,
+    ErrorData as McpProtocolError, FormElicitationCapability, Root, SamplingMessage,
+    SamplingMessageContentBlock, UrlElicitationCapability,
 };
 
 /// Model-facing names keyed by raw native tool name for one server's current

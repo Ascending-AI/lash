@@ -19,6 +19,8 @@ mod admission;
 mod attempt;
 pub(crate) mod guidance;
 mod lifecycle_actor;
+mod round_trip;
+pub(crate) mod tool_changes;
 pub(crate) use admission::admitted_binding;
 use admission::{McpToolBinding, RemoteCompletion};
 
@@ -27,7 +29,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -37,8 +38,8 @@ use futures_util::future::join_all;
 use http::HeaderName;
 use rmcp::ServiceError;
 use rmcp::model::{
-    CallToolRequestParams, ClientRequest, Content, PingRequest, ProtocolVersion, RawContent,
-    Request, ResourceContents, Role, ServerResult,
+    CallToolRequestParams, ClientRequest, ContentBlock, Request, ResourceContents, Role,
+    ServerResult,
 };
 use rmcp::service::{Peer, PeerRequestOptions, RoleClient};
 use serde_json::Value;
@@ -59,7 +60,7 @@ use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
 #[cfg(test)]
 use crate::config::{McpStdioTransport, McpTransport};
 use crate::error::McpError;
-use crate::host::{McpHostServices, McpToolListChangedHandler};
+use crate::host::McpHostServices;
 use crate::naming;
 #[cfg(test)]
 use crate::service_lifecycle::build_http_headers;
@@ -210,14 +211,8 @@ struct McpEntry {
     /// increments and resets are generation-stamped messages, so accounting
     /// is asynchronously serialized by the lifecycle actor.
     consecutive_timeouts: AtomicU64,
-    /// Keeps the protocol-version degradation warning to once per server.
-    ping_degrade_warned: AtomicBool,
     #[cfg(test)]
     mid_establish_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
-    #[cfg(test)]
-    probe_select_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
-    #[cfg(test)]
-    probe_completed: tokio::sync::Notify,
     #[cfg(test)]
     refresh_install_hook: RwLock<Option<Arc<policy_tests::ActorPauseHook>>>,
     #[cfg(test)]
@@ -238,23 +233,9 @@ struct McpEntry {
 struct PublishedService {
     peer: Peer<RoleClient>,
     generation: u64,
+    handler: crate::host::LashMcpClientHandler,
 }
 
-struct McpToolListRefresh {
-    entry: Weak<McpEntry>,
-    service_generation: u64,
-}
-
-#[async_trait::async_trait]
-impl McpToolListChangedHandler for McpToolListRefresh {
-    async fn refresh_tools(&self, _peer: Peer<RoleClient>) {
-        if let Some(entry) = self.entry.upgrade() {
-            entry.request_tool_refresh(self.service_generation);
-        }
-    }
-}
-
-#[derive(Clone)]
 struct ImportedTool {
     /// The native MCP tool name as advertised by the server (before
     /// prefixing/normalisation).
@@ -521,52 +502,6 @@ impl McpConnectionPool {
             .and_then(|entry| entry.startup_failure.read_recover().clone())
     }
 
-    /// Notify every connected server that the host's roots may have changed.
-    ///
-    /// Disconnected servers are skipped: they receive the current list from
-    /// the same provider after reconnecting and issuing `roots/list`.
-    #[allow(
-        deprecated,
-        reason = "MCP 2025-11-25 still defines roots notifications"
-    )]
-    pub async fn notify_roots_changed(&self) -> Result<(), McpError> {
-        if !self.host_services.has_roots() {
-            return Err(McpError::Config(
-                "cannot notify MCP roots changes without a roots provider".to_string(),
-            ));
-        }
-        if self.shut_down.load(Ordering::SeqCst) {
-            return Err(McpError::Protocol(
-                "MCP connection pool has already shut down".to_string(),
-            ));
-        }
-
-        let entries: Vec<Arc<McpEntry>> = self
-            .entries
-            .read_recover()
-            .values()
-            .filter(|entry| entry.service_snapshot().is_some())
-            .cloned()
-            .collect();
-        let mut peers = Vec::with_capacity(entries.len());
-        for entry in entries {
-            if let Some(service) = entry.service_snapshot() {
-                peers.push((entry.server_name.clone(), service.peer.clone()));
-            }
-        }
-        let failures = collect_notification_failures(peers, |peer| async move {
-            peer.notify_roots_list_changed().await
-        })
-        .await;
-        if !failures.is_empty() {
-            return Err(McpError::Protocol(format!(
-                "failed to notify MCP servers that roots changed: {}",
-                failures.join("; ")
-            )));
-        }
-        Ok(())
-    }
-
     /// All advertised tools across every server, with bounded
     /// `mcp__<server>__<tool>` names. Cleanup/truncation collision groups use
     /// `<tool>__<8-character-id-digest>` for every member. These are precomputed
@@ -745,30 +680,6 @@ impl McpConnectionPool {
     }
 }
 
-async fn collect_notification_failures<T, E, F, Fut>(
-    targets: Vec<(String, T)>,
-    notify: F,
-) -> Vec<String>
-where
-    E: std::fmt::Display,
-    F: Fn(T) -> Fut,
-    Fut: std::future::Future<Output = Result<(), E>>,
-{
-    join_all(targets.into_iter().map(|(server_name, target)| {
-        let notification = notify(target);
-        async move {
-            notification
-                .await
-                .err()
-                .map(|error| format!("`{server_name}`: {error}"))
-        }
-    }))
-    .await
-    .into_iter()
-    .flatten()
-    .collect()
-}
-
 fn pool_shut_down_failure() -> ToolOutcome {
     McpCallFailure::PoolShutDown.into()
 }
@@ -867,13 +778,8 @@ impl McpEntry {
                 startup_failure: RwLock::new(None),
                 reconnect_jitter: RwLock::new(Arc::new(equal_jitter)),
                 consecutive_timeouts: AtomicU64::new(0),
-                ping_degrade_warned: AtomicBool::new(false),
                 #[cfg(test)]
                 mid_establish_hook: RwLock::new(None),
-                #[cfg(test)]
-                probe_select_hook: RwLock::new(None),
-                #[cfg(test)]
-                probe_completed: tokio::sync::Notify::new(),
                 #[cfg(test)]
                 refresh_install_hook: RwLock::new(None),
                 #[cfg(test)]
@@ -989,7 +895,6 @@ impl McpEntry {
 
     async fn handle_call_timeout(
         self: &Arc<Self>,
-        peer: &Peer<RoleClient>,
         observed_generation: u64,
         expired_timeout: Duration,
     ) -> ToolOutcome {
@@ -1017,27 +922,8 @@ impl McpEntry {
 
         let timeout_failure = || timeout_failure(false);
 
-        match self.effective_timeout_disconnect_policy(peer) {
+        match self.config.timeout_disconnect_policy() {
             TimeoutDisconnectPolicy::Never => timeout_failure(),
-            TimeoutDisconnectPolicy::PingProbe => match self.probe_peer(peer).await {
-                Ok(()) => timeout_failure(),
-                Err(err) => {
-                    let cause = format!(
-                        "MCP server `{server_name}` failed liveness probe after a call timeout: {err}"
-                    );
-                    if !self.mark_disconnected(cause.clone(), observed_generation) {
-                        return timeout_failure();
-                    }
-                    McpCallFailure::ConnectionLost {
-                        server: server_name,
-                        cause: McpServiceFailure::from(err),
-                        after_ms: self.config.reconnect_initial_backoff().as_millis() as u64,
-                        shutting_down: self.is_shutting_down(),
-                        reconnect_attempts: self.config.reconnect_max_attempts(),
-                    }
-                    .into()
-                }
-            },
             TimeoutDisconnectPolicy::ConsecutiveTimeouts => {
                 let (reply, result) = tokio::sync::oneshot::channel();
                 if self
@@ -1062,55 +948,6 @@ impl McpEntry {
                 }
                 .into()
             }
-        }
-    }
-
-    fn effective_timeout_disconnect_policy(
-        &self,
-        peer: &Peer<RoleClient>,
-    ) -> TimeoutDisconnectPolicy {
-        let configured = self.config.timeout_disconnect_policy();
-        if configured == TimeoutDisconnectPolicy::PingProbe && !self.peer_supports_ping(peer) {
-            TimeoutDisconnectPolicy::ConsecutiveTimeouts
-        } else {
-            configured
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the warn branch runs only when the is_none_or arm reported a version, which requires peer_info() to be Some"
-    )]
-    fn peer_supports_ping(&self, peer: &Peer<RoleClient>) -> bool {
-        let ping_supported = peer.peer_info().is_none_or(|info| {
-            info.protocol_version.as_str() < ProtocolVersion::V_2026_07_28.as_str()
-        });
-        if !ping_supported && !self.ping_degrade_warned.swap(true, Ordering::SeqCst) {
-            tracing::warn!(
-                server = %self.server_name,
-                protocol_version = %peer.peer_info().expect("peer info checked").protocol_version,
-                "MCP ping is unavailable for the negotiated protocol; degrading timeout policy to consecutive_timeouts and disabling interval probes"
-            );
-        }
-        ping_supported
-    }
-
-    async fn probe_peer(&self, peer: &Peer<RoleClient>) -> Result<(), ServiceError> {
-        let probe_timeout = self.config.liveness_probe_timeout();
-        match timeout(
-            probe_timeout,
-            peer.send_request(ClientRequest::PingRequest(PingRequest::default())),
-        )
-        .await
-        {
-            // Any well-formed answer proves the transport and server loop are
-            // alive. This includes unexpected success shapes and JSON-RPC
-            // errors such as -32601 from a server without `ping`.
-            Ok(Ok(_)) | Ok(Err(ServiceError::McpError(_))) => Ok(()),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(ServiceError::Timeout {
-                timeout: probe_timeout,
-            }),
         }
     }
 
@@ -1234,11 +1071,9 @@ fn import_tools_with_name_builder(
     });
     for tool in tools {
         let tool_digest = admission::tool_digest(&tool)?;
-        let completion = if tool.task_support() == rmcp::model::TaskSupport::Required {
-            RemoteCompletion::UnsupportedTask
-        } else {
-            RemoteCompletion::Inline
-        };
+        // MCP tasks are an unsolicited extension result in 2026-07-28,
+        // not a required completion mode declared by a tool.
+        let completion = RemoteCompletion::Inline;
         let original_name = tool.name.to_string();
         let description = tool
             .description
@@ -1301,23 +1136,39 @@ async fn tool_result_from_rmcp(
     let mut view_only_json_copy = true;
 
     for content in result.content {
-        if content
-            .audience()
+        let annotations = match &content {
+            ContentBlock::Text(content) => content.annotations.as_ref(),
+            ContentBlock::Image(content) => content.annotations.as_ref(),
+            ContentBlock::Audio(content) => content.annotations.as_ref(),
+            ContentBlock::Resource(content) => content.annotations.as_ref(),
+            ContentBlock::ResourceLink(content) => content.annotations.as_ref(),
+            _ => None,
+        };
+        if annotations
+            .and_then(|annotations| annotations.audience.as_ref())
             .is_some_and(|audience| !audience.contains(&Role::Assistant))
         {
             continue;
         }
         let meta = ToolViewMeta {
-            priority: content.priority().map(f64::from),
-            last_modified: content.timestamp().map(|timestamp| timestamp.to_rfc3339()),
+            priority: annotations
+                .and_then(|annotations| annotations.priority)
+                .map(f64::from),
+            last_modified: annotations
+                .and_then(|annotations| annotations.last_modified.as_ref())
+                .map(|timestamp| {
+                    chrono::DateTime::parse_from_rfc3339(timestamp)
+                        .map(|timestamp| timestamp.with_timezone(&chrono::Utc).to_rfc3339())
+                        .unwrap_or_else(|_| timestamp.clone())
+                }),
         };
-        let Content { raw, .. } = content;
-        let json_copy = matches!(&raw, RawContent::Text(text) if structured.as_ref().is_some_and(|value| {
+        let raw = content;
+        let json_copy = matches!(&raw, ContentBlock::Text(text) if structured.as_ref().is_some_and(|value| {
             serde_json::from_str::<Value>(&text.text).ok().as_ref() == Some(value)
         }));
         view_only_json_copy &= json_copy;
         match raw {
-            RawContent::Text(text) => {
+            ContentBlock::Text(text) => {
                 text_parts.push(text.text.clone());
                 view_blocks.push(ToolViewBlock::Text {
                     text: text.text.clone(),
@@ -1327,7 +1178,7 @@ async fn tool_result_from_rmcp(
                     content_items.push(mcp_block("text", [("text", ToolValue::String(text.text))]));
                 }
             }
-            RawContent::Image(image) => {
+            ContentBlock::Image(image) => {
                 let reference =
                     match store_mcp_attachment(context, &image.data, &image.mime_type, "MCP image")
                         .await
@@ -1348,7 +1199,7 @@ async fn tool_result_from_rmcp(
                     ],
                 ));
             }
-            RawContent::Audio(audio) => {
+            ContentBlock::Audio(audio) => {
                 let reference =
                     match store_mcp_attachment(context, &audio.data, &audio.mime_type, "MCP audio")
                         .await
@@ -1369,7 +1220,7 @@ async fn tool_result_from_rmcp(
                     ],
                 ));
             }
-            RawContent::Resource(resource) => match resource.resource {
+            ContentBlock::Resource(resource) => match resource.resource {
                 ResourceContents::BlobResourceContents {
                     uri,
                     mime_type,
@@ -1421,8 +1272,9 @@ async fn tool_result_from_rmcp(
                     }
                     content_items.push(mcp_block("resource", fields));
                 }
+                _ => return McpCallFailure::UnexpectedResponse.into(),
             },
-            RawContent::ResourceLink(link) => {
+            ContentBlock::ResourceLink(link) => {
                 view_blocks.push(ToolViewBlock::ResourceLink {
                     uri: link.uri.clone(),
                     name: link.name.clone(),
@@ -1446,6 +1298,7 @@ async fn tool_result_from_rmcp(
                 }
                 content_items.push(mcp_block("resource_link", fields));
             }
+            _ => return McpCallFailure::UnexpectedResponse.into(),
         }
     }
 

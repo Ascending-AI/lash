@@ -444,29 +444,6 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
     pool.shutdown_all().await;
 }
 
-#[tokio::test]
-async fn roots_notification_failures_are_aggregated_after_every_attempt() {
-    let attempts = Arc::new(AtomicU64::new(0));
-    let failures = collect_notification_failures(
-        vec![
-            ("alpha".to_string(), Some("offline")),
-            ("bravo".to_string(), None),
-            ("charlie".to_string(), Some("closed")),
-        ],
-        |failure| {
-            let attempts = Arc::clone(&attempts);
-            async move {
-                attempts.fetch_add(1, Ordering::SeqCst);
-                failure.map_or(Ok(()), Err)
-            }
-        },
-    )
-    .await;
-
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    assert_eq!(failures, ["`alpha`: offline", "`charlie`: closed"]);
-}
-
 /// Regression for the header-drop bug: custom/auth headers configured for
 /// an HTTP MCP server must be translated into the `http` header types the
 /// transport actually sends. Before the fix, `connect_service` called
@@ -649,11 +626,11 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
 #[cfg(unix)]
 #[tokio::test]
 async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "catalog", "version": "1.0.0" }
         }
@@ -678,12 +655,12 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
             command: "sh".to_string(),
             args: vec![
                 "-c".to_string(),
-                "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
+                "read -r _; printf '%s\\n' \"$DISCOVER\"; \
              read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
                     .to_string(),
             ],
             env: BTreeMap::from([
-                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("DISCOVER".to_string(), discover.to_string()),
                 ("LIST".to_string(), list.to_string()),
             ]),
             cwd: None,
@@ -762,11 +739,11 @@ async fn eager_connects_start_in_parallel() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let alpha_marker = scratch.path().join("alpha.started");
     let bravo_marker = scratch.path().join("bravo.started");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "parallel", "version": "1.0.0" }
         }
@@ -783,14 +760,14 @@ async fn eager_connects_start_in_parallel() {
             args: vec![
                 "-c".to_string(),
                 ": > \"$OWN\"; while [ ! -e \"$OTHER\" ]; do sleep 0.01; done; \
-             read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; \
+             read -r _; printf '%s\\n' \"$DISCOVER\"; \
              read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null"
                     .to_string(),
             ],
             env: BTreeMap::from([
                 ("OWN".to_string(), own.display().to_string()),
                 ("OTHER".to_string(), other.display().to_string()),
-                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("DISCOVER".to_string(), discover.to_string()),
                 ("LIST".to_string(), list.to_string()),
             ]),
             cwd: None,
@@ -817,11 +794,11 @@ async fn eager_connects_start_in_parallel() {
 async fn mcp_law_catalog_miss_is_an_invalid_request() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let refresh_marker = scratch.path().join("refresh");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2025-11-25",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": "directory", "version": "1.0.0" }
         }
@@ -834,21 +811,22 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
         ] }
     });
     let refreshed_list = json!({
-        "jsonrpc": "2.0", "id": 2,
+        "jsonrpc": "2.0", "id": 3,
         "result": { "tools": [
             { "name": "get_user", "inputSchema": { "type": "object" } }
         ] }
     });
     let notification = json!({
-        "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
+        "jsonrpc": "2.0", "method": "notifications/tools/list_changed", "params":{"_meta":{"io.modelcontextprotocol/subscriptionId":2}}
     });
     let survivor_call = json!({
-        "jsonrpc": "2.0", "id": 3,
+        "jsonrpc": "2.0", "id": 4,
         "result": { "content": [{ "type": "text", "text": "underscore" }] }
     });
     let script = "\
-        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-        read -r _; read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        read -r _; printf '%s\\n' \"$DISCOVER\"; \
+        read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        read -r _; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/subscriptions/acknowledged\",\"params\":{\"notifications\":{\"toolsListChanged\":true},\"_meta\":{\"io.modelcontextprotocol/subscriptionId\":2}}}'; \
         while [ ! -e \"$REFRESH_MARKER\" ]; do sleep 0.01; done; \
         printf '%s\\n' \"$NOTIFICATION\"; \
         read -r _; printf '%s\\n' \"$REFRESHED_LIST\"; \
@@ -865,7 +843,7 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
                 env: BTreeMap::from([
-                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("DISCOVER".to_string(), discover.to_string()),
                     ("FIRST_LIST".to_string(), first_list.to_string()),
                     ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
                     (
@@ -955,11 +933,11 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
 async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let scratch = tempfile::tempdir().expect("tempdir");
     let refresh_marker = scratch.path().join("refresh");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2025-11-25",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": "directory", "version": "1.0.0" }
         }
@@ -979,23 +957,24 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
         vec![json!({ "name": "get-user", "inputSchema": { "type": "object" } })]
     };
     let refreshed_list = json!({
-        "jsonrpc": "2.0", "id": 2,
+        "jsonrpc": "2.0", "id": 3,
         "result": { "tools": refreshed_tools }
     });
     let notification = json!({
-        "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
+        "jsonrpc": "2.0", "method": "notifications/tools/list_changed", "params":{"_meta":{"io.modelcontextprotocol/subscriptionId":2}}
     });
     let hyphen_call = json!({
-        "jsonrpc": "2.0", "id": 3,
+        "jsonrpc": "2.0", "id": 4,
         "result": { "content": [{ "type": "text", "text": "hyphen" }] }
     });
     let underscore_call = json!({
-        "jsonrpc": "2.0", "id": 3,
+        "jsonrpc": "2.0", "id": 4,
         "result": { "content": [{ "type": "text", "text": "underscore" }] }
     });
     let script = "\
-        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-        read -r _; read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        read -r _; printf '%s\\n' \"$DISCOVER\"; \
+        read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        read -r _; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/subscriptions/acknowledged\",\"params\":{\"notifications\":{\"toolsListChanged\":true},\"_meta\":{\"io.modelcontextprotocol/subscriptionId\":2}}}'; \
         while [ ! -e \"$REFRESH_MARKER\" ]; do sleep 0.01; done; \
         printf '%s\\n' \"$NOTIFICATION\"; \
         read -r _; printf '%s\\n' \"$REFRESHED_LIST\"; \
@@ -1014,7 +993,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
                 env: BTreeMap::from([
-                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("DISCOVER".to_string(), discover.to_string()),
                     ("FIRST_LIST".to_string(), first_list.to_string()),
                     ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
                     (
@@ -1133,18 +1112,18 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let old_pid = scratch.path().join("old.pid");
     let overlap = scratch.path().join("overlap");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "replace", "version": "1.0.0" }
         }
     });
     let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
-    let handshake = "read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-                     read -r _; read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null";
+    let handshake = "read -r _; printf '%s\\n' \"$DISCOVER\"; \
+                     read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null";
     let config = |script: String, env: BTreeMap<String, String>| McpServerConfig {
         diagnostics: Default::default(),
         data_limits: Default::default(),
@@ -1160,7 +1139,7 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
     };
     let common_env = || {
         BTreeMap::from([
-            ("INITIALIZE".to_string(), initialize.to_string()),
+            ("DISCOVER".to_string(), discover.to_string()),
             ("LIST".to_string(), list.to_string()),
             ("OLD_PID".to_string(), old_pid.display().to_string()),
             ("OVERLAP".to_string(), overlap.display().to_string()),
@@ -1227,11 +1206,11 @@ fn replacement_connection(
 async fn normalization_collisions_dispatch_stably_across_respawn() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let respawn_marker = scratch.path().join("respawned");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "collision", "version": "1.0.0" }
         }
@@ -1261,8 +1240,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         "result": { "content": [{ "type": "text", "text": "underscore" }] }
     });
     let script = "\
-        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-        read -r _; \
+        read -r _; printf '%s\\n' \"$DISCOVER\"; \
         read -r _; \
         if [ -e \"$RESPAWN_MARKER\" ]; then printf '%s\\n' \"$RESPAWN_LIST\"; \
         else : > \"$RESPAWN_MARKER\"; printf '%s\\n' \"$FIRST_LIST\"; fi; \
@@ -1284,7 +1262,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
                 env: BTreeMap::from([
-                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("DISCOVER".to_string(), discover.to_string()),
                     ("FIRST_LIST".to_string(), first_list.to_string()),
                     ("RESPAWN_LIST".to_string(), respawn_list.to_string()),
                     ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
@@ -1384,11 +1362,11 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
     let attempt_file = scratch.path().join("attempted");
     let pid_file = scratch.path().join("mcp.pid");
     let discovery_file = scratch.path().join("discovering");
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "reconnect-race", "version": "1.0.0" }
         }
@@ -1397,7 +1375,6 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
             if [ ! -e \"$ATTEMPT_FILE\" ]; then : > \"$ATTEMPT_FILE\"; exit 1; fi; \
             printf '%s\\n' \"$$\" > \"$PID_FILE\"; \
             read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
             read -r _; : > \"$DISCOVERY_FILE\"; \
             cat >/dev/null"
         .to_string();
@@ -1425,7 +1402,7 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
                         "DISCOVERY_FILE".to_string(),
                         discovery_file.display().to_string(),
                     ),
-                    ("RESP1".to_string(), initialize.to_string()),
+                    ("RESP1".to_string(), discover.to_string()),
                 ]),
                 cwd: None,
             }),
@@ -1475,11 +1452,11 @@ fn process_exists(pid: &str) -> bool {
 /// kept across the outage so the surface stays stable.
 #[tokio::test]
 async fn pool_reconnects_after_transport_death() {
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "demo", "version": "1.0.0" }
         }
@@ -1497,18 +1474,17 @@ async fn pool_reconnects_after_transport_death() {
     });
     let call = json!({ "jsonrpc": "2.0", "id": 2, "result": { "content": [{ "type": "text", "text": "pong" }] } });
 
-    // Serve initialize, tools/list, and exactly one tools/call, then exit:
+    // Serve discover, tools/list, and exactly one tools/call, then exit:
     // the transport dies after the first successful call. Every reconnect
     // runs the same script again (rmcp request ids restart per connection).
     let script = "\
             read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
             read -r _; printf '%s\\n' \"$RESP2\"; \
             read -r _; printf '%s\\n' \"$RESP3\""
         .to_string();
 
     let mut env = BTreeMap::new();
-    env.insert("RESP1".to_string(), initialize.to_string());
+    env.insert("RESP1".to_string(), discover.to_string());
     env.insert("RESP2".to_string(), list.to_string());
     env.insert("RESP3".to_string(), call.to_string());
 
@@ -1579,28 +1555,26 @@ async fn pool_reconnects_after_transport_death() {
 /// `StartupTimeout` rather than blocking `connect` forever.
 #[tokio::test]
 async fn discovery_hang_surfaces_startup_timeout() {
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "demo", "version": "1.0.0" }
         }
     });
 
-    // Respond to `initialize`, swallow `notifications/initialized`, read the
+    // Respond to `discover`, read the
     // `tools/list` request line, then hang (never respond) by blocking on
     // stdin. The short startup timeout must trip.
     let script = "\
             read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
-            read -r _; \
             cat >/dev/null"
         .to_string();
 
     let mut env = BTreeMap::new();
-    env.insert("RESP1".to_string(), initialize.to_string());
+    env.insert("RESP1".to_string(), discover.to_string());
 
     let config = McpServerConfig {
         diagnostics: Default::default(),
@@ -1644,11 +1618,11 @@ async fn discovery_hang_surfaces_startup_timeout() {
 /// implementation completes both calls.
 #[tokio::test]
 async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "demo", "version": "1.0.0" }
         }
@@ -1672,7 +1646,6 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
 
     let script = "\
             read -r _; printf '%s\\n' \"$RESP1\"; \
-            read -r _; \
             read -r _; printf '%s\\n' \"$RESP2\"; \
             read -r _; \
             read -r _; \
@@ -1682,7 +1655,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
         .to_string();
 
     let mut env = BTreeMap::new();
-    env.insert("RESP1".to_string(), initialize.to_string());
+    env.insert("RESP1".to_string(), discover.to_string());
     env.insert("RESP2".to_string(), list.to_string());
     env.insert("RESP3".to_string(), call2.to_string());
     env.insert("RESP4".to_string(), call3.to_string());
@@ -1731,22 +1704,21 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
 #[cfg(unix)]
 #[tokio::test]
 async fn oversized_stdio_message_disconnects_with_typed_cause() {
-    let initialize = json!({
+    let discover = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "result": {
-            "protocolVersion": "2024-11-05",
+            "supportedVersions": ["2026-07-28"], "resultType":"complete", "ttlMs":0, "cacheScope":"private",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "flooder", "version": "1.0.0" }
         }
     });
     let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
-    // Answer initialize and tools/list, then write one newline-free message
+    // Answer discover and tools/list, then write one newline-free message
     // larger than MAX_STDIO_MESSAGE_BYTES and stay alive so the pool — not
     // the child's own exit — does the closing.
     let script = "\
-        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
-        read -r _; \
+        read -r _; printf '%s\\n' \"$DISCOVER\"; \
         read -r _; printf '%s\\n' \"$LIST\"; \
         head -c 9000000 /dev/zero | tr '\\000' 'x'; \
         cat >/dev/null";
@@ -1762,7 +1734,7 @@ async fn oversized_stdio_message_disconnects_with_typed_cause() {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
                 env: BTreeMap::from([
-                    ("INITIALIZE".to_string(), initialize.to_string()),
+                    ("DISCOVER".to_string(), discover.to_string()),
                     ("LIST".to_string(), list.to_string()),
                 ]),
                 cwd: None,

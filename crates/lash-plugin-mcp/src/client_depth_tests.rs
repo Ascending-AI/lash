@@ -1,708 +1,424 @@
-// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
-#![allow(clippy::disallowed_methods)]
+//! MCP-2026-ONLY and MCP-MRTR-HOST-INPUT laws.
+#![allow(
+    deprecated,
+    reason = "these laws retain existing roots and sampling capabilities"
+)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lash_core::ToolProvider as _;
-use lash_core::plugin::PluginFactory as _;
 use rmcp::model::{
-    CreateElicitationRequestParams, CreateElicitationResult, CreateMessageResult,
-    ElicitationAction, ElicitationCapability, ErrorData, FormElicitationCapability, Root,
-    SamplingMessage, UrlElicitationCapability,
+    ElicitResult, ElicitationAction, ElicitationCapability, ErrorData, FormElicitationCapability,
+    Implementation, ProtocolVersion, Root, ServerCapabilities, ServerConfig,
+    UrlElicitationCapability,
 };
+use rmcp::{ClientHandler, ClientServiceExt, ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 
+use lash_core::facade_support::PluginFactory;
+
 use crate::{
-    McpCallPolicy, McpElicitationHandler, McpElicitationRequest, McpPluginFactory,
+    McpElicitationHandler, McpElicitationParams, McpElicitationRequest, McpPluginFactory,
     McpRootsProvider, McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpServerConfig,
-    McpStdioTransport, McpToolProvider, McpTransport, McpUrlElicitationComplete,
+    McpStdioTransport, McpToolProvider, McpTransport,
 };
 
-const SCRIPTED_SERVER: &str = r#"
-import json
-import os
-import sys
-
-trace_path = os.environ["TRACE_FILE"]
-scenario = os.environ.get("SCENARIO", "round_trip")
-
-def receive():
-    line = sys.stdin.readline()
-    if not line:
-        raise SystemExit(0)
-    return json.loads(line)
-
-def send(message):
-    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
-
-def record(kind, message):
-    with open(trace_path, "a", encoding="utf-8") as trace:
-        trace.write(json.dumps({"kind": kind, "message": message}, separators=(",", ":")) + "\n")
-
-initialize = receive()
-record("initialize", initialize)
-send({
-    "jsonrpc": "2.0",
-    "id": initialize["id"],
-    "result": {
-        "protocolVersion": initialize["params"]["protocolVersion"],
-        "capabilities": {"tools": {}},
-        "serverInfo": {"name": "client-depth-script", "version": "1.0.0"},
-    },
-})
-record("initialized", receive())
-list_tools = receive()
-record("tools_list", list_tools)
-send({
-    "jsonrpc": "2.0",
-    "id": list_tools["id"],
-    "result": {
-        "tools": [{
-            "name": "exercise-client-depth",
-            "description": "Exercise sampling, elicitation, and roots",
-            "inputSchema": {"type": "object", "properties": {}},
-        }]
-    },
-})
-
-next_message = receive()
-if next_message.get("method") != "tools/call":
-    record("extra", next_message)
-    for line in sys.stdin:
-        record("extra", json.loads(line))
-    raise SystemExit(0)
-
-record("tools_call", next_message)
-
-form_request = {
-    "mode": "form",
-    "message": "May the server continue?",
-    "requestedSchema": {
-        "type": "object",
-        "properties": {
-            "answer": {"type": "string"},
-            "contact": {"type": "string", "format": "email"},
-        },
-        "required": ["answer", "contact"],
-    },
+#[derive(Clone)]
+struct RevisionServer(ProtocolVersion);
+impl ServerHandler for RevisionServer {
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        vec![self.0.clone()].into()
+    }
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::default())
+            .with_server_info(Implementation::new("revision-law", "1"))
+    }
 }
 
-if scenario == "unwired":
-    requests = [
-        ("sampling_response", {
-            "jsonrpc": "2.0",
-            "id": 100,
-            "method": "sampling/createMessage",
-            "params": {
-                "messages": [{"role": "user", "content": {"type": "text", "text": "test"}}],
-                "maxTokens": 64,
-            },
-        }),
-        ("elicitation_response", {
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "elicitation/create",
-            "params": form_request,
-        }),
-        ("roots_response", {"jsonrpc": "2.0", "id": 102, "method": "roots/list"}),
-    ]
-    for kind, request in requests:
-        send(request)
-        record(kind, receive())
-elif scenario == "cancel":
-    send({
-        "jsonrpc": "2.0",
-        "id": 101,
-        "method": "elicitation/create",
-        "params": form_request,
-    })
-    send({
-        "jsonrpc": "2.0",
-        "method": "notifications/cancelled",
-        "params": {"requestId": 101, "reason": "test cancellation"},
-    })
-    record("elicitation_response", receive())
-elif scenario == "schema":
-    for request_id, kind in [
-        (101, "conforming_response"),
-        (102, "wrong_type_response"),
-        (103, "missing_required_response"),
-        (104, "invalid_email_response"),
-    ]:
-        send({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "elicitation/create",
-            "params": form_request,
-        })
-        record(kind, receive())
-elif scenario == "url":
-    send({
-        "jsonrpc": "2.0",
-        "id": 101,
-        "method": "elicitation/create",
-        "params": {
-            "mode": "url",
-            "message": "Complete authorization in the browser",
-            "url": "https://example.invalid/authorize",
-            "elicitationId": "url-flow-17",
-        },
-    })
-    record("url_response", receive())
-    send({
-        "jsonrpc": "2.0",
-        "method": "notifications/elicitation/complete",
-        "params": {"elicitationId": "url-flow-17"},
-    })
-else:
-    send({
-        "jsonrpc": "2.0",
-        "id": 100,
-        "method": "sampling/createMessage",
-        "params": {
-            "messages": [{"role": "user", "content": {"type": "text", "text": "Summarize: Lash keeps policy with the host."}}],
-            "maxTokens": 64,
-        },
-    })
-    record("sampling_response", receive())
-
-    send({
-        "jsonrpc": "2.0",
-        "id": 101,
-        "method": "elicitation/create",
-        "params": form_request,
-    })
-    record("elicitation_response", receive())
-
-    send({"jsonrpc": "2.0", "id": 102, "method": "roots/list"})
-    record("roots_response", receive())
-
-send({
-    "jsonrpc": "2.0",
-    "id": next_message["id"],
-    "result": {
-        "content": [{"type": "text", "text": "client depth complete"}],
-        "structuredContent": {"complete": True},
-    },
-})
-
-for line in sys.stdin:
-    message = json.loads(line)
-    record("after_call", message)
-"#;
-
-fn depth_tool_name() -> String {
-    crate::mcp_tool_names("depth", &["exercise-client-depth"])["exercise-client-depth"].clone()
+#[tokio::test]
+async fn modern_discovery_negotiates_the_only_supported_revision() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let handler = crate::host::LashMcpClientHandler::new("revision", Default::default());
+    let server = tokio::spawn(RevisionServer(ProtocolVersion::V_2026_07_28).serve(server_io));
+    let client = handler
+        .serve_with_lifecycle(client_io, crate::service_lifecycle::client_lifecycle())
+        .await;
+    let client = client.expect("modern discovery");
+    assert_eq!(
+        client.peer_info().unwrap().protocol_version,
+        ProtocolVersion::V_2026_07_28
+    );
+    assert_eq!(
+        client.service().get_info().protocol_version,
+        ProtocolVersion::V_2026_07_28
+    );
+    client.cancel().await.unwrap();
+    server.abort();
+    let _ = server.await;
 }
 
-struct SamplingHost {
+#[tokio::test]
+async fn older_only_server_is_refused_with_typed_revisions() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let mut configs = configs(&trace, "inputs");
+    let McpTransport::Stdio(stdio) = &mut configs.get_mut("modern").unwrap().transport else {
+        unreachable!()
+    };
+    stdio.env.insert("REVISION".into(), "2025-11-25".into());
+    let factory = McpPluginFactory::new(configs).await.unwrap();
+    let failure = factory
+        .startup_failure("modern")
+        .expect("revision refusal retained");
+    let refusal = failure
+        .protocol_refusal
+        .expect("typed revisions survive cleanup");
+    assert_eq!(refusal.expected, ProtocolVersion::V_2026_07_28);
+    assert_eq!(refusal.offered, vec![ProtocolVersion::V_2025_11_25]);
+    assert!(
+        read_trace(&trace)
+            .iter()
+            .all(|request| request["method"] == "server/discover")
+    );
+    factory.shutdown().await.unwrap();
+}
+
+#[derive(Default)]
+struct InputHost {
     calls: AtomicUsize,
 }
-
 #[async_trait]
-impl McpSamplingHandler for SamplingHost {
+impl McpSamplingHandler for InputHost {
     async fn create_message(
         &self,
         request: McpSamplingRequest<'_>,
-    ) -> Result<CreateMessageResult, ErrorData> {
-        assert_eq!(request.context.server_name(), "depth");
-        assert_eq!(request.params.max_tokens, 64);
+    ) -> Result<rmcp::model::CreateMessageResult, ErrorData> {
+        assert_eq!(request.context.server_name(), "modern");
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(CreateMessageResult::new(
-            SamplingMessage::assistant_text("Policy stays with the host."),
-            "host-demo-model".to_string(),
-        )
-        .with_stop_reason(CreateMessageResult::STOP_REASON_END_TURN))
-    }
-}
-
-struct DecliningElicitationHost {
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl McpElicitationHandler for DecliningElicitationHost {
-    fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability {
-            form: Some(FormElicitationCapability::default()),
-            url: None,
-        }
-    }
-
-    async fn create_elicitation(
-        &self,
-        request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, ErrorData> {
-        assert_eq!(request.context.server_name(), "depth");
-        assert!(matches!(
-            request.params,
-            CreateElicitationRequestParams::FormElicitationParams { .. }
-        ));
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(CreateElicitationResult::new(ElicitationAction::Decline))
-    }
-
-    async fn url_elicitation_complete(&self, _notification: McpUrlElicitationComplete<'_>) {
-        unreachable!("form-only test host cannot receive URL completion")
-    }
-}
-
-struct WorkspaceRoots {
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl McpRootsProvider for WorkspaceRoots {
-    async fn list_roots(&self, request: McpRootsRequest<'_>) -> Result<Vec<Root>, ErrorData> {
-        assert_eq!(request.context.server_name(), "depth");
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(vec![Root::new("file:///workspace/demo").with_name("demo")])
-    }
-}
-
-struct CancellationObservingHost {
-    cancelled: AtomicBool,
-}
-
-#[async_trait]
-impl McpElicitationHandler for CancellationObservingHost {
-    fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability {
-            form: Some(FormElicitationCapability::default()),
-            url: None,
-        }
-    }
-
-    async fn create_elicitation(
-        &self,
-        request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, ErrorData> {
-        request.context.cancellation_token().cancelled().await;
-        self.cancelled.store(true, Ordering::SeqCst);
-        Err(ErrorData::internal_error(
-            "host stopped the cancelled elicitation",
-            None,
+        Ok(rmcp::model::CreateMessageResult::new(
+            rmcp::model::SamplingMessage::assistant_text("sampled"),
+            "host-model".into(),
         ))
     }
-
-    async fn url_elicitation_complete(&self, _notification: McpUrlElicitationComplete<'_>) {
-        unreachable!("form-only test host cannot receive URL completion")
-    }
 }
-
-struct SchemaCheckingHost {
-    calls: AtomicUsize,
-}
-
 #[async_trait]
-impl McpElicitationHandler for SchemaCheckingHost {
+impl McpElicitationHandler for InputHost {
     fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability {
-            form: Some(FormElicitationCapability::default()),
-            url: None,
-        }
+        ElicitationCapability::new()
+            .with_form(FormElicitationCapability::default())
+            .with_url(UrlElicitationCapability::default())
     }
-
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, ErrorData> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        let content = match call {
-            0 => json!({ "answer": "yes", "contact": "host@example.com" }),
-            1 => json!({ "answer": true, "contact": "host@example.com" }),
-            2 => json!({}),
-            3 => json!({ "answer": "yes", "contact": "not-an-email" }),
-            other => panic!("unexpected schema test call {other}"),
-        };
-        match call {
-            0 => request
-                .accept(content)
+    ) -> Result<ElicitResult, ErrorData> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match request.params {
+            McpElicitationParams::Form { message, .. } if message == "invalid" => {
+                Ok(ElicitResult::new(ElicitationAction::Accept)
+                    .with_content(json!({"answer":true})))
+            }
+            McpElicitationParams::Form { .. } => request
+                .accept(json!({"answer":"yes"}))
                 .map_err(|error| ErrorData::invalid_params(error.to_string(), None)),
-            1..=3 => {
-                let host_error = request
-                    .accept(content.clone())
-                    .expect_err("host sees typed validation error before returning an answer");
-                assert!(host_error.message().contains("requested schema"));
-                Ok(CreateElicitationResult::new(ElicitationAction::Accept).with_content(content))
+            McpElicitationParams::Url { url, .. } => {
+                assert_eq!(url, "https://example.invalid/approve");
+                Ok(ElicitResult::new(ElicitationAction::Accept))
             }
-            _ => unreachable!(),
         }
     }
-
-    async fn url_elicitation_complete(&self, _notification: McpUrlElicitationComplete<'_>) {
-        unreachable!("form-only test host cannot receive URL completion")
-    }
 }
-
-struct UrlElicitationHost {
-    completed: AtomicBool,
-    capability_calls: AtomicUsize,
-}
-
 #[async_trait]
-impl McpElicitationHandler for UrlElicitationHost {
-    fn capability(&self) -> ElicitationCapability {
-        self.capability_calls.fetch_add(1, Ordering::SeqCst);
-        ElicitationCapability {
-            form: Some(FormElicitationCapability::default()),
-            url: Some(UrlElicitationCapability::default()),
-        }
-    }
-
-    async fn create_elicitation(
-        &self,
-        request: McpElicitationRequest<'_>,
-    ) -> Result<CreateElicitationResult, ErrorData> {
-        assert_eq!(request.context.server_name(), "depth");
-        assert!(matches!(
-            request.params,
-            CreateElicitationRequestParams::UrlElicitationParams {
-                elicitation_id,
-                ..
-            } if elicitation_id == "url-flow-17"
-        ));
-        Ok(CreateElicitationResult::new(ElicitationAction::Accept))
-    }
-
-    async fn url_elicitation_complete(&self, notification: McpUrlElicitationComplete<'_>) {
-        assert_eq!(notification.context.server_name(), "depth");
-        assert_eq!(notification.elicitation_id, "url-flow-17");
-        self.completed.store(true, Ordering::SeqCst);
+impl McpRootsProvider for InputHost {
+    async fn list_roots(&self, _: McpRootsRequest<'_>) -> Result<Vec<Root>, ErrorData> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![Root::new("file:///workspace/law")])
     }
 }
 
 #[tokio::test]
-async fn scripted_server_round_trips_sampling_elicitation_roots_and_change_notification() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let sampling = Arc::new(SamplingHost {
-        calls: AtomicUsize::new(0),
-    });
-    let elicitation = Arc::new(DecliningElicitationHost {
-        calls: AtomicUsize::new(0),
-    });
-    let roots = Arc::new(WorkspaceRoots {
-        calls: AtomicUsize::new(0),
-    });
-    let factory = McpPluginFactory::builder(scripted_servers(&trace, "round_trip"))
-        .sampling_handler(sampling.clone())
-        .elicitation_handler(elicitation.clone())
-        .roots_provider(roots.clone())
+async fn modern_tool_round_trip_preserves_sampling_form_url_and_roots() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let host = Arc::new(InputHost::default());
+    let factory = McpPluginFactory::builder(configs(&trace, "inputs"))
+        .sampling_handler(host.clone())
+        .elicitation_handler(host.clone())
+        .roots_provider(host.clone())
         .build()
         .await
-        .expect("connect scripted MCP server");
-
-    let result = execute_depth_tool(&factory).await;
-    assert!(
-        result.is_success(),
-        "nested client requests complete: {result:?}"
-    );
-    assert_eq!(sampling.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(elicitation.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(roots.calls.load(Ordering::SeqCst), 1);
-
-    factory
-        .notify_roots_changed()
-        .await
-        .expect("broadcast roots/list_changed");
-    wait_for_trace(&trace, |events| {
-        events.iter().any(|event| {
-            event["kind"] == "after_call"
-                && event["message"]["method"] == "notifications/roots/list_changed"
-        })
-    })
-    .await;
-
-    let events = read_trace(&trace);
-    let initialize = event(&events, "initialize");
-    assert_eq!(initialize["params"]["protocolVersion"], "2025-11-25");
-    assert_eq!(initialize["params"]["capabilities"]["sampling"], json!({}));
-    assert_eq!(
-        initialize["params"]["capabilities"]["elicitation"],
-        json!({ "form": {} })
-    );
-    assert_eq!(
-        initialize["params"]["capabilities"]["roots"],
-        json!({ "listChanged": true })
-    );
-
-    let sampling_response = event(&events, "sampling_response");
-    assert_eq!(sampling_response["result"]["model"], "host-demo-model");
-    assert_eq!(
-        sampling_response["result"]["content"]["text"],
-        "Policy stays with the host."
-    );
-    let elicitation_response = event(&events, "elicitation_response");
-    assert_eq!(
-        elicitation_response["result"],
-        json!({ "action": "decline" }),
-        "decline is a typed MCP result and must never be rewritten as accept"
-    );
-    let roots_response = event(&events, "roots_response");
-    assert_eq!(
-        roots_response["result"]["roots"],
-        json!([{ "uri": "file:///workspace/demo", "name": "demo" }])
-    );
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-#[tokio::test]
-async fn scripted_handshake_omits_every_unwired_client_capability() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let factory = McpPluginFactory::new(scripted_servers(&trace, "round_trip"))
-        .await
-        .expect("connect scripted MCP server");
-
-    let events = read_trace(&trace);
-    let capabilities = &event(&events, "initialize")["params"]["capabilities"];
-    assert!(capabilities.get("sampling").is_none());
-    assert!(capabilities.get("elicitation").is_none());
-    assert!(capabilities.get("roots").is_none());
-    assert!(
-        factory.notify_roots_changed().await.is_err(),
-        "roots notifications require the roots seam"
-    );
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-#[tokio::test]
-async fn unwired_requests_return_typed_method_errors_without_failing_the_outer_tool_call() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let factory = McpPluginFactory::new(scripted_servers(&trace, "unwired"))
-        .await
-        .expect("connect scripted MCP server");
-
-    let result = execute_depth_tool(&factory).await;
-    assert!(result.is_success(), "outer tool call survives: {result:?}");
-
-    let events = read_trace(&trace);
-    for (kind, message) in [
-        (
-            "sampling_response",
-            "sampling is not available: no host sampling handler is installed",
-        ),
-        (
-            "elicitation_response",
-            "elicitation is not available: no host elicitation handler is installed",
-        ),
-        (
-            "roots_response",
-            "roots is not available: no host roots handler is installed",
-        ),
-    ] {
-        let response = event(&events, kind);
-        assert_eq!(response["error"]["code"], -32601);
-        assert_eq!(response["error"]["message"], message);
-    }
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-#[tokio::test]
-async fn cancelled_elicitation_reaches_the_host_token_without_an_orphaned_prompt() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let elicitation = Arc::new(CancellationObservingHost {
-        cancelled: AtomicBool::new(false),
-    });
-    let factory = McpPluginFactory::builder(scripted_servers(&trace, "cancel"))
-        .elicitation_handler(elicitation.clone())
-        .build()
-        .await
-        .expect("connect scripted MCP server");
-
-    let result = execute_depth_tool(&factory).await;
-    assert!(result.is_success(), "outer tool call survives: {result:?}");
-    assert!(
-        elicitation.cancelled.load(Ordering::SeqCst),
-        "host observed the request cancellation token"
-    );
-    assert_eq!(
-        event(&read_trace(&trace), "elicitation_response")["error"]["message"],
-        "host stopped the cancelled elicitation"
-    );
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-#[tokio::test]
-async fn form_answers_are_validated_before_they_cross_the_wire() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let elicitation = Arc::new(SchemaCheckingHost {
-        calls: AtomicUsize::new(0),
-    });
-    let factory = McpPluginFactory::builder(scripted_servers(&trace, "schema"))
-        .elicitation_handler(elicitation.clone())
-        .build()
-        .await
-        .expect("connect scripted MCP server");
-
-    let result = execute_depth_tool(&factory).await;
-    assert!(result.is_success(), "outer tool call survives: {result:?}");
-    assert_eq!(elicitation.calls.load(Ordering::SeqCst), 4);
-
-    let events = read_trace(&trace);
-    assert_eq!(
-        event(&events, "conforming_response")["result"],
-        json!({
-            "action": "accept",
-            "content": { "answer": "yes", "contact": "host@example.com" }
-        })
-    );
-    for kind in [
-        "wrong_type_response",
-        "missing_required_response",
-        "invalid_email_response",
-    ] {
-        let response = event(&events, kind);
-        assert_eq!(response["error"]["code"], -32602);
-        assert_eq!(
-            response["error"]["data"]["kind"],
-            "elicitation_response_validation"
-        );
-        assert!(
-            response.get("result").is_none(),
-            "malformed content was not sent"
-        );
-    }
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-#[tokio::test]
-async fn advertised_url_elicitation_routes_its_completion_notification() {
-    let scratch = tempfile::tempdir().expect("tempdir");
-    let trace = scratch.path().join("protocol.jsonl");
-    let elicitation = Arc::new(UrlElicitationHost {
-        completed: AtomicBool::new(false),
-        capability_calls: AtomicUsize::new(0),
-    });
-    let factory = McpPluginFactory::builder(scripted_servers(&trace, "url"))
-        .elicitation_handler(elicitation.clone())
-        .build()
-        .await
-        .expect("connect scripted MCP server");
-
-    let events = read_trace(&trace);
-    let capabilities = &event(&events, "initialize")["params"]["capabilities"];
-    assert_eq!(
-        capabilities["elicitation"],
-        json!({ "form": {}, "url": {} })
-    );
-    assert!(capabilities.get("sampling").is_none());
-    assert!(capabilities.get("roots").is_none());
-    let result = execute_depth_tool(&factory).await;
-    assert!(
-        result.is_success(),
-        "URL flow outer call succeeds: {result:?}"
-    );
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
-        while !elicitation.completed.load(Ordering::SeqCst) {
-            interval.tick().await;
-        }
-    })
-    .await
-    .expect("URL completion hook was not called");
-    assert!(elicitation.completed.load(Ordering::SeqCst));
-    assert_eq!(
-        elicitation.capability_calls.load(Ordering::SeqCst),
-        1,
-        "elicitation capability is snapshotted once at build"
-    );
-    assert_eq!(
-        event(&read_trace(&trace), "url_response")["result"],
-        json!({ "action": "accept" })
-    );
-
-    factory.shutdown().await.expect("shutdown MCP factory");
-}
-
-async fn execute_depth_tool(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
-    let tool_name = depth_tool_name();
-    let provider = McpToolProvider::new(Arc::clone(factory.pool()));
-    let manifest = provider
-        .resolve_manifest(&tool_name, &lash_core::OwnerConfigView::default())
-        .expect("depth tool manifest resolves");
-    let fixture = crate::plugin::prepared_test_call(&provider, &manifest).await;
-    let context = fixture.attempt("client-depth");
-    let attempt = provider
-        .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
-        .await;
-    let lash_core::ToolAttemptOutcome::Done { result, intents } = attempt else {
-        panic!("resident MCP calls complete inline")
-    };
-    assert!(intents.is_empty());
-    lash_core::ToolOutcome::from_output(result.into_output())
-}
-
-fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServerConfig> {
-    BTreeMap::from([(
-        "depth".to_string(),
-        McpServerConfig {
-            diagnostics: Default::default(),
-            data_limits: Default::default(),
-            startup_timeout_ms: 10_000,
-            call_policy: McpCallPolicy {
-                call_timeout_ms: 10_000,
-                ..Default::default()
-            },
-            shutdown_policy: Default::default(),
-            transport: McpTransport::Stdio(McpStdioTransport {
-                command: "python3".to_string(),
-                args: vec![
-                    "-u".to_string(),
-                    "-c".to_string(),
-                    SCRIPTED_SERVER.to_string(),
-                ],
-                env: BTreeMap::from([
-                    ("TRACE_FILE".to_string(), trace.display().to_string()),
-                    ("SCENARIO".to_string(), scenario.to_string()),
-                ]),
-                cwd: None,
-            }),
-        },
-    )])
-}
-
-fn read_trace(path: &std::path::Path) -> Vec<Value> {
-    std::fs::read_to_string(path)
-        .expect("read protocol trace")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("decode protocol trace line"))
-        .collect()
-}
-
-fn event<'a>(events: &'a [Value], kind: &str) -> &'a Value {
-    &events
+        .unwrap();
+    let outcome = execute(&factory).await;
+    assert!(outcome.is_success(), "{outcome:?}");
+    assert_eq!(host.calls.load(Ordering::SeqCst), 4);
+    let trace = read_trace(&trace);
+    let calls: Vec<_> = trace
         .iter()
-        .find(|event| event["kind"] == kind)
-        .unwrap_or_else(|| panic!("missing `{kind}` in {events:?}"))["message"]
+        .filter(|request| request["method"] == "tools/call")
+        .collect();
+    assert_eq!(calls.len(), 2);
+    assert_ne!(calls[0]["id"], calls[1]["id"]);
+    for request in &calls {
+        assert_eq!(
+            request["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"],
+            "2026-07-28"
+        );
+        assert_eq!(
+            request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"]["name"],
+            "lash"
+        );
+    }
+    assert_eq!(
+        calls[0]["params"]["_meta"]["lash.dev/tool-call-id"],
+        calls[1]["params"]["_meta"]["lash.dev/tool-call-id"]
+    );
+    assert_eq!(calls[1]["params"]["requestState"], "opaque-state");
+    assert_eq!(
+        calls[1]["params"]["inputResponses"]["url"],
+        json!({"action":"accept"})
+    );
+    assert_eq!(
+        calls[1]["params"]["inputResponses"]["form"]["content"],
+        json!({"answer":"yes"})
+    );
+    assert_eq!(
+        calls[1]["params"]["inputResponses"]["sampling"]["model"],
+        "host-model"
+    );
+    assert_eq!(
+        calls[1]["params"]["inputResponses"]["roots"]["roots"][0]["uri"],
+        "file:///workspace/law"
+    );
+    assert!(
+        !trace
+            .iter()
+            .any(|request| request["method"] == "initialize")
+    );
+    factory.shutdown().await.unwrap();
 }
 
-async fn wait_for_trace(path: &std::path::Path, predicate: impl Fn(&[Value]) -> bool) {
+#[tokio::test]
+async fn modern_form_answers_are_validated_before_retry() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let factory = McpPluginFactory::builder(configs(&trace, "invalid"))
+        .elicitation_handler(Arc::new(InputHost::default()))
+        .build()
+        .await
+        .unwrap();
+    let result = execute(&factory).await;
+    let lash_core::ToolCallOutcome::Failure(failure) = &result.as_done_output().unwrap().outcome
+    else {
+        panic!("invalid answer must fail")
+    };
+    assert_eq!(
+        failure.raw.as_ref().unwrap().to_json_value()["error"]["data"]["kind"],
+        "elicitation_response_validation"
+    );
+    assert_eq!(
+        read_trace(&trace)
+            .iter()
+            .filter(|request| request["method"] == "tools/call")
+            .count(),
+        1
+    );
+    factory.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn modern_tool_changes_use_acknowledged_subscription() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let factory = McpPluginFactory::new(configs(&trace, "changes"))
+        .await
+        .unwrap();
+    let outcome = execute(&factory).await;
+    assert!(outcome.is_success(), "{outcome:?}");
     tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let events = read_trace(path);
-            if predicate(&events) {
-                return;
-            }
+        while factory.pool().advertised_tools()[0].manifest.description != "refreshed" {
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("scripted server did not record expected protocol message");
+    .unwrap();
+    let trace = read_trace(&trace);
+    let listen = trace
+        .iter()
+        .find(|request| request["method"] == "subscriptions/listen")
+        .unwrap();
+    assert_eq!(
+        listen["params"]["notifications"],
+        json!({"toolsListChanged":true})
+    );
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|request| request["method"] == "tools/list")
+            .count(),
+        2
+    );
+    factory.shutdown().await.unwrap();
 }
+
+struct CancellingHost {
+    started: tokio::sync::Notify,
+    cancelled: tokio::sync::Notify,
+}
+#[async_trait]
+impl McpElicitationHandler for CancellingHost {
+    fn capability(&self) -> ElicitationCapability {
+        ElicitationCapability::new().with_form(FormElicitationCapability::default())
+    }
+    async fn create_elicitation(
+        &self,
+        request: McpElicitationRequest<'_>,
+    ) -> Result<ElicitResult, ErrorData> {
+        self.started.notify_one();
+        request.context.cancellation_token().cancelled().await;
+        self.cancelled.notify_one();
+        Err(ErrorData::internal_error("host input cancelled", None))
+    }
+}
+
+#[tokio::test]
+async fn modern_mrtr_cancellation_reaches_the_host_without_retry() {
+    let root = tempfile::tempdir().unwrap();
+    let trace = root.path().join("trace.jsonl");
+    let host = Arc::new(CancellingHost {
+        started: tokio::sync::Notify::new(),
+        cancelled: tokio::sync::Notify::new(),
+    });
+    let factory = McpPluginFactory::builder(configs(&trace, "cancel"))
+        .elicitation_handler(host.clone())
+        .build()
+        .await
+        .unwrap();
+    let token = tokio_util::sync::CancellationToken::new();
+    let fixture =
+        lash_core::testing::ToolCallFixture::mock().cancellation_token(Some(token.clone()));
+    let context = fixture.attempt("mrtr-cancel");
+    let name = crate::mcp_tool_names("modern", &["exercise"])["exercise"].clone();
+    let args = json!({});
+    let call = factory.pool().call_tool(&name, &args, &context);
+    tokio::pin!(call);
+    tokio::select! {
+        _ = host.started.notified() => {},
+        outcome = &mut call => panic!("host must be waiting: {outcome:?}"),
+    }
+    token.cancel();
+    let outcome = call.await;
+    assert!(matches!(
+        outcome.as_done_output().unwrap().outcome,
+        lash_core::ToolCallOutcome::Cancelled(_)
+    ));
+    tokio::time::timeout(Duration::from_secs(5), host.cancelled.notified())
+        .await
+        .unwrap();
+    assert_eq!(
+        read_trace(&trace)
+            .iter()
+            .filter(|request| request["method"] == "tools/call")
+            .count(),
+        1
+    );
+    factory.shutdown().await.unwrap();
+}
+
+async fn execute(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
+    use lash_core::ToolProvider;
+    let provider = McpToolProvider::new(Arc::clone(factory.pool()));
+    let mut manifests = provider
+        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .unwrap();
+    assert!(
+        !manifests.is_empty(),
+        "{:?}",
+        factory.pool().server_statuses()
+    );
+    let manifest = manifests.remove(0);
+    let prepared = crate::plugin::prepared_test_call(&provider, &manifest).await;
+    let context = prepared.attempt("modern-input");
+    let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
+        .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
+        .await
+    else {
+        panic!("inline attempt")
+    };
+    lash_core::ToolOutcome::from_output(result.into_output())
+}
+
+fn configs(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServerConfig> {
+    BTreeMap::from([(
+        "modern".into(),
+        McpServerConfig {
+            startup_timeout_ms: 5_000,
+            call_policy: crate::McpCallPolicy {
+                call_timeout_ms: 5_000,
+                reconnect_max_attempts: crate::ReconnectAttempts::Disabled,
+                ..Default::default()
+            },
+            transport: McpTransport::Stdio(McpStdioTransport {
+                command: "python3".into(),
+                args: vec!["-u".into(), "-c".into(), SERVER.into()],
+                env: BTreeMap::from([
+                    ("TRACE".into(), trace.display().to_string()),
+                    ("SCENARIO".into(), scenario.into()),
+                ]),
+                cwd: None,
+            }),
+            diagnostics: Default::default(),
+            data_limits: Default::default(),
+            shutdown_policy: Default::default(),
+        },
+    )])
+}
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test-only law reads the explicitly supplied protocol trace written by its own fixture"
+)]
+fn read_trace(path: &std::path::Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+const SERVER: &str = r#"
+import json, os, sys
+scenario=os.environ['SCENARIO']
+subscription=None
+lists=0
+def send(message):
+    print(json.dumps(message),flush=True)
+def complete(message,result):
+    send({'jsonrpc':'2.0','id':message['id'],'result':{'resultType':'complete',**result}})
+for line in sys.stdin:
+    with open(os.environ['TRACE'],'a') as trace: trace.write(line)
+    message=json.loads(line)
+    method=message.get('method')
+    if method=='server/discover':
+        complete(message,{'supportedVersions':[os.environ.get('REVISION','2026-07-28')], 'capabilities':{'tools':{'listChanged':scenario=='changes'}},'serverInfo':{'name':'modern-fixture','version':'1'},'ttlMs':0,'cacheScope':'private'})
+    elif method=='tools/list':
+        lists+=1
+        complete(message,{'tools':[{'name':'exercise','description':'refreshed' if lists>1 else 'initial','inputSchema':{'type':'object'}}],'ttlMs':0,'cacheScope':'private'})
+    elif method=='subscriptions/listen':
+        subscription=message['id']
+        send({'jsonrpc':'2.0','method':'notifications/subscriptions/acknowledged','params':{'notifications':message['params']['notifications'],'_meta':{'io.modelcontextprotocol/subscriptionId':subscription}}})
+    elif method=='tools/call':
+        if scenario=='changes':
+            send({'jsonrpc':'2.0','method':'notifications/tools/list_changed','params':{'_meta':{'io.modelcontextprotocol/subscriptionId':subscription}}})
+            complete(message,{'content':[{'type':'text','text':'changed'}]})
+        elif 'inputResponses' in message.get('params',{}):
+            complete(message,{'content':[{'type':'text','text':'complete'}]})
+        else:
+            form={'method':'elicitation/create','params':{'mode':'form','message':'invalid' if scenario=='invalid' else 'confirm','requestedSchema':{'type':'object','properties':{'answer':{'type':'string'}},'required':['answer']}}}
+            requests={'form':form}
+            if scenario=='inputs':
+                # MCP 2026-07-28 still defaults an omitted elicitation mode to form.
+                del form['params']['mode']
+                requests.update({'url':{'method':'elicitation/create','params':{'mode':'url','message':'authorize','url':'https://example.invalid/approve'}},'sampling':{'method':'sampling/createMessage','params':{'messages':[{'role':'user','content':{'type':'text','text':'summarize'}}],'maxTokens':64}},'roots':{'method':'roots/list'}})
+            send({'jsonrpc':'2.0','id':message['id'],'result':{'resultType':'input_required','requestState':'opaque-state','inputRequests':requests}})
+"#;

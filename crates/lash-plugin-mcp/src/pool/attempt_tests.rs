@@ -254,7 +254,7 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
 }
 
 #[tokio::test]
-async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
+async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() {
     use lash_core::ToolProvider;
     let scratch = tempfile::tempdir().unwrap();
     let pool = connect_mock(
@@ -273,7 +273,7 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
     let prepared = prepare(&provider, &original).await;
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
     let context = fixture.attempt("mcp-unsupported-law");
-    for mode in ["deferred", "task", "isolated"] {
+    for mode in ["deferred", "isolated"] {
         let mut manifest = original.clone();
         match mode {
             "deferred" => {
@@ -297,12 +297,7 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
                     )
                     .expect("an isolated manifest naming its engine");
             }
-            _ => {
-                manifest
-                    .bindings
-                    .get_mut(admission::MCP_BINDING_KEY)
-                    .unwrap()["completion"] = json!("unsupported_task");
-            }
+            _ => unreachable!("only the two declared unsupported modes"),
         }
         let attempt = provider
             .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
@@ -358,7 +353,7 @@ async fn l03_mcp_cancellation_never_claims_remote_success_or_termination() {
     mock.command("reply").await;
     peer(&pool)
         .await
-        .send_request(ClientRequest::PingRequest(PingRequest::default()))
+        .send_request(rmcp::model::CustomRequest::new("fixture/barrier", None).into())
         .await
         .unwrap();
     assert!(matches!(
@@ -376,57 +371,6 @@ async fn l03_mcp_cancellation_never_claims_remote_success_or_termination() {
     drop(clock);
     pool.shutdown_all().await;
     mock.event("eof").await;
-}
-
-#[tokio::test]
-async fn l07_mcp_required_remote_tasks_refuse_during_admission() {
-    use lash_core::ToolProvider;
-    let scratch = tempfile::tempdir().unwrap();
-    let pool = connect_mock(
-        scratch.path(),
-        MockOptions {
-            behavior: "success",
-            ..Default::default()
-        },
-    )
-    .await;
-    let entry = entry(&pool);
-    let remote: rmcp::model::Tool = serde_json::from_value(json!({
-        "name": "work", "inputSchema": {"type": "object"},
-        "execution": {"taskSupport": "required"},
-    }))
-    .unwrap();
-    let imported = import_tools("mock", vec![remote], std::time::Duration::from_secs(30)).unwrap();
-    let service = entry.service_snapshot().unwrap();
-    let imported = admission::bind_imported_tools(imported, &entry, &service.peer).unwrap();
-    entry.replace_imported_tools(imported).unwrap();
-    let provider = crate::McpToolProvider::new(Arc::clone(&pool));
-    let manifest = provider
-        .tool_manifests(&lash_core::OwnerConfigView::default())
-        .expect("fixture provider advertises")
-        .remove(0);
-    let context = lash_core::ToolPrepareContext::for_testing(
-        lash_core::RuntimeOwner::Session("mcp-task-refusal".into()),
-        Arc::new(lash_core::testing::MockSessionManager::default()),
-        None,
-    );
-    let result = provider
-        .prepare_tool_call(lash_core::ToolPrepareCall {
-            tool_id: manifest.id,
-            pending: lash_core::sansio::PendingToolCall {
-                call_id: context.call_id().clone(),
-                provider_call_id: None,
-                tool_name: manifest.name,
-                args: json!({}),
-                replay: None,
-            },
-            context: &context,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(failure(&result).code, "mcp_unsupported_remote_completion");
-    pool.shutdown_all().await;
-    assert!(!received(scratch.path()).contains("tools/call"));
 }
 
 #[tokio::test]

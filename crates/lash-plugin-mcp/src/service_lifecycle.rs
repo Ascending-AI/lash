@@ -9,16 +9,19 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use rmcp::service::{RoleClient, RunningService, ServiceExt};
+use rmcp::model::ProtocolVersion;
+use rmcp::service::ClientInitializeError;
+use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
 };
+use rmcp::{ClientLifecycleMode, ClientServiceExt};
 use tokio::time::Instant;
 
 use crate::config::{McpServerConfig, McpStdioTransport, McpTransport};
 use crate::diagnostics::{StartupDiagnostics, StderrCapture};
 use crate::error::{McpError, McpExitObservation};
-use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
+use crate::host::{LashMcpClientHandler, McpHostServices};
 use crate::stdio_transport::{ManagedChildTransport, StdioCloseCause, stdio_close_cause};
 
 type HandshakeFuture = Pin<
@@ -42,12 +45,12 @@ pub(crate) fn connect_service(
     config: &McpServerConfig,
     diagnostics: StartupDiagnostics,
     host_services: McpHostServices,
-    tool_list_changed: Arc<dyn McpToolListChangedHandler>,
+    tool_changes: Arc<crate::pool::tool_changes::ToolChanges>,
     active_pid: Arc<AtomicU32>,
     shutdown_requested: Arc<RwLock<McpServerHealth>>,
 ) -> Result<ConnectingService, McpError> {
-    let client_handler = LashMcpClientHandler::new(server_name, host_services)
-        .with_tool_list_changed_handler(tool_list_changed);
+    let client_handler =
+        LashMcpClientHandler::new(server_name, host_services).with_tool_changes(tool_changes);
 
     match &config.transport {
         McpTransport::Stdio(transport) => {
@@ -99,14 +102,26 @@ pub(crate) fn connect_service(
                     return Err(error);
                 }
                 let transport = io?;
-                client_handler.serve(transport).await.map_err(|err| {
-                    let detail = handshake_cause
-                        .lock_recover()
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| err.to_string());
-                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {detail}"))
-                })
+                client_handler
+                    .serve_with_lifecycle(transport, client_lifecycle())
+                    .await
+                    .map_err(Box::new)
+                    .and_then(validate_protocol)
+                    .map_err(|err| {
+                        if let Some(versions) = unsupported_versions(&err) {
+                            return McpError::UnsupportedProtocolRevision {
+                                server: server_name,
+                                expected: crate::host::MCP_PROTOCOL_VERSION,
+                                offered: versions,
+                            };
+                        }
+                        let detail = handshake_cause
+                            .lock_recover()
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| err.to_string());
+                        McpError::Protocol(format!("MCP handshake with `{server_name}`: {detail}"))
+                    })
             });
             Ok(ConnectingService {
                 handshake,
@@ -124,9 +139,21 @@ pub(crate) fn connect_service(
             let transport = StreamableHttpClientTransport::from_config(config);
             let server_name = server_name.to_string();
             let handshake = Box::pin(async move {
-                client_handler.serve(transport).await.map_err(|err| {
-                    McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
-                })
+                client_handler
+                    .serve_with_lifecycle(transport, client_lifecycle())
+                    .await
+                    .map_err(Box::new)
+                    .and_then(validate_protocol)
+                    .map_err(|err| {
+                        if let Some(versions) = unsupported_versions(&err) {
+                            return McpError::UnsupportedProtocolRevision {
+                                server: server_name,
+                                expected: crate::host::MCP_PROTOCOL_VERSION,
+                                offered: versions,
+                            };
+                        }
+                        McpError::Protocol(format!("MCP handshake with `{server_name}`: {err}"))
+                    })
             });
             Ok(ConnectingService {
                 handshake,
@@ -134,6 +161,39 @@ pub(crate) fn connect_service(
                 stdio_close_cause: None,
             })
         }
+    }
+}
+
+pub(crate) fn client_lifecycle() -> ClientLifecycleMode {
+    ClientLifecycleMode::Discover {
+        preferred_versions: vec![crate::host::MCP_PROTOCOL_VERSION],
+    }
+}
+
+fn validate_protocol(
+    running: RunningService<RoleClient, LashMcpClientHandler>,
+) -> Result<RunningService<RoleClient, LashMcpClientHandler>, Box<ClientInitializeError>> {
+    if let Some(info) = running.peer_info()
+        && info.protocol_version != crate::host::MCP_PROTOCOL_VERSION
+    {
+        let server_supported = vec![info.protocol_version.clone()];
+        running.cancellation_token().cancel();
+        return Err(Box::new(
+            ClientInitializeError::NoCompatibleProtocolVersion {
+                client_supported: vec![crate::host::MCP_PROTOCOL_VERSION],
+                server_supported,
+            },
+        ));
+    }
+    Ok(running)
+}
+
+fn unsupported_versions(error: &ClientInitializeError) -> Option<Vec<ProtocolVersion>> {
+    match error {
+        ClientInitializeError::NoCompatibleProtocolVersion {
+            server_supported, ..
+        } => Some(server_supported.clone()),
+        _ => None,
     }
 }
 
