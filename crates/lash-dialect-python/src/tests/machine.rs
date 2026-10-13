@@ -300,6 +300,36 @@ fn start(
     (machine, text)
 }
 
+/// FIG-6160: a builtin range loop needs space for its counter, regardless
+/// of the number of integers it could visit before a break.
+#[test]
+fn builtin_range_loop_uses_constant_space() {
+    let lowered = lower("for i in range(100000):\n    print(i)\n    break\nprint(i)\n").unwrap();
+    let program = Program {
+        document: Arc::new(lowered.document),
+        library: installed().prepared.clone(),
+    };
+    let mut machine = KernelMachine::start(
+        program,
+        Bounds {
+            memory: 64 << 10,
+            ..BOUNDS
+        },
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        },
+    )
+    .unwrap();
+    let mut console = Console::default();
+    assert!(matches!(
+        machine.run(&mut console, u64::MAX).unwrap(),
+        Step::Ended(End::Finished(_))
+    ));
+    assert_eq!(console.lines, ["0", "0"]);
+}
+
 /// Runs `source` to its end as a cell of a session that holds `bindings`
 /// and can call the tools `effects`. At each park, `at_park` is given the
 /// lines printed since the park before, the park and the document's
@@ -973,5 +1003,361 @@ except TypeError as error:
             "sequence item 1: expected str instance, list found",
             "'int' object is not iterable"
         ]
+    );
+}
+
+/// FIG-6160: compare observable values, errors and final loop targets with
+/// the still-supported eager range, forced by wrapping it in list().
+fn range_matches_eager(source: &str, args: &str, lines: &[&str]) {
+    let counted = source.replace("ITER", &format!("range({args})"));
+    let eager = source.replace("ITER", &format!("list(range({args}))"));
+    let actual = output(&counted);
+    assert_eq!(actual, output(&eager), "{counted}");
+    assert_eq!(
+        actual,
+        (
+            lines.iter().map(|line| (*line).into()).collect(),
+            "ok".into()
+        ),
+        "{counted}"
+    );
+}
+
+/// FIG-6160: arguments run once, left to right, before validation; their
+/// captured values cannot be changed by later arguments or by the body.
+#[test]
+fn range_arguments_are_evaluated_once_in_order() {
+    range_matches_eager(
+        r#"
+trace = []
+first = 1
+stop = 6
+step = 2
+def end():
+    global first
+    first = 99
+    trace.append('stop')
+    return stop
+def stride():
+    trace.append('step')
+    return step
+for i in ITER:
+    print(i)
+    stop = 0
+    step = 0
+print(trace, first, i)
+"#,
+        "first, end(), stride()",
+        &["1", "3", "5", "['stop', 'step'] 99 5"],
+    );
+    range_matches_eager(
+        r#"
+def argument(label, value):
+    print(label)
+    return value
+try:
+    for i in ITER:
+        print('body')
+except TypeError as error:
+    print(type(error).__name__, error)
+"#,
+        "argument('start', 'bad'), argument('stop', 0), argument('step', 1)",
+        &[
+            "start",
+            "stop",
+            "step",
+            "TypeError 'str' object cannot be interpreted as an integer",
+        ],
+    );
+    let source = "for i in ITER:\n    print(i)\n    await echo(i)\nprint(i)\n";
+    let args = "await echo(1), await echo(4), await echo(1)";
+    let counted = run(&source.replace("ITER", &format!("range({args})")), &[]);
+    let eager = run(
+        &source.replace("ITER", &format!("list(range({args}))")),
+        &[],
+    );
+    assert_eq!(counted, eager, "argument and body parks retain their order");
+    assert_eq!(counted.lines(), ["1", "2", "3", "3"]);
+    assert_eq!(counted.end, "ok");
+}
+
+/// FIG-6160: a zero step raises before any iteration, including an empty
+/// range, and does not assign the target or execute else.
+#[test]
+fn range_zero_step_raises_before_iteration() {
+    for args in ["0, 3, 0", "3, 0, 0", "0, 0, 0"] {
+        range_matches_eager(
+            r#"
+i = 42
+try:
+    for i in ITER:
+        print('body')
+    else:
+        print('else')
+except ValueError as error:
+    print(type(error).__name__, error, i)
+"#,
+            args,
+            &["ValueError range() arg 3 must not be zero 42"],
+        );
+    }
+}
+
+/// FIG-6160: either step direction visits exactly the eager sequence;
+/// integer counters remain exact across the small-integer boundary.
+#[test]
+fn range_steps_preserve_integer_sequences() {
+    let source = "values = []\nfor i in ITER:\n    values.append(i)\nprint(values)\n";
+    for (args, line) in [
+        ("5", "[0, 1, 2, 3, 4]"),
+        ("1, 6, 2", "[1, 3, 5]"),
+        ("5, -2, -2", "[5, 3, 1, -1]"),
+        ("0, 5, -1", "[]"),
+        ("5, 0, 1", "[]"),
+        (
+            "9223372036854775806, 9223372036854775810",
+            "[9223372036854775806, 9223372036854775807, 9223372036854775808, 9223372036854775809]",
+        ),
+        (
+            "-9223372036854775807, -9223372036854775811, -1",
+            "[-9223372036854775807, -9223372036854775808, -9223372036854775809, -9223372036854775810]",
+        ),
+    ] {
+        range_matches_eager(source, args, &[line]);
+    }
+}
+
+/// FIG-6160: the iterator is independent of target rebinding, including
+/// assignments made by a closure and a subscript target.
+#[test]
+fn range_counter_is_independent_of_target_rebinding() {
+    range_matches_eager(
+        r#"
+for i in ITER:
+    print(i)
+    i = 'changed'
+print(i)
+"#,
+        "3",
+        &["0", "1", "2", "changed"],
+    );
+    range_matches_eager(
+        r#"
+i = 99
+def change():
+    global i
+    i = 100
+for i in ITER:
+    print(i)
+    change()
+print(i)
+"#,
+        "3",
+        &["0", "1", "2", "100"],
+    );
+    range_matches_eager(
+        r#"
+box = [99]
+for box[0] in ITER:
+    print(box[0])
+    box[0] = 'changed'
+print(box)
+"#,
+        "3",
+        &["0", "1", "2", "['changed']"],
+    );
+}
+
+/// FIG-6160: a loop leaves the last target binding; an empty loop leaves
+/// an existing binding intact and an absent local unbound.
+#[test]
+fn range_target_keeps_its_last_value_or_stays_unbound() {
+    range_matches_eager("for i in ITER:\n    pass\nprint(i)\n", "3", &["2"]);
+    range_matches_eager("i = 99\nfor i in ITER:\n    pass\nprint(i)\n", "0", &["99"]);
+    range_matches_eager(
+        r#"
+for i in ITER:
+    pass
+try:
+    print(i)
+except NameError:
+    print('unbound')
+"#,
+        "0",
+        &["unbound"],
+    );
+    range_matches_eager(
+        r#"
+def empty():
+    for i in ITER:
+        pass
+    try:
+        print(i)
+    except UnboundLocalError:
+        print('unbound')
+empty()
+"#,
+        "0",
+        &["unbound"],
+    );
+}
+
+/// FIG-6160: continue advances even through finally; break skips else;
+/// natural exhaustion (including zero iterations) runs else. Nested loops
+/// retain their own break and continue targets.
+#[test]
+fn range_break_continue_and_else_keep_python_control_flow() {
+    range_matches_eager(
+        r#"
+for i in ITER:
+    try:
+        if i == 1:
+            continue
+        if i == 3:
+            break
+        print('body', i)
+    finally:
+        print('finally', i)
+else:
+    print('else')
+print(i)
+"#,
+        "5",
+        &[
+            "body 0",
+            "finally 0",
+            "finally 1",
+            "body 2",
+            "finally 2",
+            "finally 3",
+            "3",
+        ],
+    );
+    range_matches_eager(
+        r#"
+for i in ITER:
+    for j in range(2):
+        if j == 0:
+            continue
+        print(i, j)
+        break
+    continue
+else:
+    print('else')
+"#,
+        "2",
+        &["0 1", "1 1", "else"],
+    );
+    range_matches_eager(
+        "for i in ITER:\n    pass\nelse:\n    print('else')\n",
+        "0",
+        &["else"],
+    );
+}
+
+/// FIG-6160: non-integers retain py.range's existing typed errors and
+/// validation order, even when the bounds imply no iterations or step zero.
+#[test]
+fn range_non_integer_errors_match_the_eager_helper() {
+    let source = r#"
+try:
+    for i in ITER:
+        print('body')
+except TypeError as error:
+    print(type(error).__name__, error)
+"#;
+    for (args, ty) in [
+        ("1.0", "float"),
+        ("'bad', 1.0, 0", "str"),
+        ("0, 1.0, 'bad'", "float"),
+        ("0, 0, []", "list"),
+        ("True", "bool"),
+        ("None", "NoneType"),
+        ("0, 0, False", "bool"),
+    ] {
+        range_matches_eager(
+            source,
+            args,
+            &[&format!(
+                "TypeError '{ty}' object cannot be interpreted as an integer"
+            )],
+        );
+    }
+}
+
+/// FIG-6160: only a builtin direct loop gets the counter. Lexically
+/// shadowed and rebound ranges remain calls of those bindings;
+/// stored ranges, list(range(...)) and len(range(...)) stay eager lists.
+#[test]
+fn range_lowering_respects_scope_and_other_range_uses() {
+    assert_eq!(
+        output(
+            r#"
+def local():
+    def range(n):
+        return ['custom', n]
+    for i in range(2):
+        print(i)
+    range = lambda n: ['rebound', n]
+    for i in range(3):
+        print(i)
+local()
+"#
+        ),
+        (
+            vec!["custom".into(), "2".into(), "rebound".into(), "3".into()],
+            "ok".into()
+        )
+    );
+    assert_eq!(
+        output(
+            r#"
+def f(range):
+    for i in range(2):
+        print(i)
+def custom(n):
+    return ['parameter', n]
+f(custom)
+"#
+        ),
+        (vec!["parameter".into(), "2".into()], "ok".into())
+    );
+    assert_eq!(
+        output(
+            r#"
+def outer():
+    def range(n):
+        return ['closure', n]
+    def inner():
+        for i in range(2):
+            print(i)
+    inner()
+outer()
+"#
+        ),
+        (vec!["closure".into(), "2".into()], "ok".into())
+    );
+    assert_eq!(
+        lower("def range(n):\n    return []\n").unwrap_err().code,
+        crate::diagnostics::Code::ShadowsBuiltin.as_str()
+    );
+    assert_eq!(
+        output(
+            r#"
+stored = range(3)
+print(stored, list(range(3)), len(range(3)), type(stored).__name__)
+for i in stored:
+    print(i)
+"#
+        ),
+        (
+            vec![
+                "[0, 1, 2] [0, 1, 2] 3 list".into(),
+                "0".into(),
+                "1".into(),
+                "2".into()
+            ],
+            "ok".into()
+        )
     );
 }

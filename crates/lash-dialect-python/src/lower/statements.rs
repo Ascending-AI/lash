@@ -42,7 +42,7 @@ impl Lowerer<'_> {
         block
     }
 
-    fn single(&self, stmt: Stmt) -> Buf {
+    pub(super) fn single(&self, stmt: Stmt) -> Buf {
         Buf {
             stmts: vec![stmt],
             notes: vec![Note {
@@ -300,7 +300,7 @@ impl Lowerer<'_> {
     }
 
     /// A variable that records a `break`, declared false.
-    fn break_flag(&mut self) -> Name {
+    pub(super) fn break_flag(&mut self) -> Name {
         let flag = self.fresh("broke");
         self.emit(Stmt::Let {
             name: flag.clone(),
@@ -342,7 +342,7 @@ impl Lowerer<'_> {
 
     /// What follows a loop that was not left by `break`: the size check of
     /// a dict or set that was walked, then the `else` suite.
-    fn loop_else(
+    pub(super) fn loop_else(
         &mut self,
         flag: Option<Name>,
         guard: Option<&(Operand, Operand)>,
@@ -422,6 +422,13 @@ impl Lowerer<'_> {
                 for_loop.range,
                 "await inside an ordinary `for`",
             ));
+        }
+        if let PyExpr::Call(call) = for_loop.iter.as_ref()
+            && matches!(call.func.as_ref(), PyExpr::Name(name) if name.id.as_str() == "range")
+            && self.variable("range").is_none()
+            && self.effect(call).is_none()
+        {
+            return self.range_loop(for_loop, call, span);
         }
         let (walked, guard) = self.for_header(&for_loop.iter)?;
         let breaks = scope::breaks(&for_loop.body);

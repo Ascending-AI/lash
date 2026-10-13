@@ -1,0 +1,142 @@
+//! FIG-6160: builtin range iteration uses an integer counter, never a list.
+
+use lash_kernel_doc::{Expr, Integer, Literal, Place, Rhs, Stmt};
+use ruff_python_ast as ast;
+
+use super::{Buf, Lowerer, Lowering, Operand};
+use crate::scope::{self, Ty};
+
+impl Lowerer<'_> {
+    pub(super) fn range_loop(
+        &mut self,
+        for_loop: &ast::StmtFor,
+        call: &ast::ExprCall,
+        span: Option<lash_kernel_dialect::Span>,
+    ) -> Lowering<()> {
+        let args = self.positional("range", call, 1, 3)?;
+        // Pin even the last argument: the body may rebind any source name.
+        let args: Vec<_> = args.into_iter().map(|arg| self.pin(arg)).collect();
+        let zero = Operand::literal(Literal::Int(Integer::from(0)), Ty::Int);
+        let one = Operand::literal(Literal::Int(Integer::from(1)), Ty::Int);
+        let (start, stop, step) = match args.as_slice() {
+            [stop] => (zero.clone(), stop.clone(), one),
+            [start, stop] => (start.clone(), stop.clone(), one),
+            [start, stop, step] => (start.clone(), stop.clone(), step.clone()),
+            _ => unreachable!("positional checks the range arity"),
+        };
+        // Match py.range's validation order and errors, including on empty
+        // ranges. An annotation alone is not proof of the runtime kind.
+        for bound in [&start, &stop, &step] {
+            let kind = self.native("kind", vec![bound.expr.clone()])?;
+            let integer = self.native(
+                "same",
+                vec![kind, Expr::Literal(Literal::Text("integer".into()))],
+            )?;
+            let invalid = self.not(integer)?;
+            let failure = self.block(|this| {
+                let name = this.invoke("py.type", std::slice::from_ref(bound), Ty::Str)?;
+                let message = this.native(
+                    "text.join",
+                    vec![
+                        Expr::List(vec![
+                            Operand::text("'").expr,
+                            name.expr,
+                            Operand::text("' object cannot be interpreted as an integer").expr,
+                        ]),
+                        Operand::text("").expr,
+                    ],
+                )?;
+                this.invoke_do(
+                    "py.fail",
+                    &[
+                        Operand::text("TypeError"),
+                        Operand::inline(message, Ty::Str),
+                    ],
+                )
+            })?;
+            self.emit_if(invalid, failure, Buf::default());
+        }
+        let is_zero = self.native("eq", vec![step.expr.clone(), zero.expr.clone()])?;
+        let failure = self.block(|this| {
+            this.invoke_do(
+                "py.fail",
+                &[
+                    Operand::text("ValueError"),
+                    Operand::text("range() arg 3 must not be zero"),
+                ],
+            )
+        })?;
+        self.emit_if(is_zero, failure, Buf::default());
+
+        // Admission does not refine a value's type from kind checks. On the
+        // successful path these calls are identities, and expose Int results
+        // without rejecting a statically non-int argument before py.fail runs.
+        let mut integer = |bound: Operand| {
+            if matches!(bound.expr, Expr::Literal(Literal::Int(_))) {
+                Ok(bound)
+            } else {
+                self.invoke("py.int", &[bound], Ty::Int)
+            }
+        };
+        let start = integer(start)?;
+        let stop = integer(stop)?;
+        let step = integer(step)?;
+
+        let counter = self.let_rhs(Rhs::Expr(start.expr), Ty::Int);
+        let Expr::Variable(counter_name) = &counter.expr else {
+            unreachable!("a temporary is a variable");
+        };
+        let flag = (!for_loop.orelse.is_empty() && scope::breaks(&for_loop.body))
+            .then(|| self.break_flag());
+        // The usual omitted step needs just one comparison per iteration.
+        // For a dynamic step, select the comparison once per loop test.
+        let direction = match &step.expr {
+            Expr::Literal(Literal::Int(value)) => Some(!value.is_negative()),
+            _ => None,
+        };
+        let positive = if direction.is_none() {
+            let expr = self.native("int.gt", vec![step.expr.clone(), zero.expr])?;
+            Some(self.let_rhs(Rhs::Expr(expr), Ty::Bool))
+        } else {
+            None
+        };
+        let condition = match direction {
+            Some(positive) => self.native(
+                if positive { "int.lt" } else { "int.gt" },
+                vec![counter.expr.clone(), stop.expr.clone()],
+            )?,
+            None => Expr::Literal(Literal::Bool(true)),
+        };
+        let body = self.block(|this| {
+            if let Some(positive) = positive {
+                let mut exhausted = |comparison| {
+                    this.block(|this| {
+                        let done =
+                            this.native(comparison, vec![counter.expr.clone(), stop.expr.clone()])?;
+                        let leave = this.single(Stmt::Break);
+                        this.emit_if(done, leave, Buf::default());
+                        Ok(())
+                    })
+                };
+                let ascending = exhausted("int.ge")?;
+                let descending = exhausted("int.le")?;
+                this.emit_if(positive.expr, ascending, descending);
+            }
+            this.assign(&for_loop.target, counter.clone())?;
+            // Advance before the body so continue (including through finally)
+            // cannot skip it, and rebinding the Python target cannot change it.
+            let next = this.native("int.add", vec![counter.expr.clone(), step.expr.clone()])?;
+            this.store(
+                Place::Variable(counter_name.clone()),
+                Operand::inline(next, Ty::Int),
+            );
+            this.scope_mut().loops.push(flag.clone());
+            let result = this.statements(&for_loop.body);
+            this.scope_mut().loops.pop();
+            result
+        })?;
+        self.span = span;
+        self.emit_while(condition, body);
+        self.loop_else(flag, None, &for_loop.orelse, span)
+    }
+}

@@ -215,7 +215,7 @@ impl Lowerer<'_> {
     }
 
     /// The tool a call names, if it names one.
-    fn effect(&self, call: &ast::ExprCall) -> Option<(EffectName, Signature)> {
+    pub(super) fn effect(&self, call: &ast::ExprCall) -> Option<(EffectName, Signature)> {
         let PyExpr::Name(name) = call.func.as_ref() else {
             return None;
         };
@@ -962,7 +962,7 @@ impl Lowerer<'_> {
 
     /// The positional arguments of a built-in that takes between `min`
     /// and `max` of them and no keywords.
-    fn positional(
+    pub(super) fn positional(
         &mut self,
         name: &str,
         call: &ast::ExprCall,

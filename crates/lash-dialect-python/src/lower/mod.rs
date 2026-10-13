@@ -16,6 +16,7 @@ mod annotate;
 mod calls;
 mod expressions;
 mod format;
+mod range;
 mod repairs;
 mod saved;
 mod statements;
