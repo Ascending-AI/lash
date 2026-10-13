@@ -1,8 +1,7 @@
 //! The hottest internal helpers against their previous definitions: each
-//! law runs one document holding the previous body as a document function
-//! and calling the helper as the library now defines it, on the same
-//! generated input, so the previous body is the oracle for the result, the
-//! error and the prints.
+//! law calls the previous body as a document function or by its retained
+//! pin, alongside the helper as the library now defines it, on the same
+//! input. The previous body is the oracle for results, errors and prints.
 
 use std::sync::Arc;
 
@@ -536,4 +535,138 @@ fn numbers_are_spelled_as_their_former_body_spelled_them() {
         );
     }
     println!("number spelling differential: cases={}", numbers.len());
+}
+
+// The retained definition is addressed by its original identity, never by name.
+const RETAINED_MAP_KEY: &str = r#"
+use kind
+use same
+use eq
+use ref
+function ts.map.key(value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let k = kind(value)
+  if same(k, "absent") { return ("undefined", "key") }
+  for object in ["list", "map", "set", "record", "closure", "task"] {
+    if same(k, object) { return ref(value) }
+  }
+  if same(k, "error") { return ("error", ref(value.data), value.kind, value.message) }
+  if same(k, "tuple") {
+    if same(value, ()) {} else {
+      # A function's token holds the closure that calls it, which is keyed
+      # as the object it is, or the reference to the declared function a
+      # saved one is, which is a key itself; the deleted record of one the
+      # program made is keyed as the object it is.
+      if same(value[0], "ts.function") {
+        let callable = value[4]
+        if same(kind(callable), "function") {} else { set callable = ref(callable) }
+        if same(value[1], "") { return ("ts.function", "", value[2], value[3], callable, ref(value[5])) }
+        return ("ts.function", value[1], value[2], value[3], callable)
+      }
+    }
+  }
+  if same(k, "float") { if eq(value, 0) { return 0.0 } }
+  return value
+}
+"#;
+
+/// FIG-6105 and K-CHG-007: numeric admission allocates no key list and
+/// charges its executed body. K-MACH-007/008: both the new body and a
+/// retained old pin resume with their own results and exact charges.
+#[test]
+fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
+    use lash_kernel_dialect::{Library, NamedLibrary, define_functions};
+    use lash_kernel_vm::PreparedLibrary;
+
+    let mut registry = machine::registry().as_ref().clone();
+    let current = NamedLibrary::from_registry(&registry)
+        .unwrap()
+        .resolve("ts.map.key")
+        .unwrap();
+    let mut retained_names = NamedLibrary::from_registry(&super::kernel_registry()).unwrap();
+    let retained = define_functions(RETAINED_MAP_KEY, &mut retained_names)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let old = retained.identity().unwrap();
+    if old != current {
+        registry.register(retained, None).unwrap();
+    }
+    let library = PreparedLibrary::new(Arc::new(registry));
+    let make_program = |id| {
+        let document = parse_document(&format!(
+            "kernel 1\nnumbers by_spelling\nuse key = @{id}\nentry key(v: Any) -> Any\nfn key(v) {{ let out = invoke key(v) return out }}\nmain {{}}"
+        ))
+        .unwrap();
+        Program {
+            document: Arc::new(document),
+            library: library.clone(),
+        }
+    };
+    let run = |program: Program, value: Datum, relay: bool| {
+        let mut machine = KernelMachine::start(
+            program.clone(),
+            BOUNDS,
+            Start {
+                target: Target::Entry(Name::new("key")),
+                args: vec![value],
+                bindings: Bindings::default(),
+            },
+        )
+        .unwrap();
+        if !relay {
+            machine.count_work();
+        }
+        let mut host = Console::default();
+        loop {
+            match machine
+                .run(&mut host, if relay { 0 } else { u64::MAX })
+                .unwrap()
+            {
+                Step::Slice => {
+                    let state = machine.export().unwrap();
+                    machine = KernelMachine::import(program.clone(), BOUNDS, state).unwrap();
+                }
+                Step::Ended(end) => return (end, machine.meters().charged, machine.work()),
+                other => panic!("a key never parks: {other:?}"),
+            }
+        }
+    };
+    let fast = make_program(current);
+    let retained = make_program(old);
+    for value in [
+        Datum::Int(0.into()),
+        Datum::Int(7.into()),
+        Datum::Int(Integer::parse("9223372036854775808").unwrap()),
+        Datum::Float(Float::new(-0.0)),
+        Datum::Float(Float::new(0.0)),
+        Datum::Float(Float::new(7.5)),
+        Datum::Float(Float::new(f64::NAN)),
+        Datum::Float(Float::new(f64::INFINITY)),
+    ] {
+        let (end, charge, work) = run(fast.clone(), value.clone(), false);
+        let work = work.unwrap();
+        // The entry adds 4 form units plus the result's deep size;
+        // admission adds 28 for an integer, 46 for a float.
+        let expected_charge = match &value {
+            Datum::Int(n) => 28 + 4 + 1 + n.bits().div_ceil(64),
+            Datum::Float(_) => 46 + 4 + 1,
+            _ => unreachable!(),
+        };
+        assert_eq!(charge, expected_charge, "K-CHG-007: {value:?}");
+        assert_eq!(
+            work.heap_insertions, 0,
+            "numeric key admission needs no list"
+        );
+        let (relayed, relayed_charge, _) = run(fast.clone(), value.clone(), true);
+        assert_eq!((relayed, relayed_charge), (end.clone(), charge));
+        let (old_end, old_charge, _) = run(retained.clone(), value.clone(), false);
+        assert_eq!(old_end, end);
+        assert!(old_charge > charge, "less work costs less");
+        let (relayed_old, relayed_old_charge, _) = run(retained.clone(), value, true);
+        assert_eq!((relayed_old, relayed_old_charge), (old_end, old_charge));
+    }
 }

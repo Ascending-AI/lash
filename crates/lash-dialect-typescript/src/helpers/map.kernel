@@ -47,6 +47,9 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   let k = kind(value)
+  # Numbers need no object-kind list. SameValueZero spells either zero +0.
+  if same(k, "integer") { return value }
+  if same(k, "float") { if eq(value, 0) { return 0.0 } return value }
   if same(k, "absent") { return ("undefined", "key") }
   for object in ["list", "map", "set", "record", "closure", "task"] {
     if same(k, object) { return ref(value) }
@@ -66,7 +69,6 @@ body {
       }
     }
   }
-  if same(k, "float") { if eq(value, 0) { return 0.0 } }
   return value
 }
 
