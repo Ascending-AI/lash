@@ -940,6 +940,22 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     let scope = admit(&adapter, TraceCause::Root);
     let events = [
         (
+            TraceEvent::ExecCodeCompleted {
+                duration_ms: 10,
+                output: String::new(),
+                output_chars: 0,
+                observation_count: 0,
+                observation_projections: Vec::new(),
+                error: Some(crate::CellFailure::new(
+                    crate::CellFailureKind::HelperReleaseNotHeld { release: 7 },
+                    "the worker does not hold release 7",
+                )),
+                terminal_finish: None,
+                tool_calls: Vec::new(),
+            },
+            "helper_release_not_held",
+        ),
+        (
             TraceEvent::ExecCodeFailed {
                 reason: crate::ExecCodeFailureReason::RuntimeStopped,
                 error: "private runtime detail".into(),

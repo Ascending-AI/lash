@@ -599,6 +599,50 @@ impl Processes {
         }))
     }
 
+    /// Capture the exact environment for a start of a published definition.
+    /// Keeps only the entry's certified called or spawned effects from
+    /// `candidate`, retaining their tool identities, providers and surfaces,
+    /// and preserving the candidate's components, config, model and limits.
+    /// Uses the same capture judgment as model starts. Nothing is published
+    /// or started; publish the returned env before starting the pair.
+    ///
+    /// [`Self::check_link`] and start admission still require LINK-EXACTLY:
+    /// they refuse extra links rather than capturing them.
+    ///
+    /// # Errors
+    ///
+    /// A missing or unreadable definition, uncertified entry effects, or the
+    /// typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal), accessible
+    /// through [`EmbedError::process_env_refusal`].
+    pub async fn capture(
+        &self,
+        definition: &lash_core::ProcessDefinitionId,
+        candidate: &lash_core::ProcessEnv,
+    ) -> Result<lash_core::ProcessEnv> {
+        let engines = &self.core.host_process_engines;
+        let resolved = self
+            .core
+            .host_artifacts()
+            .resolved_definition(definition)
+            .await?
+            .ok_or_else(|| {
+                EmbedError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::DefinitionMissing,
+                    format!(
+                        "process definition `{definition}` is not stored: no referrer holds it"
+                    ),
+                ))
+            })?;
+        let payload = resolved.start_payload(&Default::default())?;
+        let refused =
+            |refusal| EmbedError::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal });
+        let performed = engines
+            .performed_effects(resolved.draft.engine_kind().as_str(), &payload)
+            .await
+            .map_err(refused)?;
+        engines.capture_env(&performed, candidate).map_err(refused)
+    }
+
     /// The link check of a start of the `kind` engine on `payload` under
     /// `env` (P1): `env` links exactly the effects the payload performs, each
     /// to a tool that fits it under its policy in `fits` (`Compatible` where

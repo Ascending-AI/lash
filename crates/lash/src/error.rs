@@ -233,6 +233,31 @@ impl From<SendError> for EmbedError {
 }
 
 impl EmbedError {
+    /// The typed environment refusal, independent of the operation that
+    /// encountered it. Store and transport faults return `None`.
+    pub fn process_env_refusal(&self) -> Option<&crate::process::ProcessEnvRefusal> {
+        let cause = match self {
+            Self::Plugin(lash_core::PluginError::ProcessEnvRefused { refusal })
+            | Self::Session(SessionError::Plugin(lash_core::PluginError::ProcessEnvRefused {
+                refusal,
+            })) => return Some(refusal),
+            Self::Runtime(error)
+            | Self::Plugin(lash_core::PluginError::Runtime(error))
+            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error))) => {
+                error.cause.as_ref()
+            }
+            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            | Self::Session(SessionError::Plugin(
+                lash_core::PluginError::RuntimeEffectController(error),
+            )) => error.cause.as_ref(),
+            _ => None,
+        };
+        match cause {
+            Some(lash_core::RuntimeErrorCause::ProcessEnvRefused { refusal }) => Some(refusal),
+            _ => None,
+        }
+    }
+
     /// The artifact judgment, with a stable local code, when this operation
     /// refused a released pin, unavailable content, conflicting bytes or a
     /// definition. Store and transport faults return `None`; inspect their

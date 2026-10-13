@@ -416,18 +416,27 @@ mod rlm_step_serde_tests {
     /// message, with no rendered guidance and no host detail.
     #[test]
     fn a_failed_step_reads_back_as_its_kind_and_message() {
-        let item = history(&CellRecord {
-            result: CellOutcome::Failed(program_failure()),
-            ..populated_entry()
-        });
-        assert_eq!(
-            item["error"],
-            serde_json::json!({
-                "kind": "program",
-                "message": "ReferenceError: rows is not defined",
-            })
-        );
-        assert!(item.get("final_output").is_none());
+        for (failure, kind) in [
+            (program_failure(), serde_json::json!("program")),
+            (
+                CellFailure::new(
+                    CellFailureKind::HelperReleaseNotHeld { release: 7 },
+                    "missing helpers",
+                ),
+                serde_json::json!({"helper_release_not_held": {"release": 7}}),
+            ),
+        ] {
+            let message = failure.message.clone();
+            let item = history(&CellRecord {
+                result: CellOutcome::Failed(failure),
+                ..populated_entry()
+            });
+            assert_eq!(
+                item["error"],
+                serde_json::json!({"kind": kind, "message": message})
+            );
+            assert!(item.get("final_output").is_none());
+        }
     }
 
     /// Every history item this build can serialize, with every optional key

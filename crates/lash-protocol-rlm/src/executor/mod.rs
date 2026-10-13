@@ -404,9 +404,10 @@ async fn link_cell(
             )));
         }
         Ok(Response::HelperReleaseNotHeld { release }) => {
-            return Err(host_failure(format!(
-                "this session's cells are written against helper release {release}, and the worker does not hold it"
-            )));
+            return Err(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::HelperReleaseNotHeld { release },
+                format!("this session's cells are written against helper release {release}, and the worker does not hold it"),
+            ).into());
         }
         Ok(Response::Printed { .. }) => {
             return Err(Refused::Worker(Box::new(

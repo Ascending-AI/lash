@@ -67,10 +67,17 @@ impl ProcessOriginatorFilter {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+/// Selects processes. [`Self::default`] selects live processes only: a
+/// completed child leaves that selection even while its row is retained.
+/// Include completed processes with `ProcessListFilter {
+/// status: ProcessStatusFilter::Any, ..Default::default() }`.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProcessListFilter {
     /// Select runs of this immutable definition.
     pub definition_id: Option<crate::ProcessDefinitionId>,
+    /// Defaults to selecting [`ProcessStatus::Running`], excluding completed and
+    /// other terminal processes. Use [`ProcessStatusFilter::Any`] to include
+    /// completed processes, for example when inspecting a child's history.
     pub status: ProcessStatusFilter,
     pub originator: Option<ProcessOriginatorFilter>,
     /// Selects the processes that live until one scope, compared by the same
@@ -91,6 +98,25 @@ pub struct ProcessListFilter {
     /// remain eligible regardless of age, so `status: Any` answers a bounded
     /// "live plus recently retired" poll in one store query.
     pub retired_since_ms: Option<u64>,
+}
+
+impl Default for ProcessListFilter {
+    /// Select live processes without other restrictions. To include
+    /// completed processes, set `status: ProcessStatusFilter::Any`.
+    fn default() -> Self {
+        Self {
+            definition_id: None,
+            status: ProcessStatusFilter::any_of([ProcessStatus::Running]),
+            originator: None,
+            until: None,
+            cancel_pending_before_ms: None,
+            identity_kind: None,
+            identity_label: None,
+            created_at_start_ms: None,
+            created_at_end_ms: None,
+            retired_since_ms: None,
+        }
+    }
 }
 
 impl ProcessListFilter {

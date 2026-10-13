@@ -32,6 +32,50 @@ fn typescript_services() -> super::CellServices {
     )
 }
 
+/// FIG-6124: a worker's missing helper release reaches the cell's host
+/// result as data, including after the result crosses its serialized boundary.
+#[tokio::test]
+async fn a_worker_helper_release_refusal_keeps_the_release_typed() {
+    struct MissingRelease;
+
+    #[async_trait::async_trait]
+    impl crate::plugin::HelperReleaseGate for MissingRelease {
+        async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError> {
+            Ok(u32::MAX)
+        }
+    }
+
+    let host = open_host().await;
+    let mut state = typescript_state();
+    let mut services = typescript_services();
+    services.helpers = Some(Arc::new(MissingRelease));
+    let response = run_cell(
+        &mut state,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:0",
+            Arc::new(ControlRaceTools::default()),
+        ),
+        &services,
+        "const value = 1;",
+    )
+    .await;
+    let failure = response.error().expect("the worker refuses the release");
+    let recorded = serde_json::to_value(failure).expect("the failure serializes");
+    assert_eq!(
+        recorded["kind"],
+        serde_json::json!({"helper_release_not_held": {"release": u32::MAX}})
+    );
+    let restored: lash_core::CellFailure =
+        serde_json::from_value(recorded).expect("the failure restores");
+    assert_eq!(
+        restored.kind,
+        lash_core::CellFailureKind::HelperReleaseNotHeld { release: u32::MAX }
+    );
+}
+
 /// The cell context `tools` run under, with `deferred` as the run's
 /// deferred provider when there is one.
 fn context_with(

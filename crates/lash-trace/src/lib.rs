@@ -846,6 +846,7 @@ pub struct TraceAgentFrameSwitch {
 fn wire_tag<T: Serialize>(value: &T) -> String {
     match serde_json::to_value(value) {
         Ok(Value::String(tag)) => tag,
+        Ok(Value::Object(tag)) if tag.len() == 1 => tag.keys().next().cloned().unwrap_or_default(),
         _ => String::new(),
     }
 }

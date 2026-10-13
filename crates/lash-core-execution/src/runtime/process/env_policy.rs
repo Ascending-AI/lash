@@ -169,7 +169,8 @@ impl<'a> ProcessEnvCx<'a> {
                 },
             );
         }
-        ProcessEnv::from_run(run, effects, components)
+        let candidate = ProcessEnv::from_run(run, effects, components)?;
+        self.engines.capture_env(&performed, &candidate)
     }
 
     /// Restrict the enclosing process's environment to the effects the
@@ -191,6 +192,41 @@ impl<'a> ProcessEnvCx<'a> {
                 .then(|| enclosing.settings.clone())
                 .flatten(),
         })
+    }
+}
+
+impl ProcessEngineRegistry {
+    /// Capture exactly the certified `performed` effects from `candidate`,
+    /// preserving their recorded links and all other environment settings.
+    /// Host and model starts use this same capture judgment.
+    ///
+    /// # Errors
+    ///
+    /// A missing effect, an unfit link, or a component that cannot serve it.
+    pub fn capture_env(
+        &self,
+        performed: &crate::PerformedEffects,
+        candidate: &ProcessEnv,
+    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
+        let env = candidate
+            .restrict(performed.keys())
+            .map_err(|refusal| match refusal {
+                ProcessEnvRefusal::RestrictMissing { effect } => {
+                    ProcessEnvRefusal::EffectNotLinked { effect }
+                }
+                refusal => refusal,
+            })?;
+        crate::check_links(&env, performed, &Default::default())?;
+        self.components().admit(&env)?;
+        self.components()
+            .check_served(&Arc::new(env.clone()))
+            .map_err(|refusal| match refusal {
+                ProcessEnvRefusal::ToolNotServed { effect, tool, .. } => {
+                    ProcessEnvRefusal::CaptureMissing { effect, tool }
+                }
+                refusal => refusal,
+            })?;
+        Ok(env)
     }
 }
 

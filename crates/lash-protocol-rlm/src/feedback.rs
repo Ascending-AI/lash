@@ -360,6 +360,9 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
         CellFailureKind::Host => format!(
             "Next: the host failed while handling this {cell_noun}. Retry it; if the failure persists, report the host problem."
         ),
+        CellFailureKind::HelperReleaseNotHeld { release } => format!(
+            "Next: ask the host to serve this {cell_noun} on a build that holds helper release {release}."
+        ),
     }
 }
 

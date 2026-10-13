@@ -203,6 +203,16 @@ impl HostArtifacts {
             .map(|resolved| resolved.definition))
     }
 
+    pub(crate) async fn resolved_definition(
+        &self,
+        id: &ProcessDefinitionId,
+    ) -> Result<Option<lash_core::ResolvedProcessDefinition>> {
+        Ok(self
+            .definition_ports
+            .read_definition(&self.engines, id)
+            .await?)
+    }
+
     /// What a workflow document is edited and admitted against for
     /// processes that run under `environment`: the effects their tool
     /// catalogue offers, in the kernel's type grammar, and the library

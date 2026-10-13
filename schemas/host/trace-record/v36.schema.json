@@ -251,6 +251,29 @@
           "const": "host",
           "description": "Host infrastructure failed while preparing or executing the program.",
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The worker cannot lower the cell against the helper release it names.\nThe host can route the work to a build that retains this release.",
+          "properties": {
+            "helper_release_not_held": {
+              "properties": {
+                "release": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "release"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "helper_release_not_held"
+          ],
+          "type": "object"
         }
       ]
     },

@@ -249,6 +249,245 @@ fn published(publish: WorkflowPublish) -> WorkflowPublication {
     }
 }
 
+/// FIG-6124: publication and start staging expose their typed env refusal
+/// through the same host accessor, without controller-wrapper knowledge.
+#[tokio::test]
+async fn a_host_start_with_a_narrow_environment_is_refused_typed() {
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let list_env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
+        .link_tool(
+            lash::process_controls::PROCESS_CONTROLS_CONFIG.tool_provider("tools"),
+            &lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::List,
+            ),
+        )
+        .build()
+        .expect("list environment");
+    let mut document = lash::workflow::document::parse_document(
+        r#"kernel 1
+numbers float
+effect processes.list(input: Any) -> Any
+entry list() -> Any
+fn list() {
+  let input = {}
+  let rows = perform processes.list(input) as Any
+  return rows
+}
+
+main { finish null }
+"#,
+    )
+    .expect("list document");
+    let checked = artifacts
+        .workflow_environment(&list_env)
+        .await
+        .expect("environment")
+        .expect("kernel environment");
+    let effect = lash::workflow::document::EffectName::new("processes.list").expect("effect");
+    document
+        .manifest
+        .effects
+        .insert(effect.clone(), checked.effects()[&effect].clone());
+    let draft = Draft::open(document, None).expect("list draft");
+    let publication = published(
+        artifacts
+            .publish_workflow(&pin, &draft, &Name::new("list"), &list_env)
+            .await
+            .expect("publish list"),
+    );
+    let narrow = list_env.restrict(std::iter::empty()).expect("narrow env");
+    let env_ref = artifacts
+        .publish_process_env(&pin, &narrow)
+        .await
+        .expect("publish narrow env");
+    let refused = core
+        .processes()
+        .start(
+            lash::process::ProcessStartRequest::definition(
+                publication.definition.id,
+                Some(publication.definition.signature),
+                Default::default(),
+                lash::process::EngineLaunch::new(
+                    env_ref,
+                    core.processes()
+                        .engine_defaults(
+                            lash::process::LASH_VM_ENGINE_KIND,
+                            &serde_json::Value::Null,
+                        )
+                        .expect("settings"),
+                ),
+                lash::process::ProcessOriginator::host(),
+                lash::process::LifetimeDecision::Detached,
+            )
+            .with_host_start_key("narrow-env"),
+            core.effect_host(),
+        )
+        .await
+        .expect_err("the missing link refuses the start");
+    assert_eq!(
+        refused.process_env_refusal(),
+        Some(&lash::process::ProcessEnvRefusal::EffectNotLinked {
+            effect: "processes.list".into(),
+        })
+    );
+
+    let missing =
+        lash::process::ProcessConfigKey::<()>::new("missing", lash::plugins::FormatVersion::ONE);
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(missing, &())
+        .build()
+        .expect("candidate env");
+    let refused = artifacts
+        .publish_process_env(&pin, &env)
+        .await
+        .expect_err("uninstalled component");
+    assert_eq!(
+        refused.process_env_refusal(),
+        Some(&lash::process::ProcessEnvRefusal::ComponentNotInstalled {
+            id: "missing".into(),
+        })
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-6124 / LINK-EXACTLY: host capture projects a candidate to the entry's
+/// certified closure, keeping each recorded link and every other env field.
+/// Checking and starting the broader candidate still refuses extra links.
+#[tokio::test]
+async fn a_host_captures_exactly_the_published_entrys_environment() {
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let candidate = environment(true);
+    let checked = artifacts
+        .workflow_environment(&candidate)
+        .await
+        .expect("environment")
+        .expect("kernel environment");
+    let mut document = lash::workflow::document::parse_document(SUPERVISOR).expect("document");
+    for effect in document
+        .manifest
+        .effects
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>()
+    {
+        document
+            .manifest
+            .effects
+            .insert(effect.clone(), checked.effects()[&effect].clone());
+    }
+    let publication = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &Draft::open(document, None).expect("draft"),
+                &Name::new("supervisor"),
+                &candidate,
+            )
+            .await
+            .expect("publish"),
+    );
+    let captured = core
+        .processes()
+        .capture(&publication.definition.id, &candidate)
+        .await
+        .expect("capture");
+    assert_eq!(
+        captured,
+        linking(&candidate, &["processes.start", "processes.await"])
+    );
+    let WorkflowRead::Inspected(inspection) = artifacts
+        .definition_graph(&publication.definition.id)
+        .await
+        .expect("read")
+    else {
+        panic!("the published workflow is readable");
+    };
+    // The definition's engine payload is available through its recorded document.
+    let payload = serde_json::json!({
+        "document": inspection.document.reference().document,
+        "entry": "supervisor",
+        "args": {},
+    });
+    core.processes()
+        .check_link(
+            lash::process::LASH_VM_ENGINE_KIND,
+            &payload,
+            &captured,
+            &Default::default(),
+        )
+        .await
+        .expect("captured links exactly");
+    let refused = core
+        .processes()
+        .check_link(
+            lash::process::LASH_VM_ENGINE_KIND,
+            &payload,
+            &candidate,
+            &Default::default(),
+        )
+        .await
+        .expect_err("the extra echo link is refused");
+    assert_eq!(
+        refused.process_env_refusal(),
+        Some(&lash::process::ProcessEnvRefusal::EffectNotPerformed {
+            effect: "tools.echo".into()
+        })
+    );
+    let refused = core
+        .processes()
+        .capture(&publication.definition.id, &linking(&candidate, &[]))
+        .await
+        .expect_err("missing performed effects refuse capture");
+    assert!(matches!(
+        refused.process_env_refusal(),
+        Some(lash::process::ProcessEnvRefusal::EffectNotLinked { .. })
+    ));
+    let mut links = candidate.effects().clone();
+    let await_effect =
+        lash::workflow::document::EffectName::new("processes.await").expect("effect");
+    let link = links.get_mut(&await_effect).expect("await link");
+    let tool = link.tool().to_string();
+    link.provider.key = "tool_provider:unserved".into();
+    let unserved = lash::process::ProcessEnv::builder(candidate.max_tool_calls())
+        .effects(links)
+        .component(ECHO_TOOLS, &())
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
+        .build()
+        .expect("unserved candidate");
+    let refused = core
+        .processes()
+        .capture(&publication.definition.id, &unserved)
+        .await
+        .expect_err("unserved recorded link refuses capture");
+    assert_eq!(
+        refused.process_env_refusal(),
+        Some(&lash::process::ProcessEnvRefusal::CaptureMissing {
+            effect: await_effect.to_string(),
+            tool,
+        })
+    );
+    // The captured pair is also accepted at the start hold point.
+    let env_ref = artifacts
+        .publish_process_env(&pin, &captured)
+        .await
+        .expect("publish captured env");
+    let process = start_with(
+        &core,
+        &env_ref,
+        &publication.definition,
+        "captured",
+        serde_json::Map::from_iter([("value".into(), serde_json::json!("captured"))]),
+    )
+    .await;
+    let _ = finished(&core, &process).await;
+    core.shutdown().await.expect("shutdown");
+}
+
 /// Starts `definition` as `guarded(name)` and answers the process.
 async fn start(
     core: &lash::LashCore,
