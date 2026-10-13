@@ -40,7 +40,7 @@ use lash_durable::domain::graph::{
     EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedGraph, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
+    CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
 use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
 use lash_store_sql::durable::graph::GraphStatements;
@@ -130,6 +130,11 @@ lash_store_sql::statements! {
         stored_nodes = "SELECT hash, content, encoding FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
+        /// The one-row template for bounded graph-body VALUES batches.
+        /// Graph encoding is fixed at 1; only digests and bytes are bound.
+        insert_blobs = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)
+             ON CONFLICT (hash) DO NOTHING";
+
         /// Every edge of JSON `?1`, an array of `[parent, child]` digests
         /// of freshly installed parents.
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
@@ -163,7 +168,19 @@ lash_store_sql::statements! {
     }
 }
 
+/// 64 bound parameters per full statement, below even SQLite's historical
+/// 999-parameter limit (the bundled build allows 32,766). The first-cell
+/// measurements select 32 rows to amortize statement entry without making
+/// small graphs allocate a full graph-sized parameter list.
+const BLOB_BATCH_ROWS: usize = 32;
+
+/// SQLite's multi-row VALUES program yields through a coroutine for each
+/// body. Keep small
+/// installs on the one-row shape; only a large install amortizes that work.
+const SMALL_INSTALL_ROWS: usize = 64;
+
 struct Sql {
+    blob_batches: [String; BLOB_BATCH_ROWS],
     graph: GraphStatements,
     facts: RunRecordStatements,
     snapshots: SnapshotStatements,
@@ -173,12 +190,24 @@ struct Sql {
 
 static SQL: LazyLock<Sql> = LazyLock::new(|| {
     let dialect = crate::schema_layout::MAIN;
+    let sqlite = GraphSqliteStatements::render(dialect);
+    let blob_batches = std::array::from_fn(|index| {
+        let values = (0..=index)
+            .map(|row| format!("(?{}, ?{}, 1)", row * 2 + 1, row * 2 + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        sqlite
+            .insert_blobs
+            .sql()
+            .replacen("(?1, ?2, 1)", &values, 1)
+    });
     Sql {
+        blob_batches,
         graph: GraphStatements::render(dialect),
         facts: RunRecordStatements::render(dialect),
         snapshots: SnapshotStatements::render(dialect),
         turns: TurnStatements::render(dialect),
-        sqlite: GraphSqliteStatements::render(dialect),
+        sqlite,
     }
 });
 
@@ -807,9 +836,8 @@ pub(super) fn install(
             }
         };
     }
-    // One statement checks every node referenced without being supplied,
-    // one installs every supplied node, one reads back those already stored
-    // and one writes the fresh nodes' edges, whatever their number.
+    // External references and held bodies each need one read statement.
+    // Absent bodies install in bounded batches, followed by one edge write.
     let named: BTreeSet<&NodeId> = graph
         .external
         .iter()
@@ -848,58 +876,89 @@ pub(super) fn install(
         return Ok(Ok(installed));
     }
     // One statement reads back every staged node already stored, each row
-    // compared as it streams; each node not stored is inserted alone, its
-    // bytes bound as they are. An unchanged graph costs the same statements
-    // at any size. A writer holds the database, so what is not stored now
+    // compared as it streams; absent nodes are then inserted in digest-order
+    // batches with their bytes bound as they are. An unchanged graph costs
+    // the same statements at any size. A writer holds the database, so what is not stored now
     // is inserted.
-    let mut present = BTreeSet::new();
-    let staged: BTreeMap<NodeId, _> = graph.nodes.iter().map(|node| (node.id, node)).collect();
+    // check_graph already supplies digest order. Reuse its slice rather than
+    // rebuilding a tree of the same nodes; held rows mark their slice slot.
+    let staged = &graph.nodes;
+    let mut present = vec![false; staged.len()];
+    let mut absent = staged.len();
     {
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
-        let mut rows = statement.query([digest_array(staged.keys())])?;
+        let mut rows = statement.query([digest_array(staged.iter().map(|node| &node.id))])?;
         while let Some(row) = rows.next()? {
             let hash: String = row.get(0)?;
-            let Some(node) = NodeId::from_hex(&hash).and_then(|id| staged.get(&id)) else {
+            let Some(id) = NodeId::from_hex(&hash) else {
                 continue;
             };
+            let Ok(index) = staged.binary_search_by(|node| node.id.cmp(&id)) else {
+                continue;
+            };
+            let node = &staged[index];
             if answer!(Ok::<_, rusqlite::Error>(encoding_of(row.get(2)?))) != BlobEncoding::Graph {
                 return Ok(Err(GraphRefusal::EncodingConflict(node.id)));
             }
             if row.get_ref(1)?.as_blob()? != &node.bytes[..] {
                 return Ok(Err(GraphRefusal::ContentConflict(node.id)));
             }
-            present.insert(node.id);
+            present[index] = true;
+            absent -= 1;
         }
     }
-    let mut insert = tx.prepare_cached(SQL.graph.insert_blob.sql())?;
+    if absent == 0 {
+        return Ok(Ok(installed));
+    }
+    let chunk_rows = if absent <= SMALL_INSTALL_ROWS {
+        1
+    } else {
+        BLOB_BATCH_ROWS
+    };
+    let mut fresh = staged
+        .iter()
+        .zip(present)
+        .filter_map(|(node, held)| (!held).then_some(node));
+    let mut chunk: Vec<&CheckedNode> = Vec::with_capacity(chunk_rows);
+    let mut full = tx.prepare_cached(&SQL.blob_batches[chunk_rows - 1])?;
+    let mut tail = None;
     let mut hash = String::with_capacity(64);
     let mut edges = String::from("[");
-    for node in staged.values() {
-        if present.contains(&node.id) {
-            continue;
+    loop {
+        chunk.extend(fresh.by_ref().take(chunk_rows));
+        if chunk.is_empty() {
+            break;
         }
-        hash.clear();
-        node.id.write_hex(&mut hash);
-        insert.execute(rusqlite::params![
-            hash.as_str(),
-            &node.bytes[..],
-            BlobEncoding::Graph as i64
-        ])?;
-        installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
-        installed.new_nodes += 1;
-        installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
-        for child in &node.children {
-            if edges.len() > 1 {
-                edges.push(',');
+        // The same cached VALUES implementation serves one row and a full
+        // chunk; no graph-sized hashes, bodies or bind list is allocated.
+        let insert = if chunk.len() == chunk_rows {
+            &mut full
+        } else {
+            tail.insert(tx.prepare_cached(&SQL.blob_batches[chunk.len() - 1])?)
+        };
+        for (index, node) in chunk.iter().enumerate() {
+            hash.clear();
+            node.id.write_hex(&mut hash);
+            insert.raw_bind_parameter(index * 2 + 1, hash.as_str())?;
+            insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
+            installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
+            installed.new_nodes += 1;
+            installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
+            for child in &node.children {
+                if edges.len() > 1 {
+                    edges.push(',');
+                }
+                edges.push_str("[\"");
+                edges.push_str(&hash);
+                edges.push_str("\",\"");
+                child.write_hex(&mut edges);
+                edges.push_str("\"]");
+                installed.new_edges += 1;
+                installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
             }
-            edges.push_str("[\"");
-            edges.push_str(&hash);
-            edges.push_str("\",\"");
-            child.write_hex(&mut edges);
-            edges.push_str("\"]");
-            installed.new_edges += 1;
-            installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
         }
+        insert.raw_execute()?;
+        chunk.clear();
     }
     if edges.len() > 1 {
         edges.push(']');

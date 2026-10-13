@@ -511,3 +511,158 @@ async fn a_build_catalog_closure_hydrates_whole_within_every_limit() {
         limit(DecodeDimension::NodeBytes, leaf_len, leaf_len - 1)
     );
 }
+
+/// GRAPH-INSTALL-BATCH-WORK: large installs need at most ceil(absent / 32)
+/// body statements; small installs (at most 64 bodies) need at most one per
+/// body, independent of held bodies. Edges need at most one statement.
+/// Each body statement installs at most 32 rows (64 bound parameters).
+/// A held content or encoding mismatch refuses the whole batch before writes.
+#[tokio::test]
+async fn absent_graph_bodies_install_in_bounded_batches() {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    use lash_durable::domain::graph::ReleasePinWrite;
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+
+    let tier = tier(false).await;
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
+    let actor = ActorKey::session("sql-work-owner").unwrap();
+    let count = |receipt: &lash_core_execution::facade_support::sql::Receipt, table: &str| {
+        receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| sql.starts_with(&format!("insert into main.{table} ")))
+            .map(|(_, shape)| shape.statements)
+            .sum::<u64>()
+    };
+    for size in [0_usize, 1, 31, 32, 33, 63, 64, 65, 129] {
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let mut encode = |tag: &str, children: &[NodeId]| {
+            let mut body = TokenWriter::new();
+            body.seq(children.len() as u64 + 1);
+            body.text(tag);
+            for child in children {
+                body.child(child.child_ref());
+            }
+            staging
+                .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+                .unwrap()
+        };
+        let leaves: Vec<_> = (1..size)
+            .map(|index| encode(&format!("batch-{size}-leaf-{index}"), &[]))
+            .collect();
+        let root = (size > 0).then(|| encode(&format!("batch-{size}-root"), &leaves));
+        let nodes = staging.into_nodes();
+        for (attempt, absent) in [(0, size), (1, 0)] {
+            let mut tx = tier
+                .store
+                .begin(&actor, Epoch(identity.epoch))
+                .await
+                .unwrap();
+            tx.stage(nodes.values().cloned());
+            if let Some(root) = root {
+                tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
+                    release: format!("batch-{size}-{attempt}"),
+                    root,
+                }));
+            }
+            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+                "graph.batch",
+                "sqlite",
+                tier.store.commit(tx, CommitLabel::new("graph.batch")),
+            )
+            .await;
+            answer.unwrap();
+            assert_eq!(receipt.unretained_shape_statements, 0, "{receipt:?}");
+            for (sql, shape) in &receipt.shapes {
+                if sql.starts_with("insert into main.blobs ") {
+                    assert!(shape.rows_affected <= 32 * shape.statements, "{receipt:?}");
+                }
+            }
+            let inserts = count(&receipt, "blobs");
+            assert!(
+                inserts
+                    <= if absent <= 64 {
+                        absent as u64
+                    } else {
+                        absent.div_ceil(32) as u64
+                    },
+                "{absent} absent bodies used {inserts} statements: {receipt:?}"
+            );
+            assert!(
+                count(&receipt, "blob_edges") <= u64::from(absent > 1),
+                "{receipt:?}"
+            );
+            let bytes = if absent == 0 {
+                0
+            } else {
+                nodes.values().map(|node| node.len()).sum()
+            };
+            assert_eq!(receipt.newly_installed_graph_bytes, bytes);
+            for (id, node) in &nodes {
+                assert_eq!(
+                    tier.blob(&id.to_hex()).await,
+                    Some((node.bytes.to_vec(), 1))
+                );
+                assert_eq!(tier.edges(id).await, node.children().unwrap());
+            }
+        }
+        if size == 65 {
+            // Held bytes and encoding are checked before any batch writes,
+            // including when the commit also supplies an absent body.
+            let held = root.unwrap();
+            let mut extra = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            let mut body = TokenWriter::new();
+            body.child(held.child_ref());
+            let added = extra
+                .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
+                .unwrap();
+            let mut mixed = nodes.clone();
+            mixed.extend(extra.into_nodes());
+            let before = tier.blobs().await;
+            let mut corrupt = nodes[&held].bytes.to_vec();
+            *corrupt.last_mut().unwrap() ^= 1;
+            tier.foreign(ForeignWrite::OverwriteBlob {
+                node: held,
+                bytes: corrupt,
+            })
+            .await;
+            for refusal in [
+                GraphRefusal::ContentConflict(held),
+                GraphRefusal::EncodingConflict(held),
+            ] {
+                if matches!(refusal, GraphRefusal::EncodingConflict(_)) {
+                    tier.raw(
+                        "UPDATE blobs SET encoding = 0 WHERE hash = ?1".into(),
+                        vec![hex(&held)],
+                    )
+                    .await;
+                }
+                let mut tx = tier
+                    .store
+                    .begin(&actor, Epoch(identity.epoch))
+                    .await
+                    .unwrap();
+                tx.stage(mixed.values().cloned());
+                tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
+                    release: "refused-batch".into(),
+                    root: added,
+                }));
+                assert_eq!(
+                    tier.store
+                        .commit(tx, CommitLabel::new("graph.batch.refused"))
+                        .await,
+                    Err(lash_durable::DurableError::Graph(refusal))
+                );
+                assert_eq!(
+                    tier.blobs().await,
+                    before,
+                    "a refused batch installs nothing"
+                );
+                assert!(tier.edges(&added).await.is_empty());
+                assert!(!tier.roots().await.contains(&added.to_hex()));
+            }
+        }
+    }
+}
