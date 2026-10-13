@@ -756,6 +756,14 @@ pub enum TurnErrorCode {
     ContentFiltered,
     ProviderPanicked,
     PluginFailed,
+    /// A protocol hook refused the turn before any model request was sent.
+    ProtocolRefusedBeforeModelCall,
+    /// Turn input failed normalization before provider work.
+    InputRejected,
+    /// The RLM protocol refused the model's cell.
+    RlmProtocolRefused,
+    /// The failure's origin is outside this build's typed vocabulary.
+    UnknownFailure,
     WorkerCrashed,
     ExecutionEnvironment,
     TokenUsageOverflow,
@@ -782,6 +790,10 @@ impl TurnErrorCode {
             Self::ContentFiltered => "content_filtered",
             Self::ProviderPanicked => "provider_panicked",
             Self::PluginFailed => "plugin_failed",
+            Self::ProtocolRefusedBeforeModelCall => "protocol_refused_before_model_call",
+            Self::InputRejected => "input_rejected",
+            Self::RlmProtocolRefused => "rlm_protocol_refused",
+            Self::UnknownFailure => "unknown_failure",
             Self::WorkerCrashed => "worker_crashed",
             Self::ExecutionEnvironment => "execution_environment",
             Self::TokenUsageOverflow => "token_usage_overflow",
@@ -807,6 +819,12 @@ impl TurnErrorCode {
             Self::ContentFiltered => "provider content filter refused the call",
             Self::ProviderPanicked => "provider implementation panicked",
             Self::PluginFailed => "plugin hook failed",
+            Self::ProtocolRefusedBeforeModelCall => {
+                "protocol refused the turn before the model call"
+            }
+            Self::InputRejected => "turn input normalization failed",
+            Self::RlmProtocolRefused => "RLM protocol refused the model's cell",
+            Self::UnknownFailure => "turn failed with an unknown origin",
             Self::WorkerCrashed => "driver task failed to join",
             Self::ExecutionEnvironment => "execution environment refresh failed",
             Self::TokenUsageOverflow => "turn token usage accounting overflowed",
@@ -849,21 +867,26 @@ impl TurnErrorCause {
         self.detail.as_deref()
     }
 
-    /// Classify the typed envelope at the runtime stop decision. Observed
-    /// messages and raw evidence never contribute to the terminal detail.
+    /// Preserve the typed failure kind at the runtime stop decision. Each
+    /// kind has a distinct code; the envelope's optional code cannot replace
+    /// its origin. Unknown kinds retain no foreign spelling in the cause.
+    /// Observed messages and raw evidence never contribute to terminal detail.
     pub fn runtime(envelope: Option<&ErrorEnvelope>) -> Self {
         let code = match envelope {
-            Some(envelope) => match envelope.code.as_ref().and_then(FailureCode::turn_code) {
-                Some(TurnFailureCode::InvalidTurnOptions) => TurnErrorCode::InvalidTurnOptions,
-                Some(TurnFailureCode::TokenUsageOverflow) => TurnErrorCode::TokenUsageOverflow,
-                _ => match envelope.kind {
-                    TurnFailureKind::ExecutionEnvironment => TurnErrorCode::ExecutionEnvironment,
-                    TurnFailureKind::Plugin | TurnFailureKind::ProtocolBeforeLlmCall => {
-                        TurnErrorCode::PluginFailed
-                    }
-                    TurnFailureKind::RuntimeEffectController => TurnErrorCode::EffectRefused,
-                    _ => TurnErrorCode::RuntimeRefused,
-                },
+            Some(envelope) => match &envelope.kind {
+                TurnFailureKind::ExecutionEnvironment => TurnErrorCode::ExecutionEnvironment,
+                TurnFailureKind::InputValidation => TurnErrorCode::InputRejected,
+                TurnFailureKind::LlmProvider => TurnErrorCode::ProviderRejected,
+                TurnFailureKind::Plugin => TurnErrorCode::PluginFailed,
+                TurnFailureKind::ProtocolBeforeLlmCall => {
+                    TurnErrorCode::ProtocolRefusedBeforeModelCall
+                }
+                TurnFailureKind::RlmProtocol => TurnErrorCode::RlmProtocolRefused,
+                TurnFailureKind::RlmTurnOptions => TurnErrorCode::InvalidTurnOptions,
+                TurnFailureKind::Runtime => TurnErrorCode::RuntimeRefused,
+                TurnFailureKind::RuntimeEffectController => TurnErrorCode::EffectRefused,
+                TurnFailureKind::TokenUsageAccounting => TurnErrorCode::TokenUsageOverflow,
+                TurnFailureKind::Unknown(_) => TurnErrorCode::UnknownFailure,
             },
             None => TurnErrorCode::RuntimeRefused,
         };
@@ -1157,6 +1180,61 @@ mod stream_event_tests;
 mod tests {
     use super::LlmUsage;
     use crate::llm::types::ProviderFailureKind;
+
+    /// FIG-6167: terminal classification preserves each origin, including
+    /// unknown kinds, without interpreting codes or retaining foreign text.
+    #[test]
+    fn runtime_terminal_codes_keep_failure_kinds_distinct_and_redacted() {
+        use super::{ErrorEnvelope, TurnErrorCause, TurnFailureCode, TurnFailureKind};
+        let cases = [
+            (
+                TurnFailureKind::ExecutionEnvironment,
+                "execution_environment",
+            ),
+            (TurnFailureKind::InputValidation, "input_rejected"),
+            (TurnFailureKind::LlmProvider, "provider_rejected"),
+            (TurnFailureKind::Plugin, "plugin_failed"),
+            (
+                TurnFailureKind::ProtocolBeforeLlmCall,
+                "protocol_refused_before_model_call",
+            ),
+            (TurnFailureKind::RlmProtocol, "rlm_protocol_refused"),
+            (TurnFailureKind::RlmTurnOptions, "invalid_turn_options"),
+            (TurnFailureKind::Runtime, "runtime_refused"),
+            (TurnFailureKind::RuntimeEffectController, "effect_refused"),
+            (
+                TurnFailureKind::TokenUsageAccounting,
+                "token_usage_overflow",
+            ),
+            (
+                TurnFailureKind::Unknown("foreign secret kind".to_owned()),
+                "unknown_failure",
+            ),
+        ];
+        let mut codes = std::collections::HashSet::new();
+        for (kind, expected) in cases {
+            assert!(codes.insert(expected), "two kinds share a terminal code");
+            for code in [
+                None,
+                Some(TurnFailureCode::InvalidTurnOptions.into()),
+                Some(TurnFailureCode::TokenUsageOverflow.into()),
+            ] {
+                let envelope = ErrorEnvelope {
+                    kind: kind.clone(),
+                    code,
+                    user_message: "foreign secret message".to_owned(),
+                    raw: Some("foreign secret evidence".to_owned()),
+                    terminal_reason: None,
+                    retryable: None,
+                    provider_failure_kind: None,
+                };
+                let cause = TurnErrorCause::runtime(Some(&envelope));
+                assert_eq!(cause.code.code(), expected, "kind {kind:?}");
+                assert!(!serde_json::to_string(&cause).unwrap().contains("secret"));
+            }
+        }
+        assert_eq!(TurnErrorCause::runtime(None).code.code(), "runtime_refused");
+    }
 
     #[test]
     fn checked_token_usage_add_is_atomic_and_reasoning_is_not_additive_total() {

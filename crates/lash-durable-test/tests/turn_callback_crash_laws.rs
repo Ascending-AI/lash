@@ -33,6 +33,9 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/failure_kind.rs"]
+mod failure_kind;
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
