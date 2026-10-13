@@ -374,8 +374,6 @@
     "//crates/lash-perf:latency__test__fv_f9e65682",
     "//crates/lash-perf:postgres-substrate__bin__fv_682b1827",
     "//crates/lash-perf:postgres-substrate__bin__fv_f9e65682",
-    "//crates/lash-perf:replay__test__fv_682b1827",
-    "//crates/lash-perf:replay__test__fv_f9e65682",
     "//crates/lash-perf:workload__test__fv_682b1827",
     "//crates/lash-perf:workload__test__fv_f9e65682",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_4d196649[static]",
@@ -1350,8 +1348,6 @@
     "//crates/lash-perf:latency__test__fv_f9e65682__rust_test__metadata[check]",
     "//crates/lash-perf:postgres-substrate__bin__fv_682b1827__metadata[check]",
     "//crates/lash-perf:postgres-substrate__bin__fv_f9e65682__metadata[check]",
-    "//crates/lash-perf:replay__test__fv_682b1827__rust_test__metadata[check]",
-    "//crates/lash-perf:replay__test__fv_f9e65682__rust_test__metadata[check]",
     "//crates/lash-perf:workload__test__fv_682b1827__rust_test__metadata[check]",
     "//crates/lash-perf:workload__test__fv_f9e65682__rust_test__metadata[check]",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_4d196649__metadata[check]",
@@ -2326,8 +2322,6 @@
     "//crates/lash-perf:latency__test__fv_f9e65682",
     "//crates/lash-perf:postgres-substrate__bin__fv_682b1827",
     "//crates/lash-perf:postgres-substrate__bin__fv_f9e65682",
-    "//crates/lash-perf:replay__test__fv_682b1827",
-    "//crates/lash-perf:replay__test__fv_f9e65682",
     "//crates/lash-perf:workload__test__fv_682b1827",
     "//crates/lash-perf:workload__test__fv_f9e65682",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_4d196649",
@@ -33532,26 +33526,6 @@
       "package": "lash-perf"
     },
     {
-      "build_label": "//crates/lash-perf:replay__test__fv_682b1827",
-      "check_label": "//crates/lash-perf:replay__test__fv_682b1827__rust_test__metadata[check]",
-      "clippy_label": "//crates/lash-perf:replay__test__fv_682b1827__clippy[clippy.txt]",
-      "features": [
-        "dhat-heap"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-perf:replay__test__fv_682b1827",
-      "package": "lash-perf"
-    },
-    {
-      "build_label": "//crates/lash-perf:replay__test__fv_f9e65682",
-      "check_label": "//crates/lash-perf:replay__test__fv_f9e65682__rust_test__metadata[check]",
-      "clippy_label": "//crates/lash-perf:replay__test__fv_f9e65682__clippy[clippy.txt]",
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash-perf:replay__test__fv_f9e65682",
-      "package": "lash-perf"
-    },
-    {
       "build_label": "//crates/lash-perf:workload__test__fv_682b1827",
       "check_label": "//crates/lash-perf:workload__test__fv_682b1827__rust_test__metadata[check]",
       "clippy_label": "//crates/lash-perf:workload__test__fv_682b1827__clippy[clippy.txt]",
@@ -59365,8 +59339,6 @@
       "//crates/lash-perf:latency__test__fv_f9e65682",
       "//crates/lash-perf:postgres-substrate__bin__fv_682b1827",
       "//crates/lash-perf:postgres-substrate__bin__fv_f9e65682",
-      "//crates/lash-perf:replay__test__fv_682b1827",
-      "//crates/lash-perf:replay__test__fv_f9e65682",
       "//crates/lash-perf:workload__test__fv_682b1827",
       "//crates/lash-perf:workload__test__fv_f9e65682",
       "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_867c1f4a",
@@ -60474,8 +60446,6 @@
     "//crates/lash-perf:latency__test__fv_682b1827",
     "//crates/lash-perf:latency__test__fv_f9e65682",
     "//crates/lash-perf:replay__test",
-    "//crates/lash-perf:replay__test__fv_682b1827",
-    "//crates/lash-perf:replay__test__fv_f9e65682",
     "//crates/lash-perf:workload__test",
     "//crates/lash-perf:workload__test__fv_682b1827",
     "//crates/lash-perf:workload__test__fv_f9e65682",
@@ -61026,8 +60996,6 @@
     "//crates/lash-perf:latency__test__fv_682b1827",
     "//crates/lash-perf:latency__test__fv_f9e65682",
     "//crates/lash-perf:replay__test",
-    "//crates/lash-perf:replay__test__fv_682b1827",
-    "//crates/lash-perf:replay__test__fv_f9e65682",
     "//crates/lash-perf:workload__test",
     "//crates/lash-perf:workload__test__fv_682b1827",
     "//crates/lash-perf:workload__test__fv_f9e65682",
@@ -61430,7 +61398,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1245,
+  "metadata_target_count": 1243,
   "packages": [
     {
       "declared_features": [
@@ -66812,8 +66780,6 @@
     "//crates/lash-perf:latency__test__fv_682b1827": 300,
     "//crates/lash-perf:latency__test__fv_f9e65682": 300,
     "//crates/lash-perf:replay__test": 300,
-    "//crates/lash-perf:replay__test__fv_682b1827": 300,
-    "//crates/lash-perf:replay__test__fv_f9e65682": 300,
     "//crates/lash-perf:workload__test": 300,
     "//crates/lash-perf:workload__test__fv_682b1827": 300,
     "//crates/lash-perf:workload__test__fv_f9e65682": 300,

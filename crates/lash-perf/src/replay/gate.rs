@@ -586,7 +586,17 @@ mod tests {
     #[test]
     fn counted_baselines_refuse_another_build_or_allocator() {
         let mut candidate = receipt(0.0);
-        candidate.identity.build = "debug".to_owned();
+        candidate.identity = Identity {
+            commit: None,
+            dirty: false,
+            build: "debug".to_owned(),
+            build_profile: "counted-test;debug_assertions=true".to_owned(),
+            allocator: "stats_alloc".to_owned(),
+            host: "test".to_owned(),
+            cpus: 1,
+            load1_at_start: None,
+            started_at: "2026-10-13T00:00:00Z".to_owned(),
+        };
         let baseline = Baseline::bless(&candidate).unwrap();
         assert!(evaluate(&candidate, &budgets(false), &baseline).passed());
         candidate.identity.build = "release".to_owned();

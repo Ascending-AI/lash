@@ -37,6 +37,12 @@ name = "growturn"
 path = "src/bin/growturn.rs"
 test = false
 
+[[test]]
+name = "replay"
+# The committed counted baseline belongs to the default stats_alloc build.
+# Profiling lanes use --no-default-features and must not run this gate.
+required-features = ["default"]
+
 [lints]
 workspace = true
 

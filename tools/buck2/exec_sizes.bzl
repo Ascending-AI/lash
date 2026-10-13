@@ -411,8 +411,6 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-perf:latency__test__fv_682b1827": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-perf:latency__test__fv_f9e65682": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-perf:replay__test": {"cpu_count": 4, "memory_kb": 524288},
-    "//crates/lash-perf:replay__test__fv_682b1827": {"cpu_count": 4, "memory_kb": 524288},
-    "//crates/lash-perf:replay__test__fv_f9e65682": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-perf:workload__test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-perf:workload__test__fv_682b1827": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-perf:workload__test__fv_f9e65682": {"cpu_count": 4, "memory_kb": 262144},

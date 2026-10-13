@@ -4,6 +4,8 @@
 //! stay within `workloads/replay/budgets.json` and the blessed baseline.
 //! Wall time is never asserted. A breach prints the budget and its owner;
 //! `just perf-replay-bless` re-blesses an intended baseline move.
+#![cfg(not(feature = "dhat-heap"))]
+
 use std::process::Command;
 
 #[test]
