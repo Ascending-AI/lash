@@ -69,10 +69,6 @@ async fn duplicate_plugin_id_refused() -> Result<()> {
         "duplicate-owner", lash_core::plugin::SessionAuthorityContext::fixture(),
     )), Err(lash_core::PluginError::Declaration(error)) if error == duplicate)
     );
-    assert!(matches!(host.inspect_prompt_catalog(
-        lash_core::RuntimeOwner::Session(SessionId::fixture("duplicate-owner")),
-        Default::default(),
-    ), Err(lash_core::PluginError::Declaration(error)) if error == duplicate));
     let record = host.transition_plugins(
         crate::plugins::PluginTransitionRequest {
             id: crate::plugins::PluginTransitionId(

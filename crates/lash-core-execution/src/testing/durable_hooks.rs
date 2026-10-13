@@ -97,6 +97,17 @@ impl DurableReads for DurableCommitHook {
     async fn run_facts_of(&self, owner: &OwnerKey, run: RunSeq) -> Result<RunFacts, DurableError> {
         self.inner.run_facts_of(owner, run).await
     }
+    async fn run_facts_within(
+        &self,
+        owner: &lash_durable::domain::OwnerKey,
+        run: Option<lash_durable::domain::RunSeq>,
+        max_rows: usize,
+        limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
+    ) -> Result<lash_durable::domain::RunFacts, DurableError> {
+        self.inner
+            .run_facts_within(owner, run, max_rows, limits)
+            .await
+    }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.inner.exec_root(exec).await
@@ -108,6 +119,14 @@ impl DurableReads for DurableCommitHook {
         run: &TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
+    }
+    async fn cell_roots_within(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
+        self.inner.cell_roots_within(session, run, max_rows).await
     }
 
     async fn hydrate(
@@ -231,6 +250,14 @@ impl DurableStore for DurableCommitHook {
         label: CommitLabel,
     ) -> Result<MailCommit, DurableError> {
         self.inner.commit_mail(tx, label).await
+    }
+
+    async fn claim_facts(
+        &self,
+        node: Option<&lash_durable::Owner>,
+        actor: &ActorKey,
+    ) -> Result<lash_durable::ClaimFacts, DurableError> {
+        self.inner.claim_facts(node, actor).await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {

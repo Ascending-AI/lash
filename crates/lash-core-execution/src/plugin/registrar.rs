@@ -101,7 +101,7 @@ fn register_singleton_hook<H>(
 
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
-    pub(crate) inventory: Option<InstalledInventory>,
+    pub(crate) inventory: Option<Arc<InstalledInventory>>,
     pub(crate) extensions: Vec<PluginExtensionContribution>,
     /// Plugins that kept their state view past registration (FIG-3712).
     pub(crate) state_retaining_plugins: Vec<String>,

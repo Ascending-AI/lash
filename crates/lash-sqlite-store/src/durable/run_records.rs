@@ -163,12 +163,13 @@ pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Ve
         .collect()
 }
 
-pub(super) fn read(
+fn read_limited(
     tx: &Connection,
     owner: &OwnerKey,
     run: Option<RunSeq>,
+    max_rows: Option<usize>,
 ) -> Answer<Vec<RunFactRow>> {
-    let (sql, params) = match run {
+    let (sql, mut params) = match run {
         Some(run) => (
             SQL.read_of.sql(),
             vec![
@@ -181,7 +182,14 @@ pub(super) fn read(
             vec![rusqlite::types::Value::Text(owner.stored())],
         ),
     };
-    let mut statement = tx.prepare_cached(sql)?;
+    let sql = match max_rows {
+        None => std::borrow::Cow::Borrowed(sql),
+        Some(max_rows) => {
+            params.push(integer::<i64>(max_rows.saturating_add(1))?.into());
+            std::borrow::Cow::Owned(format!("{sql} LIMIT ?{}", params.len()))
+        }
+    };
+    let mut statement = tx.prepare_cached(&sql)?;
     let rows = statement
         .query_map(rusqlite::params_from_iter(params), |row| {
             Ok((
@@ -194,6 +202,15 @@ pub(super) fn read(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
+        return Ok(Err(DurableError::Graph(
+            lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
+                dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                actual: rows.len() as u64,
+                limit: max_rows as u64,
+            },
+        )));
+    }
     let mut records = Vec::with_capacity(rows.len());
     for (run, ordinal, kind, call, record, epoch) in rows {
         let Some(kind) = RunFactKind::parse(&kind) else {
@@ -230,7 +247,17 @@ pub(super) fn facts(
     run: Option<RunSeq>,
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Answer<lash_durable::domain::RunFacts> {
-    let rows = match read(tx, owner, run)? {
+    facts_limited(tx, owner, run, limits, None)
+}
+
+pub(super) fn facts_limited(
+    tx: &Connection,
+    owner: &OwnerKey,
+    run: Option<RunSeq>,
+    limits: lash_core_store::checkpoint_graph::DecodeLimits,
+    max_rows: Option<usize>,
+) -> Answer<lash_durable::domain::RunFacts> {
+    let rows = match read_limited(tx, owner, run, max_rows)? {
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
@@ -491,7 +518,7 @@ mod tests {
             [owner.stored(), record.to_hex()],
         )
         .expect("foreign negative identity");
-        let answer = read(&conn, &owner, None);
+        let answer = read_limited(&conn, &owner, None, None);
         assert!(
             matches!(
                 answer,

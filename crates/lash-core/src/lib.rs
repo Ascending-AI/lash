@@ -30,6 +30,10 @@ pub use lash_core_execution::formats;
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
+pub use lash_core_execution::runtime::actor::claim_obligations::{
+    ObligationSite, ObligationStage, ObligationUse, RecordedWork, RequiresMismatch,
+};
+pub use lash_core_execution::runtime::actor::round::admitted_bindings_of;
 pub use lash_core_execution::runtime::actor::round::{
     CallOwner, ParkedCall, StagedPluginState, StoreLocalEffect, StoreLocalRows, parked,
 };

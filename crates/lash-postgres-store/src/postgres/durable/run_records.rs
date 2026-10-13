@@ -157,24 +157,44 @@ async fn refused(
     }
 }
 
-pub(super) async fn read(
+pub(super) async fn read_limited(
     tx: &mut PgConnection,
     owner: &OwnerKey,
     run: Option<RunSeq>,
+    max_rows: Option<usize>,
 ) -> Result<Vec<RunFactRow>, DurableError> {
-    let mut query = crate::observed_sql::query(if run.is_some() {
+    let original = if run.is_some() {
         SQL.read_of.sql()
     } else {
         SQL.read.sql()
-    })
-    .bind(owner.stored());
+    };
+    let sql = match max_rows {
+        None => std::borrow::Cow::Borrowed(original),
+        Some(_) => std::borrow::Cow::Owned(format!(
+            "{original} LIMIT ${}",
+            if run.is_some() { 3 } else { 2 }
+        )),
+    };
+    let mut query = crate::observed_sql::query(&sql).bind(owner.stored());
     if let Some(run) = run {
         query = query.bind(integer::<i64>(run.0)?);
+    }
+    if let Some(max_rows) = max_rows {
+        query = query.bind(integer::<i64>(max_rows.saturating_add(1))?);
     }
     let rows = query
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
+        return Err(DurableError::Graph(
+            lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
+                dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                actual: rows.len() as u64,
+                limit: max_rows as u64,
+            },
+        ));
+    }
     rows.iter()
         .map(|row| {
             let run: i64 = row.try_get(0).map_err(sqlx_failure)?;

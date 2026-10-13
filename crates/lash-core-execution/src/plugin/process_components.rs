@@ -290,12 +290,14 @@ pub(super) struct RegisteredComponent {
 pub struct ProcessComponentRegistry {
     pub(super) components: Arc<BTreeMap<String, Arc<RegisteredComponent>>>,
     host: ProcessComponentHost,
+    materialized_inventories: super::MaterializedInventoryReader,
 }
 
 impl Default for ProcessComponentRegistry {
     fn default() -> Self {
         Self {
             components: Arc::default(),
+            materialized_inventories: Default::default(),
             host: ProcessComponentHost::new(crate::trace::TraceRuntime::default()),
         }
     }
@@ -469,6 +471,10 @@ impl ProcessComponentRegistry {
         served
     }
 
+    pub fn materialized_inventories(&self) -> super::MaterializedInventoryReader {
+        self.materialized_inventories.clone()
+    }
+
     pub fn installed_inventory(&self) -> InstalledInventory {
         let entries = self
             .components
@@ -575,7 +581,7 @@ impl ProcessComponentRegistry {
             readiness: vec![ContributionReadiness::Ready; entries.len()],
             entries,
         };
-        contributions.inventory = Some(inventory);
+        contributions.inventory = Some(Arc::new(inventory));
         let mut presenter = None;
         for entry in env.components() {
             let registered = self.component(entry)?;
@@ -693,6 +699,12 @@ impl ProcessComponentRegistry {
             mut contributions,
             registry,
         } = self.contributions(env, process, &state)?;
+        if let Some(process) = process
+            && let Some(inventory) = &contributions.inventory
+        {
+            self.materialized_inventories
+                .observe(&crate::RuntimeOwner::Process(process.clone()), inventory);
+        }
         let reducers = std::mem::take(&mut contributions.state_reducers);
         let composition = Arc::new(ExecutionComposition::new(
             &mut contributions,

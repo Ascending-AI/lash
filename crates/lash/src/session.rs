@@ -473,7 +473,9 @@ impl SessionBuilder {
             env.core.clone(),
             self.core.process_lifecycle_available,
         )?;
-        env.plugin_host = Some(Arc::new(plugin_host));
+        let plugin_host = Arc::new(plugin_host);
+        self.core.observe_plugin_host(&plugin_host);
+        env.plugin_host = Some(plugin_host);
         let ports = self.core.substrate_slot.ports().await;
         env = env.with_work_ports(ports.process.clone());
         let binding = Arc::new(BoundSession::new(

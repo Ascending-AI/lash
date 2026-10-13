@@ -201,11 +201,36 @@ pub(super) async fn under(
     tx: &mut PgConnection,
     prefix: &str,
 ) -> Result<Vec<ExecRootRow>, DurableError> {
-    let rows = crate::observed_sql::query(SQL.under.sql())
+    under_limited(tx, prefix, None).await
+}
+
+pub(super) async fn under_limited(
+    tx: &mut PgConnection,
+    prefix: &str,
+    max_rows: Option<usize>,
+) -> Result<Vec<ExecRootRow>, DurableError> {
+    let sql = match max_rows {
+        None => std::borrow::Cow::Borrowed(SQL.under.sql()),
+        Some(max_rows) => std::borrow::Cow::Owned(format!(
+            "{} LIMIT {}",
+            SQL.under.sql(),
+            max_rows.saturating_add(1)
+        )),
+    };
+    let rows = crate::observed_sql::query(&sql)
         .bind(prefix)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
+        return Err(DurableError::Graph(
+            lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
+                dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                actual: rows.len() as u64,
+                limit: max_rows as u64,
+            },
+        ));
+    }
     rows.iter()
         .map(|row| {
             let key: String = row.try_get(0).map_err(sqlx_failure)?;

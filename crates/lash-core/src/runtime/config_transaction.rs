@@ -505,7 +505,7 @@ struct ResolveConfigTransactionRunner {
     catalog_host: crate::PluginHost,
     state: crate::RuntimeSessionState,
     registry: Arc<crate::ConfigRegistry>,
-    prompts: crate::plugin::prompt::PromptCatalog,
+    prompts: crate::plugin::prompt::PromptCatalogSnapshot,
     /// The plugins whose writer formats the step chooses from the fleet
     /// record (FIG-4747). The choice is part of the recorded resolution, so
     /// a replay publishes the formats the first execution chose.

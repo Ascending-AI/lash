@@ -368,6 +368,14 @@ impl DurableStore for CountingStore {
         self.inner.commit_mail(tx, label).await
     }
 
+    async fn claim_facts(
+        &self,
+        node: Option<&crate::Owner>,
+        actor: &ActorKey,
+    ) -> Result<crate::ClaimFacts, DurableError> {
+        self.inner.claim_facts(node, actor).await
+    }
+
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         self.inner.actor(actor).await
     }
@@ -415,6 +423,17 @@ impl DurableReads for CountingStore {
     ) -> Result<domain::RunFacts, DurableError> {
         self.inner.run_facts_of(owner, run).await
     }
+    async fn run_facts_within(
+        &self,
+        owner: &crate::domain::OwnerKey,
+        run: Option<crate::domain::RunSeq>,
+        max_rows: usize,
+        limits: crate::domain::checkpoint_graph::DecodeLimits,
+    ) -> Result<crate::domain::RunFacts, DurableError> {
+        self.inner
+            .run_facts_within(owner, run, max_rows, limits)
+            .await
+    }
 
     async fn exec_root(
         &self,
@@ -429,6 +448,14 @@ impl DurableReads for CountingStore {
         run: &TurnId,
     ) -> Result<Vec<domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
+    }
+    async fn cell_roots_within(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<crate::domain::ExecRootRow>, DurableError> {
+        self.inner.cell_roots_within(session, run, max_rows).await
     }
 
     async fn hydrate(

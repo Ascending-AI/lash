@@ -47,6 +47,8 @@ use crate::Backend;
 
 /// What one node serves.
 pub struct NodeServe {
+    /// This node's registered boot for host inspection.
+    pub registration: lash_durable::runner::NodeRegistration,
     /// The node's stable name: a new boot of the same name fences the old.
     pub node: NodeId,
     /// The node's drain switch: the host starts it to drain the node by
@@ -126,7 +128,8 @@ pub async fn serve(
         activation,
     )
     .with_hints(backend.hints().clone())
-    .with_drain(serve.drain);
+    .with_drain(serve.drain)
+    .with_registration(serve.registration);
     if settings.notifier == Notifier::AfterCommit
         && let Some(node_wakes) = backend.stores().node_wakes()
     {

@@ -856,6 +856,18 @@ impl Hints {
     }
 }
 
+/// One runner's registered boot, observed without querying the store.
+#[derive(Clone, Default)]
+pub struct NodeRegistration(Arc<Mutex<Option<NodeLease>>>);
+impl NodeRegistration {
+    pub fn snapshot(&self) -> Option<NodeLease> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
 /// One node's serving loop.
 pub struct Runner {
     store: Arc<dyn DurableStore>,
@@ -866,6 +878,7 @@ pub struct Runner {
     node_wakes: Option<Arc<dyn NodeWakes>>,
     drain: Drain,
     liveness: Liveness,
+    registration: NodeRegistration,
 }
 
 /// Publish the node's coalesced wakes, one flush at a time: whatever is
@@ -908,7 +921,14 @@ impl Runner {
             node_wakes: None,
             drain: Drain::default(),
             liveness,
+            registration: NodeRegistration::default(),
         }
+    }
+
+    /// Publish this runner's successful registration through `registration`.
+    pub fn with_registration(mut self, registration: NodeRegistration) -> Self {
+        self.registration = registration;
+        self
     }
 
     /// This runner draining by release once `drain` starts.
@@ -987,6 +1007,11 @@ impl Runner {
             }
             register_delay = register_delay.saturating_mul(2).min(settings.claim_poll);
         };
+        *self
+            .registration
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(lease.clone());
         // The stored lease cannot start before this send, so the local
         // deadline is never later than the stored one.
         let started_by = registering + settings.startup;

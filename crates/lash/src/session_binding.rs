@@ -26,6 +26,7 @@ pub(crate) struct BoundSession {
     /// The owner core's telemetry adapter: what a send through this
     /// binding captures the caller's trace context from.
     tracing: lash_core::facade_support::TraceRuntime,
+    pub(crate) plugin_host: Option<Arc<crate::plugins::PluginHost>>,
 }
 
 impl BoundSession {
@@ -51,6 +52,17 @@ impl BoundSession {
             catalog,
             models: Arc::clone(&env.core.providers.models),
             tracing: env.core.tracing.clone(),
+            plugin_host: env.plugin_host.clone(),
+        }
+    }
+
+    pub(crate) fn with_plugin_host(
+        &self,
+        plugin_host: Option<Arc<crate::plugins::PluginHost>>,
+    ) -> Self {
+        Self {
+            plugin_host,
+            ..self.clone()
         }
     }
 

@@ -473,6 +473,16 @@ pub trait DurableReads: Send + Sync {
     /// graph closure and one aggregate decode budget in one protected read.
     async fn run_facts_of(&self, owner: &OwnerKey, run: RunSeq) -> Result<RunFacts, DurableError>;
 
+    /// Optional diagnostic read, bounded before hydration by row count and
+    /// then by one aggregate graph budget. Does not truncate a fold silently.
+    async fn run_facts_within(
+        &self,
+        owner: &OwnerKey,
+        run: Option<RunSeq>,
+        max_rows: usize,
+        limits: lash_core_store::checkpoint_graph::DecodeLimits,
+    ) -> Result<RunFacts, DurableError>;
+
     /// L7: the root of `exec`.
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError>;
 
@@ -496,6 +506,14 @@ pub trait DurableReads: Send + Sync {
         expected: Option<NodeId>,
         limits: DecodeLimits,
     ) -> Result<HydratedGraph, DurableError>;
+
+    /// Bounded diagnostic enumeration of cell roots, refusing truncation.
+    async fn cell_roots_within(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<ExecRootRow>, DurableError>;
 
     /// L5: every pending wait `owner` owns.
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError>;

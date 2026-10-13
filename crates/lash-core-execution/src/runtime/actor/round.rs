@@ -854,7 +854,7 @@ pub fn admit_by(
 /// # Errors
 ///
 /// Why the row is not an admission that decodes.
-pub(crate) fn admitted_bindings_of(
+pub fn admitted_bindings_of(
     facts: &lash_durable::domain::graph::RunFacts,
     row: &lash_durable::domain::graph::RunFactRow,
 ) -> Result<Vec<(ToolCallId, Option<crate::tool_run::AdmittedBinding>)>, String> {

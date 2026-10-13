@@ -50,6 +50,44 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
+    async fn run_facts_within(
+        &self,
+        owner: &OwnerKey,
+        run: Option<lash_durable::domain::RunSeq>,
+        max_rows: usize,
+        limits: DecodeLimits,
+    ) -> Result<RunFacts, DurableError> {
+        let owner = owner.clone();
+        let policy = self.graph_reads.owner();
+        let requested = limits.kernel_data;
+        let configured = policy.kernel_data;
+        let kernel_data = lash_core_store::checkpoint_graph::KernelDataLimits::new(
+            requested.document_depth().min(configured.document_depth()),
+            requested
+                .document_json_depth()
+                .min(configured.document_json_depth()),
+            requested.decode_depth().min(configured.decode_depth()),
+            requested
+                .state_json_depth()
+                .min(configured.state_json_depth()),
+            requested.value_depth().min(configured.value_depth()),
+        )
+        .and_then(|limits| {
+            limits.with_inline_depth(requested.inline_depth().min(configured.inline_depth()))
+        })
+        .ok_or_else(|| super::corrupt("diagnostic read limits", "invalid kernel bounds"))?;
+        let limits = DecodeLimits {
+            kernel_data,
+            node_bytes: limits.node_bytes.min(policy.node_bytes),
+            total_bytes: limits.total_bytes.min(policy.total_bytes),
+            nodes: limits.nodes.min(policy.nodes),
+            logical_bytes: limits.logical_bytes.min(policy.logical_bytes),
+            depth: limits.depth.min(policy.depth),
+        };
+        self.read(move |tx| run_records::facts_limited(tx, &owner, run, limits, Some(max_rows)))
+            .await
+    }
+
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         let exec = exec.clone();
         self.read(move |tx| snapshots::read(tx, &exec)).await
@@ -62,6 +100,17 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
         self.read(move |tx| snapshots::under(tx, &prefix)).await
+    }
+
+    async fn cell_roots_within(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
+        let prefix = ExecKey::turn_cells(session, run);
+        self.read(move |tx| snapshots::under_limited(tx, &prefix, Some(max_rows)))
+            .await
     }
 
     async fn hydrate(

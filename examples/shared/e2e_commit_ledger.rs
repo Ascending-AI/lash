@@ -348,6 +348,18 @@ impl DurableReads for LedgerStore {
         self.inner.run_facts_of(owner, run).await
     }
 
+    async fn run_facts_within(
+        &self,
+        owner: &lash::durable::domain::OwnerKey,
+        run: Option<lash::durable::domain::RunSeq>,
+        max_rows: usize,
+        limits: lash::persistence::GraphDecodeLimits,
+    ) -> Result<lash::durable::domain::RunFacts, DurableError> {
+        self.inner
+            .run_facts_within(owner, run, max_rows, limits)
+            .await
+    }
+
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.inner.exec_root(exec).await
     }
@@ -358,6 +370,15 @@ impl DurableReads for LedgerStore {
         run: &lash::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
+    }
+
+    async fn cell_roots_within(
+        &self,
+        session: &lash::SessionId,
+        run: &lash::TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<lash::durable::domain::ExecRootRow>, DurableError> {
+        self.inner.cell_roots_within(session, run, max_rows).await
     }
 
     async fn hydrate(
@@ -538,6 +559,14 @@ impl DurableStore for LedgerStore {
         let answer = self.inner.commit_mail(tx, label).await;
         self.ledger.record(label, None, None, answer.as_ref().err());
         answer
+    }
+
+    async fn claim_facts(
+        &self,
+        node: Option<&lash::durable::Owner>,
+        actor: &lash::durable::ActorKey,
+    ) -> Result<lash::durable::ClaimFacts, DurableError> {
+        self.inner.claim_facts(node, actor).await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {

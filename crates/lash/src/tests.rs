@@ -458,6 +458,7 @@ mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
 mod plugin_build_refusal;
+mod plugin_diagnostics;
 mod plugin_lifecycle;
 mod plugin_operations;
 mod plugin_reopen;

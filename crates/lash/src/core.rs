@@ -64,11 +64,28 @@ pub struct LashCore {
     /// The claim tokens the core's node serves (S7), projected once from
     /// its installed registrations when it was built.
     pub(crate) serves: Arc<[String]>,
+    /// Weak metadata readers; inspection never keeps a materialization alive.
+    pub(crate) diagnostic_hosts:
+        Arc<std::sync::Mutex<Vec<crate::plugins::WeakMaterializedInventoryReader>>>,
 }
 
 pub use lash_core::session_delete::SessionDeletion;
 
 impl LashCore {
+    /// Host-only plugin inspection. No diagnostic call runs plugin code.
+    pub fn plugin_diagnostics(&self) -> crate::plugin_diagnostics::PluginDiagnostics {
+        crate::plugin_diagnostics::PluginDiagnostics { core: self.clone() }
+    }
+
+    pub(crate) fn observe_plugin_host(&self, host: &Arc<PluginHost>) {
+        let mut hosts = self
+            .diagnostic_hosts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        hosts.retain(|host| host.upgrade().is_some());
+        hosts.push(host.materialized_inventories().downgrade());
+    }
+
     pub(crate) fn transcript_decoders(&self) -> crate::transcript::TranscriptDecoders {
         self.protocol_factory
             .iter()
@@ -416,7 +433,10 @@ impl LashCore {
             env.core.clone(),
             self.process_lifecycle_available,
         )?;
-        env.plugin_host = Some(Arc::new(plugin_host));
+        let plugin_host = Arc::new(plugin_host);
+        self.observe_plugin_host(&plugin_host);
+        env.plugin_host = Some(plugin_host);
+        let binding = Arc::new(binding.with_plugin_host(env.plugin_host.clone()));
         let runtime = LashRuntime::resume(inner, &env, self.runtime_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
@@ -666,8 +686,10 @@ impl LashCore {
             self.env.core.clone(),
             self.process_lifecycle_available,
         )?;
+        let plugin_host = Arc::new(plugin_host);
+        self.observe_plugin_host(&plugin_host);
         Ok(DurableProcessWorkerConfig::new(
-            Arc::new(plugin_host),
+            plugin_host,
             runtime_host,
             self.substrate_slot.setup.process.clone(),
             self.runtime_owner.clone(),
@@ -1349,6 +1371,7 @@ impl LashCoreBuilder {
         let core = LashCore {
             observer_pacing: Arc::new(self.observer_pacing),
             serves,
+            diagnostic_hosts: Arc::default(),
             runtime_owner,
             env,
             backend,

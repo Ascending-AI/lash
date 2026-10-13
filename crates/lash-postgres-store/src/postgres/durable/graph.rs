@@ -1072,11 +1072,48 @@ impl PostgresDurableStore {
         owner: &lash_durable::domain::OwnerKey,
         run: Option<lash_durable::domain::RunSeq>,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
-        let limits = self.pools.graph_reads.owner();
+        self.read_run_facts_within(owner, run, None, self.pools.graph_reads.owner())
+            .await
+    }
+
+    pub(super) async fn read_run_facts_within(
+        &self,
+        owner: &lash_durable::domain::OwnerKey,
+        run: Option<lash_durable::domain::RunSeq>,
+        max_rows: Option<usize>,
+        limits: DecodeLimits,
+    ) -> Result<lash_durable::domain::RunFacts, DurableError> {
+        let policy = self.pools.graph_reads.owner();
+        let requested = limits.kernel_data;
+        let configured = policy.kernel_data;
+        let kernel_data = lash_core_store::checkpoint_graph::KernelDataLimits::new(
+            requested.document_depth().min(configured.document_depth()),
+            requested
+                .document_json_depth()
+                .min(configured.document_json_depth()),
+            requested.decode_depth().min(configured.decode_depth()),
+            requested
+                .state_json_depth()
+                .min(configured.state_json_depth()),
+            requested.value_depth().min(configured.value_depth()),
+        )
+        .and_then(|limits| {
+            limits.with_inline_depth(requested.inline_depth().min(configured.inline_depth()))
+        })
+        .ok_or_else(|| super::corrupt("diagnostic read limits", "invalid kernel bounds"))?;
+        let limits = DecodeLimits {
+            kernel_data,
+            node_bytes: limits.node_bytes.min(policy.node_bytes),
+            total_bytes: limits.total_bytes.min(policy.total_bytes),
+            nodes: limits.nodes.min(policy.nodes),
+            logical_bytes: limits.logical_bytes.min(policy.logical_bytes),
+            depth: limits.depth.min(policy.depth),
+        };
         self.read(|connection| {
             Box::pin(async move {
                 let mut snapshot = super::snapshot(connection).await?;
-                let rows = super::run_records::read(&mut snapshot, owner, run).await?;
+                let rows =
+                    super::run_records::read_limited(&mut snapshot, owner, run, max_rows).await?;
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
                 let nodes = walk_within(&mut snapshot, &roots, &limits, None)
                     .await

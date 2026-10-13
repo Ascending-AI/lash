@@ -45,6 +45,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 use crate::liveness_locks::{LivenessLocks, Probed};
 
+mod claim_facts;
 mod graph;
 mod park;
 pub(crate) mod processes;
@@ -1399,6 +1400,14 @@ impl DurableStore for SqliteDurableStore {
             apply_mail(connection, tx, now)
         })
         .await
+    }
+
+    async fn claim_facts(
+        &self,
+        node: Option<&Owner>,
+        actor: &ActorKey,
+    ) -> Result<lash_durable::ClaimFacts, DurableError> {
+        self.read_claim_facts(node, actor).await
     }
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {

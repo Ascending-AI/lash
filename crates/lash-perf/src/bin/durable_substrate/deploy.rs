@@ -223,6 +223,7 @@ impl Deployment {
             serve(
                 &served,
                 NodeServe {
+                    registration: Default::default(),
                     node,
                     drain: Drain::default(),
                     sessions: Arc::new(sessions),

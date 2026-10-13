@@ -603,7 +603,13 @@ pub mod prompt {
 /// reopen. Hosts can drop or redact custom records before export by wrapping
 /// their [`TraceSink`](crate::tracing::TraceSink) and installing it through
 /// [`LashCoreBuilder::trace_sink`](crate::core::LashCoreBuilder::trace_sink).
+mod plugin_diagnostics;
+
 pub mod plugins {
+    /// Host-only live and retained plugin evidence.
+    pub mod diagnostics {
+        pub use crate::plugin_diagnostics::*;
+    }
     pub use lash_core::plugin::ToolProviderHandle;
     pub use lash_core::plugin::{
         CurrentSessionSnapshotPort, NamedSessionSnapshotPort, ProcessAbandonHoldPort,
@@ -626,9 +632,9 @@ pub mod plugins {
     pub use lash_core::plugin::{
         CallbackSlot, ContributionDescriptor, ContributionDetails, ContributionKey,
         ContributionKind, ContributionReadiness, ExecutionComposition, ExecutionState,
-        InstalledInventory, InventoryScope, PluginRecipe, PluginRecipeFactory, PreflightIssue,
-        ProcessRecipe, Proposal, RequiredPort, Requirements, ServiceKind, ToolProviderKey,
-        ToolProviderKeyError,
+        InstalledInventory, InventoryScope, MaterializedInventoryReader, PluginRecipe,
+        PluginRecipeFactory, PreflightIssue, ProcessRecipe, Proposal, RequiredPort, Requirements,
+        ServiceKind, ToolProviderKey, ToolProviderKeyError, WeakMaterializedInventoryReader,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
@@ -703,7 +709,8 @@ pub mod plugins {
     /// the call's admission; a test composes through
     /// `lash::testing::prompt`.
     pub use lash_core::plugin::prompt::{
-        PromptCatalog, PromptSectionFamilyInfo, PromptSectionInfo, ProtocolPromptFacts,
+        PromptCatalog, PromptCatalogSnapshot, PromptSectionFamilyInfo, PromptSectionInfo,
+        ProtocolPromptFacts,
     };
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the

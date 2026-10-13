@@ -39,6 +39,7 @@ pub(super) enum SurfaceMethod {
     EnvironmentBytes,
     LoadSession,
     RunFactsOf,
+    ClaimFacts,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
     /// case's next-turn input (`known`), or of an id no case enqueues
@@ -176,6 +177,7 @@ impl SurfaceMethod {
             Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
             Self::RunFactsOf => "surface:run_facts_of",
+            Self::ClaimFacts => "surface:claim_facts",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
             Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
@@ -358,6 +360,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ProcessAuthority),
             surface(SurfaceMethod::EnvironmentBytes),
             surface(SurfaceMethod::RunFactsOf),
+            surface(SurfaceMethod::ClaimFacts),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
             surface(SurfaceMethod::LoadKnownNode),
@@ -580,6 +583,28 @@ impl BackendRunner {
                     .await?;
                 format!("present={}", bytes.is_some())
             }
+            SurfaceMethod::ClaimFacts => {
+                let actor = lash_core::durable_port::ActorKey::session(session_id.as_str())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let facts = self
+                    .lifecycle_backend
+                    .durable()
+                    .claim_facts(None, &actor)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let roots = self
+                    .lifecycle_backend
+                    .durable()
+                    .cell_roots_within(&session_id, &SURFACE_RUN_ID.into(), 4096)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                format!(
+                    "node={} actor={} roots={}",
+                    facts.node.is_some(),
+                    facts.actor.is_some(),
+                    roots.len()
+                )
+            }
             SurfaceMethod::RunFactsOf => {
                 let owner = lash_core::durable_port::domain::OwnerKey::Turn(
                     session_id.clone(),
@@ -591,6 +616,9 @@ impl BackendRunner {
                     .run_facts_of(&owner, lash_core::durable_port::domain::RunSeq(1))
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let bounded = self.lifecycle_backend.durable().run_facts_within(&owner, Some(lash_core::durable_port::domain::RunSeq(1)), 4096, lash_core::durable_port::domain::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024)).await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(bounded.rows, facts.rows);
                 format!("rows={} nodes={}", facts.rows.len(), facts.nodes.len())
             }
             SurfaceMethod::LoadSession => {

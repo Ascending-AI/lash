@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
+    _inventory: Option<Arc<InstalledInventory>>,
     callbacks: Vec<PluginCallbackIdentity>,
     tool_providers: Vec<super::registrar::RegisteredProvider<Arc<dyn ToolProvider>>>,
     tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -26,6 +27,7 @@ impl ExecutionComposition {
         tool_registry: Arc<crate::ToolRegistry>,
     ) -> Self {
         Self {
+            _inventory: contributions.inventory.clone(),
             callbacks: contributions
                 .inventory
                 .as_ref()

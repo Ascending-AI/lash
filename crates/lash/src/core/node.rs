@@ -39,6 +39,7 @@ type Served = Result<Stopped, DurableError>;
 
 /// The core's one node, shared by its clones.
 pub(crate) struct NodeSlot {
+    pub(crate) registration: lash_core::durable_port::runner::NodeRegistration,
     stop: CancellationToken,
     /// The node's drain switch; started, the node never starts again.
     drain: Drain,
@@ -51,6 +52,7 @@ pub(crate) struct NodeSlot {
 impl NodeSlot {
     pub(crate) fn new() -> Self {
         Self {
+            registration: Default::default(),
             stop: CancellationToken::new(),
             drain: Drain::default(),
             started: Mutex::new(false),
@@ -95,11 +97,13 @@ impl NodeSlot {
         let drain = self.drain.clone();
         let stop = self.stop.clone();
         let served = self.served.clone();
+        let registration = self.registration.clone();
         *started = true;
         runtime.spawn(async move {
             let outcome = serve(
                 &backend,
                 NodeServe {
+                    registration,
                     node,
                     drain,
                     sessions,

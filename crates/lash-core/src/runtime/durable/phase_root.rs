@@ -353,3 +353,47 @@ pub(super) fn load(
         },
     ))
 }
+
+/// The retained plugin decisions and surface in a phase, projected without
+/// restoring a runtime or executing the checkpoint.
+#[derive(Clone, Debug)]
+pub struct RecordedPluginPhase {
+    pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+    pub surface: Option<crate::RecordedSurface>,
+}
+
+/// Read only retained evidence. Absence is not evidence of a pruning history.
+pub async fn read_plugin_phase(
+    reads: &dyn lash_durable::DurableReads,
+    session: &crate::SessionId,
+    run: &crate::TurnId,
+) -> Result<Option<RecordedPluginPhase>, lash_durable::DurableError> {
+    let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024);
+    let graph = match reads
+        .hydrate(
+            lash_durable::domain::RootOwner::TurnPhase {
+                session: session.clone(),
+                run: run.clone(),
+            },
+            None,
+            limits,
+        )
+        .await
+    {
+        Ok(graph) => graph,
+        Err(lash_durable::DurableError::Graph(GraphRefusal::RootRetired)) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let (phase, _) = load(&graph, graph.root, limits).map_err(|reason| {
+        lash_durable::DurableError::Graph(GraphRefusal::InvalidBody {
+            kind: NodeKind::PHASE_ROOT.0,
+            reason,
+        })
+    })?;
+    Ok(Some(RecordedPluginPhase {
+        before_turn: phase.before_turn,
+        surface: phase
+            .config
+            .and_then(|config| config.surface().map(|surface| (**surface).clone())),
+    }))
+}

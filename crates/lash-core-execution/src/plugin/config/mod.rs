@@ -1035,7 +1035,7 @@ impl ConfigRegistry {
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
         writers: &crate::store::plugin_writers::PluginAdmission,
-        prompts: &super::prompt::PromptCatalog,
+        prompts: &super::prompt::PromptCatalogSnapshot,
     ) -> Result<ConfigResolution, RecordedNamespaceCorrupt> {
         let base_revision = base.config_revision;
         let result = if transaction.expected_revision == base_revision {
@@ -1064,7 +1064,7 @@ impl ConfigRegistry {
         transaction: &ConfigTransactionRecord,
         models: &dyn crate::LlmProfiles,
         writers: &crate::store::plugin_writers::PluginAdmission,
-        prompts: &super::prompt::PromptCatalog,
+        prompts: &super::prompt::PromptCatalogSnapshot,
     ) -> Result<ConfigResolutionDecision, ConfigFault> {
         let mut decoded_base = base.clone();
         decoded_base.plugin_config =

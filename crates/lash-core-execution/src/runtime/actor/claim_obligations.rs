@@ -142,18 +142,76 @@ impl RecordedWork {
         session: &crate::SessionId,
         limits: DecodeLimits,
     ) -> Result<Self, DurableError> {
+        Self::read_session_using(reads, session, limits, None).await
+    }
+
+    /// The same traversal for diagnostics, with a row and aggregate byte budget.
+    pub async fn read_session_within(
+        reads: &dyn DurableReads,
+        session: &crate::SessionId,
+        limits: DecodeLimits,
+        max_rows: usize,
+    ) -> Result<Self, DurableError> {
+        Self::read_session_using(reads, session, limits, Some(max_rows)).await
+    }
+
+    async fn read_session_using(
+        reads: &dyn DurableReads,
+        session: &crate::SessionId,
+        mut limits: DecodeLimits,
+        max_rows: Option<usize>,
+    ) -> Result<Self, DurableError> {
         let mut work = Self::session();
         let Some(turn) = reads.turn(session).await? else {
             return Ok(work);
         };
         let owner = OwnerKey::Turn(session.clone(), turn.run.clone());
-        work.apply_facts(&reads.run_facts(&owner).await?)?;
-        for cell in reads.cell_roots(session, &turn.run).await? {
-            work.apply_facts(&reads.run_facts(&cell.exec.owner()).await?)?;
+        let facts = match max_rows {
+            None => reads.run_facts(&owner).await?,
+            Some(max_rows) => {
+                reads
+                    .run_facts_within(&owner, None, max_rows, limits)
+                    .await?
+            }
+        };
+        work.apply_facts(&facts)?;
+        if max_rows.is_some() {
+            consume_limits(&mut limits, &facts.nodes)?;
+        }
+        let cells = match max_rows {
+            None => reads.cell_roots(session, &turn.run).await?,
+            Some(max_rows) => {
+                reads
+                    .cell_roots_within(session, &turn.run, max_rows)
+                    .await?
+            }
+        };
+        if max_rows.is_some_and(|max_rows| cells.len() > max_rows) {
+            return Err(read_limit(
+                cells.len() as u64,
+                max_rows.unwrap_or_default() as u64,
+            ));
+        }
+        for cell in cells {
+            let facts = match max_rows {
+                None => reads.run_facts(&cell.exec.owner()).await?,
+                Some(max_rows) => {
+                    reads
+                        .run_facts_within(&cell.exec.owner(), None, max_rows, limits)
+                        .await?
+                }
+            };
+            work.apply_facts(&facts)?;
+            if max_rows.is_some() {
+                consume_limits(&mut limits, &facts.nodes)?;
+            }
             let graph = reads
                 .hydrate(RootOwner::Exec(cell.exec.clone()), Some(cell.root), limits)
                 .await?;
             work.apply_root(&cell.exec, &graph, cell.root, limits)?;
+            if max_rows.is_some() {
+                consume_limits(&mut limits, &graph.nodes)?;
+            }
         }
         Ok(work)
     }
@@ -342,6 +400,30 @@ impl RecordedWork {
             ObligationSite::Environment => true,
         });
     }
+}
+
+fn read_limit(actual: u64, limit: u64) -> DurableError {
+    DurableError::Graph(
+        lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
+            dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+            actual,
+            limit,
+        },
+    )
+}
+fn consume_limits(
+    limits: &mut DecodeLimits,
+    nodes: &BTreeMap<NodeId, lash_durable::domain::graph::HydratedNode>,
+) -> Result<(), DurableError> {
+    let bytes = nodes.values().fold(0u64, |bytes, node| {
+        bytes.saturating_add(node.bytes.len() as u64)
+    });
+    if bytes > limits.total_bytes || nodes.len() as u64 > limits.nodes {
+        return Err(read_limit(nodes.len() as u64, limits.nodes));
+    }
+    limits.total_bytes -= bytes;
+    limits.nodes -= nodes.len() as u64;
+    Ok(())
 }
 
 /// The nodes a transaction stages, as a decoder reads them.

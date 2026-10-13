@@ -72,6 +72,17 @@ impl DurableReads for PostgresDurableStore {
         self.read_run_facts(owner, Some(run)).await
     }
 
+    async fn run_facts_within(
+        &self,
+        owner: &OwnerKey,
+        run: Option<lash_durable::domain::RunSeq>,
+        max_rows: usize,
+        limits: lash_core_store::checkpoint_graph::DecodeLimits,
+    ) -> Result<RunFacts, DurableError> {
+        self.read_run_facts_within(owner, run, Some(max_rows), limits)
+            .await
+    }
+
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.read(|connection| Box::pin(snapshots::read(connection, exec)))
             .await
@@ -94,6 +105,23 @@ impl DurableReads for PostgresDurableStore {
         let prefix = ExecKey::turn_cells(session, run);
         self.read(|connection| Box::pin(snapshots::under(connection, &prefix)))
             .await
+    }
+
+    async fn cell_roots_within(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+        max_rows: usize,
+    ) -> Result<Vec<ExecRootRow>, DurableError> {
+        let prefix = ExecKey::turn_cells(session, run);
+        self.read(|connection| {
+            Box::pin(snapshots::under_limited(
+                connection,
+                &prefix,
+                Some(max_rows),
+            ))
+        })
+        .await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {

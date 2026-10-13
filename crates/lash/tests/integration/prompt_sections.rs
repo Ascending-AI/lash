@@ -660,3 +660,202 @@ async fn a_removed_plugins_plan_override_is_recorded_and_the_turn_succeeds() {
     );
     core.shutdown().await.expect("shutdown");
 }
+
+/// DIAGNOSTICS-EXECUTES-NO-PLUGIN: catalog reads must not construct an owner,
+/// bind a callback, run a hook or expand a dynamic prompt family.
+#[tokio::test]
+async fn diagnostics_executes_no_plugin() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[derive(Clone)]
+    struct Counting(Arc<AtomicUsize>);
+    impl lash_core::plugin::PluginMetadata for Counting {
+        fn plugin_declaration(&self) -> PluginDeclaration {
+            PluginDeclaration::initial("counting-diagnostics")
+        }
+    }
+    impl lash::plugins::SessionPlugin for Counting {
+        fn id(&self) -> &'static str {
+            "counting-diagnostics"
+        }
+    }
+    impl PromptSectionSource for Counting {
+        fn sections(&self, _: &OfferedTools) -> Vec<PromptFamilySection> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+    }
+    impl lash::plugins::PluginFactory for Counting {
+        fn id(&self) -> &'static str {
+            "counting-diagnostics"
+        }
+        fn recipe(self: Arc<Self>) -> Result<PluginRecipe, PluginError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let mut reg = PluginRegistrar::<Counting>::new("counting-diagnostics");
+            reg.prompt().family(
+                PromptSectionFamilySpec::new(key("dynamic"), PromptPlacement::CurrentContext),
+                |this, _| {
+                    this.0.fetch_add(1, Ordering::SeqCst);
+                    Ok(Arc::new(this.clone()))
+                },
+            )?;
+            reg.turn()
+                .before(lash::plugins::HookKey::new("before").unwrap(), |this, _| {
+                    this.0.fetch_add(1, Ordering::SeqCst);
+                    let counts = this.0.clone();
+                    Ok(Arc::new(move |_| {
+                        counts.fetch_add(1, Ordering::SeqCst);
+                        Box::pin(async { Ok(Default::default()) })
+                    }))
+                })?;
+            Ok(PluginRecipe::new(
+                "counting-diagnostics",
+                reg,
+                move |_, _| {
+                    self.0.fetch_add(1, Ordering::SeqCst);
+                    Ok(Arc::new(self.as_ref().clone()))
+                },
+            ))
+        }
+    }
+    let counts = Arc::new(AtomicUsize::new(0));
+    let core = lash::LashCore::standard_builder(lash_conformance::backend_over(Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
+    )))
+    .llm_profiles(Arc::new(
+        lash::LlmProfileRegistry::new()
+            .register(
+                MODEL,
+                lash::RegisteredLlmProfile::new(
+                    lash::LlmProfileMetadata::builder(MODEL)
+                        .cache_retention(lash::provider::CacheRetention::Short)
+                        .context_window_tokens(4096)
+                        .build()
+                        .unwrap(),
+                    lash_core::testing::TestProvider::builder()
+                        .complete(|_| async { Ok(answer("done")) })
+                        .build()
+                        .into_handle(),
+                ),
+            )
+            .unwrap(),
+    ))
+    .serve_sessions(false)
+    .plugin(Arc::new(Counting(counts.clone())))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .data_retention(lash::DataRetention::standard())
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .execution_budgets(lash::ExecutionBudgets::recommended())
+    .delta_coalescing(lash::DeltaCoalescing::recommended())
+    .build(lash_core::testing::runtime_lease_owner())
+    .unwrap();
+    let session_id = lash::SessionId::from("diagnostics-observer");
+    core.session(session_id.clone())
+        .create(lash::SessionCreation::root(
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(1024),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
+        .await
+        .unwrap();
+    let session = core.session(session_id.clone()).open().await.unwrap();
+    counts.store(0, Ordering::SeqCst);
+    let catalog = session.admin().prompt().catalog().await.unwrap();
+    assert_eq!(
+        catalog
+            .families()
+            .iter()
+            .filter(|family| family.owner == "counting-diagnostics")
+            .count(),
+        1
+    );
+    use lash::plugins::diagnostics::*;
+    let diagnostics = core.plugin_diagnostics();
+    let snapshot = diagnostics.local_node();
+    for scope in [
+        lash::plugins::InventoryScope::Deployment(lash::plugins::RegistryKind::Session),
+        lash::plugins::InventoryScope::Deployment(lash::plugins::RegistryKind::Process),
+        lash::plugins::InventoryScope::Owner(lash::RuntimeOwner::Session(session_id.clone())),
+    ] {
+        let _ = diagnostics.installed(&scope);
+    }
+    diagnostics
+        .explain_claimability(Some(&snapshot), &session_id)
+        .await
+        .unwrap();
+    diagnostics
+        .explain_claimability(None, &session_id)
+        .await
+        .unwrap();
+    diagnostics.prompt_plan(&session_id).await.unwrap();
+    let call = lash::prompt::PromptCallKey {
+        session: session_id.clone(),
+        call: lash::prompt::ModelCallId::Turn {
+            run: "absent".into(),
+            ordinal: 1,
+        },
+    };
+    diagnostics.prompt_snapshot(&call).await.unwrap();
+    session.admin().prompt().plan().await.unwrap();
+    session
+        .admin()
+        .prompt()
+        .snapshot(&"absent".into(), 1)
+        .await
+        .unwrap();
+    diagnostics
+        .attribute(&DecisionRef::Prompt {
+            call,
+            section: id("notes"),
+            wrapper: None,
+        })
+        .await
+        .unwrap();
+    let record = RecordLocator::TurnPhase {
+        session: session_id.clone(),
+        run: "absent".into(),
+    };
+    diagnostics
+        .attribute(&DecisionRef::Callback {
+            record: record.clone(),
+            ordinal: 0,
+        })
+        .await
+        .unwrap();
+    diagnostics
+        .attribute(&DecisionRef::Surface {
+            record,
+            tool: lash::tools::ToolId::new("absent"),
+        })
+        .await
+        .unwrap();
+    diagnostics
+        .attribute(&DecisionRef::Tool {
+            record: RecordLocator::RunFact {
+                owner: OwnerKey::Turn(session_id.clone(), "absent".into()),
+                run: RunSeq(1),
+                ordinal: Ordinal(0),
+            },
+            call: lash::ToolCallId::fixture("absent"),
+            selection: ToolDecisionSelection::Executable,
+        })
+        .await
+        .unwrap();
+    diagnostics
+        .obligation_evidence(
+            &session_id,
+            StateRevision(0),
+            0,
+            std::num::NonZeroUsize::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        counts.load(Ordering::SeqCst),
+        0,
+        "every diagnostics call executes no plugin code"
+    );
+    core.shutdown().await.unwrap();
+}

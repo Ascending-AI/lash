@@ -219,3 +219,24 @@ crate::statements! {
         delete_all = "DELETE FROM actor_mail WHERE actor_key = ?1";
     }
 }
+
+crate::statements! {
+    /// Read-only claim facts: one statement, including both cancel exceptions.
+    pub struct ClaimFactsStatements @ "durable_claim_facts" {
+        read = "SELECT n.boot_id, n.draining, a.state, a.epoch, a.state_revision,
+                    a.ready_at_ms, a.next_due_ms, a.formats, a.requires,
+                    EXISTS (SELECT 1 FROM actor_mail m
+                        WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq AND m.kind = ?3),
+                    EXISTS (SELECT 1 FROM turn_cancel_requests c
+                        WHERE c.session_id = substr(a.actor_key, 3) AND a.kind = 'session'
+                          AND c.mode = 'immediate'),
+                    EXISTS (SELECT 1 FROM actor_mail m
+                        WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq AND m.kind = ?4),
+                    EXISTS (SELECT 1 FROM session_close s
+                        WHERE s.session_id = substr(a.actor_key, 3) AND a.kind = 'session'
+                          AND (s.done_step IS NULL OR s.done_step <> 'tombstone'))
+                FROM (SELECT ?1 AS node_id, ?2 AS actor_key) requested
+                LEFT JOIN nodes n ON n.node_id = requested.node_id
+                LEFT JOIN actors a ON a.actor_key = requested.actor_key";
+    }
+}

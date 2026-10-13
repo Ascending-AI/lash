@@ -8,14 +8,10 @@ the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `effect_admissions`, `graph_release_pins`;
 `lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
-of those is a directory: the core in `durable/mod.rs` and one file per
-domain (`turns`, `run_records`, `snapshots`, `waits`, `processes`,
-`session_close`, `session_mail`, `park`, `prompts`, `graph`), each owned by its lane.
-PostgreSQL's one-call owner commit (FIG-5936, FIG-5942) adds four engine
-modules beside them: `steps`, a domain write's statements as a step program;
-`executor`, which builds the call and owns `owner_commit_latches`;
-`generator`, which writes the server function that runs those programs; and
-`head_commit`, a session head commit as a step program. This check fails
+of those is a directory. Any file in the durable module directory belongs
+to that module; membership comes from tracked files, not a domain-name list.
+PostgreSQL's one-call owner commit (FIG-5936, FIG-5942) also keeps its step
+programs, executor and server-function generator in that directory. This check fails
 when:
 
 - SQL naming an engine table appears in any tracked Rust or SQL file outside
@@ -39,33 +35,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-DOMAINS = (
-    "mod",
-    "turns",
-    "run_records",
-    "snapshots",
-    "waits",
-    "processes",
-    "session_close",
-    "session_mail",
-    "park",
-    "prompts",
-    "graph",
-    "steps",
-    "executor",
-    "generator",
-    "head_commit",
-)
 NEUTRAL_DIR = "crates/lash-store-sql/src/durable"
 DIALECT_DIRS = (
     "crates/lash-sqlite-store/src/durable",
     "crates/lash-postgres-store/src/postgres/durable",
 )
-NEUTRAL = tuple(f"{NEUTRAL_DIR}/{domain}.rs" for domain in DOMAINS)
-DIALECTS = tuple(f"{root}/{domain}.rs" for root in DIALECT_DIRS for domain in DOMAINS)
-ALLOWED = {
-    *NEUTRAL,
-    *DIALECTS,
+SCHEMA_ARTIFACTS = {
     "crates/lash-postgres-store/schema.sql",
     "crates/lash-postgres-store/teardown.sql",
 }
@@ -108,21 +83,20 @@ def tracked(root: Path) -> list[str]:
     return [path for path in listed.split("\0") if path]
 
 
-def unknown_files(root: Path) -> list[str]:
-    """A file in an engine directory that is not one of its domains."""
-    findings = []
-    for directory in (NEUTRAL_DIR, *DIALECT_DIRS):
-        for path in sorted((root / directory).glob("*.rs")):
-            relative = path.relative_to(root).as_posix()
-            if relative not in ALLOWED:
-                findings.append(f"{relative}: not a durable domain module; the domains are {DOMAINS}")
-    return findings
+def module_files(paths: list[str]) -> set[str]:
+    """Every tracked Rust file directly in the durable module directories."""
+    directories = {NEUTRAL_DIR, *DIALECT_DIRS}
+    return {
+        path
+        for path in paths
+        if Path(path).suffix == ".rs" and Path(path).parent.as_posix() in directories
+    }
 
 
-def stray_sql(root: Path) -> list[str]:
+def stray_sql(root: Path, paths: list[str], allowed: set[str]) -> list[str]:
     findings = []
-    for path in tracked(root):
-        if path in ALLOWED:
+    for path in paths:
+        if path in allowed:
             continue
         try:
             text = (root / path).read_text()
@@ -138,11 +112,13 @@ def normalized(statement: str) -> str:
     return " ".join(re.sub(r"\blash_(" + "|".join(TABLES) + r")\b", r"\1", statement).split())
 
 
-def mirrored(root: Path) -> list[str]:
+def mirrored(root: Path, modules: set[str]) -> list[str]:
     seen: dict[str, str] = {}
     findings = []
-    for path in DIALECTS:
-        dialect = next(directory for directory in DIALECT_DIRS if path.startswith(directory))
+    for path in sorted(modules):
+        dialect = Path(path).parent.as_posix()
+        if dialect not in DIALECT_DIRS:
+            continue
         try:
             text = (root / path).read_text()
         except OSError:
@@ -157,7 +133,10 @@ def mirrored(root: Path) -> list[str]:
 
 
 def main() -> int:
-    findings = unknown_files(ROOT) + stray_sql(ROOT) + mirrored(ROOT)
+    paths = tracked(ROOT)
+    modules = module_files(paths)
+    allowed = modules | SCHEMA_ARTIFACTS
+    findings = stray_sql(ROOT, paths, allowed) + mirrored(ROOT, modules)
     if findings:
         print("durability engine SQL outside its modules:", file=sys.stderr)
         print("\n".join(f"  {finding}" for finding in findings), file=sys.stderr)

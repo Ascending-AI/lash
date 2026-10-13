@@ -212,6 +212,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let stopped = serve(
         &backend,
         NodeServe {
+            registration: Default::default(),
             node: NodeId::new(config.node.clone()),
             drain: lash_durable::runner::Drain::default(),
             sessions: Arc::new(sessions),

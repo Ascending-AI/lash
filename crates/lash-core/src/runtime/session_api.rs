@@ -457,29 +457,39 @@ impl LashRuntime {
         .await
     }
 
-    /// The prompt sections, families and wrappers this session's installed
-    /// plugins register (ADR 0133): its built plugins' registrations, or,
-    /// before this runtime built them, an inspection build under the
-    /// session's recorded config.
-    ///
-    /// # Errors
-    ///
-    /// A plugin's build or registration error.
-    pub fn prompt_catalog(&self) -> Result<crate::plugin::prompt::PromptCatalog, RuntimeError> {
-        if let Some(catalog) = self
-            .plugin_session()
-            .and_then(|plugins| plugins.built_prompt_catalog())
-        {
-            return Ok(catalog);
-        }
+    /// Frozen prompt declarations. This read never materializes the session.
+    pub fn prompt_catalog(
+        &self,
+    ) -> Result<crate::plugin::prompt::PromptCatalogSnapshot, RuntimeError> {
         self.services
             .plugins
             .host()
-            .inspect_prompt_catalog(
-                crate::RuntimeOwner::Session(self.state.session_id.clone()),
-                self.state.admitted_plugin_config(),
-            )
-            .map_err(|error| RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string()))
+            .prompt_catalog_snapshot()
+            .map_err(|error| crate::RuntimeEffectControllerError::from(error).into_runtime_error())
+    }
+
+    /// Explicitly executable, unadmitted planning. May bind plugins and expand
+    /// prompt families, but runs no renderer and persists nothing.
+    pub fn preview_prompt_plan(
+        &self,
+        plan: &crate::prompt_sections::PromptPlan,
+        purpose: &crate::prompt_sections::PromptPurpose,
+        offered: &crate::plugin::prompt::OfferedTools,
+    ) -> Result<
+        Result<crate::prompt_sections::ResolvedPromptPlan, crate::prompt_sections::PromptPlanError>,
+        RuntimeError,
+    > {
+        self.services
+            .plugins
+            .prepare_capabilities()
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
+            })?;
+        Ok(self
+            .services
+            .plugins
+            .prompt_catalog()
+            .preview(plan, purpose, offered))
     }
 
     /// The surface the session's providers offer under its recorded config:

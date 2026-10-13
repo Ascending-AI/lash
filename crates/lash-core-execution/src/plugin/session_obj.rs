@@ -254,7 +254,11 @@ impl PluginSession {
         self.bindings.read_recover().upgrade().unwrap_or_default()
     }
     pub fn installed_inventory(&self) -> Option<&InstalledInventory> {
-        self.capabilities.get()?.contributions.inventory.as_ref()
+        self.capabilities.get()?.contributions.inventory.as_deref()
+    }
+
+    pub(super) fn shared_inventory(&self) -> Option<Arc<InstalledInventory>> {
+        self.capabilities.get()?.contributions.inventory.clone()
     }
 
     pub fn composition(&self) -> Arc<ExecutionComposition> {

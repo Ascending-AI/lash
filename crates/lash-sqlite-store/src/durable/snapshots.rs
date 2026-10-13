@@ -192,8 +192,24 @@ pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Ve
 
 /// Every execution root whose key starts with `prefix`, by key.
 pub(super) fn under(tx: &Connection, prefix: &str) -> Answer<Vec<ExecRootRow>> {
+    under_limited(tx, prefix, None)
+}
+
+pub(super) fn under_limited(
+    tx: &Connection,
+    prefix: &str,
+    max_rows: Option<usize>,
+) -> Answer<Vec<ExecRootRow>> {
+    let sql = match max_rows {
+        None => std::borrow::Cow::Borrowed(SQL.under.sql()),
+        Some(max_rows) => std::borrow::Cow::Owned(format!(
+            "{} LIMIT {}",
+            SQL.under.sql(),
+            max_rows.saturating_add(1)
+        )),
+    };
     let rows = tx
-        .prepare_cached(SQL.under.sql())?
+        .prepare_cached(&sql)?
         .query_map([prefix], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -204,6 +220,15 @@ pub(super) fn under(tx: &Connection, prefix: &str) -> Answer<Vec<ExecRootRow>> {
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
+        return Ok(Err(DurableError::Graph(
+            lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
+                dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                actual: rows.len() as u64,
+                limit: max_rows as u64,
+            },
+        )));
+    }
     let mut roots = Vec::with_capacity(rows.len());
     for (key, rev, root, epoch, commit_id) in rows {
         let exec = match ExecKey::parse(&key) {

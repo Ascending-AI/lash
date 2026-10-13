@@ -5,7 +5,7 @@
 
 use super::AdminContext;
 use crate::support::{EmbedError, LashRuntime, Result};
-use lash_core::plugin::prompt::{OfferedTools, PromptCatalog};
+use lash_core::plugin::prompt::{OfferedTools, PromptCatalogSnapshot};
 use lash_core::prompt_sections::{PromptPlan, PromptPlanError, PromptPurpose, ResolvedPromptPlan};
 
 #[derive(Clone)]
@@ -33,12 +33,9 @@ impl SessionPromptAdmin {
                 ordinal: call,
             },
         };
-        lash_core::plugin::prompt::load_prompt_snapshot(
-            context.parts.effect_host.backend().durable().as_ref(),
-            &key,
-        )
-        .await
-        .map_err(EmbedError::PromptSnapshotLoad)
+        crate::plugin_diagnostics::read_prompt_snapshot(context.parts.effect_host.backend(), &key)
+            .await
+            .map_err(EmbedError::PromptSnapshotLoad)
     }
 
     /// The prompt plan the session's durable head records: what the next run
@@ -46,27 +43,25 @@ impl SessionPromptAdmin {
     /// [`SetPromptPlan`](crate::config::SetPromptPlan).
     pub async fn plan(&self) -> Result<PromptPlan> {
         let context = self.context.target.context().await?;
-        let head = context
-            .parts
-            .store
-            .load_session_head_meta()
-            .await
-            .map_err(EmbedError::Store)?
+        crate::plugin_diagnostics::read_prompt_plan(&context.parts.store)
+            .await?
             .ok_or_else(|| EmbedError::UnknownSession {
-                session_id: context.parts.session_id.clone(),
-            })?;
-        Ok(head.config.prompt_plan)
+                session_id: context.parts.session_id,
+            })
     }
 
     /// The sections, section families and wrappers the session's installed
     /// plugins register, in registration order.
-    pub async fn catalog(&self) -> Result<PromptCatalog> {
-        self.context
-            .with_writer(async |runtime: &mut LashRuntime| {
-                runtime.reload_invalidated_resident_session_state().await?;
-                runtime.prompt_catalog().map_err(EmbedError::Runtime)
-            })
-            .await
+    pub async fn catalog(&self) -> Result<PromptCatalogSnapshot> {
+        let crate::send::SendTarget::Live(session) = &self.context.target else {
+            return Err(EmbedError::MissingProtocolPlugin);
+        };
+        let host = session
+            .binding
+            .plugin_host
+            .as_ref()
+            .ok_or(EmbedError::MissingProtocolPlugin)?;
+        crate::plugin_diagnostics::read_prompt_catalog(host).map_err(EmbedError::Plugin)
     }
 
     /// Preview how the recorded plan resolves for a `purpose` call offered
@@ -80,7 +75,13 @@ impl SessionPromptAdmin {
         offered: &OfferedTools,
     ) -> Result<std::result::Result<ResolvedPromptPlan, PromptPlanError>> {
         let plan = self.plan().await?;
-        let catalog = self.catalog().await?;
-        Ok(catalog.preview(&plan, purpose, offered))
+        self.context
+            .with_writer(async |runtime: &mut LashRuntime| {
+                runtime.reload_invalidated_resident_session_state().await?;
+                runtime
+                    .preview_prompt_plan(&plan, purpose, offered)
+                    .map_err(EmbedError::Runtime)
+            })
+            .await
     }
 }

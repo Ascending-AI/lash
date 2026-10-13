@@ -288,6 +288,37 @@ pub struct ActorSnapshot {
     pub failed_activations: u32,
 }
 
+/// Scheduling facts read together, without claiming or acquiring a writer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimFacts {
+    pub observed_at: DurableInstant,
+    /// The registered boot of the requested node, even when it replaced the caller's.
+    pub node: Option<ClaimNodeFacts>,
+    pub actor: Option<ClaimActorFacts>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimNodeFacts {
+    pub owner: Owner,
+    pub draining: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimActorFacts {
+    pub actor: ActorKey,
+    pub state: ActorState,
+    pub epoch: Epoch,
+    pub revision: StateRevision,
+    pub ready_at: Option<DurableInstant>,
+    pub next_due: Option<DurableInstant>,
+    pub formats: FormatSet,
+    pub requires: Vec<String>,
+    pub process_cancel: bool,
+    pub immediate_cancel: bool,
+    pub close_mail: bool,
+    pub unfinished_close: bool,
+}
+
 /// The fenced transaction port: one implementation per dialect, its SQL in
 /// one module there. Every method that writes runs one database
 /// transaction, under a [`CommitLabel`].
@@ -361,6 +392,14 @@ pub trait DurableStore: DurableReads {
     /// Apply `tx` atomically: creations, appends and wakes, nothing else.
     async fn commit_mail(&self, tx: MailTx, label: CommitLabel)
     -> Result<MailCommit, DurableError>;
+
+    /// Read node identity/draining and actor scheduling, requirements and cancel
+    /// facts in one read snapshot. Nothing is written or activated.
+    async fn claim_facts(
+        &self,
+        node: Option<&Owner>,
+        actor: &ActorKey,
+    ) -> Result<ClaimFacts, DurableError>;
 
     /// Read `actor`'s row, unfenced.
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError>;

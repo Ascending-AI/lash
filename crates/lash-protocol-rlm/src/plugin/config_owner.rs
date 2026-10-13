@@ -537,7 +537,7 @@ mod tests {
                     &record,
                     &lash_core::EmptyLlmProfiles,
                     &lash_core::store::plugin_writers::PluginAdmission::default(),
-                    &lash_core::plugin::prompt::PromptCatalog::default(),
+                    &lash_core::plugin::prompt::PromptCatalogSnapshot::default(),
                 )
                 .expect("the recorded config reads")
                 .publish(config);

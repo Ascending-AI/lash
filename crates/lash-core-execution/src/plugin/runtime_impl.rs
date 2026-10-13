@@ -18,6 +18,7 @@ pub struct PluginHost {
     pub(super) export_plugin_namespaces: bool,
     extensions: PluginExtensions,
     sessions: Arc<StdMutex<BTreeMap<RuntimeOwner, Weak<PluginSession>>>>,
+    materialized_inventories: super::MaterializedInventoryReader,
     /// Config registration is collected on first use, after format preflight.
     config_registry: Arc<std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, PluginError>>>,
     execution_budgets: crate::ExecutionBudgets,
@@ -168,6 +169,7 @@ impl PluginHost {
             export_plugin_namespaces: true,
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
+            materialized_inventories: super::MaterializedInventoryReader::default(),
             config_registry,
             trace_runtime,
             execution_budgets,
@@ -230,6 +232,7 @@ impl PluginHost {
             export_plugin_namespaces: self.export_plugin_namespaces,
             extensions: self.extensions.clone(),
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
+            materialized_inventories: self.materialized_inventories.clone(),
             config_registry: Arc::clone(&self.config_registry),
             trace_runtime: self.trace_runtime.clone(),
             execution_budgets: self.execution_budgets.clone(),
@@ -491,6 +494,10 @@ impl PluginHost {
         session
             .materialized
             .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(inventory) = session.shared_inventory() {
+            self.materialized_inventories
+                .observe(&session.owner, &inventory);
+        }
         Ok(())
     }
 
@@ -569,35 +576,18 @@ impl PluginHost {
         }
     }
 
-    /// The prompt sections, families and wrappers the installed plugins
-    /// register for a session recorded under `plugin_config`, built for a
-    /// host to inspect: the plugins are built over empty state, and no
-    /// session is materialized or registered.
-    ///
-    /// # Errors
-    ///
-    /// A plugin's build or registration error.
-    pub fn inspect_prompt_catalog(
+    /// Frozen prompt metadata, without constructing an owner or a renderer.
+    pub fn prompt_catalog_snapshot(
         &self,
-        owner: RuntimeOwner,
-        plugin_config: super::AdmittedPluginConfig,
-    ) -> Result<super::prompt::PromptCatalog, PluginError> {
-        let ctx = PluginSessionContext {
-            bindings: std::sync::Arc::new(crate::plugin::ServiceBindings::default()),
-            tracing: self.trace_runtime.clone(),
-            trace: None,
-            owner,
-            plugin_config,
-            materialization: PluginSessionMaterialization::Rematerialization,
-            extensions: self.extensions()?,
-        };
-        let built = self.build_session_contributions(
-            &ctx,
-            Arc::new(StdMutex::new(PluginStateRegistry::from_snapshot(None))),
-        )?;
-        Ok(super::prompt::PromptCatalog::new(
-            built.contributions.prompt,
+    ) -> Result<super::prompt::PromptCatalogSnapshot, PluginError> {
+        Ok(super::prompt::PromptCatalogSnapshot::from_inventory(
+            &self.installed_inventory()?,
         ))
+    }
+
+    /// Weak metadata shared by this host's isolated execution registries.
+    pub fn materialized_inventories(&self) -> super::MaterializedInventoryReader {
+        self.materialized_inventories.clone()
     }
 
     fn recipes(&self) -> Result<&[Arc<PluginRecipe>], PluginError> {
@@ -707,10 +697,10 @@ impl PluginHost {
         drop(registry);
         let mut plugins = Vec::new();
         let mut contributions = PluginContributions {
-            inventory: Some(InstalledInventory {
+            inventory: Some(Arc::new(InstalledInventory {
                 scope: InventoryScope::Owner(ctx.owner.clone()),
                 ..inventory
-            }),
+            })),
             ..PluginContributions::default()
         };
         for (factory, recipe) in self.factories().iter().zip(recipes) {
@@ -771,7 +761,14 @@ impl PluginHost {
 
     pub fn unregister_session(&self, session_id: &SessionId) -> Result<(), PluginError> {
         let mut sessions = self.sessions.lock_recover();
-        sessions.remove(&RuntimeOwner::Session(session_id.clone()));
+        let owner = RuntimeOwner::Session(session_id.clone());
+        if let Some(session) = sessions
+            .remove(&owner)
+            .and_then(|session| session.upgrade())
+            && let Some(inventory) = session.shared_inventory()
+        {
+            self.materialized_inventories.forget(&owner, &inventory);
+        }
         Ok(())
     }
 

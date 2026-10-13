@@ -1246,6 +1246,9 @@ impl super::BoundRegistrar {
     }
 }
 
+mod snapshot;
+pub use snapshot::{PromptCatalogSnapshot, read_prompt_plan};
+
 mod composer;
 
 pub use composer::{
