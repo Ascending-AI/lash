@@ -631,6 +631,8 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::step();
         if self.observer.is_some() {
             self.observe_step(task, exe);
         }

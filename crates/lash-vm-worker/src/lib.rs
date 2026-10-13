@@ -32,6 +32,7 @@ pub use lash_dialect_python::SourceLimits as PythonSourceLimits;
 mod entry;
 #[cfg(unix)]
 mod host;
+mod perf_witness;
 #[cfg(unix)]
 mod process;
 #[cfg(unix)]

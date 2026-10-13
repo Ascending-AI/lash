@@ -137,6 +137,13 @@ impl WorkerPool {
     pub fn enable_execution_receipts(&self, capacity: usize) {
         lock(&self.0.measurements).receipt_capacity = capacity;
     }
+    /// Starts an opt-in buffer measurement window at a released-worker park.
+    #[cfg(feature = "perf-witness")]
+    pub fn clear_buffer_peaks(&self) {
+        let mut measurements = lock(&self.0.measurements);
+        measurements.counters.peak_buffer_bytes = 0;
+        measurements.counters.worker_work.peak_buffer_bytes = 0;
+    }
     pub fn measurements(&self) -> PoolMeasurements {
         let state = lock(&self.0.state);
         let measurements = lock(&self.0.measurements);
@@ -932,6 +939,7 @@ impl Checkout {
                 WorkerMessage::Progress {
                     phase: next,
                     cpu_nanos,
+                    work,
                 } => {
                     let allowed = matches!(
                         (phase, next),
@@ -944,6 +952,12 @@ impl Checkout {
                     }
                     if cpu_nanos < self.credited_cpu {
                         return Err(PoolError::breach(SequenceFault::CpuAccountingRegressed));
+                    }
+                    if let Some(work) = work {
+                        lock(&self.pool.measurements)
+                            .counters
+                            .worker_work
+                            .accumulate(work);
                     }
                     self.charge_cpu(cpu_nanos)?;
                     self.credited_cpu = cpu_nanos;

@@ -389,6 +389,9 @@ pub enum WorkerMessage {
     Progress {
         phase: WorkerPhase,
         cpu_nanos: u64,
+        /// Opt-in diagnostic delta, with no execution or admission authority.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work: Option<WorkerWork>,
     },
     LimitExceeded {
         limit: crate::WorkerLimit,
@@ -513,4 +516,38 @@ pub enum WorkerPhase {
     Computing,
     Serializing,
     Responding,
+}
+
+/// Count-only performance receipt for one worker exchange. Never persisted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerWork {
+    pub serialized_body_bytes: u64,
+    pub decoded_body_bytes: u64,
+    pub vm_steps: u64,
+    pub checkpoint_values: u64,
+    pub resume_values: u64,
+    pub carry_values: u64,
+    pub encoded_nodes: u64,
+    pub encoded_bytes: u64,
+    pub decoded_nodes: u64,
+    pub decoded_bytes: u64,
+    pub probe_units: u64,
+    /// Largest simultaneously owned frame buffers, excluding kernel heap.
+    pub peak_buffer_bytes: u64,
+}
+impl WorkerWork {
+    pub fn accumulate(&mut self, next: Self) {
+        self.serialized_body_bytes += next.serialized_body_bytes;
+        self.decoded_body_bytes += next.decoded_body_bytes;
+        self.vm_steps += next.vm_steps;
+        self.checkpoint_values += next.checkpoint_values;
+        self.resume_values += next.resume_values;
+        self.carry_values += next.carry_values;
+        self.encoded_nodes += next.encoded_nodes;
+        self.encoded_bytes += next.encoded_bytes;
+        self.decoded_nodes += next.decoded_nodes;
+        self.decoded_bytes += next.decoded_bytes;
+        self.probe_units += next.probe_units;
+        self.peak_buffer_bytes = self.peak_buffer_bytes.max(next.peak_buffer_bytes);
+    }
 }

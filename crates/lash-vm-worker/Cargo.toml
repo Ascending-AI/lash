@@ -42,7 +42,7 @@ synthetic-next = [
     "lash-kernel-vm/synthetic-next",
     "lash-vm-library/synthetic-next",
 ]
-testing = ["lash-vm-client/testing"]
+testing = ["lash-vm-client/testing", "lash-core-execution/perf-witness", "lash-core-store/perf-witness", "lash-kernel-vm/perf-witness"]
 
 [[bin]]
 name = "lash-vm-worker-fixture"

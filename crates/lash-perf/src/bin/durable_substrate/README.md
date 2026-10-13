@@ -203,3 +203,89 @@ python3 crates/lash-perf/src/bin/durable_substrate/reads_report.py --inputs \
 kiln test //crates/lash-perf:durable-substrate__bin__unit_test \
   --test_arg=--exact --test_arg=reads::tests::fifty_dependent_reads_obey_the_cost_model
 ```
+
+## Retained heap baseline (FIG-6196)
+
+One command runs six scenarios at H = 100, 1000, 5000, 10000 (100×), on the
+production `LashSession::send()` path, the durable SQLite engine and an isolated
+released worker. H counts entries/objects; for the string case it counts bytes,
+using 256-byte units of the requested population: 25,600, 256,000, 1,280,000 and
+2,560,000 bytes (also 100×). This puts immutable payloads above the fixed control
+header overhead. Run with a fresh evidence directory:
+
+```sh
+. ./env.sh
+(ulimit -v 8388608; /usr/bin/time -v kiln run //crates/lash-perf:durable-substrate__bin -- \
+  --store sqlite --sqlite-dir "$PWD/.kiln/FIG-6196/baseline" \
+  --case heap-scaling --out "$PWD/.kiln/FIG-6196/baseline.jsonl")
+```
+
+Stdout is a text table, including least-squares slopes of log count against log
+H (the growth exponent). JSONL retains every park interval, including all three
+reset intervals. The committed [before table](../../../fixtures/heap-baseline.txt)
+names the main SHA measured with this instrumentation patch. These are counts;
+wall time is diagnostic, with no threshold. The fixture is historical evidence,
+not a golden count oracle, and does not replace `kernel-baseline.json` or the
+advisory `duration-trend-history.jsonl`.
+
+Each sample uses its own fresh database, core and worker pool. Heap construction
+ends at gate 0, outside the measurement. Each gate defers its outcome. The observer waits for a durable pending
+completion and for every checked-out worker to return to the idle pool, then
+supplies that external completion. Gate 1 closes the interval covering one
+released-worker resume and the next committed park. Guest updates touch
+one list entry or one retained object's field. The immutable-string case builds `"x".repeat(256 * population)` before measurement and reads
+only length; the source/document itself stays small. Dropping removes one binding to H objects while retaining a
+separate H-element list. The next-cell case carries the seeded state into a cell
+that only awaits the gate. The reset case does the same one-entry operation
+three times, with worker reset/release required in each interval. D and W are
+fixed semantic changes/accesses; today's whole-state implementation still
+processes H internally. This is a worker reset, not a claim that the helper's
+immutable preparation cache is cold or that its PID changed.
+
+The existing performance witness owns the counters. The shared
+`RecordingStores`/`Recorder` used by declared reads certifies exactly one accepted
+owner park per measured interval (`committed_parks` in JSONL); every store call
+is forwarded unchanged. `vm_steps` counts actual
+machine statement steps without allocating or locking in the VM loop.
+`checkpoint_values`, `resume_values` and `carry_values` count object headers and
+entries converted by the existing whole-state paths (collection cardinalities,
+no additional scan). Graph encode counts every envelope actually produced,
+before staging deduplication; graph decode counts every decoder envelope read,
+including repeated reads and canonical checks. Decode's canonical verification
+may itself encode, so encoded counts include that real work. Immutable encoding
+cache hits correctly do not count newly produced envelopes.
+`serialized_body_bytes` also counts the logical token buffers built before a
+cache lookup, and `decoded_body_bytes` counts materialized logical tokens fed
+to typed decoders. These expose whole-value work that envelope deduplication
+can hide, especially for the immutable-string case. Nodes can stay constant
+while their bytes grow. Graph counts sum the isolated worker's deltas and the broker/store process's existing collector, so host-side terminal reconstruction and canonical
+checks remain visible too. The worker sends count deltas in existing progress
+receipts; an ordinary worker sends no diagnostic field.
+
+IPC counts actual encoded frames in both directions. SQL counts come from the
+physical SQLite trace, with affected rows from the existing write witness.
+`sql_expanded_bytes` counts expanded statement text, including quoted/hex bound
+values, rather than logical payload or WAL bytes. The SQL scope is the isolated
+core's complete interval, including its runner's background work and the completion observer's SQL. Buffer peaks
+observe simultaneously live transport/read-ahead allocations and node byte
+buffers at serialization/receive seams; they exclude the semantic heap,
+allocator overhead, immutable caches and RSS. Keep `/usr/bin/time`'s independent
+peak RSS beside the table. Neither a buffer counter nor SQL bytes alone proves
+that traversal is bounded.
+
+`pages_loaded`, `pages_sealed`, `spool_bytes` and `retirement_batches` are named
+nullable slots, printed as `n/a`. FIG-6193 replaces their unavailable values
+with page instrumentation and makes D/W scaling an asserting law.
+
+Add `--heap-walk checkpoint`, `--heap-walk resume` or `--heap-walk carry` to
+inject a deliberate retained-graph walk at the corresponding seam. The hook
+visits object entries and immutable payload bytes, preserves values and charge,
+and reports `probe_units`. It requires the testing worker build, and is disabled
+unless requested. The harness law runs all scenarios at the two smallest H,
+then verifies an H-proportional injected count at each of the three locations:
+
+```sh
+kiln test //crates/lash-perf:durable-substrate__bin__unit_test \
+  --test_arg=heap::tests::six_scenarios_count_released_worker_work_and_see_heap_walks \
+  --test_arg=--exact
+```

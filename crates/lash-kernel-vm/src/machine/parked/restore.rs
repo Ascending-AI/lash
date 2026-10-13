@@ -508,7 +508,15 @@ pub(in crate::machine) fn import(
     heap.value_depth = limits.value_depth();
     heap.json_depth = limits.document_depth();
     heap.inline_depth = limits.inline_depth();
+    #[cfg(any(test, feature = "perf-witness"))]
+    crate::perf_witness::probe(
+        crate::perf_witness::Probe::Resume,
+        objects.values(),
+        session.values(),
+    );
     for (id, object) in objects {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::object(crate::perf_witness::Probe::Resume, &object);
         if !heap.restore(id, object_of(&exe, object)?) {
             return Err(malformed("an object is held twice"));
         }

@@ -76,6 +76,12 @@ impl KernelMachine {
         let mut phase = crate::perf_witness::Phase::begin("machine.export");
         let parked = self.export()?;
         #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::probe(
+            crate::perf_witness::Probe::Checkpoint,
+            parked.objects.values(),
+            parked.session.values(),
+        );
+        #[cfg(any(test, feature = "perf-witness"))]
         {
             if let Some(phase) = &mut phase {
                 phase.complete(

@@ -52,6 +52,7 @@ fn worker_entry_inner(
             "--heap-profile-dir requires a dhat-heap worker",
         )));
     }
+    let _witness = crate::perf_witness::install(&args)?;
     let fd = args
         .get(index + 1)
         .ok_or_else(|| PoolError::breach(BootstrapFault::MissingDescriptor))?

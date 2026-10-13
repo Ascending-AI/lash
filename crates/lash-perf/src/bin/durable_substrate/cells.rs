@@ -172,7 +172,7 @@ fn model(scripts: Arc<Scripts>, recorder: Arc<Recorder>) -> ProviderHandle {
 }
 
 /// A text answer, streamed as one delta.
-fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
+pub(super) fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
         stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
             kind: StreamBlockKind::AssistantText,

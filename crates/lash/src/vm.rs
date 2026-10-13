@@ -104,7 +104,7 @@ pub use lash_vm_client::{
     InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError,
     PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
     RunInput, RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit,
+    WorkerDeploymentFault, WorkerLimit, WorkerWork,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

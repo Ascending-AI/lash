@@ -159,7 +159,15 @@ impl KernelMachine {
                 refuse("a binding names an object the bindings do not hold, a closure or a task")
             })
         };
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::probe(
+            crate::perf_witness::Probe::Carry,
+            bindings.objects.values(),
+            bindings.variables.values(),
+        );
         for (id, object) in &bindings.objects {
+            #[cfg(any(test, feature = "perf-witness"))]
+            crate::perf_witness::object(crate::perf_witness::Probe::Carry, object);
             let object = match object {
                 Object::List(items) => {
                     Obj::List(items.iter().map(&rename).collect::<Result<_, _>>()?)

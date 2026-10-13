@@ -86,3 +86,118 @@ impl Drop for Phase {
         });
     }
 }
+
+/// Test/performance-only whole-state slowdown location.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe {
+    Checkpoint,
+    Resume,
+    Carry,
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Work {
+    pub vm_steps: u64,
+    pub checkpoint_values: u64,
+    pub resume_values: u64,
+    pub carry_values: u64,
+    pub probe_units: u64,
+}
+thread_local! {
+    static WORK: std::cell::Cell<Option<Work>> = const { std::cell::Cell::new(None) };
+    static PROBE: std::cell::Cell<Option<Probe>> = const { std::cell::Cell::new(None) };
+}
+/// Enables count-only diagnostics on the worker thread, without VM-loop locks
+/// or allocations. Ordinary builds compile all calls out.
+pub fn enable_work(probe: Option<Probe>) {
+    WORK.set(Some(Work::default()));
+    PROBE.set(probe);
+}
+pub fn take_work() -> Option<Work> {
+    WORK.with(|work| work.replace(work.get().map(|_| Work::default())))
+}
+pub(crate) fn step() {
+    WORK.with(|work| {
+        if let Some(mut counts) = work.get() {
+            counts.vm_steps += 1;
+            work.set(Some(counts));
+        }
+    });
+}
+/// Counts the entries actually converted by the whole-state paths, using
+/// collection cardinalities rather than another traversal.
+pub(crate) fn object(phase: Probe, object: &lash_kernel_doc::Object) {
+    use lash_kernel_doc::Object;
+    let entries = 1 + match object {
+        Object::List(items) | Object::Set(items) => items.len(),
+        Object::Record(fields) => fields.len(),
+        Object::Map(entries) => entries.len() * 2,
+        Object::Variable(_) => 1,
+        Object::Closure(closure) => closure.captures.len(),
+    } as u64;
+    WORK.with(|work| {
+        if let Some(mut counts) = work.get() {
+            match phase {
+                Probe::Checkpoint => counts.checkpoint_values += entries,
+                Probe::Resume => counts.resume_values += entries,
+                Probe::Carry => counts.carry_values += entries,
+            }
+            work.set(Some(counts));
+        }
+    });
+}
+/// Deliberately visits every retained slot and payload byte. References are
+/// visited as slots; the object table visits each body once, including cycles.
+/// The hook is opt-in and changes no values, guest charge or admission.
+pub(crate) fn probe<'a>(
+    phase: Probe,
+    objects: impl Iterator<Item = &'a lash_kernel_doc::Object>,
+    roots: impl Iterator<Item = &'a lash_kernel_doc::Value>,
+) {
+    use lash_kernel_doc::{Object, Value};
+    if PROBE.get() != Some(phase) {
+        return;
+    }
+    fn value(item: &Value) -> u64 {
+        std::hint::black_box(item);
+        1 + match item {
+            Value::Text(text) => text
+                .bytes()
+                .map(|byte| {
+                    std::hint::black_box(byte);
+                    1
+                })
+                .sum(),
+            Value::Bytes(bytes) => bytes
+                .as_slice()
+                .iter()
+                .map(|byte| {
+                    std::hint::black_box(byte);
+                    1
+                })
+                .sum(),
+            Value::Tuple(items) => items.iter().map(value).sum(),
+            Value::Error(error) => value(&error.data),
+            _ => 0,
+        }
+    }
+    let mut units = roots.map(value).sum::<u64>();
+    for object in objects {
+        std::hint::black_box(object);
+        units += 1 + match object {
+            Object::List(items) | Object::Set(items) => items.iter().map(value).sum::<u64>(),
+            Object::Map(entries) => entries
+                .iter()
+                .map(|(key, item)| value(key) + value(item))
+                .sum(),
+            Object::Record(fields) => fields.iter().map(|(_, item)| value(item)).sum(),
+            Object::Variable(item) => value(item),
+            Object::Closure(closure) => closure.captures.len() as u64,
+        };
+    }
+    WORK.with(|work| {
+        if let Some(mut counts) = work.get() {
+            counts.probe_units += units;
+            work.set(Some(counts));
+        }
+    });
+}

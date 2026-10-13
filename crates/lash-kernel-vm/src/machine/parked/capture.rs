@@ -427,6 +427,8 @@ pub(in crate::machine) fn export(machine: &mut KernelMachine) -> Result<ParkedRu
         let object = view
             .data(object)
             .ok_or_else(|| fault("a closure names no closure expression"))?;
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::object(crate::perf_witness::Probe::Checkpoint, &object);
         objects.insert(id, object);
     }
     Ok(ParkedRun {

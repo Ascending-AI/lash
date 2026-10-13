@@ -8,6 +8,9 @@ pub struct PoolCounters {
     pub checkouts: u64,
     pub queue_waits: u64,
     pub queue_delay_ns: u64,
+    pub worker_work: lash_vm_protocol::WorkerWork,
+    /// Maximum simultaneously owned broker frame buffers (not RSS or heap).
+    pub peak_buffer_bytes: u64,
     pub ipc_sent_messages: u64,
     pub ipc_sent_bytes: u64,
     pub ipc_received_messages: u64,
@@ -89,6 +92,8 @@ pub(crate) fn units() -> BTreeMap<&'static str, &'static str> {
         ("checkouts", "count"),
         ("queue_waits", "count"),
         ("queue_delay_ns", "nanoseconds"),
+        ("worker_work", "mixed; see WorkerWork"),
+        ("peak_buffer_bytes", "bytes"),
         ("ipc_sent_messages", "count"),
         ("ipc_sent_bytes", "bytes"),
         ("ipc_received_messages", "count"),

@@ -94,6 +94,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Serializing,
                 cpu_nanos: cpu_nanos()?,
+                work: None,
             },
         )?;
         self.send(
@@ -101,6 +102,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Responding,
                 cpu_nanos: cpu_nanos()?,
+                work: None,
             },
         )?;
         self.send(&mut pipe, WorkerMessage::HostRead { id, kind, request })?;
@@ -135,6 +137,7 @@ impl Wire {
             WorkerMessage::Progress {
                 phase: WorkerPhase::Computing,
                 cpu_nanos: cpu_nanos()?,
+                work: None,
             },
         )?;
         Ok(answer)

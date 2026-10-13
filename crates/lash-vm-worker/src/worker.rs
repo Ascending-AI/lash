@@ -112,6 +112,9 @@ fn encode_worker(
             }
             refusal => refusal.into(),
         });
+    if let Ok(bytes) = &bytes {
+        crate::perf_witness::buffer(bytes.capacity());
+    }
     (frame.message, bytes)
 }
 
@@ -207,6 +210,7 @@ impl<'embedding> Server<'embedding> {
         self.send(WorkerMessage::Progress {
             phase,
             cpu_nanos: cpu_nanos()?,
+            work: None,
         })
     }
     pub(crate) fn run(
@@ -231,6 +235,14 @@ impl<'embedding> Server<'embedding> {
                 }
                 Err(error) => return Err(error),
             };
+            crate::perf_witness::buffer(
+                bytes.capacity()
+                    + self
+                        .inbound
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .buffer_capacity(),
+            );
             let frame = self.codec.decode_parent(&bytes).map_err(PoolError::from)?;
             let mut fences = self
                 .fences
@@ -841,6 +853,26 @@ impl<'embedding> Server<'embedding> {
             ),
             (message, bytes) => (message, bytes?),
         };
+        let graph_bytes = match &message {
+            WorkerMessage::Parked {
+                state: Some(state), ..
+            }
+            | WorkerMessage::ExportedGraph { state } => state
+                .nodes()
+                .iter()
+                .map(|node| node.bytes.capacity())
+                .sum::<usize>(),
+            _ => 0,
+        };
+        crate::perf_witness::buffer(
+            bytes.capacity()
+                + graph_bytes
+                + self
+                    .inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .buffer_capacity(),
+        );
         // Responding and the answer leave in one write: nothing happens
         // between them, and the parent then wakes once for both (FIG-4433).
         let responding = {
@@ -853,11 +885,21 @@ impl<'embedding> Server<'embedding> {
                 WorkerMessage::Progress {
                     phase: WorkerPhase::Responding,
                     cpu_nanos: cpu_nanos()?,
+                    work: crate::perf_witness::take(),
                 },
             )?;
             fences.outgoing.next_header();
             responding
         };
+        crate::perf_witness::buffer(
+            bytes.capacity()
+                + responding.capacity()
+                + self
+                    .inbound
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .buffer_capacity(),
+        );
         write_frames(
             &mut self.pipe,
             responding,

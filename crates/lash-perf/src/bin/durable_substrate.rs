@@ -16,6 +16,8 @@ use lash_core_execution::DurableSettings;
 mod cells;
 #[path = "durable_substrate/deploy.rs"]
 mod deploy;
+#[path = "durable_substrate/heap.rs"]
+mod heap;
 #[path = "durable_substrate/operations.rs"]
 mod operations;
 #[path = "durable_substrate/process.rs"]
@@ -55,6 +57,12 @@ struct Args {
     /// (LASH_POSTGRES_DATABASE_URL, provisioned with the 1.0 schema).
     #[arg(long)]
     store: String,
+    /// Retained heap sizes; default spans 100x, with fixed guest changes/reads.
+    #[arg(long, default_value = "100,1000,5000,10000", value_delimiter = ',')]
+    heap_sizes: Vec<usize>,
+    /// Test-only full heap walk: checkpoint, resume or carry.
+    #[arg(long)]
+    heap_walk: Option<String>,
     #[arg(long, env = "LASH_POSTGRES_DATABASE_URL", hide_env_values = true)]
     database_url: Option<String>,
     #[arg(long)]
@@ -125,6 +133,7 @@ enum Kind {
     Operations,
     Counted,
     Reads,
+    Heap,
 }
 
 fn rounds(rounds: usize, tools_per_round: usize) -> Script {
@@ -138,6 +147,7 @@ fn rounds(rounds: usize, tools_per_round: usize) -> Script {
 fn case(name: &str) -> Result<Case> {
     let (kind, script) = match name {
         "declared-reads" => (Kind::Reads, Script::default()),
+        "heap-scaling" => (Kind::Heap, Script::default()),
         "operations" => (Kind::Operations, Script::default()),
         "counted-no-tool" => (Kind::Counted, Script::default()),
         "counted-one-tool" => (Kind::Counted, rounds(1, 1)),
@@ -281,6 +291,7 @@ async fn bench_main() -> Result<()> {
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {
             Kind::Reads => reads::run(&run, &args.read_populations).await?,
+            Kind::Heap => heap::run(&run, &args.heap_sizes, args.heap_walk.as_deref()).await?,
             Kind::Operations => operations::run(&run).await?,
             Kind::Counted => turns::counted(&run, &case).await?,
             Kind::Rounds { sessions } => turns::rounds(&run, &case, sessions).await?,

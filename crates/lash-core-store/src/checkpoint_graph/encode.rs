@@ -274,6 +274,8 @@ impl GraphStaging {
         value: &T,
     ) -> Result<NodeId, GraphRefusal> {
         let logical = encode_body(value);
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_graph_serialized_body(logical.len());
         self.encode(kind, TypedBody::logical(&logical))
     }
 

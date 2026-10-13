@@ -170,6 +170,8 @@ impl<'s> GraphDecoder<'s> {
         if stored.encoding != BlobEncoding::Graph {
             return Err(GraphRefusal::EncodingConflict(id));
         }
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_graph_decode(stored.bytes.len());
         self.nodes_read += 1;
         self.bytes_read += stored.bytes.len() as u64;
         self.limit(DecodeDimension::Nodes, self.nodes_read, self.limits.nodes)?;
@@ -230,6 +232,8 @@ impl<'s> GraphDecoder<'s> {
         expected: NodeKind,
     ) -> Result<T, GraphRefusal> {
         let logical = self.materialized_body(id, expected)?;
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_graph_decoded_body(logical.len());
         let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(expected.0));
         let mut reader = TokenReader::new(&logical).with_data_limits(self.limits.kernel_data);
         let value = T::decode(&mut reader).map_err(refuse)?;

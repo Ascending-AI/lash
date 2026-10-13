@@ -20,6 +20,11 @@ const INSTALLING: u8 = 1;
 const ACTIVE: u8 = 2;
 
 static COLLECTOR_STATE: AtomicU8 = AtomicU8::new(INACTIVE);
+static GRAPH_SERIALIZED_BODY_BYTES: AtomicU64 = AtomicU64::new(0);
+static GRAPH_DECODED_BODY_BYTES: AtomicU64 = AtomicU64::new(0);
+static GRAPH_DECODED_NODES: AtomicU64 = AtomicU64::new(0);
+static GRAPH_DECODED_BYTES: AtomicU64 = AtomicU64::new(0);
+static SQL_BYTES: AtomicU64 = AtomicU64::new(0);
 static GRAPH_ENVELOPES: AtomicU64 = AtomicU64::new(0);
 static GRAPH_ENCODED_BYTES: AtomicU64 = AtomicU64::new(0);
 static GRAPH_ADOPT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
@@ -138,6 +143,11 @@ impl SqlVerb {
 pub struct Snapshot {
     pub graph_adopt_attempts: u64,
     pub graph_adopt_bytes: u64,
+    pub graph_serialized_body_bytes: u64,
+    pub graph_decoded_body_bytes: u64,
+    pub graph_decoded_nodes: u64,
+    pub graph_decoded_bytes: u64,
+    pub sql_bytes: u64,
     pub graph_envelopes: u64,
     pub graph_encoded_bytes: u64,
     pub hash_passes: u64,
@@ -192,6 +202,11 @@ impl Collector {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
             .map_err(|_| AlreadyInstalled)?;
+        GRAPH_SERIALIZED_BODY_BYTES.store(0, Ordering::Relaxed);
+        GRAPH_DECODED_BODY_BYTES.store(0, Ordering::Relaxed);
+        GRAPH_DECODED_NODES.store(0, Ordering::Relaxed);
+        GRAPH_DECODED_BYTES.store(0, Ordering::Relaxed);
+        SQL_BYTES.store(0, Ordering::Relaxed);
         GRAPH_ENVELOPES.store(0, Ordering::Relaxed);
         GRAPH_ENCODED_BYTES.store(0, Ordering::Relaxed);
         GRAPH_ADOPT_ATTEMPTS.store(0, Ordering::Relaxed);
@@ -220,6 +235,11 @@ impl Collector {
         Snapshot {
             graph_adopt_attempts: GRAPH_ADOPT_ATTEMPTS.load(Ordering::Relaxed),
             graph_adopt_bytes: GRAPH_ADOPT_BYTES.load(Ordering::Relaxed),
+            graph_serialized_body_bytes: GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
+            graph_decoded_body_bytes: GRAPH_DECODED_BODY_BYTES.load(Ordering::Relaxed),
+            graph_decoded_nodes: GRAPH_DECODED_NODES.load(Ordering::Relaxed),
+            graph_decoded_bytes: GRAPH_DECODED_BYTES.load(Ordering::Relaxed),
+            sql_bytes: SQL_BYTES.load(Ordering::Relaxed),
             graph_envelopes: GRAPH_ENVELOPES.load(Ordering::Relaxed),
             graph_encoded_bytes: GRAPH_ENCODED_BYTES.load(Ordering::Relaxed),
             hash_passes: HASH_PASSES.load(Ordering::Relaxed),
@@ -299,6 +319,7 @@ pub fn record_sql_statement_bytes(sql: &str, expanded_bytes: usize) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
         return;
     }
+    SQL_BYTES.fetch_add(expanded_bytes as u64, Ordering::Relaxed);
     SQL_STATEMENTS.fetch_add(1, Ordering::Relaxed);
     SQL_STATEMENTS_BY_VERB[SqlVerb::classify(sql) as usize].fetch_add(1, Ordering::Relaxed);
     if SQL_RECEIPTS_ENABLED.load(Ordering::Relaxed) {
@@ -341,6 +362,41 @@ fn lock_pool_checkout_waits() -> MutexGuard<'static, Vec<u64>> {
     POOL_CHECKOUT_WAIT_NANOS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Every envelope read by a graph decoder, including repeated reads.
+#[inline]
+pub fn record_graph_decode(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        GRAPH_DECODED_NODES.fetch_add(1, Ordering::Relaxed);
+        GRAPH_DECODED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+/// Allocation-free scalar view for an isolated worker's progress receipt.
+pub fn graph_work() -> [u64; 6] {
+    [
+        GRAPH_ENVELOPES.load(Ordering::Relaxed),
+        GRAPH_ENCODED_BYTES.load(Ordering::Relaxed),
+        GRAPH_DECODED_NODES.load(Ordering::Relaxed),
+        GRAPH_DECODED_BYTES.load(Ordering::Relaxed),
+        GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
+        GRAPH_DECODED_BODY_BYTES.load(Ordering::Relaxed),
+    ]
+}
+
+/// Logical tokens actually serialized, including before an encoding-cache hit.
+#[inline]
+pub fn record_graph_serialized_body(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        GRAPH_SERIALIZED_BODY_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+/// Logical tokens supplied to a typed decoder after materialization.
+#[inline]
+pub fn record_graph_decoded_body(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        GRAPH_DECODED_BODY_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]

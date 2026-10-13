@@ -44,7 +44,7 @@ pub use message::{
     BorrowedParentFrame, BorrowedParentMessage, Delivery, EncodedPayload, ExecutionLease,
     FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence, MessageHeader, OwnerEpoch,
     ParentFrame, ParentMessage, ParkedGraph, RunBounds, RunMeters, Start, StartFrom,
-    TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
+    TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{
     BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
