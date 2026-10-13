@@ -37,6 +37,50 @@ macro_rules! law {
     };
 }
 
+// The hermetic PostgreSQL unit target supplies its own server. These mounts
+// also refuse an absent service when invoked directly.
+macro_rules! claim_law {
+    ($name:ident, |$store:ident, $advance:ident| $law:expr) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let database_url = crate::testing::required_database_url();
+            let database = IsolatedDatabase::create(&database_url).await;
+            let storage = crate::testing::connect(database.url())
+                .await
+                .expect("open the isolated store");
+            let clock = Arc::new(TestClock::new(1_000_000));
+            let $store = &storage
+                .durable_store()
+                .with_clock_for_testing(clock.clone());
+            let $advance = &|by: Duration| {
+                clock.advance(u64::try_from(by.as_millis()).expect("a law advances by millis"));
+            };
+            $law.await.unwrap_or_else(|broken| panic!("{broken}"));
+        }
+    };
+}
+
+claim_law!(
+    a_replaced_boot_adopts_none_of_its_successors_actors,
+    |store, _advance| { laws::a_replaced_boot_adopts_none_of_its_successors_actors(store) }
+);
+claim_law!(
+    progress_before_an_empty_ready_release_resets_failed_activations,
+    |store, _advance| {
+        laws::progress_before_an_empty_ready_release_resets_failed_activations(store)
+    }
+);
+claim_law!(
+    claims_take_the_oldest_eligible_actors_first,
+    |store, advance| { laws::claims_take_the_oldest_eligible_actors_first(store, advance) }
+);
+claim_law!(
+    an_abandoned_activation_hands_back_only_its_original_grant,
+    |store, _advance| {
+        laws::an_abandoned_activation_hands_back_only_its_original_grant(Arc::new(store.clone()))
+    }
+);
+
 law!(one_writer_under_a_claim_race, |store, _advance| {
     laws::one_writer_under_a_claim_race(store)
 });

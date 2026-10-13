@@ -34,20 +34,28 @@ pub type LawOutcome = Result<(), LawBroken>;
 /// Moves the store's clock forward.
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
 
+mod claims;
 mod formats;
 pub mod graph;
+mod hand_back;
 mod model_calls;
 pub mod node_wakes;
 mod prompts;
 mod session_close;
 mod turn_namespaces;
 
+pub use claims::{
+    a_replaced_boot_adopts_none_of_its_successors_actors,
+    claims_take_the_oldest_eligible_actors_first,
+    progress_before_an_empty_ready_release_resets_failed_activations,
+};
 pub use formats::{
     a_draining_node_claims_nothing_and_releases_ready,
     a_newer_format_is_not_written_while_an_older_node_is_live,
     a_node_claims_only_actors_whose_formats_it_decodes,
     actors_in_a_format_set_and_a_turns_cells_are_listed,
 };
+pub use hand_back::an_abandoned_activation_hands_back_only_its_original_grant;
 pub use model_calls::a_turn_counts_the_model_calls_it_admitted;
 pub use prompts::{
     deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,

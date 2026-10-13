@@ -96,6 +96,27 @@ macro_rules! law {
     };
 }
 
+law!(
+    a_replaced_boot_adopts_none_of_its_successors_actors,
+    |store, _advance| { laws::a_replaced_boot_adopts_none_of_its_successors_actors(store) }
+);
+law!(
+    progress_before_an_empty_ready_release_resets_failed_activations,
+    |store, _advance| {
+        laws::progress_before_an_empty_ready_release_resets_failed_activations(store)
+    }
+);
+law!(
+    claims_take_the_oldest_eligible_actors_first,
+    |store, advance| { laws::claims_take_the_oldest_eligible_actors_first(store, advance) }
+);
+law!(
+    an_abandoned_activation_hands_back_only_its_original_grant,
+    |store, _advance| {
+        laws::an_abandoned_activation_hands_back_only_its_original_grant(Arc::new(store.clone()))
+    }
+);
+
 law!(one_writer_under_a_claim_race, |store, _advance| {
     laws::one_writer_under_a_claim_race(store)
 });
