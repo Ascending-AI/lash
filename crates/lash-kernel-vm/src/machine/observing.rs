@@ -76,16 +76,24 @@ impl KernelMachine {
 
     #[inline(always)]
     pub(super) fn observe_expression(&mut self) {
+        self.observe_expressions(1);
+    }
+
+    /// `count` expressions or action operands are evaluated.
+    #[inline(always)]
+    pub(super) fn observe_expressions(&mut self, count: u32) {
         if self.observer.is_some() {
-            self.observe_expression_unlikely();
+            self.observe_expressions_unlikely(count);
         }
     }
 
     #[cold]
     #[inline(never)]
-    fn observe_expression_unlikely(&mut self) {
+    fn observe_expressions_unlikely(&mut self, count: u32) {
         if let Some(observer) = self.observer.as_deref_mut() {
-            observer.expression(self.charging);
+            for _ in 0..count {
+                observer.expression(self.charging);
+            }
         }
     }
 

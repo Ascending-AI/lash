@@ -1,5 +1,5 @@
 //! The operations: each kernel operation's one description, which the
-//! interpreter executes.
+//! stream's ops execute (`super::stream`).
 //!
 //! An operation is one machine method with a register-indexed shape: it
 //! reads its operands from registers, writes its result to its result
@@ -13,10 +13,10 @@
 //! - `Err(Interrupt::Halt(_))`: it ended the run.
 //!
 //! An operation that cannot step returns [`Eval`] instead. The registers
-//! are the machine's register stack: the interpreter evaluates an
-//! expression into the next register, and the operation over its value
-//! names that register. Nothing outside a step holds a register, so a
-//! parked run never holds one (`K-STMT-004`).
+//! are the machine's register stack: a statement's ops name the registers
+//! of its window, where each expression's value goes and each operation
+//! reads its operands. Nothing outside a step holds a register, so a parked
+//! run never holds one (`K-STMT-004`).
 //!
 //! The operations are the member reads and writes, the charge, memory
 //! reservation and pin anchors, the library call with its charge (the one
@@ -30,10 +30,11 @@ use lash_kernel_doc::{Identity, NativeCall, NativeError, ObjectId, TaskId, Value
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
+use super::stream::{Ran, Running};
 use super::{
     Control, Cursor, Eval, Halt, Interrupt, KernelMachine, TaskState, bound, fault, raise,
 };
-use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
+use crate::compile::{Charge, Executable, Form, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::{Key, NativeView, Obj, object_bytes, value_bytes, within_depth};
 use crate::interface::{Bound, Host};
@@ -64,6 +65,18 @@ pub(super) enum Entry {
     Inline,
 }
 
+/// Drops a register's old value, which is mostly one that owns nothing:
+/// that one needs no drop.
+#[inline(always)]
+fn release(value: Value) {
+    if matches!(
+        value,
+        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
+    ) {
+        std::mem::forget(value);
+    }
+}
+
 /// The list position a value is: a number with an integral value that is
 /// not negative (`K-FORM-006`). `None` is a number that is no position.
 fn position(index: &Value) -> Eval<Option<usize>> {
@@ -92,48 +105,25 @@ pub(super) fn key(value: &Value) -> Eval<Key> {
 }
 
 impl KernelMachine {
-    /// Writes `value` to register `out`: the next register, or one the
-    /// stack holds.
+    /// Writes `value` to register `out`, growing the registers to it.
     #[inline(always)]
     pub(super) fn put(&mut self, out: Reg, value: Value) {
         match self.regs.get_mut(out) {
-            Some(held) => *held = value,
-            None => self.regs.push(value),
+            Some(held) => release(std::mem::replace(held, value)),
+            None => self.grow(out, value),
         }
+    }
+
+    #[inline(never)]
+    fn grow(&mut self, out: Reg, value: Value) {
+        self.regs.resize(out, Value::Null);
+        self.regs.push(value);
     }
 
     /// Takes the value out of register `r`, which is left null.
     #[inline(always)]
     pub(super) fn take(&mut self, r: Reg) -> Value {
         std::mem::replace(&mut self.regs[r], Value::Null)
-    }
-
-    /// Takes the value out of register `r`, removing it when it is the top
-    /// one.
-    #[inline(always)]
-    pub(super) fn take_top(&mut self, r: Reg) -> Value {
-        if r + 1 == self.regs.len()
-            && let Some(value) = self.regs.pop()
-        {
-            return value;
-        }
-        self.take(r)
-    }
-
-    /// Takes the value out of the top register.
-    #[inline(always)]
-    pub(super) fn pop(&mut self) -> Result<Value, Halt> {
-        self.regs
-            .pop()
-            .ok_or_else(|| fault("an expression left no value"))
-    }
-
-    /// Drops the registers from `len` up.
-    #[inline(always)]
-    pub(super) fn cut(&mut self, len: usize) {
-        while self.regs.len() > len {
-            self.regs.pop();
-        }
     }
 
     /// The charge anchor (`K-CHG-002`): `units` more, unless the running
@@ -396,24 +386,29 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Calls library function `lib` with the registers from `args` up as
-    /// its arguments: the one entry of every library call. A native
+    /// Calls library function `lib` with the `count` registers from `args`
+    /// as its arguments: the one entry of every library call. A native
     /// implementation or a machine function answers at once, charged by
     /// its formula: `Done`, its value in `out`. A function that runs its
     /// kernel body has that body's frame pushed, its arguments moved in, as
     /// `entry` says: `Step`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a call is its function, its argument registers, its result register and its entry"
+    )]
     pub(super) fn call_lib(
         &mut self,
         task: TaskId,
         exe: &Executable,
         lib: LibId,
         args: Reg,
+        count: usize,
         out: Reg,
         entry: Entry,
     ) -> Status {
         let function = exe.lib(lib);
         if self
-            .answer(task, exe, lib, args, out)
+            .answer(task, exe, lib, args, count, out)
             .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
         {
             return Ok(Flow::Done);
@@ -421,7 +416,9 @@ impl KernelMachine {
         let LibRun::Body(code) = &function.run else {
             return Err(fault("a function with no body was run as one").into());
         };
-        let call = Call::new(*code, args).of_library(lib);
+        // An argument the call leaves out is absent: the body binds every
+        // parameter.
+        let call = Call::new(*code, args, function.arity).of_library(lib);
         match entry {
             Entry::Frame(awaiting) => self.push_frame(task, exe, call.awaited_by(awaiting))?,
             Entry::Inline => {
@@ -445,10 +442,10 @@ impl KernelMachine {
         exe: &Executable,
         lib: LibId,
         args: Reg,
+        given: usize,
         out: Reg,
     ) -> Eval<bool> {
         let function = exe.lib(lib);
-        let given = self.regs.len() - args;
         if given > function.arity {
             return raise(
                 "arity",
@@ -458,9 +455,10 @@ impl KernelMachine {
                 ),
             );
         }
-        if given < function.arity {
-            self.regs.resize(args + function.arity, Value::Absent);
+        for absent in args + given..args + function.arity {
+            self.put(absent, Value::Absent);
         }
+        let end = args + function.arity;
         // A function that runs its body is observed by its frame; one that
         // does not, from here to its charge. A halt ends the run and its
         // observation with it.
@@ -490,7 +488,6 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(Obj::List(unfinished))?))
             }
             LibRun::Native(native) => {
-                let end = self.regs.len();
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
@@ -577,7 +574,6 @@ impl KernelMachine {
                 }
             }
         };
-        let end = self.regs.len();
         let evaluates = self.charging && function.native;
         let units = self.in_formula(lib, evaluates, |machine| {
             machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
@@ -606,24 +602,28 @@ impl KernelMachine {
     ) -> Eval<()> {
         let name = &exe.lib(lib).definition.name;
         self.inline_depth += 1;
-        let top = self.regs.len();
+        // The body's statements run their windows from the call's value on,
+        // above every register the caller's statement still holds.
+        let top = std::mem::replace(&mut self.top, out);
         let result = loop {
             if let Some(result) = self.inline_result.take() {
                 break result;
             }
             let outcome = self.advance(task, host, exe);
             let settled = self.settle(task, host, exe, outcome);
-            self.cut(top);
             if let Err(halt) = settled {
                 self.inline_depth -= 1;
+                self.top = top;
                 return Err(halt.in_function(name).into());
             }
             if self.current != Some(task) {
                 self.inline_depth -= 1;
+                self.top = top;
                 return Err(fault("a library body waited inside an expression").into());
             }
         };
         self.inline_depth -= 1;
+        self.top = top;
         self.refresh_charging(task, exe);
         match result {
             Ok(value) => {
@@ -690,7 +690,7 @@ impl KernelMachine {
                 cursor,
                 started,
             }) => {
-                let crate::compile::Stmt::For { binding, body, .. } = exe.stmt(*stmt) else {
+                let Form::For { binding, body, .. } = &exe.stmt(*stmt).form else {
                     return Err(fault("a `for` loop is not at a `for`").into());
                 };
                 let element = match cursor {
@@ -724,7 +724,7 @@ impl KernelMachine {
                     Some(element) => {
                         *started += 1;
                         self.push_block(task, *body)?;
-                        self.bind(task, *binding, element)?;
+                        self.bind(task, binding.at, binding.shared, element)?;
                         Ok(Flow::Step)
                     }
                     None => {
@@ -734,13 +734,15 @@ impl KernelMachine {
                 }
             }
             Some(Control::While { stmt, .. }) => {
-                let crate::compile::Stmt::While {
-                    condition, body, ..
-                } = exe.stmt(*stmt)
-                else {
+                let running = Running::new(task, exe, *stmt);
+                let Form::While { test, body, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
-                match self.eval_value(task, host, exe, condition)? {
+                let tested = self.run(host, &running, test.start as usize, self.top)?;
+                let Ran::Tested(value) = tested else {
+                    return Err(fault("a `while` condition gave no value").into());
+                };
+                match value {
                     Value::Bool(true) => {
                         if let Some(Control::While { started, .. }) =
                             self.frame(task)?.control.last_mut()

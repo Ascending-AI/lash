@@ -154,7 +154,7 @@ impl NativeFunction for Twice {
 pub(crate) struct Library {
     pub(crate) registry: Arc<FunctionRegistry>,
     pub(crate) ids: BTreeMap<&'static str, FunctionId>,
-    header: String,
+    pub(crate) header: String,
 }
 
 /// Builds the laws' library. `pair.twice` has a native implementation and

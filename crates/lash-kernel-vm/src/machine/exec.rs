@@ -2,38 +2,28 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Measure, ObjectId, TaskId, Value};
+use lash_kernel_doc::{Datum, ErrorValue, Measure, ObjectId, TaskId, Value};
+use lash_kernel_exec::LocalRef;
 
-use super::ops::{Flow, Reg};
+use super::ops::Reg;
+use super::stream::{Ran, Running, unbound};
 use super::{
     Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt, KernelMachine,
     LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
-use crate::compile::{
-    BlockId, CodeId, Executable, LibId, Local, Member, Place, Plan, Rhs, Source, Stmt, StmtId,
-    Target, Var,
-};
+use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
-use crate::heap::{Obj, value_bytes};
+use crate::heap::{Key, Obj, Table, value_bytes};
 use crate::interface::{Bound, Host, Outcome};
 use crate::observe::Event;
-
-/// How a statement's run ends.
-enum Ran {
-    /// In its own block: its step edge is next.
-    Done,
-    /// Having entered a block, a loop, a `try` or a frame, or waiting: the
-    /// step ends where the statement left the task.
-    Step,
-    /// Departing: a `break`, a `continue` or a `return`.
-    Depart(Completion),
-}
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
-    /// The register the call's arguments start at; they run to the top.
+    /// The register the call's arguments start at.
     pub(super) args: Reg,
+    /// How many arguments there are.
+    pub(super) count: usize,
     /// The cells of the variables a closure shares, in its code's order.
     pub(super) captures: &'a [ObjectId],
     /// The library function the code is the body of.
@@ -45,10 +35,11 @@ pub(super) struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
-    pub(super) fn new(code: CodeId, args: Reg) -> Self {
+    pub(super) fn new(code: CodeId, args: Reg, count: usize) -> Self {
         Self {
             code,
             args,
+            count,
             captures: &[],
             library: None,
             inline: false,
@@ -107,8 +98,10 @@ impl KernelMachine {
                             stmt: id,
                             charging: self.charging,
                         });
-                        let (stmt, edge) = exe.stmt_edge(id);
-                        match self.exec(task, host, exe, id, stmt)? {
+                        let running = Running::new(task, exe, id);
+                        let edge = running.edge;
+                        let start = running.stmt.ops.start as usize;
+                        match self.run(host, &running, start, self.top)? {
                             Ran::Done => {
                                 self.take_edge(task, exe, edge)?;
                                 Ok(Completion::Normal)
@@ -120,6 +113,9 @@ impl KernelMachine {
                                 Ok(Completion::Normal)
                             }
                             Ran::Depart(completion) => Ok(completion),
+                            Ran::Tested(_) => {
+                                Err(fault("a statement ended as a loop's test").into())
+                            }
                         }
                     }
                     None => {
@@ -168,8 +164,8 @@ impl KernelMachine {
                 Ok(Completion::Normal)
             }
             Some(Control::Try { stmt, phase }) => {
-                let finally = match exe.stmt(*stmt) {
-                    Stmt::Try { finally, .. } => *finally,
+                let finally = match &exe.stmt(*stmt).form {
+                    Form::Try { finally, .. } => *finally,
                     _ => None,
                 };
                 match (std::mem::replace(phase, TryPhase::Body), finally) {
@@ -255,8 +251,8 @@ impl KernelMachine {
                     }
                 },
                 Control::Try { stmt, phase } => {
-                    let (catch, finally) = match exe.stmt(*stmt) {
-                        Stmt::Try { catch, finally, .. } => (*catch, *finally),
+                    let (catch, finally) = match &exe.stmt(*stmt).form {
+                        Form::Try { catch, finally, .. } => (*catch, *finally),
                         _ => (None, None),
                     };
                     match (&*phase, catch, finally, &departure) {
@@ -264,7 +260,7 @@ impl KernelMachine {
                             let value = value.clone();
                             *phase = TryPhase::Catch;
                             self.push_block(task, block)?;
-                            self.bind(task, binding, value)?;
+                            self.bind(task, binding.at, binding.shared, value)?;
                             departure = Completion::Normal;
                         }
                         (TryPhase::Body | TryPhase::Catch, _, Some(finally), _) => {
@@ -317,10 +313,10 @@ impl KernelMachine {
         Ok(match result {
             Ok(value) => {
                 // The value is in no variable until the statement binds it.
-                let r = self.regs.len();
-                self.regs.push(value);
-                self.pin(r)?;
-                match self.finish_action(task, host, exe, r) {
+                let base = self.top;
+                self.put(base, value);
+                self.pin(base)?;
+                match self.finish_action(task, host, exe, base) {
                     Ok(stmt) => {
                         self.take_edge_of(task, exe, stmt)?;
                         None
@@ -406,8 +402,7 @@ impl KernelMachine {
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
     /// its parameters, in order; a parameter with no argument is absent
-    /// (`K-FN-004`). The arguments are moved out of their registers, and
-    /// the caller takes what is left there off.
+    /// (`K-FN-004`). The arguments are moved out of their registers.
     pub(super) fn push_frame(
         &mut self,
         task: TaskId,
@@ -417,13 +412,13 @@ impl KernelMachine {
         let Call {
             code: code_id,
             args: base,
+            count: given,
             captures,
             library,
             inline,
             awaited_by,
         } = call;
         let code = exe.code(code_id);
-        let given = self.regs.len() - base;
         if given > code.params.len() {
             return raise(
                 "arity",
@@ -460,7 +455,7 @@ impl KernelMachine {
                 // Only a native implementation's formula, charged when the
                 // call ends, reads them (`K-CHG-007`).
                 if exe.lib(lib).native {
-                    args.extend_from_slice(&self.regs[base..]);
+                    args.extend_from_slice(&self.regs[base..base + given]);
                 }
                 LibraryCall { lib, args }
             }),
@@ -478,211 +473,51 @@ impl KernelMachine {
             code: code_id,
         });
         for (index, param) in code.params.iter().enumerate() {
-            let value = self
-                .regs
-                .get_mut(base + index)
-                .map_or(Value::Absent, |arg| std::mem::replace(arg, Value::Absent));
-            self.bind(task, *param, value)?;
+            let value = match index < given {
+                true => std::mem::replace(&mut self.regs[base + index], Value::Absent),
+                false => Value::Absent,
+            };
+            self.bind(task, param.at, param.shared, value)?;
         }
         Ok(())
     }
 
-    /// Binds a new variable in the top frame (`K-FORM-004`).
-    pub(super) fn bind(&mut self, task: TaskId, local: Local, value: Value) -> Result<(), Halt> {
-        let state = if local.shared {
+    /// Binds a new variable at frame position `at` of the top frame, in a
+    /// heap cell when a closure shares it (`K-FORM-004`).
+    pub(super) fn bind(
+        &mut self,
+        task: TaskId,
+        at: u32,
+        shared: bool,
+        value: Value,
+    ) -> Result<(), Halt> {
+        let state = if shared {
             SlotState::Cell(self.alloc(Obj::Variable(value))?)
         } else {
             self.reserve(value_bytes(&value))?;
             SlotState::Value(value)
         };
-        self.frame(task)?.slots[local.at as usize] = state;
+        self.frame(task)?.slots[at as usize] = state;
         Ok(())
     }
 
+    /// Reads an action's variable.
     pub(super) fn read_var(&mut self, task: TaskId, exe: &Executable, var: &Var) -> Eval<Value> {
-        if let Var::Local(local) = var
-            && let Some(SlotState::Value(value)) = self
-                .tasks
-                .get(task.0 as usize)
-                .and_then(|task| task.frames.last())
-                .map(|frame| &frame.slots[local.at as usize])
-        {
-            return Ok(value.clone());
-        }
-        self.read_other_var(task, exe, var)
-    }
-
-    /// The rest of [`Self::read_var`]: a variable a closure shares, a
-    /// session binding, and one that is not bound. Apart, so that reading
-    /// a local stays small.
-    #[inline(never)]
-    fn read_other_var(&mut self, task: TaskId, exe: &Executable, var: &Var) -> Eval<Value> {
-        let unbound = |name: &lash_kernel_doc::Name| {
-            Err(Interrupt::Raise(Value::Error(Arc::new(
-                lash_kernel_doc::ErrorValue {
-                    kind: "unbound_variable".to_owned(),
-                    message: format!("no variable `{name}` is bound here"),
-                    data: Value::text(name.as_str()),
-                },
-            ))))
-        };
         match var {
-            Var::Local(local) => {
-                let frame = self.frame(task)?;
-                match &frame.slots[local.at as usize] {
-                    SlotState::Value(value) => Ok(value.clone()),
-                    SlotState::Cell(cell) => {
-                        let cell = *cell;
-                        match self.heap.variable(cell) {
-                            Some(value) => Ok(value.clone()),
-                            None => Err(fault("a shared variable has no cell").into()),
-                        }
-                    }
-                    SlotState::Empty => {
-                        unbound(&exe.code(frame.code).slots[local.slot as usize].name)
-                    }
-                }
-            }
+            Var::Local(local) => self.read_local(
+                task,
+                exe,
+                LocalRef {
+                    slot: local.slot,
+                    at: local.at,
+                },
+            ),
             Var::Session(name) => match self.session.get(name) {
                 Some(value) => Ok(value.clone()),
                 None => unbound(name),
             },
             Var::Unbound(name) => unbound(name),
         }
-    }
-
-    fn write_var(&mut self, task: TaskId, exe: &Executable, var: &Var, value: Value) -> Eval<()> {
-        let unbound = |name: &lash_kernel_doc::Name| {
-            Err(Interrupt::Raise(Value::Error(Arc::new(
-                lash_kernel_doc::ErrorValue {
-                    kind: "unbound_variable".to_owned(),
-                    message: format!("no variable `{name}` is bound here"),
-                    data: Value::text(name.as_str()),
-                },
-            ))))
-        };
-        self.reserve(value_bytes(&value))?;
-        match var {
-            Var::Local(local) => {
-                let frame = self.frame(task)?;
-                match &mut frame.slots[local.at as usize] {
-                    SlotState::Value(held) => *held = value,
-                    SlotState::Cell(cell) => {
-                        let cell = *cell;
-                        if let Some(Obj::Variable(held)) = self.heap.get_mut(cell) {
-                            *held = value;
-                        }
-                    }
-                    SlotState::Empty => {
-                        return unbound(&exe.code(frame.code).slots[local.slot as usize].name);
-                    }
-                }
-                Ok(())
-            }
-            Var::Session(name) => match self.session.get_mut(name) {
-                Some(held) => {
-                    *held = value;
-                    Ok(())
-                }
-                None => unbound(name),
-            },
-            Var::Unbound(name) => unbound(name),
-        }
-    }
-
-    fn exec(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        id: StmtId,
-        stmt: &Stmt,
-    ) -> Eval<Ran> {
-        let out = self.regs.len();
-        match stmt {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => match value {
-                // A value at once completes the statement, which no action
-                // holds open.
-                Rhs::Expr(expr) => {
-                    self.eval(task, host, exe, expr)?;
-                    self.complete_stmt(task, host, exe, stmt, out)?;
-                }
-                Rhs::Action(action) => match self.act(task, host, exe, id, action, out)? {
-                    Flow::Done => self.complete_stmt(task, host, exe, stmt, out)?,
-                    Flow::Step => return Ok(Ran::Step),
-                },
-            },
-            Stmt::Do(action) => {
-                if self.act(task, host, exe, id, action, out)? == Flow::Step {
-                    return Ok(Ran::Step);
-                }
-            }
-            Stmt::Remove(member) => self.remove(task, host, exe, member)?,
-            Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                let block = match self.eval_value(task, host, exe, condition)? {
-                    Value::Bool(true) => *then_block,
-                    Value::Bool(false) => *else_block,
-                    _ => return raise("type_error", "an `if` condition must be a bool"),
-                };
-                // An empty block would end as soon as it began.
-                if !exe.block(block).stmts.is_empty() {
-                    self.push_block(task, block)?;
-                    return Ok(Ran::Step);
-                }
-            }
-            Stmt::For { iterable, .. } => {
-                self.eval(task, host, exe, iterable)?;
-                return Ok(ran(self.for_start(task, host, exe, id, out)?));
-            }
-            Stmt::While { .. } => {
-                self.frame(task)?.control.push(Control::While {
-                    stmt: id,
-                    started: 0,
-                });
-                return Ok(ran(self.next_iteration(task, host, exe)?));
-            }
-            Stmt::Break => return Ok(Ran::Depart(Completion::Break)),
-            Stmt::Continue => return Ok(Ran::Depart(Completion::Continue)),
-            Stmt::Return(value) => {
-                let value = self.eval_value(task, host, exe, value)?;
-                if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
-                    // The run's result leaves the run (`K-EFF-002`): a value
-                    // that cannot is refused here, where a `catch` sees it.
-                    self.copy_out(&value)?;
-                }
-                return Ok(Ran::Depart(Completion::Return(value)));
-            }
-            Stmt::Try { body, .. } => {
-                self.frame(task)?.control.push(Control::Try {
-                    stmt: id,
-                    phase: TryPhase::Body,
-                });
-                self.push_block(task, *body)?;
-                return Ok(Ran::Step);
-            }
-            Stmt::Throw(value) => {
-                let value = self.eval_value(task, host, exe, value)?;
-                return Err(Interrupt::Raise(value));
-            }
-            Stmt::Print(value) => {
-                let value = self.eval_value(task, host, exe, value)?;
-                let datum = self.copy_out(&value)?;
-                host.print(&datum);
-            }
-            Stmt::Finish(value) => {
-                let value = self.eval_value(task, host, exe, value)?;
-                return Err(Halt::Finish(self.copy_out(&value)?).into());
-            }
-            Stmt::Fail(value) => {
-                let value = self.eval_value(task, host, exe, value)?;
-                return Err(Halt::Fail(self.copy_out(&value)?).into());
-            }
-        }
-        Ok(Ran::Done)
     }
 
     /// Copies a value out of the run, charging its deep size
@@ -721,16 +556,8 @@ impl KernelMachine {
             }
             Outcome::Completed(datum) => {
                 let awaiting = self.frame(task)?.awaiting;
-                let ty = awaiting.and_then(|stmt| match exe.stmt(stmt) {
-                    Stmt::Let {
-                        value: Rhs::Action(action),
-                        ..
-                    }
-                    | Stmt::Assign {
-                        value: Rhs::Action(action),
-                        ..
-                    }
-                    | Stmt::Do(action) => match &action.kind {
+                let ty = awaiting.and_then(|stmt| match &exe.stmt(stmt).form {
+                    Form::Action(action) => match &action.kind {
                         crate::compile::ActionKind::Perform { result, .. } => Some(result),
                         _ => None,
                     },
@@ -788,113 +615,98 @@ impl KernelMachine {
     }
 
     /// Completes the statement the top frame waits in with the value its
-    /// action yielded, in `value`: binds it, writes it, or drops it
-    /// (`K-EVAL-003`). Gives the statement.
+    /// action yielded, in register `base`: runs the statement on from its
+    /// action, which binds, writes or drops the value (`K-EVAL-003`). Gives
+    /// the statement.
     pub(super) fn finish_action(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        value: Reg,
+        base: Reg,
     ) -> Eval<StmtId> {
-        let Some(stmt) = self.frame(task)?.awaiting.take() else {
+        let Some(id) = self.frame(task)?.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
-        self.complete_stmt(task, host, exe, exe.stmt(stmt), value)?;
-        Ok(stmt)
+        let running = Running::new(task, exe, id);
+        match self.run(host, &running, running.stmt.resume(), base)? {
+            Ran::Done => Ok(id),
+            _ => Err(fault("an action's statement did not complete").into()),
+        }
     }
 
-    /// Completes a statement with the value of its right-hand side, in
-    /// `value`.
-    fn complete_stmt(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        stmt: &Stmt,
-        value: Reg,
-    ) -> Eval<()> {
-        match stmt {
-            Stmt::Let {
-                target: Target::Slot(slot),
-                ..
-            } => {
-                let value = self.take_top(value);
-                self.bind(task, *slot, value)?;
+    /// Builds a decoded datum as a fresh graph (`K-EFF-003`).
+    pub(super) fn materialise(&mut self, datum: &Datum) -> Eval<Value> {
+        let invalid = || -> Halt { fault("a decoded datum holds an undecoded number") };
+        Ok(match datum {
+            Datum::Null => Value::Null,
+            Datum::Absent => Value::Absent,
+            Datum::Bool(flag) => Value::Bool(*flag),
+            Datum::Int(integer) => Value::Int(integer.clone()),
+            Datum::Float(float) => Value::Float(*float),
+            Datum::Number(_) => return Err(invalid().into()),
+            Datum::Text(text) => Value::text(text.as_str()),
+            Datum::Bytes(bytes) => Value::Bytes(bytes.clone()),
+            Datum::Timestamp(timestamp) => Value::Timestamp(timestamp.clone()),
+            Datum::Function(name) => Value::Function(name.clone()),
+            Datum::Handle(handle) => Value::Handle(Arc::new(handle.clone())),
+            Datum::Error(error) => Value::Error(Arc::new(ErrorValue {
+                kind: error.kind.clone(),
+                message: error.message.clone(),
+                data: self.materialise(&error.data)?,
+            })),
+            Datum::Tuple(items) => {
+                let tuple = Value::Tuple(self.materialise_all(items)?.into());
+                self.pin_value(&tuple)?;
+                tuple
             }
-            Stmt::Let {
-                target: Target::Session(name),
-                ..
-            } => {
-                let value = self.take_top(value);
-                self.reserve(value_bytes(&value))?;
-                self.session.insert(name.clone(), value);
+            Datum::List(items) => {
+                let items = self.materialise_all(items)?;
+                Value::List(self.alloc(Obj::List(items))?)
             }
-            Stmt::Assign { place, .. } => match place {
-                Place::Var(var) => {
-                    let value = self.take_top(value);
-                    self.write_var(task, exe, var, value)?;
+            Datum::Set(items) => {
+                let mut table = Table::default();
+                for member in self.materialise_all(items)? {
+                    table.insert(result_key(&member)?, member, Value::Null);
                 }
-                Place::Member(member) => self.write_member(task, host, exe, member, value)?,
-            },
-            _ => {}
-        }
-        Ok(())
+                Value::Set(self.alloc(Obj::Set(table))?)
+            }
+            Datum::Map(entries) => {
+                let mut table = Table::default();
+                for (entry_key, value) in entries {
+                    let entry_key = self.materialise(entry_key)?;
+                    let value = self.materialise(value)?;
+                    table.insert(result_key(&entry_key)?, entry_key, value);
+                }
+                Value::Map(self.alloc(Obj::Map(table))?)
+            }
+            Datum::Record(fields) => {
+                let mut record: Vec<(String, Value)> = Vec::with_capacity(fields.len());
+                for (name, value) in fields {
+                    let value = self.materialise(value)?;
+                    match record.iter_mut().find(|(field, _)| field == name) {
+                        Some(field) => field.1 = value,
+                        None => record.push((name.clone(), value)),
+                    }
+                }
+                Value::Record(self.alloc(Obj::Record(record))?)
+            }
+        })
     }
 
-    /// Writes a field or an index (`K-FORM-005`, `K-FORM-006`). The target
-    /// and the index are evaluated here, after the right-hand side.
-    fn write_member(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        member: &Member,
-        value: Reg,
-    ) -> Eval<()> {
-        self.pin(value)?;
-        let target = self.regs.len();
-        match member {
-            Member::Field(target_expr, field) => {
-                self.eval(task, host, exe, target_expr)?;
-                self.write_field(target, field, value)
-            }
-            Member::Index(target_expr, index) => {
-                self.eval(task, host, exe, target_expr)?;
-                self.eval(task, host, exe, index)?;
-                self.write_index(target, target + 1, value)
-            }
-        }
-    }
-
-    /// `remove` (`K-FORM-007`).
-    fn remove(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        member: &Member,
-    ) -> Eval<()> {
-        let target = self.regs.len();
-        match member {
-            Member::Field(target_expr, field) => {
-                self.eval(task, host, exe, target_expr)?;
-                self.remove_field(target, field)
-            }
-            Member::Index(target_expr, index) => {
-                self.eval(task, host, exe, target_expr)?;
-                self.eval(task, host, exe, index)?;
-                self.remove_index(target, target + 1)
-            }
-        }
+    fn materialise_all(&mut self, items: &[Datum]) -> Eval<Vec<Value>> {
+        items.iter().map(|item| self.materialise(item)).collect()
     }
 }
 
-/// How a statement that ran an operation ends: in its block, or where the
-/// operation left the task.
-fn ran(flow: Flow) -> Ran {
-    match flow {
-        Flow::Done => Ran::Done,
-        Flow::Step => Ran::Step,
+/// The key a decoded member is; a result whose key is not a legal key
+/// does not fit (`K-EFF-007`).
+fn result_key(value: &Value) -> Eval<Key> {
+    match Key::of(value) {
+        Some(key) => Ok(key),
+        None => raise(
+            "effect_result",
+            "the result has a key that is not a legal key",
+        ),
     }
 }

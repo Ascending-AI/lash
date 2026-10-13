@@ -9,5 +9,6 @@ mod forms;
 mod layout;
 mod observe;
 mod parked;
+mod stream;
 mod tasks;
 mod whole;

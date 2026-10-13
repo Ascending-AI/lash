@@ -2906,7 +2906,6 @@ dependencies = [
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
- "lash-kernel-doc",
  "thiserror",
 ]
 

@@ -12,7 +12,7 @@ use super::super::{
     TaskState, TryPhase, Wait,
 };
 use super::action_of;
-use crate::compile::{Executable, Stmt};
+use crate::compile::{Executable, Form};
 use crate::heap::{Heap, Obj};
 use crate::interface::{ExportError, Outcome, Request};
 
@@ -305,7 +305,7 @@ impl KernelMachine {
                     cursor,
                     started,
                 } => {
-                    let Stmt::For { site, .. } = exe.stmt(*stmt) else {
+                    let Form::For { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(fault("a `for` loop is not at a `for`"));
                     };
                     let (iterated, position) = match cursor {
@@ -329,7 +329,7 @@ impl KernelMachine {
                     });
                 }
                 Control::While { stmt, started } => {
-                    let Stmt::While { site, .. } = exe.stmt(*stmt) else {
+                    let Form::While { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(fault("a `while` loop is not at a `while`"));
                     };
                     call.loops.push(state::Loop {
@@ -346,7 +346,7 @@ impl KernelMachine {
                     stmt,
                     phase: TryPhase::Finally(departure),
                 } => {
-                    let Stmt::Try { site, .. } = exe.stmt(*stmt) else {
+                    let Form::Try { site, .. } = &exe.stmt(*stmt).form else {
                         return Err(fault("a `try` is not at a `try`"));
                     };
                     let entered = match departure {

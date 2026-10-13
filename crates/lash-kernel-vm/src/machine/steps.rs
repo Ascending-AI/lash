@@ -31,7 +31,7 @@ impl KernelMachine {
         exe: &Executable,
         stmt: StmtId,
     ) -> Result<(), Halt> {
-        self.take_edge(task, exe, exe.stmt_edge(stmt).1)
+        self.take_edge(task, exe, exe.statement(stmt).2)
     }
 
     /// Takes `edge`, the step edge of a statement that has completed in its

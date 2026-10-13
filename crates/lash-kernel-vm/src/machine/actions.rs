@@ -16,7 +16,7 @@ use super::{
     Control, Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, PendingWait, Task,
     TaskState, Wait, bound, error, fault, raise,
 };
-use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, LibId, Stmt, StmtId};
+use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, StmtId};
 use crate::heap::Obj;
 use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
 
@@ -47,13 +47,13 @@ impl KernelMachine {
         match &action.kind {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                self.push_atoms(task, exe, args)?;
-                self.call(task, exe, stmt, target, out)
+                self.put_atoms(task, exe, args, out)?;
+                self.call(task, exe, stmt, target, out, args.len())
             }
             ActionKind::Spawn { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                self.push_atoms(task, exe, args)?;
-                self.spawn(task, exe, stmt, &action.site, target, out)
+                self.put_atoms(task, exe, args, out)?;
+                self.spawn(task, exe, stmt, &action.site, target, out, args.len())
             }
             ActionKind::Perform {
                 effect,
@@ -227,10 +227,10 @@ impl KernelMachine {
         }
     }
 
-    /// A call action, its arguments the registers from `args`, its value
-    /// in `args` when it completes at once. The statement waits in the call
-    /// only when the call runs in a frame of its own: one that completed at
-    /// once has left its statement behind (`K-MACH-007`).
+    /// A call action, its `count` arguments the registers from `args`, its
+    /// value in `args` when it completes at once. The statement waits in
+    /// the call only when the call runs in a frame of its own: one that
+    /// completed at once has left its statement behind (`K-MACH-007`).
     fn call(
         &mut self,
         task: TaskId,
@@ -238,29 +238,28 @@ impl KernelMachine {
         stmt: StmtId,
         target: Target,
         args: Reg,
+        count: usize,
     ) -> Status {
         match target {
             Target::Code(code, captures) => {
-                let call = Call::new(code, args)
+                let call = Call::new(code, args, count)
                     .sharing(&captures)
                     .awaited_by(Some(stmt));
                 self.push_frame(task, exe, call)?;
                 Ok(Flow::Step)
             }
             Target::Library(lib) => {
-                let flow = self.call_lib(task, exe, lib, args, args, Entry::Frame(Some(stmt)))?;
-                self.cut(args + 1);
-                Ok(flow)
+                self.call_lib(task, exe, lib, args, count, args, Entry::Frame(Some(stmt)))
             }
         }
     }
 
-    /// Reads an action's atoms into the next registers, left to right
+    /// Reads an action's atoms into the registers from `at`, left to right
     /// (`K-EVAL-004`).
-    fn push_atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom]) -> Eval<()> {
-        for atom in atoms {
+    fn put_atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom], at: Reg) -> Eval<()> {
+        for (index, atom) in atoms.iter().enumerate() {
             let value = self.atom(task, exe, atom)?;
-            self.regs.push(value);
+            self.put(at + index, value);
         }
         Ok(())
     }
@@ -360,7 +359,7 @@ impl KernelMachine {
                     }
                     _ => continue,
                 };
-                if let Stmt::For { site, .. } | Stmt::While { site, .. } = exe.stmt(*stmt) {
+                if let Form::For { site, .. } | Form::While { site, .. } = &exe.stmt(*stmt).form {
                     loops.push(LoopIteration {
                         site: site.clone(),
                         iteration: started.saturating_sub(1),
@@ -395,8 +394,13 @@ impl KernelMachine {
 
     /// `spawn`: the new task runs at once, and the spawning task goes on
     /// when it first waits or ends, before any other ready task
-    /// (`K-TASK-002`). Its arguments are the registers from `args`; the new
-    /// task's handle is in `args` when the spawning task goes on at once.
+    /// (`K-TASK-002`). Its arguments are the `count` registers from `args`;
+    /// the new task's handle is in `args` when the spawning task goes on at
+    /// once.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a spawn is its statement, its site, its callee and its argument registers"
+    )]
     fn spawn(
         &mut self,
         task: TaskId,
@@ -405,9 +409,10 @@ impl KernelMachine {
         site: &Site,
         target: Target,
         args: Reg,
+        count: usize,
     ) -> Status {
         if let Target::Code(code, _) = &target
-            && self.regs.len() - args > exe.code(*code).params.len()
+            && count > exe.code(*code).params.len()
         {
             return raise(
                 "arity",
@@ -440,9 +445,11 @@ impl KernelMachine {
         let handle = Value::Task(child);
         let started = match target {
             Target::Code(code, captures) => self
-                .push_frame(child, exe, Call::new(code, args).sharing(&captures))
+                .push_frame(child, exe, Call::new(code, args, count).sharing(&captures))
                 .map(|()| Flow::Step),
-            Target::Library(lib) => self.call_lib(child, exe, lib, args, args, Entry::Frame(None)),
+            Target::Library(lib) => {
+                self.call_lib(child, exe, lib, args, count, args, Entry::Frame(None))
+            }
         };
         match started {
             Ok(Flow::Step) => {}

@@ -67,6 +67,7 @@ pub(super) fn start(
         inline_depth: 0,
         inline_result: None,
         regs: Vec::new(),
+        top: 0,
         storage: Storage::default(),
         steps: Default::default(),
         end: None,
@@ -123,9 +124,10 @@ pub(super) fn start(
             (*code, args)
         }
     };
+    let count = args.len();
     machine.regs = args;
     machine
-        .push_frame(TaskId::MAIN, &exe, super::exec::Call::new(code, 0))
+        .push_frame(TaskId::MAIN, &exe, super::exec::Call::new(code, 0, count))
         .map_err(|interrupt| arguments(describe("the start", interrupt)))?;
     machine.regs.clear();
     Ok(machine)

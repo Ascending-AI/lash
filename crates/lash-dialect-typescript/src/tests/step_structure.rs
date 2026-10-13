@@ -4,6 +4,11 @@
 //! programs and on generated documents, the stated edge is the one the
 //! frame shows at the end of every statement's step, derived as the machine
 //! once derived it at run time.
+//!
+//! Each statement runs as one range of the flat stream, and no range spans
+//! a Boundary. The second law checks every range of real lowered code: the
+//! kernel library with the TypeScript and Python helpers in two layouts,
+//! the gate's programs and the generated documents.
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,8 +19,8 @@ use lash_kernel_dialect::Environment;
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
     Bindings, Bounds, DeliverError, Delivered, End, ExportError, Host, ImportError, KernelMachine,
-    Machine, MachineError, Meters, Outcome, Program, Request, Start, StartError, Step, Target,
-    WaitId,
+    Layout, Machine, MachineError, Meters, Outcome, PreparedLibrary, Program, Request, Start,
+    StartError, Step, Target, WaitId,
 };
 
 #[path = "../../shared/gate_six.rs"]
@@ -62,6 +67,17 @@ thread_local! {
     /// The statement ends every [`Verified`] machine of this thread has
     /// checked.
     static VERIFIED: Cell<u64> = const { Cell::new(0) };
+    /// The statements whose ops every [`Verified`] machine of this thread
+    /// has checked.
+    static RANGES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Checks the ops of every statement of the document `machine` runs.
+fn check_ranges(machine: &KernelMachine) {
+    let checked = machine
+        .verify_stream()
+        .unwrap_or_else(|error| panic!("a lowered range: {error}"));
+    RANGES.with(|ranges| ranges.set(ranges.get() + checked));
 }
 
 /// A kernel machine that checks its step structure as it runs.
@@ -73,6 +89,7 @@ impl Machine for Verified {
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
         let mut machine = KernelMachine::start(program, bounds, start)?;
         machine.verify_step_structure();
+        check_ranges(&machine);
         Ok(Self(machine))
     }
 
@@ -84,6 +101,7 @@ impl Machine for Verified {
     ) -> Result<Self, StartError> {
         let mut machine = KernelMachine::start_reading(program, bounds, start, modes)?;
         machine.verify_step_structure();
+        check_ranges(&machine);
         Ok(Self(machine))
     }
 
@@ -106,6 +124,7 @@ impl Machine for Verified {
     fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError> {
         let mut machine = KernelMachine::import(program, bounds, parked)?;
         machine.verify_step_structure();
+        check_ranges(&machine);
         Ok(Self(machine))
     }
 
@@ -125,6 +144,7 @@ fn verified_run(name: &str, program: Program) -> u64 {
     let mut machine =
         KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
     machine.verify_step_structure();
+    check_ranges(&machine);
     loop {
         match machine
             .run(&mut Quiet, u64::MAX)
@@ -203,7 +223,44 @@ fn the_prepared_step_structure_is_the_one_the_frame_shows() {
         gate > 0 && generated > 0,
         "every statement end went unchecked"
     );
+    let documents_ranges = RANGES.with(Cell::get);
+    assert!(documents_ranges > 0, "no document's ranges were checked");
     println!(
-        "step structure: executed programs={programs} gate_steps={gate} documents={documents} generated_steps={generated}"
+        "step structure: executed programs={programs} gate_steps={gate} documents={documents} generated_steps={generated} document_ranges={documents_ranges}"
+    );
+}
+
+/// No range of the library's lowered bodies spans a Boundary, with the
+/// Python helpers beside the TypeScript ones, in the layout that fuses
+/// charges into reads and in one that does not (`K-MACH-008`).
+#[test]
+fn every_library_range_is_well_formed() {
+    let mut registry = (**super::machine::registry()).clone();
+    let mut names =
+        lash_kernel_dialect::NamedLibrary::from_registry(&registry).expect("unique library names");
+    for definition in
+        lash_dialect_python::define_helpers(&mut names).unwrap_or_else(|error| panic!("{error}"))
+    {
+        registry
+            .register(definition, None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+    let registry = std::sync::Arc::new(registry);
+    let mut checked = Vec::new();
+    for layout in [Layout(0), Layout(1), Layout(0x5eed)] {
+        let library = PreparedLibrary::with_layout(std::sync::Arc::clone(&registry), layout);
+        let ranges = library
+            .verify_stream()
+            .unwrap_or_else(|error| panic!("layout {layout:?}: {error}"));
+        assert!(ranges > 0, "layout {layout:?} checked nothing");
+        checked.push(ranges);
+    }
+    assert!(
+        checked.windows(2).all(|pair| pair[0] == pair[1]),
+        "every layout lowers the same statements: {checked:?}"
+    );
+    println!(
+        "library ranges: functions={} statements={checked:?}",
+        registry.iter().count()
     );
 }

@@ -1,0 +1,565 @@
+//! The stream: the one loop that runs a statement's ops
+//! (`lash_kernel_exec::Op`), each a decoded enum over explicit registers.
+//!
+//! A statement runs in a window of the register stack from `base`: every
+//! register an op names is relative to it. Expressions never pause a task,
+//! and every operation is strict (`K-EVAL-001`, `K-EVAL-006`). A range ends
+//! at its last op, which completes the statement, ends its step where it
+//! left the task, departs, or, for a `while` condition, gives the test's
+//! value.
+
+use std::sync::Arc;
+
+use lash_kernel_doc::{ErrorValue, Float, Name, ObjectId, TaskId, Value};
+use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
+
+use super::ops::{Entry, Flow, key};
+use super::{
+    Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound, fault,
+    raise,
+};
+use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
+use crate::heap::{ClosureObj, Obj, Table, value_bytes, within_depth};
+use crate::interface::{Bound, Host};
+
+/// How a statement's range ends.
+pub(super) enum Ran {
+    /// The statement completed in its own block: its step edge is next.
+    Done,
+    /// Having entered a block, a loop, a `try` or a frame, or waiting: the
+    /// step ends where the statement left the task.
+    Step,
+    /// Departing: a `break`, a `continue` or a `return`.
+    Depart(Completion),
+    /// A `while` condition's value.
+    Tested(Value),
+}
+
+/// The register window's place `r`.
+#[inline(always)]
+fn at(base: usize, r: Reg) -> usize {
+    base + r.0 as usize
+}
+
+/// The error a read of a variable no scope binds raises.
+pub(super) fn unbound<T>(name: &Name) -> Eval<T> {
+    Err(Interrupt::Raise(Value::Error(Arc::new(ErrorValue {
+        kind: "unbound_variable".to_owned(),
+        message: format!("no variable `{name}` is bound here"),
+        data: Value::text(name.as_str()),
+    }))))
+}
+
+/// The statement a stream runs: its task, executable and ops.
+pub(super) struct Running<'a> {
+    pub(super) task: TaskId,
+    pub(super) exe: &'a Executable,
+    pub(super) id: StmtId,
+    pub(super) stream: &'a Stream,
+    pub(super) stmt: &'a Stmt,
+    /// Where the statement's step leaves its frame when it completes in its
+    /// own block.
+    pub(super) edge: StepEdge,
+}
+
+impl<'a> Running<'a> {
+    /// Statement `id` of `task`.
+    pub(super) fn new(task: TaskId, exe: &'a Executable, id: StmtId) -> Self {
+        let (stream, stmt, edge) = exe.statement(id);
+        Self {
+            task,
+            exe,
+            id,
+            stream,
+            stmt,
+            edge,
+        }
+    }
+}
+
+impl KernelMachine {
+    /// Runs a statement's ops from `pc` in the register window from
+    /// `base`. The common ops run here; the rest in [`Self::run_rare`].
+    pub(super) fn run(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        mut pc: usize,
+        base: usize,
+    ) -> Eval<Ran> {
+        let window = base + running.stmt.regs as usize;
+        if self.regs.len() < window {
+            self.regs.resize(window, Value::Null);
+        }
+        let ops = running.stream.ops.as_slice();
+        let task = running.task;
+        loop {
+            let op = ops[pc];
+            pc += 1;
+            match op {
+                Op::Charge { units } => self.charge_nodes(units)?,
+                Op::ChargeLocal { units, dst, local } => {
+                    self.charge_nodes(u32::from(units))?;
+                    let value = self.read_local(task, running.exe, local)?;
+                    self.put(at(base, dst), value);
+                }
+                Op::ChargeConst { units, dst, c } => {
+                    self.charge_nodes(u32::from(units))?;
+                    let value = running.stream.consts[c.ix()].clone();
+                    self.put(at(base, dst), value);
+                }
+                Op::Const { dst, c } => {
+                    let value = running.stream.consts[c.ix()].clone();
+                    self.put(at(base, dst), value);
+                }
+                Op::Local { dst, local } => {
+                    let value = self.read_local(task, running.exe, local)?;
+                    self.put(at(base, dst), value);
+                }
+                Op::Call { lib, args } => {
+                    let lib = LibId(lib.0);
+                    self.call_expr(host, running, lib, at(base, args.start), args.len)?;
+                    // An inline body's statements ran above the call's
+                    // value: the window is whole again for the ops after it.
+                    if self.regs.len() < window {
+                        self.regs.resize(window, Value::Null);
+                    }
+                }
+                Op::Session { dst, name } => {
+                    let name = &running.stream.names[name.ix()];
+                    let value = match self.session.get(name) {
+                        Some(value) => value.clone(),
+                        None => return unbound(name),
+                    };
+                    self.put(at(base, dst), value);
+                }
+                Op::WriteSession { name, src } => {
+                    let value = self.take(at(base, src));
+                    self.reserve(value_bytes(&value))?;
+                    let name = &running.stream.names[name.ix()];
+                    match self.session.get_mut(name) {
+                        Some(held) => *held = value,
+                        None => return unbound(name),
+                    }
+                    return Ok(Ran::Done);
+                }
+                Op::Bind { local, src } => {
+                    let value = self.take(at(base, src));
+                    self.bind(task, local.at, false, value)?;
+                    return Ok(Ran::Done);
+                }
+                Op::WriteLocal { local, src } => {
+                    let value = self.take(at(base, src));
+                    self.write_local(task, running.exe, local, value)?;
+                    return Ok(Ran::Done);
+                }
+                Op::Branch { cond, then_, else_ } => {
+                    let block = match self.take(at(base, cond)) {
+                        Value::Bool(true) => BlockId(then_.0),
+                        Value::Bool(false) => BlockId(else_.0),
+                        _ => return raise("type_error", "an `if` condition must be a bool"),
+                    };
+                    // An empty block would end as soon as it began.
+                    if running.exe.block(block).stmts.is_empty() {
+                        return Ok(Ran::Done);
+                    }
+                    self.push_block(task, block)?;
+                    return Ok(Ran::Step);
+                }
+                Op::Test { cond } => return Ok(Ran::Tested(self.take(at(base, cond)))),
+                Op::End => return Ok(Ran::Done),
+                op => {
+                    if let Some(ran) = self.run_rare(host, running, op, base)? {
+                        return Ok(ran);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The ops [`Self::run`] leaves out of its loop: `Some` ends the range.
+    #[inline(never)]
+    fn run_rare(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        op: Op,
+        base: usize,
+    ) -> Eval<Option<Ran>> {
+        let (task, exe, stream) = (running.task, running.exe, running.stream);
+        let ran = match op {
+            Op::Unbound { name, .. } => return unbound(&stream.names[name.ix()]),
+            Op::Field { at: r, field } => {
+                let r = at(base, r);
+                self.read_field(r, &stream.fields[field.ix()], r)?;
+                return Ok(None);
+            }
+            Op::Index { at: r } => {
+                let r = at(base, r);
+                self.read_index(r, r + 1, r)?;
+                return Ok(None);
+            }
+            Op::MakeTuple { items } => {
+                self.make_tuple(base, items)?;
+                return Ok(None);
+            }
+            Op::MakeList { items } => {
+                let (start, items) = self.members(base, items)?;
+                let list = Value::List(self.alloc(Obj::List(items))?);
+                self.put(start, list);
+                return Ok(None);
+            }
+            Op::MakeSet { items } => {
+                let (start, items) = self.members(base, items)?;
+                let mut table = Table::default();
+                for member in items {
+                    table.insert(key(&member)?, member, Value::Null);
+                }
+                let set = Value::Set(self.alloc(Obj::Set(table))?);
+                self.put(start, set);
+                return Ok(None);
+            }
+            Op::MakeMap { entries } => {
+                let start = at(base, entries.start);
+                self.charge(u64::from(entries.len / 2))?;
+                let mut table = Table::default();
+                for pair in (start..start + entries.len as usize).step_by(2) {
+                    let (written, value) = (self.take(pair), self.take(pair + 1));
+                    table.insert(key(&written)?, written, value);
+                }
+                let map = Value::Map(self.alloc(Obj::Map(table))?);
+                self.put(start, map);
+                return Ok(None);
+            }
+            Op::MakeRecord { fields, values } => {
+                let (start, values) = self.members(base, values)?;
+                let fields = stream.field_lists[fields.ix()]
+                    .iter()
+                    .cloned()
+                    .zip(values)
+                    .collect();
+                let record = Value::Record(self.alloc(Obj::Record(fields))?);
+                self.put(start, record);
+                return Ok(None);
+            }
+            Op::Closure { dst, code } => {
+                let closure = Value::Closure(self.closure(task, exe, CodeId(code.0))?);
+                self.put(at(base, dst), closure);
+                return Ok(None);
+            }
+            Op::Clock { dst } => {
+                self.put(at(base, dst), Value::Timestamp(host.clock()));
+                return Ok(None);
+            }
+            Op::Random { dst } => {
+                // The top 53 of the 64 bits, times 2^-53 (`K-HOST-003`).
+                let bits = host.random() >> 11;
+                let value = Value::Float(Float::new(bits as f64 / (1u64 << 53) as f64));
+                self.put(at(base, dst), value);
+                return Ok(None);
+            }
+            Op::HostRead { at: r } => {
+                let r = at(base, r);
+                self.host_read(host, exe, r, r + 1, r)?;
+                return Ok(None);
+            }
+            Op::Pin { src } => {
+                self.pin(at(base, src))?;
+                return Ok(None);
+            }
+            Op::Act => {
+                let Form::Action(action) = &running.stmt.form else {
+                    return Err(fault("an action op stands in no action statement").into());
+                };
+                if self.act(task, host, exe, running.id, action, base)? == Flow::Step {
+                    return Ok(Some(Ran::Step));
+                }
+                return Ok(None);
+            }
+            Op::BindShared { local, src } => {
+                let value = self.take(at(base, src));
+                self.bind(task, local.at, true, value)?;
+                Ran::Done
+            }
+            Op::BindSession { name, src } => {
+                let value = self.take(at(base, src));
+                self.reserve(value_bytes(&value))?;
+                self.session.insert(stream.names[name.ix()].clone(), value);
+                Ran::Done
+            }
+            Op::WriteUnbound { name, src } => {
+                let value = self.take(at(base, src));
+                self.reserve(value_bytes(&value))?;
+                return unbound(&stream.names[name.ix()]);
+            }
+            Op::SetField { target, field, src } => {
+                self.write_field(at(base, target), &stream.fields[field.ix()], at(base, src))?;
+                Ran::Done
+            }
+            Op::SetIndex { target, src } => {
+                let target = at(base, target);
+                self.write_index(target, target + 1, at(base, src))?;
+                Ran::Done
+            }
+            Op::RemoveField { target, field } => {
+                self.remove_field(at(base, target), &stream.fields[field.ix()])?;
+                Ran::Done
+            }
+            Op::RemoveIndex { target } => {
+                let target = at(base, target);
+                self.remove_index(target, target + 1)?;
+                Ran::Done
+            }
+            Op::ForIn { iterable } => {
+                ran(self.for_start(task, host, exe, running.id, at(base, iterable))?)
+            }
+            Op::While => {
+                self.frame(task)?.control.push(Control::While {
+                    stmt: running.id,
+                    started: 0,
+                });
+                ran(self.next_iteration(task, host, exe)?)
+            }
+            Op::Try { body } => {
+                self.frame(task)?.control.push(Control::Try {
+                    stmt: running.id,
+                    phase: TryPhase::Body,
+                });
+                self.push_block(task, BlockId(body.0))?;
+                Ran::Step
+            }
+            Op::Break => Ran::Depart(Completion::Break),
+            Op::Continue => Ran::Depart(Completion::Continue),
+            Op::Return { src } => {
+                let value = self.take(at(base, src));
+                if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
+                    // The run's result leaves the run (`K-EFF-002`): a value
+                    // that cannot is refused here, where a `catch` sees it.
+                    self.copy_out(&value)?;
+                }
+                Ran::Depart(Completion::Return(value))
+            }
+            Op::Throw { src } => return Err(Interrupt::Raise(self.take(at(base, src)))),
+            Op::Print { src } => {
+                let value = self.take(at(base, src));
+                let datum = self.copy_out(&value)?;
+                host.print(&datum);
+                Ran::Done
+            }
+            Op::Finish { src } => {
+                let value = self.take(at(base, src));
+                return Err(Halt::Finish(self.copy_out(&value)?).into());
+            }
+            Op::Fail { src } => {
+                let value = self.take(at(base, src));
+                return Err(Halt::Fail(self.copy_out(&value)?).into());
+            }
+            Op::Charge { .. }
+            | Op::ChargeLocal { .. }
+            | Op::ChargeConst { .. }
+            | Op::Const { .. }
+            | Op::Local { .. }
+            | Op::Session { .. }
+            | Op::WriteSession { .. }
+            | Op::Call { .. }
+            | Op::Bind { .. }
+            | Op::WriteLocal { .. }
+            | Op::Branch { .. }
+            | Op::Test { .. }
+            | Op::End => return Err(fault("the stream's loop runs this op itself").into()),
+        };
+        Ok(Some(ran))
+    }
+
+    /// The charge anchor of `units` one-unit events (`K-CHG-002`): each is
+    /// charged, then observed. Where the sum crosses the bound, the run is
+    /// charged and observed up to the event that crosses, as charging them
+    /// one at a time would leave it.
+    #[inline(always)]
+    fn charge_nodes(&mut self, units: u32) -> Result<(), Halt> {
+        if self.charging {
+            let charged = self.charged.saturating_add(u64::from(units));
+            if charged > self.bounds.charge {
+                return Err(self.cross_nodes());
+            }
+            self.charged = charged;
+        }
+        self.observe_expressions(units);
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn cross_nodes(&mut self) -> Halt {
+        // The events before the one that crosses stay within the bound.
+        let within = self.bounds.charge.saturating_sub(self.charged);
+        self.charged = self.charged.saturating_add(within).saturating_add(1);
+        self.observe_expressions(u32::try_from(within).unwrap_or(u32::MAX));
+        bound(Bound::Charge, self.bounds.charge)
+    }
+
+    /// Takes a construction's members out of their registers, charging
+    /// them (`K-CHG-002`); gives where the construction goes.
+    fn members(&mut self, base: usize, items: RegRange) -> Eval<(usize, Vec<Value>)> {
+        self.charge(u64::from(items.len))?;
+        let start = at(base, items.start);
+        let members = (start..start + items.len as usize)
+            .map(|r| self.take(r))
+            .collect();
+        Ok((start, members))
+    }
+
+    fn make_tuple(&mut self, base: usize, items: RegRange) -> Eval<()> {
+        let (start, items) = self.members(base, items)?;
+        let tuple = Value::Tuple(items.into());
+        if !within_depth(&tuple, self.heap.value_depth) {
+            return raise(
+                "too_deep",
+                format!(
+                    "a tuple exceeds the configured {}-level value depth",
+                    self.heap.value_depth
+                ),
+            );
+        }
+        self.put(start, tuple);
+        self.pin(start)?;
+        Ok(())
+    }
+
+    /// Calls `lib` with the `count` arguments from `args`, its value in
+    /// `args`.
+    fn call_expr(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        lib: LibId,
+        args: usize,
+        count: u32,
+    ) -> Eval<()> {
+        let (task, exe) = (running.task, running.exe);
+        if self.call_lib(task, exe, lib, args, count as usize, args, Entry::Inline)? == Flow::Step {
+            self.run_inline(task, host, exe, lib, args)?;
+        }
+        Ok(())
+    }
+
+    /// A closure of `code` over the cells of the variables it shares.
+    fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<ObjectId> {
+        let frame = self.frame(task)?;
+        let mut captures = Vec::new();
+        for capture in &exe.code(code).captures {
+            match &frame.slots[capture.outer_at as usize] {
+                SlotState::Cell(cell) => captures.push(*cell),
+                _ => return Err(fault("a captured variable has no cell").into()),
+            }
+        }
+        Ok(self.alloc(Obj::Closure(ClosureObj { code, captures }))?)
+    }
+
+    /// `read`: reads through the handle in `handle` with the request in
+    /// `request`, its answer in `out` (`K-HOST-004`).
+    fn host_read(
+        &mut self,
+        host: &mut dyn Host,
+        exe: &Executable,
+        handle: usize,
+        request: usize,
+        out: usize,
+    ) -> Eval<()> {
+        let Value::Handle(handle) = self.take(handle) else {
+            return raise("type_error", "`read` reads through a handle");
+        };
+        let request = self.take(request);
+        let request = self.copy_out(&request)?;
+        let value = match host.read(&handle, &request) {
+            Ok(answer) => self.decode(exe, &answer, &lash_kernel_doc::Type::Any)?,
+            Err(error) => {
+                let datum = lash_kernel_doc::Datum::Error(Box::new(error));
+                return Err(Interrupt::Raise(self.decode(
+                    exe,
+                    &datum,
+                    &lash_kernel_doc::Type::Any,
+                )?));
+            }
+        };
+        self.put(out, value);
+        Ok(())
+    }
+
+    /// Reads a variable of the running frame.
+    #[inline(always)]
+    pub(super) fn read_local(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        local: LocalRef,
+    ) -> Eval<Value> {
+        if let Some(SlotState::Value(value)) = self
+            .tasks
+            .get(task.0 as usize)
+            .and_then(|task| task.frames.last())
+            .map(|frame| &frame.slots[local.at as usize])
+        {
+            return Ok(value.clone());
+        }
+        self.read_other_local(task, exe, local)
+    }
+
+    /// The rest of [`Self::read_local`]: a variable a closure shares, and
+    /// one that is not bound. Apart, so that reading a local stays small.
+    #[inline(never)]
+    pub(super) fn read_other_local(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        local: LocalRef,
+    ) -> Eval<Value> {
+        let frame = self.frame(task)?;
+        match &frame.slots[local.at as usize] {
+            SlotState::Value(value) => Ok(value.clone()),
+            SlotState::Cell(cell) => {
+                let cell = *cell;
+                match self.heap.variable(cell) {
+                    Some(value) => Ok(value.clone()),
+                    None => Err(fault("a shared variable has no cell").into()),
+                }
+            }
+            SlotState::Empty => unbound(&exe.code(frame.code).slots[local.slot as usize].name),
+        }
+    }
+
+    /// Assigns a variable of the running frame (`K-FORM-005`): its bytes
+    /// are reserved first.
+    fn write_local(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        local: LocalRef,
+        value: Value,
+    ) -> Eval<()> {
+        self.reserve(value_bytes(&value))?;
+        let frame = self.frame(task)?;
+        match &mut frame.slots[local.at as usize] {
+            SlotState::Value(held) => *held = value,
+            SlotState::Cell(cell) => {
+                let cell = *cell;
+                if let Some(Obj::Variable(held)) = self.heap.get_mut(cell) {
+                    *held = value;
+                }
+            }
+            SlotState::Empty => {
+                return unbound(&exe.code(frame.code).slots[local.slot as usize].name);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How a statement that ran an operation ends: in its block, or where the
+/// operation left the task.
+fn ran(flow: Flow) -> Ran {
+    match flow {
+        Flow::Done => Ran::Done,
+        Flow::Step => Ran::Step,
+    }
+}

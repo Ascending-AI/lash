@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "The lash kernel's executor interface: the Boundary model and step edges, the executor IR, its charge semantics and coverage checks."
+description = "The lash kernel's executor interface: the Boundary model and step edges, the flat executor stream, its charge semantics and coverage checks."
 keywords = ["lash", "kernel", "workflow", "compiler"]
 categories = ["compilers"]
 publish = false
@@ -21,5 +21,4 @@ doctest = false
 workspace = true
 
 [dependencies]
-lash-kernel-doc = { workspace = true }
 thiserror = { workspace = true }

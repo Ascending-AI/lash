@@ -6,13 +6,13 @@
 //! stack and the variables: no value lives anywhere else while it waits.
 
 mod actions;
-mod eval;
 mod exec;
 mod observing;
 mod ops;
 mod parked;
 mod session;
 mod steps;
+mod stream;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -323,9 +323,13 @@ pub struct KernelMachine {
     inline_depth: u32,
     inline_result: Option<Result<Value, Value>>,
     /// The registers: the values of the expressions being evaluated and
-    /// the arguments of the calls being made, innermost last. Nothing holds
-    /// one past the step that wrote it.
+    /// the arguments of the calls being made, in the windows of the
+    /// statements running, innermost last. No step reads one an earlier
+    /// step wrote, and a slice's end clears them.
     regs: Vec<Value>,
+    /// Where the window of the next statement to run starts: 0, or above
+    /// the registers of the expression an inline body runs inside.
+    top: usize,
     storage: Storage,
     steps: steps::StepCheck,
     end: Option<End>,
@@ -492,6 +496,14 @@ impl KernelMachine {
         self.steps.verify = true;
     }
 
+    /// Checks the ops of every statement of the document the run executes
+    /// (`lash_kernel_exec::verify_stream`): each range is well formed and
+    /// spans no Boundary. Gives how many statements it checked; the
+    /// library's are [`crate::PreparedLibrary::verify_stream`]'s.
+    pub fn verify_stream(&self) -> Result<usize, lash_kernel_exec::KirError> {
+        self.exe.verify_stream()
+    }
+
     /// How many statement ends the step-structure check has passed.
     pub fn verified_steps(&self) -> u64 {
         self.steps.verified
@@ -624,16 +636,13 @@ impl KernelMachine {
         }
         self.pins.clear();
         self.fresh.clear();
-        if !self.regs.is_empty() {
-            self.regs.clear();
-        }
         let outcome = match self.task(task)?.incoming.take() {
             Some(incoming) => {
                 self.refresh_charging(task, exe);
                 self.resume(task, exe, incoming).and_then(|value| {
                     // The value is in no variable until the statement binds
                     // it.
-                    self.regs.push(value);
+                    self.put(0, value);
                     self.pin(0)?;
                     let stmt = self.finish_action(task, host, exe, 0)?;
                     self.take_edge_of(task, exe, stmt)?;
@@ -898,10 +907,13 @@ impl Machine for KernelMachine {
             return Err(MachineError::Ended);
         }
         if self.observer.is_none() {
-            return self.run_slice(host, slice);
+            let step = self.run_slice(host, slice);
+            self.regs.clear();
+            return step;
         }
         self.observe_phase(GuestPhase::Interpret);
         let step = self.run_slice(host, slice);
+        self.regs.clear();
         self.observe_phase(match step {
             Ok(Step::Parked(_)) => GuestPhase::Park,
             _ => GuestPhase::Inactive,

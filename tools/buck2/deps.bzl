@@ -1125,7 +1125,6 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
-            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "thiserror": "//third-party/rust:p0373"
         }
     },

@@ -1,16 +1,14 @@
-//! The coverage invariants, checked before any tier runs Kir.
+//! The coverage invariants, checked over lowered streams.
 //!
 //! - [`verify_semantics`]: the semantics table states every op exactly
 //!   once, and every dynamic charge event has an op that emits it.
-//! - [`verify_function`]: a [`KirFunction`] is well formed, and every cycle
-//!   of its CFG passes through a Boundary (so the slice test is reached on
-//!   every loop).
+//! - [`verify_stream`]: every statement's ops are well formed and no op
+//!   spans a Boundary: a range ends at its one terminator, an action is the
+//!   first op of its statement so that its continuation starts right after
+//!   it, and every register a range reads was written earlier in it, so no
+//!   register is live at a Boundary (`K-STMT-004`).
 
-use crate::boundary::{BoundaryKind, CtlStatic};
-use crate::kir::{
-    ActionIx, ActionKind, BoundaryIx, CalleeRef, Departure, FieldListIx, KBlockIx, KirFunction,
-    LocalRef, LoopIx, LoopKind, Op, OpKind, Operand, ScopeIx, SlotAt, StmtIx, TryIx, VarRef,
-};
+use crate::kir::{Op, OpKind, OpRange, Operand, Reg};
 use crate::sem::{ChargeEvent, OpSpec};
 
 /// Why a semantics table does not cover the ops and the runtime table.
@@ -52,371 +50,209 @@ pub fn verify_semantics(specs: &[OpSpec]) -> Result<(), CoverageError> {
     Ok(())
 }
 
-/// Where in a [`KirFunction`] a defect is.
+/// One statement's ops in a stream: the range a step runs from its start,
+/// a `while`'s condition, and how many registers the statement uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum At {
-    Op(u32),
-    Block(KBlockIx),
-    Boundary(BoundaryIx),
-    Loop(LoopIx),
-    Try(TryIx),
-    Action(ActionIx),
-    Scope(ScopeIx),
-    Param(u32),
-    FieldList(FieldListIx),
+pub struct StmtRanges {
+    pub main: OpRange,
+    pub test: Option<OpRange>,
+    pub regs: u32,
 }
 
-/// Why a [`KirFunction`] is rejected.
+/// The sizes of the tables a stream's ops index.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Tables {
+    pub consts: usize,
+    pub names: usize,
+    pub fields: usize,
+    /// Each field list's length.
+    pub field_lists: Vec<usize>,
+    pub codes: usize,
+    pub libs: usize,
+    pub blocks: usize,
+}
+
+/// Why a stream is rejected: the statement, by its position in the
+/// statements checked, the op, by its position in the stream, and what is
+/// wrong there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum KirError {
-    #[error("the function has no blocks")]
-    NoBlocks,
-    #[error("block {0:?} is empty or does not start where the previous block ends")]
-    BlockRange(KBlockIx),
-    #[error("ops follow the last block")]
-    TrailingOps,
-    #[error("block {0:?} does not end with a terminator")]
-    MissingTerminator(KBlockIx),
-    #[error("op {op} in block {block:?} is a terminator before the block's end")]
-    EarlyTerminator { block: KBlockIx, op: u32 },
-    #[error("{at:?} names {operand:?}, past its table")]
-    OutOfRange { at: At, operand: Operand },
-    #[error("{at:?} names statement {stmt:?}, past the statement table")]
-    StmtOutOfRange { at: At, stmt: StmtIx },
-    #[error("scope {scope:?} declares slot {slot:?}, past the frame")]
-    ScopeSlot { scope: ScopeIx, slot: SlotAt },
-    #[error("{at:?} names local {local:?}, whose sharing disagrees with its slot")]
-    LocalShared { at: At, local: LocalRef },
-    #[error("op {0} has operands of the wrong count")]
-    Arity(u32),
-    #[error("the function has {origins} op origins for {ops} ops")]
-    Origins { origins: usize, ops: usize },
-    #[error("boundary {0:?} awaits an action exactly when its kind does not")]
-    BoundaryAwaiting(BoundaryIx),
-    #[error("boundary {boundary:?} is the program point of {ops} ops, not one")]
-    BoundaryPoints { boundary: BoundaryIx, ops: usize },
-    #[error("op {op} of kind {kind:?} cannot be the program point of boundary {boundary:?}")]
-    BoundaryKind {
-        boundary: BoundaryIx,
+    #[error("statement {stmt}'s range {range:?} is empty or past the stream")]
+    Range { stmt: usize, range: OpRange },
+    #[error("statement {stmt}'s range ends at op {op}, which ends no range")]
+    MissingTerminator { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} ends its range before the range's end")]
+    EarlyTerminator { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} is the wrong terminator for its range")]
+    WrongTerminator { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} is an action that is not its statement's first op")]
+    ActionNotFirst { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} names {operand:?}, past its table")]
+    OutOfRange {
+        stmt: usize,
         op: u32,
-        kind: OpKind,
+        operand: Operand,
     },
-    #[error("block {0:?} is an exception edge's target but does not start with `Caught`")]
-    ExceptionTarget(KBlockIx),
-    #[error("a cycle through block {0:?} passes through no Boundary")]
-    UncoveredCycle(KBlockIx),
+    #[error("op {op} of statement {stmt} reads register {reg:?}, which its range has not written")]
+    Unwritten { stmt: usize, op: u32, reg: Reg },
+    #[error("op {op} of statement {stmt} has operands of the wrong count")]
+    Arity { stmt: usize, op: u32 },
 }
 
-/// Checks a function (see the module documentation).
-pub fn verify_function(f: &KirFunction) -> Result<(), KirError> {
-    blocks(f)?;
-    tables(f)?;
-    for (at, op) in f.ops.iter().enumerate() {
-        let at = at as u32;
+/// Checks every statement of a stream (see the module documentation),
+/// each with the frame size of the code it belongs to.
+pub fn verify_stream(
+    ops: &[Op],
+    stmts: &[(StmtRanges, usize)],
+    tables: &Tables,
+) -> Result<(), KirError> {
+    for (stmt, (ranges, frame)) in stmts.iter().enumerate() {
+        range(ops, stmt, ranges.main, *ranges, *frame, tables, false)?;
+        if let Some(test) = ranges.test {
+            range(ops, stmt, test, *ranges, *frame, tables, true)?;
+        }
+    }
+    Ok(())
+}
+
+fn range(
+    ops: &[Op],
+    stmt: usize,
+    range: OpRange,
+    ranges: StmtRanges,
+    frame: usize,
+    tables: &Tables,
+    test: bool,
+) -> Result<(), KirError> {
+    if range.len == 0 || range.end() as usize > ops.len() {
+        return Err(KirError::Range { stmt, range });
+    }
+    let mut written = vec![false; ranges.regs as usize];
+    let last = range.end() - 1;
+    for at in range.start..range.end() {
+        let op = &ops[at as usize];
+        let kind = op.kind();
+        if kind.is_terminator() && at != last {
+            return Err(KirError::EarlyTerminator { stmt, op: at });
+        }
+        if at == last {
+            if !kind.is_terminator() {
+                return Err(KirError::MissingTerminator { stmt, op: at });
+            }
+            if test != (kind == OpKind::Test) {
+                return Err(KirError::WrongTerminator { stmt, op: at });
+            }
+        }
+        if kind == OpKind::Act && (test || at != range.start) {
+            return Err(KirError::ActionNotFirst { stmt, op: at });
+        }
         for operand in op.operands() {
-            check(f, At::Op(at), operand)?;
-        }
-        arity(f, at, op)?;
-    }
-    if f.origins.len() != f.ops.len() {
-        return Err(KirError::Origins {
-            origins: f.origins.len(),
-            ops: f.ops.len(),
-        });
-    }
-    boundaries(f)?;
-    exception_targets(f)?;
-    cycles(f)
-}
-
-fn blocks(f: &KirFunction) -> Result<(), KirError> {
-    if f.blocks.is_empty() {
-        return Err(KirError::NoBlocks);
-    }
-    let mut next = 0u32;
-    for (ix, block) in f.blocks.iter().enumerate() {
-        let ix = KBlockIx(ix as u32);
-        let end = u64::from(block.ops.start) + u64::from(block.ops.len);
-        if block.ops.start != next || block.ops.len == 0 || end > f.ops.len() as u64 {
-            return Err(KirError::BlockRange(ix));
-        }
-        next = end as u32;
-        let last = next - 1;
-        for at in block.ops.start..last {
-            if f.ops[at as usize].kind().is_terminator() {
-                return Err(KirError::EarlyTerminator { block: ix, op: at });
+            if !fits(operand, ranges.regs, frame, tables) {
+                return Err(KirError::OutOfRange {
+                    stmt,
+                    op: at,
+                    operand,
+                });
             }
         }
-        if !f.ops[last as usize].kind().is_terminator() {
-            return Err(KirError::MissingTerminator(ix));
+        let arity = match *op {
+            Op::MakeMap { entries } => entries.len % 2 == 0,
+            Op::MakeRecord { fields, values } => {
+                tables.field_lists.get(fields.ix()).copied() == Some(values.len as usize)
+            }
+            _ => true,
+        };
+        if !arity {
+            return Err(KirError::Arity { stmt, op: at });
         }
-    }
-    if next as usize != f.ops.len() {
-        return Err(KirError::TrailingOps);
-    }
-    Ok(())
-}
-
-/// Checks the side tables' own indexes.
-fn tables(f: &KirFunction) -> Result<(), KirError> {
-    for (ix, local) in f.params.iter().enumerate() {
-        check(f, At::Param(ix as u32), Operand::Local(*local))?;
-    }
-    for (ix, block) in f.blocks.iter().enumerate() {
-        if let Some(handler) = block.exception {
-            check(f, At::Block(KBlockIx(ix as u32)), Operand::Block(handler))?;
+        for reg in op.reads() {
+            if !written.get(reg.ix()).copied().unwrap_or(false) {
+                return Err(KirError::Unwritten { stmt, op: at, reg });
+            }
         }
-    }
-    for (ix, list) in f.field_lists.iter().enumerate() {
-        for field in list {
-            check(
-                f,
-                At::FieldList(FieldListIx(ix as u32)),
-                Operand::Field(*field),
-            )?;
-        }
-    }
-    for (ix, scope) in f.scopes.iter().enumerate() {
-        if let Some(at) = scope
-            .declares
-            .iter()
-            .find(|at| **at as usize >= f.slots.len())
+        if let Some(reg) = op.writes()
+            && let Some(slot) = written.get_mut(reg.ix())
         {
-            return Err(KirError::ScopeSlot {
-                scope: ScopeIx(ix as u32),
-                slot: SlotAt(*at),
-            });
+            *slot = true;
         }
     }
-    for (ix, lp) in f.loops.iter().enumerate() {
-        let at = At::Loop(LoopIx(ix as u32));
-        stmt(f, at, lp.stmt)?;
-        check(f, at, Operand::Block(lp.test))?;
-        check(f, at, Operand::Block(lp.exit))?;
-        if let LoopKind::For { binding } = lp.kind {
-            check(f, at, Operand::Local(binding))?;
-        }
+    Ok(())
+}
+
+fn fits(operand: Operand, regs: u32, frame: usize, tables: &Tables) -> bool {
+    match operand {
+        Operand::Reg(reg) => reg.0 < regs,
+        Operand::Regs(range) => u64::from(range.start.0) + u64::from(range.len) <= u64::from(regs),
+        Operand::Local(local) => (local.at as usize) < frame && (local.slot as usize) < frame,
+        Operand::Const(c) => c.ix() < tables.consts,
+        Operand::Name(name) => name.ix() < tables.names,
+        Operand::Field(field) => field.ix() < tables.fields,
+        Operand::FieldList(list) => list.ix() < tables.field_lists.len(),
+        Operand::Code(code) => code.ix() < tables.codes,
+        Operand::Lib(lib) => lib.ix() < tables.libs,
+        Operand::Block(block) => block.ix() < tables.blocks,
     }
-    for (ix, t) in f.tries.iter().enumerate() {
-        let at = At::Try(TryIx(ix as u32));
-        stmt(f, at, t.stmt)?;
-        if let Some((local, handler)) = t.catch {
-            check(f, at, Operand::Local(local))?;
-            check(f, at, Operand::Block(handler))?;
-        }
-        if let Some(finally) = t.finally {
-            check(f, at, Operand::Block(finally))?;
-        }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kir::ConstIx;
+    use crate::sem::SEMANTICS;
+
+    /// The semantics table states every op once, and every dynamic charge
+    /// event has an op that emits it.
+    #[test]
+    fn the_semantics_table_covers_every_op_and_event() {
+        assert_eq!(verify_semantics(SEMANTICS), Ok(()));
     }
-    for (ix, action) in f.actions.iter().enumerate() {
-        let at = At::Action(ActionIx(ix as u32));
-        let callee = |callee: CalleeRef| match callee {
-            CalleeRef::Declared(code) => Operand::Code(code),
-            CalleeRef::Value(var) => Operand::Var(var),
-            CalleeRef::Library(lib) => Operand::Lib(lib),
+
+    /// No range spans a Boundary (`K-STMT-004`): a step ends at its
+    /// statement's one terminator, an action's continuation starts right
+    /// after it, and no register is read that its range did not write.
+    #[test]
+    fn a_range_that_spans_a_boundary_is_rejected() {
+        let tables = Tables {
+            consts: 1,
+            ..Tables::default()
         };
-        let operands = match action.kind {
-            ActionKind::Call { callee: c, args } | ActionKind::Spawn { callee: c, args } => {
-                vec![callee(c), Operand::Regs(args)]
-            }
-            ActionKind::Perform { args, .. } => vec![Operand::Regs(args)],
-            ActionKind::Sleep(reg)
-            | ActionKind::Join(reg)
-            | ActionKind::JoinMany(_, reg)
-            | ActionKind::Cancel(reg) => vec![Operand::Reg(reg)],
-            ActionKind::Yield => Vec::new(),
+        let c = |dst| Op::Const {
+            dst: Reg(dst),
+            c: ConstIx(0),
         };
-        for operand in operands {
-            check(f, at, operand)?;
-        }
-    }
-    for (ix, boundary) in f.boundaries.iter().enumerate() {
-        let at = At::Boundary(BoundaryIx(ix as u32));
-        if let Some(awaiting) = boundary.awaiting {
-            stmt(f, at, awaiting)?;
-        }
-        for ctl in &boundary.shape.frames {
-            let operand = match *ctl {
-                CtlStatic::Block { scope, .. } => Operand::Scope(scope),
-                CtlStatic::For { lp } | CtlStatic::While { lp } => Operand::Loop(lp),
-                CtlStatic::Try { t, .. } => Operand::Try(t),
+        let check = |ops: &[Op], len: u32| {
+            let main = OpRange { start: 0, len };
+            let ranges = StmtRanges {
+                main,
+                test: None,
+                regs: 2,
             };
-            check(f, at, operand)?;
-        }
-    }
-    Ok(())
-}
-
-fn stmt(f: &KirFunction, at: At, stmt: StmtIx) -> Result<(), KirError> {
-    if stmt.ix() < f.stmts.len() {
-        Ok(())
-    } else {
-        Err(KirError::StmtOutOfRange { at, stmt })
-    }
-}
-
-fn check(f: &KirFunction, at: At, operand: Operand) -> Result<(), KirError> {
-    let local = |local: LocalRef| -> Result<bool, KirError> {
-        let Some(slot) = f.slots.get(local.slot as usize) else {
-            return Ok(false);
+            verify_stream(ops, &[(ranges, 0)], &tables)
         };
-        if local.at as usize >= f.slots.len() {
-            return Ok(false);
-        }
-        if slot.shared != local.shared {
-            return Err(KirError::LocalShared { at, local });
-        }
-        Ok(true)
-    };
-    let fits = match operand {
-        Operand::Reg(reg) => reg.0 < f.regs,
-        Operand::Regs(range) => {
-            u64::from(range.start.0) + u64::from(range.len) <= u64::from(f.regs)
-        }
-        Operand::Local(l) | Operand::Var(VarRef::Local(l)) => local(l)?,
-        Operand::Var(VarRef::Session(name) | VarRef::Unbound(name)) => name.ix() < f.names.len(),
-        Operand::Block(b) => b.ix() < f.blocks.len(),
-        Operand::Boundary(b) => b.ix() < f.boundaries.len(),
-        Operand::Const(c) => c.ix() < f.consts.len(),
-        Operand::Field(field) => field.ix() < f.fields.len(),
-        Operand::FieldList(list) => list.ix() < f.field_lists.len(),
-        Operand::Code(code) => code.ix() < f.codes.len(),
-        Operand::Lib(lib) => lib.ix() < f.libs.len(),
-        Operand::Loop(lp) => lp.ix() < f.loops.len(),
-        Operand::Try(t) => t.ix() < f.tries.len(),
-        Operand::Scope(scope) => scope.ix() < f.scopes.len(),
-        Operand::Action(action) => action.ix() < f.actions.len(),
-    };
-    if fits {
-        Ok(())
-    } else {
-        Err(KirError::OutOfRange { at, operand })
+        assert_eq!(check(&[c(0), Op::End], 2), Ok(()));
+        assert_eq!(
+            check(&[c(0), Op::End, c(1), Op::End], 4),
+            Err(KirError::EarlyTerminator { stmt: 0, op: 1 })
+        );
+        assert_eq!(
+            check(&[c(0), c(1)], 2),
+            Err(KirError::MissingTerminator { stmt: 0, op: 1 })
+        );
+        assert_eq!(
+            check(&[c(0), Op::Act, Op::End], 3),
+            Err(KirError::ActionNotFirst { stmt: 0, op: 1 })
+        );
+        assert_eq!(
+            check(&[Op::Print { src: Reg(1) }], 1),
+            Err(KirError::Unwritten {
+                stmt: 0,
+                op: 0,
+                reg: Reg(1)
+            })
+        );
+        assert_eq!(
+            check(&[c(0), Op::Test { cond: Reg(0) }], 2),
+            Err(KirError::WrongTerminator { stmt: 0, op: 1 })
+        );
     }
-}
-
-fn arity(f: &KirFunction, at: u32, op: &Op) -> Result<(), KirError> {
-    let ok = match *op {
-        Op::MakeMap { entries, .. } => entries.len % 2 == 0,
-        Op::MakeRecord { fields, values, .. } => {
-            f.field_lists[fields.ix()].len() == values.len as usize
-        }
-        _ => true,
-    };
-    if ok { Ok(()) } else { Err(KirError::Arity(at)) }
-}
-
-fn boundaries(f: &KirFunction) -> Result<(), KirError> {
-    let mut points = vec![0usize; f.boundaries.len()];
-    for (at, op) in f.ops.iter().enumerate() {
-        let Some(b) = op.boundary() else { continue };
-        points[b.ix()] += 1;
-        let kind = f.boundaries[b.ix()].kind;
-        let fits = match op.kind() {
-            OpKind::Stmt => kind == BoundaryKind::StatementStart,
-            OpKind::Step => matches!(kind, BoundaryKind::BlockEnd | BoundaryKind::LoopTest),
-            _ => kind.awaits(),
-        };
-        if !fits {
-            return Err(KirError::BoundaryKind {
-                boundary: b,
-                op: at as u32,
-                kind: op.kind(),
-            });
-        }
-    }
-    for (ix, boundary) in f.boundaries.iter().enumerate() {
-        let b = BoundaryIx(ix as u32);
-        if boundary.kind.awaits() != boundary.awaiting.is_some() {
-            return Err(KirError::BoundaryAwaiting(b));
-        }
-        if points[ix] != 1 {
-            return Err(KirError::BoundaryPoints {
-                boundary: b,
-                ops: points[ix],
-            });
-        }
-    }
-    Ok(())
-}
-
-fn exception_targets(f: &KirFunction) -> Result<(), KirError> {
-    for handler in f.blocks.iter().filter_map(|block| block.exception) {
-        let first = f.blocks[handler.ix()].ops.start as usize;
-        if f.ops[first].kind() != OpKind::Caught {
-            return Err(KirError::ExceptionTarget(handler));
-        }
-    }
-    Ok(())
-}
-
-/// The blocks control can reach from `block`: its terminator's successors,
-/// its exception edge, and, for a block ending a `finally`, the loop
-/// targets of every `break` or `continue` that `finally` can resume.
-fn edges(f: &KirFunction, block: KBlockIx) -> Vec<KBlockIx> {
-    let range = f.blocks[block.ix()].ops;
-    let last = &f.ops[(range.start + range.len - 1) as usize];
-    let mut out = last.successors();
-    out.extend(f.blocks[block.ix()].exception);
-    if let Op::FinallyEnd { t, .. } = *last {
-        for op in f.ops.iter() {
-            match *op {
-                Op::FinallyEnter {
-                    t: entered,
-                    departure: Departure::Break(lp),
-                } if entered == t => out.push(f.loops[lp.ix()].exit),
-                Op::FinallyEnter {
-                    t: entered,
-                    departure: Departure::Continue(lp),
-                } if entered == t => out.push(f.loops[lp.ix()].test),
-                _ => {}
-            }
-        }
-    }
-    out
-}
-
-/// Every cycle passes through a block holding a Boundary's program point.
-fn cycles(f: &KirFunction) -> Result<(), KirError> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Mark {
-        New,
-        Open,
-        Done,
-    }
-    let covered: Vec<bool> = f
-        .blocks
-        .iter()
-        .map(|block| {
-            let range = block.ops.start as usize..(block.ops.start + block.ops.len) as usize;
-            f.ops[range].iter().any(|op| op.boundary().is_some())
-        })
-        .collect();
-    let mut marks = vec![Mark::New; f.blocks.len()];
-    for root in 0..f.blocks.len() {
-        if covered[root] || marks[root] != Mark::New {
-            continue;
-        }
-        marks[root] = Mark::Open;
-        let mut stack = vec![(KBlockIx(root as u32), edges(f, KBlockIx(root as u32)), 0)];
-        while let Some((block, succ, next)) = stack.last_mut() {
-            let Some(to) = succ.get(*next).copied() else {
-                marks[block.ix()] = Mark::Done;
-                stack.pop();
-                continue;
-            };
-            *next += 1;
-            if covered[to.ix()] {
-                continue;
-            }
-            match marks[to.ix()] {
-                Mark::Open => return Err(KirError::UncoveredCycle(to)),
-                Mark::Done => {}
-                Mark::New => {
-                    marks[to.ix()] = Mark::Open;
-                    stack.push((to, edges(f, to), 0));
-                }
-            }
-        }
-    }
-    Ok(())
 }

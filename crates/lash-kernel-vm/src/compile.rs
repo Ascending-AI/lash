@@ -30,11 +30,15 @@ use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, NativeFunction,
     PreparedNative, Site, Type, Unit, Value,
 };
-use lash_kernel_exec::{BoundaryKind, StepEdge};
+use lash_kernel_exec::{
+    BoundaryKind, KirError, LocalRef, Op, OpRange, StepEdge, StmtRanges, Tables as StreamTables,
+    verify_stream,
+};
 
 use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
+mod lower;
 mod preparation;
 
 pub(crate) use formula::{Charge, Fast, Plan, Source};
@@ -86,12 +90,60 @@ struct Tables {
     codes: Vec<Code>,
     blocks: Vec<Block>,
     stmts: Vec<Stmt>,
+    /// Every statement's ops, and what they index.
+    stream: Stream,
     /// Each statement's step edge, by statement.
     edges: Vec<StepEdge>,
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
     block_at: BTreeMap<Site, BlockId>,
+}
+
+impl Tables {
+    /// Checks the ops of every statement a code of these tables runs, each
+    /// with its code's frame, against `codes`, `blocks` and `libs` in all:
+    /// the ids the ops name start before these tables' own, at `base`.
+    fn verify_stream(
+        &self,
+        base: &Base,
+        codes: usize,
+        blocks: usize,
+        libs: usize,
+    ) -> Result<usize, KirError> {
+        let mut stmts = Vec::with_capacity(self.stmts.len());
+        for code in &self.codes {
+            let mut pending = vec![code.body];
+            while let Some(block) = pending.pop() {
+                for id in &self.blocks[(block.0 - base.blocks) as usize].stmts {
+                    let stmt = &self.stmts[(id.0 - base.stmts) as usize];
+                    let test = match stmt.form {
+                        Form::While { test, .. } => Some(test),
+                        _ => None,
+                    };
+                    let ranges = StmtRanges {
+                        main: stmt.ops,
+                        test,
+                        regs: stmt.regs,
+                    };
+                    stmts.push((ranges, code.slots.len()));
+                    pending.extend(stmt.form.blocks());
+                }
+            }
+        }
+        let stream = &self.stream;
+        let sizes = StreamTables {
+            consts: stream.consts.len(),
+            names: stream.names.len(),
+            fields: stream.fields.len(),
+            field_lists: stream.field_lists.iter().map(|list| list.len()).collect(),
+            codes,
+            blocks,
+            libs,
+        };
+        verify_stream(&stream.ops, &stmts, &sizes)?;
+        Ok(stmts.len())
+    }
 }
 
 /// A function registry with every library body in it compiled, once, for
@@ -133,6 +185,23 @@ impl PreparedLibrary {
     /// Compiles every library body in `registry`.
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self::with_layout(registry, Layout::default())
+    }
+
+    /// Checks the ops of every statement of the library's bodies
+    /// (`lash_kernel_exec::verify_stream`): each range is well formed and
+    /// spans no Boundary. Gives how many statements it checked.
+    pub fn verify_stream(&self) -> Result<usize, KirError> {
+        let tables = &self.0.tables;
+        tables.verify_stream(
+            &Base {
+                codes: 0,
+                blocks: 0,
+                stmts: 0,
+            },
+            tables.codes.len(),
+            tables.blocks.len(),
+            self.0.libs.len(),
+        )
     }
 
     /// The registry the library was prepared from.
@@ -208,6 +277,7 @@ impl PreparedLibrary {
         // what they hold, not what growing them reserved.
         tables.blocks.shrink_to_fit();
         tables.stmts.shrink_to_fit();
+        tables.stream.ops.shrink_to_fit();
         let libs = library
             .iter()
             .map(|(function, registered)| {
@@ -362,16 +432,32 @@ impl Executable {
         self.get_stmt(id).expect("a statement of this executable")
     }
 
-    /// Statement `id`, and where its step leaves its frame when it
-    /// completes in its own block.
-    pub(crate) fn stmt_edge(&self, id: StmtId) -> (&Stmt, StepEdge) {
+    /// Statement `id`, the stream its ops are in, and where its step
+    /// leaves its frame when it completes in its own block.
+    pub(crate) fn statement(&self, id: StmtId) -> (&Stream, &Stmt, StepEdge) {
         let library = &self.library.0.tables;
         let index = id.0 as usize;
         let (tables, at) = match index.checked_sub(library.stmts.len()) {
             None => (library, index),
             Some(own) => (&self.own.tables, own),
         };
-        (&tables.stmts[at], tables.edges[at])
+        (&tables.stream, &tables.stmts[at], tables.edges[at])
+    }
+
+    /// Checks the document's statements' ops (`lash_kernel_exec::verify_stream`),
+    /// giving how many it checked.
+    pub(crate) fn verify_stream(&self) -> Result<usize, KirError> {
+        let library = &self.library.0.tables;
+        self.own.tables.verify_stream(
+            &Base {
+                codes: library.codes.len() as u32,
+                blocks: library.blocks.len() as u32,
+                stmts: library.stmts.len() as u32,
+            },
+            library.codes.len() + self.own.tables.codes.len(),
+            library.blocks.len() + self.own.tables.blocks.len(),
+            self.library.0.libs.len(),
+        )
     }
 
     pub(crate) fn lib(&self, id: LibId) -> &Lib {
@@ -522,66 +608,89 @@ pub(crate) enum Var {
     Unbound(Name),
 }
 
-pub(crate) enum Stmt {
-    Let {
-        target: Target,
-        value: Rhs,
-    },
-    Assign {
-        place: Place,
-        value: Rhs,
-    },
-    Remove(Member),
-    Do(Action),
+/// The ops of every statement of a library or a document, and the
+/// constants, names and fields they index.
+#[derive(Default)]
+pub(crate) struct Stream {
+    pub(crate) ops: Vec<Op>,
+    pub(crate) consts: Vec<Value>,
+    pub(crate) names: Vec<Name>,
+    pub(crate) fields: Vec<String>,
+    pub(crate) field_lists: Vec<Box<[String]>>,
+}
+
+/// One statement: its ops in its stream, how many registers they use, and
+/// what the machine's control needs of its shape.
+pub(crate) struct Stmt {
+    /// The range a step runs from the statement's start: its expressions,
+    /// then the op that completes it or ends its step. An action
+    /// statement's action is its first op, and the statement resumes at the
+    /// op after it.
+    pub(crate) ops: OpRange,
+    pub(crate) regs: u32,
+    pub(crate) form: Form,
+}
+
+pub(crate) enum Form {
+    /// A statement its ops run to their end.
+    Plain,
     If {
-        condition: Expr,
         then_block: BlockId,
         else_block: BlockId,
     },
     For {
         site: Site,
         binding: Local,
-        iterable: Expr,
         body: BlockId,
     },
     While {
         site: Site,
-        condition: Expr,
+        /// The condition's ops, which every iteration step runs.
+        test: OpRange,
         body: BlockId,
     },
-    Break,
-    Continue,
-    Return(Expr),
     Try {
         site: Site,
         body: BlockId,
         catch: Option<(Local, BlockId)>,
         finally: Option<BlockId>,
     },
-    Throw(Expr),
-    Print(Expr),
-    Finish(Expr),
-    Fail(Expr),
-}
-
-pub(crate) enum Target {
-    Slot(Local),
-    Session(Name),
-}
-
-pub(crate) enum Rhs {
-    Expr(Expr),
+    /// An action statement: `let`, an assignment or `do` of an action.
     Action(Action),
 }
 
-pub(crate) enum Place {
-    Var(Var),
-    Member(Member),
+impl Stmt {
+    /// Where the statement resumes when its action has a value.
+    pub(crate) fn resume(&self) -> usize {
+        self.ops.start as usize + 1
+    }
 }
 
-pub(crate) enum Member {
-    Field(Expr, String),
-    Index(Expr, Expr),
+impl Form {
+    /// The blocks the statement holds.
+    fn blocks(&self) -> Vec<BlockId> {
+        match self {
+            Form::Plain | Form::Action(_) => Vec::new(),
+            Form::If {
+                then_block,
+                else_block,
+            } => vec![*then_block, *else_block],
+            Form::For { body, .. } | Form::While { body, .. } => vec![*body],
+            Form::Try {
+                body,
+                catch,
+                finally,
+                ..
+            } => [
+                Some(*body),
+                catch.as_ref().map(|(_, block)| *block),
+                *finally,
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        }
+    }
 }
 
 pub(crate) struct Action {
@@ -619,22 +728,6 @@ pub(crate) enum Callee {
 pub(crate) enum Atom {
     Var(Var),
     Literal(Value),
-}
-
-pub(crate) enum Expr {
-    Literal(Value),
-    Var(Var),
-    Tuple(Vec<Expr>),
-    List(Vec<Expr>),
-    Map(Vec<(Expr, Expr)>),
-    Set(Vec<Expr>),
-    Record(Vec<(String, Expr)>),
-    Member(Box<Member>),
-    Closure(CodeId),
-    Call { lib: LibId, args: Vec<Expr> },
-    Clock,
-    Random,
-    Read(Box<(Expr, Expr)>),
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
@@ -723,6 +816,12 @@ struct Compiler<'a> {
     codes: Vec<Option<Code>>,
     blocks: Vec<Block>,
     stmts: Vec<Stmt>,
+    stream: Stream,
+    /// Where each name and field already sits in the stream's pools.
+    names: BTreeMap<Name, u32>,
+    fields: BTreeMap<String, u32>,
+    /// Emptied buffers that statements gather their ops in.
+    spare: Vec<Vec<Op>>,
     declared: BTreeMap<Name, CodeId>,
     resolve: Resolve<'a>,
     /// The codes being compiled, the outermost first; each closure adds one.
@@ -814,6 +913,10 @@ impl<'a> Compiler<'a> {
             codes: Vec::new(),
             blocks: Vec::new(),
             stmts: Vec::new(),
+            stream: Stream::default(),
+            names: BTreeMap::new(),
+            fields: BTreeMap::new(),
+            spare: Vec::new(),
             declared: BTreeMap::new(),
             resolve,
             scopes: Vec::new(),
@@ -849,6 +952,7 @@ impl<'a> Compiler<'a> {
             codes,
             blocks: self.blocks,
             stmts: self.stmts,
+            stream: self.stream,
             edges,
             code_at,
             block_at,
@@ -886,11 +990,10 @@ fn step_edges(codes: &[Code], blocks: &[Block], stmts: &[Stmt], base: Base) -> V
             let edge = if index + 1 == ids.len() { last } else { ON };
             let at = (id.0 - base.stmts) as usize;
             edges[at] = edge;
-            match &stmts[at] {
-                Stmt::If {
+            match &stmts[at].form {
+                Form::If {
                     then_block,
                     else_block,
-                    ..
                 } => {
                     let arm = StepEdge {
                         leaves: edge.leaves + 1,
@@ -898,10 +1001,10 @@ fn step_edges(codes: &[Code], blocks: &[Block], stmts: &[Stmt], base: Base) -> V
                     };
                     pending.extend([(*then_block, arm), (*else_block, arm)]);
                 }
-                Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                Form::For { body, .. } | Form::While { body, .. } => {
                     pending.push((*body, TO_END));
                 }
-                Stmt::Try {
+                Form::Try {
                     body,
                     catch,
                     finally,
@@ -972,7 +1075,16 @@ impl Compiler<'_> {
         for capture in &mut captures {
             capture.inner_at = positions[capture.inner as usize];
         }
-        self.place(body, &placer);
+        // Lowered, every variable already sits at its slot and is bound as
+        // unshared: a code whose layout keeps the slots in place and that
+        // shares none is placed as it is.
+        let moved = positions
+            .iter()
+            .enumerate()
+            .any(|(slot, at)| slot as u32 != *at);
+        if moved || scopes.slots.iter().any(|slot| slot.shared) {
+            self.place(body, &placer);
+        }
         Code {
             site,
             params,
@@ -984,8 +1096,9 @@ impl Compiler<'_> {
         }
     }
 
-    /// Writes where each variable of a code sits into the code's blocks
-    /// and statements, and into the captures of the closures it makes.
+    /// Writes where each variable of a code sits into the ops and the
+    /// shapes of its statements, which its blocks hold, and into the
+    /// captures of the closures it makes.
     fn place(&mut self, body: BlockId, placer: &Placer<'_>) {
         let mut blocks = vec![body];
         let mut closures = Vec::new();
@@ -996,7 +1109,15 @@ impl Compiler<'_> {
             }
             for stmt in &block.stmts {
                 let stmt = &mut self.stmts[(stmt.0 - self.base.stmts) as usize];
-                placer.stmt(stmt, &mut blocks, &mut closures);
+                placer.form(&mut stmt.form, &mut blocks);
+                let mut ranges = [Some(stmt.ops), None];
+                if let Form::While { test, .. } = stmt.form {
+                    ranges[1] = Some(test);
+                }
+                for range in ranges.into_iter().flatten() {
+                    let ops = &mut self.stream.ops[range.start as usize..range.end() as usize];
+                    placer.ops(ops, &mut closures);
+                }
             }
         }
         for closure in closures {
@@ -1079,246 +1200,6 @@ impl Compiler<'_> {
         compiled
     }
 
-    fn stmt(&mut self, stmt: &doc::Stmt) -> Stmt {
-        match stmt {
-            doc::Stmt::Let { name, value } => {
-                // The right-hand side does not see the variable it binds.
-                let value = self.child(0, |c| c.rhs(value));
-                let top_level = self.scopes.len() == 1
-                    && self
-                        .scopes
-                        .last()
-                        .is_some_and(|scopes| scopes.main && scopes.blocks.len() == 1);
-                let target = if top_level && !self.private.contains(name) {
-                    if let Some(block) = self.scopes.last_mut().and_then(|s| s.blocks.last_mut()) {
-                        block.push((name.clone(), Declared::Session));
-                    }
-                    Target::Session(name.clone())
-                } else {
-                    Target::Slot(Local::unplaced(self.declare(name)))
-                };
-                Stmt::Let { target, value }
-            }
-            doc::Stmt::Assign { place, value } => {
-                let (place, next) = match place {
-                    doc::Place::Variable(name) => (Place::Var(self.resolve(name)), 0),
-                    doc::Place::Member(member) => {
-                        let (member, next) = self.member(member, 0);
-                        (Place::Member(member), next)
-                    }
-                };
-                let value = self.child(next, |c| c.rhs(value));
-                Stmt::Assign { place, value }
-            }
-            doc::Stmt::Remove { member } => Stmt::Remove(self.member(member, 0).0),
-            doc::Stmt::Do { action } => Stmt::Do(self.child(0, |c| c.action(action))),
-            doc::Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } => Stmt::If {
-                condition: self.child(0, |c| c.expr(condition)),
-                then_block: self.child(1, |c| c.block(then_block, &[]).0),
-                else_block: self.child(2, |c| c.block(else_block, &[]).0),
-            },
-            doc::Stmt::For {
-                binding,
-                iterable,
-                body,
-            } => {
-                let iterable = self.child(0, |c| c.expr(iterable));
-                let (body, bound) = self.child(1, |c| c.block(body, std::slice::from_ref(binding)));
-                Stmt::For {
-                    site: self.site(),
-                    binding: Local::unplaced(bound.first().copied().unwrap_or(0)),
-                    iterable,
-                    body,
-                }
-            }
-            doc::Stmt::While { condition, body } => Stmt::While {
-                site: self.site(),
-                condition: self.child(0, |c| c.expr(condition)),
-                body: self.child(1, |c| c.block(body, &[]).0),
-            },
-            doc::Stmt::Break => Stmt::Break,
-            doc::Stmt::Continue => Stmt::Continue,
-            doc::Stmt::Return { value } => Stmt::Return(self.child(0, |c| c.expr(value))),
-            doc::Stmt::Throw { value } => Stmt::Throw(self.child(0, |c| c.expr(value))),
-            doc::Stmt::Print { value } => Stmt::Print(self.child(0, |c| c.expr(value))),
-            doc::Stmt::Finish { value } => Stmt::Finish(self.child(0, |c| c.expr(value))),
-            doc::Stmt::Fail { value } => Stmt::Fail(self.child(0, |c| c.expr(value))),
-            doc::Stmt::Try(scope) => {
-                let mut next = 0;
-                let body = self.child(next, |c| c.block(&scope.body, &[]).0);
-                next += 1;
-                let catch = scope.catch.as_ref().map(|catch| {
-                    let (block, bound) = self.child(next, |c| {
-                        c.block(&catch.body, std::slice::from_ref(&catch.binding))
-                    });
-                    next += 1;
-                    (Local::unplaced(bound.first().copied().unwrap_or(0)), block)
-                });
-                let finally = scope
-                    .finally
-                    .as_ref()
-                    .map(|finally| self.child(next, |c| c.block(finally, &[]).0));
-                Stmt::Try {
-                    site: self.site(),
-                    body,
-                    catch,
-                    finally,
-                }
-            }
-        }
-    }
-
-    fn rhs(&mut self, rhs: &doc::Rhs) -> Rhs {
-        match rhs {
-            doc::Rhs::Expr(expr) => Rhs::Expr(self.expr(expr)),
-            doc::Rhs::Action(action) => Rhs::Action(self.action(action)),
-        }
-    }
-
-    /// Compiles a member whose first child has index `first`, and returns
-    /// the index after its last.
-    fn member(&mut self, member: &doc::Member, first: u32) -> (Member, u32) {
-        match member {
-            doc::Member::Field { target, field } => (
-                Member::Field(self.child(first, |c| c.expr(target)), field.clone()),
-                first + 1,
-            ),
-            doc::Member::Index { target, index } => (
-                Member::Index(
-                    self.child(first, |c| c.expr(target)),
-                    self.child(first + 1, |c| c.expr(index)),
-                ),
-                first + 2,
-            ),
-        }
-    }
-
-    fn action(&mut self, action: &doc::Action) -> Action {
-        let kind = match action {
-            doc::Action::Call { callee, args } => ActionKind::Call {
-                callee: self.callee(callee),
-                args: self.atoms(args),
-            },
-            doc::Action::Spawn { callee, args } => ActionKind::Spawn {
-                callee: self.callee(callee),
-                args: self.atoms(args),
-            },
-            doc::Action::Perform {
-                effect,
-                args,
-                result,
-            } => ActionKind::Perform {
-                effect: effect.clone(),
-                args: self.atoms(args),
-                result: result.clone(),
-            },
-            doc::Action::Sleep { duration } => ActionKind::Sleep(self.atom(duration)),
-            doc::Action::Join { task } => ActionKind::Join(self.atom(task)),
-            doc::Action::JoinMany { mode, tasks } => ActionKind::JoinMany(*mode, self.atom(tasks)),
-            doc::Action::Yield => ActionKind::Yield,
-            doc::Action::Cancel { task } => ActionKind::Cancel(self.atom(task)),
-        };
-        Action {
-            site: self.site(),
-            kind,
-        }
-    }
-
-    fn callee(&mut self, callee: &doc::Callee) -> Callee {
-        match callee {
-            doc::Callee::Declared(name) => match self.declared.get(name) {
-                Some(code) => Callee::Declared(*code),
-                // Validation refuses this; a variable of that name is what
-                // is left to mean.
-                None => Callee::Value(Var::Unbound(name.clone())),
-            },
-            doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
-            doc::Callee::Library(function) => match self.resolve.lib(function) {
-                Some(lib) => Callee::Library(lib),
-                None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
-            },
-        }
-    }
-
-    fn atoms(&mut self, atoms: &[doc::Atom]) -> Vec<Atom> {
-        atoms.iter().map(|atom| self.atom(atom)).collect()
-    }
-
-    fn atom(&mut self, atom: &doc::Atom) -> Atom {
-        match atom {
-            doc::Atom::Variable(name) => Atom::Var(self.resolve(name)),
-            doc::Atom::Literal(literal) => Atom::Literal(literal_value(literal)),
-        }
-    }
-
-    fn exprs(&mut self, exprs: &[doc::Expr]) -> Vec<Expr> {
-        exprs
-            .iter()
-            .enumerate()
-            .map(|(index, expr)| self.child(index as u32, |c| c.expr(expr)))
-            .collect()
-    }
-
-    fn expr(&mut self, expr: &doc::Expr) -> Expr {
-        match expr {
-            doc::Expr::Literal(literal) => Expr::Literal(literal_value(literal)),
-            doc::Expr::Variable(name) => Expr::Var(self.resolve(name)),
-            doc::Expr::Tuple(items) => Expr::Tuple(self.exprs(items)),
-            doc::Expr::List(items) => Expr::List(self.exprs(items)),
-            doc::Expr::Set(items) => Expr::Set(self.exprs(items)),
-            doc::Expr::Map(entries) => Expr::Map(
-                entries
-                    .iter()
-                    .enumerate()
-                    .map(|(index, entry)| {
-                        let index = index as u32 * 2;
-                        (
-                            self.child(index, |c| c.expr(&entry.key)),
-                            self.child(index + 1, |c| c.expr(&entry.value)),
-                        )
-                    })
-                    .collect(),
-            ),
-            doc::Expr::Record(entries) => Expr::Record(
-                entries
-                    .iter()
-                    .enumerate()
-                    .map(|(index, entry)| {
-                        let value = self.child(index as u32, |c| c.expr(&entry.value));
-                        (entry.field.clone(), value)
-                    })
-                    .collect(),
-            ),
-            doc::Expr::Member(member) => Expr::Member(Box::new(self.member(member, 0).0)),
-            doc::Expr::Closure(closure) => {
-                // A closure runs only where it is applied, which the body of
-                // a function with a native implementation cannot do
-                // (`K-LIB-004`): wherever it runs, it is ordinary code.
-                let code = self.child(0, |c| c.code(&closure.params, &closure.body, false, true));
-                let id = CodeId(self.base.codes + self.codes.len() as u32);
-                self.codes.push(Some(code));
-                Expr::Closure(id)
-            }
-            doc::Expr::Call { function, args } => match self.resolve.lib(function) {
-                Some(lib) => Expr::Call {
-                    lib,
-                    args: self.exprs(args),
-                },
-                None => Expr::Var(Var::Unbound(Name::new(function.to_string()))),
-            },
-            doc::Expr::Clock => Expr::Clock,
-            doc::Expr::Random => Expr::Random,
-            doc::Expr::Read(read) => Expr::Read(Box::new((
-                self.child(0, |c| c.expr(&read.handle)),
-                self.child(1, |c| c.expr(&read.request)),
-            ))),
-        }
-    }
-
     fn resolve(&mut self, name: &Name) -> Var {
         match self.scopes.len() {
             0 => Var::Unbound(name.clone()),
@@ -1372,8 +1253,8 @@ impl Compiler<'_> {
                 scopes.captures.push(Capture {
                     outer,
                     inner,
-                    outer_at: 0,
-                    inner_at: 0,
+                    outer_at: outer,
+                    inner_at: inner,
                 });
                 Var::Local(Local::unplaced(inner))
             }
@@ -1407,50 +1288,52 @@ impl Placer<'_> {
         }
     }
 
-    /// Places a statement's variables, and collects the blocks it holds
-    /// and the closures it makes.
-    fn stmt(&self, stmt: &mut Stmt, blocks: &mut Vec<BlockId>, closures: &mut Vec<CodeId>) {
-        match stmt {
-            Stmt::Let { target, value } => {
-                if let Target::Slot(local) = target {
-                    self.local(local);
+    /// Places a statement's ops' variables, a binding of a variable a
+    /// closure shares as its cell, and collects the closures they make.
+    fn ops(&self, ops: &mut [Op], closures: &mut Vec<CodeId>) {
+        for op in ops {
+            match op {
+                Op::Local { local, .. }
+                | Op::ChargeLocal { local, .. }
+                | Op::WriteLocal { local, .. } => {
+                    local.at = self.positions[local.slot as usize];
                 }
-                self.rhs(value, closures);
-            }
-            Stmt::Assign { place, value } => {
-                match place {
-                    Place::Var(var) => self.var(var),
-                    Place::Member(member) => self.member(member, closures),
+                Op::Bind { local, src } => {
+                    let (local, src) = (self.place_ref(*local), *src);
+                    *op = if self.slots[local.slot as usize].shared {
+                        Op::BindShared { local, src }
+                    } else {
+                        Op::Bind { local, src }
+                    };
                 }
-                self.rhs(value, closures);
+                Op::Closure { code, .. } => closures.push(CodeId(code.0)),
+                _ => {}
             }
-            Stmt::Remove(member) => self.member(member, closures),
-            Stmt::Do(action) => self.action(action),
-            Stmt::If {
-                condition,
+        }
+    }
+
+    fn place_ref(&self, local: LocalRef) -> LocalRef {
+        LocalRef {
+            slot: local.slot,
+            at: self.positions[local.slot as usize],
+        }
+    }
+
+    /// Places the variables a statement's shape names, and collects the
+    /// blocks it holds.
+    fn form(&self, form: &mut Form, blocks: &mut Vec<BlockId>) {
+        match form {
+            Form::Plain => {}
+            Form::If {
                 then_block,
                 else_block,
-            } => {
-                self.expr(condition, closures);
-                blocks.extend([*then_block, *else_block]);
-            }
-            Stmt::For {
-                binding,
-                iterable,
-                body,
-                ..
-            } => {
+            } => blocks.extend([*then_block, *else_block]),
+            Form::For { binding, body, .. } => {
                 self.local(binding);
-                self.expr(iterable, closures);
                 blocks.push(*body);
             }
-            Stmt::While {
-                condition, body, ..
-            } => {
-                self.expr(condition, closures);
-                blocks.push(*body);
-            }
-            Stmt::Try {
+            Form::While { body, .. } => blocks.push(*body),
+            Form::Try {
                 body,
                 catch,
                 finally,
@@ -1463,29 +1346,7 @@ impl Placer<'_> {
                 }
                 blocks.extend(*finally);
             }
-            Stmt::Break | Stmt::Continue => {}
-            Stmt::Return(expr)
-            | Stmt::Throw(expr)
-            | Stmt::Print(expr)
-            | Stmt::Finish(expr)
-            | Stmt::Fail(expr) => self.expr(expr, closures),
-        }
-    }
-
-    fn rhs(&self, rhs: &mut Rhs, closures: &mut Vec<CodeId>) {
-        match rhs {
-            Rhs::Expr(expr) => self.expr(expr, closures),
-            Rhs::Action(action) => self.action(action),
-        }
-    }
-
-    fn member(&self, member: &mut Member, closures: &mut Vec<CodeId>) {
-        match member {
-            Member::Field(target, _) => self.expr(target, closures),
-            Member::Index(target, index) => {
-                self.expr(target, closures);
-                self.expr(index, closures);
-            }
+            Form::Action(action) => self.action(action),
         }
     }
 
@@ -1507,34 +1368,6 @@ impl Placer<'_> {
         for atom in atoms {
             if let Atom::Var(var) = atom {
                 self.var(var);
-            }
-        }
-    }
-
-    fn expr(&self, expr: &mut Expr, closures: &mut Vec<CodeId>) {
-        match expr {
-            Expr::Literal(_) | Expr::Clock | Expr::Random => {}
-            Expr::Var(var) => self.var(var),
-            Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
-                items.iter_mut().for_each(|item| self.expr(item, closures));
-            }
-            Expr::Call { args, .. } => args.iter_mut().for_each(|arg| self.expr(arg, closures)),
-            Expr::Map(entries) => {
-                for (key, value) in entries {
-                    self.expr(key, closures);
-                    self.expr(value, closures);
-                }
-            }
-            Expr::Record(entries) => {
-                for (_, value) in entries {
-                    self.expr(value, closures);
-                }
-            }
-            Expr::Member(member) => self.member(member, closures),
-            Expr::Closure(code) => closures.push(*code),
-            Expr::Read(read) => {
-                self.expr(&mut read.0, closures);
-                self.expr(&mut read.1, closures);
             }
         }
     }

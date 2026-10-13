@@ -16,20 +16,12 @@ mod restore;
 pub(super) use capture::{HeapView, export, save};
 pub(super) use restore::import;
 
-use crate::compile::{Action, Executable, Rhs, Stmt, StmtId};
+use crate::compile::{Action, Executable, Form, StmtId};
 
 /// The action of a statement, when it has one.
 fn action_of(exe: &Executable, stmt: StmtId) -> Option<&Action> {
-    match exe.get_stmt(stmt)? {
-        Stmt::Let {
-            value: Rhs::Action(action),
-            ..
-        }
-        | Stmt::Assign {
-            value: Rhs::Action(action),
-            ..
-        }
-        | Stmt::Do(action) => Some(action),
+    match &exe.get_stmt(stmt)?.form {
+        Form::Action(action) => Some(action),
         _ => None,
     }
 }

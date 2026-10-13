@@ -14,7 +14,7 @@ use super::super::{
 };
 use super::action_of;
 use crate::Layout;
-use crate::compile::{ActionKind, BlockId, CodeId, Executable, Stmt};
+use crate::compile::{ActionKind, BlockId, CodeId, Executable, Form};
 use crate::heap::{ClosureObj, Heap, Key, Obj, Table, within_depth};
 use crate::interface::{
     Bounds, EffectRequest, ImportError, Outcome, Program, Request, SleepRequest, WaitId,
@@ -170,16 +170,15 @@ impl Restore<'_> {
             });
             let inner = Site::new(call.statement.unit.clone(), &path[..depth + 2]);
             let at = |candidate: BlockId| exe.block(candidate).site == inner;
-            block = match exe.stmt(stmt) {
-                Stmt::If {
+            block = match &exe.stmt(stmt).form {
+                Form::If {
                     then_block,
                     else_block,
-                    ..
                 } => [*then_block, *else_block]
                     .into_iter()
                     .find(|candidate| at(*candidate))
                     .ok_or_else(nowhere)?,
-                Stmt::For { site, body, .. } if at(*body) => {
+                Form::For { site, body, .. } if at(*body) => {
                     let saved = loops.next().filter(|saved| saved.site == *site);
                     let (Some(saved), Some(iterated)) = (saved, iterated.next()) else {
                         return Err(malformed(format!("the loop at {site} is not saved")));
@@ -194,7 +193,7 @@ impl Restore<'_> {
                     });
                     *body
                 }
-                Stmt::While { site, body, .. } if at(*body) => {
+                Form::While { site, body, .. } if at(*body) => {
                     let saved = loops
                         .next()
                         .filter(|saved| saved.site == *site && saved.position.is_none())
@@ -205,7 +204,7 @@ impl Restore<'_> {
                     });
                     *body
                 }
-                Stmt::Try {
+                Form::Try {
                     site,
                     body,
                     catch,
@@ -830,6 +829,7 @@ pub(in crate::machine) fn import(
         inline_depth: 0,
         inline_result: None,
         regs: Vec::new(),
+        top: 0,
         storage: Storage::default(),
         steps: Default::default(),
         end: None,
