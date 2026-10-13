@@ -20,10 +20,14 @@ What is production and what is the bench's:
   to record each write transaction's label, latency and payload bytes; it
   forwards every call unchanged.
 
-This benchmark drives the durable substrate directly, bypassing facade
-`LashSession::send()` and observation. Its measurements exclude the host's
+The substrate cases drive the durable substrate directly, bypassing facade
+`LashSession::send()` and observation. Their measurements exclude the host's
 tool registry, projections and event feed; facade wiring exists in
 [`lash/src/session.rs`](../../../../lash/src/session.rs).
+
+The `declared-reads` case below uses the production facade, registry,
+RLM protocol and engine through `send()`; only its fixed model/provider
+and projection handle factory belong to the benchmark.
 
 ## Cases
 
@@ -141,3 +145,61 @@ Latency's `fast` fixture retains its separate send-to-host-completion window.
 Run under an 8 GiB address-space cap and retain peak RSS. Host load1 must be
 below 8 for a qualified timing; traces and loaded-host percentiles are counts
 and unqualified diagnostics, never a passing fast-gate timing certificate.
+
+## Fifty dependent declared reads (FIG-6154)
+
+`--case declared-reads` runs TypeScript and Python, traced and untraced,
+with 32-byte and 16,384-byte answer bodies. Every answer has an ordinal prefix;
+the next request carries the complete previous answer. Recorded `Repeatable`
+and `Read` use the identical cell source, input/output schemas and provider
+answer function. The projection control calls a host-seeded function through
+its dialect's saved-function calling convention, reading a private fixed
+handle. Its provider uses the same answer function. A fourth population reads,
+records one `Once` write of that answer, and reads again.
+
+The benchmark re-executes its own worker, installing both shipped dialects
+and one pure fixture function that creates the projection handle. It changes
+no shipped helper/library definition. The optional `--read-population` selects
+an exact population such as `typescript-read-32-false`; omitting it runs all
+32 populations. Selection leaves every assertion enabled.
+
+Each sample is a fresh session in the case's database. Workers are prewarmed;
+creation, projection seeding and completed deletion lie outside the measured
+send-to-outcome window. Accepted owner transactions stop at `turn.commit`;
+mail, node maintenance and the later session release are excluded. Facts count
+successful appends before terminal pruning, not rows left at the end. Installed
+bytes count actual new canonical graph payloads, including content deduplication;
+SQL metadata/index/WAL bytes are separate units and are not inferred. Worker
+pool counters give both IPC directions and bytes. The first read-plan commit
+is timed separately; its `model.done+cell.snapshot+admit` receipt also includes
+the fused model response and initial snapshot, so it is not an estimate of an
+exclusive plan CPU cost. Trace admission/export uses the production OpenTelemetry
+adapter with a local in-memory exporter and omitted content.
+
+The maintained `READ-COST-MODEL` law checks exact owner labels and fact counts;
+timing has no threshold. Both dialects run in the law. The Python release-pin refusal discovered by
+this benchmark was fixed by FIG-6186 before its final measurement. The dated
+[measurement report](../../../../../docs/perf/declared-reads-2026-10-13.md)
+records that gap.
+
+Build once as above, then run a capped local SQLite matrix and the same
+matrix through the private synchronous PostgreSQL gate. Use exact
+`--read-population` flags to measure a dialect separately (the dated report
+retains both dialects' command manifests). Default `--samples 10` reports
+nearest-rank p50/p95/p99; choose the sample count explicitly. At fewer than
+100 samples, p99 is the maximum. Retain `/usr/bin/time -v` peak RSS and host
+load; wall timing is diagnostic under shared-host load.
+
+```sh
+(ulimit -v 8388608; /usr/bin/time -v "$B" --store sqlite \
+  --sqlite-dir .kiln/FIG-6154/sqlite/db --case declared-reads --samples 20 \
+  --vm-worker "$W" --out .kiln/FIG-6154/sqlite/results.jsonl)
+(ulimit -v 8388608; /usr/bin/time -v kiln gate lash <fork> -- \
+  python3 crates/lash-perf/src/bin/durable_substrate/bench.py --binary "$B" \
+  --evidence-dir .kiln/FIG-6154/postgres --case declared-reads -- \
+  --samples 20 --vm-worker "$W")
+python3 crates/lash-perf/src/bin/durable_substrate/reads_report.py --inputs \
+  .kiln/FIG-6154/sqlite/results.jsonl .kiln/FIG-6154/postgres/postgres-nodes1.jsonl
+kiln test //crates/lash-perf:durable-substrate__bin__unit_test \
+  --test_arg=--exact --test_arg=reads::tests::fifty_dependent_reads_obey_the_cost_model
+```

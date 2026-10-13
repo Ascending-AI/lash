@@ -142,16 +142,17 @@ lash_rust_unit_test(
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    extra_data = [
+        "//crates/lash-perf:durable-substrate__bin",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     tags = [],
     version = "0.0.0-dev",
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
 )
 
 lash_rust_binary(
@@ -533,13 +534,14 @@ lash_rust_feature_test(
     ],
     extra_compile_data = [],
     extra_data = [
+        "//crates/lash-perf:durable-substrate__bin",
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_49241f05",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
@@ -565,13 +567,14 @@ lash_rust_feature_test(
     ],
     extra_compile_data = [],
     extra_data = [
+        "//crates/lash-perf:durable-substrate__bin",
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     library = "//crates/lash-perf:lash-perf__fv_80063a4c",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",

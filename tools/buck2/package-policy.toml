@@ -306,6 +306,16 @@ compile_data = ["//crates/lash-kernel-lib:package_files"]
 
 # --- Binary and integration-test support -------------------------------------
 
+# The declared-read cost law uses the benchmark's private projection handle
+# factory and both dialects, exactly as the maintained measured matrix does.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["bin-unit-test"]
+targets = ["durable-substrate"]
+data = ["//crates/lash-perf:durable-substrate__bin"]
+env = { LASH_READ_BENCH_WORKER = "$(location //crates/lash-perf:durable-substrate__bin)" }
+
+
 # The checked-in workspace fact that replaces a nested `cargo metadata` call
 # in the dependency-direction test.
 [[rule]]

@@ -62,6 +62,8 @@ pub struct Transaction {
     pub exec_roots: usize,
     /// How many domain writes it carried.
     pub domain_writes: usize,
+    /// Run facts appended by this accepted owner transaction, by stored kind.
+    pub run_facts: BTreeMap<String, usize>,
 }
 
 /// One kind's share of a commit's staged nodes.
@@ -83,6 +85,7 @@ struct Encoded {
     by_kind: BTreeMap<u32, KindBytes>,
     exec_roots: usize,
     domain_writes: usize,
+    run_facts: BTreeMap<String, usize>,
     /// The reason of the park it commits, if it parks its actor.
     parked: Option<String>,
     sql: Option<lash_core_execution::facade_support::sql::Receipt>,
@@ -111,6 +114,17 @@ impl Encoded {
             }),
             ..Self::default()
         };
+        for write in tx.domain() {
+            if let lash_durable::DomainWrite::RunFact(
+                lash_durable::domain::RunFactWrite::Append { kind, .. },
+            ) = write
+            {
+                *encoded
+                    .run_facts
+                    .entry(kind.as_str().to_owned())
+                    .or_default() += 1;
+            }
+        }
         for node in tx.graph().values() {
             let bytes = node.bytes.len();
             // A node whose envelope does not read is refused by the commit;
@@ -258,6 +272,7 @@ impl Recorder {
             by_kind: encoded.by_kind,
             exec_roots: encoded.exec_roots,
             domain_writes: encoded.domain_writes,
+            run_facts: encoded.run_facts,
         };
         let key = (transaction.actor.clone(), label);
         let park_actor = transaction.actor.clone();

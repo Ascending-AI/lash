@@ -22,6 +22,8 @@ mod operations;
 mod process;
 #[path = "durable_substrate/processes.rs"]
 mod processes;
+#[path = "durable_substrate/reads.rs"]
+mod reads;
 #[path = "durable_substrate/recorder.rs"]
 mod recorder;
 #[path = "durable_substrate/store_bench.rs"]
@@ -75,6 +77,10 @@ struct Args {
     /// Cases, by name; see `cases()`.
     #[arg(long = "case", required = true)]
     cases: Vec<String>,
+    /// Optional exact populations of declared-reads, e.g. typescript-read-32-false.
+    /// Omitted runs the full matrix; selecting a population never changes its assertions.
+    #[arg(long = "read-population")]
+    read_populations: Vec<String>,
     /// Batches (or resume samples) per case.
     #[arg(long, default_value_t = 10)]
     samples: usize,
@@ -118,6 +124,7 @@ enum Kind {
     Store,
     Operations,
     Counted,
+    Reads,
 }
 
 fn rounds(rounds: usize, tools_per_round: usize) -> Script {
@@ -130,6 +137,7 @@ fn rounds(rounds: usize, tools_per_round: usize) -> Script {
 
 fn case(name: &str) -> Result<Case> {
     let (kind, script) = match name {
+        "declared-reads" => (Kind::Reads, Script::default()),
         "operations" => (Kind::Operations, Script::default()),
         "counted-no-tool" => (Kind::Counted, Script::default()),
         "counted-one-tool" => (Kind::Counted, rounds(1, 1)),
@@ -207,8 +215,17 @@ impl Run<'_> {
     }
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    if reads::worker_entry()? {
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(bench_main())
+}
+
+async fn bench_main() -> Result<()> {
     let args = Args::parse();
     let report = Report::open(&args.out)?;
     report.write(
@@ -263,6 +280,7 @@ async fn main() -> Result<()> {
         };
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {
+            Kind::Reads => reads::run(&run, &args.read_populations).await?,
             Kind::Operations => operations::run(&run).await?,
             Kind::Counted => turns::counted(&run, &case).await?,
             Kind::Rounds { sessions } => turns::rounds(&run, &case, sessions).await?,
