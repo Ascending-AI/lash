@@ -2,8 +2,9 @@
 
 use super::{LABEL, LawBroken, LawOutcome, append, create, ensure, node, session};
 use crate::runner::{Activation, Exit, Owned, Runner, RunnerConfig};
-use crate::{DurableSettings, DurableStore, NodeId};
+use crate::{DurableSettings, DurableStore, LeaseSettings, NodeId};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Notify, mpsc, oneshot};
 
 mod store;
@@ -38,9 +39,22 @@ pub async fn an_abandoned_activation_hands_back_only_its_original_grant(
         inner: Arc::clone(&inner),
         begins,
     });
-    let config = DurableSettings::default()
-        .validate()
-        .map_err(|error| LawBroken(error.to_string()))?;
+    // Replacing the boot must not stop the Runner through a claim or reap
+    // before the forced unwind. Renewal is held by ObservedStore; put both
+    // claim intervals and the reap interval beyond a test action's lifetime.
+    // The first claim still runs at once, and hand-back follows the exit.
+    let quiet = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+    let config = DurableSettings {
+        lease: LeaseSettings {
+            claim_backoff: quiet,
+            claim_poll: quiet,
+            reap_every: quiet,
+            ..LeaseSettings::default()
+        },
+        ..DurableSettings::default()
+    }
+    .validate()
+    .map_err(|error| LawBroken(error.to_string()))?;
     let runner = Runner::new(
         store,
         Arc::new(lash_core_ids::clock::SystemClock),
