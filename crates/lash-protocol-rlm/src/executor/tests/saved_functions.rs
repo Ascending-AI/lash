@@ -561,3 +561,28 @@ async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
     assert!(tools.answered().is_empty(), "nothing of the cell ran");
     assert!(!state.saved_functions().contains_key("done"));
 }
+
+/// TS-CALL-SLOTS: a later cell enters the packed wrapper of the shared
+/// positional body, preserving unknown types, spreads and apply.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_positional_function_saved_in_one_cell_accepts_generic_calls_in_the_next() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = typescript_services();
+    let mut state = typescript_state();
+    let defined = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "function f(value = 7) { return value; }",
+    )
+    .await;
+    assert!(defined.error().is_none(), "{:?}", defined.error());
+    let called = run_cell(&mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools), &services,
+        "await control.finish({ plain: f('x'), spread: f(...['y']), apply: f.apply(undefined, ['z']), missing: f(), length: f.length });").await;
+    assert_eq!(
+        finish_of(&called),
+        serde_json::json!({ "plain": "x", "spread": "y", "apply": "z", "missing": 7, "length": 0 })
+    );
+}

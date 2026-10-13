@@ -880,6 +880,33 @@ impl Lowerer<'_> {
                 });
             }
         }
+        if let ast::Expr::Ident(name, _) = callee
+            && args.iter().all(|arg| matches!(arg, ast::CallArg::Value(_)))
+            && let Some(entry) = self
+                .binding_mut(name)
+                .and_then(|(_, binding)| binding.positional.clone())
+        {
+            let returned = self.lower_expr(callee)?.ty.returned();
+            let mut passed = vec![Operand::undefined().atom];
+            for (index, arg) in args.iter().enumerate() {
+                let ast::CallArg::Value(arg) = arg else {
+                    unreachable!("plain arguments were checked")
+                };
+                let value = self.lower_expr(arg)?;
+                if index < entry.arity {
+                    passed.push(self.pin(value).atom);
+                } else {
+                    self.discard(value);
+                }
+            }
+            return Ok(self.emit_action(
+                Action::Call {
+                    callee: Callee::Value(entry.name),
+                    args: passed,
+                },
+                returned,
+            ));
+        }
         match callee {
             ast::Expr::Member {
                 object, property, ..

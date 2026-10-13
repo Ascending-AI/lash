@@ -39,6 +39,7 @@ mod calls;
 mod expressions;
 mod functions;
 mod patterns;
+mod positional;
 mod process;
 mod statements;
 mod walk;
@@ -188,6 +189,13 @@ impl Operand {
     }
 }
 
+/// The private entry of a stable local function, taking its arguments as slots.
+#[derive(Clone, Debug)]
+struct Positional {
+    name: Name,
+    arity: usize,
+}
+
 /// Where a statement came from, kept beside the statement until the
 /// document is whole and its sites can be counted.
 #[derive(Clone, Debug, Default)]
@@ -230,6 +238,7 @@ struct Binding {
     predeclared: bool,
     /// The function the binding belongs to, as an index into the stack.
     function: usize,
+    positional: Option<Positional>,
 }
 
 #[derive(Debug, Default)]
@@ -644,6 +653,7 @@ impl Lowerer<'_> {
                 live: kind == BindingKind::Local,
                 predeclared: false,
                 function,
+                positional: None,
             },
         );
         kernel

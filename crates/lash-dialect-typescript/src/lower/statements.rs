@@ -51,8 +51,19 @@ impl Lowerer<'_> {
                         self.declare(&name, kind_of(*kind));
                     }
                 }
-                ast::Stmt::Function { name, .. } => {
+                ast::Stmt::Function { name, function } => {
                     self.declare(name, BindingKind::Function);
+                    if !self.assigned.contains(name) && super::positional::eligible(function) {
+                        let entry = super::Positional {
+                            name: self.fresh("positional"),
+                            arity: function.params.len(),
+                        };
+                        self.bind(entry.name.clone(), Operand::undefined());
+                        let Some((_, binding)) = self.binding_mut(name) else {
+                            unreachable!("the function was just declared");
+                        };
+                        binding.positional = Some(entry);
+                    }
                 }
                 ast::Stmt::Enum { name, .. } => {
                     self.declare(name, BindingKind::Let);
@@ -90,7 +101,13 @@ impl Lowerer<'_> {
         }
         for statement in statements {
             if let ast::Stmt::Function { name, function } = statement.unlabeled() {
-                let closure = self.lower_function(function)?;
+                let entry = self
+                    .binding_mut(name)
+                    .and_then(|(_, binding)| binding.positional.clone());
+                let closure = match entry {
+                    Some(entry) => self.positional_closure(function, &entry)?,
+                    None => self.lower_function(function)?,
+                };
                 self.initialise(name, closure);
             }
         }

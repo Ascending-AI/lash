@@ -139,26 +139,7 @@ impl Lowerer<'_> {
         let outer_span = self.span;
         let body = self.scoped_block(|lowerer| {
             lowerer.parameters(&function.params, &args)?;
-            match &function.body {
-                ast::FunctionBody::Block(statements) => {
-                    lowerer.declare_vars(statements);
-                    lowerer.declare_block(statements)?;
-                    lowerer.lower_statements(statements)?;
-                }
-                ast::FunctionBody::Expression(value) => {
-                    let value = lowerer.lower_expr(value)?;
-                    lowerer.emit(Stmt::Return {
-                        value: value.expr(),
-                    });
-                }
-            }
-            if !matches!(lowerer.buf.stmts.last(), Some(Stmt::Return { .. })) {
-                // A kernel function that ends without `return` gives null;
-                // a JavaScript one gives `undefined`.
-                lowerer.emit(Stmt::Return {
-                    value: Expr::Literal(Literal::Absent),
-                });
-            }
+            lowerer.function_body(function)?;
             if lowerer.frame().arguments_used {
                 let prefix = lowerer.block(|this| {
                     let object = this.invoke(
@@ -191,6 +172,101 @@ impl Lowerer<'_> {
         })
     }
 
+    /// The shared source body, after its parameter bindings.
+    fn function_body(&mut self, function: &ast::Function) -> Lowering<()> {
+        match &function.body {
+            ast::FunctionBody::Block(statements) => {
+                self.declare_vars(statements);
+                self.declare_block(statements)?;
+                self.lower_statements(statements)?;
+            }
+            ast::FunctionBody::Expression(value) => {
+                let value = self.lower_expr(value)?;
+                self.emit(Stmt::Return {
+                    value: value.expr(),
+                });
+            }
+        }
+        if !matches!(self.buf.stmts.last(), Some(Stmt::Return { .. })) {
+            self.emit(Stmt::Return {
+                value: Expr::Literal(Literal::Absent),
+            });
+        }
+        Ok(())
+    }
+
+    /// A packed exported entry normalizes arguments into one positional body.
+    /// The body is a private captured closure, which saved-function freezing
+    /// includes as an unnamed helper rather than a second exported function.
+    pub(super) fn positional_closure(
+        &mut self,
+        function: &ast::Function,
+        entry: &super::Positional,
+    ) -> Lowering<Operand> {
+        let this = self.fresh("this");
+        let mut params = vec![this.clone()];
+        self.functions.push(FunctionFrame {
+            arrow: false,
+            this: Some(this),
+            args: None,
+            arguments_used: false,
+            controls: Vec::new(),
+        });
+        let outer_span = self.span;
+        let body = self.scoped_block(|lowerer| {
+            for pattern in &function.params {
+                if let ast::Pattern::Ident(name, _) = pattern {
+                    params.push(lowerer.declare(name, BindingKind::Local));
+                } else {
+                    let argument = lowerer.fresh("argument");
+                    params.push(argument.clone());
+                    lowerer.destructure(
+                        pattern,
+                        Operand::variable(argument, Ty::Unknown),
+                        Mode::Local,
+                    )?;
+                }
+            }
+            lowerer.function_body(function)
+        });
+        self.span = outer_span;
+        self.functions.pop();
+        let body = body?;
+        let made = self.emit_closure(params, body);
+        self.store(Place::Variable(entry.name.clone()), made);
+
+        let this = self.fresh("this");
+        let args = self.fresh("args");
+        let body = self.block(|lowerer| {
+            let supplied = lowerer.supplied_arguments(entry.arity, &args)?;
+            let mut passed = vec![lash_kernel_doc::Atom::Variable(this.clone())];
+            for index in 0..entry.arity {
+                let value = lowerer.let_expr(Self::element(&supplied, index), Ty::Unknown);
+                passed.push(value.atom);
+            }
+            let result = lowerer.emit_action(
+                lash_kernel_doc::Action::Call {
+                    callee: lash_kernel_doc::Callee::Value(entry.name.clone()),
+                    args: passed,
+                },
+                Ty::Unknown,
+            );
+            lowerer.emit(Stmt::Return {
+                value: result.expr(),
+            });
+            Ok(())
+        })?;
+        if self.in_cell_code() {
+            self.written = Some(self.written(function));
+        }
+        let closure = self.emit_closure(vec![this, args], body);
+        let closure = Operand {
+            ty: self.facts.function(function.return_ty.as_ref()),
+            ..closure
+        };
+        Ok(self.function_token(function, closure))
+    }
+
     /// Binds a function's parameters from its argument list. A missing
     /// argument is `undefined`; an extra one is ignored.
     fn parameters(
@@ -198,11 +274,32 @@ impl Lowerer<'_> {
         params: &[ast::Pattern],
         args: &lash_kernel_doc::Name,
     ) -> Lowering<()> {
-        let args = Operand::variable(args.clone(), Ty::Unknown);
         let positional = params
             .iter()
             .take_while(|param| !matches!(param, ast::Pattern::Rest(_)))
             .count();
+        let args_value = Operand::variable(args.clone(), Ty::Unknown);
+        let supplied = self.supplied_arguments(positional, args)?;
+        #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
+        let count = Operand::number(positional as f64);
+        for (index, param) in params.iter().enumerate() {
+            let value = match param {
+                ast::Pattern::Rest(_) => {
+                    self.invoke("ts.rest", &[args_value.clone(), count.clone()], Ty::Unknown)?
+                }
+                _ => self.let_expr(Self::element(&supplied, index), Ty::Unknown),
+            };
+            self.destructure(param, value, Mode::Local)?;
+        }
+        Ok(())
+    }
+
+    fn supplied_arguments(
+        &mut self,
+        positional: usize,
+        args: &lash_kernel_doc::Name,
+    ) -> Lowering<Operand> {
+        let args = Operand::variable(args.clone(), Ty::Unknown);
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
         let count = Operand::number(positional as f64);
         let supplied = if positional == 0 {
@@ -223,16 +320,7 @@ impl Lowerer<'_> {
             self.emit_if(missing, fill, Buf::default());
             Operand::variable(slot, Ty::Unknown)
         };
-        for (index, param) in params.iter().enumerate() {
-            let value = match param {
-                ast::Pattern::Rest(_) => {
-                    self.invoke("ts.rest", &[args.clone(), count.clone()], Ty::Unknown)?
-                }
-                _ => self.let_expr(Self::element(&supplied, index), Ty::Unknown),
-            };
-            self.destructure(param, value, Mode::Local)?;
-        }
-        Ok(())
+        Ok(supplied)
     }
 
     /// The enclosing function's `this`, which an arrow shares with the
