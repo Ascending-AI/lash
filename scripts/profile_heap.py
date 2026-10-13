@@ -280,11 +280,78 @@ def profile_pair(args: argparse.Namespace) -> None:
     (out / "overhead.json").write_text(json.dumps(receipt, indent=2) + "\n")
 
 
+def profile_growturn(args: argparse.Namespace) -> None:
+    """Profile both host lifetimes of the growing turn, with explicit workers."""
+    root = Path(__file__).resolve().parents[1]
+    out = args.out_dir.resolve()
+    out.mkdir(parents=True, exist_ok=False)
+    host = feature_binary(root, "lash-perf", "growturn", {"dhat-heap"})
+    worker = feature_binary(root, "lash-vm-worker", "lash-vm-worker",
+                            {"dhat-heap", "dialect-python", "dialect-typescript", "testing"})
+    paths = artifacts(root, [host, worker], build=not args.no_build,
+                      report=args.build_report or out / "build.json",
+                      optimized=True, symbolized=True)
+    observations = []
+    for phase in ("start", "resume"):
+        command = [str(paths[host]), "--phase", phase, "--rounds", str(args.operations),
+                   "--payload-bytes", str(args.payload_bytes),
+                   "--checkpoint-every", str(args.checkpoint_every),
+                   "--database", str(out / "turn.sqlite"), "--vm-worker", str(paths[worker]),
+                   "--out", str(out / "checkpoints.jsonl"),
+                   "--profile-from-round", str(args.profile_from_round),
+                   "--worker-profile-dir", str(out / "workers")]
+        if not args.profile_at_close or phase == "resume":
+            command += ["--dhat-out", str(out / f"{phase}.dhat.json"), "--dhat-frames", "16"]
+        if args.profile_at_close:
+            command += ["--profile-at-close"]
+        with (out / f"{phase}.log").open("w") as log:
+            result = subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
+        observations.append({"phase": phase, "command": command, "exit_code": result.returncode})
+        if result.returncode:
+            raise RuntimeError(f"growing turn {phase} failed; see {out / (phase + '.log')}")
+    rows = [json.loads(line) for line in (out / "checkpoints.jsonl").read_text().splitlines()]
+    completed = [row for row in rows if row.get("phase") == "completed"]
+    closed = [row for row in rows if row.get("phase") == "closed"]
+    if (len(completed) != 1 or completed[0]["rounds_done"] != args.operations
+            or completed[0]["store"]["completed"] != 1
+            or completed[0]["store"]["errors"] or completed[0]["store"]["unfinished"]
+            or len(closed) != 1 or not closed[0]["close_tombstone_observed"]):
+        raise RuntimeError("growing turn completion/close receipt is incomplete")
+    profiles = sorted(out.rglob("*.dhat.json"))
+    if not any(path.parent == out for path in profiles):
+        raise RuntimeError("no host profiling window reached the configured round")
+    if not any(path.parent.name == "workers" for path in profiles):
+        raise RuntimeError("no worker profile was flushed at clean reset")
+    for path in profiles:
+        if not json.loads(path.read_text()).get("pps") or not path.with_suffix(".receipt.json").exists():
+            raise RuntimeError(f"empty profile or missing scope receipt: {path}")
+    receipt = {"kind": "lash.growturn-heap", "certifying": False, "growth_gate": None,
+               "rounds": args.operations, "payload_bytes": args.payload_bytes,
+               "allocator": "dhat-heap+stats_alloc", "observations": observations,
+               "profile_from_round": args.profile_from_round,
+               "profile_at_close": args.profile_at_close,
+               "host_scope": ("resumed process setup through durable close; core still alive" if args.profile_at_close
+                              else "full process lifetime") if not args.profile_from_round else
+                             "from selected completed round; earlier allocations excluded; end at close if requested",
+               "completed": 1, "errors": 0, "unfinished": 0,
+               "profiles": [str(path) for path in profiles],
+               "worker_scope": "per-process bootstrap through first clean reset; not every later cell",
+               "executables": {label: {"path": str(path),
+                   "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for label, path in paths.items()}}
+    (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    print(f"Growing-turn heap receipt: {out / 'receipt.json'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--population", choices=("boundary", "latency"), default="boundary")
+    parser.add_argument("--population", choices=("boundary", "latency", "growturn"), default="boundary")
     parser.add_argument("--case", default="root-redrive")
     parser.add_argument("--operations", type=int, default=1)
+    parser.add_argument("--payload-bytes", type=int, default=1024)
+    parser.add_argument("--profile-from-round", type=int, default=0)
+    parser.add_argument("--profile-at-close", action="store_true",
+                        help="Growturn: profile resumed setup through close, before core shutdown")
+    parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--callers", type=int, default=1)
     parser.add_argument("--out-dir", type=Path, required=True, help="Fresh evidence directory")
     parser.add_argument("--build-report", type=Path)
@@ -298,7 +365,12 @@ def main() -> None:
         parser.error("latency heap pairs select one child-node case: cross-worker, poll or grace")
     if args.operations < 1 or args.callers < 1 or args.worker_threads < 1:
         parser.error("operations, callers and worker threads must be positive")
-    if args.heaptrack:
+    if args.population == "growturn":
+        if (args.heaptrack or args.operations < 4 or args.payload_bytes < 32
+                or args.checkpoint_every < 1 or not 0 <= args.profile_from_round <= args.operations):
+            parser.error("growturn uses dhat, rounds >= 4, payload >= 32 and positive checkpoints")
+        profile_growturn(args)
+    elif args.heaptrack:
         if args.population != "boundary" or args.case != "persistent-node-waves":
             parser.error("--heaptrack requires --population boundary --case persistent-node-waves")
         profile_heaptrack(args)

@@ -32,6 +32,11 @@ name = "durable-substrate"
 path = "src/bin/durable_substrate.rs"
 test = true
 
+[[bin]]
+name = "growturn"
+path = "src/bin/growturn.rs"
+test = false
+
 [lints]
 workspace = true
 
