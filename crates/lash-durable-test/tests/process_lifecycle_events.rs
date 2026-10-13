@@ -376,6 +376,7 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
             site: site.map(|(node_id, occurrence)| {
                 lash_sansio::effect_identity_fixture(node_id, occurrence)
             }),
+            matched: None,
         }],
         wake: None,
     }

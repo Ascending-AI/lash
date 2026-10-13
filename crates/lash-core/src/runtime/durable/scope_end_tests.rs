@@ -1247,6 +1247,7 @@ impl crate::ProcessEngine for LawEngine {
                         effect: lash_core_execution::testing::effect(HANGING_TOOL),
                         input: serde_json::Value::Null,
                         site: None,
+                        matched: None,
                     }],
                     wake: None,
                 },

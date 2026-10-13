@@ -24,6 +24,15 @@
 //! process that awaits `Promise.all([call, sleep(5 min)])`, longer than any
 //! step bound, parks on the sleep's deadline once its call settles, its
 //! actor released as `waiting`, and wakes there after node A is killed.
+//!
+//! A process's `call_dynamic` call is two committed steps (P6, R10): its
+//! resolution, whose committed outcome is the match, then the call of the
+//! matched tool, admitted by the commit that consumes the resolution. Cut
+//! at every write of the process's passes and step outcomes, a resumed
+//! call runs the target the committed match names under one call id, and
+//! the resolver never runs once a resolution committed: neither for a
+//! resolved path (law 10, DYNAMIC-TWO-STEP) nor for a refused or
+//! unavailable one, which the body catches typed.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -705,8 +714,558 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     );
 }
 
+/// The component that serves a process's `call_dynamic` calls: its deferred
+/// provider resolves them and executes what it matched.
+const DYNAMIC_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("process-dynamic", lash_core::FormatVersion::ONE);
+
+/// The call path the resolver resolves, to `dyn_first` the first time it is
+/// asked and to `dyn_second` every time after: a path resolved again names
+/// another target.
+const RESOLVED_PATH: &str = "search.run";
+/// The call path the resolver refuses.
+const REFUSED_PATH: &str = "search.refused";
+/// A call path no tool answers.
+const MISSING_PATH: &str = "search.missing";
+
+/// What the dynamic laws observe of every node: the outside world.
+#[derive(Default)]
+struct Resolutions {
+    /// Each resolver call: the path, and how many writes the trace held
+    /// when it ran.
+    resolved: Mutex<Vec<(String, usize)>>,
+    /// Each body entry of a matched target: its tool and call id.
+    entries: Mutex<Vec<(String, lash_core::ToolCallId)>>,
+    /// The nodes whose trace the resolver reads.
+    nodes: Mutex<Option<std::sync::Weak<SimNodes>>>,
+}
+
+/// A target the resolver matches: `Repeatable`, so a call a kill interrupted
+/// runs again under its id.
+fn dynamic_target(name: &str) -> lash_core::ToolDefinition {
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "Records each body entry's call id.",
+        object.clone(),
+        object,
+    )
+    .expect("the target's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ))
+}
+
+/// The deferred provider: it advertises nothing, resolves on demand, and
+/// executes the targets it matched.
+struct Resolver {
+    seen: Arc<Resolutions>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Resolver {
+    fn tool_manifests(&self, _config: &lash_core::OwnerConfigView) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        ["dyn_first", "dyn_second"]
+            .contains(&name)
+            .then(|| Arc::new(dynamic_target(name).contract()))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let tool = call.name().to_owned();
+        self.seen
+            .entries
+            .lock_recover()
+            .push((tool.clone(), call.context.call_id().clone()));
+        ToolOutcome::ok(serde_json::json!({ "tool": tool })).into()
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::DeferredToolProvider for Resolver {
+    async fn resolve(
+        &self,
+        _cx: &lash_core::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, lash_core::DeferredOutcome> {
+        let at = self
+            .seen
+            .nodes
+            .lock_recover()
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+            .map_or(0, |nodes| nodes.script().trace().len());
+        let mut resolved = self.seen.resolved.lock_recover();
+        let mut answers = BTreeMap::new();
+        for path in paths {
+            let earlier = resolved.iter().any(|(seen, _)| seen == path);
+            resolved.push(((*path).to_owned(), at));
+            let outcome = match *path {
+                RESOLVED_PATH => lash_core::DeferredOutcome::Resolved {
+                    provider: DYNAMIC_COMPONENT.tool_provider("deferred"),
+                    definition: dynamic_target(if earlier { "dyn_second" } else { "dyn_first" }),
+                    binding: None,
+                },
+                REFUSED_PATH => lash_core::DeferredOutcome::Refused {
+                    reason: "not for this process".to_owned(),
+                },
+                _ => continue,
+            };
+            answers.insert((*path).to_owned(), outcome);
+        }
+        answers
+    }
+}
+
+/// `dynamic()` calls the target `search.run` resolves to through
+/// `call_dynamic`, and answers what it answered.
+const RESOLVING: &str = r#"kernel 1
+numbers float
+effect lash.call_dynamic(input: Record{args?: Any, path: Text}) -> Any
+entry dynamic() -> Any
+
+fn dynamic() {
+  let request = {path: "search.run", args: {q: "x"}}
+  let got = perform lash.call_dynamic(request) as Any
+  return got
+}
+
+main {
+  finish null
+}
+"#;
+
+/// `dynamic()` calls a refused path and a path no tool answers, catches
+/// each failure, and answers both.
+const DECIDING: &str = r#"kernel 1
+numbers float
+effect lash.call_dynamic(input: Record{args?: Any, path: Text}) -> Any
+entry dynamic() -> Any
+
+fn dynamic() {
+  let refusing = {path: "search.refused", args: {}}
+  let refused = null
+  try {
+    set refused = perform lash.call_dynamic(refusing) as Any
+  } catch e {
+    set refused = {kind: e.kind, data: e.data}
+  }
+  let looking = {path: "search.missing"}
+  let missing = null
+  try {
+    set missing = perform lash.call_dynamic(looking) as Any
+  } catch e {
+    set missing = {kind: e.kind, data: e.data}
+  }
+  return [refused, missing]
+}
+
+main {
+  finish null
+}
+"#;
+
+/// A deployment whose host starts one kernel process running `document`'s
+/// `dynamic()` under an env that links only `call_dynamic`.
+struct DynamicCalls {
+    dialect: Dialect,
+    postgres_url: Option<String>,
+    document: &'static str,
+    seen: Arc<Resolutions>,
+    backend: Mutex<Option<lash::Backend>>,
+    clock: Mutex<Option<Arc<SimClock>>>,
+    core: Mutex<Option<lash::LashCore>>,
+    process: Mutex<Option<lash_core::ProcessId>>,
+    tripwire: Arc<Tripwire>,
+    keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+}
+
+impl DynamicCalls {
+    fn new(dialect: Dialect, postgres_url: Option<String>, document: &'static str) -> Self {
+        Self {
+            dialect,
+            postgres_url,
+            document,
+            seen: Arc::default(),
+            backend: Mutex::default(),
+            clock: Mutex::default(),
+            core: Mutex::default(),
+            process: Mutex::default(),
+            tripwire: Arc::default(),
+            keep: Mutex::default(),
+        }
+    }
+
+    fn backend(&self) -> lash::Backend {
+        self.backend
+            .lock_recover()
+            .clone()
+            .expect("the database is built first")
+    }
+
+    fn core(&self) -> lash::LashCore {
+        let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
+        let resolver = Arc::new(Resolver {
+            seen: Arc::clone(&self.seen),
+        });
+        self.core
+            .lock_recover()
+            .get_or_insert_with(|| {
+                lash::LashCore::rlm_builder(
+                    backend.clone(),
+                    served::rlm(&backend, sim::workers(&clock)),
+                )
+                .serve_sessions(false)
+                .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                .data_retention(lash::DataRetention::standard())
+                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+                .execution_budgets(lash::ExecutionBudgets::recommended())
+                .delta_coalescing(lash::DeltaCoalescing::recommended())
+                .process_component(
+                    Arc::new(
+                        lash::plugins::StaticPluginFactory::new(
+                            lash::plugins::PluginDeclaration::initial(
+                                DYNAMIC_COMPONENT.component(),
+                            ),
+                            lash::plugins::PluginSpec::new()
+                                .with_deferred_provider(lash::hook_key!("deferred"), resolver),
+                        )
+                        .as_component(DYNAMIC_COMPONENT.format())
+                        .expect("a deferred provider is a process component"),
+                    ),
+                    DYNAMIC_COMPONENT,
+                )
+                .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                    lash::persistence::LeaseOwnerId::new("process-dynamic-deployment"),
+                    lash::persistence::LeaseIncarnationId::new("process-dynamic-boot"),
+                ))
+                .expect("the core builds")
+            })
+            .clone()
+    }
+
+    async fn registered(&self) -> Vec<lash_core::ProcessRecord> {
+        lash_core::testing::process_roster_records_for_fixture(
+            self.backend().process_registry().as_ref(),
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            },
+        )
+        .await
+        .expect("the registry lists its processes")
+    }
+
+    /// The host's start of `dynamic()` under the env linking `call_dynamic`
+    /// to the component's deferred provider.
+    async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
+        let core = self.core();
+        let document = lash::workflow::document::parse_document(self.document)
+            .map_err(|error| format!("the document parses: {error}"))?;
+        let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
+            .publish(
+                &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                    lash_core::HostArtifactPin::mint(),
+                ))
+                .expect("a host pin is unguarded"),
+                &document,
+            )
+            .await
+            .map_err(|error| format!("publish the document: {error}"))?;
+        let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            document: identity,
+            entry: lash::workflow::document::Name::new("dynamic"),
+            args: serde_json::Map::new(),
+        })
+        .expect("the input encodes");
+        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
+            .component(DYNAMIC_COMPONENT, &())
+            .link_dynamic(DYNAMIC_COMPONENT.tool_provider("deferred"))
+            .build()
+            .map_err(|refusal| format!("the env builds: {refusal}"))?;
+        let env_ref = core
+            .host_artifacts()
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+            .await
+            .map_err(|error| format!("publish the env: {error}"))?;
+        let kind = lash_vm_runtime::LASH_VM_ENGINE_KIND;
+        let settings = core
+            .processes()
+            .engine_defaults(kind, &payload)
+            .map_err(|error| format!("the kernel's settings: {error}"))?;
+        core.processes()
+            .start(
+                lash_core::ProcessStartRequest::engine(
+                    kind.to_owned(),
+                    payload,
+                    lash_core::EngineLaunch::new(env_ref, settings),
+                    lash_core::ProcessOriginator::host(),
+                    lash_core::LifetimeDecision::Detached,
+                ),
+                core.effect_host(),
+            )
+            .await
+            .map(|receipt| receipt.process_id)
+            .map_err(|error| format!("start the process: {error}"))
+    }
+
+    /// The resolver never ran for a path once a resolution of it committed:
+    /// every resolver call of a path precedes the first step outcome the
+    /// process committed after that path was first resolved.
+    fn resolved_once(&self, trace: &[lash_durable_test::Write], process: &ActorKey) -> Vec<String> {
+        let resolved = self.seen.resolved.lock_recover().clone();
+        let mut violations = Vec::new();
+        let paths: BTreeSet<&String> = resolved.iter().map(|(path, _)| path).collect();
+        for path in paths {
+            let calls: Vec<usize> = resolved
+                .iter()
+                .filter(|(seen, _)| seen == path)
+                .map(|(_, at)| *at)
+                .collect();
+            let first = calls.iter().copied().min().unwrap_or_default();
+            let Some(committed) = trace
+                .iter()
+                .enumerate()
+                .skip(first)
+                .find_map(|(at, write)| {
+                    (write.point.label == CommitLabel::STEP_OUTCOME
+                        && write.committed()
+                        && write.actor.as_ref() == Some(process))
+                    .then_some(at)
+                })
+            else {
+                violations.push(format!("no resolution of `{path}` committed"));
+                continue;
+            };
+            if let Some(late) = calls.iter().find(|at| **at > committed) {
+                violations.push(format!(
+                    "`{path}` was resolved again at write {late}, after its resolution \
+                     committed at write {committed}"
+                ));
+            }
+        }
+        violations
+    }
+
+    /// The laws of one run, cut at `cut`.
+    async fn laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        let mut violations = Vec::new();
+        let trace = nodes.script().trace();
+        let processes = self.registered().await;
+        let [process] = processes.as_slice() else {
+            return vec![format!("{} processes registered", processes.len())];
+        };
+        let actor = ActorKey::process(process.id.as_str()).unwrap();
+        violations.extend(self.resolved_once(&trace, &actor));
+        let answer = match process.outcome() {
+            Some(lash_core::ProcessAwaitOutput::Settled { output }) if output.is_success() => {
+                output.value_for_projection()
+            }
+            other => {
+                violations.push(format!("the process ended {other:?}"));
+                serde_json::Value::Null
+            }
+        };
+        let entries = self.seen.entries.lock_recover().clone();
+        if self.document == RESOLVING {
+            // The target that ran is the one the committed match named,
+            // under one call id across every entry.
+            match entries.first() {
+                None => violations.push("the matched target never ran".to_owned()),
+                Some((tool, call)) => {
+                    if entries
+                        .iter()
+                        .any(|entry| entry.0 != *tool || entry.1 != *call)
+                    {
+                        violations.push(format!(
+                            "the target's body entries saw more than one target or call id: \
+                             {entries:?}"
+                        ));
+                    }
+                    if answer != serde_json::json!({ "tool": tool }) {
+                        violations.push(format!(
+                            "the process answered {answer}, not the target `{tool}` that ran"
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Each decision is answered to the body as the typed failure it
+            // recorded; no tool ran.
+            if !entries.is_empty() {
+                violations.push(format!("a refused or unavailable path ran: {entries:?}"));
+            }
+            for (index, cause, path) in [
+                (0, "dynamic_call_refused", REFUSED_PATH),
+                (1, "dynamic_call_unavailable", MISSING_PATH),
+            ] {
+                let caught = &answer[index];
+                if caught["kind"] != lash_vm_runtime::TOOL_FAILED
+                    || caught["data"]["cause"]["kind"] != cause
+                    || caught["data"]["cause"]["path"] != path
+                {
+                    violations.push(format!(
+                        "the body did not catch `{path}` as a tool failure caused by {cause}: \
+                         {caught}"
+                    ));
+                }
+            }
+        }
+        if let Some(cut) = cut {
+            violations.extend(zombie_laws(cut, &trace));
+        }
+        if !violations.is_empty() {
+            violations.push(format!(
+                "resolutions: {:?}",
+                self.seen.resolved.lock_recover()
+            ));
+        }
+        violations
+    }
+}
+
+#[async_trait::async_trait]
+impl Scenario for DynamicCalls {
+    async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
+        let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) = dialect::open(
+            self.dialect,
+            self.postgres_url.as_deref(),
+            clock,
+            &self.keep,
+        )
+        .await;
+        *self.backend.lock_recover() = Some(served::configured_backend(
+            stores,
+            sim::settings(),
+            Vec::new(),
+        ));
+        database
+    }
+
+    fn config(&self) -> SimNodesConfig {
+        SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: lash::testing::node_activation(&self.core(), Arc::new(lash_durable::NoProbe))
+                .expect("the core's node activation")
+                .0
+                .formats()
+                .decodes(),
+            serves: lash::testing::node_serves(&self.core()),
+            max_active: 8,
+        }
+    }
+
+    fn activation(&self) -> Arc<dyn Activation> {
+        lash::testing::node_activation(&self.core(), Arc::clone(&self.tripwire) as _)
+            .expect("the core's node activation")
+            .1
+    }
+
+    async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        *self.seen.nodes.lock_recover() = Some(Arc::downgrade(nodes));
+        // The host is outside the deployment under test: its start is uncut.
+        let process = self.start_process().await?;
+        *self.process.lock_recover() = Some(process);
+        nodes.start("a");
+        nodes.quiesce().await;
+        nodes.start("b");
+        Ok(())
+    }
+
+    fn actors(&self) -> Vec<ActorKey> {
+        self.process
+            .lock_recover()
+            .iter()
+            .map(|process| ActorKey::process(process.as_str()).unwrap())
+            .collect()
+    }
+
+    async fn done(&self, _nodes: &SimNodes) -> bool {
+        let processes = self.registered().await;
+        !processes.is_empty() && processes.iter().all(lash_core::ProcessRecord::is_terminal)
+    }
+
+    async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
+        self.laws(nodes, cut).await
+    }
+}
+
+/// The matrix of `document`'s process on `tier`: every write of its passes
+/// and step outcomes cut under every fault, recovered on the other node.
+async fn dynamic_matrix(tier: Tier, document: &'static str) {
+    let (dialect, postgres_url) = match tier {
+        Tier::SqliteMemory => (Dialect::SqliteMemory, None),
+        Tier::SqliteFile => (Dialect::SqliteFile, None),
+        Tier::Postgres => {
+            let Some(url) = dialect::postgres_url() else {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return;
+            };
+            (Dialect::Postgres, Some(url))
+        }
+    };
+    let labels = [CommitLabel::PROCESS_ADVANCE, CommitLabel::STEP_OUTCOME];
+    let report = Matrix::new()
+        .across_nodes()
+        .labels(&labels)
+        .faults(&[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| DynamicCalls::new(dialect, postgres_url.clone(), document))
+        .await;
+    eprintln!("{dialect:?}: {} cells", report.cells.len());
+    report.assert_held();
+    for label in labels {
+        assert!(
+            report.labels().contains(&label),
+            "the matrix never cut {label}"
+        );
+    }
+}
+
+/// DYNAMIC-TWO-STEP (law 10; P6, R10): a process's `call_dynamic` call is
+/// its resolution, whose committed outcome is the match, then the call of
+/// the matched tool, which the commit consuming the resolution admits. A
+/// crash anywhere between them resumes the same target under the same call
+/// id, and the resolver, which names another target every time it is asked
+/// again, never runs once the resolution committed.
+async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier: Tier) {
+    dynamic_matrix(tier, RESOLVING).await;
+}
+
+/// A refused path and a path no tool answers are each a durable decision
+/// (P6, S6): the body catches each as its typed failure, no tool runs, and
+/// a crash after a decision committed never resolves its path again.
+async fn a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed(tier: Tier) {
+    dynamic_matrix(tier, DECIDING).await;
+}
+
 tiered_laws!(
     current_thread:
     tool_call_limit_counts_what_a_process_holds_across_a_worker_kill,
     an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash,
+    a_dynamic_call_resumes_its_matched_target_and_never_resolves_again,
+    a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed,
 );

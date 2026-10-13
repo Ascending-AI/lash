@@ -23,7 +23,11 @@
 //! only parked waits and retry dues are left, it releases as `waiting`
 //! until its earliest due time, holding nothing. The activation adds only
 //! the engine-event adapter: a step whose call the fold settled is handed
-//! to `advance` as `StepSettled`.
+//! to `advance` as `StepSettled`. The one exception is a `call_dynamic`
+//! call's resolution (P6): lash consumes a resolved match itself, admitting
+//! the call of the matched tool in the same commit
+//! ([`step_admission`](super::step_admission)), and the engine is answered
+//! once, by that call.
 //!
 //! A parked process, one whose state this node cannot decode, and one that
 //! never started end without engine code when cancelled. A running or
@@ -39,13 +43,10 @@
 //! steps already running to commit their outcomes, then releases the actor
 //! `ready` under `drain.release`, for a node of the next build to claim.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use lash_core_store::tool_run::{
-    AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner, MaterialPayload,
-    MaterialRole,
-};
+use lash_core_store::tool_run::{AvailableEvidence, CompletionSource};
 use lash_durable::domain::{
     CANCEL_MAIL, ExecRootRow, OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState,
     WaitWrite,
@@ -55,19 +56,19 @@ use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, DurableReads,
     Release, StoreFailure, StoreFailureKind,
 };
-use lash_sansio::{ToolCallAdmission, ToolCallPosition};
 use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects};
 use super::session_turn::SessionTurns;
+use super::step_admission::{Admission, Consumed, Handoff, Hold};
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{
-    self, AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView,
-    RoundDraft, RoundError, RunFold, SettledOutput,
+    self, AdmittedExecution, Material, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
+    SettledOutput,
 };
 use crate::runtime::actor::waits::{
     self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
@@ -87,7 +88,7 @@ pub struct ProcessActivation {
     pub(super) tracing: Option<crate::trace::TraceRuntime>,
     trace_limits: lash_trace::TraceLimits,
     pub(super) backend: Backend,
-    steps: Arc<dyn ProcessSteps>,
+    pub(super) steps: Arc<dyn ProcessSteps>,
     probe: Arc<dyn DurableProbe>,
     /// What runs `SessionTurn` processes; a node given none parks them.
     pub(super) session_turns: Option<Arc<dyn SessionTurns>>,
@@ -149,7 +150,7 @@ impl ProcessActivation {
     }
 
     /// The fleet format the registry's records are written in.
-    fn fleet(&self) -> crate::FleetFormat {
+    pub(super) fn fleet(&self) -> crate::FleetFormat {
         crate::FleetFormatStore::fleet_format(self.backend.process_registry().as_ref())
     }
 }
@@ -179,7 +180,7 @@ enum Waited {
 pub(super) struct Live {
     /// The steps' admitted-execution lifecycle: the bodies it runs and the
     /// outcomes it holds until they commit.
-    lifecycle: Lifecycle,
+    pub(super) lifecycle: Lifecycle,
     /// What the lifecycle's bodies are built from.
     bodies: Arc<StepBodies>,
     /// The actor's park as of the claim.
@@ -194,7 +195,7 @@ pub(super) struct Live {
     /// pass read the row.
     published: Option<u64>,
     /// The `requires` the actor's row holds: claimed, then as written.
-    requires: Vec<String>,
+    pub(super) requires: Vec<String>,
 }
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
@@ -211,7 +212,7 @@ pub(super) fn registry_failure(error: &crate::PluginError) -> DurableError {
     })
 }
 
-fn millis(at: DurableInstant) -> u64 {
+pub(super) fn millis(at: DurableInstant) -> u64 {
     u64::try_from(at.0).unwrap_or_default()
 }
 
@@ -594,6 +595,18 @@ impl ProcessActivation {
                 owned.commit(tx, CommitLabel::WAIT_TIMEOUT).await?;
                 return Ok(Pass::Again);
             }
+            Next::Matched(handoff) => {
+                let consumed = Consumed {
+                    process,
+                    row: &row,
+                    record: &record,
+                    fold: &fold,
+                    now,
+                };
+                return self
+                    .hand_off(owned, tx, &consumed, driver, live, *handoff)
+                    .await;
+            }
             // Nothing for the engine: the steps' lifecycle acts. A commit of
             // its own leaves this transaction unwritten; the next pass reads
             // what it committed.
@@ -695,33 +708,9 @@ impl ProcessActivation {
             driver_json: driver.encode(),
         }));
         self.record_published(&mut tx, process, &row);
-        // The commit that changes the steps the process holds rewrites its
-        // requirements (S7): its components' config tokens, and the callbacks
-        // its unsettled steps were admitted under, those held from earlier
-        // rounds and those this commit admits.
-        let components = self
-            .steps
-            .requirements(&record, &step_requests(&driver))
-            .await?
-            .unwrap_or_default();
-        let held = driver.steps.values().filter_map(|step| {
-            fold.round(RunSeq(step.run))?
-                .members()
-                .get(usize::try_from(step.member).ok()?)?
-                .draft()
-                .binding()
-        });
-        let admitted = fresh
-            .iter()
-            .filter_map(|execution| execution.draft().binding());
-        let requires = crate::runtime::actor::claim_obligations::process_requires(
-            components,
-            held.chain(admitted),
-        );
-        let rewrites = requires != live.requires;
-        if rewrites {
-            tx.set_requires(requires.clone());
-        }
+        let requires = self
+            .rewrite_requires(&mut tx, &record, &driver, &fold, &fresh, live)
+            .await?;
         if (row.state_rev == 0 || next.format != written)
             && let Some(formats) = self.backend.formats().process_in(&next.format)
         {
@@ -732,7 +721,7 @@ impl ProcessActivation {
         }
         super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-        if rewrites {
+        if let Some(requires) = requires {
             live.requires = requires;
         }
         // The steps this transition admitted run once the next pass folds
@@ -941,25 +930,9 @@ enum Next {
     Nothing {
         due: Option<DurableInstant>,
     },
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "a step's request is plain JSON whose material reference always encodes"
-)]
-fn step_request_material(
-    process: &ProcessId,
-    step: &InFlight,
-) -> lash_core_store::tool_run::MaterialRef {
-    MaterialPayload::new(
-        MaterialOwner::Process {
-            process_id: process.clone(),
-        },
-        MaterialRole::PreparedRequest,
-        step.request.input().to_string(),
-    )
-    .reference(MaterialLocation::JournalLocal)
-    .expect("a step request's material encodes")
+    /// A `call_dynamic` call's resolution committed its match: lash admits
+    /// the call of the matched tool in its place, without the engine.
+    Matched(Box<Handoff>),
 }
 
 impl ProcessActivation {
@@ -1020,6 +993,39 @@ impl ProcessActivation {
             }));
         }
         if let Some((step, outcome)) = settled_step(driver, fold) {
+            // A `call_dynamic` call's committed resolution is consumed by
+            // lash (P6): a resolved match hands off to its target, and a
+            // refused or unavailable one answers the engine, typed, from
+            // the recorded decision.
+            let matched = step
+                .request
+                .resolves()
+                .then(|| crate::runtime::process::steps::resolved_match(&outcome))
+                .flatten();
+            if let Some(matched) = matched {
+                if let Some(decision) =
+                    crate::runtime::process::steps::dynamic_decision(process, &matched)
+                {
+                    record_effect(tx, process, driver, &step, &decision, self.fleet());
+                    return Ok(Next::Event(EngineEvent::StepSettled {
+                        call_id: Some(step.call.clone()),
+                        step: step.request.step().clone(),
+                        outcome: decision,
+                    }));
+                }
+                if let Some(target) =
+                    crate::runtime::process::steps::dynamic_target(&step.request, matched)
+                {
+                    return Ok(Next::Matched(Box::new(Handoff {
+                        resolution: step,
+                        target,
+                    })));
+                }
+                return Err(corrupt(
+                    "a call_dynamic resolution",
+                    "its input is not a call path with its arguments",
+                ));
+            }
             let outcome = self.steps.engine_output(process, &step.request, outcome);
             record_effect(tx, process, driver, &step, &outcome, self.fleet());
             return Ok(Next::Event(EngineEvent::StepSettled {
@@ -1151,109 +1157,31 @@ impl ProcessActivation {
                 steps: requests,
                 wake,
             } => {
-                let tools = requests
-                    .iter()
-                    .filter(|request| matches!(request, StepRequest::Tool { .. }))
-                    .count();
-                if tools > 0 {
-                    let limit = match self.steps.max_tool_calls(record).await {
-                        Ok(limit) => limit,
-                        Err(StepRefusal::Unavailable { reason, .. }) => {
-                            return Err(unavailable(reason));
-                        }
-                        Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
-                    };
-                    // A run is held whole while any of its steps is in
-                    // flight; a consumed run is held no more.
-                    let live: BTreeSet<u64> = driver.steps.values().map(|step| step.run).collect();
-                    driver.held.retain(|run, _| live.contains(run));
-                    let counted = driver.held.values().sum::<usize>();
-                    if let Some(limit) = limit
-                        && counted.saturating_add(tools) > limit.get()
-                    {
-                        return Ok(Some(tool_call_limit(crate::ToolCallLimitExceeded {
-                            scope: crate::ToolCallLimitScope::Process,
-                            limit,
-                            counted,
-                            requested: tools,
-                        })));
-                    }
-                    driver.held.insert(driver.next_run, tools);
+                // A recorded match is lash's to record, at the commit that
+                // consumes its resolution: an engine asks for the
+                // `call_dynamic` effect, never for a match.
+                if requests.iter().any(|request| request.matched().is_some()) {
+                    return Ok(Some(refused(
+                        "a step names a recorded match, which only lash records".to_owned(),
+                    )));
                 }
-                let run = driver.next_run;
-                driver.next_run += 1;
-                let admission = ToolCallAdmission::process("", process.clone());
-                let mut drafts = Vec::with_capacity(requests.len());
-                let mut settled = Vec::with_capacity(requests.len());
-                for (member, request) in (0_u64..).zip(requests) {
-                    if driver.steps.contains_key(request.step()) {
-                        return Ok(Some(refused(format!(
-                            "step `{}` is already in flight",
-                            request.step().0
-                        ))));
-                    }
-                    let admitted = match self.steps.admit(record, &request, millis(now)).await {
-                        Ok(admitted) => admitted,
-                        // Not a refusal: the pass did not commit, and the
-                        // next one asks again.
-                        Err(StepRefusal::Unavailable { reason, .. }) => {
-                            return Err(unavailable(reason));
-                        }
-                        Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
-                    };
-                    let call = admission.call_id(&[ToolCallPosition::ProcessStep {
-                        step: &request.step().0,
-                        run,
-                    }]);
-                    let step = InFlight {
-                        run,
-                        member,
-                        call,
-                        policy: admitted.policy,
-                        limit_expires_at: admitted.limit.expires_at,
-                        limit_max_slice_ms: u64::try_from(admitted.limit.max_slice.as_millis())
-                            .unwrap_or(u64::MAX),
-                        request,
-                    };
-                    drafts.push(
-                        ExecutionDraft::new(
-                            step.call.clone(),
-                            admitted.tool,
-                            step_request_material(process, &step),
-                            step.policy,
-                            step.limit(),
-                            admitted.park,
-                        )
-                        .with_binding(admitted.binding),
-                    );
-                    settled.push(admitted.settled.map(|output| {
-                        self.steps
-                            .admitted_output(process, &step.request, &step.call, output)
-                    }));
-                    driver.steps.insert(step.request.step().clone(), step);
-                }
-                if drafts.is_empty() {
-                    return Ok(Some(refused("a Steps action names no step".to_owned())));
-                }
-                // A step that may park has its completion wait pinned with
-                // its admission, as a round member has.
-                let admitted = round::admit_round(
-                    tx,
-                    &ScopeKey::Process(process.clone()),
-                    RoundDraft {
-                        owner: OwnerKey::Process(process.clone()),
-                        run: RunSeq(run),
-                        members: drafts,
-                    },
-                )
-                .map_err(|refusal| corrupt("a process step's admission", refusal))?;
-                // A step its admission settled (D3) commits its outcome with
-                // the admission and starts no body.
-                for (member, settled) in admitted.members().iter().zip(settled) {
-                    match settled {
-                        Some(output) => round::settle(tx, member, output, Vec::new())
-                            .map_err(|refusal| corrupt("a settled step's admission", refusal))?,
-                        None => fresh.push(member.clone()),
+                match self
+                    .admit_steps(
+                        tx,
+                        process,
+                        record,
+                        driver,
+                        requests,
+                        now,
+                        fresh,
+                        Hold::Counted,
+                    )
+                    .await?
+                {
+                    Admission::Admitted => {}
+                    Admission::Ended(outcome) => return Ok(Some(outcome)),
+                    Admission::Refused(refusal) => {
+                        return Ok(Some(refused(refusal.to_string())));
                     }
                 }
                 driver.blocked = wake.map(|until| Blocked::Sleep {
@@ -1338,28 +1266,16 @@ fn commit_refused(message: &str) -> crate::ProcessOutcome {
     ))
 }
 
-/// A process ended because lash refused what its engine asked for.
-/// The terminal of a process refused a round of tool steps past its
-/// `max_tool_calls`: the typed refusal itself, as a cell's call settles with
-/// it (FIG-4546).
-fn tool_call_limit(exceeded: crate::ToolCallLimitExceeded) -> crate::ProcessOutcome {
-    let mut failure = crate::session::tool_execution::tool_call_limit_failure(exceeded);
-    failure.raw = Some(crate::ToolValue::untrusted_json(
-        serde_json::json!({ "tool_call_limit": exceeded }),
-    ));
-    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure))
-}
-
 /// A step's declaration that could not be read now: the pass commits
 /// nothing, and the next one asks again.
-fn unavailable(reason: String) -> DurableError {
+pub(super) fn unavailable(reason: String) -> DurableError {
     DurableError::Store(StoreFailure {
         kind: StoreFailureKind::Unavailable,
         message: reason,
     })
 }
 
-fn refused(message: String) -> crate::ProcessOutcome {
+pub(super) fn refused(message: String) -> crate::ProcessOutcome {
     crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
         crate::ToolFailure::runtime(
             crate::ToolFailureClass::InvalidRequest,
@@ -1373,16 +1289,6 @@ fn refused(message: String) -> crate::ProcessOutcome {
 /// settled, with its payload as the fold checked it, for its `StepSettled`
 /// event. Its lifecycle recorded the outcome; the step leaves the driver
 /// with the transition that hands it over.
-/// The steps `driver` holds: those admitted and not yet answered to the
-/// engine.
-fn step_requests(driver: &Driver) -> Vec<StepRequest> {
-    driver
-        .steps
-        .values()
-        .map(|step| step.request.clone())
-        .collect()
-}
-
 fn settled_step(driver: &mut Driver, fold: &RunFold) -> Option<(InFlight, SettledOutput)> {
     let (name, outcome) = driver.steps.iter().find_map(|(name, step)| {
         let outcome = fold

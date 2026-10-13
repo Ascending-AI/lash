@@ -65,6 +65,25 @@ pub enum ToolFailureCause {
         effect: String,
         tool: crate::ToolId,
     },
+    /// A process's `call_dynamic` call whose input is not a call path with
+    /// its arguments. Nothing was resolved.
+    DynamicCallInvalid {
+        reason: String,
+    },
+    /// The deferred provider refused a process's `call_dynamic` path. The
+    /// decision is recorded and never resolved again; no tool ran.
+    DynamicCallRefused {
+        path: String,
+        reason: String,
+    },
+    /// No tool is available for a process's `call_dynamic` path, with the
+    /// host's note. The decision is recorded and never resolved again; no
+    /// tool ran.
+    DynamicCallUnavailable {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+    },
     /// A control call made from a task the cell spawned. Only the cell's
     /// main task ends the turn; the body did not run.
     ControlFromSpawnedTask,

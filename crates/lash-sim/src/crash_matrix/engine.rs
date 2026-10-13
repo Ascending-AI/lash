@@ -55,6 +55,7 @@ fn step(name: &str, tool: &str) -> StepRequest {
         effect: lash_core_execution::testing::effect(tool),
         input: json!({ "step": name }),
         site: None,
+        matched: None,
     }
 }
 

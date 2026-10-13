@@ -259,9 +259,10 @@ impl ProcessComponentRegistry {
         &self.host
     }
 
-    /// Check that these components serve every tool link of `env` (P1): the
+    /// Check that these components serve every link of `env` (P1): the
     /// link's provider, built under the env's config, serves its tool with
-    /// the surface the link retained. A `call_dynamic` link is matched per
+    /// the surface the link retained, and a `call_dynamic` link's provider
+    /// is a component's deferred provider, which matches its target per
     /// call.
     ///
     /// # Errors
@@ -270,16 +271,11 @@ impl ProcessComponentRegistry {
     /// [`ProcessEnvRefusal::LinkedSurfaceChanged`] naming the effect, or the
     /// refusal of a component that does not compose.
     pub fn check_served(&self, env: &Arc<ProcessEnv>) -> Result<(), ProcessEnvRefusal> {
-        let tools = env
-            .effects()
-            .iter()
-            .filter(|(_, link)| link.kind == crate::LinkKind::Tool);
-        let mut tools = tools.peekable();
-        if tools.peek().is_none() {
+        if env.effects().is_empty() {
             return Ok(());
         }
         let composition = self.compose(env, None)?;
-        for (effect, link) in tools {
+        for (effect, link) in env.effects() {
             match composition.step_link(env, effect) {
                 StepLink::Served { .. } => {}
                 StepLink::Drifted {
@@ -727,6 +723,23 @@ impl ProcessComposition {
             tool: link.tool().clone(),
             kind,
         };
+        // The `call_dynamic` endpoint is no provider's advertisement: it is
+        // served wherever the deferred provider it links is registered.
+        if link.kind == crate::LinkKind::Dynamic {
+            if self.registry.deferred_provider(&link.provider).is_none() {
+                return drifted(crate::ToolSurfaceDriftKind::Missing);
+            }
+            return match self
+                .composition
+                .tool_run_binding(link.tool(), Some(&link.provider))
+            {
+                Ok(binding) => StepLink::Served {
+                    manifest: Box::new(crate::call_dynamic_endpoint().manifest),
+                    binding: Box::new(binding),
+                },
+                Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
+            };
+        }
         let Some(definition) = self.registry.served(&link.provider, link.tool(), &config) else {
             return drifted(crate::ToolSurfaceDriftKind::Missing);
         };
@@ -743,6 +756,102 @@ impl ProcessComposition {
             },
             Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
         }
+    }
+
+    /// How this node serves the call of the tool `matched` resolved a
+    /// `call_dynamic` path to (P6): the provider the match records, by its
+    /// key, bound as the match routes it. One not registered here settles
+    /// the call typed, without a body, as a missing linked tool does (D3).
+    #[must_use]
+    pub fn matched_link(&self, matched: &crate::DeferredMatch) -> StepLink {
+        let Some((provider, definition, _)) = matched.resolved() else {
+            return StepLink::Unlinked;
+        };
+        match self
+            .composition
+            .tool_run_binding(&definition.manifest.id, Some(provider))
+        {
+            Ok(binding) => StepLink::Served {
+                manifest: Box::new(definition.manifest.clone()),
+                binding: Box::new(binding),
+            },
+            Err(_) => StepLink::Drifted {
+                tool: definition.manifest.id.clone(),
+                kind: crate::ToolSurfaceDriftKind::Missing,
+            },
+        }
+    }
+
+    /// Check that this node reads the execution binding `matched` routes
+    /// its call with, before the call is admitted (S8): its codec is a
+    /// provider registered here that declares the binding's format.
+    ///
+    /// # Errors
+    ///
+    /// Why the binding cannot be read here: an unserved codec, or a format
+    /// it does not read. The call's process parks.
+    pub fn check_matched_binding(&self, matched: &crate::DeferredMatch) -> Result<(), String> {
+        let Some((_, _, Some(binding))) = matched.resolved() else {
+            return Ok(());
+        };
+        let readable = self
+            .registry
+            .provider(&binding.codec)
+            .map(|provider| provider.readable_binding_formats())
+            .ok_or_else(|| {
+                format!(
+                    "the execution binding's codec `{}` is not served on this node",
+                    binding.codec
+                )
+            })?;
+        binding
+            .check_readable(readable)
+            .map_err(|unreadable| unreadable.to_string())
+    }
+
+    /// Resolve `path`, the call path of a `call_dynamic` call `owner` makes
+    /// under `env`, through the deferred provider `env` links the endpoint
+    /// to, under `env`'s config (P6). Resolution is read-only discovery: a
+    /// path the provider does not answer is unavailable, and its note is
+    /// bounded.
+    ///
+    /// # Errors
+    ///
+    /// `env` links no `call_dynamic` endpoint, or its deferred provider is
+    /// not registered here.
+    pub async fn resolve_dynamic(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        owner: &crate::ExecutionOwner,
+        path: &str,
+    ) -> Result<crate::DeferredMatch, PluginError> {
+        let link = env
+            .effects()
+            .values()
+            .find(|link| link.kind == crate::LinkKind::Dynamic)
+            .ok_or_else(|| {
+                PluginError::Registration("the process env links no call_dynamic endpoint".into())
+            })?;
+        let provider = self
+            .registry
+            .deferred_provider(&link.provider)
+            .ok_or_else(|| {
+                PluginError::Registration(format!(
+                    "the deferred provider `{}` the env links is not served on this node",
+                    link.provider
+                ))
+            })?;
+        let config = super::OwnerConfigView::components(Arc::clone(env));
+        let cx = crate::DeferredResolveContext::new(owner, None, env.capabilities(), &config);
+        let outcome = provider
+            .resolve(&cx, &[path])
+            .await
+            .remove(path)
+            .unwrap_or(crate::DeferredOutcome::Unavailable { note: None });
+        Ok(crate::DeferredMatch {
+            requested: path.to_owned(),
+            outcome: crate::bounded_deferred_outcome(outcome),
+        })
     }
 
     /// The tools a process's linked calls run on, as this node's components

@@ -924,6 +924,26 @@ impl RoundTools for ProductionRoundTools {
         )
     }
 
+    fn granted_body(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        execution: &AdmittedExecution,
+        grant: crate::ToolExecutionGrant,
+    ) -> MemberBody {
+        let invocation =
+            ToolInvocation::from_pending(call.clone(), execution.draft().tool().clone())
+                .with_execution_grant(grant);
+        member_body(
+            &self.context,
+            &self.owner,
+            call.clone(),
+            invocation,
+            execution,
+            &self.policies(),
+            MemberAttempts::default(),
+        )
+    }
+
     fn resolved(
         &self,
         call: &crate::sansio::PendingToolCall,

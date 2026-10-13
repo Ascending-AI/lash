@@ -192,6 +192,7 @@ impl ProcessEngine for LawEngine {
                     effect: lash_core_execution::testing::effect(REFUSED_TOOL),
                     input: json!({}),
                     site: None,
+                    matched: None,
                 }],
                 wake: None,
             },

@@ -62,6 +62,7 @@ fn step(name: &str) -> StepRequest {
             .unwrap_or_else(|_| unreachable!("a step name is an effect name")),
         input: json!({ "step": name }),
         site: None,
+        matched: None,
     }
 }
 

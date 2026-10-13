@@ -25,8 +25,10 @@ pub enum FitPolicy {
 
 /// Check that `env` links exactly the effects of `performed`, each to a
 /// tool that fits it under its policy in `fits` (`Compatible` when absent).
-/// A `call_dynamic` link fits by construction: its target is matched per
-/// call.
+/// The `call_dynamic` endpoint is linked only at its own path, as a
+/// `Dynamic` link retaining its own surface, and fits like any tool: the
+/// document is checked against its known signature, and its target is
+/// matched per call.
 ///
 /// # Errors
 ///
@@ -57,8 +59,19 @@ pub fn check_links(
     }
     for (effect, expected) in performed {
         let link = &env.effects()[effect];
-        if link.kind == LinkKind::Dynamic {
-            continue;
+        let at_endpoint = effect.as_str() == crate::CALL_DYNAMIC_EFFECT;
+        let endpoint = link.kind == LinkKind::Dynamic
+            && link.surface == crate::ProcessSurface::of(&crate::call_dynamic_endpoint());
+        if at_endpoint != endpoint {
+            return Err(ProcessEnvRefusal::EffectUnfit {
+                effect: effect.to_string(),
+                tool: link.tool().to_string(),
+                reason: format!(
+                    "the call_dynamic endpoint is linked only at `{}`, as a dynamic link of \
+                     its own surface",
+                    crate::CALL_DYNAMIC_EFFECT
+                ),
+            });
         }
         let provided = lash_kernel_check::tool_signature(
             link.surface.input_schema.canonical(),

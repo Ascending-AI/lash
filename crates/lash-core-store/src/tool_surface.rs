@@ -247,6 +247,62 @@ pub fn effect_path_of(manifest: &crate::ToolManifest) -> Option<String> {
     Some(format!("{}.{operation}", binding.module_path.join(".")))
 }
 
+/// The effect path a process performs the fixed `call_dynamic` endpoint
+/// under (P6, R9).
+pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
+
+/// How long one resolution of a `call_dynamic` call may take.
+const CALL_DYNAMIC_RESOLUTION: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The fixed, lash-owned `call_dynamic` endpoint: a known signature that
+/// takes the call path to resolve and the target's arguments
+/// ([`DynamicCall`]) and answers whatever the target answers. No provider
+/// advertises it; an env links it to its deferred provider
+/// ([`LinkKind::Dynamic`]). A call of it is two committed steps: its
+/// resolution, whose committed outcome is the [`DeferredMatch`], then the
+/// call of the matched tool. The resolution is effect-free until it
+/// commits, so it repeats.
+#[expect(
+    clippy::expect_used,
+    reason = "the endpoint's schemas are fixed literals the schema admission accepts"
+)]
+pub fn call_dynamic_endpoint() -> ToolDefinition {
+    use lash_sansio::ToolDefinitionBindingExt as _;
+    ToolDefinition::raw(
+        "lash:call_dynamic",
+        "call_dynamic",
+        "Calls the tool the process env's deferred provider resolves `path` to, with `args`.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+                "path": { "type": "string" },
+                "args": {},
+            },
+        }),
+        serde_json::json!({}),
+    )
+    .expect("the call_dynamic endpoint's schemas admit")
+    .with_tool_binding(lash_sansio::ToolBinding::new(["lash"], "call_dynamic"))
+    .with_execution(CALL_DYNAMIC_RESOLUTION)
+    .with_execution_policy(lash_sansio::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::MIN.saturating_add(2),
+        100,
+        1_000,
+    ))
+}
+
+/// The input of a `call_dynamic` call: the call path to resolve, and the
+/// arguments the matched tool is called with.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicCall {
+    pub path: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+}
+
 /// What a linked effect is linked to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -276,6 +332,16 @@ impl EffectLink {
     /// The tool this effect is linked to.
     pub fn tool(&self) -> &ToolId {
         &self.surface.id
+    }
+
+    /// The link of the `call_dynamic` endpoint to the deferred provider an
+    /// env component declares as `deferred`.
+    pub fn dynamic(deferred: ProviderKey) -> Self {
+        Self {
+            provider: deferred,
+            surface: ProcessSurface::of(&call_dynamic_endpoint()),
+            kind: LinkKind::Dynamic,
+        }
     }
 }
 

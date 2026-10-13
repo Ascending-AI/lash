@@ -662,6 +662,20 @@ impl ProcessEnvBuilder {
         self
     }
 
+    /// Link the fixed `call_dynamic` endpoint, performed at
+    /// [`CALL_DYNAMIC_EFFECT`](crate::tool_surface::CALL_DYNAMIC_EFFECT), to
+    /// the deferred provider an env component declares as `deferred` (P6).
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the call_dynamic effect path is a fixed qualified name"
+    )]
+    pub fn link_dynamic(self, deferred: crate::tool_surface::ProviderKey) -> Self {
+        let effect = EffectName::new(crate::tool_surface::CALL_DYNAMIC_EFFECT)
+            .expect("the call_dynamic effect path is a qualified name");
+        self.link(effect, crate::tool_surface::EffectLink::dynamic(deferred))
+    }
+
     /// Link exactly `effects`, replacing every earlier link.
     #[must_use]
     pub fn effects(mut self, effects: BTreeMap<EffectName, EffectLink>) -> Self {

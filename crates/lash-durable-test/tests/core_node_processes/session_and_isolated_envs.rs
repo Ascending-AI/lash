@@ -290,6 +290,7 @@ fn explicit_engine_advance(
                 effect: lash_core_execution::testing::effect("b.run"),
                 input: payload,
                 site: None,
+                matched: None,
             }],
             wake: None,
         },

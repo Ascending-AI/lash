@@ -167,6 +167,26 @@ pub trait RoundTools: Send + Sync {
         stop: Option<&AcceptedStop>,
     ) -> MemberBody;
 
+    /// The body of `execution`, an attempt of `call` of a tool outside the
+    /// catalog that a recorded deferred match authorizes under `grant`: the
+    /// match's provider, definition and execution binding. Tools that run
+    /// no matched call answer it as a stop.
+    fn granted_body(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _grant: crate::ToolExecutionGrant,
+    ) -> MemberBody {
+        Box::new(|_| {
+            Box::pin(async {
+                SettledOutput::Cancelled {
+                    evidence: lash_core_store::tool_run::AvailableEvidence::default(),
+                }
+                .into()
+            })
+        })
+    }
+
     /// The final answer of `execution`, an attempt of `call` that parked as
     /// `parked`, once one of its waits ended with `resolution`: a pure
     /// function of the resolution and the parked call's pending completion,

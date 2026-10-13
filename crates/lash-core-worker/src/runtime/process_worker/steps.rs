@@ -16,6 +16,12 @@
 //!   store-local effect commits with the step's outcome. The step's payload
 //!   retains the call's `ToolCallRecord`; incorporation projects its output
 //!   for the engine.
+//! - **`call_dynamic` calls** are two steps (P6). The engine's step of the
+//!   endpoint is the call's resolution: the env's deferred provider resolves
+//!   its path, and its committed record's value is the match. The step lash
+//!   issues in the commit that consumes it runs the matched tool on the
+//!   match's provider and binding, admitted under the tool's own
+//!   declaration, as a linked call is.
 //! - **Engine steps** run through the [`EngineSteps`](crate::EngineSteps)
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
@@ -29,8 +35,8 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, tool_step_output, tool_step_refused,
-    tool_step_resolved, tool_step_settled,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, dynamic_resolution, tool_step_output,
+    tool_step_refused, tool_step_resolved, tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
@@ -67,9 +73,19 @@ impl DurableProcessWorker {
         execution: AdmittedExecution,
         token: tokio_util::sync::CancellationToken,
     ) -> MemberOutcome {
-        let StepRequest::Tool { effect, input, .. } = step else {
+        let resolves = step.resolves();
+        let StepRequest::Tool {
+            effect,
+            input,
+            matched,
+            ..
+        } = step
+        else {
             return SettledOutput::Interrupted.into();
         };
+        if resolves {
+            return self.resolve_dynamic(&process, &execution, input).await;
+        }
         // `prepare` built the activation's tools before any step was
         // admitted or resumed, classifying every failure to build them: a
         // retryable fault retried the pass and a refusal parked the process,
@@ -81,6 +97,25 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "a process tool step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
+        // The target of a `call_dynamic` call runs on its recorded match:
+        // the matched tool, on the provider and binding the match names.
+        if let Some(matched) = matched {
+            let Some((provider, definition, binding)) = matched.resolved() else {
+                return SettledOutput::Interrupted.into();
+            };
+            let call = lash_core_execution::sansio::PendingToolCall {
+                call_id: execution.call().clone(),
+                provider_call_id: None,
+                tool_name: definition.manifest.name.clone(),
+                args: input,
+                replay: None,
+            };
+            let grant =
+                crate::ToolExecutionGrant::from_definition(provider.clone(), definition.clone())
+                    .with_execution_binding(binding.cloned());
+            let result = step.tools.granted_body(&call, &execution, grant)(token).await;
+            return tool_step_output(&process.id, &call, result);
+        }
         let tool = execution.draft().tool();
         let name = step
             .catalog
@@ -99,6 +134,59 @@ impl DurableProcessWorker {
         tool_step_output(&process.id, &call, result)
     }
 
+    /// The resolution `execution` of a `call_dynamic` call of `process`
+    /// with `input` (P6): the env's deferred provider resolves its call
+    /// path once, and the step's committed outcome is the match it
+    /// decided, which the commit that consumes it never resolves again. A
+    /// resolution that does not commit runs again: it is read-only.
+    async fn resolve_dynamic(
+        &self,
+        process: &ProcessRecord,
+        execution: &AdmittedExecution,
+        input: serde_json::Value,
+    ) -> MemberOutcome {
+        let call = lash_core_execution::sansio::PendingToolCall {
+            call_id: execution.call().clone(),
+            provider_call_id: None,
+            tool_name: lash_core::call_dynamic_endpoint().manifest.name,
+            args: input.clone(),
+            replay: None,
+        };
+        let failed = |code: &str, message: String, cause| {
+            let output = step_failure(process, code, message, Some(cause), None).output;
+            tool_step_refused(&process.id, &call, output).into()
+        };
+        let path = match serde_json::from_value::<lash_core::DynamicCall>(input) {
+            Ok(dynamic) => dynamic.path,
+            Err(error) => {
+                return failed(
+                    "dynamic_call_invalid",
+                    format!("a call_dynamic call takes a call path and its arguments: {error}"),
+                    crate::ToolFailureCause::DynamicCallInvalid {
+                        reason: error.to_string(),
+                    },
+                );
+            }
+        };
+        let resolved = match self.engine_runtime(process).await {
+            Ok(runtime) => runtime.resolve_dynamic(&path).await,
+            Err(error) => Err(error),
+        };
+        match resolved {
+            Ok(matched) => dynamic_resolution(&process.id, &call, &matched).into(),
+            // The deferred provider left this node since the step was
+            // admitted: nothing was resolved, as a missing linked tool.
+            Err(error) => failed(
+                "linked_tool_missing",
+                format!("the call path `{path}` could not be resolved here: {error}"),
+                crate::ToolFailureCause::LinkedToolMissing {
+                    effect: lash_core::CALL_DYNAMIC_EFFECT.to_owned(),
+                    tool: lash_core::call_dynamic_endpoint().manifest.id,
+                },
+            ),
+        }
+    }
+
     /// Report that the admitted body of `step` is starting, at the site the
     /// engine issued it from, bound to the call its admission pinned. Only an
     /// admitted execution reaches here: a refused step reports nothing, and
@@ -109,12 +197,16 @@ impl DurableProcessWorker {
         step: &StepRequest,
         execution: &AdmittedExecution,
     ) {
+        // A resolution is not the effect's body: its target's is.
         let StepRequest::Tool {
             site: Some(site), ..
         } = step
         else {
             return;
         };
+        if step.resolves() {
+            return;
+        }
         let tracing = crate::plugin::PluginExecutionTrace::new(
             self.config.runtime_host.tracing.unreplayed(None),
         );
@@ -297,13 +389,41 @@ impl ProcessSteps for WorkerSteps {
                     None,
                 ))
             }
-            StepRequest::Tool { step, effect, .. } => {
-                let link = self.0.step_link(process, effect).await.map_err(|error| {
-                    StepRefusal::Unavailable {
-                        step: step.0.clone(),
-                        reason: error.to_string(),
+            StepRequest::Tool {
+                step,
+                effect,
+                matched,
+                ..
+            } => {
+                let unavailable = |error: crate::PluginError| StepRefusal::Unavailable {
+                    step: step.0.clone(),
+                    reason: error.to_string(),
+                };
+                // The target of a `call_dynamic` call is admitted as the
+                // tool its recorded match names, on the match's provider,
+                // once this node reads the match's binding (S8).
+                let link = match matched {
+                    Some(matched) => {
+                        let (link, binding) = self
+                            .0
+                            .engine_runtime(process)
+                            .await
+                            .and_then(|runtime| runtime.matched_link(matched))
+                            .map_err(unavailable)?;
+                        if let Err(reason) = binding {
+                            return Err(StepRefusal::CompositionUnavailable {
+                                component: None,
+                                reason,
+                            });
+                        }
+                        link
                     }
-                })?;
+                    None => self
+                        .0
+                        .step_link(process, effect)
+                        .await
+                        .map_err(unavailable)?,
+                };
                 match link {
                     crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {
                         step: step.0.clone(),

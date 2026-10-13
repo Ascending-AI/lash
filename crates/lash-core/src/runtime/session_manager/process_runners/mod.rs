@@ -34,6 +34,34 @@ impl RuntimeSessionServices {
         Ok(engine.composition.step_link(&engine.env, effect))
     }
 
+    /// How this node serves the engine process's call of the tool
+    /// `matched` resolved a `call_dynamic` path to (P6), and whether it
+    /// reads the match's execution binding (S8), judged now.
+    pub(in crate::runtime) fn process_matched_link(
+        &self,
+        matched: &crate::DeferredMatch,
+    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        Ok((
+            engine.composition.matched_link(matched),
+            engine.composition.check_matched_binding(matched),
+        ))
+    }
+
+    /// Resolve `path`, the call path of the engine process's `call_dynamic`
+    /// call, through the deferred provider its env links (P6).
+    pub(in crate::runtime) async fn process_resolve_dynamic(
+        &self,
+        path: &str,
+    ) -> Result<crate::DeferredMatch, crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        let owner = self.current.execution_owner()?;
+        engine
+            .composition
+            .resolve_dynamic(&engine.env, &owner, path)
+            .await
+    }
+
     /// The catalog an engine process's linked calls resolve against.
     pub(in crate::runtime) fn process_step_catalog(
         &self,

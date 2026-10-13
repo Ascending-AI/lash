@@ -294,6 +294,7 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
             effect: law_effect(tool),
             input: json!({}),
             site: None,
+            matched: None,
         }],
         wake: None,
     }
@@ -411,6 +412,7 @@ impl ProcessEngine for LawEngine {
                         effect: law_effect("law_stuck"),
                         input: json!({}),
                         site: None,
+                        matched: None,
                     }],
                     wake: None,
                 },
@@ -430,6 +432,7 @@ impl ProcessEngine for LawEngine {
                             effect: law_effect(LAW_PARK),
                             input: json!({}),
                             site: Some(law_site(step)),
+                            matched: None,
                         })
                         .collect(),
                     wake: None,

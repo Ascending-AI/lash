@@ -1587,6 +1587,7 @@ fn tool_step(step: &str, tool: &str, label: &str) -> lash_core_execution::StepRe
         effect: lash_core_execution::testing::effect(&format!("tools.{tool}")),
         input: serde_json::json!({ "label": label }),
         site: None,
+        matched: None,
     }
 }
 

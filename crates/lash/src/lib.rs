@@ -996,6 +996,10 @@ pub mod process {
         ProcessComponentHost, ProcessComponentPorts, ProcessComponentSpec, ProcessSessionReads,
         StaticProcessComponent,
     };
+    /// The fixed `call_dynamic` endpoint a process links to its env's
+    /// deferred provider ([`EffectLink::dynamic`]), the effect path it is
+    /// performed under and the input it takes.
+    pub use lash_core::{CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint};
     pub use lash_core::{
         DeclaredDefinitionLaunch, DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings,
         FitPolicy, HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,

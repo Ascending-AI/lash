@@ -210,6 +210,7 @@ impl ProcessEngine for WriteEngine {
                         effect: lash_core_execution::testing::effect_of(&ext_write_definition()),
                         input: payload,
                         site: None,
+                        matched: None,
                     }],
                     wake: None,
                 }

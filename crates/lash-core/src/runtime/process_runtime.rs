@@ -111,6 +111,36 @@ impl EngineProcessRuntime {
         self.services.process_step_link(effect)
     }
 
+    /// How this node serves the process's call of the tool `matched`
+    /// resolved a `call_dynamic` path to (P6), and whether it reads the
+    /// match's execution binding (S8), judged now.
+    ///
+    /// # Errors
+    ///
+    /// This runtime has no composition.
+    pub fn matched_link(
+        &self,
+        matched: &crate::DeferredMatch,
+    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
+        self.services.process_matched_link(matched)
+    }
+
+    /// Resolve `path`, the call path of the process's `call_dynamic` call,
+    /// through the deferred provider its env links (P6): read-only
+    /// discovery, which runs again only while its decision has not
+    /// committed.
+    ///
+    /// # Errors
+    ///
+    /// This runtime has no composition, its env links no `call_dynamic`
+    /// endpoint, or this node does not serve its deferred provider.
+    pub async fn resolve_dynamic(
+        &self,
+        path: &str,
+    ) -> Result<crate::DeferredMatch, crate::PluginError> {
+        self.services.process_resolve_dynamic(path).await
+    }
+
     /// The claim requirements this runtime's process carries while it holds
     /// tool steps (§6.2).
     ///

@@ -480,9 +480,9 @@ pub use deferred_provider::{
 };
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
-    DeferredMatch, DeferredOutcome, EffectLink, ExecutionBinding, ExecutionBindingUnreadable,
-    LinkKind, ProcessSurface, ProviderKey, RecordedSurface, SurfaceCollision, SurfaceDuplicateTool,
-    SurfaceEntry, SurfaceRefusal,
+    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DynamicCall, EffectLink, ExecutionBinding,
+    ExecutionBindingUnreadable, LinkKind, ProcessSurface, ProviderKey, RecordedSurface,
+    SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, call_dynamic_endpoint,
 };
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};

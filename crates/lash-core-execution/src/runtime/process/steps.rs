@@ -1,7 +1,12 @@
 //! How a host process engine's steps run (ADR 0132 §10; L6, FIG-5175).
 //!
 //! A [`StepRequest`] names a catalog tool or one of the engine's own bodies
-//! that its registration declares ([`EngineSteps`](super::EngineSteps)). The
+//! that its registration declares ([`EngineSteps`](super::EngineSteps)). A
+//! `call_dynamic` call is two steps (P6): its resolution, whose committed
+//! outcome is the match ([`dynamic_resolution`]), and the call of the
+//! matched tool, which the commit consuming the resolution admits
+//! ([`dynamic_target`]); a refused or unavailable decision answers the
+//! engine typed ([`dynamic_decision`]). The
 //! process actor admits it as an admitted execution (S4) under the tool's
 //! declared [`ExecutionPolicy`] (an engine body's is the retry policy its
 //! kind declares) and an [`ExecutionLimit`] within the tool ceiling,
@@ -504,6 +509,120 @@ pub fn tool_step_refused(
         settled,
         record.and_then(|record| serde_json::to_string(&record).ok()),
     )
+}
+
+/// The committed outcome of the resolution `call` of a `call_dynamic` call
+/// (P6): its ToolCallRecord, whose value is the `matched` decision, which
+/// the step that consumes it never resolves again.
+#[must_use]
+pub fn dynamic_resolution(
+    process: &ProcessId,
+    call: &crate::sansio::PendingToolCall,
+    matched: &crate::DeferredMatch,
+) -> SettledOutput {
+    let record = serde_json::to_value(matched)
+        .ok()
+        .map(|value| crate::ToolCallRecord {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+            tool: call.tool_name.clone(),
+            args: call.args.clone(),
+            output: crate::ToolCallOutput::success(value),
+        });
+    match record.and_then(|record| serde_json::to_string(&record).ok()) {
+        Some(text) => SettledOutput::Completed(process_material(process, text)),
+        None => SettledOutput::Interrupted,
+    }
+}
+
+/// The match a resolution step's committed `output` recorded, or `None`
+/// for a resolution that settled without one (its input was refused, or
+/// its body did not answer).
+#[must_use]
+pub fn resolved_match(output: &SettledOutput) -> Option<crate::DeferredMatch> {
+    let SettledOutput::Completed(material) = output else {
+        return None;
+    };
+    let record = serde_json::from_str::<crate::ToolCallRecord>(material.payload()).ok()?;
+    match record.output.outcome {
+        crate::ToolCallOutcome::Success(_) => {
+            serde_json::from_value(record.output.value_for_projection()).ok()
+        }
+        _ => None,
+    }
+}
+
+/// The call of the tool `matched` resolved `resolution`'s path to: the
+/// step lash issues in the commit that consumes the resolution, under the
+/// same step name and site, with the call's `args` as its input. `None`
+/// when `matched` resolved nothing, or `resolution` is not a resolution.
+#[must_use]
+pub fn dynamic_target(
+    resolution: &StepRequest,
+    matched: crate::DeferredMatch,
+) -> Option<StepRequest> {
+    let StepRequest::Tool {
+        step,
+        effect,
+        input,
+        site,
+        matched: None,
+    } = resolution
+    else {
+        return None;
+    };
+    matched.resolved()?;
+    let call = serde_json::from_value::<crate::DynamicCall>(input.clone()).ok()?;
+    Some(StepRequest::Tool {
+        step: step.clone(),
+        effect: effect.clone(),
+        input: call.args,
+        site: site.clone(),
+        matched: Some(Box::new(matched)),
+    })
+}
+
+/// What a body that performed `call_dynamic` is answered when its
+/// resolution decided `matched` against it: a refused or unavailable path
+/// is a tool failure it may catch, typed, from the recorded decision alone.
+/// `None` for a resolved match, whose target answers instead.
+#[must_use]
+pub fn dynamic_decision(
+    process: &ProcessId,
+    matched: &crate::DeferredMatch,
+) -> Option<SettledOutput> {
+    let path = matched.requested.clone();
+    let failure = match &matched.outcome {
+        crate::DeferredOutcome::Resolved { .. } => return None,
+        crate::DeferredOutcome::Refused { reason } => crate::ToolFailure::runtime(
+            crate::ToolFailureClass::PermissionDenied,
+            "dynamic_call_refused",
+            format!("the call path `{path}` was refused: {reason}"),
+        )
+        .with_cause(crate::ToolFailureCause::DynamicCallRefused {
+            path,
+            reason: reason.clone(),
+        }),
+        crate::DeferredOutcome::Unavailable { note } => crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Unavailable,
+            "dynamic_call_unavailable",
+            match note {
+                Some(note) => format!("no tool is available for the call path `{path}`: {note}"),
+                None => format!("no tool is available for the call path `{path}`"),
+            },
+        )
+        .with_cause(crate::ToolFailureCause::DynamicCallUnavailable {
+            path,
+            note: note.clone(),
+        }),
+    };
+    let text = serde_json::to_string(&crate::ToolCallOutput::failure(failure)).ok()?;
+    Some(SettledOutput::Failed(
+        process_material(process, text).failure(
+            lash_core_store::tool_run::KnownFailureReason::Reported,
+            None,
+        ),
+    ))
 }
 
 /// Project a retained process tool record to the output its engine reads.

@@ -139,6 +139,19 @@ local task lowers to a guarded `processes.await`, so an entry that awaits a
 handle it was handed performs `processes.await` even when its source never
 names it, and its environment must link it.
 
+A call whose target is known only at run time goes through the fixed
+`call_dynamic` endpoint: the code performs `lash.call_dynamic` with
+`{path, args}`, and the environment links it to the deferred provider one of
+its components declares, with `ProcessEnvBuilder::link_dynamic(key)`. Such a
+call is two committed steps (FIG-6120). The first resolves `path` through
+the deferred provider and commits its decision. The commit that consumes a
+resolved decision admits the call of the matched tool with `args`, under the
+tool's own policy, bound and call id. A crash between the two resumes the
+same target under the same call id, and the path is never resolved again. A
+refused path, or one no tool answers, reaches the code as a catchable
+`tool_failed` whose cause is `dynamic_call_refused` or
+`dynamic_call_unavailable`.
+
 ## Editing
 
 Open the document as a `Draft` and apply kernel edits to it.

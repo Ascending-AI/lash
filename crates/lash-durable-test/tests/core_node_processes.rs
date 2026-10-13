@@ -1610,6 +1610,7 @@ fn tool_engine_advance(
                     effect: lash_core_execution::testing::effect_of(&write_definition()),
                     input: serde_json::json!({ "x": x }),
                     site: None,
+                    matched: None,
                 }],
                 wake: None,
             }
