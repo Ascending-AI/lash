@@ -43,8 +43,8 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
         .await
         .expect("project deletion tombstone");
     assert!(changes.into_iter().any(|change| matches!(
-        change,
-        ProcessChange::Deleted { tombstone } if tombstone.process_id == process_id
+        change.kind,
+        ProcessChangeKind::Deleted { tombstone } if tombstone.process_id == process_id
     )));
     assert_eq!(
         registry

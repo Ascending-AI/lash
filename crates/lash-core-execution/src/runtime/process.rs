@@ -93,11 +93,11 @@ pub use model::{
     Ancestry, DeclaredDefinitionLaunch, DeclaredLaunch, DeclaredProcessIdentity, EngineLaunch,
     EngineSettings, HandleId, InvalidStartKey, Lifetime, LifetimeDecision, LifetimePolicy,
     PreparedProcessRegistration, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionOutcome, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
-    ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvLoadError,
-    ProcessEnvRef, ProcessEnvRefusal, ProcessEnvStore, ProcessExecutionContext,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLimits,
+    ProcessChangeKind, ProcessCompletionOutcome, ProcessComponentConfig, ProcessComponentEntry,
+    ProcessComponentId, ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder,
+    ProcessEnvLoadError, ProcessEnvRef, ProcessEnvRefusal, ProcessEnvStore,
+    ProcessExecutionContext, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView,
+    ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLimits,
     ProcessLineage, ProcessListFilter, ProcessListMode, ProcessModel, ProcessObserverBy,
     ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord,
     ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
@@ -112,10 +112,10 @@ pub use model::{
 };
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
-    ObservedProcess, ObservedProcessChange, ObservedProcessEvent, ObservedProcessEventLite,
-    ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
-    ObservedWorkItemState, ProcessParkState, ProcessRosterPage, ProcessWorkObserver,
-    ProcessWorkSnapshot,
+    ObservedProcess, ObservedProcessChange, ObservedProcessChangeKind, ObservedProcessEvent,
+    ObservedProcessEventLite, ObservedProcessEventPage, ObservedProcessEventReadOutcome,
+    ObservedWorkItem, ObservedWorkItemState, ProcessParkState, ProcessRosterPage,
+    ProcessWorkObserver, ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,

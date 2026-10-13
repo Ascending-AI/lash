@@ -41,7 +41,7 @@ observer had no actor store. An operator's redrive or a cancel clears a park.
 ## One read shape
 
 Every read of a process answers an `ObservedProcess`: `processes().get`,
-the roster lists, each `ObservedProcessChange::Upsert` of
+the roster lists, each `ObservedProcessChangeKind::Upsert` of
 `processes().changed_since`, and the retained view of an observation
 snapshot. It carries the process's identity, provenance, ancestry and
 lifetime, its park, and `lifecycle`, the one `ProcessLifecycleState` its row

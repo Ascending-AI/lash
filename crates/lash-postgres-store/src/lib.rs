@@ -55,7 +55,7 @@ use lash_core_execution::store::{
 };
 use lash_core_execution::{
     AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
-    ProcessChange, ProcessChangeCursor, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessEvent, ProcessEventAppendReceipt,
     ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
     ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, SessionCommitStore,

@@ -87,7 +87,10 @@ pub trait ProcessQuery: Send + Sync {
     ///
     /// This is a host-level completeness read for trusted projectors. It is not
     /// scoped by observer edges, and the cursor must be treated as opaque outside
-    /// the store that issued it.
+    /// the store that issued it. Every returned entry retains its own issued
+    /// row sequence as `ProcessChange::cursor`, allowing a projector to resume
+    /// strictly after any committed entry. The page cursor is the last entry's
+    /// cursor, or the requested cursor when no entries are returned.
     async fn processes_changed_since(
         &self,
         cursor: ProcessChangeCursor,

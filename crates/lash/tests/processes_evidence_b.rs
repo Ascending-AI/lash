@@ -219,27 +219,31 @@ fn processes_area_witnesses_b() {
     });
     // W0436: lash::durability::EffectJournalRetirement::process [function]
     let _ = lash::durability::EffectJournalRetirement::process(lash::ProcessId::fixture("x"));
-    // W0437: lash::persistence::ProcessChange [enum]
+    // W0437: lash::persistence::ProcessChange [struct]
     type_witness::<lash::persistence::ProcessChange>();
-    // W0438: lash::persistence::ProcessChange::Deleted [variant]
-    variant_witness(|value: &lash::persistence::ProcessChange| {
-        matches!(value, lash::persistence::ProcessChange::Deleted { .. })
+    // W0438: lash::persistence::ProcessChangeKind::Deleted [variant]
+    variant_witness(|value: &lash::persistence::ProcessChangeKind| {
+        matches!(value, lash::persistence::ProcessChangeKind::Deleted { .. })
     });
-    // W0439: lash::persistence::ProcessChange::Deleted::tombstone [field]
-    field_witness(|value: &lash::persistence::ProcessChange| {
-        if let lash::persistence::ProcessChange::Deleted { tombstone, .. } = value {
+    // W0439: lash::persistence::ProcessChangeKind::Deleted::tombstone [field]
+    field_witness(|value: &lash::persistence::ProcessChangeKind| {
+        if let lash::persistence::ProcessChangeKind::Deleted { tombstone, .. } = value {
             let _ = tombstone;
         }
     });
-    // W0440: lash::persistence::ProcessChange::Upsert [variant]
-    variant_witness(|value: &lash::persistence::ProcessChange| {
-        matches!(value, lash::persistence::ProcessChange::Upsert { .. })
+    // W0440: lash::persistence::ProcessChangeKind::Upsert [variant]
+    variant_witness(|value: &lash::persistence::ProcessChangeKind| {
+        matches!(value, lash::persistence::ProcessChangeKind::Upsert { .. })
     });
-    // W0441: lash::persistence::ProcessChange::Upsert::record [field]
-    field_witness(|value: &lash::persistence::ProcessChange| {
-        if let lash::persistence::ProcessChange::Upsert { record, .. } = value {
+    // W0441: lash::persistence::ProcessChangeKind::Upsert::record [field]
+    field_witness(|value: &lash::persistence::ProcessChangeKind| {
+        if let lash::persistence::ProcessChangeKind::Upsert { record, .. } = value {
             let _ = record;
         }
+    });
+    field_witness(|value: &lash::persistence::ProcessChange| {
+        let _: lash::process::ProcessChangeCursor = value.cursor;
+        let _: &lash::persistence::ProcessChangeKind = &value.kind;
     });
     // W0442: lash::persistence::ProcessCompletionOutcome [enum]
     type_witness::<lash::persistence::ProcessCompletionOutcome>();

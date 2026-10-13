@@ -137,20 +137,24 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             let change_seq: i64 = row.get(0);
             let kind: String = row.get(1);
             let json: String = row.get(2);
-            records.push(if kind == "upsert" {
-                ProcessChange::Upsert {
+            let change = if kind == "upsert" {
+                ProcessChangeKind::Upsert {
                     record: serde_json::from_str(&json).map_err(process_decode_error)?,
                 }
             } else {
-                ProcessChange::Deleted {
+                ProcessChangeKind::Deleted {
                     tombstone: serde_json::from_str(&json).map_err(process_decode_error)?,
                 }
-            });
+            };
             next_cursor = ProcessChangeCursor::from_store_sequence(plugin_u64_from_sql(
                 "ProcessChange",
                 "change_seq",
                 change_seq,
             )?);
+            records.push(ProcessChange {
+                cursor: next_cursor,
+                kind: change,
+            });
         }
         crate::observed_sql::control("COMMIT", tx.commit())
             .await

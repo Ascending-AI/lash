@@ -476,8 +476,12 @@ impl Processes {
     /// Read the roster changes after `after`, oldest first: each process
     /// whose row changed, as it now stands, and the tombstone of each pruned
     /// one. A page converges on the latest row of a process; a process's own
-    /// facts are its event pages. Persist the returned cursor only after
-    /// applying every change in the page.
+    /// facts are its event pages. Each entry carries its backend-issued opaque
+    /// `cursor`. A host can commit that entry's projection effect and cursor
+    /// atomically in its own database, then resume after it following a crash.
+    /// Lash provides no cross-database transaction. Persist page `next` only
+    /// after applying every entry; empty pages still carry `next` and the
+    /// retention horizon. A pruned cursor requires a fresh roster scan.
     ///
     /// The read covers every process on the store, whatever session observes
     /// it, so the host must authorize access.

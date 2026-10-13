@@ -286,8 +286,8 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
             break;
         }
         for change in page.changes {
-            match change {
-                lash_core::facade_support::ObservedProcessChange::Upsert { process } => {
+            match change.kind {
+                lash_core::facade_support::ObservedProcessChangeKind::Upsert { process } => {
                     if filter.status.matches(process.status()) {
                         roster.insert(process.process_id);
                     } else {
@@ -295,7 +295,7 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
                         roster.remove(&process.process_id);
                     }
                 }
-                lash_core::facade_support::ObservedProcessChange::Deleted { tombstone } => {
+                lash_core::facade_support::ObservedProcessChangeKind::Deleted { tombstone } => {
                     saw_deletion = true;
                     roster.remove(&tombstone.process_id);
                 }
@@ -352,5 +352,120 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         .expect("scan handshake");
     assert!(final_page.changes.is_empty());
     assert_eq!(final_page.next, restart_fence);
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-6174: an interrupted projector resumes after its last atomically
+/// checkpointed entry, without skipping the rest of that page.
+#[tokio::test]
+async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_changes() {
+    use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite stores"),
+    );
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    let registry = stores.process_registry();
+    let core = standard_core_builder_over(lash_conformance::backend_over(stores))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("core");
+    let mut ids = Vec::new();
+    for _ in 0..5 {
+        ids.push(
+            registry
+                .register_process(lash_core::testing::held_engine_registration(
+                    serde_json::Value::Null,
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::Lifetime::Detached,
+                ))
+                .await
+                .expect("register")
+                .id,
+        );
+    }
+    registry
+        .complete_process(
+            &ids[1],
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(&ids[1]),
+        )
+        .await
+        .expect("complete");
+    registry
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune into a deletion entry");
+    let limit = std::num::NonZeroUsize::new(10).expect("page bound");
+    let page = core
+        .processes()
+        .changed_since(lash_core::ProcessChangeCursor::initial(), limit)
+        .await
+        .expect("initial page");
+    assert_eq!(page.changes.len(), 5);
+    let (stored, _) = lash_core::ProcessQuery::processes_changed_since(
+        registry.as_ref(),
+        lash_core::ProcessChangeCursor::initial(),
+        limit.get(),
+    )
+    .await
+    .expect("store-issued entries");
+    let mut previous = lash_core::ProcessChangeCursor::initial();
+    for (observed, stored) in page.changes.iter().zip(stored) {
+        assert_eq!(
+            observed.cursor, stored.cursor,
+            "the observer preserves the issued position"
+        );
+        assert!(observed.cursor.store_sequence() > previous.store_sequence());
+        previous = observed.cursor;
+    }
+    assert_eq!(page.next, previous);
+    assert!(matches!(
+        page.changes[4].kind,
+        crate::process::ObservedProcessChangeKind::Deleted { .. }
+    ));
+    // The host durably commits each effect and its serialized cursor together.
+    // A crash after entry three discards the remainder of this fetched page.
+    let mut projected = Vec::new();
+    let mut checkpoint = serde_json::Value::Null;
+    for change in &page.changes[..3] {
+        let encoded = serde_json::to_value(change).expect("serialize entry");
+        checkpoint = encoded
+            .get("cursor")
+            .expect("every entry has a cursor")
+            .clone();
+        let cursor: lash_core::ProcessChangeCursor =
+            serde_json::from_value(checkpoint.clone()).expect("durable opaque checkpoint");
+        assert_eq!(cursor, change.cursor);
+        projected.push(change.clone());
+    }
+    let expected = page.changes.clone();
+    let final_cursor = page.next;
+    let horizon = page.retained_after;
+    drop(page);
+    let checkpoint = serde_json::from_value(checkpoint).expect("recover the host checkpoint");
+    let resumed = core
+        .processes()
+        .changed_since(checkpoint, limit)
+        .await
+        .expect("resume");
+    assert_eq!(resumed.changes, expected[3..]);
+    assert_eq!(resumed.next, final_cursor);
+    assert_eq!(resumed.retained_after, horizon);
+    projected.extend(resumed.changes);
+    assert_eq!(
+        projected, expected,
+        "every returned entry is projected exactly once"
+    );
+    let empty = core
+        .processes()
+        .changed_since(final_cursor, limit)
+        .await
+        .expect("drained feed");
+    assert!(empty.changes.is_empty());
+    assert_eq!(empty.next, final_cursor);
+    assert_eq!(empty.retained_after, horizon);
     core.shutdown().await.expect("shutdown");
 }

@@ -1176,8 +1176,10 @@ async fn assert_prune_tombstone_watermark_safety(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let deleted = changes
         .iter()
-        .find_map(|change| match change {
-            ProcessChange::Deleted { tombstone } if tombstone.process_id == id => Some(tombstone),
+        .find_map(|change| match &change.kind {
+            ProcessChangeKind::Deleted { tombstone } if tombstone.process_id == id => {
+                Some(tombstone)
+            }
             _ => None,
         })
         .ok_or_else(|| {

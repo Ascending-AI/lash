@@ -106,11 +106,11 @@ fn processes_changed_since_tx(
     for row in rows {
         let (change_seq, kind, record_json) = row.map_err(process_sqlite_error)?;
         let change = if kind == "upsert" {
-            ProcessChange::Upsert {
+            ProcessChangeKind::Upsert {
                 record: serde_json::from_str(&record_json).map_err(process_decode_error)?,
             }
         } else {
-            ProcessChange::Deleted {
+            ProcessChangeKind::Deleted {
                 tombstone: serde_json::from_str(&record_json).map_err(process_decode_error)?,
             }
         };
@@ -119,7 +119,10 @@ fn processes_changed_since_tx(
             "change_seq",
             change_seq,
         )?);
-        records.push(change);
+        records.push(ProcessChange {
+            cursor: next_cursor,
+            kind: change,
+        });
     }
     Ok((records, next_cursor))
 }

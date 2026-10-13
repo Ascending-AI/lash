@@ -379,7 +379,13 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
             .processes_changed_since(cursor, 1)
             .await
             .expect("page one batch tombstone");
-        let [crate::ProcessChange::Deleted { tombstone }] = changes.as_slice() else {
+        let [
+            crate::ProcessChange {
+                kind: crate::ProcessChangeKind::Deleted { tombstone },
+                ..
+            },
+        ] = changes.as_slice()
+        else {
             panic!("expected exactly one tombstone page, got {changes:?}");
         };
         assert_eq!(tombstone.process_id, *expected_id);
@@ -1597,8 +1603,8 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         .await
         .expect("read change feed");
     assert!(changes.into_iter().any(|change| matches!(
-        change,
-        crate::ProcessChange::Deleted { tombstone } if tombstone.process_id == process_id
+        change.kind,
+        crate::ProcessChangeKind::Deleted { tombstone } if tombstone.process_id == process_id
     )));
     assert!(
         registry

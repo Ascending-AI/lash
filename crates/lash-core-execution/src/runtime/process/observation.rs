@@ -8,8 +8,8 @@ use crate::plugin::PluginError;
 
 use super::events::{ProcessEvent, ProcessTerminal};
 use super::model::{
-    ProcessChange, ProcessChangeCursor, ProcessEnvRef, ProcessExternalRef, ProcessId,
-    ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
+    ProcessChangeCursor, ProcessEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
+    ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
     ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, ProcessTombstone,
     SessionScope, WaitState,
 };
@@ -120,9 +120,20 @@ pub struct ProcessRosterPage {
 /// One change of the process roster, as a host reads it: the process as it
 /// now stands, or the tombstone of one that was pruned. A page of changes
 /// converges on the latest row of each process; it is not every transition.
+/// The host may atomically commit the projection and `cursor` in its own
+/// database, then resume strictly after that cursor following a crash. Lash
+/// provides no transaction spanning its store and the host's database.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ObservedProcessChange {
+    pub cursor: ProcessChangeCursor,
+    #[serde(flatten)]
+    pub kind: ObservedProcessChangeKind,
+}
+
+/// The current observed process or a pruned process's tombstone.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ObservedProcessChange {
+pub enum ObservedProcessChangeKind {
     Upsert { process: Box<ObservedProcess> },
     Deleted { tombstone: ProcessTombstone },
 }
@@ -479,13 +490,18 @@ impl ProcessWorkObserver {
         let (changes, next) = self.registry.processes_changed_since(cursor, limit).await?;
         let mut observed = Vec::with_capacity(changes.len());
         for change in changes {
-            observed.push(match change {
-                ProcessChange::Upsert { record } => ObservedProcessChange::Upsert {
-                    process: Box::new(self.observed(*record).await?),
+            observed.push(ObservedProcessChange {
+                cursor: change.cursor,
+                kind: match change.kind {
+                    super::ProcessChangeKind::Upsert { record } => {
+                        ObservedProcessChangeKind::Upsert {
+                            process: Box::new(self.observed(*record).await?),
+                        }
+                    }
+                    super::ProcessChangeKind::Deleted { tombstone } => {
+                        ObservedProcessChangeKind::Deleted { tombstone }
+                    }
                 },
-                ProcessChange::Deleted { tombstone } => {
-                    ObservedProcessChange::Deleted { tombstone }
-                }
             });
         }
         Ok((observed, next))

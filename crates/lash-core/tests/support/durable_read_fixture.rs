@@ -71,13 +71,14 @@ use lash_core::runtime::{
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
     ExecutionScope, LlmUsage, MessageOrigin, MessageRole, OperationId, PartKind,
-    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEnv, ProcessEnvRef, ProcessEnvStore,
-    ProcessEventLogTestSupport as _, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProjectionWatermark, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode,
-    SessionCreationHead, SessionNodePayload, SessionRelation, SessionStoreCreateRequest,
-    StoreError, TurnInput, TurnInputIngress, WaitKind, WaitState,
+    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput,
+    ProcessChangeCursor, ProcessChangeKind, ProcessCompletionAuthority, ProcessEnv, ProcessEnvRef,
+    ProcessEnvStore, ProcessEventLogTestSupport as _, ProcessExecutionWriteAuthority,
+    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistry, ProcessStatus, ProjectionWatermark, ReferrerClaim, RuntimeCommit,
+    RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload,
+    SessionRelation, SessionStoreCreateRequest, StoreError, TurnInput, TurnInputIngress, WaitKind,
+    WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1019,11 +1020,11 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
 
     let mut observed = BTreeMap::new();
     for change in first.into_iter().chain(second) {
-        match change {
-            ProcessChange::Upsert { record } => {
+        match change.kind {
+            ProcessChangeKind::Upsert { record } => {
                 observed.insert(record.id.clone(), "upsert".to_string());
             }
-            ProcessChange::Deleted { tombstone } => {
+            ProcessChangeKind::Deleted { tombstone } => {
                 assert_eq!(
                     tombstone.terminal_label,
                     lash_core::RetiredProcessStatus::Completed

@@ -291,7 +291,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedDrainSelection;
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
-    pub use crate::runtime::{ObservedProcessChange, ProcessRosterPage};
+    pub use crate::runtime::{ObservedProcessChange, ObservedProcessChangeKind, ProcessRosterPage};
 
     pub use crate::runtime::DataRetentionConfig;
     pub use crate::runtime::RuntimeEffectReplayTrace;
@@ -633,8 +633,8 @@ pub use runtime::{
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeBounds, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
+    ProcessChangeBounds, ProcessChangeCursor, ProcessChangeKind, ProcessClockRebind,
+    ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessComponentConfig,
     ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError, ProcessConfigKey,
     ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionError,
     ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,

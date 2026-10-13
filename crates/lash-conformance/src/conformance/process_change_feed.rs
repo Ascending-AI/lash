@@ -44,7 +44,7 @@ async fn terminal_labels_after(
         }
         cursor = next_cursor;
         for change in records {
-            if let ProcessChange::Upsert { record } = change
+            if let ProcessChangeKind::Upsert { record } = change.kind
                 && record.is_terminal()
                 && let Some(label) = record.identity.label.as_deref()
                 && expected_ids.contains(label)
@@ -109,11 +109,23 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                 next_cursor.store_sequence() > cursor.store_sequence(),
                 "a non-empty process change page must advance the cursor"
             );
+            let mut entry_cursor = cursor;
+            for change in &records {
+                assert!(
+                    change.cursor.store_sequence() > entry_cursor.store_sequence(),
+                    "each returned entry retains its ordered store-issued cursor"
+                );
+                entry_cursor = change.cursor;
+            }
+            assert_eq!(
+                entry_cursor, next_cursor,
+                "the page continues after its last entry"
+            );
             cursor = next_cursor;
             let mut progress = reader_progress.lock().expect("reader progress lock");
             progress.cursor = cursor;
             for change in records {
-                let ProcessChange::Upsert { record } = change else {
+                let ProcessChangeKind::Upsert { record } = change.kind else {
                     continue;
                 };
                 // Writers register under their own label; the feed carries

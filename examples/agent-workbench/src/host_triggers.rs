@@ -1377,7 +1377,7 @@ pub(crate) async fn notify_ended_since(
         .changed_since(cursor, NOTICE_PAGE)
         .await?;
     for change in page.changes {
-        let lash::process::ObservedProcessChange::Upsert { process } = change else {
+        let lash::process::ObservedProcessChangeKind::Upsert { process } = change.kind else {
             continue;
         };
         let status = process.status();

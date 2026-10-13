@@ -184,8 +184,11 @@ The continuation belongs to its issuing store and original filter.
 The first page captures `change_cursor` before scanning, and every later
 page retains that fence. This is a convergent scan, rather than a snapshot
 across pages: concurrent inserts and updates can appear during enumeration.
-After scanning, drain `changed_since(change_cursor, limit)` and apply each
-whole page before retaining its `next` cursor. Even an empty change page
+After scanning, drain `changed_since(change_cursor, limit)`. Each entry
+carries an opaque `cursor`; a host can atomically commit an entry's projection
+and that cursor in its own database, then resume strictly after it following
+a crash. Lash provides no cross-database transaction. Apply the whole page
+before retaining its `next` cursor. Even an empty change page
 reports a verified high water. `verified_through` is the page's verified
 change high water; it does not replace the pre-scan fence.
 
