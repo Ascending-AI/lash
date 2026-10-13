@@ -313,7 +313,10 @@ pub trait ProcessSteps: Send + Sync {
         &self,
         process: &ProcessRecord,
         steps: &[StepRequest],
-    ) -> Result<Option<Vec<String>>, lash_durable::DurableError> {
+    ) -> Result<
+        Option<std::collections::BTreeSet<crate::ObligationToken>>,
+        lash_durable::DurableError,
+    > {
         let _ = (process, steps);
         Ok(None)
     }

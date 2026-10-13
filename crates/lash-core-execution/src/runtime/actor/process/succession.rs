@@ -19,7 +19,7 @@
 //! after it, the new pair whole. A refusal at the apply records
 //! `process.successor_refused`, and the process goes on as written.
 
-use lash_durable::domain::{ExecRootRow, ProcessActorRow, ProcessWrite, RunSeq};
+use lash_durable::domain::{ExecRootRow, ProcessActorRow, ProcessWrite};
 use lash_durable::runner::Owned;
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, Release, StoreFailure, StoreFailureKind,
@@ -241,22 +241,15 @@ impl ProcessActivation {
         let mut next = current.record.clone();
         crate::runtime::process::apply_successor_input(&mut next, &request)
             .map_err(|error| corrupt("a successor request", error))?;
-        let components = self
+        let environment = self
             .steps
             .requirements(&next, &super::step_admission::step_requests(&driver))
             .await?
             .unwrap_or_default();
-        let held = driver.steps.values().filter_map(|step| {
-            fold?
-                .round(RunSeq(step.run))?
-                .members()
-                .get(usize::try_from(step.member).ok()?)?
-                .draft()
-                .binding()
-        });
-        tx.set_requires(crate::runtime::actor::claim_obligations::process_requires(
-            components, held,
-        ));
+        tx.set_requires(
+            super::step_admission::outstanding_work(current.process, environment, &driver, fold)
+                .requires(),
+        );
         // The activation built its tools from the old env: the next claim
         // builds the new one's.
         tx.give_up(Release::Ready);

@@ -3,14 +3,17 @@
 //!
 //! One token family names every recorded callback, qualified by the registry
 //! that resolves it: a session's plugins or a process's components. A node
-//! serves the token of every callback its static registrations resolve,
+//! serves the token of every callback its installed registrations resolve,
 //! without invoking any; an actor whose outstanding work names a callback
 //! the node does not resolve is claimed only for its cancel. Config-format
-//! tokens are a separate family and are unchanged.
+//! tokens are a separate family of the same codec.
+//!
+//! [`ObligationToken`] is the one encoder: a requirement and a served
+//! registration are spelled by it and nowhere else.
 
-use std::collections::BTreeSet;
-
+use crate::process_env::ProcessComponentId;
 use crate::store::plugin_writers::PluginCallbackIdentity;
+use lash_core_ids::FormatVersion;
 
 /// The registry a recorded callback resolves through.
 #[derive(
@@ -43,35 +46,60 @@ impl RegistryKind {
     }
 }
 
-/// The one encoder of callback obligation tokens: every place a callback's
-/// token is spelled, a requirement or a served registration, spells it here.
-pub struct ObligationToken;
+/// One claim token: what an actor's `requires` holds and a node's `serves`
+/// offers. The scheduler compares tokens as opaque strings; only this type
+/// spells them.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ObligationToken(String);
 
 impl ObligationToken {
     /// The token of `callback`, resolved through `kind`'s registry:
     /// `callback:<kind>:<owner>/<key>`.
     #[must_use]
-    pub fn for_callback(kind: RegistryKind, callback: &PluginCallbackIdentity) -> String {
-        format!(
+    pub fn for_callback(kind: RegistryKind, callback: &PluginCallbackIdentity) -> Self {
+        Self(format!(
             "callback:{}:{}/{}",
             kind.as_str(),
             callback.owner,
             callback.key
-        )
+        ))
     }
 
-    /// The deduplicated, sorted tokens of `callbacks`, resolved through
-    /// `kind`'s registry.
+    /// The token of process component `component`'s config at `format`:
+    /// `component:<id>@cfg<format>`. A process naming the component at that
+    /// format requires it, and a node whose component reads it serves it.
     #[must_use]
-    pub fn of_callbacks<'a>(
-        kind: RegistryKind,
-        callbacks: impl IntoIterator<Item = &'a PluginCallbackIdentity>,
-    ) -> Vec<String> {
-        callbacks
-            .into_iter()
-            .map(|callback| Self::for_callback(kind, callback))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
+    pub fn for_config(component: &ProcessComponentId, format: FormatVersion) -> Self {
+        Self(format!("component:{component}@cfg{format}"))
+    }
+
+    /// The token as the scheduler stores it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The token as the scheduler stores it.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ObligationToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl From<ObligationToken> for String {
+    fn from(token: ObligationToken) -> Self {
+        token.0
+    }
+}
+
+impl PartialEq<ObligationToken> for String {
+    fn eq(&self, token: &ObligationToken) -> bool {
+        *self == token.0
     }
 }

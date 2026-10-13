@@ -14,6 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core_execution::ActorContext;
+use lash_core_execution::runtime::actor::claim_obligations::ExecutionDebts;
 use lash_core_execution::runtime::actor::round::PolicyView;
 use lash_core_execution::runtime::actor::round::lifecycle::MemberBodies;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
@@ -174,13 +175,15 @@ impl DurableSnapshotStore {
             .clone()
     }
 
-    /// Commit `tx` under `label`. A refused or unacknowledged commit forgets
-    /// the revision, the records the members read and the nodes it knew
-    /// stored: the next write reads them back.
+    /// Commit `tx` under `label`, which publishes the execution's root
+    /// owing `owing`. A refused or unacknowledged commit forgets the
+    /// revision, the records the members read and the nodes it knew stored:
+    /// the next write reads them back.
     pub(crate) async fn commit(
         &self,
         tx: lash_durable::ActorTx,
         label: CommitLabel,
+        owing: &ExecutionDebts,
         members: &mut Members,
     ) -> Result<lash_durable::ActorCommit, QuietPointRefusal> {
         members.forget();
@@ -188,7 +191,7 @@ impl DurableSnapshotStore {
             .latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        match self.cx.commit(tx, label).await {
+        match self.cx.commit_owing(tx, label, owing).await {
             Ok(committed) => Ok(committed),
             Err(error) => {
                 *self.held() = None;

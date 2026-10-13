@@ -63,10 +63,9 @@ pub(super) enum Admission {
 
 impl ProcessActivation {
     /// Rewrite on `tx` the requirements of the process `record` once it
-    /// holds `driver`'s steps (S7): its components' config tokens, and the
-    /// callbacks its unsettled steps were admitted under, those held from
-    /// earlier rounds of `fold` and those `fresh` admits. The requirements
-    /// written, or `None` when they are unchanged.
+    /// holds `driver`'s steps (S7): what its outstanding work owes, with the
+    /// steps `fresh` admits. The requirements written, or `None` when they
+    /// are unchanged.
     pub(super) async fn rewrite_requires(
         &self,
         tx: &mut ActorTx,
@@ -76,25 +75,20 @@ impl ProcessActivation {
         fresh: &[AdmittedExecution],
         live: &Live,
     ) -> Result<Option<Vec<String>>, DurableError> {
-        let components = self
+        let environment = self
             .steps
             .requirements(record, &step_requests(driver))
             .await?
             .unwrap_or_default();
-        let held = driver.steps.values().filter_map(|step| {
-            fold.round(RunSeq(step.run))?
-                .members()
-                .get(usize::try_from(step.member).ok()?)?
-                .draft()
-                .binding()
-        });
-        let admitted = fresh
-            .iter()
-            .filter_map(|execution| execution.draft().binding());
-        let requires = crate::runtime::actor::claim_obligations::process_requires(
-            components,
-            held.chain(admitted),
-        );
+        let mut work = outstanding_work(&record.id, environment, driver, Some(fold));
+        for execution in fresh {
+            work.admit(
+                OwnerKey::Process(record.id.clone()),
+                execution.draft().call().clone(),
+                execution.draft().binding(),
+            );
+        }
+        let requires = work.requires();
         if requires == live.requires {
             return Ok(None);
         }
@@ -384,4 +378,29 @@ pub(super) fn step_requests(driver: &Driver) -> Vec<StepRequest> {
         .values()
         .map(|step| step.request.clone())
         .collect()
+}
+
+/// What `process`'s outstanding recorded work owes (S7): `environment`, its
+/// components' configs, and the binding of each step `driver` holds, as
+/// `fold`'s rounds admitted it.
+pub(super) fn outstanding_work(
+    process: &ProcessId,
+    environment: BTreeSet<crate::ObligationToken>,
+    driver: &Driver,
+    fold: Option<&RunFold>,
+) -> crate::runtime::actor::claim_obligations::RecordedWork {
+    let mut work = crate::runtime::actor::claim_obligations::RecordedWork::process(environment);
+    for step in driver.steps.values() {
+        let member = fold
+            .and_then(|fold| fold.round(RunSeq(step.run)))
+            .and_then(|round| round.members().get(usize::try_from(step.member).ok()?));
+        if let Some(member) = member {
+            work.admit(
+                OwnerKey::Process(process.clone()),
+                member.call().clone(),
+                member.draft().binding(),
+            );
+        }
+    }
+    work
 }

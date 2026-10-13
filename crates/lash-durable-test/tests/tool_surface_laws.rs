@@ -592,6 +592,7 @@ fn provider_token(owner: &str) -> String {
         )
         .callback_identity(),
     )
+    .to_string()
 }
 
 /// IDLE-RUN-NEVER-STRANDED (law 13, session arm; S7): what a session

@@ -125,7 +125,7 @@ pub const GRAMMAR_VECTORS: &str = r##"{
   ],
   "exec_root": {
     "node_count": 7,
-    "root": "8c1c1d07755045b61a79b8072f8b53d79610628937407505f78c9d6f0321be8f"
+    "root": "b5441f401a113fc014aec9ea4582fd10424eb4e92dbd40e418b7ce83d8159c75"
   },
   "large": [
     {

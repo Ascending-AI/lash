@@ -617,19 +617,10 @@ impl PluginSession {
     }
 
     fn unavailable_callback(&self, callback: &PluginCallbackIdentity) -> PluginError {
-        PluginError::Runtime(
-            RecordedCallbackUnavailable {
-                recorded: callback.clone(),
-                available: self
-                    .capabilities()
-                    .contributions
-                    .assistant_response_hooks
-                    .iter()
-                    .map(|hook| hook.identity.clone())
-                    .collect(),
-            }
-            .into_runtime_error(),
-        )
+        self.capabilities()
+            .composition
+            .recorded()
+            .unavailable(callback)
     }
 
     /// Ask each registered context-pressure hook, in priority order, what the
@@ -763,17 +754,10 @@ impl PluginSession {
         &self,
         plan: &crate::runtime::AssistantResponsePlan,
     ) -> Result<Vec<&RegisteredHook<AssistantResponseHook>>, PluginError> {
-        plan.callbacks
-            .iter()
-            .map(|callback| {
-                self.capabilities()
-                    .contributions
-                    .assistant_response_hooks
-                    .iter()
-                    .find(|registered| &registered.identity == callback)
-                    .ok_or_else(|| self.unavailable_callback(callback))
-            })
-            .collect()
+        self.capabilities().composition.recorded().resolve_all(
+            &plan.callbacks,
+            &self.capabilities().contributions.assistant_response_hooks,
+        )
     }
 
     pub async fn transform_assistant_response(

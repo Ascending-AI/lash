@@ -61,6 +61,9 @@ pub struct LashCore {
     /// The node the backend's session actors run on (ADR 0132 §3).
     pub(crate) node: Arc<node::NodeSlot>,
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
+    /// The claim tokens the core's node serves (S7), projected once from
+    /// its installed registrations when it was built.
+    pub(crate) serves: Arc<[String]>,
 }
 
 pub use lash_core::session_delete::SessionDeletion;
@@ -1306,6 +1309,13 @@ impl LashCoreBuilder {
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
+        // What the core's node serves (S7): every callback its installed
+        // plugins and process components register, and the config formats
+        // its components read. A projection that fails refuses the build,
+        // so no node advertises less than it installed.
+        let mut serves = core.process_engines.components().served_tokens();
+        serves.extend(default_plugin_host.installed_inventory()?.served_tokens());
+        let serves: Arc<[String]> = serves.into_iter().map(String::from).collect();
         let process_registry = Arc::clone(process_work.registry());
         process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
         let env = RuntimeEnvironment::builder(core)
@@ -1338,6 +1348,7 @@ impl LashCoreBuilder {
         let plugin_factories = Arc::new(plugin_factories);
         let core = LashCore {
             observer_pacing: Arc::new(self.observer_pacing),
+            serves,
             runtime_owner,
             env,
             backend,

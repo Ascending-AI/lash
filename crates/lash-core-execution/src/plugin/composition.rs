@@ -52,14 +52,10 @@ impl ExecutionComposition {
         &self.tool_catalog_contributors
     }
 
-    fn unavailable_callback(&self, callback: &PluginCallbackIdentity) -> PluginError {
-        PluginError::Runtime(
-            RecordedCallbackUnavailable {
-                recorded: callback.clone(),
-                available: self.callbacks.clone(),
-            }
-            .into_runtime_error(),
-        )
+    /// The lookup recorded callback identities resolve through against
+    /// this materialization's installed registrations.
+    pub(crate) fn recorded(&self) -> super::recorded_lookup::RecordedLookup<'_> {
+        super::recorded_lookup::RecordedLookup::new(&self.callbacks)
     }
 
     /// The provider a call of `tool` binds to and dispatches through: the
@@ -112,6 +108,7 @@ impl ExecutionComposition {
         &self,
         bindings: &[crate::plugin::PluginCallbackIdentity],
     ) -> Result<Vec<Arc<dyn crate::ToolProvider>>, PluginError> {
+        let recorded = self.recorded();
         bindings
             .iter()
             .map(|binding| {
@@ -119,12 +116,7 @@ impl ExecutionComposition {
                     .iter()
                     .find(|registered| registered.identity.callback_identity() == *binding)
                     .map(|registered| Arc::clone(&registered.hook))
-                    .ok_or_else(|| {
-                        PluginError::Session(format!(
-                            "recorded context tool binding {}:{} is unavailable",
-                            binding.owner, binding.key,
-                        ))
-                    })
+                    .ok_or_else(|| recorded.unavailable(binding))
             })
             .collect()
     }
@@ -387,29 +379,13 @@ impl ExecutionComposition {
         &self,
         plan: &crate::runtime::PresentationBinding,
     ) -> Result<ResolvedPresentationPlan<'_>, PluginError> {
-        let contributions = self;
+        let recorded = self.recorded();
         let presenter = plan
             .presenter
             .as_ref()
-            .map(|callback| {
-                contributions
-                    .presenter
-                    .as_ref()
-                    .filter(|registered| &registered.identity == callback)
-                    .ok_or_else(|| self.unavailable_callback(callback))
-            })
+            .map(|callback| recorded.resolve(callback, &self.presenter))
             .transpose()?;
-        let steps = plan
-            .steps
-            .iter()
-            .map(|callback| {
-                contributions
-                    .presentation_steps
-                    .iter()
-                    .find(|registered| &registered.identity == callback)
-                    .ok_or_else(|| self.unavailable_callback(callback))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let steps = recorded.resolve_all(&plan.steps, &self.presentation_steps)?;
         Ok(ResolvedPresentationPlan { presenter, steps })
     }
 

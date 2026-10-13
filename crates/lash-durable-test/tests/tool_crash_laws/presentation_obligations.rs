@@ -111,6 +111,7 @@ fn step_token() -> String {
             key: format!("presentation_step:{STEP}"),
         },
     )
+    .to_string()
 }
 
 /// The claim requirements session `name` carries, as a probe node serving

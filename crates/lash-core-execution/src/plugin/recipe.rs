@@ -4,7 +4,7 @@ use super::prompt::{
 };
 use super::registrar::BoundRegistrar;
 use super::*;
-pub use lash_core_store::obligations::RegistryKind;
+pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_run::CallbackSlot;
 use std::sync::Arc;
 
@@ -86,6 +86,22 @@ impl InstalledInventory {
             ContributionKey::Callback(key) => Some(key),
             _ => None,
         })
+    }
+
+    /// The claim tokens these registrations serve (S7): one for every ready
+    /// callback entry, each an installed resolver, through the registry it
+    /// was registered in. Nothing is built or invoked.
+    pub fn served_tokens(&self) -> std::collections::BTreeSet<ObligationToken> {
+        self.entries
+            .iter()
+            .zip(&self.readiness)
+            .filter_map(|(entry, readiness)| match (&entry.key, readiness) {
+                (ContributionKey::Callback(key), ContributionReadiness::Ready) => {
+                    Some(ObligationToken::for_callback(entry.registry, key))
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
 pub use lash_core_store::plugin_registrations::{PreflightIssue, RequiredPort, ServiceKind};

@@ -697,9 +697,20 @@ impl KernelEffects for CellHost<'_> {
         };
         let host = graph.state.stage(staging, reads).map_err(fault)?;
         graph.staged = Some(staged);
+        // Every match the cell committed stays owed while it is parked: a
+        // later call may run on it.
+        let owed = self
+            .envelope
+            .grants
+            .values()
+            .flat_map(lash_core::ToolExecutionGrant::callbacks)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         Ok(HostParts {
             host: Some(host),
             envelope: Some(envelope),
+            owed,
         })
     }
 

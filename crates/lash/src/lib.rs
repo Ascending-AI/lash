@@ -664,6 +664,9 @@ pub mod plugins {
         TurnDriverPreamble as GenericTurnDriverPreamble,
     };
 
+    /// A claim token: what an actor's outstanding work requires and a
+    /// node's installed registrations serve (S7).
+    pub use lash_core::ObligationToken;
     /// What an engine registry holds beside its engines: the process
     /// components installed on the deployment, and the environment ports a
     /// start's launch is held through (FIG-6034).

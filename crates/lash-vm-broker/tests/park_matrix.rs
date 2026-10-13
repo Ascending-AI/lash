@@ -997,6 +997,7 @@ impl KernelEffects for LawHost {
                 NodeKind::CELL_ENVELOPE,
                 "park-law envelope",
             )?),
+            owed: Vec::new(),
         })
     }
 }

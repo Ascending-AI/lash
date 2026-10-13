@@ -52,6 +52,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_core_execution::runtime::actor::claim_obligations::ExecutionDebts;
 use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, Recovery, RoundDraft, RunFold, SettledOutput,
 };
@@ -128,13 +129,17 @@ pub struct AdmittedCall {
     pub admission: NodeId,
 }
 
-/// The host's nodes a root names beside the machine's state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The host's nodes a root names beside the machine's state, and what the
+/// host's state owes while the execution is parked.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostParts {
     /// A HostRoot.
     pub host: Option<NodeId>,
     /// A CellEnvelope.
     pub envelope: Option<NodeId>,
+    /// The callbacks the host's state owes beyond its admitted calls (S7):
+    /// a cell's committed deferred matches' providers and codecs.
+    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
 }
 
 /// What one park commits.
@@ -859,6 +864,15 @@ impl DurableSnapshotStore {
                 (ExecStatus::Ended, end, KERNEL_VERSION, None)
             }
         };
+        let owing = ExecutionDebts {
+            exec: self.exec.clone(),
+            // An ended execution owes nothing more.
+            owed: if status == ExecStatus::Parked {
+                parts.owed
+            } else {
+                Vec::new()
+            },
+        };
         let (root, write) = stage_exec_root(
             &mut staging,
             &self.exec,
@@ -870,6 +884,7 @@ impl DurableSnapshotStore {
                 format,
                 host: parts.host,
                 envelope: parts.envelope,
+                owed: owing.owed.clone(),
             },
             (
                 expected.map(|held| held.rev),
@@ -890,7 +905,7 @@ impl DurableSnapshotStore {
         } else {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
-        let committed = self.commit(tx, label, &mut members).await?;
+        let committed = self.commit(tx, label, &owing, &mut members).await?;
         // What the cell published while the response was held is
         // published now, before anything it admitted starts.
         if let Some(response) = response {

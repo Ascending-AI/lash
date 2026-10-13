@@ -51,21 +51,15 @@ impl ProcessComponentDeclaration {
         })
     }
 
-    /// The claim requirement a process naming this component at
-    /// `format` carries, and a node registering it serves (§6.2).
-    pub fn config_token(id: &ProcessComponentId, format: FormatVersion) -> String {
-        format!("component:{id}@cfg{format}")
-    }
-
     /// The claim requirements a process under `env` carries from its
     /// start: one config token for every component `env` names.
-    pub fn env_requirements(env: &ProcessEnv) -> Vec<String> {
-        let tokens: BTreeSet<String> = env
-            .components()
+    pub fn env_requirements(env: &ProcessEnv) -> BTreeSet<crate::ObligationToken> {
+        env.components()
             .iter()
-            .map(|entry| Self::config_token(entry.id(), entry.config().format_version()))
-            .collect();
-        tokens.into_iter().collect()
+            .map(|entry| {
+                crate::ObligationToken::for_config(entry.id(), entry.config().format_version())
+            })
+            .collect()
     }
 }
 
@@ -421,39 +415,17 @@ impl ProcessComponentRegistry {
             .map(|registered| &registered.declaration)
     }
 
-    /// The claim requirements this registry serves (§6.2, S7): each
-    /// component's readable config formats, and the token of every process
-    /// callback its components register.
-    pub fn serves(&self) -> Vec<String> {
-        let mut serves = BTreeSet::new();
+    /// The claim tokens this registry serves (§6.2, S7): every config
+    /// format each component reads, and the callback tokens of its
+    /// installed registrations.
+    pub fn served_tokens(&self) -> BTreeSet<crate::ObligationToken> {
+        let mut served = self.installed_inventory().served_tokens();
         for declaration in self.declarations() {
             for format in &declaration.readable_config_formats {
-                serves.insert(ProcessComponentDeclaration::config_token(
-                    &declaration.id,
-                    *format,
-                ));
+                served.insert(crate::ObligationToken::for_config(&declaration.id, *format));
             }
         }
-        serves.extend(self.served_callbacks());
-        serves.into_iter().collect()
-    }
-
-    /// The obligation tokens of the callbacks the installed components
-    /// register (S7): a projection of each component's registrations, built
-    /// alone under its unit config with no process, as an admission builds
-    /// it. A component whose config is not `()` cannot be built without a
-    /// process's config and projects none; one that does not build is
-    /// logged and projects none.
-    fn served_callbacks(&self) -> Vec<String> {
-        let callbacks = self
-            .components
-            .values()
-            .flat_map(|registered| &registered.recipe.entries)
-            .filter_map(|entry| match &entry.key {
-                ContributionKey::Callback(key) => Some(key),
-                _ => None,
-            });
-        crate::ObligationToken::of_callbacks(crate::RegistryKind::Process, callbacks)
+        served
     }
 
     pub fn installed_inventory(&self) -> InstalledInventory {

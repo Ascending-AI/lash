@@ -335,7 +335,10 @@ impl ProcessSteps for WorkerSteps {
         &self,
         process: &ProcessRecord,
         _steps: &[StepRequest],
-    ) -> Result<Option<Vec<String>>, lash_core::durable_port::DurableError> {
+    ) -> Result<
+        Option<std::collections::BTreeSet<lash_core::ObligationToken>>,
+        lash_core::durable_port::DurableError,
+    > {
         if process.env_ref().is_none() {
             return Ok(None);
         }

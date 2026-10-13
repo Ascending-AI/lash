@@ -73,13 +73,9 @@ impl RuntimeSessionServices {
     /// steps (§6.2): its environment's components' config tokens.
     pub(in crate::runtime) fn process_component_requirements(
         &self,
-    ) -> Result<Vec<String>, crate::PluginError> {
+    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
         let (_, engine) = self.current.engine_process()?;
-        let mut requires =
-            crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);
-        requires.sort();
-        requires.dedup();
-        Ok(requires)
+        Ok(crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env))
     }
 
     /// The tools `process`'s steps run (ADR 0132 §10): its catalog, the

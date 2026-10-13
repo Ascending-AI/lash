@@ -12,6 +12,7 @@ use super::decode::GraphDecoder;
 use super::node::NodeId;
 use super::refusal::GraphRefusal;
 use super::registry::NodeKind;
+use crate::store::plugin_writers::PluginCallbackIdentity;
 
 impl TokenCodec for NodeId {
     fn encode(&self, out: &mut TokenWriter) {
@@ -190,11 +191,16 @@ pub struct ExecRoot {
     pub host: Option<NodeId>,
     /// A CellEnvelope.
     pub envelope: Option<NodeId>,
+    /// The callbacks the execution owes beyond its admitted calls while it
+    /// is parked (S7): the provider and binding codec of every deferred
+    /// match a cell committed, which its later calls run on. Empty once it
+    /// ended, and for a process.
+    pub owed: Vec<PluginCallbackIdentity>,
 }
 
 impl TokenCodec for ExecRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(9);
+        out.seq(10);
         self.exec.encode(out);
         self.owner.encode(out);
         out.text(&self.executable_identity);
@@ -204,10 +210,11 @@ impl TokenCodec for ExecRoot {
         self.effect_membership.encode(out);
         self.host.encode(out);
         self.envelope.encode(out);
+        self.owed.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(9)?;
+        input.expect_struct(10)?;
         Ok(Self {
             exec: ExecRootKind::decode(input)?,
             owner: NodeId::decode(input)?,
@@ -218,6 +225,23 @@ impl TokenCodec for ExecRoot {
             effect_membership: Option::decode(input)?,
             host: Option::decode(input)?,
             envelope: Option::decode(input)?,
+            owed: Vec::decode(input)?,
+        })
+    }
+}
+
+impl TokenCodec for PluginCallbackIdentity {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        out.text(&self.owner);
+        out.text(&self.key);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            owner: input.text()?.to_owned(),
+            key: input.text()?.to_owned(),
         })
     }
 }

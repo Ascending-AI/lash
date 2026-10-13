@@ -11,6 +11,7 @@ use super::*;
 fn write_token() -> String {
     let provider = WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
     lash_core::ObligationToken::for_callback(provider.registry(), &provider.callback_identity())
+        .to_string()
 }
 
 /// The write component's id and format with no tool provider: a node
@@ -265,3 +266,123 @@ async fn settling_one_of_two_writes_leaves_the_provider_required(tier: Tier) {
 }
 
 on_every_tier!(settling_one_of_two_writes_leaves_the_provider_required);
+
+/// The config a typed write component decodes: a component whose config is
+/// not `()` (FIG-6075 R-1).
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct TypedWriteConfig {
+    label: String,
+}
+
+/// The typed write component's config key.
+const TYPED_WRITE_COMPONENT: lash_core::ProcessConfigKey<TypedWriteConfig> =
+    lash_core::ProcessConfigKey::new("core-node-typed-write", lash_core::FormatVersion::ONE);
+
+/// A component that contributes the write tool over `world` and decodes a
+/// [`TypedWriteConfig`].
+struct TypedWrite {
+    world: Arc<World>,
+}
+
+impl lash::process::ProcessComponentFactory for TypedWrite {
+    fn declaration(&self) -> lash::process::ProcessComponentDeclaration {
+        lash::process::ProcessComponentDeclaration::initial(
+            TYPED_WRITE_COMPONENT.component(),
+            TYPED_WRITE_COMPONENT.format(),
+        )
+        .expect("the typed write component's id")
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<TypedWriteConfig>()
+    }
+
+    fn validate(
+        &self,
+        entry: &lash_core::ProcessComponentEntry,
+        _env: &lash::process::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        entry
+            .config()
+            .decode::<TypedWriteConfig>()
+            .map(drop)
+            .map_err(|error| lash_core::ProcessEnvRefusal::ConfigRefused {
+                id: entry.id().to_string(),
+                reason: error.to_string(),
+            })
+    }
+
+    fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
+        lash::process::ProcessComponentSpec::new()
+            .with_tool_provider(lash::tool_provider_key!("tools"), write_tool(&self.world))
+            .recipe(TYPED_WRITE_COMPONENT.component())
+    }
+}
+
+/// IDLE-RUN-NEVER-STRANDED for a component whose config is not `()`
+/// (FIG-6075 R-1; OWED-IS-NOT-INSTALLED, FIG-6089): a process writes twice
+/// through a typed-config component, and its held write is unsettled when
+/// its node stops. The node serves the component's write provider from its
+/// installed registrations, so a node of the same deployment claims the
+/// released process: what it requires is served.
+async fn a_typed_config_components_unsettled_step_is_served_after_release(tier: Tier) {
+    let world = Arc::new(World::default());
+    let (stores, _keep) = stores(tier).await;
+    let (backend, core) = node_over(
+        stores,
+        lash_core_execution::DurableSettings::default(),
+        vec![Arc::new(ScriptEngine {
+            kind: TWO_WRITE_ENGINE,
+            advance: two_write_engine_advance,
+            performs: writes,
+        })],
+        |backend| {
+            lash::LashCore::standard_builder(backend.clone()).process_component(
+                Arc::new(TypedWrite {
+                    world: Arc::clone(&world),
+                }),
+                TYPED_WRITE_COMPONENT,
+            )
+        },
+    );
+    let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(
+            TYPED_WRITE_COMPONENT,
+            &TypedWriteConfig {
+                label: "typed".to_owned(),
+            },
+        )
+        .link_tool(
+            TYPED_WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
+            &write_definition(),
+        )
+        .build()
+        .expect("the typed environment builds");
+    let process = start_under(
+        &core,
+        &environment,
+        TWO_WRITE_ENGINE,
+        serde_json::json!({}),
+        |request| request,
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(60), world.held.notified())
+        .await
+        .expect("the held write starts");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let serves = lash::testing::node_serves(&core);
+    core.shutdown().await.expect("the node stops");
+    let provider = TYPED_WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
+    let token = lash_core::ObligationToken::for_callback(
+        provider.registry(),
+        &provider.callback_identity(),
+    )
+    .to_string();
+    let requires = claimed_requirements(&backend, &process, serves).await;
+    assert!(
+        requires.contains(&token),
+        "the unsettled held write keeps the typed component's provider required: {requires:?}"
+    );
+}
+
+on_every_tier!(a_typed_config_components_unsettled_step_is_served_after_release);

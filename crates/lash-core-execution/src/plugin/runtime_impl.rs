@@ -600,24 +600,6 @@ impl PluginHost {
         ))
     }
 
-    /// The obligation tokens this host serves (S7): one for every callback
-    /// the installed plugins register, as their static registrations
-    /// resolve it. The plugins are built over empty state and config, as a
-    /// session being created builds them before it records any; nothing is
-    /// invoked or materialized. A callback's registration never depends on
-    /// config.
-    ///
-    /// # Errors
-    ///
-    /// A plugin's build or registration error.
-    pub fn served_obligations(&self) -> Result<Vec<String>, PluginError> {
-        let inventory = self.installed_inventory()?;
-        Ok(lash_core_store::obligations::ObligationToken::of_callbacks(
-            lash_core_store::obligations::RegistryKind::Session,
-            inventory.callbacks(),
-        ))
-    }
-
     fn recipes(&self) -> Result<&[Arc<PluginRecipe>], PluginError> {
         self.recipes
             .get_or_init(|| {

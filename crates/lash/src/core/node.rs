@@ -207,7 +207,7 @@ pub(crate) struct NodeActivations {
     /// Runs the claimed processes on the core's process worker, or why the
     /// worker did not build.
     pub(crate) processes: crate::Result<Arc<dyn Activation>>,
-    /// The claim requirements the core's process components serve.
+    /// The claim tokens the core's node serves.
     pub(crate) serves: Vec<String>,
 }
 
@@ -254,23 +254,10 @@ impl LashCore {
         }
     }
 
-    /// The claim requirements the core's node serves: its process
-    /// components' config formats, and the obligation token of every
-    /// callback its plugins register (S7), projected from their static
-    /// registrations without invoking any.
+    /// The claim tokens the core's node serves (S7): projected from its
+    /// installed registrations when the core was built.
     pub(crate) fn node_serves(&self) -> Vec<String> {
-        let mut serves = self.env.core.process_engines.components().serves();
-        if let Some(host) = &self.env.plugin_host {
-            match host.served_obligations() {
-                Ok(tokens) => serves.extend(tokens),
-                Err(error) => {
-                    tracing::error!(%error, "the core's plugins serve no callbacks");
-                }
-            }
-        }
-        serves.sort();
-        serves.dedup();
-        serves
+        self.serves.to_vec()
     }
 
     /// The hub that ticks when a commit grew a process's log, on this

@@ -1884,6 +1884,80 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
     );
 }
 
+/// OWED-IS-NOT-INSTALLED for a committed match (FIG-6089; FIG-6075 R-4):
+/// a parked cell owes the provider and codec of every deferred match it
+/// committed, so only a node that serves them claims its session. The cell
+/// calls `tools.ext_granted`, which the resolver matches to the `tools`
+/// provider with a binding that provider reads, and the call settles; the
+/// cell then sleeps before calling it again. While it sleeps, the
+/// session's requirements still name the matched provider, though no call
+/// to it is admitted.
+async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
+    let turn = CellTurn::new(Cell::Deferred, dialect, None);
+    *turn.world.binding.lock_recover() = Some(lash_core::FormatVersion::ONE);
+    let (clock, database, nodes) = simulated(&turn).await;
+    let written = Arc::new(Mutex::new(None::<Vec<String>>));
+    nodes.script().observe_commits({
+        let written = Arc::clone(&written);
+        Arc::new(move |_, tx| {
+            if tx.actor() == &actor()
+                && let Some(requires) = tx.requires()
+            {
+                *written.lock_recover() = Some(requires.to_vec());
+            }
+        })
+    });
+    turn.send().await.expect("the turn is sent");
+    nodes.start("a");
+    loop {
+        let timers = database
+            .pending_waits(&actor())
+            .await
+            .expect("the session's waits read")
+            .into_iter()
+            .filter(|wait| wait.purpose.kind() == WaitKind::Timer)
+            .count();
+        if timers == 1 {
+            break;
+        }
+        assert!(
+            nodes.step().await.is_some() && clock.logical_ms() < SLEEP_MS,
+            "the cell never slept: {}\n{}",
+            turn.last_request(),
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.kill("a");
+    nodes.quiesce().await;
+    let granted_call = turn
+        .world
+        .entries()
+        .into_values()
+        .flatten()
+        .filter(|(name, _)| name == GRANTED)
+        .count();
+    assert_eq!(
+        granted_call, 1,
+        "the granted call ran once before the sleep"
+    );
+    let matched = lash_core::ObligationToken::for_callback(
+        lash_core::RegistryKind::Session,
+        &lash::plugins::ToolProviderHandle::new(
+            lash::plugins::RegistryKind::Session,
+            "tools",
+            lash::tool_provider_key!("tools"),
+        )
+        .callback_identity(),
+    )
+    .to_string();
+    let requires = written.lock_recover().clone().unwrap_or_default();
+    assert!(
+        requires.contains(&matched),
+        "the sleeping cell's committed match keeps `{matched}` required: {requires:?}\n{}",
+        nodes.script().rendered_trace()
+    );
+}
+
 /// BINDING-FORMAT-REFUSES (law 14; S8): the resolver grants
 /// `tools.ext_granted` with an execution binding in format 3, which its
 /// codec provider does not declare it reads. The cell parks, typed, before
@@ -2298,6 +2372,12 @@ async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on
         return;
     };
     deferred_grant_across_a_crash(Dialect::Postgres, Some(url)).await;
+}
+
+/// A parked cell's committed match is required, on SQLite in memory.
+#[tokio::test]
+async fn a_parked_cells_committed_match_is_required_on_sqlite_memory() {
+    a_parked_cells_committed_match_is_required(Dialect::SqliteMemory).await;
 }
 
 /// An after-step stop during a cell's `processes.await` lets the process

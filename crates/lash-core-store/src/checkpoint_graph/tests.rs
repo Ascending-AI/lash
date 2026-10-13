@@ -115,6 +115,7 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
         effect_membership: None,
         host: None,
         envelope: None,
+        owed: Vec::new(),
     };
     (
         staging.encode_value(NodeKind::EXEC_ROOT, &root).unwrap(),

@@ -50,6 +50,7 @@ mod hooks;
 pub mod prompt;
 pub(crate) mod protocol;
 mod recorded_callbacks;
+mod recorded_lookup;
 mod registrar;
 mod registry;
 pub mod runtime_host;

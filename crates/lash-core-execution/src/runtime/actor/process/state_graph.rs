@@ -68,6 +68,7 @@ pub fn stage_engine_state(
             effect_membership: None,
             host: None,
             envelope: None,
+            owed: Vec::new(),
         },
     )?;
     let write = DomainWrite::ExecRoot(ExecRootWrite::Put {

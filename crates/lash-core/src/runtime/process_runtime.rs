@@ -147,7 +147,9 @@ impl EngineProcessRuntime {
     /// # Errors
     ///
     /// This runtime has no composition.
-    pub fn component_requirements(&self) -> Result<Vec<String>, crate::PluginError> {
+    pub fn component_requirements(
+        &self,
+    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
         self.services.process_component_requirements()
     }
 

@@ -171,9 +171,15 @@ impl ActorContext {
                 cancel,
                 probe,
                 dues: Dues::new(),
-                obligations: (owned.actor().kind() == lash_durable::ActorKind::Session).then(
-                    || super::claim_obligations::SessionObligations::claimed(owned.requires()),
-                ),
+                obligations: (owned.actor().kind() == lash_durable::ActorKind::Session)
+                    .then(|| crate::SessionId::try_from(owned.actor().id().to_owned()).ok())
+                    .flatten()
+                    .map(|session| {
+                        super::claim_obligations::SessionObligations::claimed(
+                            session,
+                            owned.requires(),
+                        )
+                    }),
             }),
             scope: Scope::new(admitted),
         }
@@ -386,40 +392,55 @@ impl ActorContext {
     /// write; unavailable for a context that owns no claim.
     pub async fn commit_draining(
         &self,
-        mut tx: ActorTx,
+        tx: ActorTx,
         label: CommitLabel,
         release: lash_durable::Release,
     ) -> Result<ActorCommit, DurableError> {
         let drain = self.claimed_drain()?;
         let durable = self.durable()?;
-        let staged = self.stage_obligations(&mut tx, label);
-        let committed = drain
-            .release_with(durable.as_ref(), tx, label, release)
-            .await;
-        self.finish_obligations(staged, committed.is_ok());
-        committed
+        self.with_obligations(tx, label, None, |tx| {
+            drain.release_with(durable.as_ref(), tx, label, release)
+        })
+        .await
     }
 
-    /// Derive `tx`'s claim requirements, for a claimed session (S7).
-    fn stage_obligations(
+    /// Commit `tx` under `label` through `commit`; a claimed session's
+    /// commit carries the claim requirements its records leave it owing
+    /// (S7), and its commits are serialized. `owing` states what a root
+    /// `tx` publishes owes, as its writer staged it.
+    async fn with_obligations<F, Fut>(
         &self,
-        tx: &mut ActorTx,
+        tx: ActorTx,
         label: CommitLabel,
-    ) -> Option<super::claim_obligations::Staged> {
-        self.inner
-            .obligations
-            .as_ref()
-            .map(|obligations| obligations.stage(tx, label, self.inner.epoch))
-    }
-
-    fn finish_obligations(
-        &self,
-        staged: Option<super::claim_obligations::Staged>,
-        committed: bool,
-    ) {
-        if let (Some(obligations), Some(staged)) = (self.inner.obligations.as_ref(), staged) {
-            obligations.concluded(staged, committed);
-        }
+        owing: Option<&super::claim_obligations::ExecutionDebts>,
+        commit: F,
+    ) -> Result<ActorCommit, DurableError>
+    where
+        F: FnOnce(ActorTx) -> Fut,
+        Fut: std::future::Future<Output = Result<ActorCommit, DurableError>>,
+    {
+        let Some(obligations) = self.inner.obligations.as_ref() else {
+            return commit(tx).await;
+        };
+        let limits = self.backend().config().settings().graph_reads.execution();
+        let reads = self.durable_reads()?;
+        let staged = super::claim_obligations::Staged {
+            label,
+            epoch: self.inner.epoch,
+            owing,
+            limits,
+        };
+        // Boxed: the ledger's read and commit would otherwise inline into
+        // every caller's future.
+        Box::pin(obligations.commit(
+            |session| async move {
+                super::claim_obligations::RecordedWork::read_session(reads, &session, limits).await
+            },
+            staged,
+            tx,
+            commit,
+        ))
+        .await
     }
 
     fn claimed_drain(&self) -> Result<&lash_durable::runner::Drain, DurableError> {
@@ -477,14 +498,32 @@ impl ActorContext {
     /// someone else's, [`DurableError::Domain`] for a refused domain write.
     pub async fn commit(
         &self,
-        mut tx: ActorTx,
+        tx: ActorTx,
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
         let durable = self.durable()?;
-        let staged = self.stage_obligations(&mut tx, label);
-        let committed = durable.commit(tx, label).await;
-        self.finish_obligations(staged, committed.is_ok());
-        committed
+        self.with_obligations(tx, label, None, |tx| durable.commit(tx, label))
+            .await
+    }
+
+    /// Commit `tx` under `label`, which publishes an execution's root that
+    /// owes `owing`: a claimed session's requirements take the root's debts
+    /// as its writer states them rather than decoding the root again. A
+    /// cell executor's hook, not host surface.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::commit`].
+    #[doc(hidden)]
+    pub async fn commit_owing(
+        &self,
+        tx: ActorTx,
+        label: CommitLabel,
+        owing: &super::claim_obligations::ExecutionDebts,
+    ) -> Result<ActorCommit, DurableError> {
+        let durable = self.durable()?;
+        self.with_obligations(tx, label, Some(owing), |tx| durable.commit(tx, label))
+            .await
     }
 
     /// Commit the mailbox transaction `tx` under `label` through this

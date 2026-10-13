@@ -2383,10 +2383,18 @@ mod turn_commit_bound;
 #[path = "tool_crash_laws/presentation_obligations.rs"]
 mod presentation_obligations;
 
-/// OBLIGATIONS-COVER-CALLBACKS on every store tier (law 19).
+#[path = "tool_crash_laws/obligation_settlement.rs"]
+mod obligation_settlement;
+
+/// OBLIGATIONS-COVER-CALLBACKS (law 19) and OWED-IS-NOT-INSTALLED on every
+/// store tier.
 mod obligations {
+    use super::obligation_settlement::a_settled_call_leaves_its_provider_unrequired_on_a_later_claim;
     use super::presentation_obligations::a_parked_members_recorded_presentation_plan_is_required_until_it_presents;
     use super::served;
 
-    crate::tiered_laws!(a_parked_members_recorded_presentation_plan_is_required_until_it_presents);
+    crate::tiered_laws!(
+        a_parked_members_recorded_presentation_plan_is_required_until_it_presents,
+        a_settled_call_leaves_its_provider_unrequired_on_a_later_claim,
+    );
 }

@@ -894,6 +894,9 @@ pub struct RootParts {
     pub host: Option<NodeId>,
     /// A CellEnvelope.
     pub envelope: Option<NodeId>,
+    /// What the parked execution owes beyond its admitted calls (S7): its
+    /// committed deferred matches' providers and codecs. Empty once ended.
+    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
 }
 
 /// The owner binding of `exec`.
@@ -954,6 +957,7 @@ pub fn stage_exec_root(
             effect_membership,
             host: parts.host,
             envelope: parts.envelope,
+            owed: parts.owed,
         },
     )?;
     let write = DomainWrite::ExecRoot(lash_durable::domain::graph::ExecRootWrite::Put {

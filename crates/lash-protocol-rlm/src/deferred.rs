@@ -89,12 +89,6 @@ pub enum DeferredResolutionError {
         #[source]
         source: Box<ToolBindingError>,
     },
-    #[error("the session cannot run the matched tool `{path}`: {source}")]
-    Owner {
-        path: String,
-        #[source]
-        source: lash_core::PluginError,
-    },
 }
 
 impl DeferredResolutionError {
@@ -104,7 +98,6 @@ impl DeferredResolutionError {
         let code = match self {
             Self::Journal(error) => return error.clone(),
             Self::ProviderRegistry(error) => return error.clone().into(),
-            Self::Owner { source, .. } => return source.clone().into(),
             Self::ProviderUnserved { .. } => lash_core::RuntimeErrorCode::LashVmCellBindingDrift,
             Self::BindingUnreadable { .. } => {
                 lash_core::RuntimeErrorCode::ExecutionBindingUnreadable
@@ -166,10 +159,6 @@ pub(crate) fn called_paths(source: &str, dialect: &str) -> BTreeSet<String> {
 /// is lowered. A redrive reuses the committed matches; a precommit redrive
 /// may resolve again. `None` when the run's surface records no deferred
 /// provider.
-#[expect(
-    clippy::result_large_err,
-    reason = "the error carries the typed runtime error a nested effect records"
-)]
 pub(crate) async fn journal_deferred_matches(
     candidates: BTreeSet<String>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
@@ -265,10 +254,6 @@ pub(crate) async fn journal_deferred_matches(
 /// `offer`: every resolved match of `matches` as an effect of `boundary`
 /// under its binding's call path, and the grant its calls execute under:
 /// the matched tool, on the provider the match names, with its binding.
-#[expect(
-    clippy::result_large_err,
-    reason = "the error carries the typed runtime error a nested effect records"
-)]
 pub(crate) fn offer_deferred_matches(
     boundary: &mut HostBoundary,
     matches: &BTreeMap<String, DeferredMatch>,
@@ -313,11 +298,12 @@ pub(crate) fn offer_deferred_matches(
                 path: path.clone(),
                 source: Box::new(source),
             })?;
+        // A match naming a provider this node does not register parks the
+        // cell for a node that does, as an unserved codec does.
         let provider = ctx
             .tool_provider(&definition.manifest.id, Some(provider))
-            .map_err(|source| DeferredResolutionError::Owner {
-                path: path.clone(),
-                source,
+            .map_err(|_| DeferredResolutionError::ProviderUnserved {
+                provider: provider.clone(),
             })?;
         let execution_grant =
             lash_core::ToolExecutionGrant::from_definition(provider, definition.clone())

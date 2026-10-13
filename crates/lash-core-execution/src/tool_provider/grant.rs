@@ -54,4 +54,15 @@ impl ToolExecutionGrant {
         self.binding = binding;
         self
     }
+
+    /// The callbacks a call under this grant runs on: its provider, then
+    /// its binding's codec when it carries one. What a cell holding the
+    /// grant owes until it ends (S7).
+    pub fn callbacks(&self) -> impl Iterator<Item = crate::plugin::PluginCallbackIdentity> + '_ {
+        std::iter::once(self.provider.callback_identity()).chain(
+            self.binding
+                .iter()
+                .map(|binding| binding.codec.callback_identity()),
+        )
+    }
 }

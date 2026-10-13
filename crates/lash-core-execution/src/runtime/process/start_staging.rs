@@ -764,7 +764,12 @@ async fn stage<'a>(
     let loaded = load_staged_env(stores, env.as_ref()).await?;
     registration.requires = loaded
         .as_ref()
-        .map(crate::plugin::ProcessComponentDeclaration::env_requirements)
+        .map(|env| {
+            crate::plugin::ProcessComponentDeclaration::env_requirements(env)
+                .into_iter()
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default();
     let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     // The engine's artifacts are held: its effects are read from them.

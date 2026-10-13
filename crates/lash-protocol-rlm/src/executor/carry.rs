@@ -247,6 +247,7 @@ impl KernelCarry {
                 format: plan.to.number(),
                 host: Some(host),
                 envelope: Some(envelope),
+                owed: body.owed.clone(),
             },
             (Some(cell.row.rev), Some(cell.row.root)),
             lash_core_store::checkpoint_graph::CommitId::mint(),
