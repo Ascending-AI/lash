@@ -9,7 +9,6 @@ use lash_sansio::sync::{MutexExt, RwLockExt};
 use super::*;
 
 mod directives;
-mod outcome_boundary;
 mod prompt_inputs;
 mod tools;
 pub use tools::ResolvedToolSurface;
@@ -625,6 +624,38 @@ impl PluginSession {
             .composition
             .recorded()
             .unavailable(callback)
+    }
+
+    pub fn has_runtime_event_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .runtime_event_hooks
+            .is_empty()
+    }
+
+    pub fn has_assistant_stream_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .assistant_stream_hooks
+            .is_empty()
+    }
+
+    pub fn has_assistant_stream_finished_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .assistant_stream_finished_hooks
+            .is_empty()
+    }
+
+    pub fn has_context_pressure_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .context_pressure_hooks
+            .is_empty()
     }
 
     /// Ask each registered context-pressure hook, in priority order, what the

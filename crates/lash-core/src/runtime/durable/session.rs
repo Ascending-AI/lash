@@ -193,12 +193,6 @@ pub struct ModelCallAttempt {
 /// the machine itself.
 #[async_trait::async_trait]
 pub trait TurnDrive: Send {
-    /// Plain final tool answers may ride the next output only when no
-    /// callback consumes their recorded state during preparation.
-    fn can_defer_tool_outcomes(&self) -> bool {
-        false
-    }
-
     /// The turn's machine.
     fn machine(&mut self) -> &mut TurnMachine;
 

@@ -74,11 +74,11 @@ pub struct EndedCell {
 }
 
 impl CellEndHandoff {
-    /// A handoff whose turn holds the end when `holds`.
+    /// A handoff whose turn holds the end.
     #[must_use]
-    pub fn holding(holds: bool) -> Self {
+    pub fn held() -> Self {
         Self {
-            holds,
+            holds: true,
             ended: Arc::default(),
         }
     }

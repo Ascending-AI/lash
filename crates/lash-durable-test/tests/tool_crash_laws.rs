@@ -906,6 +906,8 @@ struct Crash {
         )>,
     >,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+    /// What the deployment installs beside the scenario's own plugins.
+    installed: plugin_sections::Installed,
 }
 
 impl Crash {
@@ -930,6 +932,7 @@ impl Crash {
             host: Mutex::default(),
             chat: Mutex::default(),
             keep: Mutex::default(),
+            installed: plugin_sections::Installed::Nothing,
         }
     }
 
@@ -982,6 +985,7 @@ impl Crash {
                 } else {
                     builder
                 };
+                let builder = self.installed.install(builder);
                 let builder = if self.trace_adapter {
                     builder.trace_runtime(self.telemetry.runtime())
                 } else {
@@ -1082,6 +1086,7 @@ impl Crash {
         if self.turn == Turn::Activity {
             violations.extend(self.activity_laws(cut).await);
         }
+        violations.extend(self.installed.laws(&self.scripts.requests(INPUT)));
         if self.turn.changes_state() {
             violations.extend(self.state_laws().await);
         }
@@ -2133,6 +2138,18 @@ async fn prove_at(turn: Turn, tier: Tier, cut_labels: &[CommitLabel]) {
 
 /// [`prove_at`] under `faults` only.
 async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults: &[Fault]) {
+    let nothing = plugin_sections::Installed::Nothing;
+    prove_installed(turn, tier, cut_labels, faults, nothing).await;
+}
+
+/// [`prove_under`] with `installed` beside the scenario's own plugins.
+async fn prove_installed(
+    turn: Turn,
+    tier: Tier,
+    cut_labels: &[CommitLabel],
+    faults: &[Fault],
+    installed: plugin_sections::Installed,
+) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -2152,7 +2169,11 @@ async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults:
     let report = matrix
         .faults(faults)
         .horizon(Duration::from_secs(600))
-        .run_test(|| Crash::new(turn, dialect, postgres_url.clone()))
+        .run_test(|| {
+            let mut crash = Crash::new(turn, dialect, postgres_url.clone());
+            crash.installed = installed;
+            crash
+        })
         .await;
     let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
     eprintln!(
@@ -2411,6 +2432,7 @@ tiered_laws!(
     a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash,
     a_cells_call_trace_admission_is_exported_once_across_a_crash,
     a_finish_settles_under_its_admitted_declaration_across_a_crash,
+    a_sectioned_round_cut_at_its_fused_commit_keeps_one_outcome_and_its_section,
 );
 
 /// The attachment put crash law on every store tier (FIG-5400).
@@ -2422,6 +2444,10 @@ mod puts {
 
 #[path = "support/turn_commit_bound.rs"]
 mod turn_commit_bound;
+
+#[path = "tool_crash_laws/plugin_sections.rs"]
+mod plugin_sections;
+use plugin_sections::a_sectioned_round_cut_at_its_fused_commit_keeps_one_outcome_and_its_section;
 
 #[path = "tool_crash_laws/presentation_obligations.rs"]
 mod presentation_obligations;

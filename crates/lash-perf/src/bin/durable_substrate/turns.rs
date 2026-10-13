@@ -578,9 +578,14 @@ pub async fn counted(run: &Run<'_>, case: &Case) -> Result<()> {
                 .iter()
                 .filter(|tx| tx.ok && tx.actor == actor)
                 .collect();
+            // A plain round's outcomes commit with the next model start
+            // (FIG-5954, FIG-6162); a cell's with its own `round.outcome`.
             let outcomes = owned
                 .iter()
-                .filter(|tx| tx.label == "round.outcome")
+                .filter(|tx| {
+                    tx.label == CommitLabel::ROUND_OUTCOME.as_str()
+                        || tx.label == CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START.as_str()
+                })
                 .count();
             let parks = owned.iter().filter(|tx| is_park(tx.label)).count();
             let ends = owned

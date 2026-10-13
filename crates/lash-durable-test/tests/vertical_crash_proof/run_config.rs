@@ -836,12 +836,12 @@ async fn a_cancel_completes_under_drift_and_keeps_its_committed_calls_on_sqlite_
             lash::RunSpec::definition(definition_ref(), serde_json::Value::Null),
         )
         .await;
-    // The round's outcome has committed; its presentation commits with the
-    // second call's `model.start`.
+    // The round's outcome and presentation commit with the second call's
+    // `model.start`.
     let script = Script::new();
     script.cut_on(
         "a",
-        CommitLabel::ROUND_PRESENT_MODEL_START,
+        CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
         1,
         Fault::CommitThenAbort,
     );
@@ -1496,7 +1496,8 @@ async fn a_resumed_call_to_a_changed_tool_parks_typed_on_sqlite_memory() {
 async fn a_replayed_sync_after_a_committed_response_installs_the_recorded_surface_on_sqlite_memory()
 {
     let law =
-        resume_on_a_changed_surface(STABLE_TOOL, CommitLabel::ROUND_PRESENT_MODEL_START).await;
+        resume_on_a_changed_surface(STABLE_TOOL, CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START)
+            .await;
     assert_eq!(law.park, None);
     assert_eq!(law.status, Some(lash::TurnStatus::Answered));
     let offered = law.observed.descriptions();

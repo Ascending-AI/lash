@@ -328,12 +328,14 @@ pub(super) async fn run(
     // The transaction that commits a member's answer reads the turn's
     // accepted stop itself: an answer that lands after the request was
     // accepted, before this owner saw it, publishes nothing (FIG-5381).
+    // A final batch of plain answers rides the turn's next output, whatever
+    // plugins the session installs: everything that prepares that output
+    // reads the turn's live state, never the round's records (FIG-6162).
     let cancel = CancellationToken::new();
-    let prepare = drive.can_defer_tool_outcomes();
     let running = runner
         .cancelled_by(cancel.clone())
         .fenced_by(Arc::new(turn_cancel::immediate_in))
-        .run_or_prepare(prepare);
+        .run_or_prepare();
     tokio::pin!(running);
     let end = loop {
         tokio::select! {

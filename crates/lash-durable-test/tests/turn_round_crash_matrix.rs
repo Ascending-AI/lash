@@ -4,8 +4,9 @@
 //! One session runs one turn. The scripted model answers its first call
 //! with tool calls and its second, which sees their results, with a final
 //! answer. The phase runner admits the round in `model.done`, runs it with
-//! the round runner, presents it with the next `model.start`
-//! (`round.present+model.start`) and commits the turn. Member bodies write
+//! the round runner, commits its last outcomes and presents it with the
+//! next `model.start` (`round.outcome+present+model.start`) and commits the
+//! turn. Member bodies write
 //! to an [`ExternalWorld`] that survives every node, as the outside world
 //! would.
 //!
@@ -1748,7 +1749,7 @@ async fn a_turns_tool_round_resumes_at_every_label_without_replay() {
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::ROUND_START,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
         ],
     )
@@ -1804,7 +1805,7 @@ async fn a_parked_member_settles_from_its_key_at_every_label() {
         &[
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
         ],
     )

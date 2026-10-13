@@ -230,19 +230,23 @@ impl RoundRunner {
     /// [`RoundError`]: ownership lost or another store failure on a read,
     /// inconsistent records, or the activation stopping.
     pub async fn run(self) -> Result<RoundEnd, RoundError> {
-        match self.run_or_prepare(false).await? {
+        match self.drive(false).await? {
             PreparedRoundEnd::Recorded(end) => Ok(end),
             PreparedRoundEnd::Prepared { .. } => Err(RoundError::Stopped),
         }
     }
 
-    /// Run the round, allowing final plain answers to ride the next output
-    /// when the caller consumes them only through pure preparation. The caller
-    /// must commit the returned outcome before publishing anything derived from it.
+    /// Run the round, its final plain answers staged to ride the caller's
+    /// next output. The caller must commit the returned outcome before
+    /// publishing anything derived from it.
     ///
     /// # Errors
     /// As [`run`](Self::run).
-    pub async fn run_or_prepare(mut self, prepare: bool) -> Result<PreparedRoundEnd, RoundError> {
+    pub async fn run_or_prepare(self) -> Result<PreparedRoundEnd, RoundError> {
+        self.drive(true).await
+    }
+
+    async fn drive(mut self, prepare: bool) -> Result<PreparedRoundEnd, RoundError> {
         self.lifecycle.prepare_final(prepare);
         let (mut rows, mut waits) = load(&self.cx, &self.owner, self.run).await?;
         let clock = Arc::clone(self.cx.clock());

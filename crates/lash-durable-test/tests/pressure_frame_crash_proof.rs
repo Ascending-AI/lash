@@ -823,7 +823,8 @@ async fn uncut(script: Script) {
     );
 }
 
-/// The crash scripts' complete owner sequence, including the code mode cell writes.
+/// The crash scripts' complete owner sequence, including the code mode cell
+/// writes. Each cell's end commits with its turn (FIG-5999, FIG-6162).
 fn uncut_labels(script: Script) -> Vec<CommitLabel> {
     if script == Script::ContinueAs {
         vec![
@@ -831,7 +832,6 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::COMPLETION_START,
@@ -839,13 +839,11 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
-            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ]

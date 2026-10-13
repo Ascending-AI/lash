@@ -230,10 +230,9 @@ impl RuntimeDrive {
             driver.turn_phase_probe.clone(),
             RuntimeTurnPhase::EffectLoop,
         ));
-        // A cell's end rides the commit that consumes its answer unless a
-        // callback of the host's runs between the two (FIG-5999).
-        driver.cell_end =
-            crate::CellEndHandoff::holding(driver.session.plugins().can_hold_cell_end());
+        // A cell's end rides the commit that consumes its answer (FIG-5999):
+        // what runs between the two reads the turn's live state (FIG-6162).
+        driver.cell_end = crate::CellEndHandoff::held();
         Self {
             effect_phase,
             commit_phase: None,
@@ -427,10 +426,6 @@ fn cell_abort(error: RuntimeError) -> TurnError {
 
 #[async_trait::async_trait]
 impl TurnDrive for RuntimeDrive {
-    fn can_defer_tool_outcomes(&self) -> bool {
-        self.driver.session.plugins().can_defer_tool_outcomes()
-    }
-
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
     }

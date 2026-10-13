@@ -941,11 +941,14 @@ fn retained_prints(value: &serde_json::Value, found: &mut Vec<lash_core::Attachm
 }
 
 /// The commit that records the operation's outcome: a cell's VM consumes
-/// it from `round.outcome`; the standard protocol's plain final outcome
-/// commits with its presentation and the next model start (FIG-5954).
+/// it from `round.outcome`; a plain final outcome commits with its
+/// presentation and the next model start (FIG-5954), whatever the protocol
+/// (FIG-6162).
 fn outcome_label(protocol: Protocol) -> CommitLabel {
     match protocol {
-        Protocol::Tools => CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+        Protocol::Tools | Protocol::Noted | Protocol::NotedTwice => {
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START
+        }
         _ => CommitLabel::ROUND_OUTCOME,
     }
 }
@@ -1078,8 +1081,7 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -1100,11 +1102,9 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -1461,7 +1461,7 @@ async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_p
 /// uncut; and so does the commit of a turn whose owner died while the call
 /// was unanswered (`model.done`, the round's checkpoint) or after the
 /// round's results made the transcript resume-safe again
-/// (`round.present_model_start`).
+/// (`round.outcome+present+model.start`).
 #[tokio::test]
 async fn a_protocol_record_appended_while_a_call_is_unanswered_is_committed_uncut_and_resumed() {
     let note = serde_json::to_value(lash_core::SessionHistoryRecord::Protocol(
@@ -1470,7 +1470,7 @@ async fn a_protocol_record_appended_while_a_call_is_unanswered_is_committed_uncu
     .expect("a record encodes");
     for cut in [
         (CommitLabel::MODEL_DONE, 1),
-        (CommitLabel::ROUND_PRESENT_MODEL_START, 1),
+        (CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START, 1),
     ] {
         let committed = resumed_as_uncut(Protocol::Noted, cut, Dialect::SqliteMemory, None).await;
         assert_eq!(
