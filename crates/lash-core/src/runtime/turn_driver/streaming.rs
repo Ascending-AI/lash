@@ -65,8 +65,8 @@ impl RuntimeTurnDriver<'_> {
     /// replay and re-sends the call once, paying for it again, as ADR 0142
     /// §2 bounds for a cell. No commit happens between the provider's answer
     /// and the hooks to carry the completion, so closing this window would
-    /// cost an owner commit per hooked call, and RLM's cell mask hooks every
-    /// call. Closing that needs
+    /// cost an owner commit per hooked call, and a cell-mask protocol hooks
+    /// every call. Closing that needs
     /// provider-side idempotency or resume (FIG-1275), not more staging here.
     pub(super) async fn invoke_turn_llm_effect(
         &mut self,
