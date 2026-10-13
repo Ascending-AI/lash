@@ -134,12 +134,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .driver
                     .run_exec_code(
                         &code,
-                        Arc::new(
-                            crate::facade_support::ChronologicalProjection::from_turn_view(
-                                runner.active_events.as_slice(),
-                                &runner.messages,
-                            ),
-                        ),
+                        runner.active_events.clone(),
+                        runner.messages.clone(),
                         runner.protocol_iteration,
                         envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,

@@ -94,6 +94,7 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                     .flat_map(|m| m.blocks.iter()).any(|b| matches!(b, LlmContentBlock::Text { text, .. } if text.contains(&format!("grow-done:{done}:")))) {
                     return Err(lash::provider::LlmTransportError::new("cell did not emit its successful payload receipt"));
                 }
+                meter.model_request(&request);
                 meter.start_profile(done).map_err(|e| lash::provider::LlmTransportError::new(e.to_string()))?;
                 if done.is_multiple_of(every) || done == rounds || done == rounds / 2
                     || done == rounds * 3 / 4 || done == meter.profile_from_round {

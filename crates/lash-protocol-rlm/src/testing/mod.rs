@@ -53,6 +53,7 @@ pub(crate) fn cell_services(
     deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
 ) -> crate::executor::CellServices {
     crate::executor::CellServices {
+        events: Arc::default(),
         workers,
         deferred_tool_resolver,
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),

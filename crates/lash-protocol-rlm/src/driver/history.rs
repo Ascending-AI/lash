@@ -66,8 +66,6 @@ use lash_core::{
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 
-use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
-
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) dialect: &'a SessionDialect,
     pub(super) events: &'a [lash_core::SessionHistoryRecord],
@@ -124,13 +122,11 @@ pub(super) fn render_history_messages(
     input: &RlmHistoryRenderInput<'_>,
 ) -> Result<Vec<LlmMessage>, lash_core::StoredDataCorruption> {
     let mut messages = Vec::new();
-    let chronological = lash_core::facade_support::ChronologicalProjection::from_turn_view(
-        input.events,
-        input.turn_messages,
-    );
-    let history_projection = rlm_history_projection(&chronological)?;
+    let history_projection = input
+        .dialect
+        .history_index(input.events, input.turn_messages)?;
     let mut pending: Option<PendingProse> = None;
-    let superseded = superseded_failure_indices(input.events, input.turn_messages);
+    let superseded = superseded_failure_indices(input.dialect, input.events, input.turn_messages);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         // A native provider exchange is not prose: this channel shows its
@@ -161,16 +157,18 @@ pub(super) fn render_history_messages(
                 });
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                let Some(event) = decode_rlm_protocol_event(event)
+                let Some(event) = input
+                    .dialect
+                    .decode_history_event(event)
                     .expect("history projection validated every RLM event")
                 else {
                     return;
                 };
-                let step = match event {
+                let step = match event.as_ref() {
                     lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content) => {
                         flush_pending_prose(&mut messages, &mut pending);
                         pending = Some(PendingProse {
-                            text: content.prose,
+                            text: content.prose.clone(),
                             reasoning_blocks: Vec::new(),
                             image_blocks: Vec::new(),
                         });
@@ -202,10 +200,10 @@ pub(super) fn render_history_messages(
                     history_projection
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
-                    &step,
+                    step,
                 );
                 let mut obs_blocks = vec![text_block(obs_text, false)];
-                append_step_image_blocks(&step, &mut obs_blocks);
+                append_step_image_blocks(step, &mut obs_blocks);
                 messages.push(LlmMessage::new(LlmRole::User, obs_blocks));
             }
             BorrowedChronologicalPayload::Message(message) => {
@@ -270,6 +268,7 @@ pub(super) fn render_history_messages(
     reason = "the caller validated every event with the fallible history projection"
 )]
 fn superseded_failure_indices(
+    dialect: &SessionDialect,
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
 ) -> HashSet<usize> {
@@ -307,8 +306,10 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                match decode_rlm_protocol_event(event)
+                match dialect
+                    .decode_history_event(event)
                     .expect("history projection validated every RLM event")
+                    .as_deref()
                 {
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(_)) => {
                         prose_entries.push(entry.index);

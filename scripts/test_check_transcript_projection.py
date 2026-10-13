@@ -61,9 +61,11 @@ roles = {roles!r}
         self.assertEqual([], gate.check(self.root))
 
     def test_new_committed_truth_reader_is_red(self):
-        self.write("examples/other/src/main.rs", "fn hidden(view: View) { view.messages(); }")
-        self.assertIn("unregistered transcript", self.errors())
-        self.assertIn("reads cardinality changed: 1", self.errors())
+        for accessor in ("messages", "visit_chronological"):
+            with self.subTest(accessor=accessor):
+                self.write("examples/other/src/main.rs", f"fn hidden(view: View) {{ view.{accessor}(); }}")
+                self.assertIn("unregistered transcript", self.errors())
+                self.assertIn("reads cardinality changed: 1", self.errors())
 
     def test_single_output_accessor_renderer_is_red(self):
         self.write("examples/other/src/main.rs", "fn hidden(output: Output) { persist(output.assistant_message()); }")

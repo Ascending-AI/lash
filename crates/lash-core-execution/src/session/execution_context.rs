@@ -91,6 +91,17 @@ impl CellEndHandoff {
     }
 }
 
+/// One immutable execution-history snapshot. Ordinary cell metadata borrows
+/// it; a program requesting the full projection materializes it once.
+pub(super) enum ChronologicalRead {
+    Owned(Arc<crate::ChronologicalProjection>),
+    Turn {
+        events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        messages: crate::MessageSequence,
+        projected: std::sync::OnceLock<Arc<crate::ChronologicalProjection>>,
+    },
+}
+
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
     tool_fault_retry: crate::runtime::PollPacing,
@@ -109,7 +120,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// build's own generation.
     fleet_format: crate::FleetFormat,
     attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    chronological_projection: Arc<crate::ChronologicalProjection>,
+    chronological_projection: Arc<ChronologicalRead>,
     turn_context: crate::TurnContext,
     /// The admitted logical Run owning a foreground cell, independent of
     /// the effect scope of a process-owned session shift.
@@ -1085,7 +1096,74 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
-        Arc::clone(&self.chronological_projection)
+        match self.chronological_projection.as_ref() {
+            ChronologicalRead::Owned(projection) => Arc::clone(projection),
+            ChronologicalRead::Turn {
+                events,
+                messages,
+                projected,
+            } => Arc::clone(projected.get_or_init(|| {
+                Arc::new(crate::ChronologicalProjection::from_turn_view(
+                    events.as_slice(),
+                    messages,
+                ))
+            })),
+        }
+    }
+
+    /// This execution's immutable turn history, shared without projecting it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_turn_history(
+        mut self,
+        events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        messages: crate::MessageSequence,
+    ) -> Self {
+        self.chronological_projection = Arc::new(ChronologicalRead::Turn {
+            events,
+            messages,
+            projected: std::sync::OnceLock::new(),
+        });
+        self
+    }
+
+    /// Visit this execution's chronological history without copying its
+    /// protocol payloads. The borrowed and owned views have the same order.
+    pub fn visit_chronological<'a>(
+        &'a self,
+        mut visit: impl FnMut(crate::facade_support::BorrowedChronologicalEntry<'a>),
+    ) {
+        use crate::facade_support::{
+            BorrowedChronologicalEntry, BorrowedChronologicalMessage, BorrowedChronologicalPayload,
+            ChronologicalPayload,
+        };
+        match self.chronological_projection.as_ref() {
+            ChronologicalRead::Turn {
+                events, messages, ..
+            } => crate::facade_support::visit_turn_view(events.as_slice(), messages, visit),
+            ChronologicalRead::Owned(projection) => {
+                for entry in projection.entries() {
+                    let payload = match &entry.payload {
+                        ChronologicalPayload::Message(message) => {
+                            BorrowedChronologicalPayload::Message(BorrowedChronologicalMessage {
+                                id: &message.id,
+                                role: message.role,
+                                parts: &message.parts,
+                                origin: message.origin.as_ref(),
+                                reply_marker: message.reply_marker.as_ref(),
+                            })
+                        }
+                        ChronologicalPayload::ProtocolEvent(event) => {
+                            BorrowedChronologicalPayload::ProtocolEvent(event)
+                        }
+                    };
+                    visit(BorrowedChronologicalEntry {
+                        index: entry.index,
+                        payload,
+                    });
+                }
+            }
+        }
     }
 
     pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {

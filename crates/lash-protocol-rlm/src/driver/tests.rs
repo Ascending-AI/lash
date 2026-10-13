@@ -204,8 +204,14 @@ pub(crate) fn projected_request_with_facts(
         lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
     let facts = crate::prompt_sections::RlmPromptFacts {
         history_binding: Arc::from(
-            crate::prompt_sections::history_binding(&dialect, &projection, images)
-                .expect("valid history"),
+            crate::prompt_sections::history_binding(
+                &dialect,
+                &dialect
+                    .projection_index(&projection)
+                    .expect("valid history"),
+                images,
+            )
+            .expect("valid history"),
         ),
         bound_variables: Arc::from("- `scratch_note` = \"saved\""),
         read_only_variables: None,
@@ -707,4 +713,46 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
             ..
         }) if text.contains("=== CURRENT ITERATION: 2 ===")
     ));
+}
+
+/// A growing turn validates each unchanged event once per live projector,
+/// rather than decoding its tool-value graph again at every model call.
+#[test]
+fn growing_turn_decodes_only_new_history_events() {
+    let projector = projector(100);
+    let mut events = Vec::new();
+    crate::projection::EVENT_DECODES.with(|count| count.set(0));
+    for round in 0..16 {
+        events.push(step_event(round, "console.log(1)", "ok"));
+        let request = project_iteration_request(&projector, &events, round, "test-model");
+        assert_eq!(request.messages.len(), (round + 1) * 2 + 1);
+    }
+    let decodes = crate::projection::EVENT_DECODES.with(std::cell::Cell::get);
+    assert_eq!(
+        decodes,
+        events.len(),
+        "unchanged history must not be decoded again"
+    );
+    let fresh = self::projector(100);
+    project_iteration_request(&fresh, &events, 16, "test-model");
+    assert_eq!(
+        crate::projection::EVENT_DECODES.with(std::cell::Cell::get),
+        decodes + events.len()
+    );
+    let SessionHistoryRecord::Protocol(first) = &mut events[0] else {
+        unreachable!()
+    };
+    first.payload["format"] = serde_json::json!(0);
+    let config = projection_test_config("test-model", Default::default(), None);
+    let error = projector
+        .project(ProjectorContext {
+            config: &config,
+            messages: &Default::default(),
+            events: &events,
+            protocol_iteration: 17,
+            use_tools: false,
+            environment: &Default::default(),
+        })
+        .expect_err("rewritten corrupt content must validate again");
+    assert_eq!(error.record_kind, "RLM protocol event");
 }

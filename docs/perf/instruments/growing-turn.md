@@ -60,6 +60,12 @@ PID; `unix_time_ns`, PID and phase join the two process lifetimes.
   profile supplies allocation-site/lifetime evidence. Harness, asynchronous
   teardown and background work are included; allocator slack and native
   allocations are excluded. The default keeps `StatsAlloc<System>` installed.
+- `model_request_text_bytes` counts the text in the current model request's
+  messages without copying or encoding it. `cumulative_model_request_text_bytes`
+  sums those requests in this host process. These count the inherent transcript
+  payload separately from allocator traffic; instructions and non-text blocks
+  are excluded. Same-process reopening retains the cumulative count, while a
+  new process starts it at zero.
 - `/proc` rows give host and each direct VM worker's RSS/HWM in KiB, descriptors
   and threads. Children of every host thread are deduplicated and identified
   by their worker argv. A worker disappearing during observation produces an

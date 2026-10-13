@@ -444,7 +444,8 @@ impl RuntimeTurnDriver<'_> {
     pub(in crate::runtime) async fn run_exec_code(
         &self,
         code: &str,
-        chronological_projection: Arc<crate::facade_support::ChronologicalProjection>,
+        active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+        messages: crate::MessageSequence,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
@@ -455,8 +456,9 @@ impl RuntimeTurnDriver<'_> {
         let code_executor = self.session.plugins().code_executor();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self
-            .execution_context(event_tx, chronological_projection)
+            .execution_context(event_tx, Arc::default())
             .map_err(crate::RuntimeEffectControllerError::from)?
+            .with_turn_history(active_events, messages)
             .with_tracing(self.execution_tracing(protocol_iteration))
             .with_code_block_graph_key(code_block_graph_key)
             .with_cell_end(self.cell_end.clone())

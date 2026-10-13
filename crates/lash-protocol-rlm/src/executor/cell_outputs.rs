@@ -36,6 +36,7 @@ pub(super) async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
+    events: &crate::projection::EventCache,
     values: Vec<lash_kernel_doc::Datum>,
     response: &mut ExecResponse,
 ) {
@@ -64,21 +65,20 @@ pub(super) async fn record_cell_outputs(
         }
     };
     let renderer = Arc::clone(&code_renderer.0);
-    let history_index =
-        match crate::projection::rlm_history_projection(ctx.chronological_projection().as_ref()) {
-            Ok(history) => history.len(),
-            Err(corruption) => {
-                let mut error = lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                    corruption.to_string(),
-                );
-                error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
-                    corruption: Box::new(corruption),
-                });
-                fail_cell_on_nested_error(ctx, response, error);
-                return;
-            }
-        };
+    let history_index = match crate::projection::HistoryIndex::from_context(ctx, events) {
+        Ok(history) => history.len(),
+        Err(corruption) => {
+            let mut error = lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                corruption.to_string(),
+            );
+            error.cause = Some(lash_core::RuntimeErrorCause::StoredDataCorrupt {
+                corruption: Box::new(corruption),
+            });
+            fail_cell_on_nested_error(ctx, response, error);
+            return;
+        }
+    };
     let key = cell.outputs_key();
     let attachments = ctx.attachment_store();
     let finish_value = response.finish_value().cloned();

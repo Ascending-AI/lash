@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 
 use lash_core::{
     Message, MessageRole, PartKind, RuntimeExecutionContext, facade_support::ChronologicalPayload,
@@ -42,6 +44,11 @@ pub fn rlm_protocol_event(
     .expect("RLM protocol events serialize")
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static EVENT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Read the RLM event a session-history protocol event carries: `None` for
 /// another plugin's event, typed corruption for an unstamped, foreign-format or
 /// undecodable payload. The inverse of [`rlm_protocol_event`].
@@ -51,6 +58,8 @@ pub fn decode_rlm_protocol_event(
     if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
         return Ok(None);
     }
+    #[cfg(test)]
+    EVENT_DECODES.with(|count| count.set(count.get() + 1));
     let corrupt = |message: String| lash_core::StoredDataCorruption {
         record_kind: "RLM protocol event".into(),
         message,
@@ -59,7 +68,7 @@ pub fn decode_rlm_protocol_event(
     struct Stamp {
         format: u32,
     }
-    let stamp: Stamp = serde_json::from_value(event.payload.clone())
+    let stamp: Stamp = serde::Deserialize::deserialize(&event.payload)
         .map_err(|error| corrupt(error.to_string()))?;
     if !lash_core::store::upcast_chain_covers(
         lash_core::surface_format!(RLM_PROTOCOL_EVENT_VERSION),
@@ -71,7 +80,7 @@ pub fn decode_rlm_protocol_event(
             stamp.format
         )));
     }
-    let envelope: RlmEventEnvelope = serde_json::from_value(event.payload.clone())
+    let envelope: RlmEventEnvelope = serde::Deserialize::deserialize(&event.payload)
         .map_err(|error| corrupt(error.to_string()))?;
     Ok(Some(envelope.event))
 }
@@ -79,7 +88,9 @@ pub fn decode_rlm_protocol_event(
 #[derive(Clone, Debug)]
 pub struct RlmHistoryProjection {
     history: Vec<RlmHistoryItem>,
+    #[cfg(test)]
     chronological_indices: BTreeMap<usize, usize>,
+    #[cfg(test)]
     suppressed_chronological_indices: BTreeSet<usize>,
 }
 
@@ -95,51 +106,62 @@ impl RlmHistoryProjection {
     pub(crate) fn from_entries(
         entries: &[lash_core::facade_support::ChronologicalEntry],
     ) -> Result<Self, lash_core::StoredDataCorruption> {
-        let suppressed_chronological_indices = completed_turn_internal_indices(entries)?;
+        let decoder = super::EventCache::default();
+        let index = super::HistoryIndex::from_owned_entries(entries, &decoder)?;
         let mut history = Vec::with_capacity(entries.len());
+        #[cfg(test)]
         let mut chronological_indices = BTreeMap::new();
         for entry in entries {
-            if suppressed_chronological_indices.contains(&entry.index) {
+            if index.suppresses_chronological(entry.index) {
                 continue;
             }
             let item = match &entry.payload {
                 ChronologicalPayload::Message(message) => history_item_from_message(message),
                 ChronologicalPayload::ProtocolEvent(event) => {
-                    match decode_rlm_protocol_event(event)? {
+                    match decoder.decode(event)?.as_deref() {
                         Some(RlmProtocolEvent::RlmAssistantContent(content)) => {
                             Some(RlmHistoryItem::Message {
-                                id: content.id,
+                                id: content.id.clone(),
                                 role: RlmHistoryRole::Assistant,
-                                content: content.prose,
+                                content: content.prose.clone(),
                                 attachments: Vec::new(),
                             })
                         }
                         Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                            Some(history_item_from_lash_vm_step(&step))
+                            Some(history_item_from_lash_vm_step(step))
                         }
                         _ => None,
                     }
                 }
             };
             if let Some(item) = item {
+                #[cfg(test)]
                 chronological_indices.insert(entry.index, history.len());
                 history.push(item);
             }
         }
         Ok(Self {
             history,
+            #[cfg(test)]
             chronological_indices,
-            suppressed_chronological_indices,
+            #[cfg(test)]
+            suppressed_chronological_indices: entries
+                .iter()
+                .filter(|entry| index.suppresses_chronological(entry.index))
+                .map(|entry| entry.index)
+                .collect(),
         })
     }
 
     /// Return the compact semantic `history[N]` index for a retained source
     /// entry. Protocol-internal entries suppressed by completed-turn
     /// precedence do not consume an index.
+    #[cfg(test)]
     pub(crate) fn projected_index_for_chronological(&self, index: usize) -> Option<usize> {
         self.chronological_indices.get(&index).copied()
     }
 
+    #[cfg(test)]
     pub(crate) fn suppresses_chronological(&self, index: usize) -> bool {
         self.suppressed_chronological_indices.contains(&index)
     }
@@ -163,71 +185,6 @@ impl RlmHistoryProjection {
     pub fn value(&self) -> serde_json::Value {
         serde_json::to_value(&self.history).unwrap_or_else(|_| serde_json::Value::Array(vec![]))
     }
-}
-
-/// The relationship is derived from event provenance: protocol entries and a later assistant
-/// message before the next user/event turn boundary share one completed turn.
-/// Content is never compared.
-/// Intermediate trajectory entries remain available, while their prose is represented by the
-/// canonical transcript.
-/// A terminal step with an archive stays addressable; its printed values
-/// are independent of the canonical assistant answer. So does a terminal
-/// step whose final value was retained out of history: the answer is a cut
-/// text copy of a value that long, and the step holds the value's shape and
-/// its whole bytes (FIG-1439). Without a committed message, every terminal
-/// step remains unchanged.
-fn completed_turn_internal_indices(
-    entries: &[lash_core::facade_support::ChronologicalEntry],
-) -> Result<BTreeSet<usize>, lash_core::StoredDataCorruption> {
-    let mut suppressed = BTreeSet::new();
-    let mut assistant_content_indices = Vec::new();
-    let mut terminal_step = None;
-
-    for entry in entries {
-        match &entry.payload {
-            ChronologicalPayload::Message(message) => match message.role {
-                // A refused call's results are protocol output inside the
-                // turn, not the next turn's input.
-                MessageRole::User
-                    if crate::native::transport::is_exchange_message(
-                        message.origin.as_ref(),
-                        &message.parts,
-                    ) => {}
-                MessageRole::User | MessageRole::Event => {
-                    assistant_content_indices.clear();
-                    terminal_step = None;
-                }
-                MessageRole::Assistant => {
-                    if is_rlm_protocol_output(message.origin.as_ref()) {
-                        assistant_content_indices.push(entry.index);
-                    } else if history_item_from_message(message).is_some() {
-                        if let Some(step_index) = terminal_step.take() {
-                            suppressed.insert(step_index);
-                        }
-                        suppressed.extend(assistant_content_indices.drain(..));
-                    }
-                }
-                MessageRole::System => {}
-            },
-            ChronologicalPayload::ProtocolEvent(event) => match decode_rlm_protocol_event(event)? {
-                Some(RlmProtocolEvent::RlmAssistantContent(_)) => {
-                    assistant_content_indices.push(entry.index);
-                }
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                    terminal_step = step
-                        .result
-                        .finish()
-                        .filter(|value| {
-                            value.retained().is_none() && step.prints_retained.is_none()
-                        })
-                        .map(|_| entry.index);
-                }
-                _ => {}
-            },
-        }
-    }
-
-    Ok(suppressed)
 }
 
 /// Whether a message is the RLM protocol's own durable output, judged by its

@@ -17,6 +17,8 @@ pub(super) struct Meter {
     pub bytes: usize,
     pub every: usize,
     previous: Mutex<Option<stats_alloc::Stats>>,
+    request_text_bytes: std::sync::atomic::AtomicUsize,
+    cumulative_request_text_bytes: std::sync::atomic::AtomicUsize,
     pub profile_from_round: usize,
     profile_args: lash_perf::perf_support::dhat::ProfileArgs,
     profile: Mutex<Option<lash_perf::perf_support::dhat::ProfileWindow>>,
@@ -37,6 +39,8 @@ impl Meter {
             bytes: args.payload_bytes,
             every: args.checkpoint_every,
             previous: Mutex::new(None),
+            request_text_bytes: std::sync::atomic::AtomicUsize::new(0),
+            cumulative_request_text_bytes: std::sync::atomic::AtomicUsize::new(0),
             profile_from_round: args.profile_from_round,
             profile_args: lash_perf::perf_support::dhat::ProfileArgs {
                 dhat_out: args.profile.dhat_out.clone(),
@@ -85,6 +89,24 @@ impl Meter {
     pub fn failure(&self, error: &anyhow::Error) -> Result<()> {
         self.write(&json!({"kind":"failure", "pid":std::process::id(), "error":format!("{error:#}"), "errors":1}))
     }
+    /// Text actually carried by the model request, without encoding or
+    /// copying it: the inherent transcript payload beside allocation traffic.
+    pub fn model_request(&self, request: &super::LlmRequest) {
+        let bytes = request
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                super::LlmContentBlock::Text { text, .. } => Some(text.len()),
+                _ => None,
+            })
+            .sum();
+        self.request_text_bytes
+            .store(bytes, std::sync::atomic::Ordering::Relaxed);
+        self.cumulative_request_text_bytes
+            .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn sample(&self, phase: &str, done: usize) -> Result<()> {
         let alloc = lash_perf::GLOBAL_ALLOCATOR.stats();
         let traffic =
@@ -107,6 +129,8 @@ impl Meter {
         };
         self.write(&json!({"kind":"checkpoint", "phase":phase, "rounds":self.rounds,
             "rounds_done":done, "payload_bytes":self.bytes, "pid":std::process::id(),
+            "model_request_text_bytes":self.request_text_bytes.load(std::sync::atomic::Ordering::Relaxed),
+            "cumulative_model_request_text_bytes":self.cumulative_request_text_bytes.load(std::sync::atomic::Ordering::Relaxed),
             "elapsed_ns":self.started.elapsed().as_nanos(),
             "unix_time_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos(),
             "loadavg":std::fs::read_to_string("/proc/loadavg")?,

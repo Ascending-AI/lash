@@ -53,6 +53,7 @@ use crate::projection::CodeModeProjectedBindings;
 /// What a cell needs of the session that runs it, beside its state.
 #[derive(Clone)]
 pub(crate) struct CellServices {
+    pub events: Arc<crate::projection::EventCache>,
     /// The workers that lower the cell and host its machine.
     pub workers: lash_vm_client::service::Service,
     pub deferred_tool_resolver: Option<crate::deferred::SharedDeferredToolResolver>,
@@ -162,6 +163,7 @@ pub(crate) async fn execute_cell(
                 &seal_ctx,
                 cell,
                 &services.code_renderer,
+                &services.events,
                 values,
                 &mut response,
             )
@@ -1297,6 +1299,7 @@ impl CodeModeCheckpointPerfFixture {
         state.patch_globals(&patch, &BTreeSet::new()).await?;
         Ok(Self {
             services: CellServices {
+                events: Arc::default(),
                 workers,
                 deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),

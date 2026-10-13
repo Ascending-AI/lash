@@ -151,11 +151,14 @@ impl RlmRuntimeState {
             self.dialect.read_only_variables_prompt(&bindings)
         };
         let exclude = self.protected_projected_binding_names().await;
-        let projection = history
-            .map(|view| view.chronological_projection())
-            .unwrap_or_default();
-        let provenance =
-            crate::session_globals::binding_provenance(&projection).map_err(history_corruption)?;
+        let index = match history {
+            Some(view) => self
+                .dialect
+                .history_index(view.active_events(), &view.messages().to_vec().into())
+                .map_err(history_corruption)?,
+            None => crate::projection::HistoryIndex::default(),
+        };
+        let provenance = index.provenance.clone();
         let (bound_variables, globals) = self
             .execution
             .lock()
@@ -165,7 +168,7 @@ impl RlmRuntimeState {
             .render();
         Ok(crate::prompt_sections::RlmPromptFacts {
             history_binding: Arc::from(
-                crate::prompt_sections::history_binding(&self.dialect, &projection, images)
+                crate::prompt_sections::history_binding(&self.dialect, &index, images)
                     .map_err(history_corruption)?,
             ),
             bound_variables,
@@ -202,6 +205,7 @@ impl RlmRuntimeState {
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
+        self.dialect.clear_history_cache();
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
         let snapshot = state.execution_state.map_err(|error| SessionError::Store {
@@ -276,7 +280,15 @@ impl RlmRuntimeState {
         &self,
         purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
-        self.execution.lock().await.capture_execution_graph(purpose)
+        let capture = self
+            .execution
+            .lock()
+            .await
+            .capture_execution_graph(purpose)?;
+        if purpose == lash_core_store::execution_state::ExecutionGraphPurpose::Final {
+            self.dialect.clear_history_cache();
+        }
+        Ok(capture)
     }
 
     pub(crate) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {

@@ -21,3 +21,12 @@ pub use context::decode_rlm_protocol_event;
 
 mod diagnostics;
 pub use diagnostics::recorded_extraction_decisions;
+
+#[cfg(test)]
+pub(crate) use context::EVENT_DECODES;
+
+mod event_cache;
+pub(crate) use event_cache::EventCache;
+
+mod history_index;
+pub(crate) use history_index::HistoryIndex;

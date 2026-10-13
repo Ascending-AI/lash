@@ -98,7 +98,9 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             tool_material_store: None,
             process_env_store,
             attachment_store,
-            chronological_projection,
+            chronological_projection: Arc::new(super::ChronologicalRead::Owned(
+                chronological_projection,
+            )),
             turn_context,
             logical_run: None,
             resolved_run: None,

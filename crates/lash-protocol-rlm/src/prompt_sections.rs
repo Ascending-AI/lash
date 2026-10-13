@@ -54,10 +54,9 @@ impl RlmPromptFacts {
 /// The built-in binding and schema, derived before rendering any section.
 pub(crate) fn history_binding(
     dialect: &SessionDialect,
-    projection: &lash_core::facade_support::ChronologicalProjection,
+    history: &crate::projection::HistoryIndex,
     images: bool,
 ) -> Result<String, lash_core::StoredDataCorruption> {
-    let history = crate::projection::rlm_history_projection(projection)?;
     let mut binding = format!(
         "- `history`: `{}`, read-only, {} {}",
         dialect.prompt_vocabulary().history_type,
@@ -68,10 +67,7 @@ pub(crate) fn history_binding(
             "entries"
         },
     );
-    if history.history().iter().any(|item| match item {
-        lash_rlm_types::RlmHistoryItem::LashVmStep { .. } => true,
-        lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
-    }) {
+    if history.has_schema {
         binding.push_str("\n\nSchema:\n");
         binding.push_str(&dialect.history_item_definition(images));
     }

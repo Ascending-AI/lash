@@ -9,11 +9,6 @@
 //! cut, so a continuation names the snapshot it pages through and is refused
 //! against any other.
 
-use std::collections::BTreeMap;
-
-use lash_core::facade_support::{ChronologicalPayload, ChronologicalProjection};
-use lash_rlm_types::RlmProtocolEvent;
-
 /// What one session global holds.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -157,39 +152,6 @@ impl SessionGlobals {
             }),
         })
     }
-}
-
-/// The cell whose committed transition last bound each name, read from the
-/// cell records `projection` holds, in their order: a record that added,
-/// changed or left a name it did not carry names that cell, and one that
-/// removed it forgets it.
-pub(crate) fn binding_provenance(
-    projection: &ChronologicalProjection,
-) -> Result<BTreeMap<String, String>, lash_core::StoredDataCorruption> {
-    let mut cells = BTreeMap::new();
-    for entry in projection.entries() {
-        let ChronologicalPayload::ProtocolEvent(event) = &entry.payload else {
-            continue;
-        };
-        let Some(RlmProtocolEvent::RlmTrajectoryEntry(record)) =
-            crate::projection::decode_rlm_protocol_event(event)?
-        else {
-            continue;
-        };
-        let changes = &record.bindings;
-        for name in changes
-            .added
-            .iter()
-            .chain(&changes.changed)
-            .chain(&changes.not_carried)
-        {
-            cells.insert(name.clone(), record.id.clone());
-        }
-        for name in &changes.removed {
-            cells.remove(name);
-        }
-    }
-    Ok(cells)
 }
 
 #[cfg(test)]

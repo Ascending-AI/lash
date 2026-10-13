@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use lash_core::{BindingChanges, CellRecord, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
-use super::{SessionGlobalKind, StaleGlobalsPage, binding_provenance};
+use super::{SessionGlobalKind, StaleGlobalsPage};
 use crate::dialect::{DialectSession, test_dialect_services};
 
 fn cell(id: &str, bindings: BindingChanges) -> SessionHistoryRecord {
@@ -100,7 +100,11 @@ async fn a_global_names_the_cell_that_last_bound_it() {
         &events,
         &Default::default(),
     );
-    let provenance = binding_provenance(&projection).expect("valid cell records");
+    let provenance =
+        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
+            .projection_index(&projection)
+            .expect("valid cell records")
+            .provenance;
     assert_eq!(
         provenance.into_iter().collect::<Vec<_>>(),
         [
@@ -120,7 +124,10 @@ async fn a_global_names_the_cell_that_last_bound_it() {
     .await;
     let (text, globals) = listing(
         &session,
-        binding_provenance(&projection).expect("valid cell records"),
+        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
+            .projection_index(&projection)
+            .expect("valid cell records")
+            .provenance,
     )
     .await;
     insta::assert_snapshot!(text, @r#"

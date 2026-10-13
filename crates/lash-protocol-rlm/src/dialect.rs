@@ -309,6 +309,7 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
 pub(crate) struct SessionDialect {
     dialect: CellDialect,
     services: CodeModeDialectServices,
+    events: Arc<crate::projection::EventCache>,
 }
 
 impl SessionDialect {
@@ -320,7 +321,11 @@ impl SessionDialect {
     }
 
     pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
-        Self { dialect, services }
+        Self {
+            dialect,
+            services,
+            events: Arc::default(),
+        }
     }
 
     /// A session dialect that can render prompts and diagnostics but is
@@ -329,6 +334,7 @@ impl SessionDialect {
     pub(crate) fn prompt_only(dialect: CellDialect) -> Self {
         Self {
             dialect,
+            events: Arc::default(),
             services: CodeModeDialectServices {
                 workers: lash_vm_client::service::Service::default(),
                 deferred_tool_resolver: None,
@@ -397,7 +403,36 @@ impl SessionDialect {
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {
-        DialectSession::new(self.dialect.clone(), self.services.clone())
+        let mut session = DialectSession::new(self.dialect.clone(), self.services.clone());
+        session.events = Arc::clone(&self.events);
+        session
+    }
+
+    pub(crate) fn decode_history_event(
+        &self,
+        event: &lash_core::ProtocolEvent,
+    ) -> Result<Option<Arc<lash_rlm_types::RlmProtocolEvent>>, lash_core::StoredDataCorruption>
+    {
+        self.events.decode(event)
+    }
+
+    pub(crate) fn history_index(
+        &self,
+        events: &[lash_core::SessionHistoryRecord],
+        messages: &lash_core::facade_support::MessageSequence,
+    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
+        crate::projection::HistoryIndex::from_turn(events, messages, &self.events)
+    }
+
+    pub(crate) fn projection_index(
+        &self,
+        projection: &lash_core::facade_support::ChronologicalProjection,
+    ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
+        crate::projection::HistoryIndex::from_projection(projection, &self.events)
+    }
+
+    pub(crate) fn clear_history_cache(&self) {
+        self.events.clear();
     }
 
     /// The execution section as one text, prose then declarations.
@@ -718,6 +753,7 @@ pub(crate) struct DialectSession {
     state: CodeModeExecutionState,
     services: CodeModeDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
+    events: Arc<crate::projection::EventCache>,
 }
 
 impl DialectSession {
@@ -728,6 +764,7 @@ impl DialectSession {
             dialect,
             state,
             services,
+            events: Arc::default(),
             bound_variable_render_cache: Arc::new(std::sync::Mutex::new(
                 BoundVariableRenderCache::default(),
             )),
@@ -751,6 +788,7 @@ impl DialectSession {
             ctx,
             request,
             &CellServices {
+                events: Arc::clone(&self.events),
                 workers: self.services.workers.clone(),
                 deferred_tool_resolver: self.services.deferred_tool_resolver.clone(),
                 execution_bounds: self.services.execution_bounds,
