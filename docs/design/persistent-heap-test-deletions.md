@@ -78,3 +78,6 @@ certification machinery; it delegates to the real heap.
 | `collections::tests::k_bnd_003_collection_expansion_reserves_before_building_results` | `collections::tests::collection_expansion_refuses_under_the_real_census` |
 | Flat-heap charge and Room assertions in collection range/key-identity tests | The VM-level numeric-bound and identity laws remain; strict release native corpus certifies exact charges and reserve observations. |
 | `lash-ext-regex-ecma::tests::a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` | `tests::a_regex_expansion_refuses_under_the_real_census` uses the real S7 census; regex semantic and cold/warm laws retain their existing expectations. |
+
+| `crates/lash-dialect-python/src/tests/machine.rs::arithmetic_successors_and_held_previous_definitions_resume_exactly` | `tests::machine::paged_arithmetic_keeps_held_definitions_and_exact_charge` executes sealed S4 checkpoints with the real S7 census; old whole-state JSON export/import oracle removed |
+| `crates/lash-dialect-python/src/tests/machine.rs::integer_facts_resume_a_parked_loop_exactly` | `tests::machine::paged_integer_loop_keeps_facts_across_await` checks compiler facts and exact effects through sealed S4 checkpoints |

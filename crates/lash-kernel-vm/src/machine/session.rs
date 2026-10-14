@@ -194,6 +194,17 @@ impl KernelMachine {
             });
         }
         self.publish_roots()?;
+        // Lifecycle roots name sealed trees. A cell may finish before its
+        // first park, so its session still has only transient pages here.
+        self.heap.session.seal(
+            &self.heap.access,
+            &mut lash_kernel_state::paged::tree::SealWork::new(
+                lash_kernel_state::paged::SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                },
+            ),
+        )?;
         let bindings = keyed(&self.heap.session);
         let classification = self.heap.classify_carry(&bindings)?;
         let carry = self.heap.carry(CarryRoots {

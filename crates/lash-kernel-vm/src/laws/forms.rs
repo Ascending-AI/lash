@@ -672,3 +672,37 @@ fn charges_follow_the_cost_table() {
         (1 + 1) + (1 + 2) + (1 + 1)
     );
 }
+
+/// K-SES-001: finishing without a park publishes the dirty binding tree.
+#[test]
+fn a_cell_carries_unsealed_bindings_at_its_end() {
+    let mut embedder = Embedder::new("main { let x = 7 }");
+    let Step::Ended(End::Finished(finished)) = embedder.run() else {
+        panic!("cell finishes")
+    };
+    let carry = finished.carry.unwrap();
+    assert_eq!(carry.bindings.len, 1);
+    assert!(
+        carry.bindings.page.is_some(),
+        "a nonempty carry must name its sealed tree"
+    );
+    let mut heap = lash_kernel_state::paged::PagedHeap::open_header(
+        carry.heap,
+        Box::new(embedder.source.clone()),
+        lash_kernel_state::paged::EditEpoch(2),
+    )
+    .unwrap();
+    lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
+    let binding = heap
+        .session
+        .get(
+            &lash_kernel_state::paged::metadata::metadata_key(&Name::new("x")),
+            &heap.access,
+        )
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        binding.value,
+        lash_kernel_state::paged::BoundRecord::Value(lash_kernel_doc::Value::Int(_))
+    ));
+}

@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Name, Param, Signature, Type};
-use lash_kernel_vm::{Bindings, End, Outcome, Request};
+use lash_kernel_vm::{End, Outcome, Request};
 use serde::Deserialize;
 use serde_json::Value as Json;
 
@@ -146,60 +146,65 @@ fn on_the_kernel(source: &str, script: &Script) -> Capture {
     let mut trace = Vec::new();
     let mut reported = None;
     let cell = format!("{source}{ADAPTER}");
-    let (_, end) = machine::drive(&cell, effects(), Bindings::default(), |_, park, text_| {
-        assert!(
-            park.withdrawn.is_empty(),
-            "the capture script delivers every call"
-        );
-        let mut outcomes = Vec::new();
-        for request in park.requests {
-            let Request::Effect(effect) = &request else {
-                panic!("a captured case does not sleep\n{text_}");
-            };
-            if effect.effect.as_str() == "host_end" {
-                reported = Some((effect.args[0].clone(), effect.args[1].clone()));
-                outcomes.push((effect.wait, Outcome::Completed(Datum::Null)));
-                continue;
-            }
-            let id = issued.len();
-            let row = script
-                .tools
-                .get(id)
-                .unwrap_or_else(|| panic!("tool call {id} is not scripted\n{text_}"));
-            let tool = text(&effect.args[0]);
-            let args = effect.args[1..].to_vec();
-            assert_eq!(
-                (tool.as_str(), &args),
-                (row.name.as_str(), &row.args.iter().map(datum).collect())
+    let (_, end) = machine::drive(
+        &cell,
+        effects(),
+        super::pages::Session::default(),
+        |_, park, text_| {
+            assert!(
+                park.withdrawn.is_empty(),
+                "the capture script delivers every call"
             );
-            trace.push(Event::Requested { id, tool, args });
-            issued.push(request);
-        }
-        if !outcomes.is_empty() {
-            return outcomes;
-        }
-        let batch = batches
-            .next()
-            .unwrap_or_else(|| panic!("the run waits past its script\n{text_}"));
-        for id in batch {
-            let Some(Request::Effect(effect)) = issued.get(*id) else {
-                panic!("call {id} is delivered before it is issued\n{text_}");
-            };
-            let row = &script.tools[*id];
-            let outcome = match (&row.value, &row.error) {
-                (_, Some(error)) => Outcome::Failed(ErrorDatum {
-                    kind: error.kind.clone(),
-                    message: error.message.clone(),
-                    data: Datum::Null,
-                }),
-                (Some(value), None) => Outcome::Completed(datum(value)),
-                (None, None) => Outcome::Completed(Datum::Null),
-            };
-            trace.push(Event::Delivered { id: *id });
-            outcomes.push((effect.wait, outcome));
-        }
-        outcomes
-    });
+            let mut outcomes = Vec::new();
+            for request in park.requests {
+                let Request::Effect(effect) = &request else {
+                    panic!("a captured case does not sleep\n{text_}");
+                };
+                if effect.effect.as_str() == "host_end" {
+                    reported = Some((effect.args[0].clone(), effect.args[1].clone()));
+                    outcomes.push((effect.wait, Outcome::Completed(Datum::Null)));
+                    continue;
+                }
+                let id = issued.len();
+                let row = script
+                    .tools
+                    .get(id)
+                    .unwrap_or_else(|| panic!("tool call {id} is not scripted\n{text_}"));
+                let tool = text(&effect.args[0]);
+                let args = effect.args[1..].to_vec();
+                assert_eq!(
+                    (tool.as_str(), &args),
+                    (row.name.as_str(), &row.args.iter().map(datum).collect())
+                );
+                trace.push(Event::Requested { id, tool, args });
+                issued.push(request);
+            }
+            if !outcomes.is_empty() {
+                return outcomes;
+            }
+            let batch = batches
+                .next()
+                .unwrap_or_else(|| panic!("the run waits past its script\n{text_}"));
+            for id in batch {
+                let Some(Request::Effect(effect)) = issued.get(*id) else {
+                    panic!("call {id} is delivered before it is issued\n{text_}");
+                };
+                let row = &script.tools[*id];
+                let outcome = match (&row.value, &row.error) {
+                    (_, Some(error)) => Outcome::Failed(ErrorDatum {
+                        kind: error.kind.clone(),
+                        message: error.message.clone(),
+                        data: Datum::Null,
+                    }),
+                    (Some(value), None) => Outcome::Completed(datum(value)),
+                    (None, None) => Outcome::Completed(Datum::Null),
+                };
+                trace.push(Event::Delivered { id: *id });
+                outcomes.push((effect.wait, outcome));
+            }
+            outcomes
+        },
+    );
     assert!(matches!(end, End::Finished(_)), "{end:?}");
     assert!(batches.next().is_none(), "the script has batches left over");
     let (outputs, end) = reported.expect("the adapter reports the end of `main`");

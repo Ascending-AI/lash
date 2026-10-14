@@ -30,6 +30,7 @@ serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+lash-kernel-state = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-kernel-vm = { workspace = true }
