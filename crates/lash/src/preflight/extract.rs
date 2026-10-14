@@ -275,9 +275,9 @@ fn session_checkpoint(payload: Payload<'_>) -> Vec<Extraction> {
     .collect()
 }
 
-/// A session's execution state is a SessionExecution graph node, which
-/// carries no version of its own: the 1.0 node registry is frozen, and a
-/// later shape is a new kind (FIG-5887 §14). A root of the registered kind
+/// A session's execution state is a session descriptor page (ADR 0145
+/// §9), which carries no version of its own: the 1.0 node registry is
+/// frozen, and a later shape is a new kind. A root of the registered kind
 /// is this build's surface version; any other node is not readable as one.
 fn session_execution_state(payload: Payload<'_>) -> Vec<Extraction> {
     let format = DurableFormat::CodeModeSnapshotEnvelope;

@@ -317,9 +317,9 @@ impl RlmRuntimeState {
         self.execution.lock().await.settle_code_execution(outcome)
     }
 
-    /// Installs a hydrated SessionExecution graph (FIG-5887 §6): the
-    /// working state a turn phase owns, or a session revision's, as
-    /// `purpose` says, before any model continuation or cell compiles. A
+    /// Installs a session's execution state, its descriptor page (ADR 0145
+    /// §9): the working state a turn phase owns, or a session revision's,
+    /// as `purpose` says, before any model continuation or cell compiles. A
     /// read-only projected name still shadows a stored binding.
     pub(crate) async fn restore_execution_graph(
         &self,

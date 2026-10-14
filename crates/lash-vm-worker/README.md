@@ -45,17 +45,22 @@ the configured execution budget.
 
 `checkout` reserves the complete encoded input size and bounds its wait. A
 checkout owns one execution lease. `start` takes the admitted document's
-encoding, a fresh start or opaque parked state, the run's bounds and the
-execution its parks are saved under; it crosses with the first `run`, where the
-worker validates and compiles the document. `run` runs ready tasks for one
-slice of charge units and answers `Parked`, `Slice` or `Ended`. Host reads
-(clock, random, projection reads) arrive mid-slice and are answered with
-`host_answer`; prints are collected with `take_printed`. `deliver` hands the
-machine one committed outcome, which crosses with the next slice, and `export`
-takes the state a park that requests something carried, or asks the worker for
-it. Parts that do not fit one frame together cross in exchanges of their own.
-Parked state is opaque in the parent: only a worker imports it, under the
-document it names. Descriptions carry no grants or backing host handles; the
+encoding, a fresh start or a committed checkpoint root, the run's bounds and
+the execution its parks are saved under; it crosses with the first `run`,
+where the worker validates and compiles the document. `run` runs ready tasks
+for one slice of charge units and answers `Parked`, `Slice` or `Ended`. Host
+reads (clock, random, projection reads) arrive mid-slice and are answered
+with `host_answer`; the heap's page reads and seals arrive mid-slice too, as
+`Pages` exchanges of at most 64 pages and 4 MiB, and the parent answers them
+from the activation's spool or, under its root lease, from the store; prints
+are collected with `take_printed`. `deliver` hands the machine one committed
+outcome, which crosses with the next slice, and `seal` takes the candidate
+root a park that requests something sealed, or asks the worker to seal one.
+Parts that do not fit one frame together cross in exchanges of their own.
+Heap pages are opaque in the parent: it re-hashes each page a worker seals
+and reads a checkpoint root's header, and only a worker opens a root, under
+the document it names
+([ADR 0145](../../docs/adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)). Descriptions carry no grants or backing host handles; the
 broker admits every effect against its admitted context.
 
 A cell's lowering and its run share one lease: the worker that lowered the

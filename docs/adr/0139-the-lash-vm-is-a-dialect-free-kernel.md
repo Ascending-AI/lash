@@ -46,9 +46,12 @@ cost table and parked-run schema are written down rule by rule in
   Its identity is the hash of its content without annotations. Hosts edit it
   through typed, serialisable transactions and read correspondence for every
   node they touch.
-- **Parked runs.** A run is saved in the document's terms, one fragment per
-  root, whenever it parks, and resumes exactly after the executable is
-  rebuilt. Committed work never runs again.
+- **Parked runs.** A run executes on one persistent heap and is saved, in
+  the document's terms, as a checkpoint root over that heap's pages
+  whenever it parks
+  ([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)).
+  It resumes exactly after the executable is rebuilt, reading only the
+  pages its next steps touch. Committed work never runs again.
 - **Versions.** A kernel version may break when a pinned rule is wrong,
   unsafe or unbounded. A breaking version ships a document migration and a
   parked-run migration under

@@ -974,7 +974,12 @@ and the lease rules (`Lease(LeaseConfigError)`).
 ### Page retirement
 
 A replaced or released heap root is not deleted in the transaction that
-replaces it: it becomes a retirement hold (`D-RET`). Each node runs a
+replaces it: it becomes a retirement hold
+([ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§8). A root a worker is reading is protected by a root lease, a catalog row
+the activation's parent renews at a third of its 60 s time to live; an
+expired lease reads nothing and fences the activation, and retirement reaps
+it. Each node runs a
 retirement task beside its lease renewal. A sweep runs up to
 `steps_per_sweep` bounded steps, each one transaction that deletes at most
 `batch_nodes` unreachable pages and reaps expired root leases, and stops
@@ -1496,6 +1501,12 @@ cap; the workbench's upload preset is 1 MiB.
 | H | VM worker address space | 4 GiB | `PoolConfig.confinement: WorkerConfinement` | Platform rlimit; must exceed parser reservation |
 | H | VM parser stack / parent wait / ingress / slice | 8 MiB + 40000/source byte / 24 h / 16 KiB / 1M charge | `WorkerTuning` | Checked arithmetic; inbound at least frame header; finite positive values |
 | H/S | VM diagnostic detail | 512 UTF-8 bytes | `WorkerTuning.diagnostic_bytes: DetailLimit`, `FrameCodec::with_detail_limit`, `Detail::with_limit` | 512 ensures typed refusals fit the minimal frame |
+| H | VM heap page residency: clean / dirty / pinned | 64 / 32 / 8 MiB | `WorkerTuning.pages: PageBudgets` | Resident bytes, never guest memory; passing one is a host outcome (`HeapFault::Exhausted`), and residency never changes a verdict or a charge |
+| H | VM page staging per activation | 1 GiB, under the system temporary directory | `PoolConfig.{staging_quota_bytes,staging_dir}` | Passing the quota is a host outcome (`StagingExhausted`); a dead parent's spools are deleted when the next one opens the directory |
+| S | VM page exchange batch | 64 pages / 4 MiB | `lash_vm_protocol::{PAGE_BATCH_PAGES,PAGE_BATCH_BYTES}` | Fixed protocol bounds (`D-CAP`) |
+| S | Root lease / activation page span | 60 s, renewed at a third / 1 h | `lash_vm_broker::kernel::run::PagePlan.{lease_ttl,span}`, set by lash's composition | An expired lease reads nothing (`LeaseLost`) and fences the activation |
+| S | Memory refinement trace | 8 MiB trace memory (at most 64 MiB); 100 M work units | The census's `TraceLimits`; lash's composition takes the defaults | Exceeding either is `HostResource::TraceBudget` or `HostWork`, infrastructure, never `Bound::Memory` |
+| H | Durable page retirement: sweep period / step nodes / steps per sweep / backlog | 1 s / 256 / 16 / 10 000 holds | `DurableSettings.retirement: RetirementSettings`; PostgreSQL host config `retirement` | Hard maxima 4 096 nodes, 256 steps, 1 000 000 holds (`AboveMaximum`) |
 | H | Session revisions / transcript retention | Until GC | `DataRetention.session_revisions`, session retention policy, history queries | Explicit retention choice / caller page limits |
 | H | Session replay events / age / sessions / total bytes | 2048 / 120 s / 4096 / 64 MiB | `InMemoryLiveReplayStoreConfig` via `LashCoreBuilder::live_replay_store` | Addressable counts/bytes/durations |
 | H | Process replay events / age / bytes/process / processes / total bytes | 2048 / 120 s / 8 MiB / 4096 / 64 MiB | `InMemoryProcessReplayStoreConfig` via `LashCoreBuilder::process_replay_store` | Addressable counts/bytes/durations |
