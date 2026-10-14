@@ -31,10 +31,16 @@ use crate::domain::pages::{
 use crate::domain::{CellId, ExecKey, SnapshotRev};
 use crate::{ActorKey, DomainWrite, DurableError, Epoch, NodeLease};
 
+#[path = "pages_driver.rs"]
+mod driver;
 #[path = "pages_generated.rs"]
 mod generated;
 #[path = "pages_owners.rs"]
 mod owners;
+pub use driver::{
+    a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free,
+    a_node_retires_sealed_pages_on_its_own, backpressure_holds_claims_until_retirement_catches_up,
+};
 pub use generated::GeneratedManifest;
 use generated::Recipe;
 pub use owners::{a_host_read_never_descends_into_a_heap_page, a_step_outcome_owns_its_candidate};

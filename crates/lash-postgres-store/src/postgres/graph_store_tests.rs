@@ -439,6 +439,20 @@ page_law!(an_expired_lease_reads_nothing);
 page_law!(the_lost_receipt_resolves_by_commit_identity);
 page_law!(publication_keeps_global_digest_lock_order);
 page_law!(an_ownership_transfer_fences_the_old_activation);
+page_law!(a_node_retires_sealed_pages_on_its_own);
+page_law!(backpressure_holds_claims_until_retirement_catches_up);
+
+/// D-RET: a node killed in a retirement batch, before and after its commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free() {
+    let Some(mut tier) = tier().await else {
+        eprintln!("skipping the retirement crash: database URL is not set");
+        return;
+    };
+    pages::a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free(&mut tier)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
 
 /// D-RET over retired leaves, with a reconnect between steps.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

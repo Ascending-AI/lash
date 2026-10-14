@@ -1030,15 +1030,23 @@ impl Runner {
         let (ended_tx, ended) = watch::channel(None);
         let mut renewal: JoinSet<()> = JoinSet::new();
         // Page retirement runs beside the renewal and ends with it.
-        let behind = crate::retirement::Behind::default();
-        if let Some(pages) = self.store.pages() {
-            renewal.spawn(crate::retirement::retire(
-                pages,
-                Arc::clone(&self.clock),
-                self.config.retirement,
-                behind.clone(),
-            ));
-        }
+        let behind = match self.store.pages() {
+            Some(pages) => {
+                let behind = crate::retirement::Behind::unread();
+                renewal.spawn(crate::retirement::retire(
+                    pages,
+                    Arc::clone(&self.clock),
+                    self.config.retirement,
+                    behind.clone(),
+                ));
+                behind
+            }
+            None => crate::retirement::Behind::never(),
+        };
+        let mut caught_up = behind.watch();
+        // Whether the last claim was held back for retirement: the loop then
+        // claims as soon as retirement catches up.
+        let mut deferred = false;
         renewal.spawn(renew(
             Arc::clone(&self.store),
             Arc::clone(&self.clock),
@@ -1197,6 +1205,11 @@ impl Runner {
                     next_claim = self.clock.now();
                     claim_delay = settings.claim_backoff;
                 }
+                Ok(()) = caught_up.changed(), if deferred => {
+                    woke = Wake::Poll;
+                    next_claim = self.clock.now();
+                    claim_delay = settings.claim_backoff;
+                }
                 () = self.clock.sleep_until(next) => woke = Wake::Poll,
             }
             let now = self.clock.now();
@@ -1241,7 +1254,14 @@ impl Runner {
                     }
                 }
             }
-            if now >= next_claim && !self.drain.started() && !held_back {
+            if now >= next_claim && !self.drain.started() {
+                // Behind as of now, not as of the turn's start: no new
+                // actors until retirement catches up.
+                deferred = *caught_up.borrow_and_update();
+                if deferred {
+                    next_claim = now + settings.claim_poll;
+                    continue;
+                }
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
                     match self

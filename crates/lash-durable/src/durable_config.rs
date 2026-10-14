@@ -332,6 +332,102 @@ mod tests {
         );
     }
 
+    /// D-RET limits: the node's retirement defaults to the documented
+    /// standard values, in every preset; each limit validates at its hard
+    /// maximum and is refused one above it by its typed `AboveMaximum`
+    /// naming the field and the maximum, at zero by `Zero`, and a wait
+    /// under 1 ms by `BelowResolution`.
+    #[test]
+    fn retirement_limits_default_validate_at_their_maxima_and_refuse_above() {
+        let standard = RetirementSettings {
+            every: Duration::from_secs(1),
+            batch_nodes: 256,
+            steps_per_sweep: 16,
+            backlog_limit: 10_000,
+        };
+        let base = DurableSettings::default();
+        assert_eq!(base.retirement, standard);
+        assert_eq!(RetirementSettings::standard(), standard);
+        assert_eq!(DurableSettings::development().retirement, standard);
+        let with = |retirement: RetirementSettings| {
+            DurableSettings { retirement, ..base }
+                .validate()
+                .map(|config| config.settings().retirement)
+        };
+        let at_maxima = RetirementSettings {
+            every: Duration::from_millis(1),
+            batch_nodes: RetirementSettings::MAX_BATCH_NODES,
+            steps_per_sweep: RetirementSettings::MAX_STEPS_PER_SWEEP,
+            backlog_limit: RetirementSettings::MAX_BACKLOG_LIMIT,
+        };
+        assert_eq!(with(at_maxima), Ok(at_maxima));
+        for (field, above, maximum) in [
+            (
+                "retirement.batch_nodes",
+                RetirementSettings {
+                    batch_nodes: RetirementSettings::MAX_BATCH_NODES + 1,
+                    ..standard
+                },
+                RetirementSettings::MAX_BATCH_NODES,
+            ),
+            (
+                "retirement.steps_per_sweep",
+                RetirementSettings {
+                    steps_per_sweep: RetirementSettings::MAX_STEPS_PER_SWEEP + 1,
+                    ..standard
+                },
+                u64::from(RetirementSettings::MAX_STEPS_PER_SWEEP),
+            ),
+            (
+                "retirement.backlog_limit",
+                RetirementSettings {
+                    backlog_limit: RetirementSettings::MAX_BACKLOG_LIMIT + 1,
+                    ..standard
+                },
+                RetirementSettings::MAX_BACKLOG_LIMIT,
+            ),
+        ] {
+            assert_eq!(
+                with(above),
+                Err(DurableConfigError::AboveMaximum { field, maximum })
+            );
+        }
+        for (field, zero) in [
+            (
+                "retirement.batch_nodes",
+                RetirementSettings {
+                    batch_nodes: 0,
+                    ..standard
+                },
+            ),
+            (
+                "retirement.steps_per_sweep",
+                RetirementSettings {
+                    steps_per_sweep: 0,
+                    ..standard
+                },
+            ),
+            (
+                "retirement.backlog_limit",
+                RetirementSettings {
+                    backlog_limit: 0,
+                    ..standard
+                },
+            ),
+        ] {
+            assert_eq!(with(zero), Err(DurableConfigError::Zero { field }));
+        }
+        assert_eq!(
+            with(RetirementSettings {
+                every: Duration::from_micros(999),
+                ..standard
+            }),
+            Err(DurableConfigError::BelowResolution {
+                field: "retirement.every"
+            })
+        );
+    }
+
     #[test]
     fn each_refusal_fires() {
         let base = DurableSettings::default();

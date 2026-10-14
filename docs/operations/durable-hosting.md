@@ -982,7 +982,8 @@ early once a step finds nothing to do. Steps take row locks under the shared
 graph gate, so they never stop publication. When the store's
 `retirement_backlog` is above `backlog_limit`, the node takes no new actors
 (its running actors carry on) and sweeps back to back until the backlog is
-under the limit again. A failed step is retried at the next sweep.
+under the limit again. A node boots held back and claims only once its first
+backlog read answers under the limit. A failed step is retried at the next sweep.
 
 Page staging is bounded per activation by the worker service's
 `staging_quota_bytes` (1 GiB); passing it is a host outcome, the

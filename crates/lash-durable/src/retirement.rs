@@ -1,29 +1,47 @@
 //! The node's page retirement (`D-RET`): a maintenance task beside the
 //! lease renewal that runs the store's bounded retirement steps, and the
 //! backpressure it applies. While the store's retirement backlog is above
-//! the host's limit the node claims no new actors and the task sweeps
-//! without waiting, until the backlog falls back under it.
+//! the host's limit, and from boot until the task's first backlog read
+//! answers, the node claims no new actors; while it is above, the task
+//! sweeps without waiting, until the backlog falls back under it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core_ids::clock::Clock;
+use tokio::sync::watch;
 
 use crate::domain::pages::{PageStore, RetirementBudget, RetirementProgress};
 use crate::durable_config::RetirementSettings;
 
 /// Whether the node's retirement is behind its backlog limit: the runner
-/// claims no new actors while it is.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Behind(Arc<AtomicBool>);
+/// claims no new actors while it is, and watches for it to catch up.
+#[derive(Clone, Debug)]
+pub(crate) struct Behind(Arc<watch::Sender<bool>>);
 
 impl Behind {
+    /// Never behind: a node whose store holds no heap pages.
+    pub(crate) fn never() -> Self {
+        Self(Arc::new(watch::Sender::new(false)))
+    }
+
+    /// Behind until the task's first backlog read answers: a node that
+    /// boots over a backlog claims nothing before it knows.
+    pub(crate) fn unread() -> Self {
+        Self(Arc::new(watch::Sender::new(true)))
+    }
+
     pub(crate) fn get(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        *self.0.borrow()
+    }
+
+    /// Each change, from now on.
+    pub(crate) fn watch(&self) -> watch::Receiver<bool> {
+        self.0.subscribe()
     }
 
     fn set(&self, behind: bool) {
-        self.0.store(behind, Ordering::Release);
+        self.0
+            .send_if_modified(|now| std::mem::replace(now, behind) != behind);
     }
 }
 
