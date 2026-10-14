@@ -1,6 +1,10 @@
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
+/// An in-memory trace sink: a law installs it through
+/// [`LashCoreBuilder::trace_sink`](crate::LashCoreBuilder::trace_sink)
+/// and reads the typed records the core emitted.
+pub use lash_core::testing::RecordingTraceSink;
 /// Prompt composition over a cut a test states, outside any model call: the
 /// runtime builds a call's cut and composes it only at the call's admission
 /// (ADR 0133).

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use lash::plugins::PluginDeclaration;
 use lash::prompt::{PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKey};
 use lash_core::facade_support::TraceLevel;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::provider::ScriptedLlmHttpTransport;
 use crate::runtime_providers::{
@@ -113,8 +113,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     );
     let (provider, model, _) =
         runtime_provider_components(OPENAI_COMPATIBLE, &transport).expect("runtime provider");
-    let trace_dir = tempfile::tempdir().expect("trace directory");
-    let trace_path = trace_dir.path().join("provider-requests.jsonl");
+    let trace = Arc::new(lash::testing::RecordingTraceSink::new());
     let engine = crate::backend::SimEngine::new(0x5eed_7005)
         .await
         .expect("sim engine");
@@ -126,7 +125,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model.clone())
-        .trace_jsonl_path(&trace_path)
+        .trace_sink(trace.clone())
         .trace_level(TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .plugin(Arc::new(SnapshotInstruction))
@@ -183,10 +182,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
     core.flush_trace_sink()
         .expect("flush provider request trace");
 
-    let entries = lash_core::facade_support::parse_jsonl_records::<Value>(
-        &std::fs::read_to_string(&trace_path).expect("trace file"),
-    )
-    .expect("trace entries");
+    let entries = trace.json_records().expect("trace entries serialize");
     let requests = entries
         .iter()
         .filter(|entry| {

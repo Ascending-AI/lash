@@ -161,9 +161,10 @@ observations to render the path; do not execute the process to reconstruct
 it. The host owns retention, storage failures and any indication that its
 recording is incomplete.
 
-A `TraceSink` receives records, and `JsonlTraceSink` writes one JSON line
-per record. Ordinary passive tracing can be installed through
-`LashCoreBuilder::trace_sink` or `LashCoreBuilder::trace_jsonl_path`.
+A `TraceSink` receives records; lash ships no file writer, so a host that
+keeps records on disk writes its own sink
+([Writing records to a file](architecture/tracing.md#writing-records-to-a-file)).
+Ordinary passive tracing is installed through `LashCoreBuilder::trace_sink`.
 To keep the language execution records, install a sink with
 `TraceRuntime::with_product_observer` and pass that runtime through
 `LashCoreBuilder::trace_runtime`. This export is a recording. The graphs a
@@ -171,7 +172,8 @@ host shows live come from the feeds described below, never from it.
 
 The concrete example is
 [`examples/agent-workbench/src/main_sections/bootstrap.rs`](../examples/agent-workbench/src/main_sections/bootstrap.rs).
-It writes language execution records to a JSONL sink.
+It writes language execution records through its own JSON Lines file sink
+([`examples/shared/trace_file.rs`](../examples/shared/trace_file.rs)).
 `AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE` selects the file; by default it is
 `lash-vm-execution.jsonl` beneath `AGENT_WORKBENCH_DATA_DIR`. Its separate
 passive diagnostic trace is selected by `AGENT_WORKBENCH_TRACE` and defaults

@@ -22,6 +22,7 @@ use super::providers::{
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
+use crate::perf_support::trace_file::JsonlFileSink;
 pub(crate) use backend::{durable_backend, sqlite_memory_stores};
 
 const HISTORY_EXCHANGES: usize = 18;
@@ -1018,7 +1019,7 @@ pub(crate) async fn build_runtime(
             );
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
-                    builder = builder.trace_jsonl_path(path);
+                    builder = builder.trace_sink(Arc::new(JsonlFileSink::new(path)));
                 }
                 builder = builder.trace_level(config.trace_level);
             }
@@ -1031,8 +1032,7 @@ pub(crate) async fn build_runtime(
                 .as_ref()
                 .and_then(|config| config.lash_vm_execution_jsonl_path.clone())
             {
-                tracing = tracing
-                    .with_product_observer(Arc::new(lash::tracing::JsonlTraceSink::new(path)));
+                tracing = tracing.with_product_observer(Arc::new(JsonlFileSink::new(path)));
             }
             let mut builder = plugins.install(
                 benchmark_rlm_builder(backend, provider, factory)
@@ -1042,7 +1042,7 @@ pub(crate) async fn build_runtime(
             );
             if let Some(config) = trace_config {
                 if let Some(path) = config.trace_jsonl_path {
-                    builder = builder.trace_jsonl_path(path);
+                    builder = builder.trace_sink(Arc::new(JsonlFileSink::new(path)));
                 }
                 builder = builder.trace_level(config.trace_level);
             }

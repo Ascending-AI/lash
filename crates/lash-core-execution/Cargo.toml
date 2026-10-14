@@ -25,7 +25,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel
 # site compiled out unless an internal witness explicitly enables this feature.
 perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness"]
 # Expose `testing` fixtures shared with `lash-core`'s own tests.
-testing = ["lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing"]
+testing = ["lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-trace/testing"]
 
 [lints]
 workspace = true
@@ -59,6 +59,8 @@ tracing-subscriber = { workspace = true, optional = true }
 lash-conformance = { workspace = true }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
+# The trace laws read records from the in-memory recording sink.
+lash-trace = { workspace = true, features = ["testing"] }
 insta = "1"
 # ADR 0102: the crate's tests that need a concrete store or effect host run in
 # `tests/store_backed` over a SQLite memory backend. The store depends on this

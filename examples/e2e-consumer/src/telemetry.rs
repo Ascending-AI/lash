@@ -104,7 +104,7 @@ impl HostTelemetry {
         self.receipt(error, None)
     }
 
-    /// Call after quiescing the host and flushing its JSONL trace sink.
+    /// Call after quiescing the host and flushing its trace sink.
     pub fn shutdown(self) -> ExportReceipt {
         let flush_error = self
             .tracer

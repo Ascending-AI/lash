@@ -23,7 +23,7 @@ and tool contracts, tool arguments and results, executed code and its output,
 raw provider and protocol-step payloads, and diagnostic or provider text. It
 defaults to
 `TelemetryContent::Omitted`. The runtime applies it to every record before a
-`TraceSink` (JSONL, stderr, a tee, a host's own sink) or the adapter sees it,
+`TraceSink` (a tee, a host's own sink) or the adapter sees it,
 so every path shares the choice.
 
 | | `Omitted` (default) | `Captured` |
@@ -94,6 +94,34 @@ Place the wrapper before any sink fan-out whose exporters require this
 filtering. It governs the sinks it wraps; a separately installed telemetry
 adapter or sink retains its own export policy. Lash ships no custom-payload
 filter or presentation policy.
+
+### Writing records to a file
+
+Lash ships no trace file or console writer. `TraceSink` is the seam: a host
+that wants records on disk or on stderr writes its own sink, choosing the format, rotation and
+durability, and installs it with `LashCoreBuilder::trace_sink(...)`. A JSON
+Lines sink is a few lines; write each record and its newline in one call so a
+concurrent writer cannot split a line:
+
+```rust
+use std::{fs::File, io::Write, path::PathBuf, sync::Mutex};
+use lash::tracing::{TraceRecord, TraceSink, TraceSinkError};
+
+struct JsonlFile { path: PathBuf, file: Mutex<File> }
+
+impl TraceSink for JsonlFile {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
+        let mut file = self.file.lock().unwrap_or_else(|poison| poison.into_inner());
+        file.write_all(line.as_bytes())
+            .map_err(|source| TraceSinkError::Write { path: self.path.clone(), source })
+    }
+}
+```
+
+Override `TraceSink::flush` to `fsync` when the host needs records on disk
+before exit. Tests read typed records from `lash::testing::RecordingTraceSink`.
 
 The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
 fields, failure ownership, levels and correlation with domain observations.

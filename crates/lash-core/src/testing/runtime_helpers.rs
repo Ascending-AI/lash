@@ -14,7 +14,6 @@ use crate::testing::TestProvider;
 use crate::*;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -396,36 +395,6 @@ pub fn test_host_config(backend: &crate::Backend) -> EmbeddedRuntimeHost {
         backend,
         mock_provider(Vec::new()).into_handle(),
     ))
-}
-
-pub fn test_host_config_with_trace_path(
-    backend: &crate::Backend,
-    path: PathBuf,
-) -> EmbeddedRuntimeHost {
-    let mut config = test_runtime_host_config(backend);
-    config.tracing = config
-        .tracing
-        .clone()
-        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)))
-        .with_content(lash_trace::TelemetryContent::Captured);
-    EmbeddedRuntimeHost::new(config)
-}
-
-pub fn test_host_config_with_trace_path_and_stream_events(
-    backend: &crate::Backend,
-    path: PathBuf,
-) -> EmbeddedRuntimeHost {
-    let mut config = test_runtime_host_config(backend);
-    config.tracing = config
-        .tracing
-        .clone()
-        .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(path)))
-        .with_content(lash_trace::TelemetryContent::Captured);
-    config.tracing = config
-        .tracing
-        .clone()
-        .with_level(lash_trace::TraceLevel::Extended);
-    EmbeddedRuntimeHost::new(config)
 }
 
 pub fn plugin_session_with_tools(

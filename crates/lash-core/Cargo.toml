@@ -25,7 +25,7 @@ otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel
 perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness", "lash-core-store/perf-witness", "lash-core-effect/perf-witness", "lash-core-execution/perf-witness"]
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
-testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-execution/testing"]
+testing = ["lash-core-ids/testing", "lash-core-llm/testing", "lash-core-store/testing", "lash-core-effect/testing", "lash-core-execution/testing", "lash-trace/testing"]
 # Phase A's synthetic N+1 build (ADR 0115 §6), forwarded to the store
 # crate whose constants it moves. No production build enables it.
 synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthetic-next"]

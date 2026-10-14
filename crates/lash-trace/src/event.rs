@@ -240,12 +240,6 @@ pub enum TraceEvent {
 }
 
 impl TraceEvent {
-    /// Whether this build can decode a trace event kind. Readers use this
-    /// before decoding so an unfamiliar observational event can be skipped.
-    pub(crate) fn knows_kind(kind: &str) -> bool {
-        kind.parse::<TraceEventKind>().is_ok()
-    }
-
     /// - [`Self::LlmCallFailed`], [`Self::EffectEnvelopeDiff`], and
     ///   [`Self::StoreErrorObserved`] always;
     /// - [`Self::ExecCodeFailed`] always and [`Self::ExecCodeCompleted`] when

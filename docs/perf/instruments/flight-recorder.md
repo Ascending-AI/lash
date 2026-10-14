@@ -5,12 +5,30 @@ settings plus a callback taking an owned `FlightRecorderSnapshot`. The callback
 can log or enqueue the snapshot using the host's own exporter. The wrapper does
 not capture stacks or start any background work.
 
+Lash ships no console or file sink, so the inner sink is the host's own; this
+one writes each record as a JSON line on stderr:
+
 ```rust
-use std::sync::Arc;
-use lash::tracing::{FlightRecorderSettings, FlightRecorderSink, StderrTraceSink};
+use std::{io::Write, sync::Arc};
+use lash::tracing::{
+    FlightRecorderSettings, FlightRecorderSink, TraceRecord, TraceSink, TraceSinkError,
+};
+
+struct Stderr;
+
+impl TraceSink for Stderr {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
+        std::io::stderr()
+            .lock()
+            .write_all(line.as_bytes())
+            .map_err(|source| TraceSinkError::Write { path: "<stderr>".into(), source })
+    }
+}
 
 let sink = FlightRecorderSink::new(
-    StderrTraceSink::default(),
+    Stderr,
     FlightRecorderSettings::default(),
     |snapshot| {
         // Hand this owned metadata snapshot to the host's bounded export queue.

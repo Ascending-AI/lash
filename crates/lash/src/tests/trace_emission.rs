@@ -23,11 +23,10 @@ use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData
 
 const WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// What a host installs to observe a core: a JSONL record sink and an
+/// What a host installs to observe a core: a record sink and an
 /// OpenTelemetry adapter over SDK providers it owns.
 struct Observed {
-    path: std::path::PathBuf,
-    _dir: tempfile::TempDir,
+    sink: Arc<crate::testing::RecordingTraceSink>,
     spans: InMemorySpanExporter,
     metrics: InMemoryMetricExporter,
     meter: SdkMeterProvider,
@@ -37,8 +36,7 @@ struct Observed {
 impl Observed {
     /// The observers, and `builder` with them installed.
     fn install(builder: crate::core::LashCoreBuilder) -> (Self, crate::core::LashCoreBuilder) {
-        let dir = tempfile::tempdir().expect("trace directory");
-        let path = dir.path().join("trace.jsonl");
+        let sink = Arc::new(crate::testing::RecordingTraceSink::new());
         let spans = InMemorySpanExporter::default();
         let tracer = SdkTracerProvider::builder()
             .with_simple_exporter(spans.clone())
@@ -48,12 +46,11 @@ impl Observed {
             .with_reader(PeriodicReader::builder(metrics.clone()).build())
             .build();
         let builder = builder
-            .trace_jsonl_path(path.clone())
+            .trace_sink(sink.clone())
             .telemetry(OtelTelemetry::new(&tracer, &meter, OtelOptions::default()));
         (
             Self {
-                path,
-                _dir: dir,
+                sink,
                 spans,
                 metrics,
                 meter,
@@ -64,19 +61,13 @@ impl Observed {
     }
 
     /// Every record the sink holds of kind `kind`.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "the law reads back the trace file its own core wrote"
-    )]
     fn records(&self, core: &LashCore, kind: &str) -> Vec<lash_trace::TraceRecord> {
         core.flush_trace_sink().expect("flush the trace sink");
-        lash_trace::parse_jsonl_records::<lash_trace::TraceRecord>(
-            &std::fs::read_to_string(&self.path).unwrap_or_default(),
-        )
-        .expect("trace records")
-        .into_iter()
-        .filter(|record| record.event.kind().as_str() == kind)
-        .collect()
+        self.sink
+            .records()
+            .into_iter()
+            .filter(|record| record.event.kind().as_str() == kind)
+            .collect()
     }
 
     /// Every exported span whose name is, or starts with, `name`.

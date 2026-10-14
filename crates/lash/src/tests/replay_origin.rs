@@ -3,9 +3,6 @@
 //! outcome, whether the call completes, fails, is aborted by the protocol or
 //! is cancelled. On facade turns the session actor runs.
 
-// The trace JSONL these laws read is a file the test host owns.
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 use crate::support::TurnOutcome;
 use lash_core::FailureCode;
@@ -59,12 +56,12 @@ fn abort_first_chunk(id: &'static str) -> Arc<dyn lash_core::facade_support::Plu
     ))
 }
 
-/// A law's deployment: its core, its session, and the trace file its core
-/// writes.
+/// A law's deployment: its core, its session, and the sink its core's trace
+/// records land in.
 struct Replay {
     core: LashCore,
     session: crate::LashSession,
-    trace: tempfile::TempDir,
+    trace: Arc<crate::testing::RecordingTraceSink>,
 }
 
 impl Replay {
@@ -76,12 +73,12 @@ impl Replay {
         plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
         with_foreign_replay: bool,
     ) -> Result<Self> {
-        let trace = tempfile::tempdir().expect("trace directory");
+        let trace = Arc::new(crate::testing::RecordingTraceSink::new());
         let mut builder = explicit_ephemeral_facets(LashCore::standard_builder(
             sqlite_memory_store_backend().await,
         ))
         .serve_test_llm_profile(provider.into_handle(), mock_llm_profile_spec())
-        .trace_jsonl_path(trace.path().join("trace.jsonl"));
+        .trace_sink(trace.clone());
         for plugin in plugins {
             builder = builder.plugin(plugin);
         }
@@ -127,10 +124,8 @@ impl Replay {
 
     fn trace_events(&self) -> Vec<lash_trace::TraceEvent> {
         self.core.flush_trace_sink().expect("flush the trace sink");
-        let text =
-            std::fs::read_to_string(self.trace.path().join("trace.jsonl")).expect("read the trace");
-        lash_trace::parse_jsonl_records::<lash_trace::TraceRecord>(&text)
-            .expect("trace rows")
+        self.trace
+            .records()
             .into_iter()
             .map(|record| record.event)
             .collect()

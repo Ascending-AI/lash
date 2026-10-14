@@ -1,6 +1,6 @@
 //! A local OTLP/HTTP JSON receiver (ported by FIG-5308 from the deleted
 //! upgrade harness). Socket loss is an observed fault; collector records are
-//! independent of the host's JSONL trace.
+//! independent of the host's trace sink.
 
 #[path = "otlp/http.rs"]
 mod http;

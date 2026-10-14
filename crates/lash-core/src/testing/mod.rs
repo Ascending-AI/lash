@@ -86,6 +86,9 @@ pub use thread_census::ThreadCensus;
 
 pub use poll::{poll_until, wait_until};
 
+/// The in-memory trace sink laws read typed records from.
+pub use lash_trace::RecordingTraceSink;
+
 #[cfg(test)]
 std::thread_local! {
     /// The SQLite backends the running unit test opened. A memory backend's

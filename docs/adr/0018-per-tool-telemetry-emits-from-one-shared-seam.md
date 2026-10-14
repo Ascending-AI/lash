@@ -16,6 +16,6 @@ Per-protocol emission is rejected because it duplicates detailed reporting and r
 
 ## Consequences
 
-Adding a reporting channel happens at the common tool path. Telemetry emission is separate from the protocol decision to invoke the tool; containment ids record that relationship. `ProtocolStep` diagnostics can carry per-tool detail inside their payload, while versioned trace and wire contracts follow their own rules under ADR 0100. The typed JSONL schema and sinks supply trace consumption.
+Adding a reporting channel happens at the common tool path. Telemetry emission is separate from the protocol decision to invoke the tool; containment ids record that relationship. `ProtocolStep` diagnostics can carry per-tool detail inside their payload, while versioned trace and wire contracts follow their own rules under ADR 0100. The typed trace record schema and host-installed sinks supply trace consumption.
 
 [Trace emission](../../crates/lash-core-execution/src/session/execution_context.rs) and [tool execution and turn events](../../crates/lash-core-execution/src/session/tool_execution.rs) own the shared implementation.

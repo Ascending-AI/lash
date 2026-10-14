@@ -38,6 +38,9 @@ mod mcp_host;
 mod mcp_policy;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
+mod stderr_trace;
+#[path = "../../shared/trace_file.rs"]
+mod trace_file;
 mod turns;
 mod ui;
 #[cfg(feature = "provider-wire-fixtures")]
@@ -66,10 +69,7 @@ use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
 use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
-    tracing::{
-        JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent, TraceLevel,
-        TraceRecord, TraceSink,
-    },
+    tracing::{TeeTraceSink, TraceContext, TraceEvent, TraceLevel, TraceRecord, TraceSink},
 };
 
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};

@@ -16,7 +16,7 @@ Key features:
 4. **Swappable interfaces**
     1. Store: SQLite and PostgreSQL provided
     2. Attachments: S3-compatible storage provided
-    3. Tracing: JSONL and OpenTelemetry sinks provided
+    3. Tracing: a `TraceSink` seam for host sinks, and an OpenTelemetry adapter provided
     4. Models: Anthropic, OpenAI, Gemini and any OpenAI-compatible endpoint
     5. Tools: your own tool providers, plus MCP servers
     6. Deferred tools: a host resolver supplies tools on demand, so a large catalog need not be loaded up front

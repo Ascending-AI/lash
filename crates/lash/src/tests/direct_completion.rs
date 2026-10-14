@@ -2,9 +2,6 @@
 //! actor's turn, answers with its usage and call record, and is traced like
 //! any model call.
 
-// The trace JSONL this law reads is a file the test host owns.
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 
 const PROMPT: &str = "raw prompt";
@@ -105,14 +102,13 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
         })
         .build()
         .into_handle();
-    let trace = tempfile::tempdir().expect("trace directory");
-    let trace_path = trace.path().join("trace.jsonl");
+    let trace = Arc::new(crate::testing::RecordingTraceSink::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .tools(crate::tool_provider_key!("tools"), Arc::new(DirectProbe))
-    .trace_jsonl_path(trace_path.clone())
+    .trace_sink(trace.clone())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("direct-llm").expect("nonblank host identity"))
@@ -141,10 +137,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
     assert_eq!(answered["attempts"], 1);
 
     core.flush_trace_sink()?;
-    let records = lash_trace::parse_jsonl_records::<serde_json::Value>(
-        &std::fs::read_to_string(&trace_path).expect("read the trace"),
-    )
-    .expect("trace records");
+    let records = trace.json_records().expect("trace records serialize");
     assert!(
         records.iter().any(|record| {
             record.get("type").and_then(serde_json::Value::as_str) == Some("llm_call_completed")

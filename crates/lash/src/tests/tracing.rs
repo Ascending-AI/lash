@@ -16,11 +16,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
-/// A core whose trace records land in a JSONL file it owns.
+/// A core whose trace records land in a recording sink it owns.
 struct Traced {
     core: LashCore,
-    path: std::path::PathBuf,
-    _dir: tempfile::TempDir,
+    sink: Arc<crate::testing::RecordingTraceSink>,
 }
 
 impl Traced {
@@ -43,20 +42,15 @@ impl Traced {
         provider: ProviderHandle,
         configure: impl FnOnce(crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder,
     ) -> Result<Self> {
-        let dir = tempfile::tempdir().expect("trace directory");
-        let path = dir.path().join("trace.jsonl");
+        let sink = Arc::new(crate::testing::RecordingTraceSink::new());
         let core = configure(
             explicit_ephemeral_facets(LashCore::standard_builder(backend))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .trace_jsonl_path(path.clone())
+                .trace_sink(sink.clone())
                 .telemetry_content(lash_trace::TelemetryContent::Captured),
         )
         .build(owner)?;
-        Ok(Self {
-            core,
-            path,
-            _dir: dir,
-        })
+        Ok(Self { core, sink })
     }
 
     async fn session(&self, id: &str) -> Result<crate::LashSession> {
@@ -68,17 +62,9 @@ impl Traced {
             .await
     }
 
-    /// Every record written so far.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "the law reads back the trace file its own core wrote"
-    )]
+    /// Every record written so far, in its serialized shape.
     fn entries(&self) -> Vec<serde_json::Value> {
-        self.core.flush_trace_sink().expect("flush the trace sink");
-        lash_trace::parse_jsonl_records::<serde_json::Value>(
-            &std::fs::read_to_string(&self.path).unwrap_or_default(),
-        )
-        .expect("trace records")
+        self.sink.json_records().expect("trace records serialize")
     }
 }
 

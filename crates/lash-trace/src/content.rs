@@ -18,7 +18,7 @@ use lash_sansio::llm::types::StreamBlockEvent;
 /// and results, executed code and its output, raw provider payloads, and
 /// diagnostic or provider text. One host choice governs all of it on every
 /// built-in telemetry path: the records every [`TraceSink`](crate::TraceSink)
-/// receives (JSONL, stderr, a tee, a host's own sink) and the adapter's
+/// receives (a tee, a host's own sink) and the adapter's
 /// projection of them.
 ///
 /// The policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still

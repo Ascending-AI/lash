@@ -9,7 +9,9 @@
 //! tagged [`TraceEvent`] payload; [`TraceEventKind`] derives the kind vocabulary
 //! from those variants for recognising the `type` tags consumers match on.
 //!
-//! [`JsonlTraceSink`] writes one JSON line per record at schema
+//! [`TraceSink`] is the host seam: lash ships no trace writer, so a host that
+//! wants records in a file or on a console implements its own sink (see
+//! `docs/architecture/tracing.md`). Records carry schema
 //! [`TRACE_SCHEMA_VERSION`]; [`TeeTraceSink`] fans out to several sinks; and the
 //! optional `otel` feature adds `otel::OtelTelemetry`, which projects permitted
 //! domain completions under retained admission anchors. This is the diagnostics reporting channel —
@@ -31,12 +33,10 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::io;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -46,11 +46,12 @@ mod content_block;
 mod domain;
 mod event;
 mod flight_recorder;
-mod jsonl_records;
 mod language_execution;
 mod language_execution_failure;
 #[cfg(feature = "otel")]
 pub mod otel;
+#[cfg(any(test, feature = "testing"))]
+mod recording;
 pub mod telemetry;
 mod workflow_overlay;
 
@@ -65,10 +66,6 @@ pub use flight_recorder::{
     FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings, FlightRecorderSink,
     FlightRecorderSnapshot,
 };
-use jsonl_records::truncate_torn_tail;
-pub use jsonl_records::{
-    JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,
-};
 pub use language_execution::{
     LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation,
     TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeFact, TraceNodeWaitKind,
@@ -80,6 +77,8 @@ use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
+#[cfg(any(test, feature = "testing"))]
+pub use recording::RecordingTraceSink;
 pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
     InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
@@ -102,7 +101,7 @@ pub use workflow_overlay::{
     WorkflowTaskSite, fold_workflow_overlay,
 };
 
-/// Version of the durable trace JSONL schema, written to
+/// Version of the trace record schema, written to
 /// [`TraceRecord::schema_version`] on every record.
 ///
 /// Bump rules (the normative reporting-schema policy lives in
@@ -1180,10 +1179,6 @@ pub struct TraceError {
 pub enum TraceSinkError {
     #[error("failed to serialize trace record: {0}")]
     Serialize(#[from] serde_json::Error),
-    #[error("failed to create trace directory {path}: {source}")]
-    CreateDir { path: PathBuf, source: io::Error },
-    #[error("failed to open trace file {path}: {source}")]
-    Open { path: PathBuf, source: io::Error },
     #[error("failed to write trace file {path}: {source}")]
     Write { path: PathBuf, source: io::Error },
 }
@@ -1203,124 +1198,12 @@ pub trait TraceSink: Send + Sync {
     }
 }
 
-pub struct JsonlTraceSink {
-    path: PathBuf,
-    lock: Mutex<()>,
-}
-
-impl JsonlTraceSink {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-            lock: Mutex::new(()),
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "JsonlTraceSink is the filesystem trace sink; the host injects the path (FIG-2971)"
-)]
-impl TraceSink for JsonlTraceSink {
-    /// Write the record as one `line\n` call.
-    ///
-    /// The record and its newline go out in a single `write_all`: issuing them
-    /// as two writes (`writeln!` on a fresh handle does exactly that) lets a
-    /// kill or a short write tear between the record and its terminator, and
-    /// the next append would glue onto the partial line. When the file's last
-    /// line is already unterminated — a torn record left behind — the tail is
-    /// truncated first, so every line in the file stays a complete record.
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let mut line = serde_json::to_string(record)?;
-        line.push('\n');
-        let _guard = self.lock.lock_recover();
-        if let Some(parent) = self.path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).map_err(|source| TraceSinkError::CreateDir {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|source| TraceSinkError::Open {
-                path: self.path.clone(),
-                source,
-            })?;
-        truncate_torn_tail(&mut file)
-            .and_then(|()| file.write_all(line.as_bytes()))
-            .map_err(|source| TraceSinkError::Write {
-                path: self.path.clone(),
-                source,
-            })
-    }
-
-    /// `fsync` the trace file to durable storage.
-    ///
-    /// Each [`append`](Self::append) opens, appends, and closes the file, so a
-    /// record's bytes already reach the OS as it is written — this sink holds no
-    /// in-process buffer. `flush` goes one step further and forces an `fsync` so
-    /// the OS page cache is pushed to disk, which is the honest guarantee a host
-    /// wants before exit. If no record has been written yet the file may not
-    /// exist; that is a no-op rather than an error (nothing to sync), and we do
-    /// not create an empty file just to sync it.
-    fn flush(&self) -> Result<(), TraceSinkError> {
-        let _guard = self.lock.lock_recover();
-        match OpenOptions::new().append(true).open(&self.path) {
-            Ok(file) => file.sync_all().map_err(|source| TraceSinkError::Write {
-                path: self.path.clone(),
-                source,
-            }),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(TraceSinkError::Open {
-                path: self.path.clone(),
-                source,
-            }),
-        }
-    }
-}
-
-/// The newline is appended to the serialized record so both leave in one
-/// `write_all`: stderr is unbuffered and `eprintln!` emits one syscall per
-/// format fragment, so a host logging from another task could land between a
-/// record and its newline and sever the line for anything reading the merged
-/// output a line at a time. The buffering that fixes it is the `String`, not
-/// the handle.
-#[derive(Default)]
-pub struct StderrTraceSink {
-    lock: Mutex<()>,
-}
-
-impl TraceSink for StderrTraceSink {
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let mut line = serde_json::to_string(record)?;
-        line.push('\n');
-        let _guard = self.lock.lock_recover();
-        let mut stderr = io::stderr().lock();
-        stderr
-            .write_all(line.as_bytes())
-            .and_then(|()| stderr.flush())
-            .map_err(|source| TraceSinkError::Write {
-                path: PathBuf::from("<stderr>"),
-                source,
-            })
-    }
-}
-
-/// Fans each trace record out to several sinks in order (e.g. stderr + a JSONL
-/// file).
+/// Fans each trace record out to several sinks in order (e.g. a host's
+/// console sink and its file sink).
 ///
 /// Every sink runs on every call and the first error is returned once they all
-/// have: the sinks are independent destinations, so a stderr that a supervisor
-/// closed must not cost the run its durable JSONL file. Only the first error is
+/// have: the sinks are independent destinations, so a console stream that a
+/// supervisor closed must not cost the run its durable trace file. Only the first error is
 /// carried — a caller acts on "tracing degraded", not on a list.
 pub struct TeeTraceSink {
     sinks: Vec<Arc<dyn TraceSink>>,

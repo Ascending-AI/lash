@@ -3,11 +3,6 @@
 //! These live in their own file so `lib.rs` carries only the durable schema
 //! types it defines.
 
-// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 /// V23: an intent completion must name its closed, typed intent kind.
 #[test]
@@ -30,8 +25,6 @@ fn domain_completion_refuses_an_untyped_intent_subject() {
     }
 }
 
-use lash_sansio::llm::types::{AttemptOutcome, AttemptRecord, ProtocolPosition};
-
 /// A sink that fails every call, standing in for a closed stderr.
 struct FailingSink;
 
@@ -53,14 +46,12 @@ impl TraceSink for FailingSink {
 
 #[test]
 fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
-    // The bot tees stderr first and its durable JSONL file second, so a
+    // A host tees stderr first and its durable trace file second, so a
     // supervisor closing stderr must not cost the run its trace file.
-    let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("trace.jsonl");
+    let recording = Arc::new(RecordingTraceSink::new());
     let tee = TeeTraceSink::new([
         Arc::new(FailingSink) as Arc<dyn TraceSink>,
-        Arc::new(JsonlTraceSink::new(&path)),
+        Arc::clone(&recording) as Arc<dyn TraceSink>,
     ]);
 
     let append = tee.append(&fixture_record(
@@ -76,9 +67,11 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
         "the first sink's failure is still reported"
     );
     assert!(tee.flush().is_err(), "a failing flush is reported too");
-    let text = std::fs::read_to_string(&path).unwrap();
     assert!(
-        text.contains("\"type\":\"custom\""),
+        matches!(
+            recording.records().as_slice(),
+            [TraceRecord { event: TraceEvent::Custom { name, .. }, .. }] if name == "test.event"
+        ),
         "the later sink still received the record"
     );
 }
@@ -255,136 +248,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "{case} must not be classified as failed"
         );
     }
-}
-
-/// FIG-3525: a writer killed between the record bytes and their newline — or
-/// short-written on ENOSPC — leaves an unterminated final line, and the next
-/// append would glue onto it. The sink truncates that torn tail on open so the
-/// new record lands on its own line, and `parse_jsonl_records` skips a torn
-/// tail instead of failing the whole file.
-#[test]
-fn jsonl_trace_sink_recovers_from_torn_tail() {
-    let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("trace.jsonl");
-
-    let first = fixture_record(
-        TraceContext::default().for_session("root"),
-        TraceEvent::Custom {
-            name: "first".to_string(),
-            payload: serde_json::json!({"seq": 1}),
-        },
-    );
-    let second = fixture_record(
-        TraceContext::default().for_session("root"),
-        TraceEvent::Custom {
-            name: "second".to_string(),
-            payload: serde_json::json!({"seq": 2}),
-        },
-    );
-
-    // Seed one complete record and one torn record without its newline.
-    let mut seeded = serde_json::to_string(&first).unwrap();
-    seeded.push('\n');
-    seeded.push_str("{\"type\":\"custom\",\"name\":\"tor");
-    std::fs::write(&path, &seeded).unwrap();
-
-    // Reading the still-torn file skips the tail but keeps the record.
-    let torn = parse_jsonl_records::<TraceRecord>(&seeded).expect("torn read");
-    assert_eq!(torn.len(), 1);
-    assert!(matches!(&torn[0].event, TraceEvent::Custom { name, .. } if name == "first"));
-
-    let sink = JsonlTraceSink::new(&path);
-    sink.append(&second).unwrap();
-
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(
-        text.ends_with('\n'),
-        "appends keep the file line-terminated"
-    );
-    assert!(!text.contains("\"tor"), "the torn tail is truncated");
-    let records = parse_jsonl_records::<TraceRecord>(&text).expect("read trace");
-    assert_eq!(records.len(), 2, "both complete records read back");
-    assert!(matches!(&records[0].event, TraceEvent::Custom { name, .. } if name == "first"));
-    assert!(matches!(&records[1].event, TraceEvent::Custom { name, .. } if name == "second"));
-
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-/// FIG-5025: emitted attempt and domain terminals must not be skipped as future kinds.
-#[test]
-fn trace_reader_preserves_attempt_and_domain_completions() {
-    let records = [
-        fixture_record(
-            TraceContext::default(),
-            TraceEvent::LlmAttemptCompleted {
-                attempt: AttemptRecord {
-                    ordinal: 1,
-                    outcome: AttemptOutcome::Completed,
-                    protocol_position: ProtocolPosition::TerminalObserved,
-                    retry_budget_consumed: true,
-                    retry_decision: None,
-                    error: None,
-                    evidence: None,
-                    generation_disposition: None,
-                    usage: None,
-                },
-                observation: crate::TraceAttemptObservation {
-                    provider: None,
-                    request_model: "model".to_string(),
-                    started_at_ms: None,
-                    ended_at_ms: None,
-                },
-            },
-        ),
-        fixture_record(
-            TraceContext::default(),
-            TraceEvent::DomainCompleted {
-                completion: TraceDomainCompletion::new(
-                    TraceDomainSubject::Process {},
-                    1,
-                    TraceDomainStatus::Completed,
-                ),
-            },
-        ),
-    ];
-    let text: String = records
-        .iter()
-        .map(|record| format!("{}\n", serde_json::to_string(record).expect("encode trace")))
-        .collect();
-    let read = parse_trace_jsonl_records(&text).expect("read trace");
-    assert_eq!(read.records, records, "both emitted terminals must survive");
-    assert_eq!(read.skipped_unknown_kinds, 0);
-}
-
-#[test]
-fn trace_reader_skips_unknown_kinds_and_counts_them() {
-    let mut known = serde_json::to_value(fixture_record(
-        TraceContext::default(),
-        TraceEvent::Custom {
-            name: "known".to_string(),
-            payload: serde_json::Value::Null,
-        },
-    ))
-    .expect("known trace");
-    known["future_optional"] = serde_json::json!({"ignored": true});
-    let mut future = known.clone();
-    future["type"] = serde_json::json!("future_observation");
-    future["extra"] = serde_json::json!({"optional": true});
-    let text = format!("{known}\n{future}\n{known}\n");
-    let read = parse_trace_jsonl_records(&text).expect("read trace");
-    assert_eq!(read.records.len(), 2);
-    assert_eq!(read.skipped_unknown_kinds, 1);
-
-    let mut malformed = known.clone();
-    malformed.as_object_mut().unwrap().remove("name");
-    let error = parse_trace_jsonl_records(&format!("{known}\n{malformed}\n"))
-        .expect_err("known malformed kind must refuse");
-    assert_eq!(error.line, 2);
-
-    let mut unsupported = future;
-    unsupported["schema_version"] = serde_json::json!(TRACE_SCHEMA_VERSION + 1);
-    assert!(parse_trace_jsonl_records(&format!("{unsupported}\n")).is_err());
 }
 
 #[cfg(test)]

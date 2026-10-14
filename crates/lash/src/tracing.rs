@@ -30,11 +30,9 @@ pub use lash_core::{
     TraceLlmResponse, TracePromptComponent, TraceProviderBodyOmission, TraceProviderEvent,
     TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
     TraceProviderRouteIdentity, TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
-    TraceToolResultBlock, TraceToolSpec, facade_support::JsonlTraceReadError,
-    facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
+    TraceToolResultBlock, TraceToolSpec, facade_support::TraceBranchSelection,
     facade_support::TraceRecord, facade_support::TraceRuntimeScope,
     facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
-    facade_support::parse_jsonl_records,
 };
 pub use lash_sansio::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
@@ -48,9 +46,9 @@ pub use lash_trace::otel::registry::{
 pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     CONTENT_POLICY_OMISSION, FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings,
-    FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, StderrTraceSink,
-    TeeTraceSink, TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceLimitsError,
-    TraceSink, TraceToolCallOutcome, TraceToolCallOutput,
+    FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, TeeTraceSink,
+    TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceLimitsError, TraceSink,
+    TraceToolCallOutcome, TraceToolCallOutput,
 };
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a

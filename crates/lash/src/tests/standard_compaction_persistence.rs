@@ -1,8 +1,3 @@
-// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 use lash_core::facade_support::SessionNodeProjection as _;
 use lash_sansio::SessionId;
@@ -552,9 +547,8 @@ async fn repeated_admin_compactions_distinguish_changed_snapshots() -> Result<()
 #[tokio::test]
 async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction()
 -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-durable-parent";
-    let trace_path = dir.path().join("trace.jsonl");
+    let trace = Arc::new(crate::testing::RecordingTraceSink::new());
     let store_factory = sqlite_memory_store_set().await;
     let backend = lash_conformance::backend_over(store_factory.clone());
     let provider = standard_compaction_provider(vec![
@@ -571,7 +565,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
-        .trace_jsonl_path(trace_path.clone())
+        .trace_sink(trace.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
@@ -641,9 +635,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     core.flush_trace_sink()?;
 
-    let trace = std::fs::read_to_string(trace_path).expect("read standard-compaction trace");
-    let records =
-        lash_trace::parse_jsonl_records::<serde_json::Value>(&trace).expect("decode trace records");
+    let records = trace.json_records().expect("trace records serialize");
     for event_type in ["compaction_started", "compaction_completed"] {
         let record = records
             .iter()
@@ -720,9 +712,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
 #[tokio::test]
 async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let session_id = "standard-compaction-attachment-prune";
-    let trace_path = dir.path().join("trace.jsonl");
+    let trace = Arc::new(crate::testing::RecordingTraceSink::new());
     let store_factory = sqlite_memory_store_set().await;
     let backend = lash_conformance::backend_over(store_factory.clone());
     let (provider, requests) = standard_compaction_provider_recorded(vec![
@@ -737,7 +728,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         .plugin(Arc::new(
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
-        .trace_jsonl_path(trace_path.clone())
+        .trace_sink(trace.clone())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
@@ -834,9 +825,8 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         "the API keeps the attachment pruned from the Prompt View"
     );
     core.flush_trace_sink()?;
-    let trace = std::fs::read_to_string(trace_path).expect("read projection trace");
-    let mismatch_record = trace.lines().find_map(|line| {
-        let record = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    let records = trace.json_records().expect("trace records serialize");
+    let mismatch_record = records.into_iter().find_map(|record| {
         (record.get("name").and_then(serde_json::Value::as_str)
             == Some("session_graph.read_projection")
             && record["payload"]["id_mismatch_message_ids"]

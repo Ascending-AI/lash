@@ -297,6 +297,7 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_trace": "//crates/lash-trace:lash-trace",
             "proptest": "//third-party/rust:p0250",
             "syn": "//third-party/rust:p0367",
             "tempfile": "//third-party/rust:p0372",

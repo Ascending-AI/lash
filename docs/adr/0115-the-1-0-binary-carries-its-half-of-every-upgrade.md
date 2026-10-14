@@ -377,7 +377,7 @@ narrow supported history or mutable reads at finalize
 | SQLite blobs | Store a versioned compression envelope. Unknown version or compression refuses without rewriting the bytes (`crates/lash-sqlite-store/src/codec.rs`). |
 | Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs`, `crates/lash-core-store/src/store/attachment_referrers.rs`). |
 | Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs`). |
-| Trace JSONL | Count and skip unknown event kinds. Malformed known events and unsupported schema versions refuse (`crates/lash-trace/src/jsonl_records.rs`). |
+| Trace records | Lash ships no trace file writer or reader (FIG-6282). Records carry `schema_version`; a host's own reader decides how it treats an unknown event kind or schema version (`crates/lash-trace/src/lib.rs`). |
 | Process observation cursors | The replay store mints `lashpo1` cursors; parsing validates that prefix and the process, sequence and position fields. Continuity is scoped by replay incarnation (`crates/lash-core/src/runtime/observation/process_replay.rs`, `crates/lash/src/process_feed.rs`). |
 | Operator JSON | `lashctl` owns command DTOs and the `{schema_version, command, result, error}` envelope (`crates/lashctl/src/main.rs`). |
 

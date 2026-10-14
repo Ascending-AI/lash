@@ -624,7 +624,6 @@ pub(crate) fn trace_tool_attempt(
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod span_identity_tests {
     use super::*;
     use std::sync::Arc;
@@ -643,10 +642,8 @@ mod span_identity_tests {
 
     #[test]
     fn a_live_body_cannot_authorize_a_logical_terminal() {
-        let directory = tempfile::tempdir().expect("trace directory");
-        let path = directory.path().join("terminal.jsonl");
-        let runtime = TraceRuntime::default()
-            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
+        let sink = Arc::new(lash_trace::RecordingTraceSink::new());
+        let runtime = TraceRuntime::default().with_trace_sink(sink.clone());
         let standing = runtime.unreplayed(Some(turn_scope(100)));
         standing.transition(
             standing.body_permit(),
@@ -666,7 +663,7 @@ mod span_identity_tests {
         );
         runtime.flush().expect("flush");
         assert!(
-            !path.exists(),
+            sink.records().is_empty(),
             "a live attempt is not a committed terminal receipt"
         );
     }
@@ -693,10 +690,9 @@ mod span_identity_tests {
         }
         let clock_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let constructions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let directory = tempfile::tempdir().expect("trace directory");
-        let path = directory.path().join("replayed.jsonl");
+        let sink = Arc::new(lash_trace::RecordingTraceSink::new());
         let runtime = TraceRuntime::new(Arc::new(SpyClock(clock_reads.clone())))
-            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)));
+            .with_trace_sink(sink.clone());
         let scoped = crate::ActorContext::unavailable()
             .scoped(crate::AdmittedScope::turn("session", "turn"))
             .expect("scope");
@@ -720,7 +716,7 @@ mod span_identity_tests {
         assert!(!scoped.frontier().is_crossed());
         assert_eq!(constructions.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(clock_reads.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert!(!path.exists());
+        assert!(sink.records().is_empty());
     }
 
     fn turn_context() -> TraceContext {
@@ -923,10 +919,9 @@ mod span_identity_tests {
             ],
         };
 
-        let directory = tempfile::tempdir().expect("trace tempdir");
-        let path = directory.path().join("llm-retry.trace.jsonl");
+        let sink = Arc::new(lash_trace::RecordingTraceSink::new());
         let standing = TraceRuntime::default()
-            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)))
+            .with_trace_sink(sink.clone())
             .unreplayed(None);
         let error = crate::LlmCallError {
             message: "provider attempts exhausted".to_string(),
@@ -945,13 +940,11 @@ mod span_identity_tests {
             None,
             Some(&record),
         );
-        let emitted: lash_trace::TraceRecord = lash_trace::parse_jsonl_records(
-            &std::fs::read_to_string(path).expect("read LLM trace"),
-        )
-        .expect("parse emitted LLM trace")
-        .into_iter()
-        .next()
-        .expect("one emitted LLM trace record");
+        let emitted = sink
+            .records()
+            .into_iter()
+            .next()
+            .expect("one emitted LLM trace record");
         let TraceEvent::LlmCallFailed { attempts, .. } = emitted.event else {
             panic!("expected emitted LLM failure");
         };
@@ -985,10 +978,9 @@ mod span_identity_tests {
 
     #[test]
     fn store_integrity_classes_emit_at_the_runtime_boundary_only() {
-        let directory = tempfile::tempdir().expect("tempdir");
-        let path = directory.path().join("store.trace.jsonl");
+        let sink = Arc::new(lash_trace::RecordingTraceSink::new());
         let standing = TraceRuntime::default()
-            .with_trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(&path)))
+            .with_trace_sink(sink.clone())
             .unreplayed(None);
         let context = TraceContext::default().for_session("corrupt-session");
 
@@ -1017,10 +1009,7 @@ mod span_identity_tests {
             &crate::StoreError::Backend("transient".to_string()),
         );
 
-        let records = lash_trace::parse_jsonl_records::<lash_trace::TraceRecord>(
-            &std::fs::read_to_string(path).expect("trace file"),
-        )
-        .expect("trace records");
+        let records = sink.records();
         assert_eq!(
             records.len(),
             2,

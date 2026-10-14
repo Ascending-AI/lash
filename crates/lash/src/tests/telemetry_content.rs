@@ -112,8 +112,8 @@ const RESPONSE: &str = "RESPONSE-MARKER";
 const OUTPUT: &str = "raw:ARGUMENT-MARKER";
 const PROVIDER_CALL: &str = "call-content-law";
 
-/// The line a serializing sink writes for each record it is handed: what
-/// `StderrTraceSink` puts on stderr.
+/// The line a serializing sink writes for each record it is handed: what a
+/// host's own console or file sink puts out.
 #[derive(Default)]
 struct Lines(StdMutex<Vec<String>>);
 
@@ -145,7 +145,7 @@ impl lash_trace::TraceDomainProjector for Projected {
 
 /// What one tool-calling turn wrote to each telemetry path.
 struct Telemetry {
-    jsonl: String,
+    recorded: Vec<TraceRecord>,
     lines: Vec<String>,
     projected: Vec<TraceRecord>,
     lash_call_id: String,
@@ -155,8 +155,15 @@ impl Telemetry {
     /// Every path's records as text, named for a failure message.
     fn paths(&self) -> [(&'static str, String); 3] {
         [
-            ("JSONL", self.jsonl.clone()),
-            ("stderr", self.lines.join("\n")),
+            (
+                "the recording sink",
+                self.recorded
+                    .iter()
+                    .map(|record| serde_json::to_string(record).expect("encode record"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            ("a serializing sink", self.lines.join("\n")),
             (
                 "the adapter's projection",
                 self.projected
@@ -169,22 +176,20 @@ impl Telemetry {
     }
 
     fn records(&self) -> Vec<serde_json::Value> {
-        lash_trace::parse_jsonl_records::<serde_json::Value>(&self.jsonl).expect("trace records")
+        self.recorded
+            .iter()
+            .map(|record| serde_json::to_value(record).expect("encode record"))
+            .collect()
     }
 }
 
 /// One turn that sends [`PROMPT`], calls `echo_tool` with [`ARGUMENT`] and
 /// answers [`RESPONSE`], under `configure`'s telemetry settings.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the law reads back the trace file its own core wrote"
-)]
 async fn tool_calling_turn(
     session: &str,
     configure: impl FnOnce(crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder,
 ) -> Result<Telemetry> {
-    let dir = tempfile::tempdir().expect("trace directory");
-    let path = dir.path().join("trace.jsonl");
+    let recording = Arc::new(crate::testing::RecordingTraceSink::new());
     let lines = Arc::new(Lines::default());
     let projected = Arc::new(Projected::default());
     // Report the terminals the provider observed: an Unknown terminal seals
@@ -221,7 +226,7 @@ async fn tool_calling_turn(
             .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool))
             .trace_runtime(runtime)
             .trace_sink(Arc::new(lash_trace::TeeTraceSink::new([
-                Arc::new(lash_trace::JsonlTraceSink::new(path.clone())) as Arc<dyn TraceSink>,
+                Arc::clone(&recording) as Arc<dyn TraceSink>,
                 Arc::clone(&lines) as Arc<dyn TraceSink>,
             ])))
             .trace_level(lash_trace::TraceLevel::Extended),
@@ -253,7 +258,7 @@ async fn tool_calling_turn(
     core.flush_trace_sink().expect("flush the trace sink");
     core.shutdown().await?;
     Ok(Telemetry {
-        jsonl: std::fs::read_to_string(&path).unwrap_or_default(),
+        recorded: recording.records(),
         lines: lines.0.lock().expect("lines").clone(),
         projected: projected.0.lock().expect("projected").clone(),
         lash_call_id,
@@ -268,7 +273,7 @@ fn of_type<'a>(entries: &'a [serde_json::Value], kind: &str) -> Vec<&'a serde_js
 }
 
 /// With no telemetry content setting, a turn with a tool call writes its
-/// records to JSONL, to a serializing sink and to the adapter with their
+/// records to a recording sink, to a serializing sink and to the adapter with their
 /// identities and outcomes and with no prompt, response, tool argument or
 /// tool output. A host that states `TelemetryContent::Captured` gets the same
 /// records with all four present.

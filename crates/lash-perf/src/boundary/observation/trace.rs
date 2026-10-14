@@ -8,13 +8,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, ensure};
 use lash::tracing::{
-    JsonlTraceSink, TelemetryContent, TraceEvent, TraceLevel, TraceRecord, TraceSink,
-    TraceSinkError,
+    TelemetryContent, TraceEvent, TraceLevel, TraceRecord, TraceSink, TraceSinkError,
 };
 use lash_sansio::sync::MutexExt;
 
 use super::super::{Args, Case, Meter, Receipt, facade};
 use super::{Flavor, Fleet};
+use crate::perf_support::trace_file::JsonlFileSink;
 
 /// The host's installed sink: it times the sink it wraps on the emitting
 /// thread, which is where a record's cost lands.
@@ -134,7 +134,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     let path = args.store_dir.join("trace.jsonl");
     let inner: Arc<dyn TraceSink> = match args.case {
         Case::TraceSinkOtel | Case::TraceSinkSlow => Arc::new(Discard),
-        _ => Arc::new(JsonlTraceSink::new(path.clone())),
+        _ => Arc::new(JsonlFileSink::new(path.clone())),
     };
     let mut sink = TimedSink::new(inner, &meter, "trace.sink.append");
     if matches!(args.case, Case::TraceSinkSlow) {

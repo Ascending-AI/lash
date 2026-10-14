@@ -547,8 +547,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     eprintln!("agent-workbench trace: {}", trace_path.display());
     let trace_path_display = trace_path.display().to_string();
     let trace_sink = Arc::new(TeeTraceSink::new([
-        Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
-        Arc::new(JsonlTraceSink::new(trace_path)),
+        Arc::new(stderr_trace::StderrTraceSink) as Arc<dyn TraceSink>,
+        Arc::new(trace_file::JsonlFileSink::new(trace_path)),
     ])) as Arc<dyn TraceSink>;
     let lash_vm_execution_path = std::env::var("AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE")
         .map(PathBuf::from)
@@ -557,8 +557,9 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         "agent-workbench Lash VM execution trace: {}",
         lash_vm_execution_path.display()
     );
-    let lash_vm_execution_sink =
-        Arc::new(JsonlTraceSink::new(lash_vm_execution_path.clone())) as Arc<dyn TraceSink>;
+    let lash_vm_execution_sink = Arc::new(trace_file::JsonlFileSink::new(
+        lash_vm_execution_path.clone(),
+    )) as Arc<dyn TraceSink>;
 
     let model = dev_provider_scenario
         .map(|scenario| scenario.initial_profile().to_string())

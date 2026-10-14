@@ -74,12 +74,12 @@ async fn send(core: &lash::LashCore, id: &str) -> Result<()> {
 /// A socket outage is counted as dropped spans, never acknowledged, and
 /// never changes a turn's answer; after reconnect, shutdown drains the
 /// acknowledged export, and the collector's spans match the host's
-/// acknowledgement and the JSONL trace's provider attempts one for one.
+/// acknowledgement and the trace sink's provider attempts one for one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> Result<()> {
     let receiver = OtlpReceiver::bind("127.0.0.1:0".parse()?).await?;
     let telemetry = HostTelemetry::new(&receiver.endpoint())?;
-    let trace = tempfile::NamedTempFile::new()?;
+    let trace = Arc::new(lash::testing::RecordingTraceSink::new());
     let stores = lash::sqlite::SqliteStoreSet::memory().await?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
     let metadata = lash::LlmProfileMetadata::builder("otlp-fixture")
@@ -99,7 +99,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                 .execution_budgets(lash::ExecutionBudgets::recommended())
                 .delta_coalescing(lash::DeltaCoalescing::recommended())
-                .trace_jsonl_path(trace.path()),
+                .trace_sink(trace.clone()),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("otlp"),
@@ -159,8 +159,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
         "shutdown acknowledgement disagrees with socket delivery"
     );
 
-    let records: Vec<lash::tracing::TraceRecord> =
-        lash::tracing::parse_jsonl_records(&std::fs::read_to_string(trace.path())?)?;
+    let records = trace.records();
     for session in ["otlp-connected", "otlp-disconnected", "otlp-reconnected"] {
         let attempts: Vec<_> = records
             .iter()
@@ -178,7 +177,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
             .collect();
         ensure!(
             attempts.len() == 1,
-            "actual provider execution missing or repeated in JSONL for {session}"
+            "actual provider execution missing or repeated in the trace for {session}"
         );
         let exported: Vec<_> = collector
             .spans

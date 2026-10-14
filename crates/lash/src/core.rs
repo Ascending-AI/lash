@@ -252,7 +252,7 @@ impl LashCore {
     /// stack.
     ///
     /// The host configures the factory (projection resolver, separate deferred
-    /// tool resolvers, execution sink/jsonl path) before
+    /// tool resolvers, execution sink) before
     /// passing it in. The factory is built over this same `backend`
     /// ([`RlmProtocolPluginFactory::new`](crate::rlm::RlmProtocolPluginFactory::new)),
     /// which supplies its Lash VM artifact store; a factory built over any
@@ -453,9 +453,9 @@ impl LashCore {
     /// Hosts that hand `lash` a trace sink via [`LashCoreBuilder::trace_sink`] already hold
     /// their own `Arc` and can flush it directly; this is the equivalent lever for hosts that
     /// did not retain the handle.
-    /// It flushes the core's copy — for a [`JsonlTraceSink`](lash_trace::JsonlTraceSink) that
-    /// fsyncs the file, and for an OTel sink it is a no-op (the host still owns provider
-    /// flush; see the tracing docs).
+    /// It flushes the core's copy — for a host's file sink that is whatever its
+    /// [`TraceSink::flush`](lash_trace::TraceSink::flush) does, and for an OTel sink it is a
+    /// no-op (the host still owns provider flush; see the tracing docs).
     pub fn flush_trace_sink(&self) -> Result<()> {
         self.env.core.tracing.flush()?;
         Ok(())
@@ -1050,15 +1050,12 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Set the record sink, replacing sinks or paths configured through this builder.
+    /// Set the record sink, replacing any sink configured through this builder.
+    ///
+    /// Lash ships no trace writer: a host that wants records in a file or on a console
+    /// implements [`TraceSink`](lash_trace::TraceSink) itself.
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
         self.trace_sink = Some(trace_sink);
-        self
-    }
-
-    /// Set a JSONL record sink, replacing sinks or paths configured through this builder.
-    pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 

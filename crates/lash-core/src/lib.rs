@@ -404,8 +404,6 @@ pub mod facade_support {
     pub use lash_sansio::tool_result_text;
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
-    pub use lash_trace::JsonlTraceReadError;
-    pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceLevel;
     pub use lash_trace::TraceRecord;
@@ -413,7 +411,6 @@ pub mod facade_support {
     pub use lash_trace::TraceRuntimeSubject;
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
-    pub use lash_trace::parse_jsonl_records;
     /// The schemars crate first-party config owners derive their schemas
     /// through (`#[schemars(crate = "lash_core::facade_support::schemars")]`).
     pub use schemars;

@@ -9,6 +9,7 @@ pub mod scheduler;
 pub mod stack;
 pub mod tempdir;
 pub mod time;
+pub mod trace_file;
 
 /// Refuse a PostgreSQL performance run that cannot retain acknowledged local
 /// commits across power loss. Provisioning owns these settings; the harness

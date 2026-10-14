@@ -8,8 +8,8 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Trace types and JSONL exporter for the lash agent runtime."
-keywords = ["lash", "agent", "trace", "jsonl", "observability"]
+description = "Trace types and sinks for the lash agent runtime."
+keywords = ["lash", "agent", "trace", "observability"]
 categories = ["asynchronous", "development-tools::debugging"]
 
 [lib]
@@ -19,6 +19,8 @@ doctest = false
 [features]
 default = []
 otel = ["dep:opentelemetry"]
+# Exposes `RecordingTraceSink`, the in-memory sink tests read records from.
+testing = []
 
 [lints]
 workspace = true

@@ -25,6 +25,8 @@ mod fixture;
 mod scenario;
 mod telemetry;
 mod telemetry_scenario;
+#[path = "../../shared/trace_file.rs"]
+mod trace_file;
 mod workflow;
 
 #[derive(Clone)]
@@ -388,7 +390,7 @@ async fn main() -> Result<()> {
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .trace_sink(Arc::new(lash::tracing::JsonlTraceSink::new(trace)))
+        .trace_sink(Arc::new(trace_file::JsonlFileSink::new(trace)))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured);
     let builder = match live_replay().await? {

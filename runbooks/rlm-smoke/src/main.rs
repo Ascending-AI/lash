@@ -24,6 +24,8 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[path = "../../../examples/shared/e2e_live_budget.rs"]
 mod e2e_live_budget;
+#[path = "../../../examples/shared/trace_file.rs"]
+mod trace_file;
 
 #[derive(Debug, Parser)]
 #[command(about = "Live-model RLM smoke host with workspace-jailed tools")]
@@ -520,7 +522,7 @@ async fn main() -> Result<()> {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
-        .trace_jsonl_path(&trace_path)
+        .trace_sink(Arc::new(trace_file::JsonlFileSink::new(&trace_path)))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .trace_context(trace_context)

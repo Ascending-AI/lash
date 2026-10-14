@@ -389,16 +389,11 @@ fn trace_positions(
 /// whose refusal text reaches the next model request, and it and every
 /// admitted call beside it have exactly one ordered start and completion in
 /// the trace and in the turn's activity.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the test host reads back the trace file it configured"
-)]
 async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let admitted = Arc::new(AtomicUsize::new(0));
     let refused = Arc::new(AtomicUsize::new(0));
-    let trace_dir = tempfile::tempdir().expect("trace directory");
-    let trace_path = trace_dir.path().join("discovery-refusal.jsonl");
+    let trace = Arc::new(crate::testing::RecordingTraceSink::new());
     let core = explicit_ephemeral_facets(
         LashCore::builder(sqlite_memory_store_backend().await).protocol_plugin(Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::with_config(
@@ -422,9 +417,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             refused: Arc::clone(&refused),
         }),
     )
-    .trace_sink(Arc::new(lash_trace::JsonlTraceSink::new(
-        trace_path.clone(),
-    )))
+    .trace_sink(trace.clone())
     .build(crate::testing::runtime_lease_owner())
     .expect("standard core with discovery");
     let session_id = if mixed {
@@ -466,10 +459,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     assert_eq!(failure.message, DISCOVERY_REFUSAL);
 
     core.shutdown().await.expect("shutdown");
-    let entries = lash_core::facade_support::parse_jsonl_records::<serde_json::Value>(
-        &std::fs::read_to_string(&trace_path).expect("read the discovery trace"),
-    )
-    .expect("trace entries");
+    let entries = trace.json_records().expect("trace entries serialize");
     let calls: &[&str] = if mixed {
         &["refused-call", "admitted-call"]
     } else {

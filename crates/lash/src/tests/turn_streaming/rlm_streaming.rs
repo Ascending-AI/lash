@@ -878,14 +878,7 @@ await control.finish("done");"#,
 #[test]
 pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes() -> Result<()> {
     run_async_test_on_stack_budget("rlm-native-tool-contract-test", || async {
-        let trace_path = std::env::temp_dir().join(format!(
-            "lash-rlm-native-tool-contract-{}-{}.jsonl",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
+        let trace = Arc::new(crate::testing::RecordingTraceSink::new());
         let repair_request = Arc::new(std::sync::Mutex::new(None));
         let responses = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from([
             LlmResponse {
@@ -921,7 +914,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
         let core =
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
-                .trace_jsonl_path(trace_path.clone())
+                .trace_sink(trace.clone())
                 .telemetry_content(lash_trace::TelemetryContent::Captured)
                 .build(crate::testing::runtime_lease_owner())?;
         let session = core
@@ -965,10 +958,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             "{repair}"
         );
 
-        core.flush_trace_sink()?;
-        let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-        let entries =
-            lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("trace JSON");
+        let entries = trace.json_records().expect("trace records serialize");
         entries
             .iter()
             .find(|entry| {
@@ -986,10 +976,9 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
                         == Some("retry_native_tool_call")
             })
             .unwrap_or_else(|| {
-                panic!("the stray call is classified as an extraction failure: {logged}")
+                panic!("the stray call is classified as an extraction failure: {entries:?}")
             });
 
-        let _ = std::fs::remove_file(&trace_path);
         Ok(())
     })
 }
