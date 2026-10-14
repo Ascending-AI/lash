@@ -53,6 +53,9 @@ pub struct SimNodes {
     /// The activation a node runs when it is not the deployment's: a node
     /// with its own in-memory services, such as its host's sinks.
     activations: Mutex<BTreeMap<String, Arc<dyn Activation>>>,
+    /// The claim requirements a node serves when they are not the config's:
+    /// a node of a build with other plugins.
+    serves: Mutex<BTreeMap<String, Vec<String>>>,
     /// Whether each node runs its activations ahead of its runner.
     activations_first: std::sync::atomic::AtomicBool,
 }
@@ -77,6 +80,7 @@ impl SimNodes {
             nodes: Arc::default(),
             decodes: Mutex::default(),
             activations: Mutex::default(),
+            serves: Mutex::default(),
             activations_first: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -94,6 +98,12 @@ impl SimNodes {
         self.activations
             .lock_recover()
             .insert(node.to_string(), activation);
+    }
+
+    /// Run every later boot of `node` serving the claim requirements
+    /// `serves` in place of the deployment's.
+    pub fn serve_on(&self, node: &str, serves: Vec<String>) {
+        self.serves.lock_recover().insert(node.to_string(), serves);
     }
 
     /// Start draining `node`'s live boot by release.
@@ -152,6 +162,12 @@ impl SimNodes {
             .get(node)
             .cloned()
             .unwrap_or_else(|| Arc::clone(&self.activation));
+        let serves = self
+            .serves
+            .lock_recover()
+            .get(node)
+            .cloned()
+            .unwrap_or_else(|| self.config.serves.clone());
         let drain = Drain::default();
         let runner = Runner::new(
             Arc::clone(&store) as Arc<dyn DurableStore>,
@@ -159,7 +175,7 @@ impl SimNodes {
             RunnerConfig {
                 node: NodeId::new(node),
                 decodes,
-                serves: self.config.serves.clone(),
+                serves,
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,

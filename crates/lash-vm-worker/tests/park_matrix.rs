@@ -1092,23 +1092,29 @@ async fn every_park_cut_is_reached_when_b_claims_before_a(tier: Tier) {
             keep: Mutex::default(),
         })
         .await;
-    let first_claim = report
-        .baseline
-        .iter()
-        .find(|write| {
-            write.point.label == CommitLabel::CLAIM
-                && matches!(
-                    write.stored,
-                    lash_durable_test::Stored::Committed { effective: true }
-                )
-        })
-        .expect("the baseline claimed the actor");
-    assert_eq!(first_claim.node.as_ref(), "a");
+    let first_claimant = |writes: &[lash_durable_test::Write]| {
+        writes
+            .iter()
+            .find(|write| {
+                write.point.label == CommitLabel::CLAIM
+                    && matches!(
+                        write.stored,
+                        lash_durable_test::Stored::Committed { effective: true }
+                    )
+            })
+            .map(|write| write.node.to_string())
+    };
+    assert_eq!(
+        first_claimant(&report.baseline).as_deref(),
+        Some("a"),
+        "the baseline's first claim is a's"
+    );
     assert!(!report.cells.is_empty(), "the matrix must plan cuts");
     for cell in &report.cells {
         if cell.point.kind == lash_durable_test::WriteKind::Actor {
-            assert!(
-                cell.trace.contains("b:claim#1@0 committed"),
+            assert_eq!(
+                first_claimant(&cell.writes).as_deref(),
+                Some("b"),
                 "b must claim first in the reordered cell: {} {}\n{}",
                 cell.point,
                 cell.fault,

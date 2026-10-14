@@ -83,6 +83,8 @@ pub struct Cell {
     pub verdict: Verdict,
     /// The run's write trace, rendered.
     pub trace: String,
+    /// The run's writes.
+    pub writes: Vec<Write>,
     /// Virtual timer steps in this cell.
     pub steps: usize,
     /// Timer steps while a fault holds a node paused awaiting failover.
@@ -366,6 +368,7 @@ impl Matrix {
                     fault,
                     verdict: run.verdict,
                     trace: run.trace,
+                    writes: run.writes,
                     steps: run.steps,
                     failover_steps: run.failover_steps,
                     setup: factory + run.setup,

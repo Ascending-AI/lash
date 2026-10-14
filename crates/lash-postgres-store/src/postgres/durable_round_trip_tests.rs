@@ -151,8 +151,8 @@ fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
     tx.write(DomainWrite::Turn(TurnWrite::Advance {
         session: owned.session.clone(),
         run: run.clone(),
-        phase: UnfinishedPhase::Model {
-            pin: ModelPin {
+        phase: UnfinishedPhase::requested(
+            ModelPin {
                 call,
                 attempt: 1,
                 request_ref: "request".to_owned(),
@@ -160,7 +160,7 @@ fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
                 stream_from: "stream".to_owned(),
             },
             checkpoint,
-        },
+        ),
         iteration: 0,
     }));
 }

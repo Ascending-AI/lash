@@ -123,25 +123,14 @@ impl ModelAnswer {
         }
     }
 
-    /// The callbacks the receipt owes until it is derived (S7): its
-    /// response plan's, in recorded order, and the stream callbacks the
-    /// derivation finishes its stream with. Its PhaseRoot records them, so a
-    /// node that cannot resolve one never claims the turn to run it. An
-    /// unsuccessful outcome or an empty plan runs no hook and owes nothing.
+    /// The callbacks the receipt owes until it is derived (S7): exactly
+    /// those its derivation invokes
+    /// ([`LlmStreamRecord::derivation_callbacks`]), recorded in the receipt,
+    /// so a node that cannot resolve one never claims the turn to derive it.
+    ///
+    /// [`LlmStreamRecord::derivation_callbacks`]: crate::runtime::LlmStreamRecord::derivation_callbacks
     pub(crate) fn owed_callbacks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
-        let plan = &self.stream.response_plan;
-        if self.result.is_err() || plan.callbacks.is_empty() {
-            return Vec::new();
-        }
-        let capsule = &self.stream.capsule;
-        let mut owed = plan.callbacks.clone();
-        if !capsule.finished_callbacks.is_empty() {
-            owed.extend(capsule.finished_callbacks.iter().cloned());
-            if capsule.produced_response() {
-                owed.extend(capsule.stream_callbacks.iter().cloned());
-            }
-        }
-        owed
+        self.stream.derivation_callbacks(self.result.is_ok())
     }
 }
 

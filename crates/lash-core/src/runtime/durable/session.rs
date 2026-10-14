@@ -52,7 +52,7 @@ use crate::{
 };
 
 pub use lash_durable::domain::{
-    ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,
+    ModelCall, ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,
 };
 
 use super::session_close::{Closing, SessionCloseError, close_pass};
@@ -210,10 +210,12 @@ pub trait TurnDrive: Send {
 
     /// The receipt of the model call the machine waits on that no
     /// derivation has answered: the provider's outcome as
-    /// [`model_call`](Self::model_call) returned it, which `model.answer`
-    /// commits before anything derives from it, or the receipt a restore at
-    /// `model.answer` found. `None` once a derivation answered the machine.
-    fn owed_answer(&self) -> Option<&ModelAnswer>;
+    /// [`model_call`](Self::model_call) returned it, until `model.answer`
+    /// commits it and the phase runner replaces it with the receipt as it
+    /// committed, or the receipt a restore at `model.answer` found. Every
+    /// derivation reads the committed receipt, never what only the live
+    /// outcome held. `None` once a derivation or a cancel settled it.
+    fn owed_answer(&mut self) -> &mut Option<ModelAnswer>;
 
     /// Derive the machine's model call `id` from
     /// [`owed_answer`](Self::owed_answer), a committed receipt: finish its
@@ -226,17 +228,23 @@ pub trait TurnDrive: Send {
     async fn derive_answer(&mut self, cx: &ActorContext, id: EffectId) -> Result<(), TurnError>;
 
     /// Settle the machine's model call `id`, which an immediate cancel
-    /// stopped, with [`owed_answer`](Self::owed_answer) uncommitted and
-    /// underived: its record is recorded and an unsuccessful outcome
-    /// answers the machine; a completion that raced the cancel is dropped
-    /// unanswered, and no hook runs.
+    /// stopped before any derivation answered it, with
+    /// [`owed_answer`](Self::owed_answer): an outcome the cancel stopped
+    /// live, a receipt the commit that read the cancel recorded, or one a
+    /// cancel restored from the rows. Its record is recorded, its stream is
+    /// finished for its recorded reason, as a cleanup no failure holds back,
+    /// and an unsuccessful outcome answers the machine; a completion is
+    /// dropped unanswered, and no response hook runs. Nothing owed settles
+    /// nothing.
     ///
     /// # Errors
     ///
     /// [`TurnError`] when the outcome cannot be recorded.
-    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
-        Ok(())
-    }
+    async fn settle_cancelled_answer(
+        &mut self,
+        cx: &ActorContext,
+        id: EffectId,
+    ) -> Result<(), TurnError>;
 
     /// Run `attempt.ordinal` of the pinned model call `id`, bounded by
     /// `attempt.limit` (its deadline is the pinned one, never refreshed), and
@@ -738,15 +746,9 @@ impl SessionActivation {
         drop(tx);
         // An accepted cancel request ends the turn before anything else
         // runs: the live owner stopped its work for it, or a crash left it.
-        // Its stop commits from the turn's last checkpoint. An `AfterStep`
-        // request lets the round or cell the turn stands in finish, parked
-        // on a wait or cut by a crash: the turn resumes it, and the gate
-        // before its next model call honours the request (ADR 0039,
-        // FIG-5377). A turn not yet started, or between steps with its
-        // model call in flight, stops here.
+        // Its stop commits from the turn's last checkpoint.
         if let Some(request) = row.cancel.clone()
-            && (request.mode == crate::TurnCancelMode::Immediate
-                || !matches!(row.phase, UnfinishedPhase::Tools { .. }))
+            && turn_cancel::stops_before_resuming(&request, &row.phase)
         {
             let stopped = turn_cancel::restore(cx, self.services.as_ref(), &row, heads).await?;
             turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
@@ -1330,7 +1332,6 @@ pub async fn admit_turn(
         model_calls: 0,
         turn_deadline: None,
         working: None,
-        answer: None,
         written_epoch: cx.epoch(),
         cancel: None,
         trace_exported: false,
@@ -1493,9 +1494,19 @@ impl<'a> TurnRestore<'a> {
         else {
             return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
         };
-        let answered = match row.answer {
-            Some(root) => Some(self.receipt(root).await?),
-            None => None,
+        // A paid answer restores with its receipt, which the resumed turn
+        // derives; a call in flight restores to be sent again.
+        let answered = match &row.phase {
+            UnfinishedPhase::Model {
+                call: ModelCall::Answered { receipt },
+                ..
+            } => Some(self.receipt(*receipt).await?),
+            UnfinishedPhase::Admitted
+            | UnfinishedPhase::Model {
+                call: ModelCall::Requested,
+                ..
+            }
+            | UnfinishedPhase::Tools { .. } => None,
         };
         let window = match saved.checkpoint.window_pin() {
             Some(pin) => Some(

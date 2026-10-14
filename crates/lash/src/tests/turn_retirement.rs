@@ -265,6 +265,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
             &world.core.effect_host(),
             session.session_id(),
             &crate::TurnId::fixture(run),
+            Some(&crate::TurnId::fixture(run)),
             &world.core.transcript_decoders(),
         )
         .await?;

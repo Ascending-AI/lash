@@ -30,10 +30,11 @@
 //! - **Turn cancel:** a cancel requested while a member runs ends the
 //!   unfinished members `Cancelled` and the turn `Cancelled`, with no model
 //!   call after the request.
-//! - **After-step cancel (FIG-5229):** an `AfterStep` cancel requested while
-//!   the model streams keeps the call's response: its round is admitted and
-//!   its tools run, and the turn ends `Cancelled` at the next model call's
-//!   boundary, without calling the model again.
+//! - **After-step cancel (FIG-5229, FIG-6263):** an `AfterStep` cancel
+//!   requested while the model streams keeps the call's response: its round
+//!   is admitted and its tools run, and the turn ends `Cancelled` at the
+//!   next model call's boundary, without calling the model again. A cut
+//!   after the call's receipt committed keeps the step too.
 //! - **Cancel in a cell (FIG-5229):** an `Immediate` cancel requested while
 //!   a code cell runs stops the cell, and the turn ends `Cancelled` promptly.
 //! - **Pending:** a member that parks takes the key of the completion wait
@@ -601,8 +602,8 @@ impl TurnDrive for L4Drive {
         &mut self.machine
     }
 
-    fn owed_answer(&self) -> Option<&ModelAnswer> {
-        self.owed.as_ref()
+    fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
+        &mut self.owed
     }
 
     async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
@@ -615,7 +616,11 @@ impl TurnDrive for L4Drive {
         Ok(())
     }
 
-    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+    async fn settle_cancelled_answer(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+    ) -> Result<(), TurnError> {
         self.owed = None;
         Ok(())
     }
@@ -1266,6 +1271,7 @@ impl Scenario for L4 {
                     &self.world,
                     &seen,
                     cut,
+                    committed(CommitLabel::MODEL_ANSWER) > 0,
                     committed(CommitLabel::TURN_COMMIT),
                     committed(CommitLabel::TURN_CANCEL),
                 ));
@@ -1644,14 +1650,17 @@ fn cancel_laws(fold: &RunFold, world: &ExternalWorld, seen: &Seen) -> Vec<String
 }
 
 /// An `AfterStep` cancel requested while the model streams lets the call
-/// answer, and calls the model no more. Uncut, the call's round is admitted
-/// and its write runs and completes before the turn ends `Cancelled`; a cut
-/// before the round committed may lose the answer with its node.
+/// answer, and calls the model no more. Once the call's receipt committed
+/// (`model.answer`) its step is the turn's, uncut or cut: its round is
+/// admitted, its write runs once and completes (or is interrupted with its
+/// owner) and the turn ends `Cancelled`. Only a cut before the receipt
+/// committed may lose the answer with its node.
 fn after_step_laws(
     fold: &RunFold,
     world: &ExternalWorld,
     seen: &Seen,
     cut: Option<&Cut>,
+    answered: bool,
     commits: usize,
     cancels: usize,
 ) -> Vec<String> {
@@ -1664,7 +1673,7 @@ fn after_step_laws(
     if seen.called_after_cancel {
         violations.push("after-step: a model call started after the request".to_owned());
     }
-    if cut.is_some() {
+    if cut.is_some() && !answered {
         return violations;
     }
     if seen.answered_after_request != 1 {
@@ -1681,6 +1690,7 @@ fn after_step_laws(
         let writes = world.writes(member.call());
         match member.outcome() {
             Some(SettledOutput::Completed(_)) if writes.len() == 1 => {}
+            Some(SettledOutput::Interrupted) if cut.is_some() && writes.len() <= 1 => {}
             other => violations.push(format!(
                 "after-step: {} settled {other:?} after writing {writes:?}",
                 member.call()
@@ -1795,12 +1805,14 @@ async fn a_cancel_while_a_member_runs_ends_the_round_and_the_turn() {
 
 /// An `AfterStep` cancel requested while the model streams keeps the
 /// response: its round runs, and the turn ends `Cancelled` before the next
-/// model call, at every cut (FIG-5229).
+/// model call, at every cut after its receipt committed (FIG-5229,
+/// FIG-6263).
 #[tokio::test]
 async fn an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its_tools() {
     prove(
         Mode::AfterStepWhileStreaming,
         &[
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_CANCEL,

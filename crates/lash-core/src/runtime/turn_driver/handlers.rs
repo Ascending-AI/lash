@@ -7,15 +7,7 @@ impl RuntimeTurnDriver<'_> {
         observer: &TurnObserver,
         record: crate::LlmCallRecord,
     ) {
-        self.turn_observations.observe(
-            observer,
-            crate::engine::ObservedEvent::Activity {
-                correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
-                event: TurnEvent::ModelCallRecorded {
-                    record: record.clone(),
-                },
-            },
-        );
+        observe_model_call(&mut self.turn_observations, observer, &record);
         self.llm_calls.push(record);
     }
 
@@ -157,11 +149,13 @@ impl RuntimeTurnDriver<'_> {
 
     /// Derive the response of model call `id` from `answer`, its committed
     /// receipt, and answer the machine with it: the call's record is
-    /// recorded, a completion is derived through its recorded plan (an empty
-    /// plan serves it unchanged) and an unsuccessful outcome answers as it
-    /// is. Every derivation, on the worker that sent the call or on one that
-    /// restored it, takes this one path. A hook's live fault aborts the
-    /// attempt, and the next derives from the same receipt.
+    /// recorded, its stream is finished for its recorded reason, a
+    /// completion is derived through its recorded plan (an empty plan serves
+    /// it unchanged) and an unsuccessful outcome answers as it is. Every
+    /// derivation, on the worker that sent the call or on one that restored
+    /// it, takes this one path and invokes exactly the callbacks the receipt
+    /// owes. A hook's live fault aborts the attempt, and the next derives
+    /// from the same receipt.
     pub(super) async fn derive_llm_answer(
         &mut self,
         machine: &mut TurnMachine,
@@ -182,12 +176,14 @@ impl RuntimeTurnDriver<'_> {
                 },
         } = answer;
         self.model_attempt = attempt;
-        self.record_llm_outcome(&result, call_record, event_tx);
+        self.record_llm_outcome(machine, id, &result, call_record, event_tx)?;
         // Whether the hooks run at all is the plan recorded with the
         // completion (ADR 0105 §1), never the response hooks installed now:
         // a restore after a hook was added or removed derives as its first
         // execution would have.
         let result = match result {
+            // The response hooks' derivation finishes the stream first, for
+            // the states it hands them.
             Ok(response) if !response_plan.callbacks.is_empty() => match self
                 .invoke_assistant_response_hooks_effect(
                     machine,
@@ -205,7 +201,13 @@ impl RuntimeTurnDriver<'_> {
                     return Ok(());
                 }
             },
-            result => result,
+            result => {
+                if let Err(err) = self.finish_recorded_stream(&capsule).await {
+                    self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                    return Ok(());
+                }
+                result
+            }
         };
         self.answer_llm_call(
             machine,
@@ -218,11 +220,13 @@ impl RuntimeTurnDriver<'_> {
     }
 
     /// Settle model call `id`, which an immediate cancel stopped, with
-    /// `answer`, its outcome, without a receipt and without deriving it: its
-    /// record is recorded, ahead of the turn's terminal, and an unsuccessful
-    /// outcome answers the machine. A completion that raced the cancel is
-    /// left unanswered: the stop wins, and no hook runs for it.
-    pub(super) fn settle_cancelled_llm_answer(
+    /// `answer`, its outcome, without deriving it: its record is recorded,
+    /// ahead of the turn's terminal, its stream is finished for its recorded
+    /// reason, a cleanup whose failure is logged and never holds the stop
+    /// back, and an unsuccessful outcome answers the machine. A completion
+    /// that raced the cancel is left unanswered: the stop wins, and no
+    /// response hook runs for it.
+    pub(super) async fn settle_cancelled_llm_answer(
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
@@ -237,7 +241,14 @@ impl RuntimeTurnDriver<'_> {
             stream,
         } = answer;
         self.model_attempt = attempt;
-        self.record_llm_outcome(&result, call_record, event_tx);
+        self.record_llm_outcome(machine, id, &result, call_record, event_tx)?;
+        if let Err(error) = self.finish_recorded_stream(&stream.capsule).await {
+            tracing::warn!(
+                session_id = %self.session_id,
+                error = %error.message,
+                "the cancelled model call's stream finish failed"
+            );
+        }
         match result {
             Ok(_) => Ok(()),
             Err(error) => self.answer_llm_call(
@@ -251,14 +262,20 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    /// Record a model call's outcome on the turn: the failure evidence of an
-    /// unsuccessful one, then the call's sealed record.
+    /// Record the outcome of the machine's model call `id` on the turn: the
+    /// failure evidence of an unsuccessful one, then the call's sealed
+    /// record. The record is observed on a lane of the call's own, so every
+    /// owner that records it, the one that sent the call or one that
+    /// restored its receipt, publishes it under one identity, which the
+    /// live feed publishes once (FIG-3753).
     fn record_llm_outcome(
         &mut self,
+        machine: &TurnMachine,
+        id: crate::sansio::EffectId,
         result: &Result<LlmResponse, crate::LlmCallError>,
         call_record: Option<crate::LlmCallRecord>,
         event_tx: &TurnObserver,
-    ) {
+    ) -> Result<(), RuntimeError> {
         if let (Err(error), Some(record)) = (result, call_record.as_ref()) {
             let sealed_attempt_count = self
                 .llm_calls
@@ -277,8 +294,16 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            self.record_model_call(event_tx, call_record);
+            let invocation = self
+                .turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)
+                .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+            let mut cursor = crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(
+                format!("{}:record", invocation.effect_replay_key()),
+            ));
+            observe_model_call(&mut cursor, event_tx, &call_record);
+            self.llm_calls.push(call_record);
         }
+        Ok(())
     }
 
     /// Answer the machine's model call `id` with `result`, the response it
@@ -292,14 +317,6 @@ impl RuntimeTurnDriver<'_> {
         reasoning_published: Vec<crate::llm::types::StreamBlockIdentity>,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
-        if let Err(error) = &result
-            && error.code
-                == Some(crate::FailureCode::lash(
-                    crate::TurnFailureCode::ProviderPanicked,
-                ))
-        {
-            self.provider_panic = Some(error.message.clone());
-        }
         if let Ok(response) = &result
             && !text_streamed
         {
@@ -838,6 +855,23 @@ pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Optio
     invocation
         .effect_address()
         .map(crate::EffectAddress::graph_key)
+}
+
+/// Observe a model call's sealed `record` through `cursor`.
+fn observe_model_call(
+    cursor: &mut crate::engine::ObservationCursor,
+    observer: &TurnObserver,
+    record: &crate::LlmCallRecord,
+) {
+    cursor.observe(
+        observer,
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
+            event: TurnEvent::ModelCallRecorded {
+                record: record.clone(),
+            },
+        },
+    );
 }
 
 #[cfg(test)]

@@ -649,32 +649,46 @@ impl TurnDrive for RuntimeDrive {
             .protocol_reply
             .mark_model_call(self.machine.messages().iter());
         let stop = self.driver.children_stop.clone();
-        let call = Box::pin(self.driver.handle_llm_call_effect(
-            &mut self.machine,
-            id,
-            request,
-            admitted,
-            attempt,
-            &self.observer,
-        ));
-        tokio::pin!(call);
-        // A cancelled call settles before the turn's stop, which publishes
-        // the sealed call ahead of its terminal.
-        let owed = tokio::select! {
-            biased;
-            result = &mut call => result,
-            () = cancel.cancelled() => {
-                stop.cancel();
-                call.await
+        let owed = {
+            let call = Box::pin(self.driver.handle_llm_call_effect(
+                &mut self.machine,
+                id,
+                request,
+                admitted,
+                attempt,
+                &self.observer,
+            ));
+            tokio::pin!(call);
+            // A cancelled call settles before the turn's stop, which
+            // publishes the sealed call ahead of its terminal.
+            tokio::select! {
+                biased;
+                result = &mut call => result,
+                () = cancel.cancelled() => {
+                    stop.cancel();
+                    call.await
+                }
             }
         }
         .map_err(runtime)?;
+        // A provider panic re-raises from what the live outcome held: its
+        // receipt keeps no provider text (FIG-4087).
+        if let Some(ModelAnswer {
+            result: Err(error), ..
+        }) = &owed
+            && error.code
+                == Some(crate::FailureCode::lash(
+                    crate::TurnFailureCode::ProviderPanicked,
+                ))
+        {
+            self.driver.provider_panic = Some(error.message.clone());
+        }
         self.owed = owed;
         Ok(())
     }
 
-    fn owed_answer(&self) -> Option<&ModelAnswer> {
-        self.owed.as_ref()
+    fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
+        &mut self.owed
     }
 
     async fn derive_answer(
@@ -699,13 +713,22 @@ impl TurnDrive for RuntimeDrive {
         Ok(())
     }
 
-    fn settle_cancelled_answer(&mut self, id: crate::EffectId) -> Result<(), TurnError> {
+    async fn settle_cancelled_answer(
+        &mut self,
+        _cx: &ActorContext,
+        id: crate::EffectId,
+    ) -> Result<(), TurnError> {
         let Some(answer) = self.owed.take() else {
             return Ok(());
         };
-        self.driver
-            .settle_cancelled_llm_answer(&mut self.machine, id, answer, &self.observer)
-            .map_err(runtime)
+        Box::pin(self.driver.settle_cancelled_llm_answer(
+            &mut self.machine,
+            id,
+            answer,
+            &self.observer,
+        ))
+        .await
+        .map_err(runtime)
     }
 
     async fn prepare_call(

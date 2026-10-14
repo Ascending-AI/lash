@@ -586,8 +586,8 @@ impl TurnDrive for SimDrive {
         &mut self.machine
     }
 
-    fn owed_answer(&self) -> Option<&ModelAnswer> {
-        self.owed.as_ref()
+    fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
+        &mut self.owed
     }
 
     async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
@@ -600,7 +600,11 @@ impl TurnDrive for SimDrive {
         Ok(())
     }
 
-    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+    async fn settle_cancelled_answer(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+    ) -> Result<(), TurnError> {
         self.owed = None;
         Ok(())
     }

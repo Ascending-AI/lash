@@ -137,12 +137,15 @@ pub(super) fn bind_delivered(
 
 /// `model.answer`: the receipt of the pinned call `drive` just answered,
 /// the provider's outcome, committed beside the call's model phase under
-/// the owner fence, before anything derives from it. The receipt is one
-/// immutable placed text the turn's row names: the phase and its root stay
-/// as `model.start` committed them, for the machine waits on the same call
-/// at the same checkpoint, so the commit writes the receipt's own nodes and
-/// the row's reference, never a new phase root (FIG-6253). The receipt
-/// states the callbacks its derivation owes (S7). Its acknowledgement is
+/// the owner fence, before anything derives from it: the phase's call is
+/// answered. The receipt is one immutable placed text the turn's row names:
+/// the phase and its root stay as `model.start` committed them, for the
+/// machine waits on the same call at the same checkpoint, so the commit
+/// writes the receipt's own nodes and the row's reference, never a new
+/// phase root (FIG-6253). The receipt states the callbacks its derivation
+/// owes (S7). The drive then owes the receipt as it committed, which is
+/// what every derivation reads, on this worker or after a restore: nothing
+/// only the live outcome held reaches a hook. Its acknowledgement is
 /// awaited: a failed or unacknowledged commit fails the attempt, whose next
 /// pass reconciles from the rows (a committed receipt restores at
 /// `model.answer` and is derived, never sent again; an uncommitted one
@@ -156,6 +159,7 @@ async fn record_answer(
 ) -> Result<lash_durable::ActorCommit, TurnError> {
     let answer = drive
         .owed_answer()
+        .take()
         .ok_or_else(|| TurnError::Exec("the model call answered no receipt".to_owned()))?;
     let owed = answer.owed_callbacks();
     let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
@@ -163,12 +167,13 @@ async fn record_answer(
             lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
         ),
     );
-    let root = lash_core_execution::runtime::actor::model_receipt::ModelReceipt {
+    let (root, receipt) = lash_core_execution::runtime::actor::model_receipt::ModelReceipt {
         owed: owed.clone(),
         answer,
     }
     .stage(&mut staging)
     .map_err(TurnError::Exec)?;
+    *drive.owed_answer() = Some(receipt.answer);
     let mut tx = cx.begin().await?;
     tx.stage_all(staging);
     tx.owe(root, owed);
@@ -459,10 +464,7 @@ pub async fn run_phases(
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
-                        phase: UnfinishedPhase::Model {
-                            pin: pin.clone(),
-                            checkpoint,
-                        },
+                        phase: UnfinishedPhase::requested(pin.clone(), checkpoint),
                         iteration: current,
                     }));
                     // The turn's first phase commit exports the admission
@@ -504,7 +506,7 @@ pub async fn run_phases(
                     }
                 }
                 if !model_call::send(cx, drive.as_mut(), id, request, &admitted, &start).await? {
-                    drive.settle_cancelled_answer(id)?;
+                    drive.settle_cancelled_answer(cx, id).await?;
                     let request = cx.begin().await?.turn_cancel().cloned();
                     let stopped = stopped(drive, &mut carry, &mut answered_cell);
                     return stop(cx, services, &row, request, stopped, heads).await;
@@ -525,7 +527,7 @@ pub async fn run_phases(
                         .turn_cancel
                         .filter(|request| request.mode == crate::TurnCancelMode::Immediate)
                     {
-                        drive.settle_cancelled_answer(id)?;
+                        drive.settle_cancelled_answer(cx, id).await?;
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
                         return stop(cx, services, &row, Some(request), stopped, heads).await;
                     }

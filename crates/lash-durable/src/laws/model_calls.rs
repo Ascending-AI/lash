@@ -1,7 +1,7 @@
 //! A turn's model call identity (P1, FIG-5255; ADR 0133 §6).
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
-use crate::domain::{ModelPin, RunSeq, TurnWrite, UnfinishedPhase};
+use crate::domain::{ModelCall, ModelPin, RunSeq, TurnWrite, UnfinishedPhase};
 use crate::{DomainWrite, DurableInstant, DurableStore};
 use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
 use lash_sansio::{SessionId, TurnId};
@@ -61,6 +61,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             stream_from: format!("stream-{call}"),
         },
         checkpoint: checkpoint(&format!("checkpoint-{call}-{attempt}")),
+        call: ModelCall::Requested,
     };
     let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
         session: id.clone(),
@@ -225,6 +226,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
             stream_from: "stream-1".to_owned(),
         },
         checkpoint,
+        call: ModelCall::Requested,
     };
     let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
         session: id.clone(),
@@ -234,15 +236,25 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     };
     commit(advance(model.clone()), Some(checkpoint_node)).await?;
     ensure!(
-        row().await?.answer.is_none() && retired(receipt().await),
+        row().await?.phase == model && retired(receipt().await),
         "a model phase held a receipt before one was recorded"
     );
     commit(answer(first), Some(first_node)).await?;
     let answered = row().await?;
+    let UnfinishedPhase::Model {
+        pin, checkpoint, ..
+    } = model.clone()
+    else {
+        unreachable!("the phase is a model phase");
+    };
     ensure!(
-        answered.answer == Some(first) && answered.phase == model,
-        "the receipt read back {:?} over {:?}",
-        answered.answer,
+        answered.phase
+            == UnfinishedPhase::Model {
+                pin,
+                checkpoint,
+                call: ModelCall::Answered { receipt: first },
+            },
+        "the receipt read back as {:?}",
         answered.phase
     );
     ensure!(
@@ -255,7 +267,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
         "a receipt was written twice"
     );
     ensure!(
-        row().await?.answer == Some(first),
+        row().await?.phase.receipt() == Some(first),
         "a refused receipt replaced the first"
     );
 
@@ -269,7 +281,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     )
     .await?;
     ensure!(
-        row().await?.answer.is_none() && retired(receipt().await),
+        row().await?.phase.receipt().is_none() && retired(receipt().await),
         "the next phase did not consume the receipt"
     );
     let (third, third_node) = super::tagged_node("receipt-3");
@@ -289,6 +301,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
                 stream_from: "stream-2".to_owned(),
             },
             checkpoint: next,
+            call: ModelCall::Requested,
         }),
         Some(next_node),
     )

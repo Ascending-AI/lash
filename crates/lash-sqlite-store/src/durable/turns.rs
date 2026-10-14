@@ -775,8 +775,14 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         Ok(answer) => answer,
         Err(error) => return Ok(Err(error)),
     };
-    let Some(phase) = UnfinishedPhase::parse(&stored.phase, argument, checkpoint, pin, model_calls)
-    else {
+    let Some(phase) = UnfinishedPhase::parse(
+        &stored.phase,
+        argument,
+        checkpoint,
+        pin,
+        model_calls,
+        answer,
+    ) else {
         return Ok(Err(corrupt("turn phase", &stored.phase)));
     };
     let cancel = match cancel_of(tx, session, &run)? {
@@ -789,7 +795,6 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         admission,
         phase,
         working,
-        answer,
         iteration,
         model_calls,
         turn_deadline: stored.turn_deadline.map(DurableInstant),

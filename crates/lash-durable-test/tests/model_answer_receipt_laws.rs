@@ -16,7 +16,10 @@
 //! - **ACKNOWLEDGED-ANSWER-SURVIVES-HOOK-CRASH:** A is killed while its
 //!   response hook runs, or loses its `turn.commit`, or loses the receipt's
 //!   acknowledgement: the turn answers A's purchase, derived again from the
-//!   receipt with byte-identical input, with one provider send.
+//!   receipt with byte-identical input, with one provider send. The live
+//!   derivation is handed what the receipt reads back, never what only the
+//!   live outcome held (FIG-6263): the provider's diagnostic is absent on
+//!   both.
 //! - **EMPTY-PLAN-HAS-THE-SAME-RECEIPT:** a call with no response hooks has
 //!   a receipt too: A loses its `turn.commit`, and B, whose build installs a
 //!   response hook, answers the raw receipt, never runs the new hook, sends
@@ -35,11 +38,21 @@
 //!   its stream finishes, after a complete and after a protocol-aborted
 //!   stream, resumes on a node of another core, whose stream hooks never
 //!   saw the stream: it derives the uncut run's response with no send.
-//! - **REPLAY-PRESERVES-CONTROL-AND-FEED:** an `Immediate` cancel delivered
-//!   while the receipt's acknowledgement is delayed stops the turn before
-//!   its tool runs; an `AfterStep` one lets the tool run once and stops the
-//!   turn at the next model start. The feed half is in
-//!   `tool_crash_laws.rs`
+//! - **STREAM-FINISH-IS-OWED-FOR-EVERY-REASON (FIG-6263):** a stream
+//!   finish hook is owed and run for the stream's terminal reason: a
+//!   complete stream, a finish-only plugin whose response plan is empty,
+//!   and a stream the provider failed. A node that installs no stream
+//!   hook owes no finish read and derives the receipt; a node that cannot
+//!   finish a failed stream never claims it, and one that can finishes it
+//!   with the provider's error.
+//! - **CANCEL-AT-THE-RECEIPT-ENDS-AS-THE-UNCUT-RUN (FIG-6263):** an
+//!   `Immediate` and an `AfterStep` cancel, for a hooked, a finish-only and
+//!   a failed stream, cut at the receipt, inside its stream finish, inside
+//!   its derivation and at the next phase, end as the uncut run: the
+//!   status, the honoured step, the tool's writes, one send, one published
+//!   model-call record and the stream's finish reason. An `AfterStep`
+//!   cancel derives the paid step; an `Immediate` one stops before its
+//!   tool. The feed half is in `tool_crash_laws.rs`
 //!   (`a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_outcome`).
 
 // Test code.
@@ -64,7 +77,9 @@ use lash_core::{ExecutionPolicy, LlmOutputPart, LlmUsage, ToolCall, ToolOutcome}
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableStore};
-use lash_durable_test::{Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+use lash_durable_test::{
+    Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire,
+};
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt as _;
 use serde_json::{Value, json};
@@ -106,7 +121,7 @@ fn actor() -> ActorKey {
 enum Hold {
     /// The response hook.
     Derivation,
-    /// The stream-finished hook, ending a stream that produced a response.
+    /// The stream-finished hook, ending a stream for its recorded reason.
     Finish,
 }
 
@@ -120,9 +135,9 @@ struct World {
     /// What each response-hook run was handed: the response and the stream
     /// state, as JSON, and how many receipts were acknowledged by then.
     derived: Mutex<Vec<(Value, usize)>>,
-    /// The reason of each stream finish that ended a stream with a
-    /// response, and how many receipts were acknowledged by then.
-    finished: Mutex<Vec<usize>>,
+    /// The reason of each stream finish that ended a stream, never a reset
+    /// between streams, and how many receipts were acknowledged by then.
+    finished: Mutex<Vec<(Reason, usize)>>,
     /// The hook that holds on its next run.
     hold: Mutex<Option<Hold>>,
     /// Whether a hook is held now.
@@ -147,6 +162,14 @@ impl World {
 
     fn writes(&self) -> Vec<Value> {
         self.writes.lock_recover().clone()
+    }
+
+    /// The reason the last stream finish ended its stream for.
+    fn last_finish(&self) -> Option<Reason> {
+        self.finished
+            .lock_recover()
+            .last()
+            .map(|(reason, _)| *reason)
     }
 
     fn held(&self) -> bool {
@@ -181,6 +204,8 @@ enum Answer {
     /// The [`Answer::Cell`] cell streamed with trailing text and never
     /// completed: the cell mask aborts the stream at its close tag.
     AbortedCell,
+    /// Two streamed deltas, then a provider failure no retry follows.
+    Failed,
 }
 
 impl Answer {
@@ -208,6 +233,15 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                 let send = world.sends.fetch_add(1, Ordering::SeqCst);
                 let marker = ANSWERS[send.min(ANSWERS.len() - 1)];
                 let mut response = match answer {
+                    Answer::Failed => {
+                        stream(&request, &["the ", "paid a"]);
+                        return Err(lash_core::llm::transport::LlmTransportError::new(
+                            "the provider failed after streaming",
+                        )
+                        .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::NotRetryable,
+                        ));
+                    }
                     Answer::Text => {
                         let (head, tail) = marker.split_at(4);
                         let (middle, tail) = tail.split_at(6);
@@ -245,6 +279,9 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                     }
                 };
                 response.usage = USAGE;
+                // Provider detail a durable record never keeps (FIG-4087):
+                // a derivation is handed the receipt's response, never it.
+                response.terminal_diagnostic = Some("provider detail".to_owned());
                 Ok(response)
             }
         })
@@ -295,81 +332,115 @@ enum Hooks {
     /// A stream hook, a stream-finished hook and a response hook that
     /// derives with its state.
     All,
+    /// A stream hook and a stream-finished hook: the response plan is
+    /// empty, and only the stream's finish derives from the receipt.
+    FinishOnly,
+    /// A stream hook and a response hook that reads no stream state.
+    StreamAndResponse,
+    /// A response hook that reads no stream state, alone.
+    ResponseOnly,
 }
+
+impl Hooks {
+    fn stream(self) -> bool {
+        self != Self::ResponseOnly
+    }
+
+    fn finishes(self) -> bool {
+        matches!(self, Self::All | Self::FinishOnly)
+    }
+
+    fn response(self) -> bool {
+        matches!(
+            self,
+            Self::All | Self::StreamAndResponse | Self::ResponseOnly
+        )
+    }
+}
+
+type Reason = lash::plugins::AssistantStreamFinishReason;
 
 /// The law plugin over `world`. Its stream hook keeps the chunks it was
 /// handed in this core's memory: the state a node's stream hooks hold.
 fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFactory> {
     let chunks = Arc::new(Mutex::new(Vec::<String>::new()));
     let seen = Arc::clone(&chunks);
-    let mut spec = lash::plugins::PluginSpec::new().with_assistant_stream(
-        lash::hook_key!("chunks"),
-        Arc::new(move |ctx| {
-            seen.lock_recover().push(ctx.chunk.clone());
-            Box::pin(async move {
-                Ok(lash::plugins::AssistantStreamTransform {
-                    chunk: ctx.chunk,
-                    ..Default::default()
+    let mut spec = lash::plugins::PluginSpec::new();
+    if hooks.stream() {
+        spec = spec.with_assistant_stream(
+            lash::hook_key!("chunks"),
+            Arc::new(move |ctx| {
+                seen.lock_recover().push(ctx.chunk.clone());
+                Box::pin(async move {
+                    Ok(lash::plugins::AssistantStreamTransform {
+                        chunk: ctx.chunk,
+                        ..Default::default()
+                    })
                 })
-            })
-        }),
-    );
-    if hooks == Hooks::All {
-        let (finishing, deriving) = (Arc::clone(world), Arc::clone(world));
-        spec = spec
-            .with_assistant_stream_finished(
-                lash::hook_key!("chunks"),
-                Arc::new(move |ctx| {
-                    let world = Arc::clone(&finishing);
-                    let held = std::mem::take(&mut *chunks.lock_recover());
-                    Box::pin(async move {
-                        use lash::plugins::AssistantStreamFinishReason as Reason;
-                        if !matches!(ctx.reason, Reason::Complete | Reason::Aborted) {
-                            return Ok(None);
-                        }
-                        world
-                            .finished
-                            .lock_recover()
-                            .push(world.acknowledged.load(Ordering::SeqCst));
-                        world.hold_if(Hold::Finish).await;
-                        Ok(Some(json!(held)))
+            }),
+        );
+    }
+    if hooks.finishes() {
+        let finishing = Arc::clone(world);
+        spec = spec.with_assistant_stream_finished(
+            lash::hook_key!("finish"),
+            Arc::new(move |ctx| {
+                let world = Arc::clone(&finishing);
+                let held = std::mem::take(&mut *chunks.lock_recover());
+                Box::pin(async move {
+                    if ctx.reason == Reason::AttemptReset {
+                        return Ok(None);
+                    }
+                    world
+                        .finished
+                        .lock_recover()
+                        .push((ctx.reason, world.acknowledged.load(Ordering::SeqCst)));
+                    world.hold_if(Hold::Finish).await;
+                    if !matches!(ctx.reason, Reason::Complete | Reason::Aborted) {
+                        return Ok(None);
+                    }
+                    Ok(Some(json!(held)))
+                })
+            }),
+        );
+    }
+    if hooks.response() {
+        let deriving = Arc::clone(world);
+        spec = spec.with_assistant_response(
+            lash::hook_key!("suffix"),
+            hooks.finishes().then(|| lash::hook_key!("finish")),
+            Arc::new(move |ctx| {
+                let world = Arc::clone(&deriving);
+                Box::pin(async move {
+                    let handed = json!({
+                        "response": serde_json::to_value(&ctx.response).unwrap(),
+                        "diagnostic": ctx.response.terminal_diagnostic,
+                        "stream_state": ctx.stream_state,
+                    });
+                    world
+                        .derived
+                        .lock_recover()
+                        .push((handed, world.acknowledged.load(Ordering::SeqCst)));
+                    world.hold_if(Hold::Derivation).await;
+                    // A cell's text is the protocol's to parse: only prose
+                    // is marked.
+                    let mut response = ctx.response;
+                    if let Some(LlmOutputPart::Text { text, .. }) = response
+                        .parts
+                        .iter_mut()
+                        .rev()
+                        .find(|part| matches!(part, LlmOutputPart::Text { .. }))
+                        && !text.contains("<typescript>")
+                    {
+                        text.push_str(HOOKED);
+                    }
+                    Ok(lash::plugins::AssistantResponseTransform {
+                        response,
+                        events: Vec::new(),
                     })
-                }),
-            )
-            .with_assistant_response(
-                lash::hook_key!("suffix"),
-                Some(lash::hook_key!("chunks")),
-                Arc::new(move |ctx| {
-                    let world = Arc::clone(&deriving);
-                    Box::pin(async move {
-                        let handed = json!({
-                            "response": serde_json::to_value(&ctx.response).unwrap(),
-                            "stream_state": ctx.stream_state,
-                        });
-                        world
-                            .derived
-                            .lock_recover()
-                            .push((handed, world.acknowledged.load(Ordering::SeqCst)));
-                        world.hold_if(Hold::Derivation).await;
-                        // A cell's text is the protocol's to parse: only prose
-                        // is marked.
-                        let mut response = ctx.response;
-                        if let Some(LlmOutputPart::Text { text, .. }) = response
-                            .parts
-                            .iter_mut()
-                            .rev()
-                            .find(|part| matches!(part, LlmOutputPart::Text { .. }))
-                            && !text.contains("<typescript>")
-                        {
-                            text.push_str(HOOKED);
-                        }
-                        Ok(lash::plugins::AssistantResponseTransform {
-                            response,
-                            events: Vec::new(),
-                        })
-                    })
-                }),
-            );
+                })
+            }),
+        );
     }
     Arc::new(lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(PLUGIN),
@@ -410,10 +481,15 @@ fn write_tool() -> lash_core::ToolDefinition {
 
 /// One core over `backend`: the protocol `answer` needs, the model over
 /// `world` and the law plugin with `hooks`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "a law's core and its shared world"
+)]
 fn core(
     backend: &Backend,
     clock: &Arc<SimClock>,
     world: &Arc<World>,
+    live_replay: &Arc<lash::observe::InMemoryLiveReplayStore>,
     answer: Answer,
     hooks: Hooks,
     name: &str,
@@ -434,6 +510,7 @@ fn core(
     };
     builder
         .plugin(plugin(world, hooks))
+        .live_replay_store(Arc::clone(live_replay) as _)
         .serve_sessions(false)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
@@ -503,6 +580,8 @@ struct Deployment {
     clock: Arc<SimClock>,
     nodes: SimNodes,
     world: Arc<World>,
+    /// What every node published to the session's live feed.
+    live_replay: Arc<lash::observe::InMemoryLiveReplayStore>,
     core: lash::LashCore,
     _b_core: Option<lash::LashCore>,
     durable: lash::DurableSession,
@@ -523,10 +602,14 @@ impl Deployment {
         })
         .expect("the backend assembles");
         let world = Arc::new(World::default());
+        let live_replay = Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+            lash::observe::InMemoryLiveReplayStoreConfig::standard(),
+        ));
         let core = core(
             &backend,
             &clock,
             &world,
+            &live_replay,
             setup.answer,
             setup.hooks,
             "receipt-a",
@@ -561,8 +644,17 @@ impl Deployment {
             activation(&backend, &core),
         );
         let b_core = setup.b_hooks.map(|hooks| {
-            let b_core = self::core(&backend, &clock, &world, setup.answer, hooks, "receipt-b");
+            let b_core = self::core(
+                &backend,
+                &clock,
+                &world,
+                &live_replay,
+                setup.answer,
+                hooks,
+                "receipt-b",
+            );
             nodes.activate_on("b", activation(&backend, &b_core));
+            nodes.serve_on("b", lash::testing::node_serves(&b_core));
             b_core
         });
         let durable = core
@@ -581,6 +673,7 @@ impl Deployment {
             clock,
             nodes,
             world,
+            live_replay,
             core,
             _b_core: b_core,
             durable,
@@ -677,6 +770,25 @@ impl Deployment {
             .clone()
     }
 
+    /// The sealed model-call records the session's live feed published
+    /// after `cursor`: what any host following it is handed, once each.
+    async fn published_calls(&self, cursor: &lash_core::SessionCursor) -> usize {
+        use lash::observe::{LiveReplayStore as _, SessionObservationEventPayload};
+        let Ok(lash_core::LiveReplayOutcome::Replayed(events)) =
+            self.live_replay.replay_after_cursor(cursor).await
+        else {
+            panic!("the session's live feed holds its turn");
+        };
+        events
+            .iter()
+            .filter(|event| {
+                matches!(&event.payload,
+                    SessionObservationEventPayload::TurnActivity(activity)
+                    if matches!(activity.event, lash_core::TurnEvent::ModelCallRecorded { .. }))
+            })
+            .count()
+    }
+
     /// The writes of `label` that committed.
     fn committed(&self, label: CommitLabel) -> usize {
         self.nodes
@@ -733,6 +845,11 @@ fn assert_derived_alike(world: &World, runs: usize) {
         derived[0].0["stream_state"],
         json!(["the ", "paid a", "nswer A"]),
         "the stream state is the stream hooks' finish over the chunks A streamed"
+    );
+    assert_eq!(
+        derived[0].0["diagnostic"],
+        Value::Null,
+        "a derivation is handed the receipt's response, never what only the live answer held"
     );
 }
 
@@ -896,7 +1013,7 @@ async fn nothing_derives_from_a_receipt_before_its_acknowledgement() {
     );
     let finished = deployment.world.finished.lock_recover().clone();
     assert!(
-        !finished.is_empty() && finished.iter().all(|acknowledged| *acknowledged >= 1),
+        !finished.is_empty() && finished.iter().all(|(_, acknowledged)| *acknowledged >= 1),
         "a stream finish ran before the receipt's acknowledgement: {finished:?}"
     );
     assert_derived_alike(&deployment.world, 1);
@@ -1158,23 +1275,259 @@ async fn a_protocol_aborted_streams_finish_resumes_from_the_receipt_on_another_c
     a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(Answer::AbortedCell).await;
 }
 
-/// REPLAY-PRESERVES-CONTROL-AND-FEED: a cancel of `mode` delivered while the
-/// receipt of a call that asks for [`WRITE`] waits for its
-/// acknowledgement. Answers the deployment once its turn ended.
-async fn a_cancel_at_the_receipt(mode: lash::TurnCancelMode) -> Deployment {
-    let deployment = Deployment::new(Setup::new(Answer::Tool, Hooks::All), |script| {
-        script.cut_on(
-            "a",
-            CommitLabel::MODEL_ANSWER,
-            1,
-            Fault::DelayedAck(Duration::from_secs(30)),
-        );
+/// Step the deployment for `millis` of virtual time, or until nothing is
+/// left to step.
+async fn run_for(deployment: &Deployment, millis: u64) {
+    let until = deployment.clock.logical_ms() + millis;
+    deployment.nodes.quiesce().await;
+    while deployment.clock.logical_ms() < until && deployment.nodes.step().await.is_some() {}
+    deployment.nodes.quiesce().await;
+}
+
+/// Whether `node` claimed the session.
+fn claimed_by(deployment: &Deployment, node: &str) -> bool {
+    deployment.nodes.script().trace().iter().any(|write| {
+        write.point.label == CommitLabel::CLAIM
+            && write.node.as_ref() == node
+            && matches!(write.stored, Stored::Committed { effective: true })
     })
+}
+
+/// S7: a receipt owes exactly what its derivation resolves. A's build
+/// streams through a stream hook and derives through a response hook, with
+/// no stream-finished hook; B's build has the response hook alone. Nothing
+/// finishes the stream, so nothing replays it: B claims the turn, derives
+/// A's receipt and answers the paid answer.
+#[tokio::test]
+async fn a_node_without_a_stream_hook_no_finish_reads_derives_the_receipt() {
+    let deployment = Deployment::new(
+        Setup::new(Answer::Text, Hooks::StreamAndResponse).b_on_its_own_core(Hooks::ResponseOnly),
+        |_| {},
+    )
+    .await;
+    *deployment.world.hold.lock_recover() = Some(Hold::Derivation);
+    let _handle = deployment.send().await;
+    deployment
+        .until("A's response hook holds", |deployment| {
+            deployment.world.held()
+        })
+        .await;
+    deployment.take_over().await;
+    deployment.settle().await;
+    assert_eq!(
+        deployment.world.sends(),
+        1,
+        "B sends nothing of A's purchase"
+    );
+    assert_eq!(
+        answered(&deployment.transcript().await),
+        format!("{}{HOOKED}", ANSWERS[0])
+    );
+    deployment.end();
+}
+
+/// S7: a failed stream's finish is its derivation's too. The provider fails
+/// after streaming and A dies as the receipt commits. B's build has no
+/// stream-finished hook, so it never claims the turn; A's build, on node C,
+/// finishes the failed stream with its provider error.
+#[tokio::test]
+async fn a_failed_streams_finish_is_owed_to_a_node_that_serves_it() {
+    let deployment = Deployment::new(
+        Setup::new(Answer::Failed, Hooks::All).b_on_its_own_core(Hooks::StreamAndResponse),
+        |script| {
+            script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::CommitThenAbort);
+        },
+    )
     .await;
     let handle = deployment.send().await;
     deployment
-        .until("the receipt waits for its acknowledgement", |deployment| {
-            deployment.committed(CommitLabel::MODEL_ANSWER) == 1
+        .until("A dies with its receipt", |deployment| {
+            deployment.cut(CommitLabel::MODEL_ANSWER)
+        })
+        .await;
+    deployment.take_over().await;
+    run_for(&deployment, 30_000).await;
+    assert!(
+        !claimed_by(&deployment, "b"),
+        "a node that cannot finish the receipt's stream claimed it:\n{}",
+        deployment.nodes.script().rendered_trace()
+    );
+    deployment.nodes.start("c");
+    deployment.settle().await;
+    assert_eq!(deployment.world.last_finish(), Some(Reason::ProviderError));
+    let output = handle.output().await.expect("the turn settles");
+    assert!(matches!(output.status(), lash::TurnStatus::Failed { .. }));
+    deployment.end();
+}
+
+/// A stream-finished hook no response hook reads still ends the stream it
+/// watched, for the reason the stream ended: the call's derivation
+/// finishes it from the receipt.
+#[tokio::test]
+async fn a_finish_only_stream_is_finished_for_its_reason() {
+    let deployment = Deployment::new(Setup::new(Answer::Text, Hooks::FinishOnly), |_| {}).await;
+    let _handle = deployment.send().await;
+    deployment.settle().await;
+    let finished = deployment.world.finished.lock_recover().clone();
+    assert_eq!(
+        finished
+            .iter()
+            .map(|(reason, _)| *reason)
+            .collect::<Vec<_>>(),
+        [Reason::Complete],
+        "the answered call's stream finishes once"
+    );
+    assert!(finished.iter().all(|(_, acknowledged)| *acknowledged >= 1));
+    deployment.end();
+}
+
+/// A stream that failed is finished for its provider error, from the
+/// receipt: no response hook runs over a failure.
+#[tokio::test]
+async fn a_failed_stream_is_finished_for_its_provider_error() {
+    let deployment = Deployment::new(Setup::new(Answer::Failed, Hooks::All), |_| {}).await;
+    let handle = deployment.send().await;
+    deployment.settle().await;
+    assert_eq!(
+        deployment
+            .world
+            .finished
+            .lock_recover()
+            .iter()
+            .map(|(reason, _)| *reason)
+            .collect::<Vec<_>>(),
+        [Reason::ProviderError]
+    );
+    assert!(deployment.world.derived().is_empty());
+    let output = handle.output().await.expect("the turn settles");
+    assert!(matches!(output.status(), lash::TurnStatus::Failed { .. }));
+    deployment.end();
+}
+
+/// What a call does, for the cancel laws.
+#[derive(Clone, Copy, Debug)]
+enum Streams {
+    /// A call to [`WRITE`], through every hook.
+    Hooked,
+    /// A call to [`WRITE`], its stream finished by a hook no response hook
+    /// reads.
+    FinishOnly,
+    /// A provider failure after two deltas, through every hook.
+    Failed,
+}
+
+impl Streams {
+    fn setup(self) -> Setup {
+        match self {
+            Self::Hooked => Setup::new(Answer::Tool, Hooks::All),
+            Self::FinishOnly => Setup::new(Answer::Tool, Hooks::FinishOnly),
+            Self::Failed => Setup::new(Answer::Failed, Hooks::All),
+        }
+    }
+
+    /// The commit after the receipt in the uncancelled run.
+    fn next_phase(self) -> CommitLabel {
+        match self {
+            Self::Hooked | Self::FinishOnly => CommitLabel::MODEL_DONE,
+            Self::Failed => CommitLabel::TURN_COMMIT,
+        }
+    }
+
+    /// The reason the call's stream ends for.
+    fn finish(self) -> Reason {
+        match self {
+            Self::Hooked | Self::FinishOnly => Reason::Complete,
+            Self::Failed => Reason::ProviderError,
+        }
+    }
+
+    /// Every cut between the receipt and the next phase this call has.
+    fn cuts(self) -> Vec<ReceiptCut> {
+        match self {
+            Self::Hooked => vec![
+                ReceiptCut::Receipt,
+                ReceiptCut::Finish,
+                ReceiptCut::Derivation,
+                ReceiptCut::NextPhase,
+            ],
+            Self::FinishOnly | Self::Failed => vec![
+                ReceiptCut::Receipt,
+                ReceiptCut::Finish,
+                ReceiptCut::NextPhase,
+            ],
+        }
+    }
+}
+
+/// Where a cancel law cuts A: after its receipt committed and before the
+/// next phase did. A never reads the cancel; B finds it with the receipt.
+#[derive(Clone, Copy, Debug)]
+enum ReceiptCut {
+    /// A dies as the receipt commits.
+    Receipt,
+    /// A holds in the stream finish its derivation runs, and is killed.
+    Finish,
+    /// A holds in its response hook, and is killed.
+    Derivation,
+    /// A derived the answer and dies before its next phase enters the
+    /// store.
+    NextPhase,
+}
+
+/// How a turn cancelled at its receipt ended, as its host and the outside
+/// world see it.
+#[derive(Debug, PartialEq)]
+struct Ended {
+    status: lash::TurnStatus,
+    /// The protocol iteration an `AfterStep` stop names.
+    honoured_after_step: Option<usize>,
+    writes: Vec<String>,
+    sends: usize,
+    /// The sealed model-call records the session's live feed published.
+    calls: usize,
+    /// The reason the last stream finish ended its stream for.
+    finish: Option<Reason>,
+}
+
+/// A cancel of `mode` requested at the receipt of `streams`' call: while
+/// the receipt's acknowledgement is delayed and its owner lives, or once
+/// `cut` stopped A, which B then takes over.
+async fn cancelled_at_the_receipt(
+    streams: Streams,
+    mode: lash::TurnCancelMode,
+    cut: Option<ReceiptCut>,
+) -> Ended {
+    let next = streams.next_phase();
+    let deployment = Deployment::new(streams.setup(), |script| match cut {
+        None => {
+            script.cut_on(
+                "a",
+                CommitLabel::MODEL_ANSWER,
+                1,
+                Fault::DelayedAck(Duration::from_secs(30)),
+            );
+        }
+        Some(ReceiptCut::Receipt) => {
+            script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::CommitThenAbort);
+        }
+        Some(ReceiptCut::NextPhase) => {
+            script.cut_on("a", next, 1, Fault::Abort);
+        }
+        Some(ReceiptCut::Finish | ReceiptCut::Derivation) => {}
+    })
+    .await;
+    *deployment.world.hold.lock_recover() = match cut {
+        Some(ReceiptCut::Finish) => Some(Hold::Finish),
+        Some(ReceiptCut::Derivation) => Some(Hold::Derivation),
+        _ => None,
+    };
+    let handle = deployment.send().await;
+    deployment
+        .until("A reaches its cut", |deployment| match cut {
+            None => deployment.committed(CommitLabel::MODEL_ANSWER) == 1,
+            Some(ReceiptCut::Receipt) => deployment.cut(CommitLabel::MODEL_ANSWER),
+            Some(ReceiptCut::NextPhase) => deployment.cut(next),
+            Some(ReceiptCut::Finish | ReceiptCut::Derivation) => deployment.world.held(),
         })
         .await;
     handle
@@ -1182,49 +1535,137 @@ async fn a_cancel_at_the_receipt(mode: lash::TurnCancelMode) -> Deployment {
         .mode(mode)
         .await
         .expect("the cancel is requested");
+    if cut.is_some() {
+        deployment.take_over().await;
+    }
     deployment.settle().await;
-    assert!(
-        deployment.cut(CommitLabel::MODEL_ANSWER),
-        "the receipt's acknowledgement was delayed"
-    );
-    assert_eq!(
-        deployment.world.sends(),
-        1,
-        "the paid answer is bought once"
-    );
+    let cursor = handle.cursor().clone();
     let output = handle.output().await.expect("the turn settles");
-    assert_eq!(
-        output.status(),
-        lash::TurnStatus::Cancelled,
-        "{:?}",
-        output.result.outcome
-    );
-    deployment
+    let honoured_after_step = match &output.result.outcome {
+        lash::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
+            evidence.honoured_after_step
+        }
+        _ => None,
+    };
+    let ended = Ended {
+        status: output.status(),
+        honoured_after_step,
+        writes: markers(&deployment.world),
+        sends: deployment.world.all_sends.load(Ordering::SeqCst),
+        calls: deployment.published_calls(&cursor).await,
+        finish: deployment.world.last_finish(),
+    };
+    deployment.end();
+    ended
 }
 
-/// REPLAY-PRESERVES-CONTROL-AND-FEED: an `Immediate` cancel wins over the
-/// receipt: the turn stops before the call it asked for is admitted.
-#[tokio::test]
-async fn an_immediate_cancel_at_the_receipt_stops_the_turn_before_its_tool() {
-    let deployment = a_cancel_at_the_receipt(lash::TurnCancelMode::Immediate).await;
-    assert!(
-        deployment.world.writes().is_empty(),
-        "no tool starts after an immediate cancel"
+/// A cancel of `mode` at the receipt of `streams`' call ends the turn as
+/// the uncut run does at every cut between the receipt and the next phase:
+/// the same outcome, the same tool writes, no second purchase, the paid
+/// call reported once and its stream finished for its reason.
+async fn a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+    streams: Streams,
+    mode: lash::TurnCancelMode,
+) {
+    let uncut = cancelled_at_the_receipt(streams, mode, None).await;
+    assert_eq!(
+        uncut.sends, 1,
+        "{streams:?}: the paid answer is bought once"
     );
-    deployment.end();
+    assert_eq!(
+        uncut.calls, 1,
+        "{streams:?}: the paid call is published once"
+    );
+    assert_eq!(
+        uncut.finish,
+        Some(streams.finish()),
+        "{streams:?}: the call's stream is finished for its reason"
+    );
+    match (mode, streams) {
+        (lash::TurnCancelMode::Immediate, _) => {
+            assert!(
+                uncut.writes.is_empty(),
+                "no tool starts after an immediate cancel"
+            );
+            assert_eq!(uncut.status, lash::TurnStatus::Cancelled);
+        }
+        (_, Streams::Failed) => {
+            assert!(matches!(uncut.status, lash::TurnStatus::Failed { .. }));
+        }
+        (_, Streams::Hooked | Streams::FinishOnly) => {
+            assert_eq!(uncut.writes, [ANSWERS[0]], "the step's tool runs once");
+            assert_eq!(uncut.status, lash::TurnStatus::Cancelled);
+        }
+    }
+    for cut in streams.cuts() {
+        let ended = cancelled_at_the_receipt(streams, mode, Some(cut)).await;
+        assert_eq!(ended, uncut, "{streams:?} {mode:?} cut at {cut:?}");
+    }
 }
 
-/// REPLAY-PRESERVES-CONTROL-AND-FEED: an `AfterStep` cancel lets the step
-/// the receipt answers finish, its tool run once, and stops the turn at
-/// the next model start, which sends nothing.
+/// REPLAY-PRESERVES-CONTROL-AND-FEED: an `Immediate` cancel at the receipt
+/// of a hooked call stops the turn before its tool, and reports the paid
+/// call, at every cut.
 #[tokio::test]
-async fn an_after_step_cancel_at_the_receipt_finishes_the_step_and_stops() {
-    let deployment = a_cancel_at_the_receipt(lash::TurnCancelMode::AfterStep).await;
-    assert_eq!(
-        markers(&deployment.world),
-        [ANSWERS[0]],
-        "the step's tool runs once"
-    );
-    assert_eq!(deployment.world.all_sends.load(Ordering::SeqCst), 1);
-    deployment.end();
+async fn an_immediate_cancel_at_a_hooked_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::Hooked,
+        lash::TurnCancelMode::Immediate,
+    )
+    .await;
+}
+
+/// REPLAY-PRESERVES-CONTROL-AND-FEED: an `AfterStep` cancel at the receipt
+/// of a hooked call lets the step finish, its tool run once, and stops the
+/// turn at the next model start, at every cut.
+#[tokio::test]
+async fn an_after_step_cancel_at_a_hooked_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::Hooked,
+        lash::TurnCancelMode::AfterStep,
+    )
+    .await;
+}
+
+/// An `Immediate` cancel at the receipt of a call whose stream only a
+/// stream-finished hook watches, at every cut.
+#[tokio::test]
+async fn an_immediate_cancel_at_a_finish_only_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::FinishOnly,
+        lash::TurnCancelMode::Immediate,
+    )
+    .await;
+}
+
+/// An `AfterStep` cancel at the receipt of a call whose stream only a
+/// stream-finished hook watches, at every cut.
+#[tokio::test]
+async fn an_after_step_cancel_at_a_finish_only_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::FinishOnly,
+        lash::TurnCancelMode::AfterStep,
+    )
+    .await;
+}
+
+/// An `Immediate` cancel at the receipt of a failed call, at every cut.
+#[tokio::test]
+async fn an_immediate_cancel_at_a_failed_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::Failed,
+        lash::TurnCancelMode::Immediate,
+    )
+    .await;
+}
+
+/// An `AfterStep` cancel at the receipt of a failed call lets the failure
+/// end the turn, at every cut.
+#[tokio::test]
+async fn an_after_step_cancel_at_a_failed_receipt_ends_as_the_uncut_run_at_every_cut() {
+    a_cancel_at_the_receipt_resumes_to_the_uncut_result(
+        Streams::Failed,
+        lash::TurnCancelMode::AfterStep,
+    )
+    .await;
 }

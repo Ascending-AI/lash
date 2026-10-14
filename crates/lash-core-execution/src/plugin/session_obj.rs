@@ -957,30 +957,28 @@ impl PluginSession {
     > {
         let recorded = self.capabilities().composition.recorded();
         let contributions = &self.capabilities().contributions;
+        let (stream, finished) = capsule.finishing();
         Ok((
-            recorded.resolve_all(
-                &capsule.stream_callbacks,
-                &contributions.assistant_stream_hooks,
-            )?,
-            recorded.resolve_all(
-                &capsule.finished_callbacks,
-                &contributions.assistant_stream_finished_hooks,
-            )?,
+            recorded.resolve_all(stream, &contributions.assistant_stream_hooks)?,
+            recorded.resolve_all(finished, &contributions.assistant_stream_finished_hooks)?,
         ))
     }
 
-    /// Finish the stream a model call's receipt recorded in `capsule`, from
-    /// the capsule alone, on this worker: the recorded stream-finished
-    /// callbacks discard whatever they hold (an earlier stream's state, or
-    /// the live stream of this very call), the recorded stream callbacks are
-    /// handed the recorded chunks again in order, their transforms
-    /// discarded (what they published, the call published as it streamed),
-    /// and the stream-finished callbacks end the stream for the recorded
-    /// reason. The states they return are what the response callbacks
-    /// derive with: the same on every worker and every derivation, given
-    /// stream callbacks that are pure functions of the chunks they were
-    /// handed. A stream that produced no response hands no state. Every
-    /// recorded callback resolves before any runs.
+    /// Finish the stream a model call's outcome recorded in `capsule`, from
+    /// the capsule alone, on this worker, for whatever reason it ended: the
+    /// recorded stream-finished callbacks discard whatever they hold (an
+    /// earlier stream's state, or the live stream of this very call), the
+    /// recorded stream callbacks are handed the recorded chunks again in
+    /// order, their transforms discarded (what they published, the call
+    /// published as it streamed), and the stream-finished callbacks end the
+    /// stream for the recorded reason. The states they return for a stream
+    /// that produced a response are what the response callbacks derive
+    /// with: the same on every worker and every derivation, given stream
+    /// callbacks that are pure functions of the chunks they were handed.
+    /// Exactly the callbacks [`AssistantStreamCapsule::finishing`] names run,
+    /// and every one resolves before any runs.
+    ///
+    /// [`AssistantStreamCapsule::finishing`]: crate::runtime::AssistantStreamCapsule::finishing
     pub async fn replay_assistant_stream(
         &self,
         session_id: &SessionId,
@@ -996,9 +994,6 @@ impl PluginSession {
             AssistantStreamFinishReason::AttemptReset,
         )
         .await?;
-        if !capsule.produced_response() {
-            return Ok(Vec::new());
-        }
         for chunk in &capsule.chunks {
             let mut current = chunk.clone();
             for registered in &stream {
@@ -1011,8 +1006,14 @@ impl PluginSession {
                 .chunk;
             }
         }
-        self.finish_assistant_stream_with(session_id, &finished, capsule.finish)
-            .await
+        let states = self
+            .finish_assistant_stream_with(session_id, &finished, capsule.finish)
+            .await?;
+        Ok(if capsule.produced_response() {
+            states
+        } else {
+            Vec::new()
+        })
     }
 
     async fn finish_assistant_stream_with(

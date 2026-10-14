@@ -170,6 +170,8 @@ mod tool_call_reads {
     struct ReadProbe {
         inner: Arc<dyn DurableStore>,
         owners: Mutex<Vec<OwnerKey>>,
+        /// Reads of the session's unfinished turn.
+        turns: Mutex<usize>,
     }
 
     async fn fixture() -> crate::Result<(
@@ -182,6 +184,7 @@ mod tool_call_reads {
         let probe = Arc::new(ReadProbe {
             inner: Arc::new(stores.durable_store()),
             owners: Mutex::new(Vec::new()),
+            turns: Mutex::new(0),
         });
         let counted = probe.clone();
         let stores = lash_core::testing::runtime_helpers::LayeredStores::over(stores)
@@ -211,6 +214,7 @@ mod tool_call_reads {
         drop(session);
         core.node.stop().await;
         probe.owners.lock().expect("read probe").clear();
+        *probe.turns.lock().expect("read probe") = 0;
         Ok((core, durable, probe, turns))
     }
 
@@ -264,10 +268,16 @@ mod tool_call_reads {
             ],
             "one decode per named turn, even for duplicate and missing ids"
         );
+        assert_eq!(
+            *probe.turns.lock().expect("read probe"),
+            1,
+            "the batch reads the session's unfinished turn once"
+        );
         Ok(())
     }
     /// FIG-6231: opting in reads exactly one ledger for each returned page turn;
-    /// plain pages and empty pages do not decode any call ledger.
+    /// plain pages and empty pages do not decode any call ledger. A committed
+    /// turn is never the unfinished one, which the page never reads.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_committed_page_decodes_only_its_turns_tool_calls() -> crate::Result<()> {
         let (_core, durable, probe, turns) = fixture().await?;
@@ -301,6 +311,7 @@ mod tool_call_reads {
                 )
             ]
         );
+        assert_eq!(*probe.turns.lock().expect("read probe"), 0);
         let tail = durable.committed_turns(Some(&page.next), limit).await?;
         probe.owners.lock().expect("read probe").clear();
         let empty = durable
@@ -314,6 +325,7 @@ mod tool_call_reads {
     #[async_trait::async_trait]
     impl DurableReads for ReadProbe {
         async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
+            *self.turns.lock().expect("read probe") += 1;
             self.inner.turn(session).await
         }
 

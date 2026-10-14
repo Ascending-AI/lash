@@ -612,6 +612,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                         stream_from: "graph-roots-stream".into(),
                     },
                     checkpoint: phase_root,
+                    call: crate::domain::ModelCall::Requested,
                 }
             } else {
                 UnfinishedPhase::Tools {

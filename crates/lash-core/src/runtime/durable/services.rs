@@ -92,24 +92,38 @@ impl RuntimeTurnServices {
 
         let owner = OwnerKey::Turn(session.clone(), run.clone());
         let facts = cx.durable_reads()?.run_facts(&owner).await?;
-        Self::decode_recorded_tool_calls(&facts, decoders)
+        let fold = Self::ledger_fold(&facts)?;
+        Self::decode_recorded_tool_calls(&facts, &fold, decoders)
+    }
+
+    /// The tool-call ledger `facts` hold, folded once for every read of it.
+    /// Reporting folds only settled facts and never consults live policies
+    /// to run a recovery: the empty policy view executes nothing.
+    fn ledger_fold(
+        facts: &lash_durable::domain::RunFacts,
+    ) -> Result<lash_core_execution::runtime::actor::round::RunFold, lash_durable::DurableError>
+    {
+        use lash_core_execution::runtime::actor::round::{self, PolicyView};
+        round::fold(facts, &PolicyView::new([]), &round::PinnedWaits::ledger()).map_err(|error| {
+            lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: format!("the turn's tool records: {error}"),
+            })
+        })
     }
 
     fn decode_recorded_tool_calls(
         facts: &lash_durable::domain::RunFacts,
+        fold: &lash_core_execution::runtime::actor::round::RunFold,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
-        use lash_core_execution::runtime::actor::round::{self, PolicyView};
+        use lash_core_execution::runtime::actor::round;
         let corrupt = |message| {
             lash_durable::DurableError::Store(lash_durable::StoreFailure {
                 kind: lash_durable::StoreFailureKind::Corrupt,
                 message,
             })
         };
-        // Reporting folds only settled facts and never consults live policies
-        // to run a recovery. The empty policy view executes nothing.
-        let fold = round::fold(facts, &PolicyView::new([]), &round::PinnedWaits::ledger())
-            .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
         // Rounds and cell reports, in the order of the effects they answer.
         let mut runs: std::collections::BTreeMap<_, Result<_, _>> = fold
@@ -162,12 +176,33 @@ impl RuntimeTurnServices {
         Ok(calls)
     }
 
-    /// Read a named turn's settled bodies, plus its pending identities if unfinished,
-    /// through its reports, current round outcomes and saved cell ledgers.
+    /// The run of `session`'s unfinished turn, if it has one: what a batch
+    /// of [`tool_call_bodies`](Self::tool_call_bodies) reads once.
+    ///
+    /// # Errors
+    ///
+    /// A durable read's refusal.
+    pub async fn unfinished_run(
+        cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<Option<TurnId>, lash_durable::DurableError> {
+        Ok(cx
+            .durable_reads()?
+            .turn(session)
+            .await?
+            .map(|turn| turn.run))
+    }
+
+    /// Read a named turn's settled bodies, plus its pending identities if it
+    /// is `unfinished`, the session's unfinished turn's run
+    /// ([`unfinished_run`](Self::unfinished_run)), through its reports,
+    /// current round outcomes and saved cell ledgers. Each owner's facts are
+    /// folded once.
     pub async fn tool_call_bodies(
         cx: &ActorContext,
         session: &SessionId,
         run: &TurnId,
+        unfinished: Option<&TurnId>,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<
         (
@@ -179,22 +214,12 @@ impl RuntimeTurnServices {
         use lash_core_execution::runtime::actor::round;
         use lash_core_store::checkpoint_graph::GraphDecoder;
         use lash_durable::domain::{OwnerKey, RootOwner};
-        let corrupt = |error: String| {
-            lash_durable::DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: error,
-            })
-        };
-        let reads = cx.durable_reads()?;
-        if !reads
-            .turn(session)
-            .await?
-            .is_some_and(|turn| turn.run == *run)
-        {
+        if unfinished != Some(run) {
             return Self::recorded_tool_calls(cx, session, run, decoders)
                 .await
                 .map(|records| (records, Default::default()));
         }
+        let reads = cx.durable_reads()?;
         let mut records = Vec::new();
         let roots = reads.cell_roots(session, run).await?;
         let mut owners = vec![OwnerKey::Turn(session.clone(), run.clone())];
@@ -220,13 +245,8 @@ impl RuntimeTurnServices {
         }
         for owner in owners {
             let facts = reads.run_facts(&owner).await?;
-            records.extend(Self::decode_recorded_tool_calls(&facts, decoders)?);
-            let fold = round::fold(
-                &facts,
-                &round::PolicyView::new([]),
-                &round::PinnedWaits::ledger(),
-            )
-            .map_err(|error| corrupt(error.to_string()))?;
+            let fold = Self::ledger_fold(&facts)?;
+            records.extend(Self::decode_recorded_tool_calls(&facts, &fold, decoders)?);
             for member in fold.rounds().flat_map(|round| round.members()) {
                 if member.draft().tool().as_str().starts_with("cell-host:") {
                     continue;

@@ -28,18 +28,24 @@ pub struct ModelReceipt<A> {
     pub answer: A,
 }
 
-impl<A: serde::Serialize> ModelReceipt<A> {
-    /// Stages the receipt as its placed text and returns its root.
+impl<A: serde::Serialize + serde::de::DeserializeOwned> ModelReceipt<A> {
+    /// Stages the receipt as its placed text and returns its root with the
+    /// receipt as that text reads back: what every derivation of it reads,
+    /// on the worker that staged it as on any other. What its encoding
+    /// leaves out, the live outcome alone held.
     ///
     /// # Errors
     ///
-    /// The account of a receipt that does not encode or stage.
-    pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, String> {
+    /// The account of a receipt that does not encode, stage or read back.
+    pub fn stage(&self, staging: &mut GraphStaging) -> Result<(NodeId, Self), String> {
         let text = serde_json::to_string(self)
             .map_err(|error| format!("the model call's receipt does not encode: {error}"))?;
-        staging
+        let root = staging
             .place_text(&text)
-            .map_err(|error| format!("the model call's receipt does not stage: {error}"))
+            .map_err(|error| format!("the model call's receipt does not stage: {error}"))?;
+        let read = serde_json::from_str(&text)
+            .map_err(|error| format!("the model call's receipt does not decode: {error}"))?;
+        Ok((root, read))
     }
 }
 

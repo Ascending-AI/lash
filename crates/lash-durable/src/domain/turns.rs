@@ -19,12 +19,15 @@ pub enum UnfinishedPhase {
     /// Admitted: inputs bound, deadline recorded, nothing run yet. A
     /// restore starts the turn from its admission.
     Admitted,
-    /// A model call is in flight, its request pinned before its first byte.
+    /// A model call is admitted, its request pinned before its first byte:
+    /// in flight, or answered by its receipt and not yet derived.
     Model {
         /// The pinned call.
         pin: ModelPin,
         /// The PhaseRoot that re-delivers the call.
         checkpoint: NodeId,
+        /// Whether the provider's outcome is durable yet.
+        call: ModelCall,
     },
     /// A tool round or a code cell is admitted and its bodies may run.
     Tools {
@@ -35,7 +38,35 @@ pub enum UnfinishedPhase {
     },
 }
 
+/// Where a model phase's pinned call stands: the boundary between a call a
+/// restore sends again and a paid answer a restore derives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelCall {
+    /// No receipt committed: the call is in flight or unsent, and a
+    /// restore sends it again as its next attempt. The step before it
+    /// closed.
+    Requested,
+    /// `model.answer` committed the call's receipt: the provider's outcome
+    /// is paid for and durable, and a restore derives the step from it,
+    /// never sending the call again.
+    Answered {
+        /// The receipt's root.
+        receipt: NodeId,
+    },
+}
+
 impl UnfinishedPhase {
+    /// A model phase whose pinned call is in flight: the phase
+    /// `model.start` commits.
+    #[must_use]
+    pub fn requested(pin: ModelPin, checkpoint: NodeId) -> Self {
+        Self::Model {
+            pin,
+            checkpoint,
+            call: ModelCall::Requested,
+        }
+    }
+
     /// The stored spelling and its argument: a model call's attempt or a
     /// tool round's run.
     #[must_use]
@@ -66,9 +97,11 @@ impl UnfinishedPhase {
     }
 
     /// The phase its stored columns name; `None` for anything
-    /// [`Self::stored`] does not write. The DDL refuses those rows too.
-    /// `model_calls` is the turn's admitted model calls: in the model phase,
-    /// the pinned call is the latest of them.
+    /// [`Self::stored`] and [`TurnWrite::Answer`] do not write. The DDL
+    /// refuses those rows too. `model_calls` is the turn's admitted model
+    /// calls: in the model phase, the pinned call is the latest of them.
+    /// `answer` is the receipt the row names, which only a model phase
+    /// holds.
     #[must_use]
     pub fn parse(
         stored: &str,
@@ -76,14 +109,16 @@ impl UnfinishedPhase {
         checkpoint: Option<NodeId>,
         pin: Option<(String, DurableInstant, String)>,
         model_calls: u32,
+        answer: Option<NodeId>,
     ) -> Option<Self> {
-        Some(match (stored, argument, checkpoint, pin) {
-            ("admitted", None, None, None) => Self::Admitted,
+        Some(match (stored, argument, checkpoint, pin, answer) {
+            ("admitted", None, None, None, None) => Self::Admitted,
             (
                 "model",
                 Some(attempt),
                 Some(checkpoint),
                 Some((request_ref, deadline, stream_from)),
+                answer,
             ) if model_calls > 0 => Self::Model {
                 pin: ModelPin {
                     call: model_calls,
@@ -93,13 +128,34 @@ impl UnfinishedPhase {
                     stream_from,
                 },
                 checkpoint,
+                call: answer.map_or(ModelCall::Requested, |receipt| ModelCall::Answered {
+                    receipt,
+                }),
             },
-            ("tools", Some(run), Some(checkpoint), None) => Self::Tools {
+            ("tools", Some(run), Some(checkpoint), None, None) => Self::Tools {
                 run: RunSeq(run),
                 checkpoint,
             },
             _ => return None,
         })
+    }
+
+    /// The receipt of the pinned model call, once `model.answer` committed
+    /// it and until the turn's next phase consumes it.
+    #[must_use]
+    pub fn receipt(&self) -> Option<NodeId> {
+        match self {
+            Self::Model {
+                call: ModelCall::Answered { receipt },
+                ..
+            } => Some(*receipt),
+            Self::Admitted
+            | Self::Model {
+                call: ModelCall::Requested,
+                ..
+            }
+            | Self::Tools { .. } => None,
+        }
     }
 }
 
@@ -155,16 +211,13 @@ pub struct TurnRow {
     pub run: TurnId,
     /// What the run's admission took.
     pub admission: RunAdmissionRecord,
-    /// The phase, with what a restore resumes it from.
+    /// The phase, with what a restore resumes it from: in the model phase,
+    /// whether its call is answered by a receipt.
     pub phase: UnfinishedPhase,
     /// The complete post-cell SessionExecution of the turn's last
     /// successful cell, while the turn has one: rooted until the next
     /// successful cell replaces it or the turn's commit transfers it.
     pub working: Option<NodeId>,
-    /// The receipt of the pinned model call, once `model.answer` committed
-    /// it and until the turn's next phase consumes it: `Some` only in the
-    /// model phase.
-    pub answer: Option<NodeId>,
     /// The protocol iteration.
     pub iteration: u32,
     /// How many model calls the turn admitted: the latest call's ordinal,
@@ -200,9 +253,11 @@ pub enum TurnWrite {
         turn_deadline: Option<DurableInstant>,
     },
     /// Move an unfinished turn to `phase`. A model phase admits its pin's
-    /// call, which becomes the turn's latest; any other phase keeps the
-    /// turn's call count. Every phase consumes the turn's receipt
-    /// ([`Self::Answer`]): the row drops it and its root goes. Refused with
+    /// call, which becomes the turn's latest, [`ModelCall::Requested`]:
+    /// only [`Self::Answer`] records a receipt, and the phase's `call` is
+    /// not written. Any other phase keeps the turn's call count. Every
+    /// phase consumes the turn's receipt: the row drops it and its root
+    /// goes. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Advance {

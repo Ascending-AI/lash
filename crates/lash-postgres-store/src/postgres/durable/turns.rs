@@ -877,8 +877,15 @@ pub(super) async fn turn(
         .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
     let model_calls: i64 = row.try_get(10).map_err(decode)?;
     let model_calls = integer::<u32>(model_calls)?;
-    let phase = UnfinishedPhase::parse(&stored_phase, argument, checkpoint, pin, model_calls)
-        .ok_or_else(|| corrupt("turn phase", &stored_phase))?;
+    let phase = UnfinishedPhase::parse(
+        &stored_phase,
+        argument,
+        checkpoint,
+        pin,
+        model_calls,
+        answer,
+    )
+    .ok_or_else(|| corrupt("turn phase", &stored_phase))?;
     let iteration: i64 = row.try_get(4).map_err(decode)?;
     let iteration = integer::<u32>(iteration)?;
     let turn_deadline: Option<i64> = row.try_get(8).map_err(decode)?;
@@ -894,7 +901,6 @@ pub(super) async fn turn(
         admission,
         phase,
         working,
-        answer,
         iteration,
         model_calls,
         turn_deadline: turn_deadline.map(DurableInstant),

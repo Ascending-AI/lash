@@ -148,8 +148,17 @@ impl DurableSession {
                 },
             );
         }
+        // The session's unfinished turn is read once for the batch: only it
+        // has calls still pending.
+        let unfinished = if turns.is_empty() {
+            None
+        } else {
+            self.open_turn().await?
+        };
         for (turn, wanted) in &mut turns {
-            let (records, pending) = self.turn_tool_call_bodies(turn).await?;
+            let (records, pending) = self
+                .turn_tool_call_bodies(turn, unfinished.as_ref())
+                .await?;
             for record in records {
                 if let Some(read) = wanted.get_mut(&record.call_id) {
                     *read = crate::ToolCallRead::Settled {
@@ -169,9 +178,19 @@ impl DurableSession {
             .collect())
     }
 
+    async fn open_turn(&self) -> Result<Option<crate::TurnId>> {
+        use lash_core::runtime::durable::services::RuntimeTurnServices;
+        RuntimeTurnServices::unfinished_run(&self.effect_host, &self.session_id)
+            .await
+            .map_err(EmbedError::Durable)
+    }
+
+    /// `turn`'s tool-call bodies, and its pending calls when it is
+    /// `unfinished`, the session's unfinished turn.
     async fn turn_tool_call_bodies(
         &self,
         turn: &crate::TurnId,
+        unfinished: Option<&crate::TurnId>,
     ) -> Result<(
         Vec<crate::tools::ToolCallRecord>,
         std::collections::BTreeSet<crate::ToolCallId>,
@@ -181,6 +200,7 @@ impl DurableSession {
             &self.effect_host,
             &self.session_id,
             turn,
+            unfinished,
             &self.transcript_decoders,
         )
         .await
@@ -694,8 +714,9 @@ impl DurableSession {
     ) -> Result<crate::transcript::CommittedTurnsWithToolCallsPage> {
         let page = self.committed_turns(after, limit).await?;
         let mut turns = Vec::with_capacity(page.turns.len());
+        // A committed turn is never the unfinished one.
         for turn in page.turns {
-            let (tool_calls, _) = self.turn_tool_call_bodies(&turn.turn_id).await?;
+            let (tool_calls, _) = self.turn_tool_call_bodies(&turn.turn_id, None).await?;
             turns.push(crate::transcript::CommittedTurnWithToolCalls { turn, tool_calls });
         }
         Ok(crate::transcript::CommittedTurnsWithToolCallsPage {

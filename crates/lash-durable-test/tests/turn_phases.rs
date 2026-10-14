@@ -555,8 +555,8 @@ impl TurnDrive for L3Drive {
         &mut self.machine
     }
 
-    fn owed_answer(&self) -> Option<&ModelAnswer> {
-        self.owed.as_ref()
+    fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
+        &mut self.owed
     }
 
     async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
@@ -569,7 +569,11 @@ impl TurnDrive for L3Drive {
         Ok(())
     }
 
-    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+    async fn settle_cancelled_answer(
+        &mut self,
+        _cx: &ActorContext,
+        _id: EffectId,
+    ) -> Result<(), TurnError> {
         self.owed = None;
         Ok(())
     }
@@ -673,7 +677,10 @@ impl TurnDrive for L3Drive {
         let reads = cx.durable_reads()?;
         let admitted = match reads.turn(&session()).await? {
             Some(TurnRow {
-                phase: UnfinishedPhase::Model { pin, checkpoint },
+                phase:
+                    UnfinishedPhase::Model {
+                        pin, checkpoint, ..
+                    },
                 ..
             }) => {
                 // The phase root's text holds the composed instructions
@@ -1959,7 +1966,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         deadline: lash_durable::DurableInstant(i64::MAX),
         stream_from: "pinned-stream".to_owned(),
     };
-    let phase = UnfinishedPhase::Model { pin, checkpoint };
+    let phase = UnfinishedPhase::requested(pin, checkpoint);
     let advance = TurnWrite::Advance {
         session: session(),
         run: run(),

@@ -33,7 +33,7 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_core_store::obligations::{ObligationToken, RegistryKind};
 use lash_durable::domain::graph::{ExecRootWrite, RunFactKind, RunFactWrite, RunFacts};
-use lash_durable::domain::{ExecKey, OwnerKey, RootOwner, TurnWrite};
+use lash_durable::domain::{ExecKey, ModelCall, OwnerKey, RootOwner, TurnWrite, UnfinishedPhase};
 use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads, Epoch};
 
 use crate::ToolCallId;
@@ -231,7 +231,21 @@ impl RecordedWork {
         let Some(turn) = reads.turn(session).await? else {
             return Ok(());
         };
-        if let Some(root) = turn.answer {
+        // A paid answer owes the callbacks its derivation resolves (S7); a
+        // call in flight owes nothing until its receipt commits.
+        let receipt = match &turn.phase {
+            UnfinishedPhase::Model {
+                call: ModelCall::Answered { receipt },
+                ..
+            } => Some(*receipt),
+            UnfinishedPhase::Admitted
+            | UnfinishedPhase::Model {
+                call: ModelCall::Requested,
+                ..
+            }
+            | UnfinishedPhase::Tools { .. } => None,
+        };
+        if let Some(root) = receipt {
             let graph = reads
                 .hydrate(
                     RootOwner::ModelAnswer {

@@ -173,6 +173,21 @@ impl RuntimeTurnDriver<'_> {
         Ok((current.unwrap_or(original), events))
     }
 
+    /// Finish the stream a model call's receipt recorded in `capsule`, for a
+    /// derivation or a cancelled settlement that runs no response hook:
+    /// the stream-finished callbacks end it for its recorded reason.
+    pub(in crate::runtime) async fn finish_recorded_stream(
+        &mut self,
+        capsule: &crate::runtime::AssistantStreamCapsule,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.session
+            .plugins()
+            .replay_assistant_stream(&self.session_id, capsule)
+            .await
+            .map(drop)
+            .map_err(response_derivation_error)
+    }
+
     /// Runs one unjournaled attempt of an admitted model call on the
     /// transport its template bound, sending `admitted`'s request template
     /// as it was admitted, its attachment slots delivered afresh by the

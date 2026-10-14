@@ -29,18 +29,41 @@ pub struct LlmStreamRecord {
     pub response_plan: AssistantResponsePlan,
 }
 
+impl LlmStreamRecord {
+    /// The callbacks a derivation of the call's outcome invokes, in
+    /// recorded order: the response plan's over a successful outcome, then
+    /// those that finish its stream ([`AssistantStreamCapsule::finishing`]).
+    /// A receipt owes exactly these until it is derived (S7), so a node that
+    /// cannot resolve one never claims the turn to derive it, and a node
+    /// that can derives it.
+    pub fn derivation_callbacks(
+        &self,
+        succeeded: bool,
+    ) -> Vec<crate::plugin::PluginCallbackIdentity> {
+        let plan = if succeeded {
+            &self.response_plan.callbacks[..]
+        } else {
+            &[]
+        };
+        let (stream, finished) = self.capsule.finishing();
+        plan.iter().chain(finished).chain(stream).cloned().collect()
+    }
+}
+
 /// A paid call's stream as its stream hooks saw it: the stream callbacks
 /// and stream-finished callbacks the call ran under, every visible chunk
 /// the stream callbacks were handed since the attempt that answered began,
 /// in order, and how the stream finished.
 ///
 /// The live stream's hooks are never finished before the call's receipt is
-/// acknowledged. A derivation discards what the finished callbacks hold,
-/// replays the chunks through the recorded stream callbacks and finishes
-/// them with the recorded reason ([`PluginSession::replay_assistant_stream`](crate::plugin::PluginSession::replay_assistant_stream)),
-/// so the stream-state handed to the response callbacks is the same on the
-/// worker that streamed and on any other, and nothing depends on the
-/// streaming worker's memory.
+/// acknowledged. Every derivation of the call's outcome, successful or not,
+/// and the settlement of one a cancel stopped, discards what the finished
+/// callbacks hold, replays the chunks through the recorded stream callbacks
+/// and finishes them with the recorded reason
+/// ([`PluginSession::replay_assistant_stream`](crate::plugin::PluginSession::replay_assistant_stream)),
+/// so every terminal reason reaches them, the stream-state handed to the
+/// response callbacks is the same on the worker that streamed and on any
+/// other, and nothing depends on the streaming worker's memory.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AssistantStreamCapsule {
@@ -67,6 +90,28 @@ impl AssistantStreamCapsule {
             chunks: Vec::new(),
             finish: crate::plugin::AssistantStreamFinishReason::Complete,
         }
+    }
+
+    /// The stream callbacks and the stream-finished callbacks that finishing
+    /// the stream from the capsule invokes, each in recorded order: none
+    /// when no stream-finished callback watched it, and the stream callbacks
+    /// only when the stream handed them chunks, which they are handed
+    /// again.
+    pub fn finishing(
+        &self,
+    ) -> (
+        &[crate::plugin::PluginCallbackIdentity],
+        &[crate::plugin::PluginCallbackIdentity],
+    ) {
+        if self.finished_callbacks.is_empty() {
+            return (&[], &[]);
+        }
+        let stream = if self.chunks.is_empty() {
+            &[][..]
+        } else {
+            &self.stream_callbacks[..]
+        };
+        (stream, &self.finished_callbacks)
     }
 
     /// Whether the stream produced a response the stream-finished callbacks

@@ -27,10 +27,12 @@
 //! from the drive it holds, as `turn.commit` commits from it. Only a stop
 //! honoured before `turn.commit`, whose machine has finished, leaves it to
 //! the next activation pass, which finds the request on the row,
-//! [`restore`]s the turn from its last checkpoint and finalizes it. A pass
-//! that finds an `AfterStep` request on a turn in its round or cell (parked
-//! on a wait, or cut by a crash) resumes it instead: the step finishes, and
-//! the gate before the next model call honours the request (FIG-5377). Either
+//! [`restore`]s the turn from its last checkpoint and finalizes it; a paid
+//! answer its model phase holds is settled as the live stop settles one. A
+//! pass that finds an `AfterStep` request on a turn in its round or cell
+//! (parked on a wait, or cut by a crash), or holding a paid answer, resumes
+//! it instead: the step finishes, and the gate before the next model call
+//! honours the request (FIG-5377, FIG-6263). Either
 //! way the turn ends in one `turn.cancel` commit (ADR 0039): its `Cancelled`
 //! terminal and its stop as the session head's next revision, which keeps
 //! its input, the steps it completed and the steering input it delivered
@@ -58,9 +60,9 @@ use lash_durable::{CommitLabel, DurableError, Release};
 
 use super::head::HeadCache;
 use super::session::{
-    OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
-    TurnRow, TurnServices, UnfinishedPhase, await_stop, cancel_evidence, cancelled_cause,
-    undecodable_state,
+    ModelCall, OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRestore, TurnRow, TurnServices, UnfinishedPhase, await_stop, cancel_evidence,
+    cancelled_cause, undecodable_state,
 };
 use super::session_close::{Closing, close_pass};
 use super::tool_round::AnsweredCell;
@@ -83,6 +85,32 @@ pub(super) async fn immediate(cx: &ActorContext) -> Result<bool, TurnError> {
 /// at once.
 pub(super) fn stops_at_once(request: &lash_durable::domain::TurnCancelRequest) -> bool {
     request.mode == TurnCancelMode::Immediate
+}
+
+/// Whether the cancel `request` a turn the rows leave in `phase` accepted
+/// ends it before anything resumes. An `Immediate` request does. An
+/// `AfterStep` request lets the step the turn stands in finish, as the
+/// uncut run would: a paid answer its receipt holds, which the turn
+/// derives, or a round or cell, parked on a wait or cut by a crash. The gate
+/// before its next model call honours the request (ADR 0039, FIG-5377). A
+/// turn not yet started, or between steps with its model call in flight,
+/// stops here.
+pub(super) fn stops_before_resuming(request: &TurnCancelRequest, phase: &UnfinishedPhase) -> bool {
+    if stops_at_once(request) {
+        return true;
+    }
+    match phase {
+        UnfinishedPhase::Admitted
+        | UnfinishedPhase::Model {
+            call: ModelCall::Requested,
+            ..
+        } => true,
+        UnfinishedPhase::Model {
+            call: ModelCall::Answered { .. },
+            ..
+        }
+        | UnfinishedPhase::Tools { .. } => false,
+    }
 }
 
 /// Run `work` until it finishes, or the turn accepts an `Immediate` cancel
@@ -250,15 +278,50 @@ pub(super) async fn restore(
     let OpenTurn {
         mut drive, pending, ..
     } = turn;
-    let cell = stopped_cell(cx, drive.as_mut(), row, pending).await?;
+    let (cell, between_steps) = match &row.phase {
+        // Never here: an admitted turn has no state to stop with.
+        UnfinishedPhase::Admitted => (None, false),
+        // A turn restored with its model call in flight stands before that
+        // call: the step before it closed.
+        UnfinishedPhase::Model {
+            call: ModelCall::Requested,
+            ..
+        } => (None, true),
+        // A paid answer the cancel stops is settled as the live stop
+        // settles one: its call recorded and its stream finished, never
+        // derived.
+        UnfinishedPhase::Model {
+            call: ModelCall::Answered { .. },
+            ..
+        } => {
+            settle_restored_answer(cx, drive.as_mut(), pending).await?;
+            (None, false)
+        }
+        UnfinishedPhase::Tools { .. } => {
+            (stopped_cell(cx, drive.as_mut(), row, pending).await?, false)
+        }
+    };
     Ok(Some(StoppedTurn {
         drive,
         present: None,
         cell,
-        // A turn restored in its model phase stands before that call: the
-        // step before it closed.
-        between_steps: row.phase.model().is_some(),
+        between_steps,
     }))
+}
+
+/// Settle the paid answer a cancel restored with its turn: the restored
+/// machine re-delivers the model call the receipt answers.
+async fn settle_restored_answer(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    pending: Option<Effect>,
+) -> Result<(), TurnError> {
+    let Some(Effect::LlmCall { id, .. }) = pending.or_else(|| drive.machine().poll_effect()) else {
+        return Err(TurnError::Exec(
+            "the restored receipt answers no model call the turn waits on".to_owned(),
+        ));
+    };
+    drive.settle_cancelled_answer(cx, id).await
 }
 
 /// The tool calls the cell `row`'s turn stopped on completed, when the turn's

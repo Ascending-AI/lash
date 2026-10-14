@@ -65,7 +65,7 @@ pub use session_mail::{
 };
 pub use snapshots::SnapshotRev;
 pub use turns::{
-    ModelPin, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite, StoredValues,
+    ModelCall, ModelPin, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite, StoredValues,
     TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace, TurnNamespaceWrite, TurnRow,
     TurnWrite, UnfinishedPhase,
 };
