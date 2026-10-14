@@ -186,15 +186,21 @@ pub(crate) async fn observe(
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
         for mut event in events {
-            if let Some(call_id) = &event.call_id {
-                event.call = core
+            if let Some(call_id) = &event.call_id
+                && let Some(record) = core
                     .processes()
                     .tool_call(&overlay.process, call_id)
                     .await?
-                    .map(|record| crate::contract::CallData {
-                        input: record.args,
-                        output: record.output.value_for_projection(),
-                    });
+            {
+                event.status = if record.output.is_success() {
+                    RunStatus::Succeeded
+                } else {
+                    RunStatus::Failed
+                };
+                event.call = Some(crate::contract::CallData {
+                    input: record.args,
+                    output: record.output.value_for_projection(),
+                });
             }
             if sender.send(Ok(event)).await.is_err() {
                 return Ok(());
@@ -231,8 +237,11 @@ pub(crate) async fn observe(
                 let read_view = replacement.into_read_view();
                 // A gap retires provisional history. Applied display operations
                 // remain host state; retained effect evidence rebuilds bindings.
-                overlay.accumulator.reset_live();
-                overlay.completed_calls.clear();
+                for reset in overlay.reset_after_gap() {
+                    if sender.send(Ok(reset)).await.is_err() {
+                        return Ok(());
+                    }
+                }
                 overlay.snapshot(read_view)?
             }
         };
@@ -338,6 +347,8 @@ impl Overlay {
             workflow_version: self.workflow_version,
             definition: self.definition.clone(),
             sequence: self.sequence,
+            reset: false,
+            call_only: false,
             site,
             status,
             display_delta,
@@ -348,6 +359,23 @@ impl Overlay {
             call: None,
             output: None,
         }
+    }
+
+    fn reset_after_gap(&mut self) -> Vec<RunEvent> {
+        self.accumulator.reset_live();
+        self.completed_calls.clear();
+        self.shown.clear();
+        let mut event = self.event(
+            None,
+            RunStatus::Incomplete,
+            DisplayDelta::default(),
+            Some(
+                "Observation gap: prior live evidence was discarded; retained outcomes follow."
+                    .into(),
+            ),
+        );
+        event.reset = true;
+        vec![event]
     }
 
     /// The sites whose state in lash's overlay changed since they were last
@@ -369,10 +397,11 @@ impl Overlay {
                     (2, RunStatus::Failed, Some("cancelled".to_owned()))
                 }
                 WorkflowOverlayOccurrence::Completed { .. } => (1, RunStatus::Succeeded, None),
-                WorkflowOverlayOccurrence::Incomplete { terminal, .. } => match terminal {
-                    WorkflowOverlayTerminal::Completed => (1, RunStatus::Succeeded, None),
-                    _ => (2, RunStatus::Failed, Some("the run ended first".to_owned())),
-                },
+                WorkflowOverlayOccurrence::Incomplete { .. } => (
+                    2,
+                    RunStatus::Incomplete,
+                    Some("The run ended without a recorded outcome for this occurrence.".into()),
+                ),
             };
             let node = nodes
                 .entry(site.site.site.clone())
@@ -456,7 +485,23 @@ impl Overlay {
             occurrence.code.as_ref().map(ToString::to_string),
         );
         event.call_id = occurrence.call_id.clone();
-        vec![event]
+        event.call_only = true;
+        let observed = self.accumulator.snapshot().is_some_and(|overlay| {
+            overlay
+                .sites
+                .iter()
+                .any(|site| site.site.site == occurrence.at.site)
+        });
+        let mut events = vec![event];
+        if !observed {
+            events.push(self.event(
+                Some(occurrence.at.site.clone()),
+                status,
+                DisplayDelta::default(),
+                occurrence.code.as_ref().map(ToString::to_string),
+            ));
+        }
+        events
     }
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {
@@ -488,7 +533,9 @@ impl Overlay {
                 &operation.args,
             )
             .map_err(RunError::Invalid)?;
-            events.push(self.event(Some(node), RunStatus::Succeeded, delta, None));
+            let mut event = self.event(Some(node), RunStatus::Succeeded, delta, None);
+            event.call_only = true;
+            events.push(event);
         }
         Ok(events)
     }
@@ -556,18 +603,35 @@ impl Overlay {
         // The engine resumes the VM with a settled step's recorded output.
         // NodeCompleted identifies that logical call even after the bounded
         // effect summary stops carrying individual loop occurrences.
-        if let TraceLanguageExecutionPayload::Node {
-            at,
-            fact: TraceNodeFact::Completed {
-                call_id: Some(call),
-            },
-        } = &observation.execution.payload
-        {
-            self.completed_calls
-                .insert(call.to_string(), at.site.clone());
-        }
         self.accumulator.observe(observation)?;
         let mut events = self.changed();
+        if let TraceLanguageExecutionPayload::Node { at, fact } = &observation.execution.payload {
+            let call = match fact {
+                TraceNodeFact::Completed {
+                    call_id: Some(call),
+                } => {
+                    self.completed_calls
+                        .insert(call.to_string(), at.site.clone());
+                    Some((call, RunStatus::Succeeded, None))
+                }
+                TraceNodeFact::Failed {
+                    call_id: Some(call),
+                    failure,
+                } => Some((call, RunStatus::Failed, Some(failure.message().to_owned()))),
+                _ => None,
+            };
+            if let Some((call, status, error)) = call {
+                let mut event = self.event(
+                    Some(at.site.clone()),
+                    status,
+                    DisplayDelta::default(),
+                    error,
+                );
+                event.call_id = Some(call.clone());
+                event.call_only = true;
+                events.push(event);
+            }
+        }
         events.extend(self.deliver_display()?);
         Ok(events)
     }
@@ -643,5 +707,192 @@ impl CommandClient {
             .processes()
             .start(request, self.0.effect_host())
             .await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash::tracing::{
+        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceRuntimeScope,
+        TraceRuntimeSubject,
+    };
+    use lash::workflow::document::{DocumentId, EffectIdentity, TaskIdentity, Unit};
+    use lash::workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
+
+    fn overlay() -> Overlay {
+        Overlay {
+            accumulator: WorkflowExecutionOverlayAccumulator::default(),
+            process: lash::ProcessId::fixture("adapter"),
+            workflow_version: 1,
+            definition: DocumentId::from_bytes([1; 32]).to_string(),
+            shown: BTreeMap::new(),
+            sequence: 0,
+            display: DisplayState::default(),
+            completed_calls: BTreeMap::new(),
+            delivered: BTreeSet::new(),
+            host: Arc::new(crate::display::HostTools::default()),
+        }
+    }
+
+    fn observation(occurrence: u64, fact: TraceNodeFact) -> LanguageExecutionObservation {
+        LanguageExecutionObservation {
+            language: None,
+            observed_at_ms: occurrence * 10 + 1,
+            execution: TraceLanguageExecution {
+                event_key: format!("{occurrence}:{fact:?}"),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::none(),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: lash::ProcessId::fixture("adapter"),
+                    },
+                    document: WorkflowDocumentRef {
+                        document: DocumentId::from_bytes([1; 32]),
+                        entry: WorkflowDocumentEntry::Main,
+                    },
+                    entry_name: "main".into(),
+                    engine_execution_id: None,
+                    generation: None,
+                },
+                payload: TraceLanguageExecutionPayload::Node {
+                    at: EffectIdentity {
+                        task: TaskIdentity::Main,
+                        site: Site::new(Unit::Main, [0]),
+                        occurrence,
+                        loops: Vec::new(),
+                    },
+                    fact,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn a_process_success_does_not_invent_a_missing_occurrence_outcome() {
+        let mut overlay = overlay();
+        overlay
+            .language_observation(&observation(0, TraceNodeFact::Started { call_id: None }))
+            .unwrap();
+        overlay.accumulator.settle(WorkflowOverlaySettlement {
+            terminal: WorkflowOverlayTerminal::Completed,
+            occurred_at: None,
+        });
+        let events = overlay.changed();
+        assert_eq!(
+            serde_json::to_value(&events[0]).unwrap()["status"],
+            "incomplete"
+        );
+    }
+
+    #[test]
+    fn a_gap_retires_shown_state_and_tells_the_client_to_replace_its_view() {
+        let mut overlay = overlay();
+        overlay
+            .language_observation(&observation(0, TraceNodeFact::Started { call_id: None }))
+            .unwrap();
+        assert!(!overlay.shown.is_empty());
+        let events = overlay.reset_after_gap();
+        assert!(
+            overlay.shown.is_empty(),
+            "lost provisional statuses must not survive a gap"
+        );
+        assert_eq!(events.len(), 1);
+        let event = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(event["reset"], true);
+        assert!(
+            events[0].error.is_some(),
+            "the replacement must explain missing live evidence"
+        );
+    }
+
+    #[test]
+    fn live_call_data_continues_past_the_durable_summary_without_repainting_running_work() {
+        let mut overlay = overlay();
+        let mut running = observation(0, TraceNodeFact::Started { call_id: None });
+        if let TraceLanguageExecutionPayload::Node { at, .. } = &mut running.execution.payload {
+            at.task = TaskIdentity::Spawned(lash::workflow::document::SpawnIdentity {
+                parent: Arc::new(TaskIdentity::Main),
+                site: Site::new(Unit::Main, [1]),
+                occurrence: 0,
+            });
+        }
+        overlay.language_observation(&running).unwrap();
+        let mut last_durable = None;
+        for occurrence in 0..9 {
+            let call = lash::ToolCallId::fixture(&format!("call-{occurrence}"));
+            let events = overlay
+                .language_observation(&observation(
+                    occurrence,
+                    TraceNodeFact::Completed {
+                        call_id: Some(call.clone()),
+                    },
+                ))
+                .unwrap();
+            let event = events
+                .iter()
+                .find(|event| event.call_id.as_ref() == Some(&call))
+                .expect(
+                    "every observed call has inspector data even without a durable summary record",
+                );
+            assert_eq!(serde_json::to_value(event).unwrap()["callOnly"], true);
+            assert!(
+                events
+                    .iter()
+                    .filter(|event| serde_json::to_value(event).unwrap()["callOnly"] != true)
+                    .all(|event| event.status == RunStatus::Started),
+                "another in-flight occurrence keeps its running aggregate"
+            );
+            let durable = ProcessEffectOccurrence {
+                vocabulary_version: 1,
+                at: EffectIdentity {
+                    task: TaskIdentity::Main,
+                    site: Site::new(Unit::Main, [0]),
+                    occurrence,
+                    loops: Vec::new(),
+                },
+                operation: "fixture".into(),
+                outcome_class: ProcessEffectOutcomeClass::Success,
+                code: None,
+                call_id: Some(call),
+                replay_key: format!("call-{occurrence}"),
+            };
+            assert!(
+                overlay.effect(&durable).iter().all(|event| event.call_only),
+                "a durable completion must not repaint a concurrently running task"
+            );
+            last_durable = Some(durable);
+        }
+        let failed = lash::ToolCallId::fixture("failed-after-cap");
+        let events = overlay
+            .language_observation(&observation(
+                9,
+                TraceNodeFact::Failed {
+                    call_id: Some(failed.clone()),
+                    failure: lash::tracing::TraceLanguageExecutionFailure::Runtime {
+                        code: "fixture".into(),
+                        message: "failed".into(),
+                    },
+                },
+            ))
+            .unwrap();
+        let call = events
+            .iter()
+            .find(|event| event.call_id.as_ref() == Some(&failed))
+            .expect("failed calls also remain inspectable after the cap");
+        assert_eq!(call.status, RunStatus::Failed);
+        assert!(call.call_only);
+        assert!(!overlay.completed_calls.contains_key(&failed.to_string()));
+        overlay.accumulator.settle(WorkflowOverlaySettlement {
+            terminal: WorkflowOverlayTerminal::Completed,
+            occurred_at: None,
+        });
+        overlay.changed();
+        assert!(
+            overlay
+                .effect(&last_durable.unwrap())
+                .iter()
+                .all(|event| event.call_only),
+            "a durable success cannot replace another task's failed or incomplete aggregate"
+        );
     }
 }

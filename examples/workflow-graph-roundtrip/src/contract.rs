@@ -150,6 +150,7 @@ pub enum RunStatus {
     Succeeded,
     Waiting,
     Failed,
+    Incomplete,
 }
 
 /// Host presentation of a retained tool call. Absence is unavailable evidence.
@@ -169,6 +170,12 @@ pub struct RunEvent {
     /// a site of that document.
     pub definition: String,
     pub sequence: u64,
+    /// Replace the client's provisional observation state before applying this event.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reset: bool,
+    /// Inspector or display data that does not update the site's aggregate status.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub call_only: bool,
     /// The site the event is about; absent for the run as a whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<Site>,
