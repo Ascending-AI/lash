@@ -13,15 +13,23 @@
 
 mod diagnostics;
 mod exceptions;
+mod generated;
 mod lower;
 mod package;
+mod printer;
 mod scope;
 
 #[cfg(test)]
 mod tests;
 
-pub use diagnostics::Code;
+pub use diagnostics::{Code, GeneratedSourceCode};
+pub use generated::compile_generated;
+pub use lash_kernel_dialect::{
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
+    SourceSite,
+};
 pub use package::define_helpers;
+pub use printer::print;
 
 use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Package, Span};
 
@@ -119,12 +127,12 @@ impl FrontEnd for Python {
 }
 
 /// The dialect as an embedder installs it: the front end and the helpers
-/// in `functions`, in registration order. It ships no printer yet.
+/// in `functions`, in registration order, with its exact generated-source printer.
 pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
     Package {
         dialect: DIALECT.to_string(),
         front_end: Box::new(Python::default()),
-        printer: None,
+        printer: Some(Box::new(Python::default())),
         function_values: Some(lash_kernel_dialect::FunctionValues::Bare),
         functions,
     }

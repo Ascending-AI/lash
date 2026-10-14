@@ -1,6 +1,6 @@
 # lash-dialect-python
 
-A Python front end for the lash kernel. `lower(source, environment)` turns a
+A Python front end and exact generated-source codec for the lash kernel. `lower(source, environment)` turns a
 subset of Python into a kernel document; the kernel machine runs it. The
 crate depends on `lash-kernel-doc` and `lash-kernel-dialect` and on nothing
 else of lash, and the kernel was not changed for it: no form, value kind or
@@ -204,3 +204,12 @@ refusals and exclusions are reported separately.
 
 `deviations.md` lists where the dialect is deliberately not Python, with a
 law for each entry.
+
+## Exact generated source
+
+`print(document, PrintOptions::default())` emits Python generated-source v1;
+`compile_generated(source, GeneratedSourceLimits::default())` reconstructs
+identical canonical document bytes without authored lowering or library lookup.
+Maps are optional and default off. Printing performs no compilation or admission.
+The [generic format and paired inventory](../../docs/design/generated-source-python.md)
+document indentation, explicit empty blocks, exact literals, aliases and limits.

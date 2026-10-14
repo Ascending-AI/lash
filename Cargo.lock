@@ -1983,7 +1983,13 @@ dependencies = [
 name = "lash-dialect-python"
 version = "0.0.0-dev"
 dependencies = [
+ "arbitrary",
+ "lash-dialect-typescript",
+ "lash-ext-date-ecma",
+ "lash-ext-regex-ecma",
+ "lash-ext-url-whatwg",
  "lash-kernel-check",
+ "lash-kernel-conformance",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
@@ -1993,6 +1999,7 @@ dependencies = [
  "ruff_text_size",
  "serde",
  "serde_json",
+ "unicode-ident",
 ]
 
 [[package]]

@@ -114,3 +114,22 @@ pub(crate) fn unplaced(code: Code, message: impl Into<String>) -> Diagnostic {
         repairs: Vec::new(),
     }
 }
+
+/// Refusals at the independent generated-workflow decoder boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GeneratedSourceCode {
+    GeneratedSourceFormat,
+    GeneratedSourceBytes,
+    GeneratedSourceDepth,
+    InvalidGeneratedSource,
+}
+impl GeneratedSourceCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GeneratedSourceFormat => "PY_GENERATED_SOURCE_FORMAT",
+            Self::GeneratedSourceBytes => "PY_GENERATED_SOURCE_BYTES",
+            Self::GeneratedSourceDepth => "PY_GENERATED_SOURCE_DEPTH",
+            Self::InvalidGeneratedSource => "PY_INVALID_GENERATED_SOURCE",
+        }
+    }
+}

@@ -63107,7 +63107,13 @@
     {
       "declared_features": [],
       "dependencies": [
+        "arbitrary",
+        "lash-dialect-typescript",
+        "lash-ext-date-ecma",
+        "lash-ext-regex-ecma",
+        "lash-ext-url-whatwg",
         "lash-kernel-check",
+        "lash-kernel-conformance",
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-lib",
@@ -63116,7 +63122,8 @@
         "ruff_python_parser",
         "ruff_text_size",
         "serde",
-        "serde_json"
+        "serde_json",
+        "unicode-ident"
       ],
       "doc": "//crates/lash-dialect-python:lash-dialect-python__doc",
       "manifest": "crates/lash-dialect-python/Cargo.toml",

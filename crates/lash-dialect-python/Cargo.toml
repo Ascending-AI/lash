@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+unicode-ident = "1"
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 ruff_python_ast = { workspace = true }
@@ -30,6 +31,12 @@ serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+lash-ext-date-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
+lash-ext-regex-ecma = { workspace = true }
+arbitrary = "1"
+lash-kernel-conformance = { workspace = true }
+lash-dialect-typescript = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-kernel-vm = { workspace = true }

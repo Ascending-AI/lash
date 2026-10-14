@@ -105,7 +105,13 @@ PACKAGE_DEPS = {
     "lash-dialect-python": {
         "build": {},
         "dev": {
+            "arbitrary": "//third-party/rust:p0012",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
@@ -116,7 +122,8 @@ PACKAGE_DEPS = {
             "ruff_python_parser": "//third-party/rust:p0285",
             "ruff_text_size": "//third-party/rust:p0288",
             "serde": "//third-party/rust:p0313",
-            "serde_json": "//third-party/rust:p0318"
+            "serde_json": "//third-party/rust:p0318",
+            "unicode_ident": "//third-party/rust:p0407"
         }
     },
     "lash-dialect-typescript": {
