@@ -55,9 +55,15 @@ impl std::fmt::Display for PluginLawReport {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluginCertificationVerdict {
+    /// Every callback law was exercised and passed.
     Full,
+    /// At least one callback law was unavailable.
     Partial,
+    /// At least one callback law failed.
     Failed,
+    /// The factory's inventory declares no callbacks for this battery to certify.
+    /// Inventory admission alone proves no execution, replay or reopen behavior.
+    NoCertifiableContributions,
 }
 #[derive(Clone, Debug)]
 pub struct PluginCertification {
@@ -72,11 +78,13 @@ impl PluginCertification {
             .any(|report| matches!(report.result, PluginLawResult::Failed { .. }))
         {
             PluginCertificationVerdict::Failed
-        } else if self.reports.is_empty()
-            || self
-                .reports
-                .iter()
-                .any(|report| matches!(report.result, PluginLawResult::Unavailable { .. }))
+        } else if self.reports.is_empty() {
+            // The battery emits reports for every callback, including unavailable ones.
+            PluginCertificationVerdict::NoCertifiableContributions
+        } else if self
+            .reports
+            .iter()
+            .any(|report| matches!(report.result, PluginLawResult::Unavailable { .. }))
         {
             PluginCertificationVerdict::Partial
         } else {

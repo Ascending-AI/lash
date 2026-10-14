@@ -47,8 +47,12 @@ and reports each of these laws for each callback:
 A result is passed, failed with a readable message, or unavailable with a
 typed reason. The verdict is `Failed` if any law fails, `Partial` if evidence
 is unavailable, and `Full` when every reported law is exercised and passes.
+A factory whose inventory has no certifiable callbacks, such as a prompt-only
+plugin, receives `NoCertifiableContributions`. Its inventory passed admission,
+but the battery proves no prompt rendering, replay or reopen behavior.
 A host decides whether partial evidence is sufficient. An unexecuted callback
-never receives an execution-law pass.
+never receives an execution-law pass; a deferred callback without an author
+scenario remains `Partial`.
 
 `PluginScenario` supplies typed author scenarios for callbacks requiring
 specific tool inputs, history, services or credentials. Register scenarios

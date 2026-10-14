@@ -51,6 +51,38 @@ fn no_failed_law(report: &PluginCertification) {
     let failures: Vec<_> = report.failures().map(ToString::to_string).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+/// NO-CERTIFIABLE-CONTRIBUTIONS: prompt inventory has no callback laws to run.
+#[tokio::test]
+async fn prompt_only_plugins_have_no_certifiable_contributions() {
+    let mut entries = PluginRegistrar::new("prompt-only");
+    entries
+        .prompt()
+        .section(
+            PromptSectionSpec::new(
+                lash::prompt::PromptSectionKey::new("instructions").unwrap(),
+                lash::prompt::PromptPlacement::InitialInstructions,
+            ),
+            |_, _| {
+                Ok(Arc::new(|_: &PromptInput<'_>| {
+                    Ok(SectionText::text("Answer concisely."))
+                }))
+            },
+        )
+        .unwrap();
+    let factory = Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("prompt-only"),
+        PluginRecipe::from_registrar("prompt-only", entries),
+    ));
+    let report = certify_plugin(factory).await.unwrap();
+    assert!(report.inventory.entries.iter().any(|entry| {
+        entry.key.owner() == "prompt-only" && entry.kind == ContributionKind::PromptSection
+    }));
+    assert!(report.reports.is_empty());
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::NoCertifiableContributions
+    );
+}
 #[tokio::test]
 async fn two_tools_with_recorded_session_config_are_certified() {
     let factory = examples::greetings().unwrap();

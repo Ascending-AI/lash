@@ -818,13 +818,20 @@ pub trait PluginMetadata {
     fn plugin_declaration(&self) -> PluginDeclaration;
 }
 
-/// # Cheap-build / stateful-factory contract
+/// Declare a recipe once; bind session owners cheaply.
 ///
-/// `build(ctx)` **must be cheap**. It runs on the hot path every time
-/// a new session is created (children and forks included)
-/// and any latency here is paid per session.
+/// [`recipe`](Self::recipe), taking `self: Arc<Self>`, declares contributions
+/// and their binders in a [`PluginRecipe`](super::PluginRecipe) before a session
+/// owner exists. The recipe also carries configuration, host extensions and
+/// process engines. Use [`PluginRecipe::bound`](super::PluginRecipe::bound)
+/// for plain session data, [`PluginRecipe::new`](super::PluginRecipe::new) for
+/// a [`SessionPlugin`] with a readiness callback, or
+/// [`PluginRecipe::from_registrar`](super::PluginRecipe::from_registrar) when
+/// entries need no session-local data.
 ///
-/// Specifically, `build` must **not**:
+/// Owner and contribution binders **must be cheap**: the recipe binds them
+/// whenever an owner is materialized, including creation, children, forks and
+/// reopen. Binders must not:
 /// - perform any I/O (disk reads, HTTP calls, DB queries),
 /// - compile regexes, templates, or schemas,
 /// - open network connections or initialize connection pools,
@@ -832,13 +839,10 @@ pub trait PluginMetadata {
 /// - block the current thread for non-trivial work.
 ///
 /// Expensive state belongs on the `PluginFactory` struct itself,
-/// wrapped in `Arc` so it can be cheaply cloned into per-session
-/// closures. The `PluginFactory` is constructed once by the embedder
-/// and held in the `RuntimeEnvironment`; its fields outlive every
-/// session. Hooks captured into a `PluginSpec` are closures that clone
-/// the `Arc`s off `self` and reference the shared state directly, so
-/// every session sees the same pool / cache / compiled artifact without
-/// rebuilding it. Factories that own host-visible resources also
+/// wrapped in `Arc` so recipe binders can cheaply clone it into session owners
+/// and contributions. The embedder constructs the factory once; its shared
+/// pools, caches and compiled artifacts outlive individual owners and are
+/// reused on reopen. Factories that own host-visible resources also
 /// participate in the explicit post-intake lifecycle through
 /// [`shutdown`](Self::shutdown).
 #[async_trait::async_trait]
