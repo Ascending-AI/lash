@@ -28,9 +28,9 @@ before-turn decisions (§6). Request templates with live attachment slots
 (§6, WIRE-SLOTS) are on main under ADR 0135: admission records literals,
 attachment refs, acceptance and codecs, and the response contract. Each
 attempt fills slots afresh; resolved delivery values are never admitted.
-Amended by FIG-5946 (§5): a call's request lives only until the call
-settles, its snapshot until the explicit retention, and a record binds only
-the text bodies the store does not hold.
+A call's request lives only until the call settles, its snapshot until the
+explicit retention, and a record binds only the text bodies the store does
+not hold (§5).
 
 ## Context
 

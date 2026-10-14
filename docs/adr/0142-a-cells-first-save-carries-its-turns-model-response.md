@@ -6,21 +6,12 @@ Recovery and external-effect guarantees follow [What survives a crash](../../REA
 
 Accepted.
 
-## Supersedes
-
-This decision supersedes FIG-6108's earlier ADR 0142, which bounded a
-whole-node crash's possible provider resend to the time before the first
-save or standalone `model.done` committed the held response. The first-save
-hold and committed-tool recovery guarantees remain. This change commits each
-provider outcome first as `model.answer`, so a crash after that receipt is
-acknowledged replays the response from the receipt; only a crash before the
-receipt commits can require another provider call.
-
 ## Context
 
 A model response that asks for a code cell is committed raw, as the call's
 receipt, under `model.answer` before any response hook runs or the cell
-starts (ADR 0132 §4). Its derived checkpoint, the turn advanced past the
+starts (ADR 0132 §4); only a crash before that receipt commits can require
+another provider call. Its derived checkpoint, the turn advanced past the
 call, still needs a commit. That commit can ride the cell's first save
 instead of standing alone before execution. This saves one owner commit in
 a one-park cell turn.

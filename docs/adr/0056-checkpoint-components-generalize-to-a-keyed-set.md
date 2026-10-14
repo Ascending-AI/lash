@@ -41,7 +41,9 @@ shared-graph boundary.
 
 ### Granularity and encoding
 
-Nodes use the canonical binary grammar of FIG-5887 §2. A text or byte token
+Nodes use the canonical binary grammar of
+[`checkpoint_graph::node`](../../crates/lash-core-store/src/checkpoint_graph/node.rs)
+(FIG-5887). A text or byte token
 over `checkpoint_graph::INLINE_TOKEN_MAX` (256 bytes, tag and length
 included) becomes its own leaf node, chunked under an index when it exceeds
 one leaf. A large value is therefore written once: a later capture whose

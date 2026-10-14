@@ -121,14 +121,14 @@ Source: `crates/lash-core/src/runtime/durable_queue.rs:104`.
 
 ## A run serves its recorded tool surface
 
-Amended by FIG-6074: tool state, tool loss reports, the tool-source policy
-and host tool administration are deleted. An open builds no capabilities
+Tool state, tool loss reports, the tool-source policy and host tool
+administration are deleted (FIG-6074). An open builds no capabilities
 (FIG-4857), and a run records the tool surface it offers when it prepares:
 each tool with the provider that serves it, its dispatch surface and the
 run's `ToolSelection` of each provider. A resume serves the prompt from that
 record and never rebuilds it from the live catalog. Drift is judged per
 call, against the recorded tool under its provider's key
-(`ToolSurfaceDrift::judge`): a call to a tool its provider no longer serves,
+(`ToolSurfaceDrift::judge`): a call to a tool its provider does not serve,
 or serves with another dispatch surface, parks typed (`ParkReason::BindingDrift`);
 a call to an undrifted tool runs. Which tools a provider offers is that
 provider's own config, changed by its owner's typed command or stated for

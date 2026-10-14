@@ -61,7 +61,7 @@ justify its reclamation.
 
 | Reference-edge class | Owner | Reclaim trigger |
 | --- | --- | --- |
-| `blob_edges` / `lash_blob_edges` | The graph node whose child table names the edge (a session manifest and everything it reaches) | A node's edges are its child table, written with it and cascaded when collection deletes it. Collection marks from every complete root source and deletes only unreachable nodes, outgoing edges before nodes (FIG-5887 §7, §8). |
+| `blob_edges` / `lash_blob_edges` | The graph node whose child table names the edge (a session manifest and everything it reaches) | A node's edges are its child table, written with it and cascaded when collection deletes it. Collection marks from every complete root source and deletes only unreachable nodes, outgoing edges before nodes ([the graph domain](../../crates/lash-store-sql/src/durable/graph.rs), FIG-5887). |
 | Artifact referrer edge | The exact frame, process, start, execution or host pin holding it | Severance by that referrer; artifact cleanup can free the descriptor after the last edge disappears. An id stored without an edge retains nothing. |
 
 ### 2. Terminal-before-reclaimable

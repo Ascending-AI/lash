@@ -2,11 +2,12 @@
 
 ## Status
 
-Accepted. Supersedes the engine transport decisions in
+Accepted. The engine transport decision of
 [ADR 0002](0002-session-observation-uses-cursors-and-bounded-live-replay.md),
 [ADR 0079](0079-one-promised-package-facade-owns-the-api.md),
 [ADR 0100](0100-the-run-observation-contract.md), and
-[ADR 0115, section 4](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md#4-host-wire-contracts).
+[ADR 0115, section 4](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md#4-host-wire-contracts)
+lives here.
 
 ## Context
 
