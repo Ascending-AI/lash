@@ -48,6 +48,8 @@ pub enum CertificationUnavailable {
     AttributionNotRecorded,
     NotRecordedAtCut,
     CounterUnavailable,
+    /// The callback can publish state, but the scenario left its namespace empty.
+    ScenarioDidNotPublish,
 }
 /// A law has no subject in this exercised contribution.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -290,8 +292,24 @@ pub async fn certify_plugin_with(
             .get(factory.id())
             .is_none_or(|namespace| namespace.values.is_empty())
         {
-            PluginLawResult::NotApplicable {
-                reason: CertificationNotApplicable::NoPublishedState,
+            let has_reducer = inventory.entries.iter().any(|entry| {
+                entry.key.owner() == factory.id()
+                    && entry.kind == crate::plugins::ContributionKind::StateReducer
+            });
+            // Resolver entries are decision-only. A provider's actual tool
+            // body can publish commands even though its slot is DecisionOnly.
+            let tool_body = slot == CallbackSlot::ToolProvider
+                && (!harness.deferred_resolution_counts().contains_key(&callback)
+                    || recorded.1 > 0);
+            if slot.state_authority() == crate::plugins::StateAuthority::Commands
+                || tool_body
+                || has_reducer
+            {
+                unavailable(CertificationUnavailable::ScenarioDidNotPublish)
+            } else {
+                PluginLawResult::NotApplicable {
+                    reason: CertificationNotApplicable::NoPublishedState,
+                }
             }
         } else {
             PluginLawResult::Passed
@@ -480,10 +498,16 @@ async fn unserved_law(
         Ok(PluginLawResult::Passed)
     }
 }
+// Keep cell report addresses across removal, rather than materializing a
+// report before the crash and then again for every call it contains.
+enum RecordedDecision {
+    Direct(DecisionRef),
+    DeferredReport(RecordLocator),
+}
 async fn recorded_decisions(
     harness: &PluginHarness,
     callback: &PluginCallbackIdentity,
-) -> Result<Vec<DecisionRef>, PluginHarnessError> {
+) -> Result<Vec<RecordedDecision>, PluginHarnessError> {
     let Some(run) = harness.session().await?.current_turn().await? else {
         return Ok(Vec::new());
     };
@@ -496,14 +520,14 @@ async fn recorded_decisions(
     {
         for (ordinal, contribution) in phase.before_turn.iter().enumerate() {
             if contribution.plugin_id == callback.owner {
-                decisions.push(DecisionRef::Callback {
+                decisions.push(RecordedDecision::Direct(DecisionRef::Callback {
                     record: RecordLocator::TurnPhase {
                         session: harness.session.clone(),
                         run: run.clone(),
                     },
                     ordinal: u32::try_from(ordinal)
                         .map_err(|error| PluginHarnessError::Worker(error.to_string()))?,
-                });
+                }));
             }
         }
     }
@@ -523,18 +547,8 @@ async fn recorded_decisions(
                 run: row.run,
                 ordinal: row.ordinal,
             };
-            for (resolver, call) in harness
-                .core()?
-                .plugin_diagnostics()
-                .deferred_selections(&record)
-                .await?
-            {
-                if resolver == *callback {
-                    decisions.push(DecisionRef::DeferredTool {
-                        record: record.clone(),
-                        call,
-                    });
-                }
+            if harness.deferred_resolution_counts().contains_key(callback) {
+                decisions.push(RecordedDecision::DeferredReport(record));
             }
             continue;
         }
@@ -556,7 +570,7 @@ async fn recorded_decisions(
                 }
             });
             if let Some(selection) = selection {
-                decisions.push(DecisionRef::Tool {
+                decisions.push(RecordedDecision::Direct(DecisionRef::Tool {
                     record: RecordLocator::RunFact {
                         owner: owner.clone(),
                         run: row.run,
@@ -564,7 +578,7 @@ async fn recorded_decisions(
                     },
                     call,
                     selection,
-                });
+                }));
             }
         }
     }
@@ -573,61 +587,268 @@ async fn recorded_decisions(
 async fn attribution_law(
     harness: &PluginHarness,
     callback: &PluginCallbackIdentity,
-    decisions: &[DecisionRef],
+    decisions: &[RecordedDecision],
 ) -> Result<PluginLawResult, PluginHarnessError> {
     if decisions.is_empty() {
         return Ok(unavailable(
             CertificationUnavailable::AttributionNotRecorded,
         ));
     }
+    let diagnostics = harness.core()?.plugin_diagnostics();
+    let mut evaluated = false;
     for decision in decisions {
-        let result = harness
-            .core()?
-            .plugin_diagnostics()
-            .attribute(decision)
-            .await?;
-        let matches = match result.evidence {
-            Evidence::Recorded {
-                value: RecordedAttribution::Binding { selected, .. },
-                ..
-            } => selected == *callback,
-            Evidence::Recorded {
-                value: RecordedAttribution::DeferredTool { resolver, .. },
-                ..
-            } => resolver == *callback,
-            Evidence::Recorded {
-                value: RecordedAttribution::Presentation(binding),
-                ..
-            } => binding.presenter.as_ref() == Some(callback) || binding.steps.contains(callback),
-            // Owner attribution records no callback key, so cannot certify
-            // per-callback attribution even if this owner had only one hook.
-            Evidence::Recorded {
-                value: RecordedAttribution::Owner(_),
-                ..
-            } => {
-                return Ok(unavailable(
-                    CertificationUnavailable::AttributionNotRecorded,
-                ));
-            }
-            Evidence::Unavailable { reason } => {
+        let attributions = match decision {
+            RecordedDecision::Direct(decision) => vec![diagnostics.attribute(decision).await?],
+            RecordedDecision::DeferredReport(record) => diagnostics
+                .deferred_attributions(record)
+                .await?
+                .into_iter()
+                .filter(|result| matches!(&result.evidence,
+                    Evidence::Recorded { value: RecordedAttribution::DeferredTool { resolver, .. }, .. }
+                        if resolver == callback))
+                .collect(),
+        };
+        for result in attributions {
+            evaluated = true;
+            let decision = &result.decision;
+            let matches = match result.evidence {
+                Evidence::Recorded {
+                    value: RecordedAttribution::Binding { selected, .. },
+                    ..
+                } => selected == *callback,
+                Evidence::Recorded {
+                    value: RecordedAttribution::DeferredTool { resolver, .. },
+                    ..
+                } => resolver == *callback,
+                Evidence::Recorded {
+                    value: RecordedAttribution::Presentation(binding),
+                    ..
+                } => {
+                    binding.presenter.as_ref() == Some(callback) || binding.steps.contains(callback)
+                }
+                // Owner attribution records no callback key, so cannot certify
+                // per-callback attribution even if this owner had only one hook.
+                Evidence::Recorded {
+                    value: RecordedAttribution::Owner(_),
+                    ..
+                } => {
+                    return Ok(unavailable(
+                        CertificationUnavailable::AttributionNotRecorded,
+                    ));
+                }
+                Evidence::Unavailable { reason } => {
+                    return Ok(PluginLawResult::Failed {
+                        message: format!(
+                            "a retained decision became unavailable after removal: {reason:?}; {decision:?}"
+                        ),
+                    });
+                }
+                _ => false,
+            };
+            if !matches
+                || result
+                    .installed_now
+                    .iter()
+                    .any(|entry| entry.key.owner() == callback.owner)
+            {
                 return Ok(PluginLawResult::Failed {
                     message: format!(
-                        "a retained decision became unavailable after removal: {reason:?}; {decision:?}"
+                        "recorded binding lost its callback after removal: {decision:?}"
                     ),
                 });
             }
-            _ => false,
-        };
-        if !matches
-            || result
-                .installed_now
-                .iter()
-                .any(|entry| entry.key.owner() == callback.owner)
-        {
-            return Ok(PluginLawResult::Failed {
-                message: format!("recorded binding lost its callback after removal: {decision:?}"),
-            });
         }
     }
-    Ok(PluginLawResult::Passed)
+    Ok(if evaluated {
+        PluginLawResult::Passed
+    } else {
+        unavailable(CertificationUnavailable::AttributionNotRecorded)
+    })
+}
+
+#[cfg(all(test, feature = "rlm"))]
+mod tests {
+    use crate as lash;
+    use lash::plugins::*;
+    use lash::testing::*;
+    use lash::tools::*;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Resolver {
+        empty: bool,
+        resolutions: Arc<AtomicUsize>,
+        definition: ToolDefinition,
+    }
+    #[lash::async_trait]
+    impl ToolProvider for Resolver {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("the resolver is not an executable")
+        }
+    }
+    fn definition(id: &str, name: &str) -> Result<ToolDefinition, PluginError> {
+        ToolDefinition::raw(
+            id,
+            name,
+            name,
+            serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+            serde_json::json!({"type":"string"}),
+        )
+        .map(|draft| {
+            draft
+                .with_execution(std::time::Duration::from_secs(1))
+                .with_tool_binding(ToolBinding::new(["tools"], name))
+        })
+        .map_err(|error| PluginError::Registration(error.to_string()))
+    }
+    #[lash::async_trait]
+    impl DeferredToolProvider for Resolver {
+        async fn resolve(
+            &self,
+            _: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, DeferredOutcome> {
+            self.resolutions.fetch_add(1, Ordering::SeqCst);
+            paths
+                .iter()
+                .filter(|path| !self.empty && **path == "tools.send_email")
+                .map(|path| {
+                    (
+                        (*path).into(),
+                        DeferredOutcome::Resolved {
+                            provider: ToolProviderHandle::new(
+                                RegistryKind::Session,
+                                "host",
+                                lash::tool_provider_key!("tools"),
+                            ),
+                            definition: self.definition.clone(),
+                            binding: None,
+                        },
+                    )
+                })
+                .collect()
+        }
+    }
+    struct Host;
+    #[lash::async_trait]
+    impl ToolProvider for Host {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(vec![definition("host:lookup", "lookup")?.manifest])
+        }
+        fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            if name != "lookup" {
+                return None;
+            }
+            Some(Arc::new(definition("host:lookup", "lookup").ok()?.contract))
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            ToolOutcome::ok(serde_json::json!("ok")).into()
+        }
+    }
+    struct Scenario {
+        code: &'static str,
+    }
+    #[lash::async_trait]
+    impl PluginScenario for Scenario {
+        fn callback(&self) -> PluginCallbackIdentity {
+            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+        }
+        async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
+            let protocol: Arc<dyn PluginFactory> = Arc::new(
+                lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::NativeTool)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    lash::rlm::CellDialect::typescript(),
+                )
+                .with_worker_service(lash::vm::WorkerService::default()),
+            );
+            harness.install_protocol(protocol).await?;
+            harness
+                .install(Arc::new(StaticPluginFactory::new(
+                    PluginDeclaration::initial("host"),
+                    PluginSpec::new()
+                        .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host)),
+                )))
+                .await?;
+            harness.create(PluginOptions::default()).await
+        }
+        fn input(&self) -> lash::TurnInput {
+            lash::TurnInput::text("exercise the cell")
+        }
+        fn responses(&self) -> Vec<lash::provider::LlmResponse> {
+            vec![
+                lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::ToolCall {
+                        call_id: "certification-cell".into(),
+                        tool_name: "execute_code".into(),
+                        input_json: serde_json::json!({"code": self.code}).to_string(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                },
+                text_response("done"),
+            ]
+        }
+        fn pause_after_responses(&self) -> usize {
+            1
+        }
+    }
+    fn factory(
+        empty: bool,
+        resolutions: Arc<AtomicUsize>,
+    ) -> Result<Arc<dyn PluginFactory>, PluginError> {
+        Ok(Arc::new(StaticPluginFactory::new(
+            PluginDeclaration::initial("resolver"),
+            PluginSpec::new().with_deferred_provider(
+                lash::tool_provider_key!("deferred"),
+                Arc::new(Resolver {
+                    empty,
+                    resolutions,
+                    definition: definition("remote:send_email", "send_email")?,
+                }),
+            ),
+        )))
+    }
+
+    /// CELL-REPORT-DECODE-IS-LINEAR: attribution after factory removal reads
+    /// one report once, including a static call and three deferred calls.
+    #[tokio::test]
+    async fn certification_decodes_each_cell_report_once() {
+        let decoded = Arc::new(AtomicUsize::new(0));
+        let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
+            code: "await tools.lookup({}); await tools.send_email({}); await tools.send_email({}); await tools.send_email({});",
+        });
+        let report = crate::plugin_diagnostics::CELL_REPORT_DECODES
+            .scope(
+                Arc::clone(&decoded),
+                certify_plugin_with(
+                    factory(false, Arc::new(AtomicUsize::new(0))).unwrap(),
+                    HostPolicy::standard(),
+                    &[scenario],
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            report.verdict(),
+            PluginCertificationVerdict::Full,
+            "{:#?}",
+            report.reports
+        );
+        assert_eq!(
+            decoded.load(Ordering::SeqCst),
+            1,
+            "one immutable report must be decoded once after removal"
+        );
+    }
 }

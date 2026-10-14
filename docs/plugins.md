@@ -49,9 +49,12 @@ An executed law is `Passed` or `Failed` with a readable message.
 `Unavailable` means applicable evidence or author input is missing. The verdict
 is `Failed` if any law fails, `Partial` if an applicable law is unavailable,
 and `Full` when every applicable law is exercised and passes. An exercised
-provider with no published values receives
-`NotApplicable { reason: CertificationNotApplicable::NoPublishedState }` for
-the state law, after verifying that its namespace stayed empty on reopen.
+callback that can publish state needs a scenario that publishes values:
+an empty namespace yields `Unavailable { reason:
+CertificationUnavailable::ScenarioDidNotPublish }`. Only a decision-only
+contribution that ran no tool body and whose factory declares no state reducer
+receives `NotApplicable { reason: CertificationNotApplicable::NoPublishedState }`,
+after verifying that its namespace stayed empty on reopen.
 A factory whose inventory has no certifiable callbacks, such as a prompt-only
 plugin, receives `NoCertifiableContributions`. Its inventory passed admission,
 but the battery proves no prompt rendering, replay or reopen behavior.

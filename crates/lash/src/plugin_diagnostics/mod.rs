@@ -248,3 +248,8 @@ impl PluginDiagnostics {
         })
     }
 }
+
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static CELL_REPORT_DECODES: Arc<std::sync::atomic::AtomicUsize>;
+}

@@ -217,6 +217,15 @@ impl PluginDiagnostics {
                 )
             }
         };
+        Ok(self.observe_attribution(decision, evidence, kind))
+    }
+
+    fn observe_attribution(
+        &self,
+        decision: &DecisionRef,
+        evidence: Evidence<RecordedAttribution>,
+        kind: crate::plugins::RegistryKind,
+    ) -> DecisionAttribution {
         let recorded = match &evidence {
             Evidence::Recorded { value, .. } | Evidence::Partial { value, .. } => Some(value),
             Evidence::Unavailable { .. } => None,
@@ -229,11 +238,37 @@ impl PluginDiagnostics {
                 .collect(),
             _ => Vec::new(),
         };
-        Ok(DecisionAttribution {
+        DecisionAttribution {
             decision: decision.clone(),
             evidence,
             installed_now,
-        })
+        }
+    }
+
+    /// Observe all resolver selections of one immutable report in one read.
+    pub(crate) async fn deferred_attributions(
+        &self,
+        record: &RecordLocator,
+    ) -> Result<Vec<DecisionAttribution>, DiagnosticError> {
+        Ok(self
+            .deferred_selections(record)
+            .await?
+            .into_iter()
+            .map(|(resolver, call)| {
+                let decision = DecisionRef::DeferredTool {
+                    record: record.clone(),
+                    call: call.clone(),
+                };
+                self.observe_attribution(
+                    &decision,
+                    Evidence::Recorded {
+                        source: record.clone(),
+                        value: RecordedAttribution::DeferredTool { resolver, call },
+                    },
+                    crate::plugins::RegistryKind::Session,
+                )
+            })
+            .collect())
     }
 }
 fn matches_recorded(key: &ContributionKey, record: &RecordedAttribution) -> bool {
@@ -439,6 +474,20 @@ fn decode_expiry_checks<V: serde::de::DeserializeOwned + lash_core::tool_run::Ra
     Ok(checks)
 }
 
+// Cell reports and catalogue keys retain model-facing names, never ToolIds.
+// Construct this identity only from those two typed records: a ToolId cannot
+// participate in the membership comparison by exposing its string spelling.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct RecordedToolName<'a>(&'a str);
+impl<'a> RecordedToolName<'a> {
+    fn catalogue(entry: &'a crate::tools::SurfaceEntry) -> Self {
+        Self(&entry.definition.manifest.name)
+    }
+    fn call(record: &'a lash_core::ToolCallRecord) -> Self {
+        Self(&record.tool)
+    }
+}
+
 impl PluginDiagnostics {
     /// Join the retained resolver authority to completed calls outside its
     /// catalogue. S6 admits such cell calls only through deferred grants; the
@@ -483,17 +532,22 @@ impl PluginDiagnostics {
         else {
             return Ok(Vec::new());
         };
-        let calls = lash_core::cell_report_of(&facts, row, &self.core.transcript_decoders())
+        #[cfg(test)]
+        let _ = super::CELL_REPORT_DECODES.try_with(|count| {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let calls = tracing::debug_span!("plugin_diagnostics.cell_report", ?record)
+            .in_scope(|| lash_core::cell_report_of(&facts, row, &self.core.transcript_decoders()))
             .map_err(lash_core::durable_port::DurableError::Graph)?
             .unwrap_or_default();
+        let catalogue: BTreeSet<_> = surface
+            .tools()
+            .values()
+            .map(RecordedToolName::catalogue)
+            .collect();
         Ok(calls
             .into_iter()
-            .filter(|call| {
-                !surface
-                    .tools()
-                    .values()
-                    .any(|entry| entry.tool().as_str() == call.tool)
-            })
+            .filter(|call| !catalogue.contains(&RecordedToolName::call(call)))
             .map(|call| (resolver.callback_identity(), call.call_id))
             .collect())
     }

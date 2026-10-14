@@ -96,7 +96,17 @@ async fn two_tools_with_recorded_session_config_are_certified() {
         .await
         .unwrap();
     no_failed_law(&report);
-    assert_eq!(report.verdict(), PluginCertificationVerdict::Full);
+    assert_eq!(report.verdict(), PluginCertificationVerdict::Partial);
+    assert!(
+        report
+            .reports
+            .iter()
+            .any(|report| report.law == PluginLaw::StateSurvivesReopen
+                && report.result
+                    == PluginLawResult::Unavailable {
+                        reason: CertificationUnavailable::ScenarioDidNotPublish,
+                    })
+    );
     assert!(report.reports.iter().any(|report| report.law
         == PluginLaw::ReplayInvokesNoRecordedCallback
         && report.result == PluginLawResult::Passed));
@@ -578,5 +588,254 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
                     == PluginLawResult::NotApplicable {
                         reason: CertificationNotApplicable::NoPublishedState
                     })
+    );
+}
+
+#[cfg(feature = "rlm")]
+mod deferred_laws {
+    use super::*;
+    use lash::tools::*;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Resolver {
+        empty: bool,
+        resolutions: Arc<AtomicUsize>,
+        definition: ToolDefinition,
+    }
+    #[lash::async_trait]
+    impl ToolProvider for Resolver {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("the resolver is not an executable")
+        }
+    }
+    fn definition(id: &str, name: &str) -> Result<ToolDefinition, PluginError> {
+        ToolDefinition::raw(
+            id,
+            name,
+            name,
+            serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+            serde_json::json!({"type":"string"}),
+        )
+        .map(|draft| {
+            draft
+                .with_execution(std::time::Duration::from_secs(1))
+                .with_tool_binding(ToolBinding::new(["tools"], name))
+        })
+        .map_err(|error| PluginError::Registration(error.to_string()))
+    }
+    #[lash::async_trait]
+    impl DeferredToolProvider for Resolver {
+        async fn resolve(
+            &self,
+            _: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, DeferredOutcome> {
+            self.resolutions.fetch_add(1, Ordering::SeqCst);
+            paths
+                .iter()
+                .filter(|path| !self.empty && **path == "tools.send_email")
+                .map(|path| {
+                    (
+                        (*path).into(),
+                        DeferredOutcome::Resolved {
+                            provider: ToolProviderHandle::new(
+                                RegistryKind::Session,
+                                "host",
+                                lash::tool_provider_key!("tools"),
+                            ),
+                            definition: self.definition.clone(),
+                            binding: None,
+                        },
+                    )
+                })
+                .collect()
+        }
+    }
+    struct Host;
+    #[lash::async_trait]
+    impl ToolProvider for Host {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(vec![definition("host:lookup", "lookup")?.manifest])
+        }
+        fn resolve_contract(&self, name: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            if name != "lookup" {
+                return None;
+            }
+            Some(Arc::new(definition("host:lookup", "lookup").ok()?.contract))
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            ToolOutcome::ok(serde_json::json!("ok")).into()
+        }
+    }
+    struct Scenario {
+        code: &'static str,
+    }
+    #[lash::async_trait]
+    impl PluginScenario for Scenario {
+        fn callback(&self) -> PluginCallbackIdentity {
+            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+        }
+        async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
+            let protocol: Arc<dyn PluginFactory> = Arc::new(
+                lash::rlm::RlmProtocolPluginFactory::new(
+                    lash::rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash::rlm::RlmChannel::NativeTool)
+                        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    lash::rlm::CellDialect::typescript(),
+                )
+                .with_worker_service(lash::vm::WorkerService::default()),
+            );
+            harness.install_protocol(protocol).await?;
+            harness
+                .install(Arc::new(StaticPluginFactory::new(
+                    PluginDeclaration::initial("host"),
+                    PluginSpec::new()
+                        .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host)),
+                )))
+                .await?;
+            harness.create(PluginOptions::default()).await
+        }
+        fn input(&self) -> lash::TurnInput {
+            lash::TurnInput::text("exercise the cell")
+        }
+        fn responses(&self) -> Vec<lash::provider::LlmResponse> {
+            vec![
+                lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::ToolCall {
+                        call_id: "certification-cell".into(),
+                        tool_name: "execute_code".into(),
+                        input_json: serde_json::json!({"code": self.code}).to_string(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                },
+                text_response("done"),
+            ]
+        }
+        fn pause_after_responses(&self) -> usize {
+            1
+        }
+    }
+    fn factory(
+        empty: bool,
+        resolutions: Arc<AtomicUsize>,
+    ) -> Result<Arc<dyn PluginFactory>, PluginError> {
+        Ok(Arc::new(StaticPluginFactory::new(
+            PluginDeclaration::initial("resolver"),
+            PluginSpec::new().with_deferred_provider(
+                lash::tool_provider_key!("deferred"),
+                Arc::new(Resolver {
+                    empty,
+                    resolutions,
+                    definition: definition("remote:send_email", "send_email")?,
+                }),
+            ),
+        )))
+    }
+
+    /// STATIC-CALL-IS-NOT-DEFERRED-EVIDENCE: resolving a builtin selects no tool.
+    #[tokio::test]
+    async fn static_call_cannot_certify_an_empty_deferred_resolver() {
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
+            code: "const nonce = Math.random(); await tools.lookup({});",
+        });
+        let report = certify_plugin_with(
+            factory(true, Arc::clone(&resolutions)).unwrap(),
+            HostPolicy::standard(),
+            &[scenario],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolutions.load(Ordering::SeqCst),
+            1,
+            "the resolver was exercised but selected nothing"
+        );
+        no_failed_law(&report);
+        assert_eq!(
+            report.verdict(),
+            PluginCertificationVerdict::Partial,
+            "{:#?}",
+            report.reports
+        );
+        assert!(report.reports.iter().any(|law| law.law
+            == PluginLaw::RecordedDecisionsStayAttributable
+            && law.result
+                == PluginLawResult::Unavailable {
+                    reason: CertificationUnavailable::AttributionNotRecorded
+                }));
+    }
+}
+
+/// STATE-PUBLICATION-MUST-BE-EXERCISED: a hook publishing on its second turn
+/// cannot claim its empty first turn as evidence that state survived a crash.
+#[tokio::test]
+async fn a_state_publishing_hook_requires_a_published_state_scenario() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let invocations = Arc::new(AtomicUsize::new(0));
+    let mut entries = PluginRegistrar::new("late-state");
+    let counted = Arc::clone(&invocations);
+    entries
+        .turn()
+        .before(lash::hook_key!("publish-later"), move |_, _| {
+            let counted = Arc::clone(&counted);
+            Ok(Arc::new(move |_| {
+                let counted = Arc::clone(&counted);
+                Box::pin(async move {
+                    Ok(TurnContributions {
+                        state: if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+                            StateCommands::new()
+                        } else {
+                            StateCommands::new().set("counter", serde_json::json!(1))
+                        },
+                        ..Default::default()
+                    })
+                })
+            }))
+        })
+        .unwrap();
+    let factory: Arc<dyn PluginFactory> = Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("late-state"),
+        PluginRecipe::from_registrar("late-state", entries),
+    ));
+    let report = certify_plugin(Arc::clone(&factory)).await.unwrap();
+    assert_eq!(invocations.load(Ordering::SeqCst), 1);
+    let state = report
+        .reports
+        .iter()
+        .find(|law| law.law == PluginLaw::StateSurvivesReopen)
+        .unwrap();
+    assert_eq!(
+        state.result,
+        PluginLawResult::Unavailable {
+            reason: CertificationUnavailable::ScenarioDidNotPublish,
+        },
+        "{state}"
+    );
+    assert_ne!(report.verdict(), PluginCertificationVerdict::Full);
+
+    // The same hook really can publish; its unexercised branch is the gap.
+    let mut harness = PluginHarness::new(factory, HostPolicy::standard())
+        .await
+        .unwrap();
+    harness.create(PluginOptions::default()).await.unwrap();
+    harness.script([text_response("done")]);
+    harness
+        .publish_then_reopen(lash::TurnInput::text("publish now"))
+        .await
+        .unwrap();
+    assert_eq!(
+        harness.plugin_state().await.unwrap().plugins["late-state"].values["counter"],
+        serde_json::json!(1)
     );
 }
