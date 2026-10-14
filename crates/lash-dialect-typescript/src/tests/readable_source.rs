@@ -25,28 +25,22 @@ fn spelling(expr: k::Expr) -> String {
 #[test]
 fn native_numbers_preserve_variants_bits_and_safe_integer_boundary() {
     for (value, expected) in [
-        (k::Literal::Int(7.into()), "k.finish(7);"),
-        (k::Literal::Int((-7).into()), "k.finish(-7);"),
+        (k::Literal::Int(7.into()), "finish(7);"),
+        (k::Literal::Int((-7).into()), "finish(-7);"),
         (
             k::Literal::Int(9_007_199_254_740_991i64.into()),
-            "k.finish(9007199254740991);",
+            "finish(9007199254740991);",
         ),
         (
             k::Literal::Int(9_007_199_254_740_992i64.into()),
-            "k.int(\"9007199254740992\")",
+            "9007199254740992n",
         ),
-        (k::Literal::Float(k::Float::new(7.0)), "k.finish(7.0);"),
-        (k::Literal::Float(k::Float::new(-0.0)), "k.finish(-0.0);"),
-        (
-            k::Literal::Float(k::Float::new(f64::INFINITY)),
-            "k.float(\"inf\")",
-        ),
-        (
-            k::Literal::Float(k::Float::new(f64::NAN)),
-            "k.float(\"nan\")",
-        ),
-        (k::Literal::Absent, "k.finish(k.absent);"),
-        (k::Literal::Null, "k.finish(null);"),
+        (k::Literal::Float(k::Float::new(7.0)), "finish(7.0);"),
+        (k::Literal::Float(k::Float::new(-0.0)), "finish(-0.0);"),
+        (k::Literal::Float(k::Float::new(f64::INFINITY)), "Infinity"),
+        (k::Literal::Float(k::Float::new(f64::NAN)), "NaN"),
+        (k::Literal::Absent, "finish(undefined);"),
+        (k::Literal::Null, "finish(null);"),
     ] {
         let source = spelling(literal(value));
         assert!(source.contains(expected), "{source}");
@@ -66,11 +60,11 @@ fn native_numbers_preserve_variants_bits_and_safe_integer_boundary() {
 #[test]
 fn native_collections_keep_variants_order_and_record_applicability() {
     let items = vec![integer(1), integer(2)];
-    assert!(spelling(k::Expr::List(items.clone())).contains("k.finish([1, 2]);"));
-    assert!(spelling(k::Expr::Tuple(items.clone())).contains("k.tuple(1, 2)"));
-    assert!(spelling(k::Expr::Set(items)).contains("k.set(1, 2)"));
-    assert!(spelling(k::Expr::Map(vec![])).contains("k.map()"));
-    assert!(spelling(k::Expr::Record(vec![])).contains("k.finish({});"));
+    assert!(spelling(k::Expr::List(items.clone())).contains("finish([1, 2]);"));
+    assert!(spelling(k::Expr::Tuple(items.clone())).contains("[1, 2] as const"));
+    assert!(spelling(k::Expr::Set(items)).contains("new Set([1, 2])"));
+    assert!(spelling(k::Expr::Map(vec![])).contains("new Map([])"));
+    assert!(spelling(k::Expr::Record(vec![])).contains("finish({});"));
     let record = |fields: &[&str]| {
         k::Expr::Record(
             fields
@@ -84,13 +78,9 @@ fn native_collections_keep_variants_order_and_record_applicability() {
         )
     };
     assert!(spelling(record(&["λ", "ready"])).contains("{λ: 0, ready: 1}"));
-    for fields in [
-        vec!["not a field"],
-        vec!["__proto__"],
-        vec!["ready", "ready"],
-    ] {
-        assert!(spelling(record(&fields)).contains("k.record("));
-    }
+    assert!(spelling(record(&["not a field"])).contains("{\"not a field\": 0}"));
+    assert!(spelling(record(&["__proto__"])).contains("{[\"__proto__\"]: 0}"));
+    assert!(spelling(record(&["ready", "ready"])).contains("Object.fromEntries(["));
 }
 
 #[test]
@@ -99,16 +89,21 @@ fn native_members_preserve_field_index_and_assignment_targets() {
         target: variable("page"),
         field: name.into(),
     };
-    assert!(spelling(k::Expr::Member(Box::new(field("ready")))).contains("(page).ready"));
+    assert!(spelling(k::Expr::Member(Box::new(field("ready")))).contains("page.ready"));
     assert!(
         spelling(k::Expr::Member(Box::new(field("not a field"))))
-            .contains("k.field(page, \"not a field\")")
+            .contains("page[\"not a field\" as const]")
     );
     let index = k::Member::Index {
         target: variable("page"),
         index: literal(k::Literal::Text("ready".into())),
     };
-    assert!(spelling(k::Expr::Member(Box::new(index.clone()))).contains("(page)[\"ready\"]"));
+    assert!(spelling(k::Expr::Member(Box::new(index.clone()))).contains("page[\"ready\"]"));
+    let tuple_index = k::Expr::Member(Box::new(k::Member::Index {
+        target: variable("page"),
+        index: k::Expr::Tuple(vec![integer(1), integer(2)]),
+    }));
+    assert!(spelling(tuple_index).contains("page[[1, 2] as const]"));
     let document = k::Document::new(
         k::NumberPolicy::Float,
         vec![
@@ -130,9 +125,9 @@ fn native_members_preserve_field_index_and_assignment_targets() {
         ],
     );
     let source = roundtrip(&document, true).source;
-    assert!(source.contains("(page).value = 1;"));
-    assert!(source.contains("k.field(page, \"not a field\").value = 2;"));
-    assert!(source.contains("(page)[\"ready\"] = 3;"));
+    assert!(source.contains("page.value = 1;"));
+    assert!(source.contains("page[\"not a field\" as const] = 2;"));
+    assert!(source.contains("page[\"ready\"] = 3;"));
 }
 
 #[test]
@@ -184,10 +179,10 @@ fn helper_calls_keep_expression_action_and_callee_kinds_unambiguous() {
     }
     let source = roundtrip(&document, true).source;
     assert!(source.contains("let result = helper_foreign_same(1);"));
-    assert!(source.contains("let action = k.call(helper_foreign_same, [1]);"));
-    assert!(source.contains("k.spawn(helper_foreign_same_2, []);"));
-    assert!(source.contains("k.call(k.declared(\"result\"), []);"));
-    assert!(source.contains("k.call(k.value(\"result\"), []);"));
+    assert!(source.contains("let action = await helper_foreign_same(1);"));
+    assert!(source.contains("spawn(helper_foreign_same_2, []);"));
+    assert!(source.contains("await result();"));
+    assert!(source.contains("await (result)();"));
     assert_eq!(source.matches(&id.to_string()).count(), 2); // manifest and alias, never call sites
 }
 
@@ -235,7 +230,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
     assert_eq!(off.source, on.source);
     assert!(
         off.source.contains(
-            "  for (let item of [λ]) {\n    if (item) {\n      k.print(item);\n    }\n  }"
+            "  for (let item of [λ]) {\n    if (item) {\n      console.log(item);\n    }\n  }"
         ),
         "{}",
         off.source
@@ -244,7 +239,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
     assert!(off.source.contains("while (false)"));
     assert!(off.source.contains("catch (error)"));
     assert!(off.source.contains("finally"));
-    assert!(off.source.contains("k.try(function()"));
+    assert!(off.source.contains("k.try(async function("));
     let anchors: Vec<_> = on
         .source_map
         .unwrap()
@@ -269,7 +264,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
     assert!(
         roundtrip(&nonempty, true)
             .source
-            .contains(" else {\n      k.yield();")
+            .contains(" else {\n      await yieldTask();")
     );
 }
 
@@ -280,6 +275,17 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
         ("useful", "useful"),
         ("return", "kernel_name_1"),
         ("k", "kernel_name_1"),
+        ("main", "kernel_name_1"),
+        ("tools", "kernel_name_1"),
+        ("finish", "kernel_name_1"),
+        ("declared", "kernel_name_1"),
+        ("console", "kernel_name_1"),
+        ("Math", "kernel_name_1"),
+        ("Date", "kernel_name_1"),
+        ("Object", "kernel_name_1"),
+        ("Promise", "kernel_name_1"),
+        ("Uint8Array", "kernel_name_1"),
+        ("projection", "kernel_name_1"),
         ("helper_label", "kernel_name_1"),
         ("kernel_name_1", "kernel_name_1"),
         ("odd name", "kernel_name_1"),
@@ -356,7 +362,7 @@ const NATIVE_HEADER: &str = r#"k.document("lash.generated.typescript", "1", {"ke
 #[test]
 fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {
     let source = format!(
-        "{NATIVE_HEADER}\nk.main(function() {{ k.finish(k.tuple(7, 7.0, -0.0, [1, 2], {{λ: true}}, (page).λ, (page)[\"λ\"])); }});"
+        "{NATIVE_HEADER}\nasync function main() {{ finish([7, 7.0, -0.0, [1, 2], {{λ: true}}, page.λ, page[\"λ\"]] as const); }}"
     );
     let decoded = crate::compile_generated(&source, Default::default()).unwrap();
     let expected = k::Document::new(
@@ -405,9 +411,304 @@ fn native_near_misses_refuse_without_authored_lowering() {
         "{[page]: 1}",
         "page(1)",
         "(page)?.x",
-        "(page).x++",
+        "page.x++",
+        "Date.now(1)",
+        "Math.random(1)",
+        "projection.read(page)",
+        "new Uint8Array([256])",
+        "new Set(1)",
+        "new Map([[1]])",
+        "Object.fromEntries([[1, 2]])",
+        "async function(page: any) { return page; }",
+        "function named() { return null; }",
     ] {
-        let source = format!("{NATIVE_HEADER}\nk.main(function() {{ k.finish({expression}); }});");
+        let source = format!("{NATIVE_HEADER}\nasync function main() {{ finish({expression}); }}");
+        assert!(
+            crate::compile_generated(&source, Default::default()).is_err(),
+            "{source}"
+        );
+    }
+}
+// The independently pinned spelling is also a production-reader witness.
+const ORDINARY_WORKFLOW: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"effects":{"display.show_message":{"params":[{"name":"input","ty":"any"}],"result":"any"},"research.search":{"params":[{"name":"input","ty":"any"}],"result":"any"},"research.synthesize":{"params":[{"name":"input","ty":"any"}],"result":"any"}},"numbers":"float"}, {"deep_research":{"result":"any"}}, [], [["deep_research","deep_research"],["evidence","evidence"],["message","message"],["search_input","search_input"],["synthesis","synthesis"],["synthesis_input","synthesis_input"]], []);
+async function deep_research() {
+  let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
+  let evidence = await tools.research.search(search_input);
+  let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
+  let synthesis = await tools.research.synthesize(synthesis_input);
+  let message = {text: synthesis.summary};
+  await tools.display.show_message(message);
+  return synthesis;
+}
+async function main() {
+  finish(null);
+}
+"#;
+
+// FIG-6250: ordinary workflows must select native rules and retain every byte.
+#[test]
+fn ordinary_three_effect_workflow_has_no_generic_body_forms() {
+    let document = k::parse_document(
+        r#"kernel 1
+numbers float
+effect research.search(input: Any) -> Any
+effect research.synthesize(input: Any) -> Any
+effect display.show_message(input: Any) -> Any
+entry deep_research() -> Any
+fn deep_research() {
+  let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3}
+  let evidence = perform research.search(search_input) as Any
+  let synthesis_input = {topic: evidence.topic, sources: evidence.sources}
+  let synthesis = perform research.synthesize(synthesis_input) as Any
+  let message = {text: synthesis.summary}
+  do perform display.show_message(message) as Any
+  return synthesis
+}
+main {
+  finish null
+}
+"#,
+    )
+    .unwrap();
+    let source = roundtrip(&document, true).source;
+    assert_eq!(source, ORDINARY_WORKFLOW);
+    assert_eq!(
+        crate::compile_generated(ORDINARY_WORKFLOW, Default::default())
+            .unwrap()
+            .canonical_bytes()
+            .unwrap(),
+        document.canonical_bytes().unwrap()
+    );
+    let body = source.split_once('\n').unwrap().1;
+    assert!(!body.contains("k."), "{source}");
+    assert!(
+        !source.contains("\\\""),
+        "metadata must be structured: {source}"
+    );
+}
+
+fn generated_decoder(
+    source: &str,
+    limits: lash_kernel_dialect::GeneratedSourceLimits,
+) -> Result<k::Document, lash_kernel_dialect::Diagnostic> {
+    crate::compile_generated(source, limits).map_err(Into::into)
+}
+fn generic_form(node: k::Node<'_>, source: &str) -> Option<&'static str> {
+    let source = source.trim_start();
+    match node {
+        k::Node::Expr(k::Expr::Record(_)) if source.starts_with("k.record(") => {
+            Some("repeated-record-fields")
+        }
+        k::Node::Stmt(k::Stmt::Try(_)) if source.starts_with("k.try(") => Some("handlerless-try"),
+        _ if source.starts_with("k.") => Some("undocumented-kernel-form"),
+        _ => None,
+    }
+}
+#[test]
+fn shared_realistic_corpus_is_native_and_exact_in_typescript() {
+    use lash_kernel_dialect::readability::{self, Dialect};
+    let corpus = readability::corpus().expect("valid shared readability corpus");
+    let printer = crate::TypeScript::default();
+    let report = readability::check(
+        &corpus,
+        &[Dialect {
+            name: "typescript",
+            printer: &printer,
+            decode: generated_decoder,
+            generic: generic_form,
+            unavoidable: &[],
+        }],
+    );
+    eprintln!(
+        "shared readability: documents={} generic_forms={} failures={:?}",
+        report.documents,
+        report.generic_forms.len(),
+        report.failures
+    );
+    report.assert_passed();
+    assert_eq!(report.documents, 7);
+    assert!(report.generic_forms.is_empty());
+    for case in &corpus {
+        let source = roundtrip(&case.document, false).source;
+        assert!(
+            !source.split_once('\n').unwrap().1.contains("k."),
+            "{}: {source}",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn authored_typescript_corpus_reprints_without_generic_body_forms() {
+    // Reuse representative authored sources from language, array, async_fn and
+    // controls laws, including their visible lowered temporaries and tokens.
+    for source in [
+        "let x = 1 + 2 * 3; console.log(x);",
+        "function twice(x) { return x + x; } console.log(twice(4));",
+        "let rows = [{name: 'first'}, {name: 'second'}]; for (const row of rows) { console.log(row.name); }",
+        "let i = 0; while (i < 3) { i = i + 1; if (i === 2) { continue; } console.log(i); }",
+        "try { throw 'bad'; } catch (error) { console.log(error); } finally { console.log('done'); }",
+        "let result = await echo(4); console.log(result);",
+    ] {
+        let document = super::lower_with_effects(source).unwrap().document;
+        let printed = roundtrip(&document, true).source;
+        assert!(
+            !printed.split_once('\n').unwrap().1.contains("k."),
+            "authored {source}\n{printed}"
+        );
+    }
+}
+
+#[test]
+fn native_operator_aliases_preserve_helper_identity_precedence_and_ambiguity() {
+    let add = k::FunctionId::from_bytes([41; 32]);
+    let multiply = k::FunctionId::from_bytes([42; 32]);
+    let negate = k::FunctionId::from_bytes([43; 32]);
+    let helper = |function, args| k::Expr::Call { function, args };
+    let mut document = k::Document::new(
+        k::NumberPolicy::Float,
+        vec![k::Stmt::Finish {
+            value: k::Expr::Tuple(vec![
+                helper(
+                    add,
+                    vec![integer(1), helper(multiply, vec![integer(2), integer(3)])],
+                ),
+                helper(
+                    multiply,
+                    vec![helper(add, vec![integer(1), integer(2)]), integer(3)],
+                ),
+                helper(
+                    add,
+                    vec![integer(1), helper(add, vec![integer(2), integer(3)])],
+                ),
+                helper(negate, vec![integer(7)]),
+                integer(-7),
+            ]),
+        }],
+    );
+    for (id, name) in [(add, "ts.add"), (multiply, "ts.mul"), (negate, "ts.neg")] {
+        document
+            .manifest
+            .functions
+            .insert(id, k::FunctionName::new(name).unwrap());
+    }
+    let printed = roundtrip(&document, true).source;
+    assert!(
+        printed.contains("finish([1 + 2 * 3, (1 + 2) * 3, 1 + (2 + 3), -(7), -7] as const);"),
+        "{printed}"
+    );
+    document.manifest.functions.insert(
+        k::FunctionId::from_bytes([44; 32]),
+        k::FunctionName::new("ts.add").unwrap(),
+    );
+    let ambiguous = roundtrip(&document, true).source;
+    assert!(ambiguous.contains("helper_ts_add(1, 2 * 3)"), "{ambiguous}");
+    let independent = format!(
+        "{}\nasync function main() {{ finish([1 + 2 * 3, (1 + 2) * 3, 1 + (2 + 3), -(7), -7] as const); }}",
+        printed.split_once('\n').unwrap().0
+    );
+    assert_eq!(
+        crate::compile_generated(&independent, Default::default())
+            .unwrap()
+            .canonical_bytes()
+            .unwrap(),
+        {
+            document
+                .manifest
+                .functions
+                .remove(&k::FunctionId::from_bytes([44; 32]));
+            document.canonical_bytes().unwrap()
+        }
+    );
+    // Unary expressions on the left of exponentiation need an outer group;
+    // the inner numeric group still distinguishes a helper from a literal.
+    let power = k::FunctionId::from_bytes([45; 32]);
+    document
+        .manifest
+        .functions
+        .insert(power, k::FunctionName::new("ts.pow").unwrap());
+    document.main = vec![k::Stmt::Finish {
+        value: k::Expr::List(vec![
+            helper(power, vec![helper(negate, vec![integer(7)]), integer(2)]),
+            helper(power, vec![integer(-7), integer(2)]),
+            helper(
+                power,
+                vec![integer(2), helper(power, vec![integer(3), integer(2)])],
+            ),
+        ]),
+    }];
+    let powered = roundtrip(&document, true).source;
+    assert!(
+        powered.contains("finish([(-(7)) ** 2, (-7) ** 2, 2 ** 3 ** 2]);"),
+        "{powered}"
+    );
+}
+
+#[test]
+fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
+    let effect = k::EffectName::new("research.search").unwrap();
+    let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
+    document.manifest.effects.insert(
+        effect.clone(),
+        k::Signature {
+            params: vec![],
+            result: k::Type::Any,
+        },
+    );
+    for (args, result) in [
+        (vec![], k::Type::Any),
+        (
+            vec![k::Atom::Literal(k::Literal::Text("topic".into()))],
+            k::Type::Any,
+        ),
+        (
+            vec![
+                k::Atom::Variable("first".into()),
+                k::Atom::Variable("second".into()),
+            ],
+            k::Type::List(Box::new(k::Type::Text)),
+        ),
+    ] {
+        document.main.push(k::Stmt::Do {
+            action: k::Action::Perform {
+                effect: effect.clone(),
+                args,
+                result,
+            },
+        });
+    }
+    let printed = roundtrip(&document, true).source;
+    assert!(
+        printed.contains("await tools.research.search();"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("await tools.research.search(\"topic\");"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(
+            "await tools.research.search(first, second) as KernelType<{\"list\":\"text\"}>;"
+        ),
+        "{printed}"
+    );
+    document.manifest.effects.clear();
+    let missing = roundtrip(&document, true).source;
+    assert!(
+        missing.contains("await tools.research.search() as KernelType<\"any\">;"),
+        "{missing}"
+    );
+    for expression in [
+        "await tools.research.search([1])",
+        "await sleep()",
+        "await tools.research.search() as string",
+        "await (first + second)()",
+        "spawn(first, [1,,2])",
+    ] {
+        let source = format!(
+            "{}\nasync function main() {{ let first = {expression}; }}",
+            printed.split_once('\n').unwrap().0
+        );
         assert!(
             crate::compile_generated(&source, Default::default()).is_err(),
             "{source}"

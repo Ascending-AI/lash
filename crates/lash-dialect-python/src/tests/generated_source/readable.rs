@@ -549,7 +549,7 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
     for (literal, spelling) in [
         (k::Literal::Null, "None"),
         (k::Literal::Bool(false), "False"),
-        (k::Literal::Text("λ\n\"\\".into()), "\"λ\\n\"\\\""),
+        (k::Literal::Text("λ\n\"\\".into()), "\"λ\\n\\\"\\\\\""),
         (k::Literal::Absent, "k.absent"),
         (
             k::Literal::Bytes(k::Bytes::parse_hex("00ff").unwrap()),

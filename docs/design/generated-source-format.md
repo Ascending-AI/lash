@@ -43,10 +43,10 @@ headers and unsupported formats refuse. The seven envelope operands are:
 
 ```typescript
 k.document("lash.generated.typescript", "1",
-  "<manifest JSON>", "<entries JSON>", ["<private original name>"],
-  "<identifier alias pairs JSON>", "<helper alias pairs JSON>");
-k.declare("<original function name>", function(<parameter aliases>) { /* body */ });
-k.main(function() { /* body */ });
+  {kernel: 1, numbers: "float"}, {entry: {result: "any"}}, ["privateName"],
+  [["entry", "entry"], ["privateName", "privateName"]], [["helper_alias", "fullFunctionId"]]);
+async function entry() { return null; }
+async function main() { finish(null); }
 ```
 
 Python uses the same seven logical operands and the format identifier
@@ -59,22 +59,22 @@ The manifest preserves kernel version, number policy, effects with complete
 signatures, and full FunctionId-to-FunctionName requirements. Entries preserve
 original keys and complete signatures, including parameter names, optionality,
 and nested types. Private bindings are original names. Metadata uses the
-kernel's existing JSON shapes; duplicate object keys at any level refuse.
+kernel's existing field/type shapes in native literal syntax; duplicate object keys at any level refuse.
 No program body is hidden in metadata or in an opaque Document payload.
 
 Identifier aliases are a JSON array of `[sourceIdentifier, originalName]`.
 The writer includes legal names as self mappings too. Each source identifier
 and each original name occurs at most once. Parameters, variables, loop and
-catch bindings use this table. Explicit string-bearing forms (`declare`,
-`declared`, `value`, `function`, entries and private names) carry original
-names directly. Thus shadowing reconstructs the same Name without capture.
+catch bindings use this table. TypeScript declaration names and `declared.alias`
+function references also resolve through it; entries and private names retain
+original names. Thus shadowing reconstructs the same Name without capture.
 The reader refuses undeclared identifiers and conflicting/reserved aliases.
 
 Helper aliases are a JSON array of `[sourceIdentifier, fullFunctionId]`.
 Each alias and identity occurs once. Helper labels never resolve dependencies.
-Aliases live in the reserved `helper_` namespace. `invoke` and `library` refer
-to an alias, so even helpers from the other dialect decode without being
-installed. Malformed IDs, duplicate identities or contradictory aliases refuse.
+Aliases live in the reserved `helper_` namespace. Ordinary TypeScript helper
+calls and awaited calls refer to the alias, so even helpers from the other
+dialect decode without being installed. Malformed IDs, duplicate identities or contradictory aliases refuse.
 Extra unused metadata remains data; admission decides whether it is valid.
 
 ## Deterministic naming plan
@@ -87,7 +87,9 @@ follow in their BTree order. It reserves every legal original identifier
 before assigning any alias. Equal original Names share one spelling everywhere.
 
 TypeScript legality uses SWC's Unicode identifier character predicates, excludes
-language keywords, strict bindings `eval`/`arguments`, and `k`, and reserves `kernel_name_` and `helper_`. Legal
+language keywords, strict bindings `eval`/`arguments`, `main`, the documented
+global generated APIs (tools, declared, console, task/terminal APIs and native
+constructors), and `k`; it reserves `kernel_name_` and `helper_`. Legal
 original names retain their spelling. Other names receive `kernel_name_1`,
 `kernel_name_2`, etc., in first-encounter order, skipping used spellings. The
 mapping is injective. The Python codec supplies its language legality predicate
@@ -103,71 +105,43 @@ Ordered table operations cost O((names + helpers) log(names + helpers));
 structural walks and final writing are linear in nodes and bytes, apart from
 optional Site path copies, whose cost is the total collected path length.
 
-## Complete generic spelling inventory
+## Native TypeScript and necessary explicit forms
 
-The TypeScript codec and its independent inventory law exhaustively match the
-kernel variants and stored fields. These are direct reconstruction rules, never
-ordinary authored lowering. `e` denotes an expression, `a` an atom, `n` an
-identifier alias, `original` an original-name string, and `h` a helper alias.
-Every block is explicitly spelled, including empty else/catch/finally blocks.
+Every modeled ordinary construct uses ordinary TypeScript syntax with a direct
+inverse: declarations/anonymous functions, calls, awaited effects, bindings,
+literals, object/array expressions, members, operators and structured controls.
+The paired inventory in
+[`generated_rules.md`](../../crates/lash-dialect-typescript/src/generated_rules.md)
+names applicability, inverses and positive/boundary witnesses. The only
+remaining TypeScript body `k.*` form is handlerless Try, because native TypeScript
+requires catch or finally. The header marker is the sole allowed generic form
+in ordinary programs. Exactness and readability are both acceptance criteria.
 
-| Kernel form | TypeScript generic spelling |
-| --- | --- |
-| Block | `{ statement... }` (order and boundaries retained) |
-| Let / Assign variable | `let n = rhs;` / `n = rhs;` |
-| Assign member / Remove | `member.value = rhs;` / `k.remove(member);` |
-| Do | `action;` |
-| If | `if (e) { ... } else { ... }` |
-| For / While | `for (let n of e) { ... }` / `while (e) { ... }` |
-| Break / Continue | `break;` / `continue;` |
-| Return / Throw | `return e;` / `throw e;` |
-| Print / Finish / Fail | `k.print(e);` / `k.finish(e);` / `k.fail(e);` |
-| Try with a handler | `try { ... }` with optional `catch (n) { ... }` and `finally { ... }`; absent differs from present empty |
-| Try without either handler | `k.try(function() { ... });`; the parameterless wrapper reconstructs a Block, without introducing a Closure |
-| RHS | An expression or an action, distinguished by its outer form |
-| Null / Absent / Bool / Text | `null` / `k.absent` / `true` or `false` / JSON-quoted text |
-| Int / Float / Bytes | `k.int("canonical integer")` / `k.float("canonical float")` / `k.bytes("hex")` |
-| Function literal | `k.function("original")` |
-| Variable | `n` |
-| Tuple / List / Set | `k.tuple(e, ...)` / `k.list(e, ...)` / `k.set(e, ...)` |
-| Map | `k.map([key, value], ...)` (entry order retained) |
-| Record | `k.record(["field", value], ...)` (field order retained) |
-| Field / Index member | `k.field(target, "field")` / `k.index(target, index)` |
-| Closure | `function(parameterAliases) { ... }` (captures remain derived) |
-| Expression Call | `k.invoke(h, [e, ...])` |
-| Clock / Random / Read | `k.clock()` / `k.random()` / `k.read(handle, request)` |
-| Callee Declared / Value / Library | `k.declared("original")` / `k.value("original")` / `k.library(h)` |
-| Action Call / Spawn | `k.call(callee, [a, ...])` / `k.spawn(callee, [a, ...])` |
-| Perform | `k.perform("effect", [a, ...], k.type("complete type JSON"))` |
-| Sleep / Join / Cancel | `k.sleep(a)` / `k.join(a)` / `k.cancel(a)` |
-| JoinMany | `k.joinMany("all" or "all_settled" or "race" or "any", a)` |
-| Yield | `k.yield()` |
-| Atom | Variable or literal only; never an invented expression Site |
+Full-ID helper aliases distinguish unawaited Expression Calls from awaited
+Action Calls. Bare, parenthesized and helper callees retain Declared/Value/Library
+kinds. Effects are `await tools.effect.name(atoms...)`; result decoding types are
+preserved by `as KernelType<structuredType>` only when the complete manifest
+cannot express them. Every tool path and arity has this inverse without host
+catalogues. Finish/Fail/Print are `finish`, `failure` and `console.log` calls;
+Return/Throw stay native statements. Main is its own native function declaration.
+Task APIs retain every spawn/join/action boundary.
 
-Float spelling is kernel canonical spelling, including `nan`, `inf`, `-inf`
-and signed zero `-0.0`. No helper is rewritten into a native operator. Numeric
-variants, absent/null, expression/action calls and collection variants remain
-distinct. The codec rejects syntax it does not reconstruct, including imports,
-spread operands, const/var declarations, typed parameters,
-async/generator function wrappers and trailing module text.
+A unique manifest label for a known `ts.*` operator explicitly binds its full
+identity to that operator's generated syntax. The inverse uses this preserved
+binding, without installing the helper or assuming equivalence to JavaScript.
+Duplicate labels and mismatched arities keep ordinary full-ID alias calls.
+Numeric/collection syntax carries exact variants: fractional/exponent tokens
+for Float, canonical integer/bigint tokens for Int, undefined for Absent,
+const-asserted arrays for Tuple, arrays for List and constructors for Set/Map/Bytes.
+Quoted const-asserted text in an index selects Field; const-asserted tuple keys
+remain Index. All native syntax decodes directly without inserting temporaries.
+The generated async marker enables await syntax and has no stored node of its own.
+No statement fusion or spawn/join fusion is authorized.
 
-TypeScript's paired readable rule inventory is
-[`generated_rules.md`](../../crates/lash-dialect-typescript/src/generated_rules.md).
-It states each applicability predicate, exact inverse, positive spelling
-witness and nearest generic fallback witness. Generic forms remain permanent.
-The printer emits safe canonical integer tokens (magnitude at most 53 bits),
-finite canonical float tokens (fraction or exponent distinguishes Float),
-List arrays and eligible Record objects, dot fields and computed indices,
-direct helper expression calls and helper aliases as Library action callees.
-All numeric tokens decode from their original spelling rather than the
-parser's binary64 approximation; non-finite floats and larger integers stay
-explicit. Native records require unique identifier fields excluding
-`__proto__`; other fields retain `k.record`. Call tags retain Expression/Action
-and Declared/Value/Library distinctions. Controls decode directly and blocks
-use two-space indentation. An empty else can be omitted because absence has
-the exact inverse of an empty kernel else Block.
-No statement fusion, temporary erasure, closure introduction or spawn/join
-fusion is authorized by this format.
+Python's native literal envelope/type encoding uses the same shared writer and
+schema. Its body inventory remains in
+[generated-source-python.md](generated-source-python.md); full native body
+parity is owned by FIG-6251.
 
 ## Resource policy and optional final-text spans
 
@@ -197,8 +171,7 @@ An instrumented shared-writer law proves zero map-specific work when disabled.
 
 Map completeness is exactly `Node::children` from main and declared Function
 roots. Each Site occurs once, with nonempty half-open ranges at valid UTF-8
-boundaries. Parent/child ranges may overlap. Generic forms spell every block,
-so they need no implicit anchors. TypeScript's readable empty-else rule records
+boundaries. Parent/child ranges may overlap. Spelled blocks receive ranges, including empty function/main bodies. TypeScript's readable empty-else rule records
 the omitted Block with `SourceSite::implicit` at the byte boundary immediately
 after its then block. This is the only unspelled TypeScript node; executable
 statements, expressions and actions always have ranges. Metadata and alias
@@ -277,3 +250,12 @@ checks complete canonical bytes and reports every generic occurrence with
 dialect, case, kernel Site, node kind and reason. Generic forms without a
 matching named rule and reason fail. Exactness wins over native spelling;
 ordinary modeled constructs must use their direct native inverse.
+
+
+The common readability harness independently walks `Node::children` to require
+complete, unique real-Site coverage before asking registered dialect detectors
+about generic forms. `corpus()` returns a typed `GENERATED_READABILITY_CORPUS`
+diagnostic for malformed shared fixtures; it does not panic. Test registrations
+supply every dialect's printer, decoder, detector and named unavoidable list.
+The TypeScript registration permits no generic forms in the seven ordinary
+cases. Python's registration is maintained by its owning body-codec lane.

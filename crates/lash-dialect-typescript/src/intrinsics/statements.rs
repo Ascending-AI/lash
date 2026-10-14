@@ -18,7 +18,10 @@ impl Reader {
     }
     pub(super) fn statement(&mut self, stmt: &s::Stmt) -> Result<k::Stmt, Diagnostic> {
         Ok(match stmt {
-            s::Stmt::Decl(s::Decl::Var(var)) if var.kind == s::VarDeclKind::Let && !var.declare => {
+            s::Stmt::Decl(s::Decl::Var(var))
+                if matches!(var.kind, s::VarDeclKind::Let | s::VarDeclKind::Const)
+                    && !var.declare =>
+            {
                 let [binding] = var.decls.as_slice() else {
                     return Err(invalid(
                         "one binding per kernel statement",
@@ -137,13 +140,6 @@ impl Reader {
                 s::AssignTarget::Simple(s::SimpleAssignTarget::Ident(name)) => {
                     k::Place::Variable(self.name(&name.id)?)
                 }
-                s::AssignTarget::Simple(s::SimpleAssignTarget::Member(member))
-                    if matches!(&member.prop, s::MemberProp::Ident(name) if name.sym == "value")
-                        && invocation(&member.obj)
-                            .is_ok_and(|(name, _)| matches!(name.as_str(), "field" | "index")) =>
-                {
-                    k::Place::Member(self.member(&member.obj)?)
-                }
                 s::AssignTarget::Simple(s::SimpleAssignTarget::Member(member)) => {
                     k::Place::Member(self.native_member(member)?)
                 }
@@ -158,6 +154,9 @@ impl Reader {
                 place,
                 value: self.rhs(&assign.right)?,
             });
+        }
+        if let Some(native) = self.native_statement(expr) {
+            return native;
         }
         let (name, args) = invocation(expr)?;
         Ok(match (name.as_str(), args.as_slice()) {
@@ -175,21 +174,12 @@ impl Reader {
                     finally: None,
                 })
             }
-            ("remove", [member]) => k::Stmt::Remove {
-                member: self.member(member)?,
-            },
-            ("print", [value]) => k::Stmt::Print {
-                value: self.expression(value)?,
-            },
-            ("finish", [value]) => k::Stmt::Finish {
-                value: self.expression(value)?,
-            },
-            ("fail", [value]) => k::Stmt::Fail {
-                value: self.expression(value)?,
-            },
-            _ => k::Stmt::Do {
-                action: self.action(expr)?,
-            },
+            _ => {
+                return Err(invalid(
+                    "only handlerless Try needs a kernel statement form",
+                    Some(expr.span()),
+                ));
+            }
         })
     }
 }

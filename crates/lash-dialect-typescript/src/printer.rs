@@ -1,5 +1,8 @@
 //! Format v1 exact forms. Paired readable rules: generated_rules.md.
-use crate::TypeScript;
+use crate::{
+    TypeScript,
+    generated_operators::{self, Operator},
+};
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
     check_document_depth,
@@ -17,6 +20,8 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         out: SourceWriter::new(options),
         plan: &plan,
         indent: 0,
+        effects: &document.manifest.effects,
+        operators: generated_operators::bindings(&document.manifest),
     };
     renderer
         .out
@@ -38,20 +43,19 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     renderer.metadata(&helpers);
     renderer.out.write(");\n");
     for (name, function) in &document.functions {
-        renderer.out.write("k.declare(");
-        renderer.out.json(name);
-        renderer.out.write(", ");
+        renderer.out.write("async function ");
+        renderer.name(name);
         let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
-        renderer.function(&function.params, &function.body, unit.as_ref());
-        renderer.out.write(");\n");
+        renderer.parameters(&function.params);
+        renderer.node(k::Node::Block(&function.body), unit.as_ref());
+        renderer.out.write("\n");
     }
-    renderer.out.write("k.main(");
-    renderer.function(
-        &[],
-        &document.main,
+    renderer.out.write("async function main() ");
+    renderer.node(
+        k::Node::Block(&document.main),
         options.source_map.then_some(&k::Unit::Main),
     );
-    renderer.out.write(");\n");
+    renderer.out.write("\n");
     renderer.out.finish(document, SourceFormat::TypeScriptV1)
 }
 impl Printer for TypeScript {
@@ -70,7 +74,30 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
         && !name.starts_with("kernel_name_")
         && !matches!(
             name,
-            "k" | "eval"
+            "k" | "Object"
+                | "projection"
+                | "main"
+                | "tools"
+                | "declared"
+                | "finish"
+                | "failure"
+                | "sleep"
+                | "join"
+                | "spawn"
+                | "cancel"
+                | "yieldTask"
+                | "Promise"
+                | "console"
+                | "Math"
+                | "Date"
+                | "Set"
+                | "Map"
+                | "Uint8Array"
+                | "KernelType"
+                | "undefined"
+                | "NaN"
+                | "Infinity"
+                | "eval"
                 | "arguments"
                 | "await"
                 | "break"
@@ -131,14 +158,14 @@ pub(crate) fn property_identifier(name: &str) -> bool {
 }
 fn native_record(items: &[k::RecordEntry]) -> bool {
     let mut fields = std::collections::BTreeSet::new();
-    items.iter().all(|item| {
-        property_identifier(&item.field) && item.field != "__proto__" && fields.insert(&item.field)
-    })
+    items.iter().all(|item| fields.insert(&item.field))
 }
 struct Renderer<'a> {
     out: SourceWriter,
     plan: &'a NamePlan,
     indent: usize,
+    effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
+    operators: std::collections::BTreeMap<Operator, k::FunctionId>,
 }
 impl Renderer<'_> {
     fn metadata(&mut self, value: &impl serde::Serialize) {
@@ -152,7 +179,12 @@ impl Renderer<'_> {
         self.out.write(&self.plan.helpers[id]);
     }
     fn function(&mut self, params: &[k::Name], body: &k::Block, unit: Option<&k::Unit>) {
-        self.out.write("function(");
+        self.out.write("async function");
+        self.parameters(params);
+        self.node(k::Node::Block(body), unit);
+    }
+    fn parameters(&mut self, params: &[k::Name]) {
+        self.out.write("(");
         for (i, param) in params.iter().enumerate() {
             if i > 0 {
                 self.out.write(", ");
@@ -160,7 +192,6 @@ impl Renderer<'_> {
             self.name(param);
         }
         self.out.write(") ");
-        self.node(k::Node::Block(body), unit);
     }
     fn node(&mut self, node: k::Node<'_>, unit: Option<&k::Unit>) {
         self.out.begin_node(unit);
@@ -214,10 +245,6 @@ impl Renderer<'_> {
                     k::Place::Variable(n) => self.name(n),
                     k::Place::Member(m) => {
                         self.member(m);
-                        if matches!(m, k::Member::Field { field, .. } if !property_identifier(field))
-                        {
-                            self.out.write(".value");
-                        }
                     }
                 }
                 self.out.write(" = ");
@@ -225,9 +252,9 @@ impl Renderer<'_> {
                 self.out.write(";");
             }
             k::Stmt::Remove { member } => {
-                self.out.write("k.remove(");
+                self.out.write("delete ");
                 self.member(member);
-                self.out.write(");");
+                self.out.write(";");
             }
             k::Stmt::Do { action } => {
                 self.node(k::Node::Action(action), None);
@@ -283,9 +310,9 @@ impl Renderer<'_> {
             }
             k::Stmt::Print { value } | k::Stmt::Finish { value } | k::Stmt::Fail { value } => {
                 self.out.write(match stmt {
-                    k::Stmt::Print { .. } => "k.print(",
-                    k::Stmt::Finish { .. } => "k.finish(",
-                    _ => "k.fail(",
+                    k::Stmt::Print { .. } => "console.log(",
+                    k::Stmt::Finish { .. } => "finish(",
+                    _ => "failure(",
                 });
                 self.expr(value);
                 self.out.write(");");
@@ -313,55 +340,97 @@ impl Renderer<'_> {
     }
     fn member(&mut self, member: &k::Member) {
         match member {
-            k::Member::Field { target, field } if property_identifier(field) => {
-                self.out.write("(");
-                self.expr(target);
-                self.out.write(").");
-                self.out.write(field);
-            }
             k::Member::Field { target, field } => {
-                self.out.write("k.field(");
-                self.expr(target);
-                self.out.write(", ");
-                self.out.json(field);
-                self.out.write(")");
+                self.operand(target, 18);
+                if property_identifier(field) {
+                    self.out.write(".");
+                    self.out.write(field);
+                } else {
+                    self.out.write("[");
+                    self.out.json(field);
+                    self.out.write(" as const]");
+                }
             }
             k::Member::Index { target, index } => {
-                self.out.write("(");
-                self.expr(target);
-                self.out.write(")[");
+                self.operand(target, 18);
+                self.out.write("[");
                 self.expr(index);
                 self.out.write("]");
             }
         }
     }
+    fn precedence(&self, expr: &k::Expr) -> u8 {
+        match expr {
+            k::Expr::Call { function, args } => self
+                .operators
+                .iter()
+                .find_map(|(op, id)| {
+                    (*id == *function
+                        && args.len()
+                            == if matches!(op, Operator::Unary(_)) {
+                                1
+                            } else {
+                                2
+                            })
+                    .then(|| op.precedence())
+                })
+                .unwrap_or(18),
+            k::Expr::Tuple(_) => 2,
+            k::Expr::Closure(_) | k::Expr::Record(_) => 1,
+            k::Expr::Literal(k::Literal::Int(_) | k::Literal::Float(_)) => 15,
+            _ => 18,
+        }
+    }
+    fn operand(&mut self, expr: &k::Expr, minimum: u8) {
+        let parens = self.precedence(expr) < minimum;
+        if parens {
+            self.out.write("(");
+        }
+        self.expr(expr);
+        if parens {
+            self.out.write(")");
+        }
+    }
+    fn unary_syntax(&self, expr: &k::Expr) -> bool {
+        match expr {
+            k::Expr::Literal(k::Literal::Int(value)) => value.is_negative(),
+            k::Expr::Literal(k::Literal::Float(value)) => value.get().is_sign_negative(),
+            k::Expr::Call { function, args } if args.len() == 1 => self
+                .operators
+                .iter()
+                .any(|(operator, id)| matches!(operator, Operator::Unary(_)) && id == function),
+            _ => false,
+        }
+    }
     fn literal(&mut self, literal: &k::Literal) {
         match literal {
             k::Literal::Null => self.out.write("null"),
-            k::Literal::Absent => self.out.write("k.absent"),
+            k::Literal::Absent => self.out.write("undefined"),
             k::Literal::Bool(b) => self.out.write(if *b { "true" } else { "false" }),
             k::Literal::Text(s) => self.out.json(s),
             k::Literal::Int(n) if n.bits() <= 53 => self.out.write(&n.to_string()),
             k::Literal::Int(n) => {
-                self.out.write("k.int(");
-                self.out.json(&n.to_string());
-                self.out.write(")");
+                self.out.write(&n.to_string());
+                self.out.write("n");
             }
             k::Literal::Float(n) if n.get().is_finite() => self.out.write(&n.to_string()),
             k::Literal::Float(n) => {
-                self.out.write("k.float(");
-                self.out.json(&n.to_string());
-                self.out.write(")");
+                self.out.write(if n.get().is_nan() {
+                    "NaN"
+                } else if n.get().is_sign_negative() {
+                    "-Infinity"
+                } else {
+                    "Infinity"
+                });
             }
             k::Literal::Bytes(b) => {
-                self.out.write("k.bytes(");
-                self.out.json(&b.to_hex());
+                self.out.write("new Uint8Array(");
+                self.out.json(b.as_slice());
                 self.out.write(")");
             }
             k::Literal::Function(n) => {
-                self.out.write("k.function(");
-                self.out.json(n);
-                self.out.write(")");
+                self.out.write("declared.");
+                self.name(n);
             }
         }
     }
@@ -383,72 +452,86 @@ impl Renderer<'_> {
     }
     fn callee(&mut self, callee: &k::Callee) {
         match callee {
-            k::Callee::Declared(n) | k::Callee::Value(n) => {
-                self.out.write(if matches!(callee, k::Callee::Declared(_)) {
-                    "k.declared("
-                } else {
-                    "k.value("
-                });
-                self.out.json(n);
+            k::Callee::Declared(n) => self.name(n),
+            k::Callee::Value(n) => {
+                self.out.write("(");
+                self.name(n);
+                self.out.write(")");
             }
-            k::Callee::Library(id) => {
-                self.helper(id);
-                return;
-            }
+            k::Callee::Library(id) => self.helper(id),
         }
-        self.out.write(")");
+    }
+    fn arguments(&mut self, args: &[k::Atom]) {
+        for (i, atom) in args.iter().enumerate() {
+            if i > 0 {
+                self.out.write(", ");
+            }
+            self.atom(atom);
+        }
     }
     fn action(&mut self, action: &k::Action) {
         match action {
-            k::Action::Call { callee, args } | k::Action::Spawn { callee, args } => {
-                self.out.write(if matches!(action, k::Action::Call { .. }) {
-                    "k.call("
-                } else {
-                    "k.spawn("
-                });
+            k::Action::Call { callee, args } => {
+                self.out.write("await ");
+                self.callee(callee);
+                self.out.write("(");
+                self.arguments(args);
+                self.out.write(")");
+            }
+            k::Action::Spawn { callee, args } => {
+                self.out.write("spawn(");
                 self.callee(callee);
                 self.out.write(", ");
                 self.atoms(args);
+                self.out.write(")");
             }
             k::Action::Perform {
                 effect,
                 args,
                 result,
             } => {
-                self.out.write("k.perform(");
-                self.out.json(effect);
-                self.out.write(", ");
-                self.atoms(args);
-                self.out.write(", k.type(");
-                self.metadata(result);
+                self.out.write("await tools.");
+                self.out.write(effect.as_str());
+                self.out.write("(");
+                self.arguments(args);
                 self.out.write(")");
+                if !self
+                    .effects
+                    .get(effect)
+                    .is_some_and(|signature| signature.result == *result)
+                {
+                    self.out.write(" as KernelType<");
+                    self.metadata(result);
+                    self.out.write(">");
+                }
             }
             k::Action::Sleep { duration } => {
-                self.out.write("k.sleep(");
+                self.out.write("await sleep(");
                 self.atom(duration);
+                self.out.write(")");
             }
-            k::Action::Join { task } | k::Action::Cancel { task } => {
-                self.out.write(if matches!(action, k::Action::Join { .. }) {
-                    "k.join("
-                } else {
-                    "k.cancel("
-                });
+            k::Action::Join { task } => {
+                self.out.write("await join(");
                 self.atom(task);
+                self.out.write(")");
+            }
+            k::Action::Cancel { task } => {
+                self.out.write("await cancel(");
+                self.atom(task);
+                self.out.write(")");
             }
             k::Action::JoinMany { mode, tasks } => {
-                self.out.write("k.joinMany(");
-                self.out.json(match mode {
-                    k::JoinMode::All => "all",
-                    k::JoinMode::AllSettled => "all_settled",
-                    k::JoinMode::Race => "race",
-                    k::JoinMode::Any => "any",
+                self.out.write(match mode {
+                    k::JoinMode::All => "await Promise.all(",
+                    k::JoinMode::AllSettled => "await Promise.allSettled(",
+                    k::JoinMode::Race => "await Promise.race(",
+                    k::JoinMode::Any => "await Promise.any(",
                 });
-                self.out.write(", ");
                 self.atom(tasks);
+                self.out.write(")");
             }
-            k::Action::Yield => self.out.write("k.yield("),
+            k::Action::Yield => self.out.write("await yieldTask()"),
         }
-        self.out.write(")");
     }
     fn expression(&mut self, expr: &k::Expr) {
         match expr {
@@ -465,20 +548,25 @@ impl Renderer<'_> {
                 self.out.write("]");
             }
             k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                self.out.write(match expr {
-                    k::Expr::Tuple(_) => "k.tuple(",
-                    _ => "k.set(",
-                });
+                if matches!(expr, k::Expr::Set(_)) {
+                    self.out.write("new Set(");
+                }
+                self.out.write("[");
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
                         self.out.write(", ");
                     }
                     self.expr(item);
                 }
-                self.out.write(")");
+                self.out.write("]");
+                self.out.write(if matches!(expr, k::Expr::Tuple(_)) {
+                    " as const"
+                } else {
+                    ")"
+                });
             }
             k::Expr::Map(items) => {
-                self.out.write("k.map(");
+                self.out.write("new Map([");
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
                         self.out.write(", ");
@@ -489,7 +577,7 @@ impl Renderer<'_> {
                     self.expr(&item.value);
                     self.out.write("]");
                 }
-                self.out.write(")");
+                self.out.write("])");
             }
             k::Expr::Record(items) if native_record(items) => {
                 self.out.write("{");
@@ -497,14 +585,22 @@ impl Renderer<'_> {
                     if i > 0 {
                         self.out.write(", ");
                     }
-                    self.out.write(&item.field);
+                    if item.field == "__proto__" {
+                        self.out.write("[");
+                        self.out.json(&item.field);
+                        self.out.write("]");
+                    } else if property_identifier(&item.field) {
+                        self.out.write(&item.field);
+                    } else {
+                        self.out.json(&item.field);
+                    }
                     self.out.write(": ");
                     self.expr(&item.value);
                 }
                 self.out.write("}");
             }
             k::Expr::Record(items) => {
-                self.out.write("k.record(");
+                self.out.write("Object.fromEntries([");
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
                         self.out.write(", ");
@@ -515,11 +611,50 @@ impl Renderer<'_> {
                     self.expr(&item.value);
                     self.out.write("]");
                 }
-                self.out.write(")");
+                self.out.write("])");
             }
             k::Expr::Member(m) => self.member(m),
             k::Expr::Closure(c) => self.function(&c.params, &c.body, None),
             k::Expr::Call { function, args } => {
+                if let Some(op) = self.operators.iter().find_map(|(op, id)| {
+                    (*id == *function
+                        && args.len()
+                            == if matches!(op, Operator::Unary(_)) {
+                                1
+                            } else {
+                                2
+                            })
+                    .then_some(*op)
+                }) {
+                    match op {
+                        Operator::Unary(_) => {
+                            self.out.write(op.token());
+                            // Parentheses distinguish invocation of negation from a signed literal.
+                            self.out.write("(");
+                            self.expr(&args[0]);
+                            self.out.write(")");
+                        }
+                        Operator::Binary(binary) => {
+                            let right_associative = binary == swc_ecma_ast::BinaryOp::Exp;
+                            if right_associative && self.unary_syntax(&args[0]) {
+                                // TypeScript forbids an ungrouped unary lhs of **.
+                                self.out.write("(");
+                                self.expr(&args[0]);
+                                self.out.write(")");
+                            } else {
+                                self.operand(
+                                    &args[0],
+                                    op.precedence() + u8::from(right_associative),
+                                );
+                            }
+                            self.out.write(" ");
+                            self.out.write(op.token());
+                            self.out.write(" ");
+                            self.operand(&args[1], op.precedence() + u8::from(!right_associative));
+                        }
+                    }
+                    return;
+                }
                 self.helper(function);
                 self.out.write("(");
                 for (i, arg) in args.iter().enumerate() {
@@ -530,10 +665,10 @@ impl Renderer<'_> {
                 }
                 self.out.write(")");
             }
-            k::Expr::Clock => self.out.write("k.clock()"),
-            k::Expr::Random => self.out.write("k.random()"),
+            k::Expr::Clock => self.out.write("Date.now()"),
+            k::Expr::Random => self.out.write("Math.random()"),
             k::Expr::Read(read) => {
-                self.out.write("k.read(");
+                self.out.write("projection.read(");
                 self.expr(&read.handle);
                 self.out.write(", ");
                 self.expr(&read.request);

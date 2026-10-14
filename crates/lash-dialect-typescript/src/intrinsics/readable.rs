@@ -78,16 +78,29 @@ impl Reader {
                         Some(object.span()),
                     ));
                 };
-                let s::PropName::Ident(field) = &prop.key else {
-                    return Err(invalid(
-                        "native record keys are identifiers",
-                        Some(object.span()),
-                    ));
+                let (field, special) = match &prop.key {
+                    s::PropName::Ident(field) => (field.sym.to_string(), false),
+                    s::PropName::Str(field) => (
+                        field
+                            .value
+                            .as_str()
+                            .ok_or_else(|| {
+                                invalid("record key needs Unicode scalars", Some(object.span()))
+                            })?
+                            .to_owned(),
+                        false,
+                    ),
+                    s::PropName::Computed(field) => (super::string(&field.expr)?, true),
+                    _ => {
+                        return Err(invalid(
+                            "native record keys are identifiers or text",
+                            Some(object.span()),
+                        ));
+                    }
                 };
-                let field = field.sym.to_string();
-                if field == "__proto__" || !fields.insert(field.clone()) {
+                if (field == "__proto__" && !special) || !fields.insert(field.clone()) {
                     return Err(invalid(
-                        "use k.record for special or repeated fields",
+                        "special keys need computed text; repeated fields need Object.fromEntries",
                         Some(object.span()),
                     ));
                 }
@@ -108,10 +121,21 @@ impl Reader {
                 target,
                 field: field.sym.to_string(),
             }),
-            s::MemberProp::Computed(index) => Ok(k::Member::Index {
-                target,
-                index: self.expression(&index.expr)?,
-            }),
+            s::MemberProp::Computed(index) => {
+                if let s::Expr::TsConstAssertion(field) = &*index.expr
+                    && matches!(&*field.expr, s::Expr::Lit(s::Lit::Str(_)))
+                {
+                    Ok(k::Member::Field {
+                        target,
+                        field: super::string(&field.expr)?,
+                    })
+                } else {
+                    Ok(k::Member::Index {
+                        target,
+                        index: self.expression(&index.expr)?,
+                    })
+                }
+            }
             s::MemberProp::PrivateName(_) => Err(invalid(
                 "kernel fields are not private names",
                 Some(member.span()),
@@ -139,7 +163,7 @@ fn native_number(number: &s::Number, negative: bool) -> Result<k::Literal, Diagn
             .map_err(|error| invalid(error.to_string(), Some(number.span())))?;
         if value.bits() > 53 {
             return Err(invalid(
-                "use k.int beyond the safe native integer range",
+                "use a bigint literal beyond the safe native integer range",
                 Some(number.span()),
             ));
         }

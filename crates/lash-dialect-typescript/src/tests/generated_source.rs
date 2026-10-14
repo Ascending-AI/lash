@@ -25,8 +25,8 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
 }
 // Independently written syntax, not obtained from the printer or its rule table.
 const HAND_WRITTEN: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"numbers":"by_spelling"}, {"worker":{"params":[],"result":"any"}}, ["odd name"], [["answer","odd name"],["worker","worker"]], []);
-k.declare("worker", function() { return k.int("7"); });
-k.main(function() { let answer = k.float("-0.0"); k.finish(answer); });"#;
+async function worker() { return 7; }
+async function main() { let answer = -0.0; finish(answer); }"#;
 fn hand_document() -> k::Document {
     let mut document = k::Document::new(
         k::NumberPolicy::BySpelling,
@@ -320,7 +320,7 @@ fn malformed_generated_modules_refuse_without_authored_fallback() {
             "[\"answer\",\"odd name\"],[\"answer\",\"other\"]",
         ),
         format!("{HAND_WRITTEN}\nlet extra = 1;"),
-        HAND_WRITTEN.replace("k.main", "k.declare"),
+        HAND_WRITTEN.replace("function main", "function worker"),
         "k.document(\"old manifest\", \"entries\", []);".into(),
     ];
     let id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -334,10 +334,10 @@ fn malformed_generated_modules_refuse_without_authored_fallback() {
         cases.push(HAND_WRITTEN.replacen("[]);", &format!("{operand});"), 1));
     }
     cases.push(HAND_WRITTEN.replace("\"kernel\":1", "\"kernel\":1,\"kernel\":1"));
-    cases.push(HAND_WRITTEN.replace("let answer =", "const answer ="));
-    cases.push(HAND_WRITTEN.replace("function()", "function(): any"));
-    cases.push(HAND_WRITTEN.replace("k.float(\"-0.0\")", "k.tuple(k.yield())"));
-    cases.push(HAND_WRITTEN.replace("k.float(\"-0.0\")", "k.sleep(k.tuple(k.int(\"1\")))"));
+    cases.push(HAND_WRITTEN.replace("let answer =", "var answer ="));
+    cases.push(HAND_WRITTEN.replace("function worker()", "function worker(): any"));
+    cases.push(HAND_WRITTEN.replace("let answer = -0.0;", "let answer = [await yieldTask()];"));
+    cases.push(HAND_WRITTEN.replace("let answer = -0.0;", "let answer = await sleep([1]);"));
     let env = lash_kernel_dialect::Environment {
         library: super::library(),
         effects: &BTreeMap::new(),
@@ -483,7 +483,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         "{{\"kernel\":1,\"numbers\":\"float\",\"effects\":{{\"deep\":{{\"result\":{nested_type}}}}}}}"
     );
     let source = format!(
-        "k.document(\"lash.generated.typescript\",\"1\",{},{{}},[],[],[]);k.main(function(){{}});",
+        "k.document(\"lash.generated.typescript\",\"1\",{},{{}},[],[],[]);async function main(){{}}",
         metadata
     );
     assert_eq!(
@@ -1278,7 +1278,7 @@ fn structured_envelope_and_types_keep_nested_optional_metadata() {
     let source = roundtrip(&document, true).source;
     assert!(source.contains("{\"kernel\":1"), "{source}");
     assert!(!source.contains("\\\""), "{source}");
-    assert!(source.contains("k.type({\"record\":"), "{source}");
+    assert!(source.contains("as KernelType<{\"record\":"), "{source}");
     assert!(
         source.contains("True false None"),
         "quoted metadata is not token-converted"

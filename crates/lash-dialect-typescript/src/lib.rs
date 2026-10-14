@@ -10,6 +10,7 @@
 mod adapter;
 mod builtins;
 mod diagnostics;
+mod generated_operators;
 mod intrinsics;
 mod lower;
 mod node_label;

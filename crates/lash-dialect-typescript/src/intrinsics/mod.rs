@@ -13,6 +13,7 @@ use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod expressions;
+mod native;
 mod readable;
 mod statements;
 
@@ -20,6 +21,8 @@ pub(crate) struct Reader {
     limits: k::KernelDataLimits,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
+    effects: BTreeMap<k::EffectName, k::Signature>,
+    operators: BTreeMap<crate::generated_operators::Operator, k::FunctionId>,
 }
 
 /// A generated module starts with `k.document` (or an incomplete declare/main). Trivia is insignificant. This
@@ -217,6 +220,8 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
         limits: k::KernelDataLimits::standard(),
         names: BTreeMap::new(),
         helpers: BTreeMap::new(),
+        effects: BTreeMap::new(),
+        operators: BTreeMap::new(),
     };
     let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
     let mut items = module.body.iter();
@@ -291,31 +296,31 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
         }
         error
     })?;
+    reader.effects = document.manifest.effects.clone();
+    reader.operators = crate::generated_operators::bindings(&document.manifest);
     let mut main_seen = false;
     for item in items {
-        let expr =
-            module_expr(item).ok_or_else(|| format_error("expected a declaration or main"))?;
-        let (operation, args) = invocation(expr)?;
-        match (operation.as_str(), args.as_slice()) {
-            ("declare", [name, function]) if !main_seen => {
-                let name = k::Name::new(string(name)?);
-                let function = reader.function(function)?;
-                if document.functions.insert(name, function).is_some() {
-                    return Err(format_error("duplicate declaration"));
-                }
+        let s::ModuleItem::Stmt(s::Stmt::Decl(s::Decl::Fn(declaration))) = item else {
+            return Err(format_error(
+                "expected native function declarations and main",
+            ));
+        };
+        if declaration.declare || main_seen {
+            return Err(format_error(
+                "expected one main after declarations; trailing text is forbidden",
+            ));
+        }
+        let function = reader.read_function(&declaration.function)?;
+        if declaration.ident.sym == "main" {
+            if !function.params.is_empty() {
+                return Err(format_error("main has no parameters"));
             }
-            ("main", [function]) if !main_seen => {
-                let function = reader.function(function)?;
-                if !function.params.is_empty() {
-                    return Err(format_error("main has no parameters"));
-                }
-                document.main = function.body;
-                main_seen = true;
-            }
-            _ => {
-                return Err(format_error(
-                    "expected one main after declarations; trailing text is forbidden",
-                ));
+            document.main = function.body;
+            main_seen = true;
+        } else {
+            let name = reader.name(&declaration.ident)?;
+            if document.functions.insert(name, function).is_some() {
+                return Err(format_error("duplicate declaration"));
             }
         }
     }
@@ -339,7 +344,7 @@ pub(crate) fn invalid(message: impl Into<String>, span: Option<swc_common::Span>
     Diagnostic::with_repair(
         DiagnosticCode::InvalidAst,
         message,
-        "use the reserved k operation with its kernel operands",
+        "use the documented generated TypeScript syntax and its exact operands",
         span.map(|span| SourceSpan {
             start: span.lo.0 as usize,
             end: span.hi.0 as usize,
@@ -479,9 +484,7 @@ fn decode_metadata<T: serde::de::DeserializeOwned>(
 fn metadata_text(expr: &s::Expr) -> Result<String, Diagnostic> {
     fn write(expr: &s::Expr, out: &mut String) -> Result<(), Diagnostic> {
         match expr {
-            s::Expr::Lit(s::Lit::Str(_)) => {
-                out.push_str(&serde_json::to_string(&string(expr)?).unwrap())
-            }
+            s::Expr::Lit(s::Lit::Str(_)) => out.push_str(&json_string(&string(expr)?)?),
             s::Expr::Lit(s::Lit::Bool(v)) => out.push_str(if v.value { "true" } else { "false" }),
             s::Expr::Lit(s::Lit::Null(_)) => out.push_str("null"),
             s::Expr::Lit(s::Lit::Num(v)) => out.push_str(
@@ -518,7 +521,7 @@ fn metadata_text(expr: &s::Expr) -> Result<String, Diagnostic> {
                     if i > 0 {
                         out.push(',');
                     }
-                    out.push_str(&serde_json::to_string(key).unwrap());
+                    out.push_str(&json_string(key)?);
                     out.push(':');
                     write(&item.value, out)?;
                 }
@@ -536,4 +539,8 @@ fn metadata_text(expr: &s::Expr) -> Result<String, Diagnostic> {
     let mut text = String::new();
     write(expr, &mut text)?;
     Ok(text)
+}
+
+pub(super) fn json_string(value: &str) -> Result<String, Diagnostic> {
+    serde_json::to_string(value).map_err(|error| invalid(error.to_string(), None))
 }
