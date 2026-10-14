@@ -1196,3 +1196,22 @@ fn repeated_variable_reads_share_the_resident_normal_form() {
         "one payload normalization: {reads} pages"
     );
 }
+
+/// D-SEALTIME: installing unchanged root holdings and releasing empty
+/// statement scratch does not rewrite the immutable heap header.
+#[test]
+fn unchanged_root_holdings_seal_without_writing_a_page() {
+    use super::super::tree::Tree;
+    let (mut heap, pages) = fresh();
+    let first = seal(&mut heap);
+    let before = pages.borrow().seals;
+    for _ in 0..10 {
+        heap.set_execution_roots(Tree::new(false), Tree::new(false), &[], &[], &[])
+            .expect("roots");
+        heap.release_statement_roots().expect("release");
+        let next = seal(&mut heap);
+        assert_eq!(next.sealed_pages, 0);
+        assert_eq!(next.root.directory.page, first.root.directory.page);
+    }
+    assert_eq!(pages.borrow().seals, before);
+}

@@ -221,6 +221,12 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
+            if let Completion::Return(value) | Completion::Throw(value) = &mut departure {
+                *value = self
+                    .heap
+                    .canonical_value(value.clone())
+                    .map_err(|error| self.heap_halt(error))?;
+            }
             match &departure {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it

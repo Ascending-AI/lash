@@ -165,6 +165,16 @@ impl NativeFunction for Twice {
 
 /// The handful of library functions the laws call, and the header that
 /// names them in a document.
+struct LargeError;
+impl NativeFunction for LargeError {
+    fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
+        Err(NativeError::Raised(Arc::new(ErrorRef::new(
+            &"k".repeat(1 << 20),
+            &"m".repeat(1 << 20),
+        ))))
+    }
+}
+
 pub(crate) struct Library {
     pub(crate) registry: Arc<FunctionRegistry>,
     pub(crate) ids: BTreeMap<&'static str, FunctionId>,
@@ -180,7 +190,12 @@ pub(crate) fn library(native_twice: bool) -> Library {
     let machine = register_machine_functions(&mut registry).unwrap();
     ids.insert("deref", machine.deref);
     ids.insert("tasks.unfinished", machine.tasks_unfinished);
-    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 8] = [
+    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 9] = [
+        (
+            "work.error",
+            "() -> Any\nkernel 1\ncharge 1",
+            Arc::new(LargeError),
+        ),
         (
             "num.add",
             "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",

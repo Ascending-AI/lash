@@ -1050,6 +1050,8 @@ impl PagedHeap {
         new_tasks: u64,
         install: impl FnOnce(&mut Self),
     ) -> Result<(), HeapWriteError> {
+        let before_certificate = self.accounting;
+        let before_population = self.population;
         let mut census = self
             .census
             .take()
@@ -1070,7 +1072,6 @@ impl PagedHeap {
                 .checked_sub(old_tasks)
                 .and_then(|v| v.checked_add(new_tasks))
                 .ok_or_else(|| HeapFault::Malformed("root task-edge population overflow".into()))?;
-            self.header = None;
             match decision {
                 ReservationDecision::Granted(_) => census
                     .changed(LogicalBytes(before), LogicalBytes(after))
@@ -1102,6 +1103,9 @@ impl PagedHeap {
             }
         })();
         self.accounting = census.certificate();
+        if before_certificate != self.accounting || before_population != self.population {
+            self.header = None;
+        }
         self.census = Some(census);
         result
     }

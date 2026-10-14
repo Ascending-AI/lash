@@ -141,6 +141,7 @@ impl PagedHeap {
         *self.family_base.borrow_mut() = Some(base);
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
+        let before = self.accounting;
         if let Some(census) = &mut self.census {
             census
                 .changed(
@@ -155,7 +156,9 @@ impl PagedHeap {
         self.temporary.clear();
         self.temporary_fresh.clear();
         self.reserved = 0;
-        self.header = None;
+        if before != self.accounting {
+            self.header = None;
+        }
         Ok(())
     }
     pub(super) fn statement_roots(&self) -> &[Value] {

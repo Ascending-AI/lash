@@ -238,3 +238,31 @@ fn task_diagnostics_count_and_enumerate_only_the_requested_prefix() {
     assert!(none.tasks.is_empty());
     assert!(none.finished);
 }
+
+/// D-IMM/S4: a native error remains a bounded descriptor while finally
+/// parks, then resumes with its exact kind, message and data.
+#[test]
+fn a_megabyte_native_error_survives_a_parked_finally() {
+    let mut embedder = Embedder::new(
+        "main { try { let unused = work.error() } finally { do perform echo(7) as Any } }",
+    );
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    reopen(&mut embedder);
+    assert!(
+        embedder
+            .source
+            .0
+            .borrow()
+            .values()
+            .all(|page| page.tokens.len() <= 65_536)
+    );
+    embedder.deliver("echo");
+    let crate::End::Error(crate::RunError::Uncaught(lash_kernel_doc::Datum::Error(error))) =
+        embedder.run_to_end(&[])
+    else {
+        panic!("native error")
+    };
+    assert_eq!(error.kind, "k".repeat(1 << 20));
+    assert_eq!(error.message, "m".repeat(1 << 20));
+    assert_eq!(error.data, lash_kernel_doc::Datum::Null);
+}

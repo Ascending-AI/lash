@@ -592,6 +592,16 @@ impl KernelMachine {
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
     fn end_task(&mut self, task: TaskId, result: Result<Value, Value>) -> Result<(), Halt> {
+        let result = match result {
+            Ok(value) => Ok(self
+                .heap
+                .canonical_value(value)
+                .map_err(|error| self.heap_halt(error))?),
+            Err(value) => Err(self
+                .heap
+                .canonical_value(value)
+                .map_err(|error| self.heap_halt(error))?),
+        };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();

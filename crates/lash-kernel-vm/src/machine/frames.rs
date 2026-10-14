@@ -47,6 +47,19 @@ fn truncate<T: Cell>(tree: &mut Tree<T>, len: u64, access: &Access<'_>) -> Resul
     Ok(())
 }
 
+fn site_ref(
+    old: Option<lash_kernel_state::paged::SiteRef>,
+    site: &lash_kernel_doc::Site,
+    access: &Access<'_>,
+) -> Result<lash_kernel_state::paged::SiteRef, HeapFault> {
+    if let Some(old) = old
+        && old.matches(site, access)?
+    {
+        return Ok(old);
+    }
+    lash_kernel_state::paged::SiteRef::new(site, access)
+}
+
 impl Frame {
     pub(super) fn sync(&mut self) -> Result<(), HeapFault> {
         if let Some(Control::Block { block, next }) = self.control.last() {
@@ -89,11 +102,19 @@ impl Frame {
                             (value.clone(), at.map(|at| at.0).unwrap_or(u64::MAX))
                         }
                     };
+                    let saved_site = site_ref(
+                        self.record
+                            .loops
+                            .get(&ordinal_key(loops), &self.access)?
+                            .map(|record| record.site),
+                        site,
+                        &self.access,
+                    )?;
                     write(
                         &mut self.record.loops,
                         loops,
                         LoopRecord {
-                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
+                            site: saved_site,
                             started: *started,
                             position: Some(position),
                         },
@@ -112,11 +133,19 @@ impl Frame {
                     let Form::While { site, .. } = &self.exe.stmt(*stmt).form else {
                         return Err(malformed("a while cursor stands at another form"));
                     };
+                    let saved_site = site_ref(
+                        self.record
+                            .loops
+                            .get(&ordinal_key(loops), &self.access)?
+                            .map(|record| record.site),
+                        site,
+                        &self.access,
+                    )?;
                     write(
                         &mut self.record.loops,
                         loops,
                         LoopRecord {
-                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
+                            site: saved_site,
                             started: *started,
                             position: None,
                         },
@@ -150,11 +179,19 @@ impl Frame {
                             }
                         }
                     };
+                    let saved_site = site_ref(
+                        self.record
+                            .finally
+                            .get(&ordinal_key(finally), &self.access)?
+                            .map(|record| record.site),
+                        site,
+                        &self.access,
+                    )?;
                     write(
                         &mut self.record.finally,
                         finally,
                         FinallyRecord {
-                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
+                            site: saved_site,
                             entered,
                         },
                         &self.access,
