@@ -101,31 +101,29 @@ async fn grace_case_probes_binding_before_remote_terminal_wait() {
     let dir = tempfile::tempdir().unwrap();
     let report = dir.path().join("report.json");
     let samples = dir.path().join("samples.json");
-    let output = tokio::time::timeout(
-        // A functional watchdog, with a wide margin over the fixture's work;
-        // this must not wait for the deliberately delayed 120-second poll.
-        std::time::Duration::from_secs(20),
-        tokio::process::Command::new(env!("CARGO_BIN_EXE_lash-perf"))
-            .args([
-                "latency",
-                "--cases",
-                "grace",
-                "--lanes",
-                "1",
-                "--scale-down",
-            ])
-            .arg("--store-dir")
-            .arg(dir.path().join("stores"))
-            .arg("--out")
-            .arg(&report)
-            .arg("--samples-out")
-            .arg(&samples)
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .expect("the binding probe must keep its short floor")
-    .unwrap();
+    // Completion and the ledger below are the oracle. Startup, SQLite work
+    // and teardown have no fixed wall-time budget on the shared executor.
+    // grace_binding_discovery_stays_at_floor_after_unbound_reads pins the
+    // probe cadence separately with store gates and a paused clock.
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .args([
+            "latency",
+            "--cases",
+            "grace",
+            "--lanes",
+            "1",
+            "--scale-down",
+        ])
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&report)
+        .arg("--samples-out")
+        .arg(&samples)
+        .kill_on_drop(true)
+        .output()
+        .await
+        .unwrap();
     assert_eq!(
         output.status.code(),
         Some(2),

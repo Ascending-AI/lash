@@ -1359,4 +1359,87 @@ mod tests {
                 .all(|pair| pair[0].since_entry_ns <= pair[1].since_entry_ns)
         );
     }
+
+    /// LATENCY-BINDING: the grace case discovers an unbound input at the
+    /// short floor on successive reads, before it can hold a terminal wait.
+    #[tokio::test(start_paused = true)]
+    async fn grace_binding_discovery_stays_at_floor_after_unbound_reads() {
+        use lash_core::testing::runtime_helpers::LayeredBackend;
+        use lash_core::testing::{Script, StoreOp};
+
+        let reads = Script::new();
+        let first = reads.on(StoreOp::input_status).after().pause();
+        let second = reads.on(StoreOp::input_status).nth(2).after().pause();
+        let third = reads.on(StoreOp::input_status).nth(3).before().pause();
+        let backend =
+            durable_backend(lash::sqlite::SqliteStoreSet::memory().await.unwrap()).unwrap();
+        let backend = LayeredBackend::over(backend)
+            .map_session_store_factory(|inner| reads.wrap("grace-observer", inner))
+            .into_backend();
+        let spec = super::super::default_cases(1, 1)
+            .into_iter()
+            .find(|case| case.name == "grace")
+            .unwrap();
+        let pacing = spec.follower.pacing().unwrap().follow;
+        assert_eq!(
+            pacing.initial(),
+            lash::ObserverPacing::standard().follow.initial()
+        );
+        let core = build_core(
+            backend,
+            &spec,
+            Arc::new(ProviderTiming::default()),
+            None,
+            &None,
+            None,
+        )
+        .unwrap();
+        let session = core
+            .session(SessionId::fixture("grace-binding-floor"))
+            .create(lash::SessionCreation::root(
+                lash::SessionSpec::new(
+                    latency_llm_profile_spec().unwrap().wire_model,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(1),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
+            .await
+            .unwrap();
+        let handle = session
+            .send(lash::TurnInput::text("still unbound"))
+            .await
+            .unwrap();
+        // SQLite runs outside Tokio: prevent automatic time advancement
+        // while a status read is in flight. Gates prove those reads finished.
+        let hold_time = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        {
+            let mut following = std::pin::pin!(handle.outcome());
+            first.reached_by(&mut following, 1).await;
+            let started = tokio::time::Instant::now();
+            first.open_one();
+            assert!(futures_util::poll!(&mut following).is_pending());
+            tokio::time::advance(pacing.initial()).await;
+            second.reached_by(&mut following, 1).await;
+            second.open_one();
+            assert!(futures_util::poll!(&mut following).is_pending());
+            // No store work remains until the third gate (before its read).
+            // Tokio can now advance directly to the next probe's timer.
+            hold_time.abort();
+            let _ = hold_time.await;
+            third.reached_by(&mut following, 1).await;
+            assert_eq!(
+                started.elapsed(),
+                pacing.initial() * 2,
+                "unbound reads must not back off toward the 120-second ceiling"
+            );
+            third.open_one();
+        }
+        reads.finish().unwrap();
+        core.shutdown().await.unwrap();
+    }
 }

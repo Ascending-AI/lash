@@ -6,3 +6,7 @@ fn omit_admission(execution: &mut ProcessLocalExecution) {
 }
 
 fn main() {}
+
+// Keep rustc's Option path qualified in every feature closure, including
+// closures that do not expose the MCP SDK's type names.
+struct Option;

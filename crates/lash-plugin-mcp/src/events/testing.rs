@@ -71,8 +71,10 @@ def take_rewind():
 
 def events():
     try:
-        with open(path('events.jsonl'), 'r', encoding='utf-8') as f:
-            return [json.loads(line) for line in f if line.strip()]
+        with open(path('events.jsonl'), 'rb') as f:
+            # The newline publishes an occurrence. A concurrent append may
+            # still be writing the tail, including a UTF-8 code point.
+            return [json.loads(line) for line in f if line.endswith(b'\n') and line.strip()]
     except FileNotFoundError:
         return []
 
@@ -215,7 +217,9 @@ impl McpEventsFixture {
             .append(true)
             .open(self.world.join("events.jsonl"))
             .expect("the world's events open");
-        writeln!(file, "{line}").expect("the event is written");
+        // Format before publishing: Value's Display writes JSON in fragments.
+        file.write_all(format!("{line}\n").as_bytes())
+            .expect("the event is written");
     }
 
     /// Replace the server's steering with `control`.
@@ -245,5 +249,75 @@ impl McpEventsFixture {
             .into_iter()
             .filter(|request| request.get("method").and_then(Value::as_str) == Some(method))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+
+    /// EVENT-PUBLICATION: a reader sees only newline-terminated occurrences,
+    /// even when a producer is stopped partway through writing one.
+    #[tokio::test]
+    async fn an_incomplete_event_is_not_published_until_its_line_is_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(dir.path());
+        fixture.emit("first", json!({}));
+        let mut events = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.path().join("events.jsonl"))
+            .unwrap();
+        let event = json!({
+            "eventId": "second", "name": FIXTURE_EVENT,
+            "timestamp": "2026-10-14T00:00:00Z", "data": {},
+        })
+        .to_string();
+        events.write_all(&event.as_bytes()[..1]).unwrap();
+        let mut server = tokio::process::Command::new("python3")
+            .args(["-u", "-c", SERVER])
+            .env("EVENTS_WORLD", dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut input = server.stdin.take().unwrap();
+        let mut output = BufReader::new(server.stdout.take().unwrap()).lines();
+        for (id, expected) in [
+            (1, json!([])),
+            (2, json!([])),
+            (3, json!([serde_json::from_str::<Value>(&event).unwrap()])),
+        ] {
+            if id == 2 {
+                // Complete JSON alone is not the publication boundary.
+                events.write_all(&event.as_bytes()[1..]).unwrap();
+            } else if id == 3 {
+                events.write_all(b"\n").unwrap();
+            }
+            let request = json!({
+                "jsonrpc": "2.0", "id": id, "method": "events/poll",
+                "params": { "name": FIXTURE_EVENT, "cursor": "1" },
+            });
+            input
+                .write_all(format!("{request}\n").as_bytes())
+                .await
+                .unwrap();
+            let line = output
+                .next_line()
+                .await
+                .unwrap()
+                .expect("a partial event must not crash its reader");
+            let response: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(response["result"]["events"], expected);
+            assert_eq!(
+                response["result"]["cursor"],
+                if id == 3 { "2" } else { "1" }
+            );
+        }
+        drop(input);
+        assert!(server.wait().await.unwrap().success());
     }
 }
