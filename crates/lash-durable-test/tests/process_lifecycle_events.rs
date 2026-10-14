@@ -685,6 +685,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 serves: lash::testing::node_serves(&core),
                 max_active: 1,
                 claim_batch: 1,
+                retirement: lash_durable::RetirementSettings::standard(),
             },
             Arc::new(MeasuredActivation {
                 inner,

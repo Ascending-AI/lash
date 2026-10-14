@@ -818,6 +818,9 @@ pub(super) async fn root_of(
         RootOwner::WorkingExecution { session, run } => query(sql.turns.working_root.sql())
             .bind(session.as_str())
             .bind(run.as_str()),
+        RootOwner::ModelAnswer { session, run } => query(sql.turns.answer_root.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
         RootOwner::TurnNamespace {
             session,
             run,
