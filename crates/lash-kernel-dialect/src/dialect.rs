@@ -106,6 +106,9 @@ pub struct Package {
     /// The name annotations record a document's dialect under.
     pub dialect: String,
     pub front_end: Box<dyn FrontEnd>,
+    /// Decode exact generated source without a library, admission or execution.
+    /// This is separate from authored cell lowering and from printing.
+    pub compile_generated: fn(&str, crate::GeneratedSourceLimits) -> Result<Document, Diagnostic>,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
     /// What the dialect's function values are, where a session of it keeps

@@ -93,13 +93,20 @@ pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Low
     lower_workflow_with_limits(source, environment, SourceLimits::standard())
 }
 
+/// Whether trusted whole-workflow dispatch must use the generated decoder.
+/// This includes incomplete reserved envelopes so malformed generated modules
+/// cannot fall through to authored lowering. It grants no model-cell authority.
+pub fn is_generated_workflow(source: &str) -> bool {
+    intrinsics::source_probe(source).0
+}
+
 /// Lower a whole TypeScript workflow under host source admission policy.
 pub fn lower_workflow_with_limits(
     source: &str,
     environment: &Environment<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    if intrinsics::source_probe(source).0 {
+    if is_generated_workflow(source) {
         let document = compile_generated(source, GeneratedSourceLimits::default())?;
         let mut annotations =
             lash_kernel_doc::Annotations::new(document.identity().map_err(|error| {

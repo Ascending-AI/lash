@@ -2,11 +2,11 @@ worker protocol 1
 frame header 8 bytes
 testing true
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , bindings : BTreeSet < Name > , functions : BTreeMap < Name , lash_kernel_dialect :: SavedFunction > , helpers : u32 , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , Print { dialect : String , # [serde (with = "serde_bytes")] document : Vec < u8 > , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , bindings : BTreeSet < Name > , functions : BTreeMap < Name , lash_kernel_dialect :: SavedFunction > , helpers : u32 , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , Print { format : lash_kernel_dialect :: SourceFormat , # [serde (with = "serde_bytes")] document : Vec < u8 > , options : lash_kernel_dialect :: PrintOptions , } , CompileGenerated { format : lash_kernel_dialect :: SourceFormat , source : String , limits : lash_kernel_dialect :: GeneratedSourceLimits , } }
 
 # [serde (deny_unknown_fields)] struct DialectRefusal { code : String , message : String , span : Option < (usize , usize) > , unsupported : bool , repairs : Vec < String > , }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , function_values : Option < lash_kernel_dialect :: FunctionValues > , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , Printed { source : String , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } , HelperReleaseNotHeld { release : u32 , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , function_values : Option < lash_kernel_dialect :: FunctionValues > , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , Printed (lash_kernel_dialect :: PrintedSource) , Generated { # [serde (with = "serde_bytes")] document : Vec < u8 > , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } , HelperReleaseNotHeld { release : u32 , } }
 
 # [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , # [serde (default , skip_serializing_if = "Vec::is_empty")] reads : Vec < EffectName > , }
 
@@ -21,3 +21,17 @@ testing true
 # [serde (rename_all = "snake_case" , deny_unknown_fields)] enum OutcomeWire { Completed (Datum) , Failed (ErrorDatum) , Elapsed }
 
 # [serde (deny_unknown_fields)] struct ProjectionRead { handle : Handle , request : Datum , }
+
+# [serde (rename_all = "snake_case")] enum SourceFormat { TypeScriptV1 , PythonV1 }
+
+struct GeneratedSourceLimits { max_bytes : usize , max_depth : usize , }
+
+struct PrintOptions { source_map : bool , limits : GeneratedSourceLimits , }
+
+struct PrintedSource { source : String , format : SourceFormat , # [serde (default , skip_serializing_if = "Option::is_none")] source_map : Option < SourceMap > , }
+
+struct SourceMap { source : [u8 ; 32] , document : DocumentId , format : SourceFormat , sites : Vec < SourceSite > , }
+
+struct SourceSite { site : Site , ranges : Vec < crate :: Span > , implicit : Option < usize > , }
+
+struct Span { start : usize , end : usize , }

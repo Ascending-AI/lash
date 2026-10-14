@@ -66,7 +66,12 @@ does (FIG-5922).
 
 `prepare` runs pure work in a worker: `Request::Lower` lowers source in a
 dialect to a kernel document against the effects the host supplies and the
-session bindings in scope, and `Request::Print` prints a document as source.
+session bindings in scope. `Request::Print` renders a document in a selected
+exact source format with host limits and an optional disposable map;
+`Request::CompileGenerated` separately decodes that source without admission.
+Neither printing nor decoding resolves dependencies or stores source/maps.
+The host-facing `WorkerService::print` and `::compile_generated` expose these
+operations; hosts compare the returned Documents' canonical bytes themselves.
 Both read guest-controlled input, so both run here. A dialect's parser runs on
 a thread whose reserved stack is 8 MiB plus 40,000 bytes per source byte at
 the 64 KiB source cap; pages commit only when touched.

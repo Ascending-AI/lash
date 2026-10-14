@@ -87,10 +87,14 @@
 //! const-bound async literals, including `process(async (...) => ...)`, become
 //! entries. The printer's exact source is also accepted.
 //!
-//! With the `typescript` feature, [`WorkflowDocument::typescript`] prints a
-//! document as generated TypeScript that reconstructs identical canonical bytes, or
-//! answers the printer's typed refusal. A refusal leaves the document
-//! readable, editable and publishable.
+//! With the matching `typescript` or `python` feature, a workflow document's
+//! `typescript(options)` or `python(options)` returns exact generated source
+//! and an optional disposable map. Printing does not compile or admit it.
+//! Hosts compose `lash::typescript::compile_generated` or
+//! `lash::python::compile_generated` with `Document::canonical_bytes()` to
+//! check reconstruction. `vm::WorkerService` exposes separate `print` and
+//! `compile_generated` operations in a worker. Decoded documents still require
+//! normal admission before execution; maps are never stored automatically.
 
 #[cfg(feature = "typescript")]
 pub(crate) mod typescript;

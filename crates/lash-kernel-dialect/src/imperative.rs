@@ -3,14 +3,25 @@ use lash_kernel_doc::{Document, DocumentId, Node, Site, Unit};
 use sha2::{Digest, Sha256};
 
 /// Generated source is a separate, disposable format from stored documents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceFormat {
     TypeScriptV1,
     PythonV1,
 }
 
+impl SourceFormat {
+    /// The installed dialect that owns this generated format.
+    pub fn dialect(self) -> &'static str {
+        match self {
+            Self::TypeScriptV1 => "typescript",
+            Self::PythonV1 => "python",
+        }
+    }
+}
+
 /// Host policy for whole generated workflows, independent of cell limits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedSourceLimits {
     pub max_bytes: usize,
     /// Node depth, counting the root block as zero. Native safety ceiling: 64.
@@ -24,18 +35,19 @@ impl Default for GeneratedSourceLimits {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PrintOptions {
     pub source_map: bool,
     pub limits: GeneratedSourceLimits,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PrintedSource {
     pub source: String,
     pub format: SourceFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_map: Option<SourceMap>,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceMap {
     /// SHA-256 of the final UTF-8 source bytes (without a domain prefix).
     pub source: [u8; 32],
@@ -43,7 +55,7 @@ pub struct SourceMap {
     pub format: SourceFormat,
     pub sites: Vec<SourceSite>,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceSite {
     pub site: Site,
     pub ranges: Vec<crate::Span>,

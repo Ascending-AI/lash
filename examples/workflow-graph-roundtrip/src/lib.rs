@@ -94,9 +94,9 @@ impl SavedWorkflow {
                         loops: site.loops.clone(),
                     })
                     .collect();
-                match derived.typescript() {
-                    Ok(source) => (sites, Some(source), None),
-                    Err(diagnostic) => (sites, None, Some(diagnostic.message)),
+                match derived.typescript(Default::default()) {
+                    Ok(printed) => (sites, Some(printed.source), None),
+                    Err(error) => (sites, None, Some(error.to_string())),
                 }
             }
             Err(refusal) => (Vec::new(), None, Some(refusal.to_string())),

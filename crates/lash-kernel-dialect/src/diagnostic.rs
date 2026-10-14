@@ -3,7 +3,9 @@
 use std::fmt;
 
 /// Byte offsets in the submitted source.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

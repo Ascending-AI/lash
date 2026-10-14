@@ -441,7 +441,10 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
         package: typescript::FrontEnd::new(tuning).map(|front_end| Package {
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
             front_end: Box::new(front_end),
-            printer: Some(Box::new(typescript::Printer)),
+            compile_generated: |source, limits| {
+                lash_dialect_typescript::compile_generated(source, limits).map_err(Into::into)
+            },
+            printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
             function_values: Some(lash_dialect_typescript::function_values()),
             functions: Vec::new(),
         }),
@@ -474,7 +477,6 @@ mod typescript {
     use std::sync::Mutex;
 
     use lash_kernel_dialect::{Diagnostic, Environment, Lowered};
-    use lash_kernel_doc::Document;
 
     /// The TypeScript front end on one reused parser thread, whose stack
     /// the parent's working policy sizes.
@@ -519,18 +521,6 @@ mod typescript {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .lower(source, environment)
                 .map_err(Into::into)
-        }
-    }
-
-    pub(super) struct Printer;
-
-    impl lash_kernel_dialect::Printer for Printer {
-        fn print(
-            &self,
-            document: &Document,
-            options: lash_kernel_dialect::PrintOptions,
-        ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
-            lash_dialect_typescript::print(document, options)
         }
     }
 }

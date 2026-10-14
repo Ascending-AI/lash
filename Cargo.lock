@@ -2790,6 +2790,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
+ "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-internal-core",
  "lash-internal-core-execution",
@@ -3039,6 +3040,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "insta",
+ "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-internal-conformance",
  "lash-internal-core",

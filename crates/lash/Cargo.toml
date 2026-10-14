@@ -24,6 +24,7 @@ workspace = true
 
 [dependencies]
 lash-dialect-typescript = { workspace = true, optional = true }
+lash-dialect-python = { workspace = true, optional = true }
 lash-kernel-doc = { workspace = true, optional = true }
 lash-kernel-check = { workspace = true, optional = true }
 lash-kernel-edit = { workspace = true, optional = true }
@@ -102,6 +103,7 @@ dialect-typescript = [
 ]
 dialect-python = [
     "codemode",
+    "python",
     "lash-vm-runtime/dialect-python",
     "lash-vm-worker?/dialect-python",
 ]
@@ -127,6 +129,8 @@ mcp = ["dep:lash-plugin-mcp"]
 # (`lash::typescript`, `WorkflowDocument::typescript`), with no helper
 # release: `dialect-typescript` includes it.
 typescript = ["codemode", "dep:lash-dialect-typescript", "lash-vm-runtime/typescript"]
+# The Python exact codec in the host, without selecting a helper release.
+python = ["codemode", "dep:lash-dialect-python", "lash-vm-runtime/python"]
 http-transport = ["dep:lash-http-transport"]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
 # The durable-backend certification laws are not part of the facade: a host
@@ -194,4 +198,10 @@ test = false
 name = "plugin_authoring"
 path = "examples/plugin_authoring.rs"
 required-features = ["testing"]
+test = false
+
+[[example]]
+name = "generated_source"
+path = "examples/generated_source.rs"
+required-features = ["worker", "typescript", "python", "dialect-typescript", "dialect-python"]
 test = false

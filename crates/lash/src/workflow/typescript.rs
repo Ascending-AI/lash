@@ -48,14 +48,21 @@ pub(crate) fn import(
         Ok(lowered) => lowered,
         Err(diagnostic) => return WorkflowImport::Refused(vec![diagnostic.into()]),
     };
-    let document =
-        match WorkflowDocument::admit(lowered.document, WorkflowDocumentEntry::Main, checker) {
-            Ok(document) => document,
-            Err(refusal) => return WorkflowImport::Admission(refusal),
-        };
+    admit(lowered.document, lowered.annotations, checker)
+}
+
+pub(crate) fn admit(
+    document: lash_kernel_doc::Document,
+    annotations: Annotations,
+    checker: &lash_kernel_check::Environment<'_>,
+) -> WorkflowImport {
+    let document = match WorkflowDocument::admit(document, WorkflowDocumentEntry::Main, checker) {
+        Ok(document) => document,
+        Err(refusal) => return WorkflowImport::Admission(refusal),
+    };
     WorkflowImport::Imported {
         document,
-        annotations: lowered.annotations,
+        annotations,
     }
 }
 

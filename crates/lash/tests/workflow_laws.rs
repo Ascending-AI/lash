@@ -1096,3 +1096,7 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
     )));
     core.shutdown().await.expect("the node stops");
 }
+
+#[cfg(all(feature = "typescript", feature = "python"))]
+#[path = "workflow_laws/generated_source.rs"]
+mod generated_source;

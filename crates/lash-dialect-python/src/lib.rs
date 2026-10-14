@@ -132,6 +132,7 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
     Package {
         dialect: DIALECT.to_string(),
         front_end: Box::new(Python::default()),
+        compile_generated,
         printer: Some(Box::new(Python::default())),
         function_values: Some(lash_kernel_dialect::FunctionValues::Bare),
         functions,

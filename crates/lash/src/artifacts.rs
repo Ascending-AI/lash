@@ -313,6 +313,36 @@ impl HostArtifacts {
                 WorkflowImportUnsupported::EngineUnavailable,
             ));
         };
+        // Exact imports already name every dependency by identity. A library
+        // may hold several definitions with one label; only authored lowering
+        // needs to resolve those labels before admission.
+        if crate::typescript::is_generated_workflow(source) {
+            let document = match crate::typescript::compile_generated(source, Default::default()) {
+                Ok(document) => document,
+                Err(error) => return Ok(WorkflowImport::Refused(vec![error.into()])),
+            };
+            let identity = match document.identity() {
+                Ok(identity) => identity,
+                Err(error) => {
+                    return Ok(WorkflowImport::Refused(vec![
+                        lash_kernel_dialect::Diagnostic {
+                            code: "GENERATED_SOURCE_INVALID".into(),
+                            message: error.to_string(),
+                            span: None,
+                            kind: lash_kernel_dialect::DiagnosticKind::ProgramDefect,
+                            repairs: Vec::new(),
+                        },
+                    ]));
+                }
+            };
+            let mut annotations = lash_kernel_doc::Annotations::new(identity);
+            annotations.dialect = Some("typescript".into());
+            return Ok(crate::workflow::typescript::admit(
+                document,
+                annotations,
+                &checked.checker(),
+            ));
+        }
         let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
             Ok(library) => library,
             Err(refusal) => {

@@ -126,17 +126,32 @@ impl WorkflowDocument {
         }
     }
 
-    /// The document as TypeScript that reconstructs its complete canonical bytes,
-    /// or the printer's typed refusal of a document it cannot spell.
+    /// Print exact TypeScript, optionally with a disposable source map.
+    /// Printing performs no compilation, comparison, admission or storage.
     ///
     /// # Errors
     ///
-    /// The printer's diagnostic.
+    /// The printer's typed resource or encoding refusal.
     #[cfg(feature = "typescript")]
-    pub fn typescript(&self) -> Result<String, lash_kernel_dialect::Diagnostic> {
-        lash_dialect_typescript::print(&self.document, Default::default())
-            .map(|printed| printed.source)
-            .map_err(Into::into)
+    pub fn typescript(
+        &self,
+        options: lash_kernel_dialect::PrintOptions,
+    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
+        lash_dialect_typescript::print(&self.document, options)
+    }
+
+    /// Print exact Python, preserving the document's original helper identities.
+    /// Maps default off; enabling them does not change the source bytes.
+    ///
+    /// # Errors
+    ///
+    /// The printer's typed resource or encoding refusal.
+    #[cfg(feature = "python")]
+    pub fn python(
+        &self,
+        options: lash_kernel_dialect::PrintOptions,
+    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
+        lash_dialect_python::print(&self.document, options)
     }
 
     /// What the execution overlay's reducer reads of this document: its

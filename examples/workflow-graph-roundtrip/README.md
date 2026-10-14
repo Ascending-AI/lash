@@ -26,9 +26,10 @@ the version it last saved:
   (`core.host_artifacts().execution_document()`), and settles it with the
   committed end. Every run event names a site of that document.
 
-TypeScript is a read-only lens: the source pane shows what the kernel
-exact generated-source printer (`WorkflowDocument::typescript()`) spells for the document. The [format v1 contract](../../docs/design/generated-source-format.md) preserves its complete canonical bytes and documents how to re-export old generated text. Nothing
-is imported from source.
+TypeScript is a read-only lens: the source pane reads the `source` field of
+`WorkflowDocument::typescript(Default::default())`. The [format v1 contract](../../docs/design/generated-source-format.md)
+preserves the document's complete canonical bytes and documents how to re-export
+old generated text. Nothing is imported from source.
 
 The page in `frontend/index.html` is a renderer of that contract: the
 entry's statements by site, the document as kernel text, TypeScript and

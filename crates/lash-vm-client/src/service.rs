@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
 
+mod source;
+pub use source::SourceServiceError;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
@@ -35,11 +38,18 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
         reads: BTreeSet<EffectName>,
     },
-    /// Print `document` (its JSON encoding) as source in `dialect`.
+    /// Print `document` (its JSON encoding) in the selected generated format.
     Print {
-        dialect: String,
+        format: lash_kernel_dialect::SourceFormat,
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
+        options: lash_kernel_dialect::PrintOptions,
+    },
+    /// Decode a whole generated workflow, without admission or helper resolution.
+    CompileGenerated {
+        format: lash_kernel_dialect::SourceFormat,
+        source: String,
+        limits: lash_kernel_dialect::GeneratedSourceLimits,
     },
 }
 
@@ -77,8 +87,10 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
         reads: BTreeSet<EffectName>,
     },
-    Printed {
-        source: String,
+    Printed(lash_kernel_dialect::PrintedSource),
+    Generated {
+        #[serde(with = "serde_bytes")]
+        document: Vec<u8>,
     },
     DialectRefused(DialectRefusal),
     /// The worker has no such dialect installed.
@@ -282,6 +294,7 @@ impl Default for Service {
 pub enum WorkerPath {
     Lower,
     Print,
+    CompileGenerated,
     /// A run of a document's `main`.
     Cell,
     /// A run of one of a document's entries.
@@ -453,6 +466,7 @@ pub mod runtime_ops {
                 match &request {
                     Request::Lower { .. } => WorkerPath::Lower,
                     Request::Print { .. } => WorkerPath::Print,
+                    Request::CompileGenerated { .. } => WorkerPath::CompileGenerated,
                 },
                 &worker,
             )?;

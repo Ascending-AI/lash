@@ -1362,6 +1362,13 @@ pub mod typescript {
     pub use lash_dialect_typescript::*;
 }
 
+/// Python source operations: authored cell lowering, exact generated printing
+/// and library-free generated compilation. Decoding never admits a workflow.
+#[cfg(feature = "python")]
+pub mod python {
+    pub use lash_dialect_python::*;
+}
+
 /// HTTP transport for provider and ingress traffic.
 #[cfg(feature = "http-transport")]
 pub mod http_transport {

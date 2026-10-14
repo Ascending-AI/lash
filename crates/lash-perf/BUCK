@@ -445,7 +445,43 @@ load(
 )
 
 lash_rust_feature_binary(
-    name = "durable-substrate__bin__fv_05b65792",
+    name = "durable-substrate__bin__fv_dd3a01f5",
+    crate_features = [],
+    crate_name = "durable_substrate",
+    crate_root = "src/bin/durable_substrate.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "durable_substrate"),
+    compile_data_patterns = [
+        "workloads/*.json",
+        "workloads/replay/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "durable-substrate__bin__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -469,7 +505,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -479,12 +515,12 @@ lash_rust_feature_binary(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_binary(
-    name = "durable-substrate__bin__fv_602d637c",
+lash_rust_feature_test(
+    name = "durable-substrate__bin__unit_test__fv_dd3a01f5",
     crate_features = [],
     crate_name = "durable_substrate",
     crate_root = "src/bin/durable_substrate.rs",
@@ -492,7 +528,143 @@ lash_rust_feature_binary(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "durable_substrate"),
+    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable-substrate__bin__unit_test__fv_dd3a01f5"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-perf:durable-substrate__bin",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "durable-substrate__bin__unit_test__fv_fa855a3a",
+    crate_features = [
+        "dhat-heap",
+    ],
+    crate_name = "durable_substrate",
+    crate_root = "src/bin/durable_substrate.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable-substrate__bin__unit_test__fv_fa855a3a"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-perf:durable-substrate__bin",
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "durable_substrate__test__fv_dd3a01f5",
+    crate_features = [],
+    crate_name = "durable_substrate",
+    crate_root = "tests/durable_substrate.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable_substrate__test__fv_dd3a01f5"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [
+        ":durable-substrate__bin__fv_dd3a01f5",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    rustc_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_dd3a01f5)"},
+    test_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_dd3a01f5)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "durable_substrate__test__fv_fa855a3a",
+    crate_features = [
+        "dhat-heap",
+    ],
+    crate_name = "durable_substrate",
+    crate_root = "tests/durable_substrate.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable_substrate__test__fv_fa855a3a"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [
+        ":durable-substrate__bin__fv_fa855a3a",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    rustc_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_fa855a3a)"},
+    test_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_fa855a3a)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "growturn__bin__fv_dd3a01f5",
+    crate_features = [],
+    crate_name = "growturn",
+    crate_root = "src/bin/growturn.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "growturn"),
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
@@ -506,7 +678,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -515,148 +687,12 @@ lash_rust_feature_binary(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "durable-substrate__bin__unit_test__fv_05b65792",
-    crate_features = [
-        "dhat-heap",
-    ],
-    crate_name = "durable_substrate",
-    crate_root = "src/bin/durable_substrate.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable-substrate__bin__unit_test__fv_05b65792"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-perf:durable-substrate__bin",
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "durable-substrate__bin__unit_test__fv_602d637c",
-    crate_features = [],
-    crate_name = "durable_substrate",
-    crate_root = "src/bin/durable_substrate.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable-substrate__bin__unit_test__fv_602d637c"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-perf:durable-substrate__bin",
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    test_env = {"LASH_READ_BENCH_WORKER": "$(location //crates/lash-perf:durable-substrate__bin)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "durable_substrate__test__fv_05b65792",
-    crate_features = [
-        "dhat-heap",
-    ],
-    crate_name = "durable_substrate",
-    crate_root = "tests/durable_substrate.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable_substrate__test__fv_05b65792"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [
-        ":durable-substrate__bin__fv_05b65792",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_05b65792)"},
-    test_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_05b65792)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "durable_substrate__test__fv_602d637c",
-    crate_features = [],
-    crate_name = "durable_substrate",
-    crate_root = "tests/durable_substrate.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "durable_substrate", "//crates/lash-perf:durable_substrate__test__fv_602d637c"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [
-        ":durable-substrate__bin__fv_602d637c",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_602d637c)"},
-    test_env = {"CARGO_BIN_EXE_durable-substrate": "$(location :durable-substrate__bin__fv_602d637c)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_binary(
-    name = "growturn__bin__fv_05b65792",
+    name = "growturn__bin__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -680,7 +716,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -690,20 +726,20 @@ lash_rust_feature_binary(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_binary(
-    name = "growturn__bin__fv_602d637c",
+    name = "lash-perf__bin__fv_dd3a01f5",
     crate_features = [],
-    crate_name = "growturn",
-    crate_root = "src/bin/growturn.rs",
+    crate_name = "lash_perf",
+    crate_root = "src/main.rs",
     declared_features = [
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "growturn"),
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
     compile_data_patterns = [
         "workloads/*.json",
         "workloads/replay/*.json",
@@ -717,7 +753,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -726,12 +762,12 @@ lash_rust_feature_binary(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_binary(
-    name = "lash-perf__bin__fv_05b65792",
+    name = "lash-perf__bin__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -755,7 +791,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -765,12 +801,12 @@ lash_rust_feature_binary(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_binary(
-    name = "lash-perf__bin__fv_602d637c",
+lash_rust_feature_test(
+    name = "lash-perf__bin__unit_test__fv_dd3a01f5",
     crate_features = [],
     crate_name = "lash_perf",
     crate_root = "src/main.rs",
@@ -778,11 +814,7 @@ lash_rust_feature_binary(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
-    compile_data_patterns = [
-        "workloads/*.json",
-        "workloads/replay/*.json",
-    ],
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_dd3a01f5"),
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
@@ -790,23 +822,21 @@ lash_rust_feature_binary(
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    include_dev_deps = False,
-    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
-    rustc_env = {},
     tags = [
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-perf__bin__unit_test__fv_05b65792",
+    name = "lash-perf__bin__unit_test__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -816,7 +846,7 @@ lash_rust_feature_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_05b65792"),
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_fa855a3a"),
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
@@ -825,7 +855,7 @@ lash_rust_feature_test(
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -834,42 +864,40 @@ lash_rust_feature_test(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "lash-perf__bin__unit_test__fv_602d637c",
-    crate_features = [],
-    crate_name = "lash_perf",
-    crate_root = "src/main.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_602d637c"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
-    name = "lash-perf__fv_05b65792",
+    name = "lash-perf__fv_dd3a01f5",
+    build_script = ":build_script",
+    crate_features = [],
+    crate_name = "lash_perf",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+        "workloads/replay/*.json",
+    ],
+    extra_compile_data = [
+        "//:perf_guard_budgets",
+        "//:perf_duration_level_shifts",
+    ],
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-perf__fv_fa855a3a",
     build_script = ":build_script",
     crate_features = [
         "dhat-heap",
@@ -895,40 +923,44 @@ lash_rust_feature_library(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
-lash_rust_feature_library(
-    name = "lash-perf__fv_602d637c",
+lash_rust_feature_test(
+    name = "lash-perf__unit_test__fv_dd3a01f5",
     build_script = ":build_script",
     crate_features = [],
     crate_name = "lash_perf",
+    crate_root = "src/lib.rs",
     declared_features = [
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
-    compile_data_patterns = [
-        "workloads/*.json",
-        "workloads/replay/*.json",
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_dd3a01f5"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
     ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
     ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_dd3a01f5", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-perf__unit_test__fv_05b65792",
+    name = "lash-perf__unit_test__fv_fa855a3a",
     build_script = ":build_script",
     crate_features = [
         "dhat-heap",
@@ -939,7 +971,7 @@ lash_rust_feature_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_05b65792"),
+    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_fa855a3a"),
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
@@ -958,44 +990,46 @@ lash_rust_feature_test(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_05b65792", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_fa855a3a", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "lash-perf__unit_test__fv_602d637c",
-    build_script = ":build_script",
+    name = "latency__test__fv_dd3a01f5",
     crate_features = [],
-    crate_name = "lash_perf",
-    crate_root = "src/lib.rs",
+    crate_name = "latency",
+    crate_root = "tests/latency.rs",
     declared_features = [
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_602d637c"),
+    exec_properties = sized_exec_properties("lash-perf", "latency", "//crates/lash-perf:latency__test__fv_dd3a01f5"),
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [
-        "//:perf_guard_budgets",
-        "//:perf_duration_level_shifts",
+        ":lash-perf__bin__fv_dd3a01f5",
     ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)", "RUST_TEST_THREADS": "1"},
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    rustc_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_dd3a01f5)"},
+    test_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_dd3a01f5)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_602d637c", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "latency__test__fv_05b65792",
+    name = "latency__test__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -1005,68 +1039,70 @@ lash_rust_feature_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "latency", "//crates/lash-perf:latency__test__fv_05b65792"),
+    exec_properties = sized_exec_properties("lash-perf", "latency", "//crates/lash-perf:latency__test__fv_fa855a3a"),
     data_exclude = [
         "workloads/fixtures/*.json",
     ],
     extra_compile_data = [
-        ":lash-perf__bin__fv_05b65792",
+        ":lash-perf__bin__fv_fa855a3a",
     ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_05b65792)"},
-    test_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_05b65792)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    rustc_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_fa855a3a)"},
+    test_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_fa855a3a)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "latency__test__fv_602d637c",
-    crate_features = [],
-    crate_name = "latency",
-    crate_root = "tests/latency.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "latency", "//crates/lash-perf:latency__test__fv_602d637c"),
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [
-        ":lash-perf__bin__fv_602d637c",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    rustc_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_602d637c)"},
-    test_env = {"CARGO_BIN_EXE_lash-perf": "$(location :lash-perf__bin__fv_602d637c)", "LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_binary(
-    name = "postgres-substrate__bin__fv_05b65792",
+    name = "postgres-substrate__bin__fv_dd3a01f5",
+    crate_features = [],
+    crate_name = "postgres_substrate",
+    crate_root = "src/bin/postgres_substrate.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "postgres_substrate"),
+    compile_data_patterns = [
+        "workloads/*.json",
+        "workloads/replay/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "postgres-substrate__bin__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -1090,7 +1126,7 @@ lash_rust_feature_binary(
     ],
     include_dev_deps = False,
     run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -1100,48 +1136,40 @@ lash_rust_feature_binary(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_binary(
-    name = "postgres-substrate__bin__fv_602d637c",
-    crate_features = [],
-    crate_name = "postgres_substrate",
-    crate_root = "src/bin/postgres_substrate.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "postgres_substrate"),
-    compile_data_patterns = [
-        "workloads/*.json",
-        "workloads/replay/*.json",
-    ],
-    data_exclude = [
-        "workloads/fixtures/*.json",
-    ],
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    include_dev_deps = False,
-    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    rustc_env = {},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )
 
 lash_rust_feature_test(
-    name = "workload__test__fv_05b65792",
+    name = "workload__test__fv_dd3a01f5",
+    crate_features = [],
+    crate_name = "workload",
+    crate_root = "tests/workload.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_dd3a01f5"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = "//crates/lash-perf:lash-perf__fv_dd3a01f5",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_498908e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_6dd33f41", "//crates/lash:lash": "//crates/lash:lash__fv_32f500bf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_33d1f3f6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "workload__test__fv_fa855a3a",
     crate_features = [
         "dhat-heap",
     ],
@@ -1151,12 +1179,12 @@ lash_rust_feature_test(
         "default",
         "dhat-heap",
     ],
-    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_05b65792"),
+    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_fa855a3a"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
-    library = "//crates/lash-perf:lash-perf__fv_05b65792",
+    library = "//crates/lash-perf:lash-perf__fv_fa855a3a",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
@@ -1167,34 +1195,6 @@ lash_rust_feature_test(
         "manual",
     ],
     extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d6dd6b62", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_381512dd", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_13b65eae", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_0d5a0b73"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "workload__test__fv_602d637c",
-    crate_features = [],
-    crate_name = "workload",
-    crate_root = "tests/workload.rs",
-    declared_features = [
-        "default",
-        "dhat-heap",
-    ],
-    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_602d637c"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-perf:lash-perf__fv_602d637c",
-    library_crate_name = "lash_perf",
-    manifest_dir = "crates/lash-perf",
-    package_name = "lash-perf",
-    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_d2ca0d9e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_b235feaa", "//crates/lash:lash": "//crates/lash:lash__fv_df47cecf", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_6b4ad668"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1e917464", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_51d6a1d6", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_1d78e9ef", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_3599350d", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_06783d6d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_300ff9af", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_f82c5c5f", "//crates/lash:lash": "//crates/lash:lash__fv_48bde34a", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_a6898eb0"},
     version = "0.0.0-dev",
 )

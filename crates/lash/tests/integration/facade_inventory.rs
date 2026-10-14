@@ -317,6 +317,11 @@ mod mcp_inventory {
 #[cfg(feature = "typescript")]
 mod typescript_inventory {}
 
+#[cfg(feature = "python")]
+mod python_inventory {
+    use lash::python::{compile_generated as _, print as _};
+}
+
 #[cfg(feature = "http-transport")]
 mod http_transport_inventory {
     use lash::http_transport::ReqwestClient as _;

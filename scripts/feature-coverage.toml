@@ -262,6 +262,8 @@ features = [
   "lash-runtime/mcp:off",
   "lash-runtime/typescript:on",
   "lash-runtime/typescript:off",
+  "lash-runtime/python:on",
+  "lash-runtime/python:off",
   "lash-runtime/http-transport:on",
   "lash-runtime/http-transport:off",
   "lash-runtime/worker:on",
@@ -314,6 +316,7 @@ commands = [
   # Python parser, and one that names Python alone links no TypeScript parser
   # or ECMAScript extension.
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "python", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,worker", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,worker,dialect-typescript", "--locked"],
@@ -434,6 +437,8 @@ features = [
   "lash-internal-vm-runtime/dialect-typescript:off",
   "lash-internal-vm-runtime/dialect-python:on",
   "lash-internal-vm-runtime/dialect-python:off",
+  "lash-internal-vm-runtime/python:on",
+  "lash-internal-vm-runtime/python:off",
   "lash-internal-vm-worker/dialect-typescript:on",
   "lash-internal-vm-worker/dialect-typescript:off",
   "lash-internal-vm-worker/dialect-python:on",
@@ -450,6 +455,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--locked"],

@@ -1,6 +1,6 @@
 # Exact generated workflow source, format v1
 
-This is the shared contract for FIG-6202, FIG-6203 and FIG-6199/FIG-6204.
+This is the shared contract for FIG-6202, FIG-6203, FIG-6199/FIG-6204 and FIG-6205.
 A dialect changes spelling only. A supported, structurally valid Document
 prints and decodes to identical `Document::canonical_bytes()`: manifest,
 entries, private names, all declarations (including unused ones), and main.
@@ -213,5 +213,41 @@ mode. Stored Documents and their JSON remain the same 1.0 baseline and can be
 re-exported directly. A host holding only old generated text must decode it
 with the previous toolchain, retain that Document, and export it with the new
 one. This change does not add stored migrations or change kernel/worker wire
-version constants. The existing worker Print request and string response retain
-their shape; optional map transport is owned by FIG-6205.
+version constants. Before the 1.0 cut, worker service shapes and both wire-v1
+snapshots change in place.
+
+## Host and worker operations
+
+`WorkflowDocument::typescript(options)` and `::python(options)` return the
+complete `PrintedSource`. Features `typescript` and `python` enable the local
+codecs without selecting helper releases; `dialect-typescript` and
+`dialect-python` include the matching local feature and helper release.
+The facade exposes `lash::typescript::compile_generated` and
+`lash::python::compile_generated`; their results are unadmitted Documents.
+A host compares `document.canonical_bytes()` directly.
+
+`lash::vm::WorkerService::print(document, format, options)` and
+`::compile_generated(source, format, limits)` expose the same independent
+operations asynchronously in the worker crash domain. Print requests carry
+options and the selected format; responses retain source, format and the
+requested map. A map-off response omits the map field entirely. Generated
+compilation is a distinct request/response returning a Document, without a
+library, helper-release choice or admission. The installed dialect package
+owns a `compile_generated` function pointer alongside its authored front end
+and printer; dispatch never chooses a second codec. The shared options,
+limits, result, format, map and span types now have Serde representations,
+covered by the worker schema snapshots. This adds no stored shape.
+
+Whole-workflow source limits apply to these operations; the ordinary cell
+source cap does not. Pool frame, allocation, queue and deadline bounds still
+apply. Source-service errors retain dialect codes or the typed worker cause.
+Nothing automatically stores a source or map.
+
+To execute an imported document, admit it through `WorkflowDocument::admit`
+or publish it through the host's existing workflow API. TypeScript's trusted
+host import recognizes the reserved generated envelope before constructing a
+name catalogue, decodes full identities, then performs normal admission.
+Unavailable requirements and mismatched signatures remain admission refusals.
+Ordinary model cells still use authored lowering; the marker grants no authority.
+The [facade example and measured costs](generated-source-cost.md) show the
+three operations composed explicitly, both locally and through a worker.
