@@ -24,6 +24,7 @@ impl RuntimeErrorCause {
             | Self::StreamStateFormatUnreadable { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
+            Self::StoreRefusal { refusal } => refusal.is_terminal(),
             Self::ControlPhaseExpired { .. }
             | Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }
@@ -33,7 +34,6 @@ impl RuntimeErrorCause {
             | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }
             | Self::Compat { .. }
-            | Self::StoreRefusal { .. }
             | Self::StoredDataCorrupt { .. }
             | Self::ModuleArtifactRefused { .. }
             | Self::MissingRecordedProcessConfig { .. }

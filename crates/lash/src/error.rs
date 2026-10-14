@@ -390,8 +390,19 @@ impl EmbedError {
                 lash_core::SessionStateVersionRefusal::of_store_error(error)
             }
             Self::Runtime(error) => error.session_state_version_refusal(),
-            Self::Plugin(lash_core::PluginError::Runtime(error)) => {
-                error.session_state_version_refusal()
+            Self::Plugin(error) | Self::Session(SessionError::Plugin(error)) => {
+                use lash_core::PluginError;
+                match error {
+                    PluginError::Runtime(error) => error.session_state_version_refusal(),
+                    PluginError::RuntimeEffectController(error) => {
+                        error.store_refusal()?.session_state_version_refusal()
+                    }
+                    PluginError::StoreRefusal(refusal) => refusal.session_state_version_refusal(),
+                    _ => None,
+                }
+            }
+            Self::Durable(lash_core::durable_port::DurableError::StoreRefused(refusal)) => {
+                refusal.session_state_version_refusal()
             }
             _ => None,
         }
@@ -632,15 +643,18 @@ fn durable_error_is_retryable(error: &lash_core::durable_port::DurableError) -> 
     }
 }
 
-/// A durable store that a newer release finalized, or a stored row that does
-/// not decode, refuses every repeat.
+/// A typed store refusal, a store that a newer release finalized, or a row
+/// that does not decode refuses every repeat.
 fn durable_error_is_terminal(error: &lash_core::durable_port::DurableError) -> bool {
     use lash_core::durable_port::{DurableError, StoreFailureKind};
-    matches!(
-        error,
-        DurableError::Store(failure)
-            if matches!(failure.kind, StoreFailureKind::WriterRetired | StoreFailureKind::Corrupt)
-    )
+    match error {
+        DurableError::StoreRefused(refusal) => refusal.is_terminal(),
+        DurableError::Store(failure) => matches!(
+            failure.kind,
+            StoreFailureKind::WriterRetired | StoreFailureKind::Corrupt
+        ),
+        _ => false,
+    }
 }
 
 /// A store error is terminal at the facade exactly when the engine ends a
@@ -648,7 +662,10 @@ fn durable_error_is_terminal(error: &lash_core::durable_port::DurableError) -> b
 /// ([`StoreError::runtime_code`](lash_core::StoreError::runtime_code)) is
 /// terminal.
 fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
-    error.runtime_code().is_terminal()
+    lash_core::store::StoreRefusal::of_store_error(error).map_or_else(
+        || error.runtime_code().is_terminal(),
+        |refusal| refusal.is_terminal(),
+    )
 }
 
 /// Result type returned by Lash facade operations.
@@ -1110,6 +1127,56 @@ mod tests {
             for facade in shapes {
                 assert_eq!(facade.is_terminal(), engine.is_terminal(), "{facade:?}");
                 assert_eq!(facade.is_retryable(), engine.is_retryable(), "{facade:?}");
+            }
+        }
+    }
+
+    /// FIG-6219: a permanent head refusal keeps its class and generation
+    /// evidence through every facade wrapper, including FIG-6209's durable path.
+    #[test]
+    fn store_refused_heads_are_terminal_and_keep_versions_across_facade_wrappers() {
+        use lash_core::store::StoreRefusal;
+        let refusals = store_refusals()
+            .into_iter()
+            .chain([StoreRefusal::ReferrerKindRefused {
+                kind: lash_core::ArtifactReferrerKind::Upload,
+                store: lash_core::ReferrerStore::Artifact,
+            }]);
+        for refusal in refusals {
+            let version = match &refusal {
+                StoreRefusal::SessionStateVersionUnsupported { found, current }
+                | StoreRefusal::SessionStateVersionNewerThanRuntime { found, current } => {
+                    Some(lash_core::SessionStateVersionRefusal {
+                        found: *found,
+                        current: *current,
+                    })
+                }
+                _ => None,
+            };
+            let controller = RuntimeEffectControllerError::from(refusal.clone().into_store_error());
+            let runtime = controller.clone().into_runtime_error();
+            let shapes = [
+                EmbedError::Durable(lash_core::durable_port::DurableError::StoreRefused(
+                    refusal.clone(),
+                )),
+                EmbedError::Runtime(runtime.clone()),
+                EmbedError::Plugin(PluginError::Runtime(runtime.clone())),
+                EmbedError::Session(SessionError::Plugin(PluginError::Runtime(runtime))),
+                EmbedError::Plugin(PluginError::StoreRefusal(refusal.clone())),
+                EmbedError::Session(SessionError::Plugin(PluginError::StoreRefusal(
+                    refusal.clone(),
+                ))),
+                EmbedError::Plugin(PluginError::RuntimeEffectController(controller.clone())),
+                EmbedError::Session(SessionError::Plugin(PluginError::RuntimeEffectController(
+                    controller,
+                ))),
+            ]
+            .into_iter()
+            .chain(store_shapes(|| refusal.clone().into_store_error()));
+            for error in shapes {
+                assert!(error.is_terminal(), "{error:?}");
+                assert!(!error.is_retryable(), "{error:?}");
+                assert_eq!(error.session_state_version_refusal(), version, "{error:?}");
             }
         }
     }

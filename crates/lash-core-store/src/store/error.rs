@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::runtime_error::SessionStateVersionRefusal;
 use crate::{BatchId, InputId, NodeId};
 
 /// Why a window's rows do not form one anchored frame (ADR 0112 §5).
@@ -63,6 +64,28 @@ pub enum StoreRefusal {
 }
 
 impl StoreRefusal {
+    /// Whether retrying this refusal requires changing state, configuration
+    /// or the runtime. Every wrapper delegates to the refusal's own code.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        self.code().is_terminal()
+    }
+
+    /// The generations a session-state gate refused, if this is its refusal.
+    #[must_use]
+    pub fn session_state_version_refusal(&self) -> Option<SessionStateVersionRefusal> {
+        match self {
+            Self::SessionStateVersionUnsupported { found, current }
+            | Self::SessionStateVersionNewerThanRuntime { found, current } => {
+                Some(SessionStateVersionRefusal {
+                    found: *found,
+                    current: *current,
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Copy the structured refusal, if this store error is one.
     pub fn of_store_error(error: &StoreError) -> Option<Self> {
         match error {

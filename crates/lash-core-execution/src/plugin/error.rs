@@ -976,6 +976,13 @@ impl PluginError {
                     Redrivable
                 }
             }
+            Self::StoreRefusal(refusal) => {
+                if refusal.is_terminal() {
+                    Terminal
+                } else {
+                    Redrivable
+                }
+            }
             // a successor holds the lane or the process; this execution's
             // authority is gone and a redrive under a new one proceeds.
             Self::SessionExecutionLeaseLost { .. } | Self::ProcessExecutionSuperseded { .. } => {
@@ -1000,7 +1007,6 @@ impl PluginError {
             | Self::State(_)
             | Self::Declaration(_)
             | Self::Format(_)
-            | Self::StoreRefusal(_)
             | Self::StoredDataCorrupt { .. }
             | Self::MissingRecordedProcessConfig { .. }
             | Self::ProcessCancelConflict { .. }

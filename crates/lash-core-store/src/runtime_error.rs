@@ -885,13 +885,7 @@ impl SessionStateVersionRefusal {
     /// refusal.
     #[must_use]
     pub fn of_store_error(error: &crate::store::StoreError) -> Option<Self> {
-        match *error {
-            crate::store::StoreError::SessionStateVersionUnsupported { found, current }
-            | crate::store::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {
-                Some(Self { found, current })
-            }
-            _ => None,
-        }
+        crate::store::StoreRefusal::of_store_error(error)?.session_state_version_refusal()
     }
 }
 /// Runtime error for unexpected failures.
@@ -1011,16 +1005,7 @@ impl RuntimeError {
     /// refused call returned or read back from storage. `None` on any other
     /// error, including an older record that holds only a code and message.
     pub fn session_state_version_refusal(&self) -> Option<SessionStateVersionRefusal> {
-        match self.store_refusal()? {
-            crate::store::StoreRefusal::SessionStateVersionUnsupported { found, current }
-            | crate::store::StoreRefusal::SessionStateVersionNewerThanRuntime { found, current } => {
-                Some(SessionStateVersionRefusal {
-                    found: *found,
-                    current: *current,
-                })
-            }
-            _ => None,
-        }
+        self.store_refusal()?.session_state_version_refusal()
     }
 
     /// The store refusal this error carries, when a store's typed refusal is
