@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { approvalControl } from "./authoring-approvals.mjs";
+import { approvalControl } from "./approvals.mjs";
 
 function fixture() {
   const button = { hidden: true, disabled: false, onclick: null };

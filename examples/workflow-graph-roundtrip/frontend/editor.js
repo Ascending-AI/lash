@@ -11,15 +11,15 @@ import {
   constantValue,
   constantText,
   fieldsOf,
-} from "./authoring-dataflow.mjs";
+} from "./dataflow.mjs";
 import {
   actionOf,
   recordInput as canonicalRecordInput,
   literal,
   startPosition as scopeStart,
   appendPosition,
-} from "./authoring-projection.mjs";
-import { approvalControl } from "./authoring-approvals.mjs";
+} from "./projection.mjs";
+import { approvalControl } from "./approvals.mjs";
 const $ = (id) => document.getElementById(id);
 const approvals = approvalControl(
   $("approve"),
@@ -315,7 +315,7 @@ $("placement").onchange = () => {
 $("preview").onclick = () =>
   action(async () => {
     plan = undefined;
-    plan = await call("/prototype/plan", { version: workflow.version, steps });
+    plan = await call("/workflow/plan", { version: workflow.version, steps });
     renderPane();
     report(
       `Preview ready · ${plan.transaction.edits.length} typed edits · saved revision ${workflow.version} unchanged.`,
@@ -345,7 +345,7 @@ $("import").onclick = () =>
   action(async () => {
     if (steps.length)
       throw Error("Apply or clear pending changes before importing source.");
-    const next = await call("/prototype/source", {
+    const next = await call("/workflow/source", {
       version: workflow.version,
       source: $("source").value,
       entry: $("entry").value,
@@ -363,7 +363,7 @@ $("load").onclick = () =>
     if (!template) throw Error("Choose an example.");
     const next = template.canonical
       ? await call("/workflow/select", { id: template.id })
-      : await call("/prototype/source", {
+      : await call("/workflow/source", {
           version: workflow.version,
           source: template.source,
           entry: template.entry,
@@ -1148,7 +1148,7 @@ function fields(parent, info, values) {
 async function applyVisual(changes) {
   if (steps.length)
     throw Error("Apply or clear the pending changes in Advanced first.");
-  const planned = await call("/prototype/plan", {
+  const planned = await call("/workflow/plan", {
     version: workflow.version,
     steps: changes,
   });
@@ -1963,7 +1963,7 @@ await action(async () => {
   show(await call("/workflow"));
   const [canonical, sourceTemplates] = await Promise.all([
     call("/workflows"),
-    call("/prototype/templates"),
+    call("/workflow/templates"),
   ]);
   templates = [
     ...canonical

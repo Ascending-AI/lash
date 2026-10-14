@@ -6,12 +6,12 @@
 //! lash's execution overlay of the document's sites.
 
 use lash::sync::MutexExt;
-pub mod authoring_prototype;
+pub mod authoring;
+mod authoring_http;
 mod catalog;
 mod contract;
 pub mod dataflow;
 mod display;
-mod prototype_host;
 mod runtime;
 mod sample_tools;
 
@@ -339,9 +339,9 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(open_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/workflow/edits", post(edit_workflow))
-        .route("/prototype/templates", get(prototype_host::templates))
-        .route("/prototype/source", post(prototype_host::import_source))
-        .route("/prototype/plan", post(prototype_host::preview))
+        .route("/workflow/templates", get(authoring_http::templates))
+        .route("/workflow/source", post(authoring_http::import_source))
+        .route("/workflow/plan", post(authoring_http::preview))
         .route("/run", post(run_workflow))
         .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))

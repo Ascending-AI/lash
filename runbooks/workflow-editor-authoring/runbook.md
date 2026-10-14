@@ -1,119 +1,100 @@
-# E2E Scenario: Workflow Editor — Open, Edit, Republish, Run
+# Workflow editor: open, edit, republish and run
 
-> **Read [../RULES.md](../RULES.md) first** — especially the browser-surface,
-> screenshot, polling, objective-gate, Abort/RCA, and teardown rules. This runbook adds
-> only the workflow-editor scenario.
+Read [the shared rules](../RULES.md) first. This scenario uses the existing
+`examples/workflow-graph-roundtrip` host and deterministic mock effects. It
+opens no RLM session and calls no external model, email or research service.
 
-**Purpose.** Follow the workflow round-trip example as an author working on a kernel
-document: open a catalog example, send one edit transaction, see it saved and published
-as a new version, run that version, and watch the run settle on the document's sites.
-This proves that the document the page shows, the definition lash admitted and the run
-the overlay reports are the same workflow.
+## Start and evidence
 
-**No real tokens.** `examples/workflow-graph-roundtrip` uses deterministic host-owned
-mock operations. Do not configure OpenRouter for this run.
+From an isolated Kiln fork, run `just workflow-graph-roundtrip`. The script
+uses a gate-owned port and a fresh SQLite database; open its printed URL at `/`.
+Poll `/healthz` for `{ "service": "workflow-graph-roundtrip", "status": "ok" }`.
+Use a fresh artifact directory. Stop only this test's server when finished.
 
-**There is no source language in this scenario.** The host opens no RLM session and
-prompts no model. The workflow is a kernel document; the TypeScript tab is what the
-kernel printer spells for it and is read-only. Edits are kernel edits addressed by site.
+The default page is the visual editor. **Examples** selects workflows,
+**Canvas scope** selects canonical blocks, and **Advanced** contains source,
+the kernel document and the helper/direct-edit transaction queue. It is one
+editor with one saved document. See [the HTTP contract](../../examples/workflow-graph-roundtrip/CONTRACT.md).
 
-## Scenario-specific golden rules
+Save screenshots at each phase and the corresponding HTTP requests, responses
+and SSE events. Treat UI success messages alone as insufficient evidence.
 
-1. **A refused transaction changes nothing.** After the refusal in Phase 2, `GET
-   /workflow` must return the version and `identity` it returned before it.
-2. **An edit is a new version and a new definition.** The applied transaction answers
-   `version + 1`, a `definition` and an `identity` that both differ from the opened
-   version's, and a correspondence whose only `edited` entry ends at the replaced
-   expression.
-3. **A run reports sites of its own document.** Every `run_event` carries the saved
-   `workflowVersion`, a `definition` equal to the view's `identity`, and either no `site`
-   or one listed in the view's `executionSites`.
-4. **Terminal means UI and SSE terminal.** The last `run_event` has no `site` and
-   `status == "succeeded"`; the page's run status reads `succeeded`, every statement that
-   ran shows a completed dot, and the display shows the edited message.
+## 1. Open and inspect
 
-## Working material
+Open **Examples**, select **Onboarding**, and capture `/workflow/select`.
+Require that its response and a fresh `/workflow` agree on `version`,
+`identity`, `definition` and `entry`, with no `notAdmitted` error. The canvas
+must show the selected entry, with branches and explicit scope navigation.
 
-- Choose an unused `<port>` and an empty `<artifacts>` directory. Boot from the repository
-  root with `just workflow-graph-roundtrip <port>`. Gate the printed
-  `workflow-graph-roundtrip listening` line, then poll `GET /healthz` until it returns 200
-  with `{ "service": "workflow-graph-roundtrip", "status": "ok" }`.
-- Teardown is Ctrl-C/SIGTERM to that foreground recipe. Confirm the port is closed.
-- Page affordances: the workflow selector; the **Statements** list (click a statement to
-  copy its site); the **Kernel text** / **TypeScript** / **Document** tabs; the **Edit
-  transaction** box with **Apply and publish**; **Run**, **Approve**, the run status, the
-  progress bar and the display list. The page carries no `data-testid`; the controls have
-  ids (`catalog`, `statements`, `edits`, `apply`, `run`, `approve`, `run-status`,
-  `display`).
-- Backend truth: `GET /workflows`, `GET /environment`, `GET /workflow`,
-  `POST /workflow/select`, `POST /workflow/edits`, and the `POST /run` SSE stream
-  ([CONTRACT.md](../../examples/workflow-graph-roundtrip/CONTRACT.md)).
+Open **Advanced**. The TypeScript pane must contain
+`Welcome to the workflow graph`. Import that unchanged export and verify that
+`identity` and the canonical `document` are unchanged. The host revision may
+advance. Save `01-opened.json` and `01-opened.png`.
 
-Save every named screenshot plus the relevant HTTP request/response bodies in
-`<artifacts>`. Capture exact sites, versions and identities rather than shortening them.
+Find the text expression containing that greeting in `workflow.dataflow.expressions`.
+Record its full `site` and the current revision. Do not use a site from an earlier
+revision after an edit.
 
-## Phase 0 — Boot and contract pre-flight
+## 2. Refuse an invalid edit without saving
 
-After readiness, gate before opening the page:
-
-- `GET /workflows` includes `{ id: "onboarding", name: "Onboarding" }`;
-- `GET /environment` lists the effect `display.show_message` and the function `num.lt`.
-
-Open the page; gate the selector, the statement list, the three tabs and the Run button.
-Screenshot `00-ready.png`.
-
-## Phase 1 — Open the catalog example
-
-Select **Onboarding** and capture `POST /workflow/select`. Gate:
-
-- the response and a fresh `GET /workflow` agree on `version`, `identity` and
-  `definition`, and `notAdmitted` is absent;
-- the statement list shows the entry's statements, nested under `if` and `while`, and the
-  header reads the same version and definition;
-- the **TypeScript** tab shows printer output containing `Welcome to the workflow graph`.
-
-Record the view as `01-opened.json`. Find the statement `let shown_2 = a value`: its
-value is the record `{text: "Welcome to the workflow graph"}`, at the statement's site
-with `0` appended; the text literal is that site with another `0` appended. Record the
-literal's site. Screenshot `01-opened.png`.
-
-## Phase 2 — A refused transaction
-
-Put this in the edit box, with the literal's site, and press **Apply and publish**:
+Expand **Direct typed edit** and enter:
 
 ```json
-[{ "replace_expression": { "expression": <site>, "with": { "variable": "nowhere" } } }]
+[{"replace_expression":{"expression":<greeting-site>,"with":{"variable":"nowhere"}}}]
 ```
 
-Require HTTP 422 `edit_refused` with one diagnostic at the literal's site, the message
-rendered under the box, and golden rule 1. Save the exchange as `02-refused.json`;
-screenshot `02-refused.png`.
+Press **Queue direct edits**, then **Preview transaction**. Require HTTP 422
+`plan_refused` with a diagnostic, a visible error, and unchanged saved document,
+identity and revision. **Apply changes** must remain disabled. Clear the queue.
+Save `02-refused.json` and `02-refused.png`.
 
-## Phase 3 — Edit and republish
+## 3. Preview and apply a valid edit
 
-Replace the box with:
+Queue the same edit with `with` set to
+`{"literal":{"text":"Edited as a kernel document"}}`. Preview it.
+Require a successful plan with the expected ordinary typed edit and a preview
+containing the new greeting, while GET `/workflow` remains unchanged.
 
-```json
-[{ "replace_expression": { "expression": <site>, "with": { "literal": { "text": "Edited as a kernel document" } } } }]
-```
+Press **Apply changes**. Require revision +1, changed document identity,
+and correspondence mapping the edited expression. The TypeScript and Kernel
+document panes must now show the new greeting. Save `03-edited.json` and
+`03-edited.png`.
 
-Apply. Gate golden rule 2 on the response, then on the page: the header shows the new
-version and definition, the result line reports one edited node, and both the **Kernel
-text** and **TypeScript** tabs contain `Edited as a kernel document`. Save the exchange as
-`03-edited.json`; screenshot `03-edited.png`.
+The Rust helper law separately checks a helper/direct/helper batch, fresh
+names across the complete batch, base-document anchors, and atomic refusal.
+The visual **Add step** flow must use that same planner/admission path.
 
-## Phase 4 — Run and watch the overlay
+## 4. Run and approve
 
-Press **Run** while capturing the SSE stream. The run parks on `host.approval`: gate that
-the run status reads `waiting`, the approval statement shows a waiting dot and **Approve**
-appears. Screenshot `04-waiting.png`. Press **Approve**.
+Close Advanced and press **Run workflow**, recording SSE. Require the execution
+panel to show the parked approval and a usable approval control. Approve it and
+poll until the invocation settles. Every site-bearing event must reference the
+run's document; call-only events must not replace aggregate node status.
 
-Poll until the run status reads `succeeded`. Gate golden rules 3 and 4, and that the
-display shows the message `Edited as a kernel document`, the list `steps` as `Approved,
-Loop item, Loop item` and a full progress bar. Save the events as `04-run.jsonl`;
-screenshot `04-settled.png`.
+Require terminal `succeeded`, the edited greeting in the display, the expected
+Onboarding list/progress updates, and input/output data for retained calls.
+Missing observations must remain unavailable or incomplete. Save
+`04-waiting.png`, `04-settled.png` and `04-run.jsonl`.
 
-## Evidence
+## 5. Research and KPI data mappings
 
-`00-ready.png`, `01-opened.{png,json}`, `02-refused.{png,json}`, `03-edited.{png,json}`,
-`04-waiting.png`, `04-settled.png`, `04-run.jsonl`.
+Select **Deep research brief**, edit the workflow Input node's topic to
+`Reducing support escalation`, save inputs and run. Require a successful output
+whose title/topic reflects that input, not the template default, and three
+inspectable mock calls. Repeat with **Weekly business KPIs**, a distinct workspace
+name, and four calls. Select a result port and inspect the Return step's mapping.
+Save `05-research.png`, `05-kpis.png` and each run's events.
+
+## Regression companions
+
+Run the example's Node tests using `node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs`.
+They must exercise the active canvas and editing/approval implementations:
+constant promotion cannot hoist a reevaluated condition; generated names avoid
+all binding kinds; negative zero survives controls; pending approvals survive
+concurrent waits and late responses. Backend admission owns type compatibility.
+Use the example's focused Rust laws for canonical facets, atomic edits, named
+inputs, trace gaps and repeated call correlation.
+
+The draft is intentionally in memory and this example has no historical-run
+browser. Do not claim restart restoration, full durable trace capture, or generic
+tool-live progress based on this scenario.

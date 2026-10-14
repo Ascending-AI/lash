@@ -282,8 +282,12 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
             .expect("select"),
     )
     .await;
-    assert_eq!(workflow["dataflow"]["bindings"][0]["type"], "text");
-    assert!(workflow["dataflow"]["returns"][0]["type"]["record"].is_object());
+    assert_eq!(
+        workflow["document"]["entries"]["deep_research"]["params"][0]["ty"],
+        "text"
+    );
+    assert_eq!(workflow["dataflow"]["bindings"][0]["type"], "any");
+    assert_eq!(workflow["dataflow"]["returns"][0]["type"], "any");
     let refused = client
         .post(format!("{base}/run"))
         .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
@@ -340,7 +344,7 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
     .await;
     let workflow = answer(
         client
-            .post(format!("{base}/prototype/source"))
+            .post(format!("{base}/workflow/source"))
             .json(&json!({
                 "version": before["version"], "entry": "echo",
                 "source": "export async function echo(message: string) { return message; }"
@@ -363,7 +367,7 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
     let terminal: RunEvent = body
         .lines()
         .filter_map(|line| line.strip_prefix("data: "))
-        .last()
+        .next_back()
         .map(|data| serde_json::from_str(data).expect("terminal event"))
         .expect("run event");
     assert_eq!(terminal.status, RunStatus::Succeeded);

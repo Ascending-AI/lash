@@ -6,8 +6,8 @@ import {
   appendPosition,
   recordInput,
   conditionValue,
-} from "./authoring-projection.mjs";
-import { buildDataflow } from "./authoring-dataflow.mjs";
+} from "./projection.mjs";
+import { buildDataflow } from "./dataflow.mjs";
 const site = (path) => ({ unit: { function: "demo" }, path });
 const row = (path, block, statement) => ({
   site: site(path),

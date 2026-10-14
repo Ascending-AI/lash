@@ -1,4 +1,4 @@
-import { siteKey, statementsIn } from "./authoring-projection.mjs";
+import { siteKey, statementsIn } from "./projection.mjs";
 
 export function typeName(type) {
   if (!type) return "Any";

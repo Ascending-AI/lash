@@ -9,7 +9,7 @@ use lash::workflow::document::{EffectName, Expr, Name, Type};
 use lash::workflow::edit::{Correspondence, Draft, Edit, Position, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::authoring_prototype::{Step, plan};
+use crate::authoring::{Step, plan};
 use crate::{AppState, ErrorResponse, WorkflowView, runtime};
 
 #[derive(Serialize)]

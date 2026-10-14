@@ -6,7 +6,7 @@ import {
   planEndAfter,
   planConstantPromotion,
   constantText,
-} from "./authoring-dataflow.mjs";
+} from "./dataflow.mjs";
 test("editing an integral Float constant preserves its numeric kind, including inside typed records", () => {
   assert.deepEqual(encodeValue(1, "float"), { literal: { float: "1.0" } });
   assert.deepEqual(encodeValue(-0, "float"), { literal: { float: "-0.0" } });
