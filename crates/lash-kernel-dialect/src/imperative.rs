@@ -320,8 +320,8 @@ impl SourceWriter {
     pub fn refuse(&mut self, error: PrintError) {
         self.error.get_or_insert(error);
     }
-    /// Serialize metadata into a bounded temporary and quote it into final text.
-    pub fn metadata(&mut self, value: &(impl serde::Serialize + ?Sized)) {
+    /// Serialize structured metadata in the dialect's native literal syntax.
+    pub fn metadata(&mut self, value: &(impl serde::Serialize + ?Sized), format: SourceFormat) {
         let mut nested = Self::new(PrintOptions {
             limits: GeneratedSourceLimits {
                 max_bytes: self.limit,
@@ -333,7 +333,11 @@ impl SourceWriter {
         if let Some(error) = nested.error {
             self.refuse(error);
         } else {
-            self.json(&nested.source);
+            self.write(&crate::metadata::literal_tokens(
+                &nested.source,
+                format,
+                false,
+            ));
         }
     }
     pub fn json(&mut self, value: &(impl serde::Serialize + ?Sized)) {

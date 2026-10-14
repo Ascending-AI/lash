@@ -24,7 +24,7 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
     printed
 }
 // Independently written syntax, not obtained from the printer or its rule table.
-const HAND_WRITTEN: &str = r#"k.document("lash.generated.typescript", "1", "{\"kernel\":1,\"numbers\":\"by_spelling\"}", "{\"worker\":{\"params\":[],\"result\":\"any\"}}", ["odd name"], "[[\"answer\",\"odd name\"],[\"worker\",\"worker\"]]", "[]");
+const HAND_WRITTEN: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"numbers":"by_spelling"}, {"worker":{"params":[],"result":"any"}}, ["odd name"], [["answer","odd name"],["worker","worker"]], []);
 k.declare("worker", function() { return k.int("7"); });
 k.main(function() { let answer = k.float("-0.0"); k.finish(answer); });"#;
 fn hand_document() -> k::Document {
@@ -316,8 +316,8 @@ fn malformed_generated_modules_refuse_without_authored_fallback() {
         HAND_WRITTEN.replace("typescript", "python"),
         HAND_WRITTEN.replace("\"1\"", "\"99\""),
         HAND_WRITTEN.replace(
-            "[\\\"answer\\\",\\\"odd name\\\"]",
-            "[\\\"answer\\\",\\\"odd name\\\"],[\\\"answer\\\",\\\"other\\\"]",
+            "[\"answer\",\"odd name\"]",
+            "[\"answer\",\"odd name\"],[\"answer\",\"other\"]",
         ),
         format!("{HAND_WRITTEN}\nlet extra = 1;"),
         HAND_WRITTEN.replace("k.main", "k.declare"),
@@ -330,10 +330,10 @@ fn malformed_generated_modules_refuse_without_authored_fallback() {
         vec![("helper_one", "invalid-id")],
     ] {
         let json = serde_json::to_string(&helpers).unwrap();
-        let operand = serde_json::to_string(&json).unwrap();
-        cases.push(HAND_WRITTEN.replacen("\"[]\");", &format!("{operand});"), 1));
+        let operand = json;
+        cases.push(HAND_WRITTEN.replacen("[]);", &format!("{operand});"), 1));
     }
-    cases.push(HAND_WRITTEN.replace("\\\"kernel\\\":1", "\\\"kernel\\\":1,\\\"kernel\\\":1"));
+    cases.push(HAND_WRITTEN.replace("\"kernel\":1", "\"kernel\":1,\"kernel\":1"));
     cases.push(HAND_WRITTEN.replace("let answer =", "const answer ="));
     cases.push(HAND_WRITTEN.replace("function()", "function(): any"));
     cases.push(HAND_WRITTEN.replace("k.float(\"-0.0\")", "k.tuple(k.yield())"));
@@ -394,7 +394,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     let document = hand_document();
     let printed = roundtrip(&document, false);
     let limits = GeneratedSourceLimits {
-        max_bytes: printed.source.len(),
+        max_bytes: printed.source.len().max(document.to_json().unwrap().len()),
         ..Default::default()
     };
     let at_limit = crate::print(
@@ -413,7 +413,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         document.canonical_bytes().unwrap()
     );
     let short = GeneratedSourceLimits {
-        max_bytes: printed.source.len() - 1,
+        max_bytes: limits.max_bytes - 1,
         ..limits
     };
     assert!(matches!(
@@ -483,8 +483,8 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         "{{\"kernel\":1,\"numbers\":\"float\",\"effects\":{{\"deep\":{{\"result\":{nested_type}}}}}}}"
     );
     let source = format!(
-        "k.document(\"lash.generated.typescript\",\"1\",{},\"{{}}\",[],\"[]\",\"[]\");k.main(function(){{}});",
-        serde_json::to_string(&metadata).unwrap()
+        "k.document(\"lash.generated.typescript\",\"1\",{},{{}},[],[],[]);k.main(function(){{}});",
+        metadata
     );
     assert_eq!(
         crate::compile_generated(&source, Default::default())
@@ -1242,4 +1242,45 @@ fn inventory_signature(signature: &k::Signature, variants: &mut BTreeSet<&'stati
         inventory_type(ty, variants);
     }
     inventory_type(result, variants);
+}
+
+/// G-SOURCE-ENVELOPE: native literals carry nested optional types exactly.
+#[test]
+fn structured_envelope_and_types_keep_nested_optional_metadata() {
+    let mut document = hand_document();
+    let ty = k::Type::Record(k::RecordType {
+        fields: vec![k::RecordTypeField {
+            name: "True false None".into(),
+            ty: k::Type::Bool,
+            optional: true,
+        }],
+        rest: Some(Box::new(k::Type::Any)),
+    });
+    let effect = k::EffectName::new("tools.inspect").unwrap();
+    document.manifest.effects.insert(
+        effect.clone(),
+        k::Signature {
+            params: vec![k::Param {
+                name: "input".into(),
+                ty: ty.clone(),
+                optional: true,
+            }],
+            result: k::Type::Any,
+        },
+    );
+    document.main.push(k::Stmt::Do {
+        action: k::Action::Perform {
+            effect,
+            args: vec![],
+            result: ty,
+        },
+    });
+    let source = roundtrip(&document, true).source;
+    assert!(source.contains("{\"kernel\":1"), "{source}");
+    assert!(!source.contains("\\\""), "{source}");
+    assert!(source.contains("k.type({\"record\":"), "{source}");
+    assert!(
+        source.contains("True false None"),
+        "quoted metadata is not token-converted"
+    );
 }

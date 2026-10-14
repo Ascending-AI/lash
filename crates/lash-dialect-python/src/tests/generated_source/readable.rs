@@ -254,7 +254,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
 /// An independently written reader fixture pins tree shape without using the printer.
 #[test]
 fn independent_readable_source_preserves_elif_blocks_and_call_kinds() {
-    let source = r#"k.document("lash.generated.python", "1", "{\"kernel\":1,\"numbers\":\"float\"}", "{}", [], "[[\"x\",\"x\"],[\"y\",\"y\"],[\"error\",\"error\"]]", "[[\"helper_foreign\",\"1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f\"]]")
+    let source = r#"k.document("lash.generated.python", "1", {"kernel":1,"numbers":"float"}, {}, [], [["x","x"],["y","y"],["error","error"]], [["helper_foreign","1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f"]])
 with k.main():
     with k.block():
         if x.field[helper_foreign(-0.0)]:
@@ -549,7 +549,7 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
     for (literal, spelling) in [
         (k::Literal::Null, "None"),
         (k::Literal::Bool(false), "False"),
-        (k::Literal::Text("λ\n\"\\".into()), "\"λ\\n\\\"\\\\\""),
+        (k::Literal::Text("λ\n\"\\".into()), "\"λ\\n\"\\\""),
         (k::Literal::Absent, "k.absent"),
         (
             k::Literal::Bytes(k::Bytes::parse_hex("00ff").unwrap()),

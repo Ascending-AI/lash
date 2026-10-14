@@ -127,6 +127,50 @@ impl<'a> Cursor<'a> {
         }
         Err(invalid("unterminated text"))
     }
+    fn metadata<T: serde::de::DeserializeOwned>(&mut self) -> Result<T> {
+        self.text = self.text.trim_start_matches(' ');
+        let mut depth = 0usize;
+        let mut quoted = false;
+        let mut escaped = false;
+        let mut end = self.text.len();
+        for (i, byte) in self.text.bytes().enumerate() {
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    quoted = false;
+                }
+            } else {
+                match byte {
+                    b'"' => quoted = true,
+                    b'{' | b'[' => {
+                        depth += 1;
+                        if depth > k::KernelDataLimits::standard().document_json_depth() {
+                            return Err(depth_error());
+                        }
+                    }
+                    b'}' | b']' => {
+                        depth = depth
+                            .checked_sub(1)
+                            .ok_or_else(|| invalid("unbalanced metadata"))?
+                    }
+                    b',' | b')' if depth == 0 => {
+                        end = i;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let native = &self.text[..end];
+        let json =
+            lash_kernel_dialect::metadata_json(native, lash_kernel_dialect::SourceFormat::PythonV1);
+        let value = decode(&json)?;
+        self.text = &self.text[end..];
+        Ok(value)
+    }
     fn operation(&mut self) -> Result<&'a str> {
         if self.word()? != "k" {
             return Err(invalid("expected reserved k namespace"));
@@ -319,12 +363,12 @@ impl<'a> Reader<'a> {
                 return Err(format_error("unsupported generated-source version"));
             }
             c.expect(",")?;
-            let manifest: k::Manifest = decode(&c.string()?)?;
+            let manifest: k::Manifest = c.metadata()?;
             if k::KernelVersion::of(manifest.kernel).is_none() {
                 return Err(format_error("unsupported kernel version"));
             }
             c.expect(",")?;
-            let entries = decode(&c.string()?)?;
+            let entries = c.metadata()?;
             c.expect(",")?;
             let mut private_bindings = BTreeSet::new();
             for n in c.strings()? {
@@ -333,7 +377,7 @@ impl<'a> Reader<'a> {
                 }
             }
             c.expect(",")?;
-            let aliases: Vec<(String, k::Name)> = decode(&c.string()?)?;
+            let aliases: Vec<(String, k::Name)> = c.metadata()?;
             let mut originals = BTreeSet::new();
             for (alias, name) in aliases {
                 let legal = crate::printer::legal_identifier(&alias)
@@ -350,7 +394,7 @@ impl<'a> Reader<'a> {
                 }
             }
             c.expect(",")?;
-            let aliases: Vec<(String, k::FunctionId)> = decode(&c.string()?)?;
+            let aliases: Vec<(String, k::FunctionId)> = c.metadata()?;
             let mut ids = BTreeSet::new();
             for (alias, id) in aliases {
                 if !alias
@@ -1014,7 +1058,7 @@ impl<'a> Reader<'a> {
                 if c.operation()? != "type" {
                     return Err(invalid("expected complete result type"));
                 }
-                let result = decode(&c.string()?)?;
+                let result = c.metadata()?;
                 c.expect(")")?;
                 k::Action::Perform {
                     effect,

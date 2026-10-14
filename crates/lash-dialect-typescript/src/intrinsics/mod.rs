@@ -238,11 +238,11 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
                 "unsupported generated-source format or version",
             ));
         }
-        document.manifest = decode(&string(manifest)?, reader.limits)?;
+        document.manifest = decode_metadata(manifest, reader.limits)?;
         if k::KernelVersion::of(document.manifest.kernel).is_none() {
             return Err(format_error("unsupported kernel version"));
         }
-        document.entries = decode(&string(entries)?, reader.limits)?;
+        document.entries = decode_metadata(entries, reader.limits)?;
         for value in array(private)? {
             if !document
                 .private_bindings
@@ -251,7 +251,7 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
                 return Err(format_error("duplicate private binding"));
             }
         }
-        let aliases: Vec<(String, k::Name)> = decode(&string(names)?, reader.limits)?;
+        let aliases: Vec<(String, k::Name)> = decode_metadata(names, reader.limits)?;
         let mut originals = std::collections::BTreeSet::new();
         for (alias, name) in aliases {
             let valid_alias = crate::printer::legal_identifier(&alias)
@@ -267,7 +267,7 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
                 ));
             }
         }
-        let aliases: Vec<(String, k::FunctionId)> = decode(&string(helpers)?, reader.limits)?;
+        let aliases: Vec<(String, k::FunctionId)> = decode_metadata(helpers, reader.limits)?;
         let mut ids = std::collections::BTreeSet::new();
         for (alias, id) in aliases {
             if !alias.strip_prefix("helper_").is_some_and(|suffix| {
@@ -467,4 +467,73 @@ fn decode<T: serde::de::DeserializeOwned>(
         .end()
         .map_err(|error| format_error(error.to_string()))?;
     Ok(value)
+}
+
+fn decode_metadata<T: serde::de::DeserializeOwned>(
+    expr: &s::Expr,
+    limits: k::KernelDataLimits,
+) -> Result<T, Diagnostic> {
+    decode(&metadata_text(expr)?, limits)
+}
+
+fn metadata_text(expr: &s::Expr) -> Result<String, Diagnostic> {
+    fn write(expr: &s::Expr, out: &mut String) -> Result<(), Diagnostic> {
+        match expr {
+            s::Expr::Lit(s::Lit::Str(_)) => {
+                out.push_str(&serde_json::to_string(&string(expr)?).unwrap())
+            }
+            s::Expr::Lit(s::Lit::Bool(v)) => out.push_str(if v.value { "true" } else { "false" }),
+            s::Expr::Lit(s::Lit::Null(_)) => out.push_str("null"),
+            s::Expr::Lit(s::Lit::Num(v)) => out.push_str(
+                v.raw
+                    .as_ref()
+                    .ok_or_else(|| invalid("metadata number needs its token", Some(expr.span())))?,
+            ),
+            s::Expr::Array(_) => {
+                out.push('[');
+                for (i, item) in array(expr)?.into_iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    write(item, out)?;
+                }
+                out.push(']');
+            }
+            s::Expr::Object(object) => {
+                out.push('{');
+                for (i, item) in object.props.iter().enumerate() {
+                    let s::PropOrSpread::Prop(item) = item else {
+                        return Err(invalid("metadata has no spread", Some(expr.span())));
+                    };
+                    let s::Prop::KeyValue(item) = item.as_ref() else {
+                        return Err(invalid("metadata needs explicit fields", Some(expr.span())));
+                    };
+                    let key = match &item.key {
+                        s::PropName::Str(key) => key.value.as_str().ok_or_else(|| {
+                            invalid("metadata key needs Unicode scalars", Some(expr.span()))
+                        })?,
+                        s::PropName::Ident(key) => key.sym.as_ref(),
+                        _ => return Err(invalid("metadata keys are text", Some(expr.span()))),
+                    };
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&serde_json::to_string(key).unwrap());
+                    out.push(':');
+                    write(&item.value, out)?;
+                }
+                out.push('}');
+            }
+            _ => {
+                return Err(invalid(
+                    "expected structured metadata literal",
+                    Some(expr.span()),
+                ));
+            }
+        }
+        Ok(())
+    }
+    let mut text = String::new();
+    write(expr, &mut text)?;
+    Ok(text)
 }

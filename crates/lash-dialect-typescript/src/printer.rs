@@ -142,7 +142,7 @@ struct Renderer<'a> {
 }
 impl Renderer<'_> {
     fn metadata(&mut self, value: &impl serde::Serialize) {
-        self.out.metadata(value);
+        self.out.metadata(value, SourceFormat::TypeScriptV1);
     }
 
     fn name(&mut self, name: &k::Name) {

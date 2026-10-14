@@ -251,3 +251,29 @@ Unavailable requirements and mismatched signatures remain admission refusals.
 Ordinary model cells still use authored lowering; the marker grants no authority.
 The [facade example and measured costs](generated-source-cost.md) show the
 three operations composed explicitly, both locally and through a worker.
+
+
+## Shared native envelope and readability acceptance
+
+Both dialects use the same ordered seven-field envelope:
+`document(format, version, manifest, entries, privateBindings, names, helpers)`.
+The marker is dialect-specific, version is `"1"`, and the remaining fields
+are structured native literals, never JSON encoded inside a string. Manifest,
+entries and type objects retain the kernel's field names and type tags. Name
+and helper tables are ordered arrays of `[alias, original]` and `[alias, fullId]`.
+TypeScript uses object/array literals and `true`/`false`/`null`; Python uses
+dictionaries/lists and `True`/`False`/`None`. Primitive type metadata is a single
+string such as `"any"`, not a string containing JSON quotation marks.
+Each decoder accepts only literal metadata, rejects duplicate object fields
+before deserialization, and preserves unused requirements, entries and aliases.
+The shared bounded writer and native-token conversion own this encoding rule.
+
+The shared `lash_kernel_dialect::readability` harness owns seven realistic
+kernel documents: three effects with record inputs, recursion with a foreign
+helper, nested controls, loops over records, error handling, multiple entries,
+and an RLM tool cell. Register every dialect's printer, public generated decoder,
+node-based generic detector and documented unavoidable rules. The harness
+checks complete canonical bytes and reports every generic occurrence with
+dialect, case, kernel Site, node kind and reason. Generic forms without a
+matching named rule and reason fail. Exactness wins over native spelling;
+ordinary modeled constructs must use their direct native inverse.

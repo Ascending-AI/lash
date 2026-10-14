@@ -351,7 +351,7 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
 }
 
 // Independent reader witness: these native forms are not obtained from print().
-const NATIVE_HEADER: &str = r#"k.document("lash.generated.typescript", "1", "{\"kernel\":1,\"numbers\":\"float\"}", "{}", [], "[[\"page\",\"page\"]]", "[]");"#;
+const NATIVE_HEADER: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"numbers":"float"}, {}, [], [["page","page"]], []);"#;
 
 #[test]
 fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {

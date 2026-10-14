@@ -24,7 +24,7 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     printed
 }
 // Independently written syntax, not obtained from the printer or its rule table.
-const HAND_WRITTEN: &str = r#"k.document("lash.generated.python", "1", "{\"kernel\":1,\"numbers\":\"by_spelling\"}", "{\"worker\":{\"params\":[],\"result\":\"any\"}}", ["odd name"], "[[\"answer\",\"odd name\"],[\"worker\",\"worker\"]]", "[]")
+const HAND_WRITTEN: &str = r#"k.document("lash.generated.python", "1", {"kernel":1,"numbers":"by_spelling"}, {"worker":{"params":[],"result":"any"}}, ["odd name"], [["answer","odd name"],["worker","worker"]], [])
 with k.declare("worker", []):
     with k.block():
         with k.return_():
@@ -379,15 +379,12 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         HAND_WRITTEN.replace("lash.generated.python", "lash.generated.typescript"),
         HAND_WRITTEN.replace("\"1\"", "\"99\""),
         HAND_WRITTEN.replace(
-            "[\\\"answer\\\",\\\"odd name\\\"]",
-            "[\\\"answer\\\",\\\"odd name\\\"],[\\\"answer\\\",\\\"other\\\"]",
+            "[\"answer\",\"odd name\"]",
+            "[\"answer\",\"odd name\"],[\"answer\",\"other\"]",
         ),
-        HAND_WRITTEN.replace(
-            "[\\\"worker\\\",\\\"worker\\\"]",
-            "[\\\"worker\\\",\\\"odd name\\\"]",
-        ),
-        HAND_WRITTEN.replace("\\\"kernel\\\":1", "\\\"kernel\\\":1,\\\"kernel\\\":1"),
-        HAND_WRITTEN.replace("[\\\"answer\\\",", "[\\\"print\\\","),
+        HAND_WRITTEN.replace("[\"worker\",\"worker\"]", "[\"worker\",\"odd name\"]"),
+        HAND_WRITTEN.replace("\"kernel\":1", "\"kernel\":1,\"kernel\":1"),
+        HAND_WRITTEN.replace("[\"answer\",", "[\"print\","),
         HAND_WRITTEN.replace("[\"odd name\"]", "[\"odd name\",\"odd name\"]"),
         HAND_WRITTEN.to_owned() + "with k.main():\n    with k.block():\n        pass\n",
         "with k.main():\n    with k.block():\n        pass\n".into(),
@@ -539,8 +536,8 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         "{{\"kernel\":1,\"numbers\":\"float\",\"effects\":{{\"deep\":{{\"result\":{nested_type}}}}}}}"
     );
     let source = format!(
-        "k.document(\"lash.generated.python\",\"1\",{},\"{{}}\",[],\"[]\",\"[]\")\nwith k.main():\n    with k.block():\n        pass\n",
-        serde_json::to_string(&metadata).unwrap()
+        "k.document(\"lash.generated.python\",\"1\",{},{{}},[],[],[])\nwith k.main():\n    with k.block():\n        pass\n",
+        metadata
     );
     assert_eq!(
         crate::compile_generated(&source, Default::default())
@@ -1328,9 +1325,9 @@ fn inventory_signature(signature: &k::Signature, variants: &mut BTreeSet<&'stati
 #[test]
 fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
     let aliases = serde_json::to_string(&vec![("n", "a".repeat(512))]).unwrap();
-    let quoted = serde_json::to_string(&aliases).unwrap();
+    let quoted = aliases;
     let mut source = format!(
-        "k.document(\"lash.generated.python\",\"1\",\"{{\\\"kernel\\\":1,\\\"numbers\\\":\\\"float\\\"}}\",\"{{}}\",[],{quoted},\"[]\")\nwith k.main():\n    with k.block():\n"
+        "k.document(\"lash.generated.python\",\"1\",{{\"kernel\":1,\"numbers\":\"float\"}},{{}},[],{quoted},[])\nwith k.main():\n    with k.block():\n"
     );
     for _ in 0..100 {
         source.push_str("        with k.finish():\n            n\n");
@@ -1347,3 +1344,44 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
 }
 
 mod readable;
+
+/// G-SOURCE-ENVELOPE: native literals carry nested optional types exactly.
+#[test]
+fn structured_envelope_and_types_keep_nested_optional_metadata() {
+    let mut document = hand_document();
+    let ty = k::Type::Record(k::RecordType {
+        fields: vec![k::RecordTypeField {
+            name: "True false None".into(),
+            ty: k::Type::Bool,
+            optional: true,
+        }],
+        rest: Some(Box::new(k::Type::Any)),
+    });
+    let effect = k::EffectName::new("tools.inspect").unwrap();
+    document.manifest.effects.insert(
+        effect.clone(),
+        k::Signature {
+            params: vec![k::Param {
+                name: "input".into(),
+                ty: ty.clone(),
+                optional: true,
+            }],
+            result: k::Type::Any,
+        },
+    );
+    document.main.push(k::Stmt::Do {
+        action: k::Action::Perform {
+            effect,
+            args: vec![],
+            result: ty,
+        },
+    });
+    let source = roundtrip(&document, true).source;
+    assert!(source.contains("{\"kernel\":1"), "{source}");
+    assert!(!source.contains("\\\""), "{source}");
+    assert!(source.contains("k.type({\"record\":"), "{source}");
+    assert!(
+        source.contains("True false None"),
+        "quoted metadata is not token-converted"
+    );
+}

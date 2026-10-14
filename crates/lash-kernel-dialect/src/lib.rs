@@ -18,6 +18,7 @@ mod imperative;
 mod library;
 mod metadata;
 mod name_plan;
+pub mod readability;
 mod saved;
 mod source;
 
@@ -29,7 +30,7 @@ pub use dialect::{
     EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
 };
 pub use library::{Library, LibraryError, NamedLibrary};
-pub use metadata::check_metadata_uniqueness;
+pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, Constant, DOCUMENT_NODE_KIND,

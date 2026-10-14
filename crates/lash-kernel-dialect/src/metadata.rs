@@ -57,3 +57,59 @@ pub fn check_metadata_uniqueness(text: &str) -> Result<(), serde_json::Error> {
     Unique::deserialize(&mut decoder)?;
     decoder.end()
 }
+
+/// Convert only unquoted scalar tokens between native metadata and JSON.
+/// Strings, keys, escapes and whitespace retain their exact bytes. The caller
+/// bounds the input before conversion and validates the result as metadata.
+pub fn metadata_json(text: &str, format: crate::SourceFormat) -> String {
+    literal_tokens(text, format, true)
+}
+
+pub(crate) fn literal_tokens(text: &str, format: crate::SourceFormat, to_json: bool) -> String {
+    if format == crate::SourceFormat::TypeScriptV1 {
+        return text.to_owned();
+    }
+    let mut output = String::with_capacity(text.len());
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut start = 0;
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if bytes[i] == b'\\' {
+                escaped = true;
+            } else if bytes[i] == b'"' {
+                quoted = false;
+            }
+            i += 1;
+        } else if bytes[i] == b'"' {
+            quoted = true;
+            i += 1;
+        } else if bytes[i].is_ascii_alphabetic() {
+            let word_start = i;
+            while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            let word = &text[word_start..i];
+            let replacement = match (to_json, word) {
+                (true, "True") => "true",
+                (true, "False") => "false",
+                (true, "None") => "null",
+                (false, "true") => "True",
+                (false, "false") => "False",
+                (false, "null") => "None",
+                _ => word,
+            };
+            output.push_str(&text[start..word_start]);
+            output.push_str(replacement);
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    output.push_str(&text[start..]);
+    output
+}

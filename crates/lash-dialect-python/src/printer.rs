@@ -460,7 +460,7 @@ impl Renderer<'_> {
         true
     }
     fn metadata(&mut self, value: &impl serde::Serialize) {
-        self.out.metadata(value);
+        self.out.metadata(value, SourceFormat::PythonV1);
     }
     fn name(&mut self, n: &k::Name) {
         self.out.write(&self.plan.names[n]);

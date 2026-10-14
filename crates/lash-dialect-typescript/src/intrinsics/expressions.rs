@@ -229,7 +229,7 @@ impl Reader {
                 k::Action::Perform {
                     effect,
                     args: self.atoms(args)?,
-                    result: super::decode(&string(value)?, self.limits)?,
+                    result: super::decode_metadata(value, self.limits)?,
                 }
             }
             ("sleep", [duration]) => k::Action::Sleep {
