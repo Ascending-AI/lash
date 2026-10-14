@@ -11,6 +11,32 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_runs";
 
+/// The published head a terminal window retains: revision, leaf, checkpoint
+/// and head-document digest. Its leaf and checkpoint remain roots for the
+/// lifetime of the terminal row, even after later commits or collection.
+pub struct TerminalWindowRef {
+    pub revision: i64,
+    pub leaf: Option<String>,
+    pub checkpoint: Option<String>,
+    pub config_ref: String,
+}
+
+impl TerminalWindowRef {
+    /// The `write_terminal` parameters ?7 to ?10; an absent head names no window.
+    pub fn columns(
+        window: Option<&Self>,
+    ) -> (Option<i64>, Option<&str>, Option<&str>, Option<&str>) {
+        window.map_or((None, None, None, None), |window| {
+            (
+                Some(window.revision),
+                window.leaf.as_deref(),
+                window.checkpoint.as_deref(),
+                Some(window.config_ref.as_str()),
+            )
+        })
+    }
+}
+
 crate::statements! {
     /// `session_runs` statements both backends issue verbatim.
     pub struct SessionRunStatements @ "session_run" {

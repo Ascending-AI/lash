@@ -14,10 +14,12 @@ use lash_core_execution::store::{
     RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
     run_binding_conflict, stored_intent_kind, stored_intent_state,
 };
+use lash_core_execution::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_runs::{
-    control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
-    runs::SessionRunStatements,
+    control_intents::ControlIntentStatements,
+    run_inputs::SessionRunInputStatements,
+    runs::{SessionRunStatements, TerminalWindowRef},
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -119,34 +121,6 @@ pub(crate) fn run_terminal_conn(
         ));
     }
     Ok(Some(terminal))
-}
-
-/// The window a terminal ends on, by reference (FIG-5931): the published
-/// head's revision, leaf and checkpoint, and the digest its head document is
-/// recorded under in `blobs`. The leaf and the
-/// checkpoint are roots while the terminal's row lives, so the window reads
-/// the same after any later commit or collection.
-pub(crate) struct TerminalWindowRef {
-    revision: i64,
-    leaf: Option<String>,
-    checkpoint: Option<String>,
-    config_ref: String,
-}
-
-impl TerminalWindowRef {
-    /// The `write_terminal`/`end_run` parameters `?7` to `?10`.
-    pub(crate) fn columns(
-        window: Option<&Self>,
-    ) -> (Option<i64>, Option<&str>, Option<&str>, Option<&str>) {
-        window.map_or((None, None, None, None), |window| {
-            (
-                Some(window.revision),
-                window.leaf.as_deref(),
-                window.checkpoint.as_deref(),
-                Some(window.config_ref.as_str()),
-            )
-        })
-    }
 }
 
 /// Name the session's published head as the terminal's window, in the
@@ -256,20 +230,8 @@ pub(crate) fn write_run_terminal_conn(
 /// caller's transaction: accepted input is open again in the state its
 /// submitted delivery names, and the session is woken to admit it again.
 ///
-/// Open input addressed to a turn the run ends ([`RunTurns`]: its own
-/// physical turns and the turns its admission's members were accepted
-/// under) names a turn that will never run again, so the run's disposition
-/// applies to it here (FIG-3946): the undelivered disposition of the run's
-/// cancellation request if it has one, else `Defer`. `Defer` writes
-/// nothing: the row is next-turn input at its own position by rule, its
-/// submitted delivery unchanged (ADR 0101 §5.1). `Drop` withdraws it into
-/// its tombstone at the terminal instant `at_ms` (FIG-4098). Either is
-/// recorded once on the request's outcome. No open row is bound to a run
-/// with terminal evidence.
-///
-/// An input the run's admission took as its own (its retained input-row binding)
-/// that is still open is unbound from the run too, so a later run can
-/// admit it: a terminal run answers nothing more.
+/// [`EndedRunInputRelease`] owns the addressed-input selection and disposition;
+/// this adapter applies its withdrawals at `at_ms` in the same transaction.
 fn release_run_rows_conn(
     tx: &Connection,
     session_id: &SessionId,
@@ -306,39 +268,30 @@ fn release_run_rows_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let mut addressed = Vec::new();
-    for row in open_rows {
-        let ingress = crate::pending_turn_inputs::decode_turn_input_ingress(row.ingress_json)?;
-        if ingress
-            .active_turn_id()
-            .is_some_and(|turn| ended.contains(turn))
-        {
-            addressed.push(row.input_id);
-        }
-    }
+    let addressed = EndedRunInputRelease::select(
+        &ended,
+        open_rows.into_iter().map(|row| {
+            let ingress = crate::pending_turn_inputs::decode_turn_input_ingress(row.ingress_json)?;
+            Ok((row.input_id, ingress.active_turn_id().cloned()))
+        }),
+    )?;
     if addressed.is_empty() {
         return Ok(());
     }
     let request =
         crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session_id, run)?;
-    let disposition = request.as_ref().map_or(
-        lash_core_execution::TurnCancelUndeliveredInputPolicy::Defer,
-        |request| request.undelivered,
-    );
-    for input_id in addressed {
-        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
-            crate::conn::cached_execute(
-                tx,
-                sql.pending_inputs.cancel.sql(),
-                params![
-                    session_id.as_str(),
-                    input_id.as_str(),
-                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
-                    crate::clamp_epoch_ms(at_ms),
-                ],
-            )
-            .map_err(sqlite_error)?;
-        }
+    for input_id in addressed.dropped_inputs(request.as_ref().map(|request| request.undelivered)) {
+        crate::conn::cached_execute(
+            tx,
+            sql.pending_inputs.cancel.sql(),
+            params![
+                session_id.as_str(),
+                input_id.as_str(),
+                lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                crate::clamp_epoch_ms(at_ms),
+            ],
+        )
+        .map_err(sqlite_error)?;
     }
     Ok(())
 }

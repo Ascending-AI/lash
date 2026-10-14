@@ -6,6 +6,50 @@ use crate::StoreError;
 /// and mode.
 pub type TurnCancelRequestRow = (String, Option<String>, Option<String>, String, String);
 
+/// Open inputs addressed to the physical turns or admission members an ended
+/// run owns (FIG-3946). No open row stays bound to a terminal run: adapters
+/// first release its retained input and queued-work bindings so a later run
+/// can admit them. Only its addressed input takes the cancel request's policy.
+/// Drop writes a cancellation tombstone at the terminal instant (FIG-4098);
+/// Defer writes nothing. The cancellation outcome retains the input facts.
+///
+/// Decode every candidate before consulting the cancel request, so an
+/// unrelated corrupt input still refuses the terminal transaction.
+pub struct EndedRunInputRelease<I>(Vec<I>);
+
+impl<I> EndedRunInputRelease<I> {
+    pub fn select(
+        ended: &crate::store::RunTurns,
+        inputs: impl IntoIterator<Item = Result<(I, Option<crate::TurnId>), StoreError>>,
+    ) -> Result<Self, StoreError> {
+        let mut addressed = Vec::new();
+        for input in inputs {
+            let (input_id, turn) = input?;
+            if turn.as_ref().is_some_and(|turn| ended.contains(turn)) {
+                addressed.push(input_id);
+            }
+        }
+        Ok(Self(addressed))
+    }
+
+    /// An empty selection needs no cancel-request read.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Only an explicit Drop withdraws addressed input. Default and explicit
+    /// Defer write nothing: immutable delivery becomes next-turn input by rule
+    /// at its existing ingress position (ADR 0101 §5.1).
+    pub fn dropped_inputs(
+        self,
+        policy: Option<crate::TurnCancelUndeliveredInputPolicy>,
+    ) -> impl Iterator<Item = I> {
+        self.0
+            .into_iter()
+            .filter(move |_| policy == Some(crate::TurnCancelUndeliveredInputPolicy::Drop))
+    }
+}
+
 /// Decode an open active-turn input selected by the terminal transaction.
 /// Inputs addressed to another run are outside this cancellation.
 pub fn affected_input(
