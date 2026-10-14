@@ -73,6 +73,28 @@ test("constant editor text preserves negative zero through an unchanged scalar o
   assert.ok(Object.is(read.items[0], -0));
 });
 
+test("saving structured constants preserves numeric kinds when canonical facets leave contents unknown", () => {
+  const original = {
+    list: [
+      { literal: { float: "1.0" } },
+      { literal: { text: "text" } },
+      {
+        record: [
+          { field: "weight", value: { literal: { float: "2.0" } } },
+          { field: "count", value: { literal: { int: "3" } } },
+        ],
+      },
+    ],
+  };
+  const read = JSON.parse(constantText(constantValue(original).value));
+  assert.deepEqual(encodeValue(read, { list: "any" }, original), original);
+  read[2].count = 4;
+  const changed = structuredClone(original);
+  changed.list[2].record[1].value.literal.int = "4";
+  assert.deepEqual(encodeValue(read, { list: "any" }, original), changed);
+  assert.deepEqual(encodeValue(1, "int"), { literal: { int: "1" } });
+});
+
 test("promotion cannot snapshot a connected or computed While condition outside its loop", () => {
   const unit = { function: "demo" };
   const port = {

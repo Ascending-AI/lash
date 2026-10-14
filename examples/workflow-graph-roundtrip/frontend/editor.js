@@ -1485,6 +1485,7 @@ function openPort(node, port) {
           ? "float"
           : port.type;
       let value = literal.known ? literal.value : defaultValue(port.type);
+      let original = literal.known ? port.expression : undefined;
       function drawConstant() {
         holder.replaceChildren();
         const readValue = constantControl(
@@ -1495,7 +1496,7 @@ function openPort(node, port) {
           "constant-value",
           hostConfig,
         );
-        read = () => expression(readValue(), currentType);
+        read = () => expression(readValue(), currentType, original);
       }
       if (port.acceptsType === "any" || port.type === "any") {
         const label = el("label", null, "Constant type");
@@ -1528,6 +1529,7 @@ function openPort(node, port) {
         select.onchange = () => {
           currentType = types[Number(select.value)];
           value = defaultValue(currentType);
+          original = undefined;
           drawConstant();
         };
         editor.append(label, select);

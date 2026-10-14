@@ -368,7 +368,11 @@ export function sourceOptions(view, port) {
   });
 }
 
-export function encodeValue(value, type) {
+export function encodeValue(value, type, original) {
+  if (original?.literal !== undefined) {
+    const previous = constantValue(original);
+    if (previous.known && Object.is(previous.value, value)) return original;
+  }
   if (value === null) return { literal: "null" };
   if (typeof value === "string") return { literal: { text: value } };
   if (typeof value === "boolean") return { literal: { bool: value } };
@@ -394,13 +398,18 @@ export function encodeValue(value, type) {
     return { literal: { float: text } };
   }
   if (Array.isArray(value))
-    return { list: value.map((item) => encodeValue(item, type?.list)) };
+    return {
+      list: value.map((item, index) =>
+        encodeValue(item, type?.list, original?.list?.[index]),
+      ),
+    };
   return {
     record: Object.entries(value).map(([field, item]) => ({
       field,
       value: encodeValue(
         item,
         fieldsOf(type).find((f) => f.name === field)?.ty,
+        original?.record?.find((entry) => entry.field === field)?.value,
       ),
     })),
   };
