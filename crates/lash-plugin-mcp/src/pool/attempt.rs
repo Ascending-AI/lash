@@ -122,13 +122,20 @@ impl McpConnectionPool {
                 if entry.config.reset_call_timeout_on_progress() {
                     options = options.reset_timeout_on_progress();
                 }
-                let response = match peer
+                // Hold receive-side correlation across send: even an immediate
+                // notification waits until the SDK token is bound to this call.
+                let mut routes = handler.observations.lock().await;
+                let sent = peer
                     .send_cancellable_request(
                         ClientRequest::CallToolRequest(Request::new(params.clone())),
                         options,
                     )
-                    .await
-                {
+                    .await;
+                if let Ok(handle) = &sent {
+                    routes.register(handle.progress_token.clone(), handle.id.clone(), context);
+                }
+                drop(routes);
+                let response = match sent {
                     Ok(handle) => {
                         let request_id = handle.id.clone();
                         let response = handle.await_response();

@@ -181,6 +181,10 @@ async fn subscriber_lag_from_retained_cursor_replays_every_event_then_continues(
         .await
         .expect("publish the delivered event");
     let next_cursor = |item| match item {
+        crate::observe::SessionObservationStreamItem::Mcp(_)
+        | crate::observe::SessionObservationStreamItem::McpGap(_) => {
+            panic!("this fixture does not serve MCP")
+        }
         crate::observe::SessionObservationStreamItem::Event(event) => event.cursor.clone(),
         crate::observe::SessionObservationStreamItem::Gap { .. } => {
             panic!("a retained cursor must recover without replacing the observation");

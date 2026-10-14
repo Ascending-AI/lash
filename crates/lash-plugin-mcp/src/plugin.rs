@@ -31,6 +31,12 @@ pub struct McpPluginFactoryBuilder {
 }
 
 impl McpPluginFactoryBuilder {
+    /// Bounds each host observer independently, per server. Defaults and hard
+    /// maxima are documented by `McpObservationPolicy`.
+    pub fn observation_policy(mut self, policy: lash_core::McpObservationPolicy) -> Self {
+        self.host_services.observation_policy = policy;
+        self
+    }
     pub fn sampling_handler(mut self, handler: Arc<dyn McpSamplingHandler>) -> Self {
         self.host_services.sampling = Some(handler);
         self
@@ -104,6 +110,12 @@ impl McpPluginFactory {
     /// none.
     pub fn events(&self) -> crate::events::McpEvents {
         self.events.clone()
+    }
+
+    /// Unsolicited server messages and list changes, live on this node.
+    /// Call-correlated facts go automatically to the executing session feed.
+    pub fn observe_server(&self, server: &str) -> lash_core::McpLiveSubscription {
+        self.pool.observe_server(server)
     }
 
     /// Direct access to the underlying pool, in case the embedder wants to

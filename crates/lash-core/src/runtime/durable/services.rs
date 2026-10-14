@@ -516,7 +516,10 @@ fn live_observer(
         sink.as_ref(),
         runtime.delta_framing(),
     );
-    let observer = observer.for_turn(turn);
+    let observer = observer.for_turn(turn).with_mcp_publisher(
+        live.mcp_observations()
+            .map(|hub| hub.session(runtime.session_id().clone())),
+    );
     let publisher = crate::task::spawn(async move {
         while let Some(observation) =
             std::future::poll_fn(|context| observations.poll_next(context)).await

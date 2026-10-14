@@ -212,6 +212,8 @@ pub trait McpRootsProvider: Send + Sync + 'static {
 /// Optional server-to-client handlers shared by every connection in a pool.
 #[derive(Clone, Default)]
 pub(crate) struct McpHostServices {
+    pub(crate) observations: Arc<lash_core::McpObservationHub>,
+    pub(crate) observation_policy: lash_core::McpObservationPolicy,
     pub(crate) sampling: Option<Arc<dyn McpSamplingHandler>>,
     pub(crate) elicitation: Option<McpElicitationService>,
     pub(crate) roots: Option<Arc<dyn McpRootsProvider>>,
@@ -303,6 +305,7 @@ fn host_tasks_shut_down() -> ErrorData {
 /// Per-server rmcp handler that routes protocol requests to host seams.
 #[derive(Clone)]
 pub(crate) struct LashMcpClientHandler {
+    pub(crate) observations: Arc<Mutex<crate::observations::Routes>>,
     server_name: String,
     client_info: ClientConfig,
     services: McpHostServices,
@@ -318,6 +321,11 @@ impl LashMcpClientHandler {
         let client_info = ClientConfig::new(services.capabilities(), implementation)
             .with_protocol_version(MCP_PROTOCOL_VERSION);
         Self {
+            observations: Arc::new(Mutex::new(crate::observations::Routes::new(
+                server_name,
+                &services.observations,
+                services.observation_policy,
+            ))),
             server_name: server_name.to_string(),
             client_info,
             services,
@@ -457,7 +465,45 @@ impl ClientHandler for LashMcpClientHandler {
         crate::events::client::route_notification(&self.event_streams, &notification, subscription);
     }
 
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _: NotificationContext<RoleClient>,
+    ) {
+        self.observations.lock().await.progress(params);
+    }
+
+    #[allow(
+        deprecated,
+        reason = "forward server logging while it remains on the MCP wire"
+    )]
+    async fn on_logging_message(
+        &self,
+        params: rmcp::model::LoggingMessageNotificationParam,
+        context: NotificationContext<RoleClient>,
+    ) {
+        self.observations.lock().await.log(params, context);
+    }
+
+    async fn on_resource_list_changed(&self, _: NotificationContext<RoleClient>) {
+        self.observations
+            .lock()
+            .await
+            .changed(lash_core::McpList::Resources);
+    }
+
+    async fn on_prompt_list_changed(&self, _: NotificationContext<RoleClient>) {
+        self.observations
+            .lock()
+            .await
+            .changed(lash_core::McpList::Prompts);
+    }
+
     async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
+        self.observations
+            .lock()
+            .await
+            .changed(lash_core::McpList::Tools);
         if let Some(changes) = &self.tool_changes {
             let id = context
                 .extensions

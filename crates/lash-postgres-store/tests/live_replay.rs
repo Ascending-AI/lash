@@ -682,3 +682,101 @@ async fn a_followed_session_idle_past_max_age_keeps_its_window() {
         "the follower sees no gap"
     );
 }
+
+/// MCP-LIVE-ONLY: a protocol call's observations bypass PostgreSQL's replay
+/// cache. Another node and a reconnect see a gap, never cached MCP facts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_call_observations_never_write_the_postgres_replay_cache() {
+    use futures_util::StreamExt;
+    use lash::observe::{McpLiveItem, McpObservation};
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    let schema = fresh_schema();
+    let first = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config(&schema))
+        .await
+        .unwrap();
+    let second = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config(&schema))
+        .await
+        .unwrap();
+    let session = SessionId::from("mcp-live-only");
+    let cursor = first.current_cursor(&session, SessionRevision::new(0));
+    let hub = first.mcp_observations().unwrap();
+    let mut local = hub.subscribe_session(session.clone());
+    let _ = local.next().await;
+    let mut remote = second
+        .mcp_observations()
+        .unwrap()
+        .subscribe_session(session.clone());
+    assert!(matches!(remote.next().await, Some(McpLiveItem::Gap(_))));
+    let script = r#"
+import json,sys
+for line in sys.stdin:
+    m=json.loads(line)
+    if m.get('method')=='server/discover':
+        r={'supportedVersions':['2026-07-28'],'resultType':'complete','ttlMs':0,'cacheScope':'private','capabilities':{'tools':{}},'serverInfo':{'name':'fixture','version':'1'}}
+    elif m.get('method')=='tools/list':
+        r={'resultType':'complete','ttlMs':0,'cacheScope':'private','tools':[{'name':'work','inputSchema':{'type':'object'}}]}
+    elif m.get('method')=='tools/call':
+        t=m['params']['_meta']['progressToken']
+        print(json.dumps({'jsonrpc':'2.0','method':'notifications/progress','params':{'progressToken':t,'progress':3,'total':3}}),flush=True)
+        print(json.dumps({'jsonrpc':'2.0','method':'notifications/message','params':{'level':'info','data':{'fixture':'mcp-cache-law'},'_meta':{'progressToken':t}}}),flush=True)
+        r={'content':[{'type':'text','text':'ok'}]}
+    else: continue
+    print(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':r}),flush=True)
+"#;
+    let factory = lash::mcp::McpPluginFactory::new(std::collections::BTreeMap::from([(
+        "fixture".into(),
+        lash::mcp::McpServerConfig::stdio(lash::mcp::McpStdioTransport::new(
+            "python3",
+            vec!["-u".into(), "-c".into(), script.into()],
+        )),
+    )]))
+    .await
+    .unwrap();
+    let context =
+        lash_core::testing::mock_attempt_context().with_mcp_publisher(hub.session(session.clone()));
+    let output = factory
+        .pool()
+        .call_tool(
+            factory.pool().advertised_tools()[0].name(),
+            &serde_json::json!({}),
+            &context,
+        )
+        .await;
+    assert!(output.is_success(), "{output:?}");
+    let mut progress = false;
+    let mut log = false;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !progress || !log {
+            match local.next().await.unwrap() {
+                McpLiveItem::Observation(McpObservation::McpProgress { .. }) => progress = true,
+                McpLiveItem::Observation(McpObservation::McpLog { .. }) => log = true,
+                other => panic!("unexpected live fact {other:?}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        first.current_cursor(&session, SessionRevision::new(0)),
+        cursor,
+        "MCP facts allocate no replay position"
+    );
+    for store in [&first, &second] {
+        let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&cursor).await.unwrap()
+        else {
+            panic!("empty replay");
+        };
+        assert!(events.is_empty(), "no MCP observation row is stored");
+    }
+    assert!(
+        futures_util::poll!(remote.next()).is_pending(),
+        "no cross-node live fan-out"
+    );
+    let mut reconnected = hub.subscribe_session(session);
+    assert!(matches!(
+        reconnected.next().await,
+        Some(McpLiveItem::Gap(_))
+    ));
+    assert!(futures_util::poll!(reconnected.next()).is_pending());
+    factory.pool().shutdown_all().await;
+}

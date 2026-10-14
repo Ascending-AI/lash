@@ -181,6 +181,7 @@ pub(crate) enum ToolExecutionRoute {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
+    mcp_publisher: Option<crate::McpLivePublisher>,
     fleet_format: crate::FleetFormat,
     /// Who the attempt runs for: a session on its admitted frame, or a
     /// process.
@@ -244,6 +245,16 @@ pub struct AttemptContext<'run> {
 }
 
 impl<'run> AttemptContext<'run> {
+    /// The executing session's live feed; absent outside a session observer.
+    pub fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
+        self.mcp_publisher.clone()
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_mcp_publisher(mut self, publisher: crate::McpLivePublisher) -> Self {
+        self.mcp_publisher = Some(publisher);
+        self
+    }
     /// The spec the running turn's recorded shape resolved, read from the
     /// run's recorded preparation and never rebuilt from live config
     /// (FIG-6021). A tool that switches the agent frame passes it back to
@@ -321,6 +332,10 @@ impl<'run> AttemptContext<'run> {
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
         Self {
+            mcp_publisher: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(|runtime| runtime.mcp_publisher()),
             fleet_format: context
                 .runtime_execution_context
                 .as_ref()

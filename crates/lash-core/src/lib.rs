@@ -824,3 +824,9 @@ mod attachments_tests;
 pub use lash_core_store::transcript;
 
 pub use lash_core_execution::ProcessAuthorityReads;
+
+pub use lash_core_execution::{
+    McpCallIdentity, McpList, McpLiveItem, McpLivePublisher, McpLiveSubscription, McpLogLevel,
+    McpObservation, McpObservationGap, McpObservationHub, McpObservationKind, McpObservationPolicy,
+    McpObservationPolicyError,
+};

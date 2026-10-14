@@ -100,7 +100,9 @@ impl Feed {
             .into_iter()
             .filter_map(|item| match item {
                 SessionObservationStreamItem::Event(event) => Some(event),
-                SessionObservationStreamItem::Gap { .. } => None,
+                SessionObservationStreamItem::Gap { .. }
+                | SessionObservationStreamItem::Mcp(_)
+                | SessionObservationStreamItem::McpGap(_) => None,
             })
             .collect()
     }
@@ -493,7 +495,9 @@ fn held_prose(items: &[SessionObservationStreamItem]) -> String {
         .iter()
         .filter_map(|item| match item {
             SessionObservationStreamItem::Event(event) => Some(Arc::clone(event)),
-            SessionObservationStreamItem::Gap { .. } => None,
+            SessionObservationStreamItem::Gap { .. }
+            | SessionObservationStreamItem::Mcp(_)
+            | SessionObservationStreamItem::McpGap(_) => None,
         })
         .collect();
     followed_prose(&events)

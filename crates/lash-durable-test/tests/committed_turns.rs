@@ -746,6 +746,9 @@ async fn rendered_live_and_after_recovery(
                 .expect("the feed stays open")
                 .expect("the feed answers");
             match item {
+                SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_) => {
+                    panic!("this fixture does not serve MCP")
+                }
                 SessionObservationStreamItem::Event(event) => {
                     if let SessionObservationEventPayload::Committed { entries, .. } =
                         &event.payload

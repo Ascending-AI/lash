@@ -288,13 +288,15 @@ impl AttemptStreamBuilder {
 /// [`ObservationSink`]: crate::engine::ObservationSink
 #[derive(Default)]
 pub struct AttemptStreamRecorder {
+    live_mcp: Option<crate::McpLivePublisher>,
     stream: std::sync::Mutex<AttemptStreamBuilder>,
 }
 
 impl AttemptStreamRecorder {
     #[must_use]
-    pub fn start(limit: usize) -> std::sync::Arc<Self> {
+    pub fn start(limit: usize, live_mcp: Option<crate::McpLivePublisher>) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
+            live_mcp,
             stream: std::sync::Mutex::new(AttemptStreamBuilder::new(limit)),
         })
     }
@@ -308,6 +310,9 @@ impl AttemptStreamRecorder {
 }
 
 impl crate::engine::ObservationSink for AttemptStreamRecorder {
+    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
+        self.live_mcp.clone()
+    }
     fn observe(&self, observation: crate::engine::ShiftObservation) {
         let crate::engine::ShiftObservation {
             key,

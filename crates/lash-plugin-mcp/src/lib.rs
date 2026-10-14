@@ -131,3 +131,8 @@ mod client_depth_tests;
 
 #[cfg(test)]
 mod header_path_tests;
+
+#[cfg(test)]
+mod observation_tests;
+
+mod observations;

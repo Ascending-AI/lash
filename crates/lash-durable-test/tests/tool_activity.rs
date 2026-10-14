@@ -677,6 +677,10 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                     loop {
                         let update = next_update(&mut updates).await;
                         match update {
+                            SessionObservationStreamItem::Mcp(_)
+                            | SessionObservationStreamItem::McpGap(_) => {
+                                panic!("this fixture does not serve MCP")
+                            }
                             SessionObservationStreamItem::Event(event)
                                 if matches!(
                                     event.payload,

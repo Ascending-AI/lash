@@ -1921,6 +1921,10 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
 
     let mut first_delivery = session.observe().subscribe_and_recover(cursor.clone());
     let first_id = match first_delivery.next().await.expect("first replay event")? {
+        crate::observe::SessionObservationStreamItem::Mcp(_)
+        | crate::observe::SessionObservationStreamItem::McpGap(_) => {
+            panic!("this fixture does not serve MCP")
+        }
         crate::observe::SessionObservationStreamItem::Event(event) => {
             crate::observe::SessionObservationEventId::of(&event)
         }
@@ -1934,6 +1938,10 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
         .subscribe_and_recover(cursor.clone())
         .with_applied_event_ids([first_id.clone()]);
     let next_id = match redelivery.next().await.expect("next replay event")? {
+        crate::observe::SessionObservationStreamItem::Mcp(_)
+        | crate::observe::SessionObservationStreamItem::McpGap(_) => {
+            panic!("this fixture does not serve MCP")
+        }
         crate::observe::SessionObservationStreamItem::Event(event) => {
             crate::observe::SessionObservationEventId::of(&event)
         }
@@ -2175,6 +2183,10 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
     let continued = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             match stream.next().await.expect("post-gap live update")? {
+                crate::observe::SessionObservationStreamItem::Mcp(_)
+                | crate::observe::SessionObservationStreamItem::McpGap(_) => {
+                    panic!("this fixture does not serve MCP")
+                }
                 crate::observe::SessionObservationStreamItem::Gap {
                     observation: snapshot,
                     ..

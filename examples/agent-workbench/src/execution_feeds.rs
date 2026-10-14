@@ -472,6 +472,7 @@ async fn follow_session(graphs: ExecutionGraphs, state: AppState, session_id: Se
         let mut feed = observed.subscribe_and_recover(observed.attach().await?.cursor);
         while let Some(item) = feed.next().await {
             match item? {
+                SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_) => {}
                 SessionObservationStreamItem::Event(event) => match &event.payload {
                     SessionObservationEventPayload::LanguageExecution(observation) => {
                         graphs.observe(&state, source.clone(), observation).await;

@@ -787,6 +787,9 @@ struct HeldObservations<'a> {
 }
 
 impl crate::engine::ObservationSink for HeldObservations<'_> {
+    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
+        self.inner.mcp_publisher()
+    }
     fn observe(&self, observation: crate::engine::ShiftObservation) {
         match self.held {
             Some(held) => {

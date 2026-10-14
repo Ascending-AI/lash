@@ -85,7 +85,7 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
         .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
         .unwrap();
     let limits = config.tracing.limits();
-    let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
+    let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes, None);
     recorder.observe(ShiftObservation {
         key: ReplayKey::new("capacity"),
         ordinal: 0,

@@ -898,3 +898,10 @@ pub type CompletedToolCall = lash_sansio::CompletedToolCall<ToolIntentExecutionO
 pub type Response = lash_sansio::Response<ToolIntentExecutionOutcome>;
 
 pub use crate::backend::ProcessAuthorityReads;
+
+mod mcp_observation;
+pub use mcp_observation::{
+    McpCallIdentity, McpList, McpLiveItem, McpLivePublisher, McpLiveSubscription, McpLogLevel,
+    McpObservation, McpObservationGap, McpObservationHub, McpObservationKind, McpObservationPolicy,
+    McpObservationPolicyError,
+};

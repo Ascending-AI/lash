@@ -505,6 +505,7 @@ impl AppliedEventIds {
     /// identity is new, and a commit clears the window it settles.
     fn admit(&mut self, item: &SessionObservationStreamItem) -> bool {
         match item {
+            SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_) => true,
             SessionObservationStreamItem::Gap { .. } => {
                 self.clear();
                 true
@@ -551,6 +552,13 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<SessionObserva
 impl SessionObservationStream {
     pub(crate) fn new(source: FeedSource, cursor: SessionCursor) -> Self {
         let limits = source.work_limits;
+        let mcp = source.resident.observe().mcp_observations_enabled.then(|| {
+            source
+                .live_replay
+                .mcp_observations()
+                .unwrap_or_default()
+                .subscribe_session(source.session_id.clone())
+        });
         Self {
             cursor: cursor.clone(),
             state: Some(Box::new(FeedState {
@@ -559,6 +567,7 @@ impl SessionObservationStream {
                 done: false,
                 delivered: None,
                 live: None,
+                mcp,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -651,6 +660,7 @@ struct FeedState {
     /// established it: a `Committed` at or before it is a redelivery.
     delivered: Option<SessionRevision>,
     live: Option<LiveReplaySubscription>,
+    mcp: Option<lash_core::McpLiveSubscription>,
 }
 
 impl FeedState {
@@ -661,7 +671,19 @@ impl FeedState {
     async fn next(
         mut self: Box<Self>,
     ) -> (Box<Self>, Option<Result<SessionObservationStreamItem>>) {
-        let item = self.step().await;
+        let item = if let Some(mut mcp) = self.mcp.take() {
+            let item = tokio::select! {
+                item = mcp.next() => item.map(|item| Ok(match item {
+                    lash_core::McpLiveItem::Observation(fact) => SessionObservationStreamItem::Mcp(fact),
+                    lash_core::McpLiveItem::Gap(reason) => SessionObservationStreamItem::McpGap(reason),
+                })),
+                item = self.step() => item,
+            };
+            self.mcp = Some(mcp);
+            item
+        } else {
+            self.step().await
+        };
         if matches!(item, None | Some(Err(_))) {
             self.done = true;
         }

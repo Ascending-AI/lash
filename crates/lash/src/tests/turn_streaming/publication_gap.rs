@@ -481,6 +481,10 @@ async fn session_feed_across_two_publication_windows() -> Result<Vec<Shown>> {
             .expect("the session feed delivers")
             .expect("the session feed stays open")?;
         match item {
+            crate::observe::SessionObservationStreamItem::Mcp(_)
+            | crate::observe::SessionObservationStreamItem::McpGap(_) => {
+                panic!("this fixture does not serve MCP")
+            }
             crate::observe::SessionObservationStreamItem::Gap { .. } => {
                 shown.push(Shown::Gap);
                 break;

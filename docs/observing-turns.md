@@ -208,3 +208,31 @@ discarding the roster and starting a fresh scan. Its new fence lets scanning
 restart even when deletion history before that fence is gone. Process facts
 and provisional node observations continue through each process's recovering
 observation feed; the fleet cursor is separate from its observation cursor.
+
+
+MCP server observations are live facts on the executing node. Registering the
+MCP plugin routes progress and explicitly correlated logs automatically to the
+executing session's `SessionObservationStreamItem::Mcp`. `McpProgress` names the
+server, Lash tool call ID and attempt, and forwards progress, optional total
+and optional message. `McpLog` retains severity, logger and JSON data. A log
+without protocol correlation and `McpListChanged` go to the plugin's
+`observe_server(server)` subscription, which the host opens once per server.
+Tools, resources and prompts have distinct list-change kinds; these notices do
+not start turns or enter the process lifecycle feed.
+
+`McpObservationPolicy` bounds each observer's pending facts independently per
+server. The default is 128 logs, 64 progress identities, 64 server keys and
+64 KiB per fact; the hard maxima are 4096, 1024, 256 and 1 MiB respectively.
+Hosts set a validated policy through `McpPluginFactoryBuilder::observation_policy`.
+Pending progress coalesces to the latest notification for each call and attempt.
+Excess logs and oversized facts produce typed dropped counts. Excess server
+keys use the anonymous omission counter rather than retaining unbounded names.
+A reader can see more facts over time by draining its bounded queue.
+
+These facts have no serialization or write path into the journal, lifecycle
+feed or replay cache, including PostgreSQL's replay cache. Each subscription
+starts with an `Unavailable` MCP gap because no live history survives a
+reconnect. A different node has its own live feed and exposes the same gap;
+cross-node MCP fan-out is outside this contract. The recorded tool outcome
+remains authoritative. Lash forwards MCP server facts only; hosts own progress
+for tools they execute themselves.

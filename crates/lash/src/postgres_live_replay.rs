@@ -92,6 +92,7 @@ pub enum PostgresLiveReplayError {
 /// PostgreSQL database. Plug it in with
 /// [`LashCoreBuilder::live_replay_store`](crate::LashCoreBuilder::live_replay_store).
 pub struct PostgresLiveReplayStore {
+    mcp_observations: Arc<lash_core::McpObservationHub>,
     shared: Arc<Shared>,
     publisher: mpsc::UnboundedSender<publisher::PublishRequest>,
     tasks: Vec<JoinHandle<()>>,
@@ -255,6 +256,7 @@ impl PostgresLiveReplayStore {
         });
         let (publisher, requests) = mpsc::unbounded_channel();
         let store = Self {
+            mcp_observations: Arc::new(lash_core::McpObservationHub::default()),
             tasks: vec![
                 tokio::spawn(publisher::run(Arc::clone(&shared), requests)),
                 tokio::spawn(listener::run(Arc::clone(&shared))),
@@ -326,6 +328,9 @@ impl Drop for PostgresLiveReplayStore {
 
 #[async_trait::async_trait]
 impl LiveReplayStore for PostgresLiveReplayStore {
+    fn mcp_observations(&self) -> Option<Arc<lash_core::McpObservationHub>> {
+        Some(Arc::clone(&self.mcp_observations))
+    }
     async fn publish(
         &self,
         session_id: &SessionId,

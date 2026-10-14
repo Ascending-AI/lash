@@ -404,6 +404,11 @@ pub mod observe {
         facade_support::SessionObservation, facade_support::SessionObservationSubscription,
         facade_support::SessionResume,
     };
+    pub use lash_core::{
+        McpCallIdentity, McpList, McpLiveItem, McpLivePublisher, McpLiveSubscription, McpLogLevel,
+        McpObservation, McpObservationGap, McpObservationHub, McpObservationKind,
+        McpObservationPolicy, McpObservationPolicyError,
+    };
 }
 
 /// Tool definitions, providers, and execution types.

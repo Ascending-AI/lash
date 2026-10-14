@@ -1212,6 +1212,10 @@ impl ObservableSession {
 #[derive(Clone, Debug)]
 /// Item delivered by a local session-observation stream.
 pub enum SessionObservationStreamItem {
+    /// Node-local MCP fact, never replayed or written to the replay cache.
+    Mcp(lash_core::McpObservation),
+    /// The live-only span before this subscription is unavailable.
+    McpGap(lash_core::McpObservationGap),
     /// A replayed or live session observation event.
     Event(Arc<SessionObservationEvent>),
     /// A recoverable replay gap with a fresh durable observation.
