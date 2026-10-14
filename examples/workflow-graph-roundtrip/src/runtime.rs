@@ -41,7 +41,7 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// The environment a process of a saved workflow runs under, which is the
 /// environment lash admits the workflow against: the host's tools, from the
 /// one component that provides them.
-fn environment() -> Result<ProcessEnv, RunError> {
+pub(crate) fn environment() -> Result<ProcessEnv, RunError> {
     let host_tools = HOST_TOOLS.tool_provider(lash::tool_provider_key!("tools"));
     Ok(crate::display::tool_definitions()
         .iter()

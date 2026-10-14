@@ -9,6 +9,7 @@ use lash::sync::MutexExt;
 mod catalog;
 mod contract;
 mod display;
+mod prototype_host;
 mod runtime;
 mod sample_tools;
 
@@ -294,6 +295,9 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(open_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/workflow/edits", post(edit_workflow))
+        .route("/prototype/templates", get(prototype_host::templates))
+        .route("/prototype/source", post(prototype_host::import_source))
+        .route("/prototype/plan", post(prototype_host::preview))
         .route("/run", post(run_workflow))
         .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))
