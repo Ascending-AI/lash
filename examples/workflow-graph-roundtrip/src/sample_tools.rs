@@ -657,10 +657,6 @@ fn metrics_report(args: &Record) -> Result<JsonValue, String> {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::expect_used,
-    reason = "test module: invalid fixtures fail the law"
-)]
 mod tests {
     use super::apply_tool;
     use serde_json::json;

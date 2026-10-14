@@ -5,8 +5,8 @@ use lash::workflow::document::{
     Action, Atom, Document, Expr, Name, Node, Place, Site, Stmt, Type, Unit,
 };
 use lash::workflow::graph::{
-    ActionNode, AtomNode, BindingId, BindingKind, CalleeNode, ExprNode, Graph, GraphNode,
-    MemberNode, NodeId, NodeKind, Reference, ScopeId, StmtNode,
+    ActionNode, AtomNode, BindingId, BindingKind, CalleeNode, ExprNode, Graph, GraphNode, NodeId,
+    NodeKind, Reference, ScopeId, StmtNode,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -225,61 +225,12 @@ fn action_result(document: &Document, node: &GraphNode) -> Type {
     }
 }
 
-fn value_type(graph: &Graph, node: &GraphNode, bindings: &BTreeMap<usize, Type>) -> Type {
-    match &node.kind {
-        NodeKind::Expr(ExprNode::Variable(Reference::Binding(id))) => {
-            bindings.get(&id.index()).cloned().unwrap_or(Type::Any)
-        }
-        NodeKind::Expr(ExprNode::Member(MemberNode::Field { target, field })) => {
-            if let Type::Record(record) = value_type(graph, graph.node(*target), bindings) {
-                record
-                    .fields
-                    .iter()
-                    .find(|item| &item.name == field)
-                    .map(|item| item.ty.clone())
-                    .or_else(|| record.rest.map(|ty| *ty))
-                    .unwrap_or(Type::Any)
-            } else {
-                node.facet.clone().unwrap_or(Type::Any)
-            }
-        }
-        _ => node.facet.clone().unwrap_or(Type::Any),
-    }
-}
-
 pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
     let mut view = Dataflow::default();
     let unit = Unit::Function(entry.clone());
     if let Some(entry) = graph.unit(&unit) {
         view.parameters = entry.params.iter().copied().map(BindingId::index).collect();
     }
-    let parameter_types: BTreeMap<_, _> = view
-        .parameters
-        .iter()
-        .copied()
-        .zip(
-            document
-                .entries
-                .get(entry)
-                .into_iter()
-                .flat_map(|signature| signature.params.iter().map(|param| param.ty.clone())),
-        )
-        .collect();
-    let mut binding_types = BTreeMap::new();
-    // A member write may mutate an aliased record. Without alias analysis we
-    // retain the checker's deliberately open types throughout this unit.
-    let writes_members = graph.nodes().iter().any(|node| {
-        node.site.unit == unit
-            && matches!(
-                node.kind,
-                NodeKind::Stmt(
-                    StmtNode::Assign {
-                        place: lash::workflow::graph::PlaceNode::Member(_),
-                        ..
-                    } | StmtNode::Remove { .. }
-                )
-            )
-    });
     for binding in graph.bindings() {
         let declaration = graph.node(binding.declared_at);
         if declaration.site.unit != unit {
@@ -289,31 +240,13 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
             NodeKind::Stmt(StmtNode::Let { value, .. }) => Some(graph.node(value)),
             _ => None,
         };
-        let ty = if !binding.assigned && !binding.captured && !writes_members {
-            parameter_types
-                .get(&binding.id.index())
-                .cloned()
-                .or_else(|| {
-                    value
-                        .filter(|n| matches!(n.kind, NodeKind::Action(_)))
-                        .map(|n| action_result(document, n))
-                })
-                .unwrap_or_else(|| {
-                    value
-                        .map(|node| value_type(graph, node, &binding_types))
-                        .unwrap_or_else(|| binding.facet.clone())
-                })
-        } else {
-            binding.facet.clone()
-        };
-        binding_types.insert(binding.id.index(), ty.clone());
         view.bindings.push(BindingView {
             id: binding.id.index(),
             name: binding.name.clone(),
             kind: format!("{:?}", binding.kind).to_lowercase(),
             site: declaration.site.clone(),
             block: block(graph, binding.scope),
-            ty,
+            ty: binding.facet.clone(),
             assigned: binding.assigned,
             captured: binding.captured,
             value_site: value.map(|n| n.site.clone()),
@@ -339,7 +272,7 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
                     statement: statement(graph, node),
                     block: block(graph, node.scope),
                     expression: expression.clone(),
-                    ty: value_type(graph, node, &binding_types),
+                    ty: node.facet.clone().unwrap_or(Type::Any),
                     references: deps.into_iter().collect(),
                     available: available(graph, node),
                 });
@@ -404,7 +337,7 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
                 expected_type,
                 statement: node.site.clone(),
                 expression_site: expression.site.clone(),
-                ty: value_type(graph, expression, &binding_types),
+                ty: expression.facet.clone().unwrap_or(Type::Any),
             });
         }
         if let NodeKind::Stmt(StmtNode::Assign { value, .. }) = node.kind
@@ -421,10 +354,50 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "test assertions")]
 mod tests {
     use super::*;
     use lash::workflow::document::{FunctionRegistry, parse_document};
+
+    /// K-ADM-005: aliases passed to another function can change record fields.
+    #[test]
+    fn helper_mutations_do_not_leave_stale_field_types_in_the_editor() {
+        for mutation in [
+            "let change = call mutator(record) do apply change()",
+            "do call mutate(record)",
+        ] {
+            let document = parse_document(&format!(
+                r#"kernel 1
+numbers float
+entry demo() -> Any
+fn mutate(record) {{ set record.value = 42 }}
+fn mutator(record) {{ return fn() {{ set record.value = 42 }} }}
+fn demo() {{
+  let record = {{value: "initial"}}
+  {mutation}
+  return record.value
+}}
+main {{ finish null }}
+"#
+            ))
+            .expect("canonical helper mutation fixture");
+            let graph = lash::workflow::graph::derive(&document, &FunctionRegistry::default())
+                .expect("graph");
+            let view = project(&document, &graph, &Name::new("demo"));
+            let output = view.returns.first().expect("entry return");
+            assert_eq!(
+                output.ty,
+                Type::Any,
+                "{mutation}: a helper can replace Text with a number through an alias"
+            );
+            let expression = view
+                .expressions
+                .iter()
+                .find(|expression| expression.site == output.expression_site)
+                .expect("returned field expression");
+            assert_eq!(expression.ty, Type::Any);
+        }
+    }
+
     #[test]
     fn source_choices_preserve_shadowing_and_exclude_own_initializers() {
         let document = parse_document(
