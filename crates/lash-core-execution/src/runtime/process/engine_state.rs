@@ -368,7 +368,9 @@ pub trait StepPublication: Send + Sync {
     fn root(&self) -> lash_core_store::checkpoint_graph::NodeId;
 
     /// The candidate rooted at [`root`](Self::root), with no base,
-    /// published under `commit`, and its semantic admission.
+    /// published under `commit`, and its semantic admission. What the
+    /// pages name beyond the heap and the store may not hold yet, such as
+    /// the release the root pins, is staged in the outcome's `tx`.
     ///
     /// # Errors
     ///
@@ -376,6 +378,7 @@ pub trait StepPublication: Send + Sync {
     /// recorded.
     async fn publication(
         &self,
+        tx: &mut lash_durable::ActorTx,
         commit: lash_core_store::checkpoint_graph::CommitId,
     ) -> Result<
         (
@@ -388,6 +391,11 @@ pub trait StepPublication: Send + Sync {
     /// The publication under `commit` committed: the pages are the
     /// store's, and the staging lets them go.
     async fn settled(&self, commit: lash_core_store::checkpoint_graph::CommitId);
+
+    /// The publication under `commit` was refused before it entered the
+    /// store: the staging keeps its pages, and the outcome publishes them
+    /// again under a new commit.
+    async fn withdrawn(&self, commit: lash_core_store::checkpoint_graph::CommitId);
 
     /// Nothing was published: the staging is dropped, and none of its
     /// pages is ever reachable.

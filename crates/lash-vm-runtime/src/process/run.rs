@@ -412,8 +412,10 @@ async fn run_machine(
                     root: sealed.root,
                     kernel: sealed.header.kernel,
                 };
-                let candidate =
-                    RunCandidate::new(std::sync::Arc::clone(&activation.pages), sealed.root);
+                let candidate = activation.candidate(
+                    sealed.root,
+                    lash_core_store::checkpoint_graph::NodeId(sealed.header.release.0),
+                );
                 return Ok((MachineStep::Parked(park), Some((page, candidate))));
             }
             MachineStep::Ended(end) => {

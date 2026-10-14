@@ -37,7 +37,10 @@ mod generated;
 mod owners;
 pub use generated::GeneratedManifest;
 use generated::Recipe;
-pub use owners::{a_host_read_never_descends_into_a_heap_page, a_step_outcome_owns_its_candidate};
+pub use owners::{
+    a_host_read_never_descends_into_a_heap_page,
+    a_pruned_step_outcome_frees_exactly_its_unshared_pages, a_step_outcome_owns_its_candidate,
+};
 
 /// One dialect's page store and the raw access the laws need.
 #[async_trait::async_trait]

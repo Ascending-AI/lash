@@ -378,6 +378,7 @@ macro_rules! page_law {
 page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
 page_law!(publication_is_atomic_with_admissions_and_semantic_admission);
 page_law!(a_step_outcome_owns_its_candidate);
+page_law!(a_pruned_step_outcome_frees_exactly_its_unshared_pages);
 page_law!(a_host_read_never_descends_into_a_heap_page);
 page_law!(a_leased_root_survives_concurrent_retirement);
 page_law!(an_expired_lease_reads_nothing);

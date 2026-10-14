@@ -64,7 +64,7 @@ use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
     CommitId, EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeId, NodeKind,
 };
-use lash_durable::domain::graph::{HydratedGraph, ReleasePinWrite, RootOwner};
+use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
 use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
@@ -823,13 +823,15 @@ impl DurableSnapshotStore {
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
                 }
-                self.pin_release(
-                    &mut tx,
-                    NodeId(state.header.release.0),
-                    releases,
-                    expected.is_none(),
-                )
-                .await?;
+                releases
+                    .pin(
+                        self.cx.durable_reads().map_err(refused)?,
+                        &mut tx,
+                        NodeId(state.header.release.0),
+                        expected.is_none(),
+                    )
+                    .await
+                    .map_err(refused)?;
                 (
                     ExecStatus::Parked,
                     state.root,
@@ -944,60 +946,6 @@ impl DurableSnapshotStore {
             return Ok(FirstPark::Stopped);
         }
         Ok(FirstPark::Saved(Saved { rev, root, ledger }))
-    }
-
-    /// Pins helper release `release`, the one a checkpoint root's header
-    /// names: the store installs a release's nodes with its pin once, under
-    /// its dialect's key ([`lash_vm_releases::HeldManifests::pin_key`]), on
-    /// the first root of the first execution that pins it; every later root
-    /// requires them. Nothing of the heap is decoded.
-    async fn pin_release(
-        &self,
-        tx: &mut lash_durable::ActorTx,
-        release: NodeId,
-        releases: &ReleaseGraph,
-        first: bool,
-    ) -> Result<(), QuietPointRefusal> {
-        if releases.manifests.pin_key(&release.child_ref()).is_none() {
-            return Err(refused("the state pins a release this build does not hold"));
-        }
-        if !first {
-            tx.require(release);
-            return Ok(());
-        }
-        let key = releases
-            .manifests
-            .pin_key(&release.child_ref())
-            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
-        // A release this store already pins is stored whole: the commit
-        // rechecks the requirement under its protection. A pin this read
-        // cannot confirm is installed again, and the commit compares it.
-        let pinned = self
-            .cx
-            .durable_reads()
-            .map_err(refused)?
-            .hydrate(
-                RootOwner::ReleasePin {
-                    release: key.clone(),
-                },
-                Some(release),
-                self.read_limits(),
-            )
-            .await
-            .is_ok();
-        if pinned {
-            tx.require(release);
-            return Ok(());
-        }
-        let (_, nodes) = releases
-            .pinned(release)
-            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
-        tx.stage(nodes.into_values());
-        tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-            release: key,
-            root: release,
-        }));
-        Ok(())
     }
 
     /// Commits `tx` with `candidate`, which publishes the execution's root

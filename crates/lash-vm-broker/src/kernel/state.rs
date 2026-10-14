@@ -119,7 +119,65 @@ impl ReleaseGraph {
         }
         Some((key, nodes))
     }
+
+    /// Pins `release`, the release a checkpoint root's header names, in
+    /// `tx`: the store installs a release's nodes with its pin once, under
+    /// its dialect's key ([`HeldManifests::pin_key`]), on the first root of
+    /// the first execution that pins it; every later root requires them.
+    /// Only a `first` root reads whether the store pins it already, within
+    /// the release's own size. Nothing of the heap is decoded.
+    ///
+    /// # Errors
+    ///
+    /// [`UnheldRelease`] when this build does not hold `release`.
+    pub async fn pin(
+        &self,
+        reads: &dyn lash_durable::DurableReads,
+        tx: &mut lash_durable::ActorTx,
+        release: NodeId,
+        first: bool,
+    ) -> Result<(), UnheldRelease> {
+        if self.manifests.pin_key(&release.child_ref()).is_none() {
+            return Err(UnheldRelease);
+        }
+        if !first {
+            tx.require(release);
+            return Ok(());
+        }
+        let (key, nodes) = self.pinned(release).ok_or(UnheldRelease)?;
+        // A release this store already pins is stored whole: the commit
+        // rechecks the requirement under its protection. A pin this read
+        // cannot confirm is installed again, and the commit compares it.
+        let size = nodes.values().map(EncodedNode::len).sum();
+        let pinned = reads
+            .hydrate(
+                lash_durable::domain::RootOwner::ReleasePin {
+                    release: key.clone(),
+                },
+                Some(release),
+                DecodeLimits::within_total(size),
+            )
+            .await
+            .is_ok();
+        if pinned {
+            tx.require(release);
+            return Ok(());
+        }
+        tx.stage(nodes.into_values());
+        tx.write(lash_durable::DomainWrite::ReleasePin(
+            lash_durable::domain::ReleasePinWrite::Install {
+                release: key,
+                root: release,
+            },
+        ));
+        Ok(())
+    }
 }
+
+/// A checkpoint root's header pins a release this build does not hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("the state pins a release this build does not hold")]
+pub struct UnheldRelease;
 
 /// The helper releases this build holds for the dialects it was built with,
 /// staged. Staging is deterministic:
@@ -130,9 +188,21 @@ impl ReleaseGraph {
 ///
 /// A refusal of the graph, or the build's own releases not decoding.
 pub fn release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
+    held_releases().cloned()
+}
+
+/// [`release_manifests`], borrowed from the process's one staging.
+///
+/// # Errors
+///
+/// As [`release_manifests`].
+pub fn held_releases() -> Result<&'static ReleaseGraph, GraphStateFailure> {
     static RELEASES: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>> =
         std::sync::OnceLock::new();
-    RELEASES.get_or_init(read_release_manifests).clone()
+    RELEASES
+        .get_or_init(read_release_manifests)
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {

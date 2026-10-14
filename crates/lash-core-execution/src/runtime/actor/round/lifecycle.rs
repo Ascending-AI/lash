@@ -1013,13 +1013,16 @@ impl Lifecycle {
     /// Commit `tx`, which records `candidate`'s outcome at `place`, with
     /// the candidate's pages in its one fenced transaction, owned by that
     /// run fact (FIG-6193, P1). The staging settles once the commit is
-    /// authoritative. Any other end abandons it and ends the activation:
-    /// the pages were never published, or a lost acknowledgement left them
-    /// the store's under the fact, and the step's next owner settles the
-    /// call as its records say.
+    /// authoritative. A commit refused before it entered the store is
+    /// [`Act::Refused`], as [`commit`](Self::commit)'s: the staging keeps
+    /// its pages for the outcome's next commit. A lost fence, a lost
+    /// acknowledgement or a refused candidate abandons it and ends the
+    /// activation: the pages were never published, or a lost
+    /// acknowledgement left them the store's under the fact, and the step's
+    /// next owner settles the call as its records say.
     async fn commit_paged(
         &mut self,
-        tx: lash_durable::ActorTx,
+        mut tx: lash_durable::ActorTx,
         label: CommitLabel,
         candidate: StepCandidate,
         (owner, run, ordinal): (
@@ -1030,7 +1033,7 @@ impl Lifecycle {
     ) -> Result<Act, RoundError> {
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
-        let (manifest, admission) = match candidate.0.publication(commit).await {
+        let (manifest, admission) = match candidate.0.publication(&mut tx, commit).await {
             Ok(publication) => publication,
             Err(error) => {
                 candidate.0.abandoned().await;
@@ -1055,9 +1058,28 @@ impl Lifecycle {
                 candidate.0.settled(commit).await;
                 Ok(Act::Committed(appended))
             }
-            Err(error) => {
+            Err(
+                error @ (DurableError::OwnershipLost(_)
+                | DurableError::AckLost { .. }
+                | DurableError::Graph(_)
+                | DurableError::Domain(DomainRefusal::ProcessStartRefused { .. })),
+            ) => {
                 candidate.0.abandoned().await;
                 Err(error.into())
+            }
+            Err(error) => {
+                candidate.0.withdrawn(commit).await;
+                if let DurableError::Domain(DomainRefusal::RunOrdinalTaken {
+                    owner,
+                    run,
+                    ordinal,
+                }) = &error
+                {
+                    self.cx
+                        .probe()
+                        .committed_ordinal_emitted(owner, *run, *ordinal);
+                }
+                Ok(Act::Refused)
             }
         }
     }

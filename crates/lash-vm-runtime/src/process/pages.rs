@@ -22,7 +22,7 @@ use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot,
 };
-use lash_vm_broker::kernel::state::{ReleaseGraph, admission_of, checkpoint_header};
+use lash_vm_broker::kernel::state::{ReleaseGraph, admission_of, checkpoint_header, held_releases};
 use lash_vm_broker::kernel::{KernelFailure, ParkedState, next_stage_lease};
 
 use super::run::RunFault;
@@ -141,6 +141,19 @@ impl StepActivation {
         })
     }
 
+    /// The candidate that publishes `root`, the CheckpointRoot the run
+    /// sealed at its park, pinning `release`, the release its header
+    /// names: installed with the run's first outcome, required after.
+    pub(crate) fn candidate(&self, root: NodeId, release: NodeId) -> RunCandidate {
+        RunCandidate {
+            pages: Arc::clone(&self.pages),
+            store: Arc::clone(&self.store),
+            root,
+            release,
+            first: self.parked.is_none(),
+        }
+    }
+
     /// Ends the run's reads: the lease it took goes, and its expiry would
     /// end it as well. What the run staged stays with its candidate.
     pub(crate) async fn end_reads(&mut self) {
@@ -158,17 +171,16 @@ fn fault(message: &str) -> KernelFailure {
 }
 
 /// The CheckpointRoot a run sealed at its park, published with the step's
-/// outcome from the activation's spool. Dropping the last holder of the
-/// activation drops what it staged.
+/// outcome from the activation's spool, with the release its header pins.
+/// Dropping the last holder of the activation drops what it staged.
 pub(crate) struct RunCandidate {
     pages: SharedPages,
+    store: Arc<dyn PageStore>,
     root: NodeId,
-}
-
-impl RunCandidate {
-    pub(crate) fn new(pages: SharedPages, root: NodeId) -> Self {
-        Self { pages, root }
-    }
+    release: NodeId,
+    /// Whether this is the process's first root: no earlier one pinned
+    /// the release.
+    first: bool,
 }
 
 fn staging(fault: StageFault) -> DurableError {
@@ -186,6 +198,7 @@ impl lash_core::StepPublication for RunCandidate {
 
     async fn publication(
         &self,
+        tx: &mut lash_durable::ActorTx,
         commit: CommitId,
     ) -> Result<
         (
@@ -194,6 +207,21 @@ impl lash_core::StepPublication for RunCandidate {
         ),
         DurableError,
     > {
+        let releases = held_releases().map_err(|failure| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Corrupt,
+                message: format!("the build's releases: {failure}"),
+            })
+        })?;
+        releases
+            .pin(&*self.store, tx, self.release, self.first)
+            .await
+            .map_err(|unheld| {
+                DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Corrupt,
+                    message: unheld.to_string(),
+                })
+            })?;
         let manifest = self
             .pages
             .lock()
@@ -206,6 +234,12 @@ impl lash_core::StepPublication for RunCandidate {
     async fn settled(&self, commit: CommitId) {
         if let Err(fault) = self.pages.lock().await.settle(commit) {
             tracing::debug!(%fault, "a published run's staging did not settle");
+        }
+    }
+
+    async fn withdrawn(&self, commit: CommitId) {
+        if let Err(fault) = self.pages.lock().await.spool().withdraw(commit) {
+            tracing::debug!(%fault, "a refused run's candidate did not withdraw");
         }
     }
 
