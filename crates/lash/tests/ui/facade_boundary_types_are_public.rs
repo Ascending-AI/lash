@@ -447,6 +447,9 @@ fn committed_turns_page_supports_serde() {
     fn serde_value<T: serde::Serialize + serde::de::DeserializeOwned>() {}
     serde_value::<lash::transcript::CommittedTurnsPage>();
     serde_value::<lash::ToolCallRead>();
+    serde_value::<lash::TurnToolCallRef>();
+    serde_value::<lash::transcript::CommittedTurnWithToolCalls>();
+    serde_value::<lash::transcript::CommittedTurnsWithToolCallsPage>();
 }
 
 fn settled_outcome_status_is_public(outcome: &lash::TurnOutcome) -> lash::TurnStatus {

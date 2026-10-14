@@ -1829,10 +1829,13 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
     let reopened = core(backend)?;
     let durable = reopened.session(session_id).durable().await?;
     let transcript = durable.transcript().await?;
-    let cell = transcript
+    let (cell_turn, cell) = transcript
         .visible()
         .find_map(|entry| match &entry.item {
-            crate::transcript::TranscriptItem::Cell(cell) => Some(cell),
+            crate::transcript::TranscriptItem::Cell(cell) => Some((
+                entry.provenance.turn_id.as_ref().expect("the cell's turn"),
+                cell,
+            )),
             _ => None,
         })
         .expect("one committed cell");
@@ -1841,7 +1844,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         130,
         "every committed call stays addressable"
     );
-    let bodies = durable.read_cell_tool_calls(&cell.calls).await?;
+    let bodies = durable.read_cell_tool_calls(cell_turn, &cell.calls).await?;
     assert_eq!(bodies.len(), 130);
     for (call, body) in cell.calls.iter().zip(bodies) {
         let crate::ToolCallRead::Settled { record } = body else {
@@ -1855,7 +1858,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         }
     }
     let restored = durable
-        .read_cell_tool_calls(&cell.calls)
+        .read_cell_tool_calls(cell_turn, &cell.calls)
         .await?
         .into_iter()
         .map(|body| {
@@ -1877,12 +1880,20 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         .as_ref()
         .expect("recorded call");
     assert!(matches!(
-        durable.read_tool_call(last).await?,
+        durable
+            .read_tool_call(&crate::TurnToolCallRef {
+                turn_id: cell_turn.clone(),
+                call_id: last.clone()
+            })
+            .await?,
         crate::ToolCallRead::Settled { .. }
     ));
     assert!(matches!(
         durable
-            .read_tool_call(&crate::ToolCallId::fixture("not-in-this-session"))
+            .read_tool_call(&crate::TurnToolCallRef {
+                turn_id: cell_turn.clone(),
+                call_id: crate::ToolCallId::fixture("not-in-this-session")
+            })
             .await?,
         crate::ToolCallRead::NotFound { .. }
     ));

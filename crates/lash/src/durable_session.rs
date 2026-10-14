@@ -118,77 +118,35 @@ impl DurableSession {
         self
     }
 
-    /// Read a call's original typed tool, arguments and output from this
-    /// session's ledger. No runtime, plugin session or prompt is materialized.
-    pub async fn read_tool_call(&self, call_id: &crate::ToolCallId) -> Result<crate::ToolCallRead> {
-        let mut reads = self.read_tool_calls(std::slice::from_ref(call_id)).await?;
+    /// Read a call from its named turn's ledger without materializing a runtime.
+    pub async fn read_tool_call(
+        &self,
+        call: &crate::TurnToolCallRef,
+    ) -> Result<crate::ToolCallRead> {
+        let mut reads = self.read_tool_calls(std::slice::from_ref(call)).await?;
         Ok(reads.remove(0))
     }
 
-    /// Read a batch of call ids in input order, including duplicates. Reads
-    /// use the retained turns' existing graph references; no body index or
-    /// second body table is maintained.
+    /// Read turn-addressed calls in input order, including duplicates. Each
+    /// distinct named turn is decoded once; missing ids never scan other turns.
+    /// The retained ledgers remain the only source of call bodies.
     pub async fn read_tool_calls(
         &self,
-        call_ids: &[crate::ToolCallId],
+        calls: &[crate::TurnToolCallRef],
     ) -> Result<Vec<crate::ToolCallRead>> {
-        use lash_core::runtime::durable::services::RuntimeTurnServices;
         use std::collections::BTreeMap;
-        let store = self.store().await?;
-        let mut wanted = call_ids
-            .iter()
-            .cloned()
-            .map(|id| {
-                let read = crate::ToolCallRead::NotFound {
-                    call_id: id.clone(),
-                };
-                (id, read)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let mut cursor = None;
-        while wanted
-            .values()
-            .any(|read| matches!(read, crate::ToolCallRead::NotFound { .. }))
-        {
-            let page = store
-                .load_committed_turns(
-                    cursor.as_ref(),
-                    std::num::NonZeroU32::MIN.saturating_add(127),
-                )
-                .await?;
-            if page.turns.is_empty() {
-                break;
-            }
-            for turn in page.turns {
-                for record in RuntimeTurnServices::recorded_tool_calls(
-                    &self.effect_host,
-                    &self.session_id,
-                    &turn.turn_id,
-                    &self.transcript_decoders,
-                )
-                .await
-                .map_err(EmbedError::Durable)?
-                {
-                    if let Some(read) = wanted.get_mut(&record.call_id) {
-                        *read = crate::ToolCallRead::Settled {
-                            record: Box::new(record),
-                        };
-                    }
-                }
-            }
-            cursor = Some(page.next);
+        self.store().await?;
+        let mut turns = BTreeMap::<_, BTreeMap<_, _>>::new();
+        for call in calls {
+            turns.entry(call.turn_id.clone()).or_default().insert(
+                call.call_id.clone(),
+                crate::ToolCallRead::NotFound {
+                    call_id: call.call_id.clone(),
+                },
+            );
         }
-        if wanted
-            .values()
-            .any(|read| matches!(read, crate::ToolCallRead::NotFound { .. }))
-        {
-            let (records, pending) = RuntimeTurnServices::unfinished_call_bodies(
-                &self.effect_host,
-                &self.session_id,
-                &self.transcript_decoders,
-            )
-            .await
-            .map_err(EmbedError::Durable)?;
+        for (turn, wanted) in &mut turns {
+            let (records, pending) = self.turn_tool_call_bodies(turn).await?;
             for record in records {
                 if let Some(read) = wanted.get_mut(&record.call_id) {
                     *read = crate::ToolCallRead::Settled {
@@ -202,23 +160,46 @@ impl DurableSession {
                 }
             }
         }
-        Ok(call_ids
+        Ok(calls
             .iter()
-            .filter_map(|id| wanted.get(id).cloned())
+            .map(|call| turns[&call.turn_id][&call.call_id].clone())
             .collect())
     }
 
-    /// Read the bodies a cell's ordered executed calls reference. Dispatches
-    /// with no host call id have no ledger body and are skipped.
+    async fn turn_tool_call_bodies(
+        &self,
+        turn: &crate::TurnId,
+    ) -> Result<(
+        Vec<crate::tools::ToolCallRecord>,
+        std::collections::BTreeSet<crate::ToolCallId>,
+    )> {
+        use lash_core::runtime::durable::services::RuntimeTurnServices;
+        RuntimeTurnServices::tool_call_bodies(
+            &self.effect_host,
+            &self.session_id,
+            turn,
+            &self.transcript_decoders,
+        )
+        .await
+        .map_err(EmbedError::Durable)
+    }
+
+    /// Read a cell's ordered calls from its enclosing turn (the transcript
+    /// entry's turn provenance). Dispatches without host call ids are skipped.
     pub async fn read_cell_tool_calls(
         &self,
+        turn: &crate::TurnId,
         calls: &[crate::persistence::ExecutedCall],
     ) -> Result<Vec<crate::ToolCallRead>> {
-        let ids = calls
+        let calls = calls
             .iter()
             .filter_map(|call| call.call_id.clone())
+            .map(|call_id| crate::TurnToolCallRef {
+                turn_id: turn.clone(),
+                call_id,
+            })
             .collect::<Vec<_>>();
-        self.read_tool_calls(&ids).await
+        self.read_tool_calls(&calls).await
     }
 
     /// Decode all retained committed history, paging across frame boundaries.
@@ -694,6 +675,26 @@ impl DurableSession {
                 })
             },
         )
+    }
+
+    /// Read a committed-turn page with each returned turn's tool-call bodies.
+    /// Only the page's turns are decoded, once each. The cursor and transcript
+    /// entries have the same meaning as [`Self::committed_turns`].
+    pub async fn committed_turns_with_tool_calls(
+        &self,
+        after: Option<&lash_core::store::CommittedTurnCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<crate::transcript::CommittedTurnsWithToolCallsPage> {
+        let page = self.committed_turns(after, limit).await?;
+        let mut turns = Vec::with_capacity(page.turns.len());
+        for turn in page.turns {
+            let (tool_calls, _) = self.turn_tool_call_bodies(&turn.turn_id).await?;
+            turns.push(crate::transcript::CommittedTurnWithToolCalls { turn, tool_calls });
+        }
+        Ok(crate::transcript::CommittedTurnsWithToolCallsPage {
+            turns,
+            next: page.next,
+        })
     }
 
     /// Report whether this session still has durable live session metadata.

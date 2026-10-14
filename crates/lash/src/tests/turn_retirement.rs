@@ -261,9 +261,10 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
     let input = handle.input_id().clone();
     let key = world.parked().await;
     let (settled, pending) =
-        lash_core::runtime::durable::services::RuntimeTurnServices::unfinished_call_bodies(
+        lash_core::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
             &world.core.effect_host(),
             session.session_id(),
+            &crate::TurnId::fixture(run),
             &world.core.transcript_decoders(),
         )
         .await?;
@@ -274,14 +275,24 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_ledger() 
         "the saved lookup already has a readable body"
     );
     assert_eq!(
-        session.read_tool_call(&settled[0].call_id).await?,
+        session
+            .read_tool_call(&crate::TurnToolCallRef {
+                turn_id: crate::TurnId::fixture(run),
+                call_id: settled[0].call_id.clone()
+            })
+            .await?,
         crate::ToolCallRead::Settled {
             record: Box::new(settled[0].clone())
         }
     );
     for id in &pending {
         assert!(matches!(
-            session.read_tool_call(id).await?,
+            session
+                .read_tool_call(&crate::TurnToolCallRef {
+                    turn_id: crate::TurnId::fixture(run),
+                    call_id: id.clone()
+                })
+                .await?,
             crate::ToolCallRead::NotYetSettled { .. }
         ));
     }
@@ -388,7 +399,12 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
     assert_eq!(durable.tool_calls, live.tool_calls);
     for call in &live.tool_calls {
         assert_eq!(
-            session.read_tool_call(&call.call_id).await?,
+            session
+                .read_tool_call(&crate::TurnToolCallRef {
+                    turn_id: crate::TurnId::fixture(run),
+                    call_id: call.call_id.clone()
+                })
+                .await?,
             crate::ToolCallRead::Settled {
                 record: Box::new(call.clone())
             }

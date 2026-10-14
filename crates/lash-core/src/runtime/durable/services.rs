@@ -88,21 +88,27 @@ impl RuntimeTurnServices {
         run: &TurnId,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
-        use lash_core_execution::runtime::actor::round::{self, PolicyView};
         use lash_durable::domain::OwnerKey;
 
+        let owner = OwnerKey::Turn(session.clone(), run.clone());
+        let facts = cx.durable_reads()?.run_facts(&owner).await?;
+        Self::decode_recorded_tool_calls(&facts, decoders)
+    }
+
+    fn decode_recorded_tool_calls(
+        facts: &lash_durable::domain::RunFacts,
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<Vec<crate::ToolCallRecord>, lash_durable::DurableError> {
+        use lash_core_execution::runtime::actor::round::{self, PolicyView};
         let corrupt = |message| {
             lash_durable::DurableError::Store(lash_durable::StoreFailure {
                 kind: lash_durable::StoreFailureKind::Corrupt,
                 message,
             })
         };
-        let owner = OwnerKey::Turn(session.clone(), run.clone());
-        let reads = cx.durable_reads()?;
-        let facts = reads.run_facts(&owner).await?;
         // Reporting folds only settled facts and never consults live policies
         // to run a recovery. The empty policy view executes nothing.
-        let fold = round::fold(&facts, &PolicyView::new([]), &round::PinnedWaits::ledger())
+        let fold = round::fold(facts, &PolicyView::new([]), &round::PinnedWaits::ledger())
             .map_err(|error| corrupt(format!("the turn's tool records: {error}")))?;
         let mut calls = Vec::new();
         // Rounds and cell reports, in the order of the effects they answer.
@@ -119,7 +125,7 @@ impl RuntimeTurnServices {
             let round = match entry {
                 Ok(round) => round,
                 Err(report) => {
-                    let report = round::cell_report(&facts, report, decoders)
+                    let report = round::cell_report(facts, report, decoders)
                         .map_err(lash_durable::DurableError::Graph)?;
                     calls.extend(report);
                     continue;
@@ -156,11 +162,12 @@ impl RuntimeTurnServices {
         Ok(calls)
     }
 
-    /// Read settled call bodies and pending identities of the current turn,
+    /// Read a named turn's settled bodies, plus its pending identities if unfinished,
     /// through its reports, current round outcomes and saved cell ledgers.
-    pub async fn unfinished_call_bodies(
+    pub async fn tool_call_bodies(
         cx: &ActorContext,
         session: &SessionId,
+        run: &TurnId,
         decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<
         (
@@ -179,12 +186,18 @@ impl RuntimeTurnServices {
             })
         };
         let reads = cx.durable_reads()?;
-        let Some(turn) = reads.turn(session).await? else {
-            return Ok(Default::default());
-        };
-        let mut records = Self::recorded_tool_calls(cx, session, &turn.run, decoders).await?;
-        let roots = reads.cell_roots(session, &turn.run).await?;
-        let mut owners = vec![OwnerKey::Turn(session.clone(), turn.run.clone())];
+        if !reads
+            .turn(session)
+            .await?
+            .is_some_and(|turn| turn.run == *run)
+        {
+            return Self::recorded_tool_calls(cx, session, run, decoders)
+                .await
+                .map(|records| (records, Default::default()));
+        }
+        let mut records = Vec::new();
+        let roots = reads.cell_roots(session, run).await?;
+        let mut owners = vec![OwnerKey::Turn(session.clone(), run.clone())];
         let mut pending = std::collections::BTreeSet::new();
         for root in roots {
             owners.push(root.exec.owner());
@@ -207,6 +220,7 @@ impl RuntimeTurnServices {
         }
         for owner in owners {
             let facts = reads.run_facts(&owner).await?;
+            records.extend(Self::decode_recorded_tool_calls(&facts, decoders)?);
             let fold = round::fold(
                 &facts,
                 &round::PolicyView::new([]),
@@ -217,21 +231,12 @@ impl RuntimeTurnServices {
                 if member.draft().tool().as_str().starts_with("cell-host:") {
                     continue;
                 }
-                match member
+                if member
                     .outcome()
                     .and_then(round::SettledOutput::payload)
-                    .and_then(round::decode_completed)
+                    .is_none()
                 {
-                    Some(call) => records.push(crate::ToolCallRecord {
-                        call_id: call.call_id,
-                        provider_call_id: call.provider_call_id,
-                        tool: call.tool_name,
-                        args: call.args,
-                        output: call.output,
-                    }),
-                    None => {
-                        pending.insert(member.call().clone());
-                    }
+                    pending.insert(member.call().clone());
                 }
             }
         }

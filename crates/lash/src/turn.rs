@@ -12,6 +12,29 @@ pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
 /// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
 
+/// A tool call addressed through the turn whose ledger contains it.
+/// Ids are opaque; readers never recover a turn by searching session history.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub struct TurnToolCallRef {
+    pub turn_id: TurnId,
+    pub call_id: crate::ToolCallId,
+}
+
+/// One committed turn with its original tool-call bodies in admission order.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CommittedTurnWithToolCalls {
+    pub turn: crate::transcript::CommittedTurn,
+    pub tool_calls: Vec<ToolCallRecord>,
+}
+
+/// A committed-turn page that opted into decoding each returned turn's calls.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CommittedTurnsWithToolCallsPage {
+    pub turns: Vec<CommittedTurnWithToolCalls>,
+    /// Persist after applying every turn; continues the same committed feed.
+    pub next: crate::persistence::CommittedTurnCursor,
+}
+
 /// A typed read of one session's recorded call. A body is exposed only
 /// after its outcome commits; an admitted call without an outcome is pending.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

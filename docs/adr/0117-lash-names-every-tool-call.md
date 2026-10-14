@@ -178,9 +178,15 @@ identity) is derived from those entries and is not stored.
 
 The call ledger stores each archival body once. A turn references that body,
 and a cell entry keeps every executed call in order (FIG-6171). A host reads
-one body through `DurableSession::read_tool_call`, or a cell's bodies through
-`read_cell_tool_calls`, with typed settled, not-found and not-yet-settled
-results. Execution pins retire independently of the archival body.
+one body through `DurableSession::read_tool_call(&TurnToolCallRef { turn_id,
+call_id })`, or a cell's bodies through `read_cell_tool_calls(turn_id, calls)`,
+with typed settled, not-found and not-yet-settled results. A batch groups these
+references by turn and decodes each named turn once, including for missing
+ids; no read scans session history to locate an opaque call id. The enclosing
+transcript entry's turn provenance supplies a cell's turn. Live observation
+envelopes carry the turn, and collected activity announces it in `TurnStarted`.
+`committed_turns_with_tool_calls` opts into the same ledger decoder for only
+the returned page's turns; `committed_turns` reads no call bodies. Execution pins retire independently of the archival body.
 
 Only the model-facing diagnostic tail is bounded by `prompt_max_tool_calls`.
 Its earlier-call count is derived at render time; it never limits durable

@@ -237,7 +237,9 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::turn::{ReportSource, ToolCallRead, TurnActivityFanout, TurnOutput, TurnReport};
+pub use crate::turn::{
+    ReportSource, ToolCallRead, TurnActivityFanout, TurnOutput, TurnReport, TurnToolCallRef,
+};
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
@@ -1474,6 +1476,7 @@ pub use lash_core::{RetainedRevision, Retention, Target};
 /// The typed, decoded committed history of a session (ADR 0129): facts a
 /// host renders however it likes.
 pub mod transcript {
+    pub use crate::turn::{CommittedTurnWithToolCalls, CommittedTurnsWithToolCallsPage};
     pub use lash_core::transcript::{
         CommittedTurn, CommittedTurnsPage, EntryId, EntryProvenance, SessionTranscript,
         SuppressionReason, ToolResultBlock, TranscriptBlock, TranscriptDecoders, TranscriptEntry,
