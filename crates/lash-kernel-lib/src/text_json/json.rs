@@ -112,181 +112,8 @@ enum Json {
     Object(Vec<(String, Json)>),
 }
 
-/// Reads JSON text into a tree that can be many times the size of the
-/// text (`[0,0,...]` holds a node for every two bytes). Each node is
-/// reserved in `heap`, as one value and the bytes of its text, before it
-/// joins the tree. After a refusal the parser stops building and reads on,
-/// so a syntax or depth error later in the text is still the error.
-struct Parser<'a> {
-    text: &'a str,
-    cursor: usize,
-    heap: &'a mut dyn NativeHeap,
-    refused: bool,
-}
-
-impl<'a> Parser<'a> {
-    /// Whether `node`, with `name` bytes of field name, may join the tree.
-    fn keep(&mut self, node: &Json, name: usize) -> bool {
-        let bytes = match node {
-            Json::Text(text) => text.len(),
-            Json::Number(token) => token.as_str().len(),
-            _ => 0,
-        };
-        self.refused = self.refused
-            || self
-                .heap
-                .reserve(1, room(bytes.saturating_add(name)))
-                .is_err();
-        !self.refused
-    }
-
-    fn whitespace(&mut self) {
-        while self
-            .text
-            .as_bytes()
-            .get(self.cursor)
-            .is_some_and(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
-        {
-            self.cursor += 1;
-        }
-    }
-
-    fn take(&mut self, byte: u8) -> bool {
-        self.whitespace();
-        if self.text.as_bytes().get(self.cursor) == Some(&byte) {
-            self.cursor += 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn string(&mut self) -> Result<String, NativeError> {
-        self.whitespace();
-        let start = self.cursor;
-        if !self.take(b'"') {
-            return Err(syntax());
-        }
-        let mut escaped = false;
-        while let Some(byte) = self.text.as_bytes().get(self.cursor) {
-            self.cursor += 1;
-            if *byte == b'"' && !escaped {
-                return serde_json::from_str(&self.text[start..self.cursor]).map_err(|_| syntax());
-            }
-            escaped = *byte == b'\\' && !escaped;
-        }
-        Err(syntax())
-    }
-
-    fn value(&mut self, depth: usize) -> Result<Json, NativeError> {
-        self.whitespace();
-        if depth > self.heap.data_depth_limit().min(64) {
-            return Err(raise(
-                "json_depth",
-                &format!(
-                    "JSON exceeds the configured {}-level kernel nesting limit",
-                    self.heap.data_depth_limit().min(64)
-                ),
-            ));
-        }
-        match self.text.as_bytes().get(self.cursor) {
-            Some(b'"') => self.string().map(Json::Text),
-            Some(b'[') => {
-                self.cursor += 1;
-                let mut items = Vec::new();
-                if self.take(b']') {
-                    return Ok(Json::Array(items));
-                }
-                loop {
-                    let item = self.value(depth + 1)?;
-                    if self.keep(&item, 0) {
-                        items.push(item);
-                    }
-                    if self.take(b']') {
-                        return Ok(Json::Array(items));
-                    }
-                    if !self.take(b',') {
-                        return Err(syntax());
-                    }
-                }
-            }
-            Some(b'{') => {
-                self.cursor += 1;
-                let mut fields: Vec<(String, Json)> = Vec::new();
-                if self.take(b'}') {
-                    return Ok(Json::Object(fields));
-                }
-                loop {
-                    let name = self.string()?;
-                    if !self.take(b':') {
-                        return Err(syntax());
-                    }
-                    let value = self.value(depth + 1)?;
-                    if let Some((_, old)) = fields.iter_mut().find(|(key, _)| *key == name) {
-                        *old = value;
-                    } else if self.keep(&value, name.len()) {
-                        fields.push((name, value));
-                    }
-                    if self.take(b'}') {
-                        return Ok(Json::Object(fields));
-                    }
-                    if !self.take(b',') {
-                        return Err(syntax());
-                    }
-                }
-            }
-            Some(b'-' | b'0'..=b'9') => {
-                let start = self.cursor;
-                while self
-                    .text
-                    .as_bytes()
-                    .get(self.cursor)
-                    .is_some_and(|b| matches!(b, b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9'))
-                {
-                    self.cursor += 1;
-                }
-                NumberToken::new(&self.text[start..self.cursor])
-                    .map(Json::Number)
-                    .map_err(|_| syntax())
-            }
-            _ => {
-                for (word, value) in [
-                    ("null", Json::Null),
-                    ("true", Json::Bool(true)),
-                    ("false", Json::Bool(false)),
-                ] {
-                    if self.text[self.cursor..].starts_with(word) {
-                        self.cursor += word.len();
-                        return Ok(value);
-                    }
-                }
-                Err(syntax())
-            }
-        }
-    }
-}
-
-fn syntax() -> NativeError {
-    raise("json_syntax", "invalid JSON, including unpaired surrogates")
-}
-
-fn read(text: &str, heap: &mut dyn NativeHeap) -> Result<Json, NativeError> {
-    let mut parser = Parser {
-        text,
-        cursor: 0,
-        heap,
-        refused: false,
-    };
-    let json = parser.value(0)?;
-    parser.whitespace();
-    if parser.cursor != text.len() {
-        return Err(syntax());
-    }
-    if !parser.keep(&json, 0) {
-        return Err(NativeError::Memory);
-    }
-    Ok(json)
-}
+mod reader;
+use reader::{read, read_descriptor, syntax};
 
 fn fits(
     json: &Json,
@@ -800,7 +627,10 @@ pub(super) fn functions() -> Vec<Function> {
 }
 
 fn parse(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let json = read(&materialized_text(call.args, 0, call.heap)?, call.heap)?;
+    let Value::Text(text) = arg(call.args, 0)? else {
+        return Err(raise("type_error", "expected text"));
+    };
+    let json = read_descriptor(text, call.heap)?;
     let numbers = match materialized_text(call.args, 1, call.heap)?.as_ref() {
         "int" => Type::Int,
         "float" => Type::Float,

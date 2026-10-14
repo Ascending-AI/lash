@@ -1139,6 +1139,7 @@ PACKAGE_DEPS = {
     "lash-kernel-lib": {
         "build": {},
         "dev": {
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {

@@ -64042,6 +64042,7 @@
       "declared_features": [],
       "dependencies": [
         "lash-kernel-doc",
+        "lash-kernel-state",
         "lash-kernel-vm",
         "libm",
         "num-bigint",

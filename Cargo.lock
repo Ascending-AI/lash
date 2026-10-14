@@ -2922,6 +2922,7 @@ name = "lash-kernel-lib"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "libm",
  "num-bigint",

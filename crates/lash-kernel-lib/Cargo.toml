@@ -27,4 +27,5 @@ serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-state = { path = "../lash-kernel-state" }
 lash-kernel-vm = { path = "../lash-kernel-vm" }

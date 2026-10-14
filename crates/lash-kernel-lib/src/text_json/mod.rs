@@ -4,10 +4,9 @@ mod bytes;
 mod classify;
 mod format;
 mod json;
-mod text;
-
 #[cfg(test)]
-mod tests;
+mod laws;
+mod text;
 
 use std::sync::Arc;
 
