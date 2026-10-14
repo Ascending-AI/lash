@@ -195,7 +195,9 @@ prototype inherits `TraceLimits::process_effect_occurrences`' default of 64
 retained effects per node; hosts can configure up to 4096. Live call inspection
 continues independently of that retained summary.
 
-Upstream MCP progress and notifications are live-only, correlated by call and
-attempt on the session observation feed. These examples use host-owned mocked
-tools, not MCP servers, so they do not emit MCP notifications. Display progress
-here is the mock host's display state; it is not generic tool partial output.
+Lash also offers a separate bounded tool-live feed through `core.tool_live()`.
+Host tools publish through `AttemptContext::live()`; MCP tools use the same lane.
+Events identify the execution owner, call and attempt, and support resumption
+within their own retention window with explicit gaps. This prototype does not
+yet subscribe to that feed or publish mock tool-live facts. Display progress
+here remains the mock host's display state, separate from tool progress.
