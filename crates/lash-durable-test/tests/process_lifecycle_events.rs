@@ -444,8 +444,33 @@ async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) {
         core.processes().await_output(process),
     )
     .await
-    .expect("the process ends within a minute")
-    .expect("the process's end is read");
+    .expect("the process ends within a minute");
+    succeeded(output);
+}
+
+/// Awaits the end of a process that writes to `world` as it goes. The
+/// deadline is a minute without a new write rather than a minute in all: a
+/// long sequential run ends however loaded the host is, and a stalled one
+/// still fails a minute after its last write.
+async fn ended_while_writing(core: &lash::LashCore, process: &lash_core::ProcessId, world: &World) {
+    let processes = core.processes();
+    let output = processes.await_output(process);
+    tokio::pin!(output);
+    let mut written = 0;
+    loop {
+        tokio::select! {
+            output = &mut output => return succeeded(output),
+            () = tokio::time::sleep(Duration::from_secs(60)) => {
+                let now = world.writes.lock().unwrap().len();
+                assert!(now > written, "the process wrote nothing for a minute after {written} writes");
+                written = now;
+            }
+        }
+    }
+}
+
+fn succeeded<E: std::fmt::Debug>(output: Result<lash_core::ProcessAwaitOutput, E>) {
+    let output = output.expect("the process's end is read");
     let lash_core::ProcessAwaitOutput::Settled { output } = output else {
         panic!("the process ended without an answer: {output:?}");
     };
@@ -642,6 +667,7 @@ impl lash_durable::runner::Activation for MeasuredActivation {
 /// assertion: each run-fact row is one RoundFact decode in the production fold.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
+    let _guard = EFFECT_LAW_GUARD.lock().await;
     for count in [12_u64, 1000] {
         fn dozen(
             state: &mut serde_json::Value,
@@ -700,7 +726,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 })
                 .await
         });
-        ended(&core, &process).await;
+        ended_while_writing(&core, &process, &world).await;
         let elapsed = started.elapsed();
         stop.send(()).unwrap();
         task.await.unwrap().unwrap();

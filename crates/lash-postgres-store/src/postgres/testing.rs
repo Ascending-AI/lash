@@ -38,6 +38,37 @@ pub fn fixture_config() -> crate::PostgresHostConfig {
     config
 }
 
+/// The tables a published DDL artifact creates, sorted by name: the name
+/// after each `CREATE [UNLOGGED] TABLE IF NOT EXISTS`. Schema laws take
+/// their expected table set from the artifact itself, so a table added to it
+/// is covered without a second list to keep in step (FIG-6279).
+pub fn published_tables(ddl: &str) -> Vec<String> {
+    let mut tables: Vec<String> = ddl
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim_start().strip_prefix("CREATE ")?;
+            let rest = rest.strip_prefix("UNLOGGED ").unwrap_or(rest);
+            let name = rest.strip_prefix("TABLE IF NOT EXISTS ")?;
+            name.split(|c: char| c.is_whitespace() || c == '(')
+                .next()
+                .map(str::to_owned)
+        })
+        .collect();
+    tables.sort();
+    tables
+}
+
+/// The tables a committed schema-shape artifact names, sorted by name.
+pub fn shape_tables(shape: &str) -> Vec<String> {
+    let mut tables: Vec<String> = shape
+        .lines()
+        .filter_map(|line| line.strip_prefix("table "))
+        .map(str::to_owned)
+        .collect();
+    tables.sort();
+    tables
+}
+
 /// Open storage over `database_url` under [`fixture_config`]: the fixture
 /// open of laws that do not exercise the host configuration. A refusal that
 /// is not the store's own is reported as a backend error.

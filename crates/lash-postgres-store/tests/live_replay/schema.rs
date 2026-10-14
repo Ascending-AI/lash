@@ -11,7 +11,9 @@ use lash::postgres::{
     PostgresHostConfig, PostgresLiveReplayError, PostgresLiveReplaySchemaFinding,
     PostgresLiveReplayStore, ReplaySchemaMode,
 };
-use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
+use lash_postgres_store::testing::{
+    IsolatedDatabase, published_tables, required_database_url, shape_tables,
+};
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions as _, Connection as _, PgConnection, PgPool};
 
@@ -59,7 +61,8 @@ async fn refusal(url: &str, config: PostgresHostConfig) -> Vec<PostgresLiveRepla
 
 /// A host vendors the artifact into a schema it may not own outright,
 /// possibly more than once: every statement is creation-only and
-/// idempotent, and nothing names a schema.
+/// idempotent, nothing names a schema, and the tables it creates are the
+/// tables of the committed shape.
 #[test]
 fn the_published_ddl_is_creation_only_and_unqualified() {
     let body = PostgresLiveReplayStore::schema_ddl()
@@ -83,7 +86,16 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
         );
     }
     let creates = body.matches("CREATE ").count();
-    assert!(creates >= 3, "the artifact creates the store's tables");
+    let tables = published_tables(PostgresLiveReplayStore::schema_ddl());
+    assert!(
+        !tables.is_empty(),
+        "the artifact creates the store's tables"
+    );
+    assert_eq!(
+        tables,
+        shape_tables(PostgresLiveReplayStore::schema_shape()),
+        "the artifact creates exactly the tables of the committed shape"
+    );
     assert_eq!(
         body.matches(" IF NOT EXISTS ").count(),
         creates,
@@ -207,15 +219,11 @@ async fn verify_only_refuses_a_missing_or_drifted_schema_without_repair() {
     let findings = refusal(database.url(), verify_only(&schema)).await;
     assert_eq!(
         findings,
-        [
-            "live_replay_head",
-            "live_replay_incarnation",
-            "live_replay_log"
-        ]
-        .map(|table| PostgresLiveReplaySchemaFinding::MissingTable {
-            table: table.to_string()
-        })
-        .to_vec()
+        published_tables(PostgresLiveReplayStore::schema_ddl())
+            .into_iter()
+            .map(|table| PostgresLiveReplaySchemaFinding::MissingTable { table })
+            .collect::<Vec<_>>(),
+        "every table the artifact creates is missing"
     );
     let pool = PgPool::connect(database.url()).await.expect("pool");
     let created: bool =
