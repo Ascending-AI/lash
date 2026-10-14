@@ -44,9 +44,14 @@ and reports each of these laws for each callback:
 | UNSERVED-IS-UNCLAIMABLE | A session actor owing the declared callback token, a node lacking that registration, `plugin_diagnostics().explain_claimability` and the real SQL claim predicate. |
 | RECORDED-DECISIONS-STAY-ATTRIBUTABLE | `plugin_diagnostics().attribute` reads retained binding/presentation decisions after removing the factory. |
 
-A result is passed, failed with a readable message, or unavailable with a
-typed reason. The verdict is `Failed` if any law fails, `Partial` if evidence
-is unavailable, and `Full` when every reported law is exercised and passes.
+An executed law is `Passed` or `Failed` with a readable message.
+`NotApplicable` has a typed reason for a law with no subject, while
+`Unavailable` means applicable evidence or author input is missing. The verdict
+is `Failed` if any law fails, `Partial` if an applicable law is unavailable,
+and `Full` when every applicable law is exercised and passes. An exercised
+provider with no published values receives
+`NotApplicable { reason: CertificationNotApplicable::NoPublishedState }` for
+the state law, after verifying that its namespace stayed empty on reopen.
 A factory whose inventory has no certifiable callbacks, such as a prompt-only
 plugin, receives `NoCertifiableContributions`. Its inventory passed admission,
 but the battery proves no prompt rendering, replay or reopen behavior.
@@ -74,10 +79,61 @@ a recorded answer. These are reported as `NotRecordedAtCut`.
 Check replies have no retained attribution in the current baseline.
 Before-turn records name their owner without a callback key. Those branches
 report `AttributionNotRecorded`; the battery never guesses a callback from
-its installed roster. State-free scenarios report `NoPublishedState`.
+its installed roster. Empty state never excuses an unexecuted callback: it
+still reports `Unavailable { reason: NoScenario }`.
 MCP without a server fixture is explicit partial certification. RLM and kernel
 process factories need a backend-bound VM client and workers; their default
 scenario is `NeedsVmBackend`, outside this battery's cheap fixtures.
+
+## Deferred resolvers under a supporting protocol
+
+An extension keeps `PluginRole::Extension` when its tools run under RLM.
+`PluginHarness::install_protocol` installs the author's supporting protocol,
+including the VM service bound to that factory. The harness retains the same
+factory on every certification reopen and when removing the primary plugin
+for attribution. `install` continues to install supporting extensions. A
+second supporting protocol, or one supplied for a primary protocol, returns
+`PluginHarnessError::SupportingProtocolConflict`.
+
+The [complete compiled deferred scenario](../crates/lash/tests/plugin_certification.rs)
+(`deferred_state_free_provider_is_full_under_a_supporting_protocol`) registers
+an empty-catalogue resolver and a separate empty-catalogue executable. Its
+`prepare` installs RLM in the native tool channel with a bound worker service,
+installs the executable, and creates the session. Its response script is:
+
+```rust
+vec![
+    lash::provider::LlmResponse {
+        parts: vec![lash::direct::LlmOutputPart::ToolCall {
+            call_id: "deferred-cell".into(),
+            tool_name: "execute_code".into(),
+            input_json: serde_json::json!({
+                "code": "await tools.send_email({});"
+            }).to_string(),
+            replay: None,
+        }],
+        ..Default::default()
+    },
+    lash::testing::text_response("done"),
+]
+```
+
+The scenario names `PluginCallbackIdentity::tool_provider("resolver", "deferred")`
+and pauses after one response. The first cell must resolve and execute before
+that cut; prose completes the resumed turn without introducing another cell.
+The resolved definition carries its explicit `ToolBinding` and execution
+bound. Hosts put real authorization and other preconditions in `prepare`,
+through the core, and supply one scenario for each callback they certify.
+
+Resolver entries are exposed separately through `deferred_resolution_counts`;
+`callback_counts` observes prepare/execute on the selected executable. A
+callable placeholder under the resolver's provider key cannot supply resolution
+evidence. Attribution joins the retained turn surface's resolver identity to
+completed cell calls outside that surface's catalogue. It remains readable
+through `DecisionRef::DeferredTool` after removing the resolver; it never
+consults a live catalogue or resolves a committed selection again. With no
+published state, the compiled scenario receives three passed laws and one
+not-applicable state law, hence `Full`.
 
 ## Publish and reopen with host limits
 

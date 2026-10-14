@@ -658,6 +658,33 @@ pub fn cell_report(
     graph::ReportView::records(&mut decoder, report, decoders)
 }
 
+/// Read a retained cell report using the same offline decoder as execution.
+/// Returns `None` for a row that is not a cell report.
+///
+/// # Errors
+/// A malformed fact or archival call body.
+pub fn cell_report_of(
+    facts: &lash_durable::domain::graph::RunFacts,
+    row: &lash_durable::domain::graph::RunFactRow,
+    decoders: &lash_core_store::transcript::TranscriptDecoders,
+) -> Result<Option<Vec<crate::ToolCallRecord>>, lash_core_store::checkpoint_graph::GraphRefusal> {
+    if row.kind != lash_durable::domain::RunFactKind::CellReport {
+        return Ok(None);
+    }
+    let mut decoder =
+        lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits);
+    let graph::RoundFact::CellReport { report } = graph::RoundFact::load(&mut decoder, row.record)?
+    else {
+        return Err(
+            lash_core_store::checkpoint_graph::GraphRefusal::InvalidBody {
+                kind: lash_core_store::checkpoint_graph::NodeKind::ROUND_FACT.0,
+                reason: "a cell report row holds another fact kind".into(),
+            },
+        );
+    };
+    cell_report(facts, report, decoders).map(Some)
+}
+
 /// Record references to a cell's existing admission/outcome ledger in the
 /// transaction consuming its answer. No body is copied or bounded.
 pub fn report_cell(

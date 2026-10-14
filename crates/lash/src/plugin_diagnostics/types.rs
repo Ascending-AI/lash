@@ -115,6 +115,11 @@ pub enum ToolDecisionSelection {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecisionRef {
+    /// A call outside the retained surface's catalogue, selected by its resolver.
+    DeferredTool {
+        record: RecordLocator,
+        call: crate::ToolCallId,
+    },
     Tool {
         record: RecordLocator,
         call: crate::ToolCallId,
@@ -165,6 +170,10 @@ pub enum Evidence<T> {
 }
 #[derive(Clone, Debug)]
 pub enum RecordedAttribution {
+    DeferredTool {
+        resolver: crate::plugins::PluginCallbackIdentity,
+        call: crate::ToolCallId,
+    },
     Binding {
         binding: AdmittedBinding,
         selected: crate::plugins::PluginCallbackIdentity,

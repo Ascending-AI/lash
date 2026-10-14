@@ -55,6 +55,10 @@ pub enum PluginHarnessError {
     Diagnostic(#[from] crate::plugins::diagnostics::DiagnosticError),
     #[error("plugin harness runtime: {0}")]
     Worker(String),
+    #[error(
+        "a supporting protocol requires an extension under certification and no other supporting protocol"
+    )]
+    SupportingProtocolConflict,
     #[error("scenario did not reach its model pause within the host timeout")]
     Timeout,
 }
@@ -140,6 +144,7 @@ pub struct PluginHarness {
     factory: Arc<dyn PluginFactory>,
     policy: HostPolicy,
     supporting: Vec<Arc<dyn PluginFactory>>,
+    supporting_protocol: Option<Arc<dyn PluginFactory>>,
     backend: crate::Backend,
     script: Arc<Script>,
     counts: CallbackCounts,
@@ -165,6 +170,7 @@ impl PluginHarness {
             factory,
             policy,
             supporting: Vec::new(),
+            supporting_protocol: None,
             backend,
             script: Arc::new(Script {
                 responses: Mutex::new(VecDeque::new()),
@@ -198,6 +204,19 @@ impl PluginHarness {
         self.supporting.push(factory);
         self.reopen().await
     }
+    /// Install the scenario's real protocol, including its bound VM service.
+    /// The same factory is retained on every reopen and removal observation.
+    /// Only an extension can have a supporting protocol; install before creation.
+    pub async fn install_protocol(
+        &mut self,
+        factory: Arc<dyn PluginFactory>,
+    ) -> Result<(), PluginHarnessError> {
+        if self.policy.plugin_role == PluginRole::Protocol || self.supporting_protocol.is_some() {
+            return Err(PluginHarnessError::SupportingProtocolConflict);
+        }
+        self.supporting_protocol = Some(factory);
+        self.reopen().await
+    }
     pub fn session_id(&self) -> &crate::SessionId {
         &self.session
     }
@@ -208,6 +227,12 @@ impl PluginHarness {
         &self,
     ) -> std::collections::BTreeMap<crate::plugins::PluginCallbackIdentity, u64> {
         self.counts.snapshot()
+    }
+    /// Resolver entries are independent of the provider selected to execute.
+    pub fn deferred_resolution_counts(
+        &self,
+    ) -> std::collections::BTreeMap<crate::plugins::PluginCallbackIdentity, u64> {
+        self.counts.resolution_snapshot()
     }
     /// Responses are consumed only after any armed pause, so a killed model
     /// call's response is available to the fresh runtime.
@@ -301,6 +326,7 @@ impl PluginHarness {
         self.crash();
         let backend = self.backend.clone();
         let supporting = self.supporting.clone();
+        let supporting_protocol = self.supporting_protocol.clone();
         let policy = self.policy.clone();
         let script = Arc::clone(&self.script);
         let counts = self.counts.clone();
@@ -342,7 +368,10 @@ impl PluginHarness {
                         .build()
                         .into_handle();
                     let builder = match policy.plugin_role {
-                        PluginRole::Extension => crate::LashCore::standard_builder(backend),
+                        PluginRole::Extension if supporting_protocol.is_none() => {
+                            crate::LashCore::standard_builder(backend)
+                        }
+                        PluginRole::Extension => crate::LashCore::builder(backend),
                         PluginRole::Protocol => crate::LashCore::builder(backend),
                     };
                     let mut builder = builder
@@ -375,6 +404,9 @@ impl PluginHarness {
                         {
                             builder = builder.protocol_plugin(protocol);
                         }
+                    }
+                    if let Some(protocol) = supporting_protocol {
+                        builder = builder.protocol_plugin(protocol);
                     }
                     for plugin in supporting {
                         builder = builder.plugin(plugin);

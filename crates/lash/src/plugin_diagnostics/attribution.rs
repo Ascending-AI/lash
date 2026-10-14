@@ -19,6 +19,21 @@ impl PluginDiagnostics {
         decision: &DecisionRef,
     ) -> Result<DecisionAttribution, DiagnosticError> {
         let (evidence, kind) = match decision {
+            DecisionRef::DeferredTool { record, call } => {
+                let evidence = self
+                    .deferred_selections(record)
+                    .await?
+                    .into_iter()
+                    .find(|(_, selected)| selected == call)
+                    .map_or_else(
+                        || unavailable(EvidenceAbsence::AttributionNotRecorded),
+                        |(resolver, call)| Evidence::Recorded {
+                            source: record.clone(),
+                            value: RecordedAttribution::DeferredTool { resolver, call },
+                        },
+                    );
+                (evidence, crate::plugins::RegistryKind::Session)
+            }
             DecisionRef::Tool {
                 record,
                 call,
@@ -223,6 +238,9 @@ impl PluginDiagnostics {
 }
 fn matches_recorded(key: &ContributionKey, record: &RecordedAttribution) -> bool {
     match record {
+        RecordedAttribution::DeferredTool { resolver, .. } => {
+            matches!(key, ContributionKey::Callback(key) if key == resolver)
+        }
         RecordedAttribution::Binding { selected, .. } => {
             matches!(key, ContributionKey::Callback(key) if key == selected)
         }
@@ -419,4 +437,64 @@ fn decode_expiry_checks<V: serde::de::DeserializeOwned + lash_core::tool_run::Ra
         return Err(EvidenceAbsence::UnsupportedRetainedRepresentation);
     }
     Ok(checks)
+}
+
+impl PluginDiagnostics {
+    /// Join the retained resolver authority to completed calls outside its
+    /// catalogue. S6 admits such cell calls only through deferred grants; the
+    /// selected executable can belong to a different plugin. No live inventory
+    /// supplies an identity, and no callback is invoked by this observation.
+    pub(crate) async fn deferred_selections(
+        &self,
+        record: &RecordLocator,
+    ) -> Result<Vec<(crate::plugins::PluginCallbackIdentity, crate::ToolCallId)>, DiagnosticError>
+    {
+        let RecordLocator::RunFact {
+            owner: OwnerKey::Turn(session, turn),
+            run,
+            ordinal,
+        } = record
+        else {
+            return Ok(Vec::new());
+        };
+        let store = self.core.backend.durable();
+        let Some(surface) =
+            lash_core::runtime::durable::read_plugin_phase(store.as_ref(), session, turn)
+                .await?
+                .and_then(|phase| phase.surface)
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(resolver) = surface.deferred() else {
+            return Ok(Vec::new());
+        };
+        let facts = store
+            .run_facts_within(
+                &OwnerKey::Turn(session.clone(), turn.clone()),
+                Some(*run),
+                4096,
+                lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024),
+            )
+            .await?;
+        let Some(row) = facts
+            .rows
+            .iter()
+            .find(|row| row.ordinal == *ordinal && row.kind == RunFactKind::CellReport)
+        else {
+            return Ok(Vec::new());
+        };
+        let calls = lash_core::cell_report_of(&facts, row, &self.core.transcript_decoders())
+            .map_err(lash_core::durable_port::DurableError::Graph)?
+            .unwrap_or_default();
+        Ok(calls
+            .into_iter()
+            .filter(|call| {
+                !surface
+                    .tools()
+                    .values()
+                    .any(|entry| entry.tool().as_str() == call.tool)
+            })
+            .map(|call| (resolver.callback_identity(), call.call_id))
+            .collect())
+    }
 }

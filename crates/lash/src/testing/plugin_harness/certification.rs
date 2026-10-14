@@ -28,14 +28,19 @@ pub enum CertificationUnavailable {
     MissingService { service: String },
     MissingCredential { credential: String },
     AttributionNotRecorded,
-    NoPublishedState,
     NotRecordedAtCut,
     CounterUnavailable,
+}
+/// A law has no subject in this exercised contribution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CertificationNotApplicable {
+    NoPublishedState,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PluginLawResult {
     Passed,
     Failed { message: String },
+    NotApplicable { reason: CertificationNotApplicable },
     Unavailable { reason: CertificationUnavailable },
 }
 #[derive(Clone, Debug)]
@@ -55,7 +60,7 @@ impl std::fmt::Display for PluginLawReport {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluginCertificationVerdict {
-    /// Every callback law was exercised and passed.
+    /// Every applicable callback law was exercised and passed.
     Full,
     /// At least one callback law was unavailable.
     Partial,
@@ -218,11 +223,7 @@ pub async fn certify_plugin_with(
         );
         // Setup may have completed other turns. Only this turn's callbacks
         // establish replay evidence at the requested crash cut.
-        let initial = harness
-            .callback_counts()
-            .get(&callback)
-            .copied()
-            .unwrap_or(0);
+        let initial = callback_entries(&harness, &callback);
         let handle = harness.send(input).await?;
         let input_id = handle.input_id().clone();
         // Do not retain an old runtime handle across the crash.
@@ -252,9 +253,8 @@ pub async fn certify_plugin_with(
             }
             continue;
         }
-        let counts = harness.callback_counts();
-        let recorded = counts.get(&callback).copied().unwrap_or(0);
-        let invoked = recorded.saturating_sub(initial);
+        let recorded = callback_entries(&harness, &callback);
+        let invoked = recorded.0.saturating_sub(initial.0);
         let state = harness.plugin_state().await?;
         let decisions = recorded_decisions(&harness, &callback).await?;
         harness.crash();
@@ -264,18 +264,20 @@ pub async fn certify_plugin_with(
         let restored = harness.plugin_state().await?;
         let state_result = if invoked == 0 {
             unavailable(CertificationUnavailable::NoScenario)
+        } else if state.plugins.get(factory.id()) != restored.plugins.get(factory.id()) {
+            PluginLawResult::Failed {
+                message: "published namespace changed on fresh materialization".into(),
+            }
         } else if state
             .plugins
             .get(factory.id())
             .is_none_or(|namespace| namespace.values.is_empty())
         {
-            unavailable(CertificationUnavailable::NoPublishedState)
-        } else if state.plugins.get(factory.id()) == restored.plugins.get(factory.id()) {
-            PluginLawResult::Passed
-        } else {
-            PluginLawResult::Failed {
-                message: "published namespace changed on fresh materialization".into(),
+            PluginLawResult::NotApplicable {
+                reason: CertificationNotApplicable::NoPublishedState,
             }
+        } else {
+            PluginLawResult::Passed
         };
         // Reattach the accepted input: no new send and no new turn is admitted.
         harness.release_model();
@@ -284,11 +286,7 @@ pub async fn certify_plugin_with(
             harness.session().await?.attach(input_id).output(),
         )
         .await;
-        let after = harness
-            .callback_counts()
-            .get(&callback)
-            .copied()
-            .unwrap_or(0);
+        let after = callback_entries(&harness, &callback);
         let replay = if invoked == 0 {
             unavailable(CertificationUnavailable::NoScenario)
         } else if !recorded_at_cut(slot) {
@@ -296,7 +294,7 @@ pub async fn certify_plugin_with(
         } else if after != recorded {
             PluginLawResult::Failed {
                 message: format!(
-                    "recorded callback invoked again: {recorded} before crash, {after} after reopen"
+                    "recorded callback invoked again: {recorded:?} before crash, {after:?} after reopen"
                 ),
             }
         } else if !matches!(outcome, Ok(Ok(_))) {
@@ -323,6 +321,19 @@ pub async fn certify_plugin_with(
         });
     }
     Ok(PluginCertification { inventory, reports })
+}
+// Resolver laws require resolution, not a callable placeholder under the same
+// provider identity. Check both counters for replay when it also executes tools.
+fn callback_entries(harness: &PluginHarness, callback: &PluginCallbackIdentity) -> (u64, u64) {
+    let executable = harness
+        .callback_counts()
+        .get(callback)
+        .copied()
+        .unwrap_or(0);
+    harness
+        .deferred_resolution_counts()
+        .get(callback)
+        .map_or((executable, 0), |resolved| (*resolved, executable))
 }
 fn unavailable(reason: CertificationUnavailable) -> PluginLawResult {
     PluginLawResult::Unavailable { reason }
@@ -472,6 +483,27 @@ async fn recorded_decisions(
         )
         .await?;
     for row in &facts.rows {
+        if row.kind == crate::durable::domain::RunFactKind::CellReport {
+            let record = RecordLocator::RunFact {
+                owner: owner.clone(),
+                run: row.run,
+                ordinal: row.ordinal,
+            };
+            for (resolver, call) in harness
+                .core()?
+                .plugin_diagnostics()
+                .deferred_selections(&record)
+                .await?
+            {
+                if resolver == *callback {
+                    decisions.push(DecisionRef::DeferredTool {
+                        record: record.clone(),
+                        call,
+                    });
+                }
+            }
+            continue;
+        }
         if row.kind != crate::durable::domain::RunFactKind::Admit {
             continue;
         }
@@ -525,6 +557,10 @@ async fn attribution_law(
                 value: RecordedAttribution::Binding { selected, .. },
                 ..
             } => selected == *callback,
+            Evidence::Recorded {
+                value: RecordedAttribution::DeferredTool { resolver, .. },
+                ..
+            } => resolver == *callback,
             Evidence::Recorded {
                 value: RecordedAttribution::Presentation(binding),
                 ..

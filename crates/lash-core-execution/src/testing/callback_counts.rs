@@ -10,13 +10,28 @@ use std::sync::{Arc, Mutex};
 
 /// Counts callback entries, not factory construction or metadata inspection.
 #[derive(Clone, Default)]
-pub struct CallbackCounts(Arc<Mutex<BTreeMap<PluginCallbackIdentity, u64>>>);
+pub struct CallbackCounts(Arc<Mutex<Entries>>);
+#[derive(Default)]
+struct Entries {
+    callbacks: BTreeMap<PluginCallbackIdentity, u64>,
+    resolutions: BTreeMap<PluginCallbackIdentity, u64>,
+}
 impl CallbackCounts {
     pub fn snapshot(&self) -> BTreeMap<PluginCallbackIdentity, u64> {
-        self.0.lock_recover().clone()
+        self.0.lock_recover().callbacks.clone()
+    }
+    /// Resolution entries, separate from prepare/execute on the selected provider.
+    /// A registered resolver has a zero entry even before it is exercised.
+    pub fn resolution_snapshot(&self) -> BTreeMap<PluginCallbackIdentity, u64> {
+        self.0.lock_recover().resolutions.clone()
     }
     fn entered(&self, callback: &PluginCallbackIdentity) {
-        *self.0.lock_recover().entry(callback.clone()).or_default() += 1;
+        *self
+            .0
+            .lock_recover()
+            .callbacks
+            .entry(callback.clone())
+            .or_default() += 1;
     }
     pub(crate) fn wrap(&self, contributions: &mut PluginContributions) {
         macro_rules! hooks {
@@ -63,6 +78,19 @@ impl CallbackCounts {
                 counts: self.clone(),
             });
         }
+        if let Some(registered) = &mut contributions.deferred_provider {
+            let callback = registered.identity.callback_identity();
+            self.0
+                .lock_recover()
+                .resolutions
+                .entry(callback.clone())
+                .or_default();
+            registered.hook = Arc::new(CountedProvider {
+                inner: Arc::clone(&registered.hook),
+                callback,
+                counts: self.clone(),
+            });
+        }
         for (_, registered) in &mut contributions.context_pressure_hooks {
             registered.hook = Arc::new(CountedPressure {
                 inner: Arc::clone(&registered.hook),
@@ -86,13 +114,13 @@ impl CallbackCounts {
         }
     }
 }
-struct CountedProvider {
-    inner: Arc<dyn ToolProvider>,
+struct CountedProvider<T: ToolProvider + ?Sized> {
+    inner: Arc<T>,
     callback: PluginCallbackIdentity,
     counts: CallbackCounts,
 }
 #[async_trait::async_trait]
-impl ToolProvider for CountedProvider {
+impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
     fn tool_manifests(&self, config: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
         self.inner.tool_manifests(config)
     }
@@ -136,6 +164,23 @@ impl ToolProvider for CountedProvider {
     ) -> Result<crate::IsolatedStart, crate::ProcessEnvRefusal> {
         self.counts.entered(&self.callback);
         self.inner.isolated_start(call)
+    }
+}
+#[async_trait::async_trait]
+impl crate::DeferredToolProvider for CountedProvider<dyn crate::DeferredToolProvider> {
+    async fn resolve(
+        &self,
+        cx: &crate::DeferredResolveContext<'_>,
+        paths: &[&str],
+    ) -> BTreeMap<String, crate::DeferredOutcome> {
+        *self
+            .counts
+            .0
+            .lock_recover()
+            .resolutions
+            .entry(self.callback.clone())
+            .or_default() += 1;
+        self.inner.resolve(cx, paths).await
     }
 }
 struct CountedPressure {

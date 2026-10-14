@@ -44,7 +44,9 @@ pub use lash_core_execution::runtime::actor::claim_obligations::{
 pub use lash_core_execution::runtime::actor::round::{
     CallOwner, ParkedCall, StagedPluginState, StoreLocalEffect, StoreLocalRows, parked,
 };
-pub use lash_core_execution::runtime::actor::round::{admitted_bindings_of, tool_outcome_of};
+pub use lash_core_execution::runtime::actor::round::{
+    admitted_bindings_of, cell_report_of, tool_outcome_of,
+};
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
 pub use lash_core_execution::{

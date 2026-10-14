@@ -96,6 +96,7 @@ async fn two_tools_with_recorded_session_config_are_certified() {
         .await
         .unwrap();
     no_failed_law(&report);
+    assert_eq!(report.verdict(), PluginCertificationVerdict::Full);
     assert!(report.reports.iter().any(|report| report.law
         == PluginLaw::ReplayInvokesNoRecordedCallback
         && report.result == PluginLawResult::Passed));
@@ -306,5 +307,191 @@ async fn the_battery_names_the_state_law_for_an_over_limit_plugin() {
     assert!(
         message.contains("TooLarge") || message.contains("too_large"),
         "the typed cause stays readable: {message}"
+    );
+}
+
+/// DEFERRED-STATE-FREE-CERTIFICATION: the resolver selects a different,
+/// catalogue-free executable under the author's actual protocol.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
+    use lash::tools::*;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Resolver(Arc<AtomicUsize>);
+    #[lash::async_trait]
+    impl ToolProvider for Resolver {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("the resolver never executes the selected tool")
+        }
+    }
+    fn definition() -> ToolDefinition {
+        ToolDefinition::raw(
+            "remote:send_email",
+            "send_email",
+            "send email",
+            serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+            serde_json::json!({"type":"string"}),
+        )
+        .unwrap()
+        .with_execution(std::time::Duration::from_secs(1))
+        .with_tool_binding(ToolBinding::new(["tools"], "send_email"))
+    }
+    #[lash::async_trait]
+    impl DeferredToolProvider for Resolver {
+        async fn resolve(
+            &self,
+            _: &DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> BTreeMap<String, DeferredOutcome> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            paths
+                .iter()
+                .filter(|path| **path == "tools.send_email")
+                .map(|path| {
+                    (
+                        (*path).into(),
+                        DeferredOutcome::Resolved {
+                            provider: ToolProviderHandle::new(
+                                RegistryKind::Session,
+                                "host",
+                                lash::tool_provider_key!("tools"),
+                            ),
+                            definition: definition(),
+                            binding: None,
+                        },
+                    )
+                })
+                .collect()
+        }
+    }
+    struct Host(Arc<AtomicUsize>);
+    #[lash::async_trait]
+    impl ToolProvider for Host {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            ToolOutcome::ok(serde_json::json!("sent")).into()
+        }
+    }
+    struct DeferredScenario {
+        resolved: Arc<AtomicUsize>,
+        executed: Arc<AtomicUsize>,
+    }
+    #[lash::async_trait]
+    impl PluginScenario for DeferredScenario {
+        fn callback(&self) -> PluginCallbackIdentity {
+            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+        }
+        async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
+            harness
+                .install_protocol(Arc::new(
+                    lash::rlm::RlmProtocolPluginFactory::new(
+                        lash::rlm::RlmProtocolPluginConfig::builder()
+                            .channel(lash::rlm::RlmChannel::NativeTool)
+                            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                            .build(),
+                        lash::rlm::CellDialect::typescript(),
+                    )
+                    .with_worker_service(lash::vm::WorkerService::default()),
+                ))
+                .await?;
+            harness
+                .install(Arc::new(StaticPluginFactory::new(
+                    PluginDeclaration::initial("host"),
+                    PluginSpec::new().with_tool_provider(
+                        lash::tool_provider_key!("tools"),
+                        Arc::new(Host(Arc::clone(&self.executed))),
+                    ),
+                )))
+                .await?;
+            harness.create(PluginOptions::default()).await?;
+            // A scenario only installs services. The battery must exercise resolution.
+            assert_eq!(self.resolved.load(Ordering::SeqCst), 0);
+            Ok(())
+        }
+        fn input(&self) -> lash::TurnInput {
+            lash::TurnInput::text("send email")
+        }
+        fn responses(&self) -> Vec<lash::provider::LlmResponse> {
+            vec![
+                lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::ToolCall {
+                        call_id: "deferred-cell".into(),
+                        tool_name: "execute_code".into(),
+                        input_json: serde_json::json!({"code":"await tools.send_email({});"})
+                            .to_string(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                },
+                text_response("done"),
+            ]
+        }
+        fn pause_after_responses(&self) -> usize {
+            1
+        }
+    }
+    let resolved = Arc::new(AtomicUsize::new(0));
+    let executed = Arc::new(AtomicUsize::new(0));
+    let factory = Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial("resolver"),
+        PluginSpec::new().with_deferred_provider(
+            lash::tool_provider_key!("deferred"),
+            Arc::new(Resolver(Arc::clone(&resolved))),
+        ),
+    ));
+    let unavailable = certify_plugin(factory.clone()).await.unwrap();
+    assert_eq!(unavailable.verdict(), PluginCertificationVerdict::Partial);
+    assert!(unavailable.reports.iter().any(|report| report.result
+        == PluginLawResult::Unavailable {
+            reason: CertificationUnavailable::NoScenario
+        }));
+    let scenario: Arc<dyn PluginScenario> = Arc::new(DeferredScenario {
+        resolved: Arc::clone(&resolved),
+        executed: Arc::clone(&executed),
+    });
+    let report = certify_plugin_with(factory, HostPolicy::standard(), &[scenario])
+        .await
+        .unwrap();
+    assert_eq!(
+        executed.load(Ordering::SeqCst),
+        1,
+        "the selected executable ran once across reopen"
+    );
+    assert_eq!(
+        resolved.load(Ordering::SeqCst),
+        1,
+        "the recorded resolution is never repeated"
+    );
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::Full,
+        "{:#?}",
+        report.reports
+    );
+    assert_eq!(report.reports.len(), 4);
+    assert!(
+        report
+            .reports
+            .iter()
+            .any(|law| law.law == PluginLaw::StateSurvivesReopen
+                && law.result
+                    == PluginLawResult::NotApplicable {
+                        reason: CertificationNotApplicable::NoPublishedState
+                    })
     );
 }
