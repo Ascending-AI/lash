@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,18 @@ spec.loader.exec_module(static)
 
 
 class ProductionScopeLaws(unittest.TestCase):
+    def test_suite_libtest_controls_preserve_exact_guard_selection(self):
+        name = 'ProductionScopeLaws.test_inline_module_children_remain_production'
+        result = subprocess.run(
+            [sys.executable, str(ROOT / 'scripts/run-vm-guard.py'),
+             '--root', str(ROOT), '--guard', 'laws', '--list',
+             '-Z', 'unstable-options', '--report-time', '--test-threads', '4',
+             '--color=never', '--nocapture', '--exact', name],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f'{name}: test\n')
+
     def test_test_only_items_are_excluded_but_production_branches_remain(self):
         source = '''
 #[cfg(test)]

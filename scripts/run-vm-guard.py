@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run one source guard or its laws with the ordinary test receipt format."""
+"""Run one source guard or its laws with the ordinary test receipt format.
+
+Mixed suites pass the same libtest harness arguments to non-libtest targets.
+Consume those controls here; Rust timing, formatting, capture, threading and
+shuffle settings do not apply to these serial Python guards.
+"""
 import argparse
 import importlib.util
 from pathlib import Path
@@ -16,13 +21,20 @@ def load(root, name):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--guard', choices=['static_state', 'parent_paths', 'laws'], required=True)
     parser.add_argument('--list', action='store_true')
     parser.add_argument('--exact', action='store_true')
     parser.add_argument('--ignored', action='store_true')
     parser.add_argument('--format', default='pretty')
+    for flag in ['-Z', '--test-threads', '--color', '--logfile', '--shuffle-seed']:
+        parser.add_argument(flag, action='append')
+    for flag in ['--report-time', '--ensure-time', '--nocapture', '--show-output',
+                 '--include-ignored', '--shuffle', '--exclude-should-panic',
+                 '--bench', '--test']:
+        parser.add_argument(flag, action='store_true')
+    parser.add_argument('--quiet', '-q', action='store_true')
     parser.add_argument('selectors', nargs='*')
     args = parser.parse_intermixed_args()
     root = args.root.resolve()
