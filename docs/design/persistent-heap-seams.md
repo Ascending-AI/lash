@@ -1,7 +1,10 @@
 # Persistent semantic heap: the frozen seams
 
 Status: frozen design for the FIG-6187 arc, delivered by FIG-6195 on branch
-`lanes/hp-seams`. Source anchors are at `195ed4db93` (main when the arc
+`lanes/hp-seams`. The decision it implements, in its end state, is
+[ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md);
+where this document and the ADR differ, the ADR states the landed design and
+§7 below records the integration rulings. Source anchors are at `195ed4db93` (main when the arc
 fanned out). It does not repeat the arc's specification; read it with the
 four design reports (the decision and cost contract, representation and
 identities, page access and publication, exact memory and collection). Where
@@ -148,7 +151,7 @@ open that two lanes would otherwise settle differently.
   build's page schema. Unchanged pages inherit admission. Changed pages are
   validated by the producing worker before sealing. A root admitted under
   another validator, or a foreign image, enters the trusted population only
-  after the full validation pass (`lash-kernel-migrate`'s carry path). It
+  after the full validation pass. It
   never inherits an incompatible attestation.
 - **D-WAITS (amended): table root digest; no XOR summary.** The waits table
   is canonical; its root digest is its identity. There is no separate summary.
@@ -582,7 +585,8 @@ the receipt confirms the commit.
 New catalog sources are `RootSource::ReadLease` and
 `RootSource::RetirementHold`. New tables (`root_leases`,
 `retirement_holds`, `semantic_admissions`) go straight into both 1.0
-baselines. Normal activation stops using `DurableReads::hydrate`; the
+baselines. Normal activation stops using `DurableReads::hydrate` for heap
+roots; hydrate stays the generic reader of host roots (§7); the
 integrator deletes it.
 
 Errors: `DurableError::OwnershipLost` for a stale epoch; the graph refusals
@@ -813,7 +817,7 @@ symbol together with every caller in its own files.
 | SQLite `durable/graph.rs::reclaim` (663) and PostgreSQL `durable/graph/reclaim.rs::reclaim` (83): synchronous last-owner peel on commit (replaced by holds and `retire_step`) | hp-publish |
 | `lash-vm-broker/src/kernel/store.rs::pin_release` (942): decoding a `KernelWhole` to find the release | hp-publish |
 | `lash-vm-broker/src/kernel/store.rs`: `hydrate` calls (975, 1024) on normal activation | I |
-| `lash-durable/src/domain/mod.rs:503`: `DurableReads::hydrate` and `HydratedGraph`; SQLite `durable/graph.rs::hydrate_in` (561); PostgreSQL `durable/graph.rs::{hydrate_in, hydrate_owner}` (661, 1053) | I |
+| Kept by ruling (§7): `lash-durable/src/domain/mod.rs:503`: `DurableReads::hydrate` and `HydratedGraph`; SQLite `durable/graph.rs::hydrate_in` (561); PostgreSQL `durable/graph.rs::{hydrate_in, hydrate_owner}` (661, 1053) | I |
 | `lash-kernel-state/src/schema.rs`: `ParkedRun` and the whole JSON schema; `fragments.rs`: `Baseline`, `Saved`, `save`, `load`; `bin/parked_schema_generator.rs` | hp-heap |
 | `lash-kernel-state/src/whole.rs`: `KernelWhole` (66), `WholeTask`, `WholeWait`, `capture` (196), `restore` (253); `terminal.rs`: `TerminalWhole` (21) | hp-heap |
 | `lash-kernel-vm/src/whole.rs`: `export_whole` (69), `import_whole*` (112, 129), `terminal_whole` (181), `terminal_end` (273) | hp-heap |
@@ -824,7 +828,7 @@ symbol together with every caller in its own files.
 | `lash-vm-worker/src/worker.rs`: `export_graph` (767) and the `staged` `SealedGraphState` (46, 402) | I |
 | `lash-vm-runtime/src/process/state.rs`: `SealedRun` (101), base64 whole material; `process/migrate.rs` whole carry | I |
 | `lash-core-execution/src/runtime/actor/process/state_graph.rs`: `stage_engine_state`, `write_engine_state`, `read_engine_state`, `load_engine_state` for kernel processes (36, 91, 119, 144); opaque foreign-engine bytes stay | I |
-| `lash-kernel-migrate/src/carry.rs::carry` (31) over `ParkedRun`: becomes the full validator and migrator over page roots | I |
+| `lash-kernel-migrate/src/carry.rs::carry` (31) over `ParkedRun`: deleted; the paged parked-run migrator is FIG-6233 (§7) | I |
 | `lash-core-store/src/checkpoint_graph/registry.rs`: `KERNEL_WHOLE` (16), `TERMINAL_WHOLE` (27), `SESSION_EXECUTION` (29) rows. `WHOLE_STREAM`, `STRUCTURE_BLOCK` and `STREAM_INDEX` stay: other enveloped kinds use them. | I |
 | `lash-core-store/src/checkpoint_graph/encode.rs`: the FIG-6157 encoding cache stays (it is generic, used by other domains); only the kernel's whole-input encode path through it goes | I |
 | Tests, fixtures and docs whose subject is the removed shapes: `lash-kernel-state/src/tests.rs`; `lash-kernel-vm/src/laws/{parked,whole}.rs`; `lash-vm-worker/src/graph_laws.rs`; `lash-vm-protocol/src/graph_state_tests.rs`; `lash-vm-broker/src/kernel/graph_tests.rs`; `lash-durable-test` format fixtures; `docs/kernel/parked-state.md`. Each deleted test is listed in the commit with the law that now covers its property. | I |
@@ -846,6 +850,44 @@ symbol together with every caller in its own files.
   wrong once implemented: for example, `SemanticHeap::open` as a trait
   constructor, or reads through `&self` with interior residency. Such a
   change is a seam ruling, not a local edit.
+
+## 7. Integration rulings
+
+The integrator's end state, as ADR 0145 states it:
+
+- **Host graph reads.** `DurableReads::hydrate` and `HydratedGraph` stay the
+  generic reader of host roots: turn phases, release pins, process engine
+  state, execution control nodes and session manifests. A hydrate never
+  descends into a semantic page: a host node's semantic child is returned as
+  itself, and a read asked to start at one is `GraphRefusal::SemanticPage`.
+  Heap pages are read only under a root lease through the page exchange.
+- **One publication identity (FIG-6197 F1).** `check_candidate` relates the
+  owner write (`CandidateOwner::ExecRootPut` or `RunFactAppend`), the
+  manifest summary's root and base, the semantic admission and the commit;
+  `candidate_state` and resolution use the same pair. A mismatch is
+  `GraphRefusal::PublicationMismatch`.
+- **Spool child provenance (FIG-6197 F2).** A staged page's child that was
+  committed and reused is read and sealed under the root lease's authority;
+  a staged child under the stage lease's (`StageSpool::contains`).
+- **Checked tree roots (FIG-6197 F3).** External `KeyedRoot` and
+  `SequenceRoot` are `Empty | NonEmpty { page, len, cost }`, refused invalid
+  at construction and decode, before any `Tree::open`.
+- **Kernel process publication (P1).** A `kernel_run` step outcome owns its
+  candidate: `KernelRunOutput::Parked` names the `CheckpointRoot` page, the
+  outcome's `RunFact` record holds it, `commit_candidate` runs in the
+  outcome's transaction, and `ProcessStateBody::Kernel { root, bytes }`
+  names it from the advance on.
+- **Retirement.** Multi-hold steps bounded by a node budget; a node
+  maintenance task runs them beside lease renewal; backpressure on
+  `retirement_backlog`; every limit in `DurableSettings.retirement` with a
+  default and a hard maximum. Locks follow one global order: digest order,
+  with root-catalog and hold rows before a step's peel.
+- **Parked-run carry.** `lash-kernel-migrate`'s whole-image `carry` is
+  deleted. A parked run whose kernel version or helper release a build does
+  not interpret is refused with `ParkedRefusal::StateNotCarried`, kept, and
+  resumable on a build that retains it; the paged migrator is FIG-6233.
+  Session bindings across a release change are covered by `classify_carry`
+  and `adopt`.
 
 ### S1/S4/S8 (amended): descriptor summaries and lifecycle attachment
 

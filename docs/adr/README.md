@@ -176,6 +176,7 @@ The generated region below is checked against the live filenames and headings.
 | 0142 | [A cell's first save carries its turn's model response](0142-a-cells-first-save-carries-its-turns-model-response.md) |
 | 0143 | [Plugins are fully trusted code](0143-plugins-are-fully-trusted-code.md) |
 | 0144 | [Declared reads are owned by the caller's saved state](0144-declared-reads-are-owned-by-the-callers-saved-state.md) |
+| 0145 | [Kernel execution and its checkpoints share one persistent heap](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

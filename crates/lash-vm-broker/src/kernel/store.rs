@@ -4,7 +4,7 @@
 //!
 //! [`DurableSnapshotStore::commit_park`] commits, in one
 //! `cell.snapshot+admit` transaction, the execution's next root graph
-//! (FIG-5887 §5): the machine's CheckpointRoot at the next revision, its
+//! (ADR 0145 §6): the machine's CheckpointRoot at the next revision, its
 //! changed heap pages published from the activation's spool as one
 //! candidate (S6, FIG-6193), the
 //! effect membership that matches its [`EffectLedger`], one Admission per

@@ -125,18 +125,14 @@ The resident graph append curve also preserves each phase's raw latency vector;
 aggregate phase duration is no longer its only timing evidence. Completed frame
 curve fixtures are removed after their store handles have dropped.
 
-Whole kernel parks additionally have a synchronous, thread-local
-`lash_kernel_vm::perf_witness::Collector` under the opt-in `perf-witness` feature.
-Install it on the thread that calls `export_whole`/`import_whole` (a worker's
-thread for production cells). Its non-overlapping `machine.export`, `whole.capture`,
-`whole.restore` and `machine.import` receipts retain raw nanoseconds and complete
-structure task/active-call/object cardinalities. They are neither byte counts nor
-VM charge, and are not host-process counters for a subprocess worker. Refused
-phases have unknown geometry, rather than a fabricated zero. A functional command
-showing the counted phases and the unchanged cold-relay oracle is:
-
-```sh
-kiln test //crates/lash-kernel-vm:lash-kernel-vm__unit_test \
-  --test_arg=laws::whole::whole_capture_and_import_report_each_real_phase_and_structure \
-  --test_arg=--exact --test_arg=--nocapture
-```
+Kernel parks and resumes on the persistent heap are counted, not timed, by
+the opt-in `perf-witness` feature: `lash_kernel_vm::perf_witness`
+(`enable_work`, `take_work`) counts VM steps on the calling thread; a
+worker's page source counts the pages it loaded through the wire and sealed
+into its parent's staging, and returns them in its progress receipts; the
+broker's spool counts staged bytes (`DiskSpool::seal`); and both stores
+count retirement steps (`retire_step`). They are neither byte counts of the
+SQL window nor VM charge. The counted released-worker harness that reads them
+(`pages_loaded`, `pages_sealed`, `spool_bytes`, `retirement_batches`), its
+scenarios and its committed baseline are in
+[the durable substrate README](../../../crates/lash-perf/src/bin/durable_substrate/README.md#retained-heap-baseline-fig-6196).

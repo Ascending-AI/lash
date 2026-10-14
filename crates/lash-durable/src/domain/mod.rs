@@ -497,8 +497,12 @@ pub trait DurableReads: Send + Sync {
         run: &TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError>;
 
-    /// FIG-5887: `owner`'s complete root graph, read under one protection:
-    /// every node reachable from its root, checked, within `limits`. With
+    /// `owner`'s complete host root graph, read under one protection:
+    /// every node reachable from its root, checked, within `limits`. A
+    /// persistent-heap page is taken as itself and never descended into,
+    /// and a read that starts at one is refused
+    /// ([`GraphRefusal::SemanticPage`](lash_core_store::checkpoint_graph::GraphRefusal::SemanticPage);
+    /// ADR 0145 §10). With
     /// `expected`, a root that is not it is refused
     /// ([`GraphRefusal::RevisionConflict`](lash_core_store::checkpoint_graph::GraphRefusal::RevisionConflict));
     /// an owner with no root is refused

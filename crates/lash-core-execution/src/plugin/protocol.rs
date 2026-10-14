@@ -429,10 +429,10 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(())
     }
 
-    /// The session's complete SessionExecution graph for `purpose`
-    /// (FIG-5887 §4, §6), built from live state: a working capture after
-    /// each successful cell, a final capture for the turn's commit. Its
-    /// staged nodes are kept until
+    /// The session's execution state for `purpose`, its descriptor page and
+    /// the heap pages staged under it (ADR 0145 §9), built from live state:
+    /// a working capture after each successful cell, a final capture for
+    /// the turn's commit. Its staged nodes are kept until
     /// [`Self::acknowledge_execution_state_capture`]; a refused commit
     /// resends them. An executor that holds no execution state keeps the
     /// default.
@@ -444,9 +444,9 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(ExecutionGraphCapture::Clear)
     }
 
-    /// Installs a hydrated SessionExecution graph into the executor
-    /// (FIG-5887 §6): a session revision's, or the working state a turn
-    /// phase owns, before any model continuation or cell compiles. An
+    /// Installs a session's execution state, its descriptor page, into the
+    /// executor (ADR 0145 §9): a session revision's, or the working state a
+    /// turn phase owns, before any model continuation or cell compiles. An
     /// executor that holds no execution state keeps the default.
     async fn restore_execution_graph(
         &self,

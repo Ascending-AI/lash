@@ -208,7 +208,8 @@ The durable substrate's `DurableSettings`, unchanged: `lease` (`ttl_ms`
 `activation_loop_budget` 8, `group_commit` (`max_members` 64, `window_ms`
 5), `snapshot_every_fuel`, `cascade_batch` 256, `notifier`
 (`after_commit` or `poll_only`) and `retirement` (`every_ms` 1000,
-`batch_nodes` 256, `steps_per_sweep` 16, `backlog_limit` 10000; see
+`batch_nodes` 256, `steps_per_sweep` 16, `backlog_limit` 10000, each at
+most its hard maximum of 4096, 256 and 1000000; see
 [page retirement](durable-hosting.md#page-retirement)). Its existing rules
 apply.
 
