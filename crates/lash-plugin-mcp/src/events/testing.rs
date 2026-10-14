@@ -14,7 +14,8 @@
 //!   resumes this many positions earlier, redelivering what it delivered;
 //! - `refuse`: `{code, message}` every events request answers;
 //! - `terminate`: `{code, message}` an open stream ends with;
-//! - `next_poll_ms` and `heartbeat_ms`: the server's pacing.
+//! - `next_poll_ms` and `heartbeat_ms`: the server's pacing;
+//! - `poll_delay_ms`: the wall time the server takes to answer each poll.
 //!
 //! `requests.jsonl` logs every request and notification the server read,
 //! once it is handled: a logged poll or stream has fixed where it starts.
@@ -152,6 +153,7 @@ for line in sys.stdin:
             held = events()
             batch = held[position:position + int(params.get('maxEvents') or 50)]
             after = position + len(batch)
+            time.sleep(c.get('poll_delay_ms', 0) / 1000.0)
             send({'jsonrpc': '2.0', 'id': request_id, 'result': {
                 'events': batch, 'cursor': str(after), 'truncated': truncated,
                 'hasMore': after < len(held), 'nextPollMs': c.get('next_poll_ms', 100)}})

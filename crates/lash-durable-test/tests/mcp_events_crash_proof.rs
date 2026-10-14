@@ -59,6 +59,9 @@ const EVENTS: [&str; 2] = ["e1", "e2"];
 /// Virtual time a run polls for at least: the first poll, the redelivery
 /// a second later, and one more.
 const SETTLED_MS: u64 = 2_500;
+/// Wall time a slow server takes to answer each poll: longer than the
+/// virtual time between the uncut run's last poll and [`SETTLED_MS`].
+const SLOW_POLL_MS: u64 = 600;
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -129,6 +132,7 @@ impl OffClockWork for Fetches {
 }
 
 struct EventOnce {
+    poll_delay_ms: u64,
     tripwire: Arc<Tripwire>,
     fixture: McpEventsFixture,
     _world: tempfile::TempDir,
@@ -140,13 +144,24 @@ struct EventOnce {
 
 impl EventOnce {
     fn new() -> Self {
+        Self::answering_after(0)
+    }
+
+    /// The scenario over a server that answers each poll after
+    /// `poll_delay_ms` of wall time.
+    fn answering_after(poll_delay_ms: u64) -> Self {
         let world = tempfile::tempdir().expect("the fixture's world");
         let fixture = McpEventsFixture::new(world.path());
-        fixture.control(serde_json::json!({ "null_cursor": "origin", "next_poll_ms": 1000 }));
+        fixture.control(serde_json::json!({
+            "null_cursor": "origin",
+            "next_poll_ms": 1000,
+            "poll_delay_ms": poll_delay_ms,
+        }));
         for event in EVENTS {
             fixture.emit(event, serde_json::json!({ "ticket": event }));
         }
         Self {
+            poll_delay_ms,
             tripwire: Arc::default(),
             fixture,
             _world: world,
@@ -311,6 +326,7 @@ impl Scenario for EventOnce {
         self.fixture.control(serde_json::json!({
             "null_cursor": "origin",
             "next_poll_ms": 1000,
+            "poll_delay_ms": self.poll_delay_ms,
             "rewind_once": EVENTS.len(),
         }));
         nodes.start("a");
@@ -402,6 +418,32 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
     violations
 }
 
+/// The uncut run's owner commits, in order.
+fn owner_commits(report: &lash_durable_test::MatrixReport) -> Vec<&'static str> {
+    report
+        .baseline
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label.as_str())
+        .collect()
+}
+
+/// FIG-6283: a subscription's schedule runs on its activation's clock. A
+/// server that takes wall time to answer each poll leaves the uncut run's
+/// owner commits as they were, so every cut its census plans comes again
+/// in a re-run, however long the server takes.
+#[tokio::test]
+async fn a_slow_server_leaves_the_uncut_owner_commits_unchanged() {
+    let uncut = Matrix::new().faults(&[]);
+    let prompt = uncut.run(EventOnce::new).await;
+    let slow = uncut.run(|| EventOnce::answering_after(SLOW_POLL_MS)).await;
+    assert_eq!(
+        owner_commits(&slow),
+        owner_commits(&prompt),
+        "a server answering after {SLOW_POLL_MS} ms moved the subscription's schedule"
+    );
+}
+
 /// A subscription killed at every label reacts to each event once.
 #[tokio::test]
 async fn an_event_subscription_killed_at_every_label_reacts_to_each_event_once() {
@@ -425,12 +467,7 @@ async fn an_event_subscription_killed_at_every_label_reacts_to_each_event_once()
         labels.join(", ")
     );
     // The uncut run's owner commits, in order: what each event costs.
-    let owner: Vec<&str> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label.as_str())
-        .collect();
+    let owner = owner_commits(&report);
     eprintln!(
         "mcp events: uncut owner commits ({}): {}; {:?}",
         owner.len(),

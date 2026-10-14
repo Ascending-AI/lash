@@ -78,10 +78,6 @@ fn malformed(run: &EngineStepRun, error: impl std::fmt::Display) -> EngineStepAn
     )
 }
 
-fn elapsed_ms(started: std::time::Instant) -> i64 {
-    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
-}
-
 #[async_trait::async_trait]
 impl lash_core::EngineSteps for SubscriptionSteps {
     fn kinds(&self) -> Vec<EngineStepKind> {
@@ -129,7 +125,6 @@ impl SubscriptionSteps {
         cancel: CancellationToken,
     ) -> FetchOutcome {
         let _in_flight = self.events.activity().fetch();
-        let started = std::time::Instant::now();
         let FetchInput { spec, cursor } = input;
         let bounds = &spec.bounds;
         let mut params = serde_json::json!({
@@ -179,7 +174,9 @@ impl SubscriptionSteps {
                     at_ms: 0,
                 }),
         };
-        let at_ms = run.now.0.saturating_add(elapsed_ms(started));
+        // The fetch ends on the clock `run.now` was read on, never that
+        // reading plus wall time: the next poll is scheduled on that clock.
+        let at_ms = i64::try_from(run.clock.timestamp_ms()).unwrap_or(i64::MAX);
         match fetched {
             Ok(batch) => FetchOutcome::Batch(Batch { at_ms, ..batch }),
             Err(error) => FetchOutcome::Failed { error, at_ms },
