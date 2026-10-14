@@ -69,6 +69,10 @@ use crate::service_lifecycle::equal_jitter;
 use lash_core::{ToolFailureClass, ToolFailureSource};
 use lifecycle_actor::{LifecycleActor, LifecycleCommand};
 
+/// A live connection an events request is sent on: its peer, and the
+/// handler that routes its stream notifications.
+pub(crate) type EventsPeer = (Peer<RoleClient>, crate::host::LashMcpClientHandler);
+
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
 ///
@@ -648,6 +652,38 @@ impl McpConnectionPool {
 
     #[cfg(not(test))]
     async fn pause_after_target_resolution(&self) {}
+
+    /// The events policy of `server_name`, and its live connection when it
+    /// has one: what an events request is sent on. `None` for a server the
+    /// pool does not hold.
+    pub(crate) fn events_connection(
+        &self,
+        server_name: &str,
+    ) -> Option<(crate::events::McpServerEvents, Option<EventsPeer>)> {
+        if self.shut_down.load(Ordering::SeqCst) {
+            return None;
+        }
+        let entry = self.entries.read_recover().get(server_name).cloned()?;
+        let service = entry
+            .service_snapshot()
+            .map(|service| (service.peer.clone(), service.handler.clone()));
+        Some((entry.config.events.clone(), service))
+    }
+
+    /// The servers whose events are enabled, with their policy.
+    pub(crate) fn events_servers(&self) -> Vec<(String, crate::events::McpEventsConfig)> {
+        self.entries
+            .read_recover()
+            .iter()
+            .filter_map(|(name, entry)| {
+                entry
+                    .config
+                    .events
+                    .enabled()
+                    .map(|config| (name.clone(), config.clone()))
+            })
+            .collect()
+    }
 
     /// Tear down all connections in parallel. Call this before dropping the
     /// pool for a graceful shutdown; `Drop` itself cannot await. Every actor is

@@ -508,6 +508,7 @@ async fn connect_tolerates_unreachable_server() {
     servers.insert(
         "down".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 1_000,
@@ -646,6 +647,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         }
     });
     let config = || McpServerConfig {
+        events: Default::default(),
         diagnostics: Default::default(),
         data_limits: Default::default(),
         startup_timeout_ms: 2_000,
@@ -750,6 +752,7 @@ async fn eager_connects_start_in_parallel() {
     });
     let list = json!({ "jsonrpc": "2.0", "id": 1, "result": { "tools": [] } });
     let config = |own: &std::path::Path, other: &std::path::Path| McpServerConfig {
+        events: Default::default(),
         diagnostics: Default::default(),
         data_limits: Default::default(),
         startup_timeout_ms: 1_000,
@@ -834,6 +837,7 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "directory".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 2_000,
@@ -984,6 +988,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "directory".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 2_000,
@@ -1125,6 +1130,7 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
     let handshake = "read -r _; printf '%s\\n' \"$DISCOVER\"; \
                      read -r _; printf '%s\\n' \"$LIST\"; cat >/dev/null";
     let config = |script: String, env: BTreeMap<String, String>| McpServerConfig {
+        events: Default::default(),
         diagnostics: Default::default(),
         data_limits: Default::default(),
         startup_timeout_ms: 2_000,
@@ -1250,6 +1256,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
     let servers = BTreeMap::from([(
         "directory".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 10_000,
@@ -1381,6 +1388,7 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
     let servers = BTreeMap::from([(
         "race".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 10_000,
@@ -1492,6 +1500,7 @@ async fn pool_reconnects_after_transport_death() {
     servers.insert(
         "flaky".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 10_000,
@@ -1577,6 +1586,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
     env.insert("RESP1".to_string(), discover.to_string());
 
     let config = McpServerConfig {
+        events: Default::default(),
         diagnostics: Default::default(),
         data_limits: Default::default(),
         startup_timeout_ms: 750,
@@ -1664,6 +1674,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
     servers.insert(
         "svc".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 10_000,
@@ -1725,6 +1736,7 @@ async fn oversized_stdio_message_disconnects_with_typed_cause() {
     let pool = McpConnectionPool::connect(BTreeMap::from([(
         "flooder".to_string(),
         McpServerConfig {
+            events: Default::default(),
             diagnostics: Default::default(),
             data_limits: Default::default(),
             startup_timeout_ms: 2_000,

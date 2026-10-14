@@ -99,6 +99,32 @@ pub struct EngineStateRefusal {
     pub fatal: bool,
 }
 
+/// A read-only status an engine projects from its committed state: the
+/// engine's own typed data, in the format of the state it was projected
+/// from. Lash records it beside the process's driver in each transition's
+/// own commit and never interprets it; a host reads the last committed one
+/// back ([`EngineStatusProjection`]). It is a read, not a lifecycle fact.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineStatus {
+    /// The format of the state the status was projected from.
+    pub format: EngineStateFormat,
+    /// The engine's typed status, as its own data.
+    pub status: serde_json::Value,
+}
+
+/// An engine's projection of a host-readable status from its state,
+/// declared at registration
+/// ([`ProcessEngineRegistration::with_status_projection`](super::ProcessEngineRegistration::with_status_projection)).
+/// Lash calls it with the state each transition commits and records the
+/// answer in the same commit, so the status never disagrees with the state
+/// it was projected from. An engine registered without one has no status.
+pub trait EngineStatusProjection: Send + Sync {
+    /// The status `state` projects, or `None` for a state with none:
+    /// synchronous and effect-free, like `advance`.
+    fn status(&self, state: &EngineState) -> Option<serde_json::Value>;
+}
+
 /// The name an engine gives one of its waits; unique within the process.
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

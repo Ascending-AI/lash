@@ -308,6 +308,8 @@ pub(crate) struct LashMcpClientHandler {
     services: McpHostServices,
     request_tasks: Arc<McpHostRequestTasks>,
     tool_changes: Option<Arc<crate::pool::tool_changes::ToolChanges>>,
+    /// The connection's open `events/stream` requests, by request id.
+    event_streams: Arc<crate::events::client::EventStreams>,
 }
 
 impl LashMcpClientHandler {
@@ -321,6 +323,7 @@ impl LashMcpClientHandler {
             services,
             request_tasks: Arc::new(McpHostRequestTasks::default()),
             tool_changes: None,
+            event_streams: Arc::default(),
         }
     }
 
@@ -330,6 +333,10 @@ impl LashMcpClientHandler {
     ) -> Self {
         self.tool_changes = Some(changes);
         self
+    }
+
+    pub(crate) fn event_streams(&self) -> Arc<crate::events::client::EventStreams> {
+        Arc::clone(&self.event_streams)
     }
 
     pub(crate) fn request_tasks(&self) -> Arc<McpHostRequestTasks> {
@@ -435,6 +442,19 @@ impl ClientHandler for LashMcpClientHandler {
                 .and_then(|meta| meta.subscription_id());
             changes.acknowledge(params, id);
         }
+    }
+
+    async fn on_custom_notification(
+        &self,
+        notification: rmcp::model::CustomNotification,
+        context: NotificationContext<RoleClient>,
+    ) {
+        let subscription = context
+            .extensions
+            .get::<rmcp::model::NotificationMetaObject>()
+            .and_then(|meta| meta.subscription_id())
+            .map(rmcp::model::RequestId::into_json_value);
+        crate::events::client::route_notification(&self.event_streams, &notification, subscription);
     }
 
     async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {

@@ -232,6 +232,9 @@ impl LashCore {
                 &crate::formats::previous_actor_state_surfaces(),
             );
         }
+        // An engine that projects a status has it recorded with each of its
+        // processes' transitions.
+        backend = backend.with_status_projections(self.host_process_engines.status_projections());
         let sessions = Arc::new(SessionActivation::new(
             backend.clone(),
             self.turn_services(),

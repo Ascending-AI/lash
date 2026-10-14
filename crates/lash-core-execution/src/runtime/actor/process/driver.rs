@@ -54,6 +54,11 @@ pub(super) struct Driver {
     /// its mail and applied, or refused, once the run is at rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) successor: Option<crate::ProcessSuccessorRequest>,
+    /// The status the engine projected from the state the last transition
+    /// committed, when its registration declares a projection: recorded in
+    /// that transition's own commit, read back by [`engine_status`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) status: Option<Box<crate::EngineStatus>>,
 }
 
 /// One admitted step.
@@ -183,6 +188,40 @@ pub(crate) fn in_flight_effects(
     stored: Option<&str>,
 ) -> Result<Vec<lash_kernel_doc::EffectName>, serde_json::Error> {
     Ok(Driver::decode(stored)?.in_flight_effects())
+}
+
+/// The status the engine of `process` projected from its last committed
+/// transition, or `None` for a process whose engine projects none, one
+/// that has not transitioned, or one that is not retained.
+///
+/// # Errors
+///
+/// A store fault, or a stored status that does not decode.
+pub async fn engine_status(
+    reads: &dyn lash_durable::DurableReads,
+    process: &ProcessId,
+) -> Result<Option<crate::EngineStatus>, lash_durable::DurableError> {
+    /// The one field of a driver row this read decodes: a `SessionTurn`
+    /// process's driver is another shape, and records no status.
+    #[derive(Deserialize)]
+    struct Recorded {
+        #[serde(default)]
+        status: Option<crate::EngineStatus>,
+    }
+    let Some(row) = reads.process(process).await? else {
+        return Ok(None);
+    };
+    let Some(stored) = row.driver_json else {
+        return Ok(None);
+    };
+    serde_json::from_str::<Recorded>(&stored)
+        .map(|recorded| recorded.status)
+        .map_err(|error| {
+            super::activation::corrupt(
+                &format!("process `{process}`'s recorded engine status"),
+                error,
+            )
+        })
 }
 
 impl Driver {

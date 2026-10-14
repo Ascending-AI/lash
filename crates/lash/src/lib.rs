@@ -93,6 +93,8 @@ mod durable_session;
 mod error;
 pub mod formats;
 mod language_observation;
+#[cfg(feature = "mcp")]
+mod mcp_events;
 mod observation_feed;
 mod parked_work;
 #[cfg(feature = "postgres")]
@@ -889,9 +891,9 @@ pub mod plugins {
     /// answers with.
     pub use lash_core::{
         CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-        EngineStateMigration, EngineStateRefusal, EngineStepAnswer, EngineStepKind,
-        EngineStepRefusal, EngineStepRun, EngineSteps, KeyName, Material, NamesMaterial,
-        SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
+        EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{

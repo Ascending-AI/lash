@@ -77,8 +77,9 @@ pub use engine::{
 };
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-    EngineStateMigration, EngineStateRefusal, EngineStepAnswer, EngineStepKind, EngineStepRefusal,
-    EngineStepRun, EngineSteps, KeyName, StepName, StepRequest,
+    EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
+    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
+    StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,

@@ -417,6 +417,12 @@ pub struct McpServerConfig {
     pub shutdown_policy: McpShutdownPolicy,
     #[serde(flatten)]
     pub transport: McpTransport,
+    /// Whether this server's events (SEP-3415) are offered; off by default.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::events::McpServerEvents::is_disabled"
+    )]
+    pub events: crate::events::McpServerEvents,
 }
 
 /// Wire transport for one MCP server, selected by the `transport` tag.
@@ -524,6 +530,7 @@ impl McpServerConfig {
             call_policy: McpCallPolicy::default(),
             shutdown_policy: McpShutdownPolicy::default(),
             transport,
+            events: crate::events::McpServerEvents::Disabled,
         }
     }
 
@@ -600,7 +607,17 @@ impl McpServerConfig {
         self
     }
 
+    /// Offer this server's events under `events`.
+    #[must_use]
+    pub fn with_events(mut self, events: crate::events::McpEventsConfig) -> Self {
+        self.events = crate::events::McpServerEvents::Enabled(events);
+        self
+    }
+
     pub(crate) fn validate(&self, server_name: &str) -> Result<(), McpError> {
+        if let Some(events) = self.events.enabled() {
+            events.validate(server_name)?;
+        }
         if server_name.trim().is_empty() {
             return Err(McpError::Config(
                 "MCP server name cannot be empty".to_string(),

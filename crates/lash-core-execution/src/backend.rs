@@ -112,6 +112,9 @@ struct BackendInner {
     /// How each engine that carries an earlier build's state forward does
     /// it, by engine kind ([`Backend::with_state_migration`]).
     migrations: BTreeMap<String, Arc<dyn crate::EngineStateMigration>>,
+    /// The status each engine that declares one projects from its state, by
+    /// engine kind ([`Backend::with_status_projections`]).
+    status_projections: BTreeMap<String, Arc<dyn crate::EngineStatusProjection>>,
     providers: Arc<dyn ProjectionProviders>,
     /// The format sets this build writes and decodes.
     formats: crate::formats::BuildFormats,
@@ -185,6 +188,7 @@ impl Backend {
         Ok(Self {
             inner: Arc::new(BackendInner {
                 migrations: BTreeMap::new(),
+                status_projections: BTreeMap::new(),
                 stores: parts.stores,
                 durable: std::sync::OnceLock::new(),
                 config,
@@ -226,6 +230,7 @@ impl Backend {
         Self {
             inner: Arc::new(BackendInner {
                 migrations: self.inner.migrations.clone(),
+                status_projections: self.inner.status_projections.clone(),
                 stores,
                 durable: std::sync::OnceLock::new(),
                 config: self.inner.config,
@@ -259,6 +264,7 @@ impl Backend {
         Self {
             inner: Arc::new(BackendInner {
                 migrations: self.inner.migrations.clone(),
+                status_projections: self.inner.status_projections.clone(),
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
@@ -331,6 +337,7 @@ impl Backend {
                 formats,
                 engines: self.inner.engines.clone(),
                 migrations,
+                status_projections: self.inner.status_projections.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
@@ -360,6 +367,7 @@ impl Backend {
                 formats: self.inner.formats.clone().retiring(format, previous, sweep),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),
+                status_projections: self.inner.status_projections.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
@@ -384,6 +392,7 @@ impl Backend {
                 formats: self.inner.formats.clone().decoding(previous),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),
+                status_projections: self.inner.status_projections.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
@@ -406,6 +415,7 @@ impl Backend {
                 formats: self.inner.formats.clone(),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),
+                status_projections: self.inner.status_projections.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
@@ -423,6 +433,42 @@ impl Backend {
     /// when it drops anything.
     pub fn retirement(&self) -> Option<&Arc<dyn RetirementCheck>> {
         self.inner.retirement.as_ref()
+    }
+
+    /// This backend recording the status each of `projections` projects
+    /// from its engine's committed state, with each transition of a process
+    /// of that engine kind.
+    #[must_use]
+    pub fn with_status_projections<'a>(
+        &self,
+        projections: impl IntoIterator<Item = (&'a str, &'a Arc<dyn crate::EngineStatusProjection>)>,
+    ) -> Self {
+        let mut status_projections = self.inner.status_projections.clone();
+        for (kind, projection) in projections {
+            status_projections.insert(kind.to_owned(), Arc::clone(projection));
+        }
+        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
+        Self {
+            inner: Arc::new(BackendInner {
+                stores: Arc::clone(&self.inner.stores),
+                durable,
+                config: self.inner.config,
+                formats: self.inner.formats.clone(),
+                engines: self.inner.engines.clone(),
+                migrations: self.inner.migrations.clone(),
+                status_projections,
+                providers: Arc::clone(&self.inner.providers),
+                surfaces: self.inner.surfaces.clone(),
+                hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
+            }),
+        }
+    }
+
+    /// The status the engine of `kind` projects from its state, when its
+    /// registration declares one.
+    pub fn status_projection(&self, kind: &str) -> Option<&Arc<dyn crate::EngineStatusProjection>> {
+        self.inner.status_projections.get(kind)
     }
 
     /// How the engine of `kind` carries an earlier build's state forward,

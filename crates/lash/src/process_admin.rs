@@ -544,6 +544,24 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// The status the process's engine projected from its last committed
+    /// transition: the engine's own typed data, which its plugin decodes.
+    /// `None` for a process whose engine declares no status projection, one
+    /// that has not transitioned yet, or one that is not retained. It is a
+    /// read of committed state, not a lifecycle event.
+    pub async fn engine_status(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<lash_core::EngineStatus>> {
+        lash_core::runtime::durable::engine_status(self.core.backend.durable().as_ref(), process_id)
+            .await
+            .map_err(|error| {
+                EmbedError::Plugin(lash_core::PluginError::Session(format!(
+                    "read process `{process_id}`'s engine status: {error}"
+                )))
+            })
+    }
+
     /// Read recorded authority in one backend call and one SQL statement.
     /// Builds no component and opens no session. Narrowing the creator's
     /// session leaves this answer unchanged. An unknown id returns `None`;

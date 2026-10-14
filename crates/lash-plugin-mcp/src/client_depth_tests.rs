@@ -354,6 +354,7 @@ fn configs(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServe
     BTreeMap::from([(
         "modern".into(),
         McpServerConfig {
+            events: Default::default(),
             startup_timeout_ms: 5_000,
             call_policy: crate::McpCallPolicy {
                 call_timeout_ms: 5_000,

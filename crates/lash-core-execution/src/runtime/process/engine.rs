@@ -420,6 +420,7 @@ pub struct ProcessEngineRegistration {
     document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
     state_migration: Option<Arc<dyn super::engine_state::EngineStateMigration>>,
     succession: Option<Arc<dyn super::succession::EngineSuccession>>,
+    status_projection: Option<Arc<dyn super::engine_state::EngineStatusProjection>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
         BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
@@ -447,6 +448,7 @@ impl ProcessEngineRegistration {
             document_provider: None,
             state_migration: None,
             succession: None,
+            status_projection: None,
             engine_step_retries: BTreeMap::new(),
         })
     }
@@ -461,6 +463,7 @@ impl ProcessEngineRegistration {
             document_provider: None,
             state_migration: None,
             succession: None,
+            status_projection: None,
             engine_step_retries: BTreeMap::new(),
         }
     }
@@ -505,6 +508,18 @@ impl ProcessEngineRegistration {
         self
     }
 
+    /// Declare the status this engine projects from its committed state:
+    /// lash records it with each transition's commit, and a host reads the
+    /// last committed one back.
+    #[must_use]
+    pub fn with_status_projection(
+        mut self,
+        projection: Arc<dyn super::engine_state::EngineStatusProjection>,
+    ) -> Self {
+        self.status_projection = Some(projection);
+        self
+    }
+
     /// Retry the engine's `kind` steps under `policy` instead of the policy
     /// its [`EngineSteps`](super::engine_state::EngineSteps) declare: the
     /// host's override of the engine author's default, for this deployment.
@@ -519,6 +534,14 @@ impl ProcessEngineRegistration {
     }
 }
 
+/// Each engine kind's optional hooks: kept behind one shared pointer, so a
+/// registry stays the size it is however many a kind declares.
+#[derive(Clone, Default)]
+struct KindHooks {
+    successions: BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>,
+    status_projections: BTreeMap<String, Arc<dyn super::engine_state::EngineStatusProjection>>,
+}
+
 #[derive(Clone, Default)]
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
@@ -526,7 +549,8 @@ pub struct ProcessEngineRegistry {
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     state_migrations: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
-    successions: Arc<BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>>,
+    /// Each kind's succession and status projection, in one map pair.
+    hooks: Arc<KindHooks>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     /// The process components a new environment is admitted against and a
     /// process is composed from (FIG-6034).
@@ -542,7 +566,7 @@ pub struct WeakProcessEngineRegistry {
     document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     state_migrations:
         std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
-    successions: std::sync::Weak<BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>>,
+    hooks: std::sync::Weak<KindHooks>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
     components: crate::plugin::ProcessComponentRegistry,
 }
@@ -557,7 +581,7 @@ impl WeakProcessEngineRegistry {
             engine_steps: self.engine_steps.upgrade()?,
             document_providers: self.document_providers.upgrade()?,
             state_migrations: self.state_migrations.upgrade()?,
-            successions: self.successions.upgrade()?,
+            hooks: self.hooks.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         })
@@ -610,7 +634,7 @@ impl ProcessEngineRegistry {
             engine_steps: Arc::downgrade(&self.engine_steps),
             document_providers: Arc::downgrade(&self.document_providers),
             state_migrations: Arc::downgrade(&self.state_migrations),
-            successions: Arc::downgrade(&self.successions),
+            hooks: Arc::downgrade(&self.hooks),
             artifact_ports: self.artifact_ports.clone(),
             components: self.components.clone(),
         }
@@ -654,7 +678,7 @@ impl ProcessEngineRegistry {
         let mut engine_steps = (*self.engine_steps).clone();
         let mut document_providers = (*self.document_providers).clone();
         let mut state_migrations = (*self.state_migrations).clone();
-        let mut successions = (*self.successions).clone();
+        let mut hooks = (*self.hooks).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
@@ -662,6 +686,7 @@ impl ProcessEngineRegistry {
             document_provider,
             state_migration,
             succession,
+            status_projection,
             engine_step_retries: retries,
         } = registration;
         match steps {
@@ -683,8 +708,16 @@ impl ProcessEngineRegistry {
             None => state_migrations.remove(engine.kind()),
         };
         match succession {
-            Some(succession) => successions.insert(engine.kind().to_string(), succession),
-            None => successions.remove(engine.kind()),
+            Some(succession) => hooks
+                .successions
+                .insert(engine.kind().to_string(), succession),
+            None => hooks.successions.remove(engine.kind()),
+        };
+        match status_projection {
+            Some(projection) => hooks
+                .status_projections
+                .insert(engine.kind().to_string(), projection),
+            None => hooks.status_projections.remove(engine.kind()),
         };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
@@ -694,7 +727,7 @@ impl ProcessEngineRegistry {
             engine_steps: Arc::new(engine_steps),
             document_providers: Arc::new(document_providers),
             state_migrations: Arc::new(state_migrations),
-            successions: Arc::new(successions),
+            hooks: Arc::new(hooks),
             artifact_ports: self.artifact_ports,
             components: self.components,
         }
@@ -786,10 +819,20 @@ impl ProcessEngineRegistry {
             .map(|(kind, migration)| (kind.as_str(), migration))
     }
 
+    /// Every registered engine's status projection, by engine kind.
+    pub fn status_projections(
+        &self,
+    ) -> impl Iterator<Item = (&str, &Arc<dyn super::engine_state::EngineStatusProjection>)> {
+        self.hooks
+            .status_projections
+            .iter()
+            .map(|(kind, projection)| (kind.as_str(), projection))
+    }
+
     /// How the `kind` engine carries a process onto a successor pair, when
     /// its registration declares it.
     pub fn succession(&self, kind: &str) -> Option<Arc<dyn super::succession::EngineSuccession>> {
-        self.successions.get(kind).cloned()
+        self.hooks.successions.get(kind).cloned()
     }
 
     /// Every registered engine, by kind.

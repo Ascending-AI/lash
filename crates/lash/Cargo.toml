@@ -134,6 +134,7 @@ http-transport = ["dep:lash-http-transport"]
 # facade's dependency edge.
 testing = [
     "lash-core/testing",
+    "lash-plugin-mcp?/testing",
     "dep:lash-sqlite-store",
     "lash-sqlite-store?/testing",
     "lash-postgres-store?/testing",

@@ -19,6 +19,8 @@ doctest = false
 [features]
 default = []
 lash-vm = ["dep:lash-vm-runtime"]
+# The SEP-3415 fixture server laws and examples run against.
+testing = []
 
 [lints]
 workspace = true

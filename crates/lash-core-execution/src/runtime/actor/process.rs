@@ -22,6 +22,7 @@ pub(crate) use driver::in_flight_effects;
 
 pub use activation::ProcessActivation;
 pub use carry::stored_engine_state;
+pub use driver::engine_status;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
 pub use terminal::{ProcessParkReason, cancelled, park_of, record_park, record_terminal};
 

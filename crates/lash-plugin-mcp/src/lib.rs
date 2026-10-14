@@ -73,6 +73,7 @@ mod call_failure;
 pub mod config;
 mod diagnostics;
 pub mod error;
+pub mod events;
 pub mod host;
 pub mod naming;
 pub mod plugin;

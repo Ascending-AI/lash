@@ -1374,6 +1374,18 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0377"
         }
     },
+    "mcp-events": {
+        "build": {},
+        "dev": {
+            "lash": "//crates/lash:lash",
+            "tempfile": "//third-party/rust:p0368",
+            "tokio": "//third-party/rust:p0377"
+        },
+        "normal": {
+            "lash": "//crates/lash:lash",
+            "serde_json": "//third-party/rust:p0318"
+        }
+    },
     "rlm-smoke-host": {
         "build": {},
         "dev": {

@@ -809,6 +809,16 @@ impl ProcessActivation {
             };
             return self.park(owned, tx, &reason).await;
         }
+        driver.status = self
+            .backend
+            .status_projection(kind)
+            .and_then(|projection| projection.status(&next))
+            .map(|status| {
+                Box::new(crate::EngineStatus {
+                    format: next.format.clone(),
+                    status,
+                })
+            });
         let mut fresh = Vec::new();
         let applied = self
             .apply(
