@@ -40,6 +40,7 @@ pub mod graph;
 mod hand_back;
 mod model_calls;
 pub mod node_wakes;
+pub mod pages;
 mod prompts;
 mod session_close;
 mod turn_namespaces;

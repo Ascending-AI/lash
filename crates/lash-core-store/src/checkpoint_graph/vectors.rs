@@ -14,7 +14,7 @@ pub const GRAMMAR_VECTORS: &str = r##"{
     "magic": "4c415348",
     "max_node_bytes": 65536,
     "max_root_bytes": 4096,
-    "reserved_future_kinds": [
+    "semantic_kinds": [
       1000,
       1999
     ]
@@ -507,6 +507,69 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "name": "CallBody",
       "owner": "Host",
       "shape": "Enveloped"
+    },
+    {
+      "bound": 4096,
+      "kind": 1000,
+      "name": "CheckpointRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1001,
+      "name": "SequenceIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1002,
+      "name": "SequenceLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1003,
+      "name": "KeyedIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1004,
+      "name": "KeyedLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1005,
+      "name": "PayloadLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1006,
+      "name": "PayloadIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1007,
+      "name": "FrozenRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1008,
+      "name": "SessionRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
     }
   ],
   "root_sources": [
@@ -587,6 +650,18 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "postgres": "lash_session_runs.terminal_window_config_ref",
       "source": "terminal_config",
       "sqlite": "session_runs.terminal_window_config_ref"
+    },
+    {
+      "number": 14,
+      "postgres": "lash_root_leases.root_ref",
+      "source": "lease",
+      "sqlite": "root_leases.root_ref"
+    },
+    {
+      "number": 15,
+      "postgres": "lash_retirement_holds.root_ref",
+      "source": "retirement",
+      "sqlite": "retirement_holds.root_ref"
     }
   ]
 }"##;

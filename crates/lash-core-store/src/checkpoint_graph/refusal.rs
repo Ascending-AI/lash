@@ -83,6 +83,10 @@ pub enum GraphRefusal {
     FenceLost,
     #[error("the root was retired")]
     RootRetired,
+    /// A root lease past its expiry, released, or reaped: no read or
+    /// renewal runs under it, and the activation it served is fenced.
+    #[error("the root lease is lost")]
+    LeaseLost,
     /// A publication does not match the domain record it names.
     #[error("the commit's root changes are not the projection of its writes")]
     PublicationMismatch,

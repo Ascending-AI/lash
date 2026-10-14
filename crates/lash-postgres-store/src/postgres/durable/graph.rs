@@ -1,6 +1,6 @@
 //! The checkpoint graph on PostgreSQL: owner graph installation, hydration
 //! and the peel that reclaims a retired root's closure (FIG-5887 §5;
-//! FIG-5949). The DDL is in `schema.sql`.
+//! FIG-5949; FIG-6191). The DDL is in `schema.sql`.
 //!
 //! # Locks
 //!
@@ -16,16 +16,17 @@
 //!
 //! The root catalog (`lash_graph_root_catalog`) is a view of the owning
 //! columns, and the graph is a DAG: a node no root reaches is an orphan (no
-//! root row, no edge to it) or reached only from such nodes. Every
-//! transaction that retires a root peels it before it commits: the level's
-//! candidates no other transaction holds are locked `FOR UPDATE SKIP
-//! LOCKED` in digest order, then one statement deletes every locked
-//! candidate no root names and no edge reaches and returns the children
-//! their edges reached, the next level. A peel never waits, so it is never
-//! part of a lock cycle: a candidate a writer key-share locked first is one
-//! that writer names, and stays (the orphan audit's, should that writer
-//! roll back); a writer that comes after waits for the peel, finds the node
-//! gone, and refuses a missing node or installs its bytes again.
+//! root row, no edge to it) or reached only from such nodes. A transaction
+//! that retires a root holds it (`lash_retirement_holds`, a root of the
+//! catalog), and bounded retirement steps peel it later
+//! (`super::pages`): each level's candidates no other transaction holds
+//! are locked `FOR UPDATE SKIP LOCKED` in digest order, then one statement
+//! deletes every locked candidate no root names and no edge reaches and
+//! returns the children their edges reached, the next level. A peel never
+//! waits, so it is never part of a lock cycle: a candidate a writer
+//! key-share locked first is one that writer names, and stays; a writer
+//! that comes after waits for the peel, finds the node gone, and refuses a
+//! missing node or installs its bytes again.
 //! The schema's `RESTRICT` keys stay the backstop.
 //!
 //! # Reads
@@ -50,7 +51,7 @@ use lash_durable::domain::graph::{
     EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedGraph, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
+    CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
 use lash_durable::{
     CommitCapacity, CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind,
@@ -63,7 +64,6 @@ use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
 
 mod reclaim;
-pub(super) use reclaim::reclaim;
 pub(crate) use reclaim::{audit_page, graph_counts, peel};
 
 lash_store_sql::statements! {
@@ -252,6 +252,9 @@ lash_store_sql::statements! {
 struct Sql {
     graph: GraphStatements,
     postgres: GraphPostgresStatements,
+    snapshots: lash_store_sql::durable::snapshots::SnapshotStatements,
+    facts: lash_store_sql::durable::run_records::RunRecordStatements,
+    turns: lash_store_sql::durable::turns::TurnStatements,
 }
 
 static SQL: LazyLock<Sql> = LazyLock::new(|| {
@@ -259,6 +262,9 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     Sql {
         graph: GraphStatements::render(dialect),
         postgres: GraphPostgresStatements::render(dialect),
+        snapshots: lash_store_sql::durable::snapshots::SnapshotStatements::render(dialect),
+        facts: lash_store_sql::durable::run_records::RunRecordStatements::render(dialect),
+        turns: lash_store_sql::durable::turns::TurnStatements::render(dialect),
     }
 });
 
@@ -318,7 +324,7 @@ pub(super) fn from_durable(error: DurableError) -> GraphRefusal {
     }
 }
 
-fn db(error: sqlx::Error) -> GraphRefusal {
+pub(super) fn db(error: sqlx::Error) -> GraphRefusal {
     from_durable(sqlx_failure(error))
 }
 
@@ -333,11 +339,11 @@ fn corrupt(what: &str, value: &str) -> GraphRefusal {
     })
 }
 
-fn node_of(stored: &str) -> Answer<NodeId> {
+pub(super) fn node_of(stored: &str) -> Answer<NodeId> {
     NodeId::from_hex(stored).ok_or_else(|| corrupt("node reference", stored))
 }
 
-fn encoding_of(stored: i16) -> Answer<BlobEncoding> {
+pub(super) fn encoding_of(stored: i16) -> Answer<BlobEncoding> {
     match stored {
         0 => Ok(BlobEncoding::Opaque),
         1 => Ok(BlobEncoding::Graph),
@@ -655,6 +661,80 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         .map_err(db)
 }
 
+/// The root `owner` names now, read on the caller's connection: none when
+/// the owner is gone or holds no root.
+pub(super) async fn root_of(
+    connection: &mut PgConnection,
+    owner: &RootOwner,
+) -> Answer<Option<NodeId>> {
+    let sql = &*SQL;
+    let query =
+        |statement| crate::observed_sql::query_scalar::<sqlx::Postgres, Option<String>>(statement);
+    let bound = match owner {
+        RootOwner::Exec(exec) => {
+            let row: Option<(i64, Option<String>)> =
+                crate::observed_sql::query_as(sql.snapshots.root.sql())
+                    .bind(exec.stored())
+                    .fetch_optional(crate::observed_sql::executor(&mut *connection))
+                    .await
+                    .map_err(db)?;
+            return row
+                .and_then(|(_, root)| root)
+                .as_deref()
+                .map(node_of)
+                .transpose();
+        }
+        RootOwner::RunFact {
+            owner,
+            run,
+            ordinal,
+        } => query(sql.facts.root.sql())
+            .bind(owner.stored())
+            .bind(number::<i64>(run.0)?)
+            .bind(number::<i64>(ordinal.0)?),
+        RootOwner::EffectAdmission { exec, effect } => query(sql.graph.admission_root.sql())
+            .bind(exec.stored())
+            .bind(effect.0.to_vec()),
+        RootOwner::TurnPhase { session, run } => query(sql.turns.phase_root.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
+        RootOwner::WorkingExecution { session, run } => query(sql.turns.working_root.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
+        RootOwner::TurnNamespace {
+            session,
+            run,
+            plugin,
+        } => query(sql.turns.namespace_root.sql())
+            .bind(session.as_str())
+            .bind(run.as_str())
+            .bind(plugin.as_str()),
+        RootOwner::SessionRevision { session, revision } => query(sql.graph.revision_root.sql())
+            .bind(session.as_str())
+            .bind(number::<i64>(*revision)?),
+        RootOwner::SessionAdmissionBase { session } => {
+            query(sql.graph.admission_base_root.sql()).bind(session.as_str())
+        }
+        RootOwner::ArtifactBridge {
+            namespace,
+            artifact,
+        } => query(sql.postgres.artifact_root.sql())
+            .bind(namespace.as_str())
+            .bind(artifact.as_str()),
+        RootOwner::ReleasePin { release } => {
+            query(sql.graph.release_root.sql()).bind(release.as_str())
+        }
+    };
+    bound
+        .fetch_optional(crate::observed_sql::executor(connection))
+        .await
+        .map_err(db)?
+        .flatten()
+        .as_deref()
+        .map(node_of)
+        .transpose()
+}
+
 /// `owner`'s root graph, hydrated in one statement on `connection`: its
 /// snapshot holds the root and everything it reaches, so a root a peel
 /// retires after it began is read whole, and one retired before is gone.
@@ -907,9 +987,49 @@ pub(crate) async fn install(
     if absent.is_empty() {
         return Ok(installed);
     }
+    let inserted = insert_absent(tx, &absent).await?;
+    let mut parents = Vec::new();
+    let mut children = Vec::new();
+    for (node, hash) in &absent {
+        if !inserted.contains(*hash) {
+            continue;
+        }
+        installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
+        installed.new_nodes += 1;
+        installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
+        for child in &node.children {
+            parents.push(&node.id.0[..]);
+            children.push(&child.0[..]);
+            installed.new_edges += 1;
+            installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
+        }
+    }
+    if !parents.is_empty() {
+        crate::observed_sql::query(SQL.postgres.insert_edges.sql())
+            .bind(&parents)
+            .bind(&children)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(db)?;
+    }
+    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
+        window.installed_graph(installed.newly_installed_canonical_bytes);
+    }
+    Ok(installed)
+}
+
+/// Inserts `absent`, the supplied nodes a lock found unstored, in digest
+/// order, and answers the digests it inserted. One another writer stored
+/// first is key-share locked and compared; one a peel deleted between the
+/// insert's conflict and that lock is installed again from the bytes the
+/// commit carries (FIG-5949); each round only shrinks.
+pub(super) async fn insert_absent(
+    tx: &mut PgConnection,
+    absent: &[(&CheckedNode, &String)],
+) -> Answer<BTreeSet<String>> {
     let digests: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.id.0[..]).collect();
     let contents: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.bytes[..]).collect();
-    let inserted: BTreeSet<String> =
+    let mut inserted: BTreeSet<String> =
         crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
             .bind(&digests)
             .bind(&contents)
@@ -918,11 +1038,6 @@ pub(crate) async fn install(
             .map_err(db)?
             .into_iter()
             .collect();
-    // A node stored before the insert that the lock did not read is
-    // key-share locked and compared now. One a peel deleted between the
-    // insert's conflict and that lock is installed again from the bytes the
-    // commit carries (FIG-5949); each round only shrinks.
-    let mut inserted = inserted;
     let mut held: Vec<&str> = absent
         .iter()
         .map(|(_, hash)| hash.as_str())
@@ -940,7 +1055,7 @@ pub(crate) async fn install(
             .map(|(hash, bytes, encoding)| (hash, (bytes, encoding)))
             .collect();
         let mut peeled = Vec::new();
-        for (node, hash) in &absent {
+        for (node, hash) in absent {
             if !held.contains(&hash.as_str()) {
                 continue;
             }
@@ -972,39 +1087,12 @@ pub(crate) async fn install(
             .collect();
         inserted.extend(fresh);
     }
-    let mut parents = Vec::new();
-    let mut children = Vec::new();
-    for (node, hash) in &absent {
-        if !inserted.contains(*hash) {
-            continue;
-        }
-        installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
-        installed.new_nodes += 1;
-        installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
-        for child in &node.children {
-            parents.push(&node.id.0[..]);
-            children.push(&child.0[..]);
-            installed.new_edges += 1;
-            installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
-        }
-    }
-    if !parents.is_empty() {
-        crate::observed_sql::query(SQL.postgres.insert_edges.sql())
-            .bind(&parents)
-            .bind(&children)
-            .execute(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
-    }
-    if let Some(window) = lash_core_execution::facade_support::sql::Window::current() {
-        window.installed_graph(installed.newly_installed_canonical_bytes);
-    }
-    Ok(installed)
+    Ok(inserted)
 }
 
 /// A supplied node against the blob stored under its digest: a graph node
 /// of exactly its bytes, or a conflict.
-fn compare(
+pub(super) fn compare(
     id: NodeId,
     supplied: &[u8],
     encoding: BlobEncoding,

@@ -939,6 +939,9 @@ impl DurableSnapshotStore {
     /// nodes with its pin once, under its dialect's key
     /// ([`lash_vm_releases::HeldManifests::pin_key`]), on the first root of
     /// the first execution that pins it; every later root requires them.
+    /// The release is read from the root's header, the child table of its
+    /// envelope: the one child this build holds as a release manifest.
+    /// Nothing under the root is decoded.
     async fn pin_release(
         &self,
         tx: &mut lash_durable::ActorTx,
@@ -946,17 +949,22 @@ impl DurableSnapshotStore {
         releases: &ReleaseGraph,
         first: bool,
     ) -> Result<(), QuietPointRefusal> {
-        // The state omits the release manifest it pins; a whole that places
-        // a large value is read over the release's nodes, which tell its
-        // typed children from its leaves.
-        let source = super::state::Layered {
-            state: &state.nodes,
-            release: &releases.nodes,
-        };
-        let whole: lash_kernel_state::KernelWhole = GraphDecoder::new(&source, self.read_limits())
-            .decode(state.root, NodeKind::KERNEL_WHOLE)
+        let children = state
+            .nodes
+            .get(&state.root)
+            .ok_or_else(|| refused("the state omits its root"))?
+            .children()
             .map_err(refused)?;
-        let release = NodeId(whole.release.0);
+        let mut held = children
+            .iter()
+            .filter(|child| releases.manifests.pin_key(&child.child_ref()).is_some());
+        let release = match (held.next(), held.next()) {
+            (Some(release), None) => *release,
+            (None, _) => {
+                return Err(refused("the state pins a release this build does not hold"));
+            }
+            (Some(_), Some(_)) => return Err(refused("the state's root names two releases")),
+        };
         if !first {
             tx.require(release);
             return Ok(());

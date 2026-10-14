@@ -9,13 +9,13 @@
 //! the commit's mechanics gathered as they are answered. A step may be
 //! skipped by what an earlier step captured, and may capture its own first
 //! row. After a step, the ancestry it retired is walked and the actors it
-//! woke are woken. Then the commit's retired roots are peeled, and the
+//! woke are woken. Then the commit's retired roots are held, and the
 //! formats stamp, the acknowledgement and the release end it; a `ready`
 //! release that writes nothing else keeps the claim's no-progress mark.
 
 use super::executor::{EXECUTOR_SQL, FUNCTION, LATCH_HORIZON_MS, REGISTRY, entries};
 use super::steps::{Collect, END_LOCAL_PARAMS, Entry, Shape, Ty};
-use super::{SQL, graph, prompts};
+use super::{SQL, graph, pages, prompts};
 use crate::connection_sql::connection_sql;
 use crate::session_sql::session_sql;
 
@@ -298,9 +298,8 @@ pub(crate) fn function_ddl() -> String {
            WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted)))",
         ],
     ));
-    let peel = peel_loop();
-    let peel_ends_lock = inline(graph::peel_lock().sql(), &["v_frontier"]);
-    let peel_ends = inline(graph::peel_level().sql(), &["v_locked"]);
+    let hold_closures = inline(pages::hold().sql(), &["v_retired", "TRUE", "v_now"]);
+    let hold_phase_ends = inline(pages::hold().sql(), &["v_phase_ends", "FALSE", "v_now"]);
     let installed_bytes = inline(
         executor.installed_bytes.sql(),
         &["p_digests", "p_contents", "v_inserted"],
@@ -383,8 +382,6 @@ DECLARE
     v_state TEXT := 'owned';
     v_retired TEXT[] := '{{}}';
     v_phase_ends TEXT[] := '{{}}';
-    v_frontier TEXT[];
-    v_locked TEXT[];
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{{}}';
@@ -524,19 +521,14 @@ BEGIN
             v_wakes := '{{}}';
         END IF;
     END LOOP;
-    -- Peel what the steps retired: each level deletes what no root names
-    -- and no edge reaches, skipping what another transaction holds
-    -- (FIG-5949). An ended turn's PhaseRoot is peeled alone.
-    v_frontier := ARRAY(SELECT DISTINCT unnest(v_retired));
-    {peel}
-    v_frontier := ARRAY(SELECT DISTINCT unnest(v_phase_ends));
-    IF cardinality(v_frontier) > 0 THEN
-        {peel_ends_lock}
-        INTO v_locked;
-        IF cardinality(v_locked) > 0 THEN
-            {peel_ends}
-            INTO v_rows, v_frontier;
-        END IF;
+    -- Hold what the steps retired for the bounded retirement steps
+    -- (FIG-6191, D-RET): each retired root's closure, and an ended turn's
+    -- PhaseRoot alone.
+    IF cardinality(v_retired) > 0 THEN
+        {hold_closures};
+    END IF;
+    IF cardinality(v_phase_ends) > 0 THEN
+        {hold_phase_ends};
     END IF;
     IF p_formats IS NOT NULL THEN
         {stamp_formats};

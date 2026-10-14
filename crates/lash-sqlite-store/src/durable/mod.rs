@@ -29,6 +29,7 @@ use std::sync::{Arc, LazyLock};
 use lash_core_execution::Clock;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
 use lash_durable::domain::graph_commit::{check_graph, measure_owner_commit};
+use lash_durable::domain::pages::CandidatePublication;
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
     SessionCloseRow, TurnRow, WaitId, WaitRow,
@@ -50,6 +51,7 @@ use crate::liveness_locks::{LivenessLocks, Probed};
 
 mod claim_facts;
 mod graph;
+mod pages;
 mod park;
 pub(crate) mod processes;
 mod prompts;
@@ -357,15 +359,17 @@ pub(crate) struct Committing<'a> {
     pub(crate) fleet: lash_core_execution::FleetFormat,
     /// How the session store a head commit writes keeps its blobs.
     pub(crate) blob_profile: crate::BuiltinBlobProfile,
-    /// The roots its writes retired, peeled before it commits.
+    /// The roots its writes retired, moved to retirement holds before it
+    /// commits.
     pub(crate) retired: Retired,
 }
 
-/// The roots a transaction's writes retired: what it peels before it
-/// commits (FIG-5949). A turn's terminal retires its PhaseRoot alone: the
-/// TurnContent under it is the transcript the session's next turn names
-/// again, so it waits for the orphan audit rather than being reinstalled
-/// (the TurnContent ordering constraint).
+/// The roots a transaction's writes retired: what it moves to retirement
+/// holds before it commits (FIG-5949, D-RET). A turn's terminal retires its
+/// PhaseRoot alone: the TurnContent under it is the transcript the
+/// session's next turn names again, so its hold peels the PhaseRoot only
+/// and the content waits for the orphan audit rather than being
+/// reinstalled (the TurnContent ordering constraint).
 #[derive(Default)]
 pub(crate) struct Retired {
     closures: std::cell::RefCell<std::collections::BTreeSet<String>>,
@@ -373,17 +377,17 @@ pub(crate) struct Retired {
 }
 
 impl Retired {
-    /// `root` was retired: peel its closure.
+    /// `root` was retired: hold its closure.
     pub(crate) fn closure(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
         self.closures.borrow_mut().insert(root.to_hex());
     }
 
-    /// A stored root reference was retired: peel its closure.
+    /// A stored root reference was retired: hold its closure.
     pub(crate) fn stored(&self, root: impl Into<String>) {
         self.closures.borrow_mut().insert(root.into());
     }
 
-    /// An ended turn's PhaseRoot was retired: peel it alone.
+    /// An ended turn's PhaseRoot was retired: hold it alone.
     pub(crate) fn phase_end(&self, root: impl Into<String>) {
         self.phase_ends.borrow_mut().insert(root.into());
     }
@@ -677,6 +681,7 @@ fn apply_owner(
     write: ActorTx,
     now: DurableInstant,
     blob_profile: crate::BuiltinBlobProfile,
+    mut candidate: Option<&mut CandidatePublication>,
 ) -> Flow<ActorCommit> {
     let fleet = tx.fleet();
     let actor = write.actor().as_str().to_owned();
@@ -710,11 +715,17 @@ fn apply_owner(
         .iter()
         .flat_map(DomainWrite::publications)
         .collect();
-    if !write.graph().is_empty() || !write.reads().is_empty() || !publications.is_empty() {
+    if candidate.is_some()
+        || !write.graph().is_empty()
+        || !write.reads().is_empty()
+        || !publications.is_empty()
+    {
         let checked = match check_graph(write.graph(), write.reads(), &publications) {
             Ok(checked) => checked,
             Err(refusal) => return refuse(DurableError::from(refusal)),
         };
+        // The budget admits the commit's own graph and writes; a
+        // candidate's pages are bounded by its staging quota instead.
         if let Some(budget) = write.budget() {
             let admitted = measure_owner_commit(write.graph(), write.domain())
                 .and_then(|measured| budget.admit(&measured));
@@ -722,7 +733,11 @@ fn apply_owner(
                 return refuse(DurableError::from(refusal));
             }
         }
-        if let Err(refusal) = graph::install(tx, &checked)? {
+        let installed = match candidate.as_deref_mut() {
+            None => graph::install(tx, &checked)?.map(drop),
+            Some(candidate) => pages::install_candidate(tx, write.domain(), &checked, candidate)?,
+        };
+        if let Err(refusal) = installed {
             return refuse(DurableError::from(refusal));
         }
     }
@@ -739,7 +754,12 @@ fn apply_owner(
             return refuse(refusal);
         }
     }
-    graph::reclaim(tx, committing.retired)?;
+    if let Some(candidate) = candidate.as_deref()
+        && let Err(refusal) = pages::admit(tx, &candidate.admission)?
+    {
+        return refuse(DurableError::from(refusal));
+    }
+    graph::hold_retired(tx, committing.retired, now)?;
     if let Some(formats) = write.formats() {
         cached_execute(
             tx,
@@ -1398,7 +1418,7 @@ impl DurableStore for SqliteDurableStore {
             tx.epoch().0,
             tx.revision().0,
             self.write(label, move |connection, now| {
-                apply_owner(connection, tx, now, blob_profile)
+                apply_owner(connection, tx, now, blob_profile, None)
             }),
         )
         .await

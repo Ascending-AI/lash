@@ -457,13 +457,14 @@ fn every_envelope_refusal_names_its_cause() {
             limit: 4
         })
     );
-    // A future kind passes the generic check, so a reader can follow its
-    // children, and is refused by an execution decoder.
-    let future = raw(1_000, &[], &[0x00]);
+    // A semantic kind this build does not register passes the generic
+    // check, so a reader can follow its children, and is refused by an
+    // execution decoder.
+    let future = raw(1_999, &[], &[0x00]);
     assert!(check_envelope(&future.bytes, future.id, &limits()).is_ok());
     assert_eq!(
-        logical(&source([future.clone()]), future.id, NodeKind(1_000)),
-        Err(GraphRefusal::UnsupportedKind(1_000))
+        logical(&source([future.clone()]), future.id, NodeKind(1_999)),
+        Err(GraphRefusal::UnsupportedKind(1_999))
     );
 }
 
@@ -893,6 +894,7 @@ fn grammar_vectors() -> serde_json::Value {
     use serde_json::json;
     let registry: Vec<_> = REGISTRY
         .iter()
+        .chain(SEMANTIC_REGISTRY)
         .map(|spec| {
             json!({
                 "kind": spec.kind.0,
@@ -1010,7 +1012,7 @@ fn grammar_vectors() -> serde_json::Value {
             "inline_token_max": INLINE_TOKEN_MAX,
             "leaf_payload_max": LEAF_PAYLOAD_MAX,
             "index_fanout": INDEX_FANOUT,
-            "reserved_future_kinds": [*NodeKind::RESERVED_FUTURE.start(), *NodeKind::RESERVED_FUTURE.end()],
+            "semantic_kinds": [*NodeKind::SEMANTIC.start(), *NodeKind::SEMANTIC.end()],
         },
         "registry": registry,
         "root_sources": roots,

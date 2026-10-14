@@ -46,6 +46,13 @@ pub enum RootSource {
     RevisionConfig = 12,
     /// Configuration named by a retained terminal window.
     TerminalConfig = 13,
+    /// `root_leases.root_ref`: the exact committed root an activation reads
+    /// lazily, while its lease row stands (released, or reaped by a
+    /// retirement step once expired).
+    ReadLease = 14,
+    /// `retirement_holds.root_ref`: a retired root, or the frontier of one,
+    /// that a bounded retirement step has not peeled yet (FIG-6191).
+    RetirementHold = 15,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -59,7 +66,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -73,6 +80,8 @@ impl RootSource {
         Self::RunTerminalWindow,
         Self::RevisionConfig,
         Self::TerminalConfig,
+        Self::ReadLease,
+        Self::RetirementHold,
     ];
 
     /// The `source` column of the root catalog view.
@@ -92,6 +101,8 @@ impl RootSource {
             Self::RunTerminalWindow => "terminal_window",
             Self::RevisionConfig => "revision_config",
             Self::TerminalConfig => "terminal_config",
+            Self::ReadLease => "lease",
+            Self::RetirementHold => "retirement",
         }
     }
 
@@ -141,6 +152,8 @@ impl RootSource {
             Self::RunTerminalWindow => {
                 RootField::of("lash_session_runs", "terminal_window_checkpoint_ref", None)
             }
+            Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
+            Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
         }
     }
 
@@ -159,6 +172,8 @@ impl RootSource {
             Self::ArtifactBridge => ("artifact_refs", "blob_ref", None),
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
             Self::RunTerminalWindow => ("session_runs", "terminal_window_checkpoint_ref", None),
+            Self::ReadLease => ("root_leases", "root_ref", None),
+            Self::RetirementHold => ("retirement_holds", "root_ref", None),
         }
     }
 }

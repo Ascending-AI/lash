@@ -71,5 +71,7 @@ pub use node::{
     MAX_NODE_BYTES, MAX_ROOT_BYTES, NodeEnvelope, NodeId, check_envelope, parse_envelope,
 };
 pub use refusal::{DecodeLimits, GraphReadPolicy, GraphRefusal, KernelRestoreRefusal};
-pub use registry::{BodyShape, KindSpec, NodeKind, OwningLane, REGISTRY, SizeBound};
+pub use registry::{
+    BodyShape, KindSpec, NodeKind, OwningLane, REGISTRY, SEMANTIC_REGISTRY, SizeBound,
+};
 pub use roots::RootSource;

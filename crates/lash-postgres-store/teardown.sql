@@ -142,6 +142,12 @@ DROP TABLE IF EXISTS lash_effect_admissions CASCADE;
 
 DROP TABLE IF EXISTS lash_graph_release_pins CASCADE;
 
+DROP TABLE IF EXISTS lash_root_leases CASCADE;
+
+DROP TABLE IF EXISTS lash_retirement_holds CASCADE;
+
+DROP TABLE IF EXISTS lash_semantic_admissions CASCADE;
+
 DROP VIEW IF EXISTS lash_graph_root_catalog CASCADE;
 
 DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;

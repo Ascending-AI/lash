@@ -78,6 +78,9 @@ pub trait GraphTier: Send + Sync {
     fn store(&self) -> &dyn DurableStore;
     /// Runs the orphan audit to its end: how many blobs it deleted.
     async fn audit(&self) -> Result<u64, GraphRefusal>;
+    /// Runs bounded retirement steps until nothing is held (D-RET): how
+    /// many blobs they deleted.
+    async fn retire(&self) -> Result<u64, DurableError>;
     /// A stored blob's bytes and encoding.
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)>;
     /// A node's stored edges, in digest order.
@@ -212,7 +215,9 @@ async fn hydrate(
 }
 
 /// Commits `writes` with `nodes` staged through the owner's own fenced
-/// transaction: how turn rows publish their roots.
+/// transaction: how turn rows publish their roots. The roots it retires are
+/// then reclaimed by retirement steps run to their end (D-RET), so the laws
+/// observe each commit with its retirement settled.
 async fn owner_commit(
     tier: &dyn GraphTier,
     owner: &Owned,
@@ -225,7 +230,8 @@ async fn owner_commit(
     for write in writes {
         tx.write(write);
     }
-    store.commit(tx, LABEL).await.map(|_| ())
+    store.commit(tx, LABEL).await?;
+    tier.retire().await.map(|_| ())
 }
 
 /// A session actor the law owns, and its fence.
@@ -497,7 +503,7 @@ pub async fn an_owner_refuses_a_second_outcome_for_one_call(tier: &dyn GraphTier
 }
 
 /// PC-ROOTS, R-LIVE and R-DEAD (FIG-5949): every root source retains its
-/// whole graph on its own; the transaction that retires its root peels the
+/// whole graph on its own; the retirement of its root peels the
 /// closure only that root reached, so after every commit exactly the
 /// reachable nodes are stored; and a leaf two owners share outlives either
 /// one. A source whose rows no graph commit writes is retired by a foreign
@@ -596,6 +602,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     let facts = OwnerKey::Cell(owner.session.clone(), run.clone(), CellId::new("roots"));
     let effect = EffectKey(vec![9].into());
     for source in RootSource::ALL {
+        // A lease or a retirement hold is no domain row: the page laws
+        // (`laws::pages`) cover what it keeps and when it goes.
+        if matches!(source, RootSource::ReadLease | RootSource::RetirementHold) {
+            continue;
+        }
         let mut nodes = staging();
         let unique = big(source.catalog_name());
         let root = value(&mut nodes, &[&shared, &unique], &[]);
@@ -686,6 +697,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             | RootSource::ArtifactBridge
             | RootSource::RunTerminalWindow
             | RootSource::TerminalConfig => (None, None),
+            RootSource::ReadLease | RootSource::RetirementHold => continue,
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
         if writes.is_empty() {
