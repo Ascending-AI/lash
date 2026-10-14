@@ -176,8 +176,11 @@ example clients discard prior node status and approval state. The visual editor
 also discards call rows, trace links and the old invocation output, then reports
 that live evidence was lost. The host's applied display state remains intact.
 
-Live completed-node observations expose call IDs to the inspector independently
-of the bounded durable effect summary. Call-only updates do not overwrite a
+Live completed and failed occurrences expose their admitted call IDs to the
+inspector independently of the bounded durable effect summary. When a terminal
+observation omits the call ID, the adapter matches its full occurrence identity
+to the body-start binding retained in the existing overlay. Missing bindings
+remain unavailable. Call-only updates do not overwrite a
 node's aggregate status, and the visual editor merges repeated live/durable
 updates by call ID. This improves continuous live inspection; it does not make
 the retained history complete after a gap or restart. The runtime's existing
