@@ -1134,9 +1134,8 @@ class RealRepository(unittest.TestCase):
         cls.view = gate.WorktreeView(gate.ROOT)
         registry = cls.view.content(gate.REGISTRY)
         assert registry is not None
-        from discover_version_surfaces import surfaces as discover_surfaces
         cls.surfaces = {
-            surface.key: surface for surface in discover_surfaces(cls.view)
+            surface.key: surface for surface in gate.discovered_surfaces(cls.view)
         }
 
     def declaration(self, key: str) -> gate.Declaration:

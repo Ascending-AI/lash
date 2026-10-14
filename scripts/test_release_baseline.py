@@ -21,6 +21,52 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseBaselineTests(unittest.TestCase):
+    def test_version_inspection_preserves_source_offsets_and_policy_scopes(self):
+        from discover_version_surfaces import (
+            _inspect_file, production_text, rust_item_end, rust_tokens, without_comments,
+        )
+
+        source = '''
+/* outer /* nested */ comment */
+/// version_surface = "coexist"
+#[cfg(not(test))]
+const WRITER_VERSION: &str = r#"lash.writer/v1"#;
+#[cfg(all(test, feature = "demo"))]
+mod tests {
+    const OLD_VERSION: u32 = 9;
+    const DELIMITERS: &[&str] = &["}", "/*", ";"];
+}
+const BRACE: char = '}';
+const QUOTE: u8 = b'"';
+const SUPPORT_VERSION: u8 = 1;
+trait Required {
+    const REQUIRED_VERSION: u32;
+}
+'''
+        comments = without_comments(source)
+        masked = production_text(source)
+        for text in (comments, masked):
+            self.assertEqual(len(text), len(source))
+            self.assertEqual(text.index("const WRITER_VERSION"), source.index("const WRITER_VERSION"))
+        self.assertIn('r#"lash.writer/v1"#', masked)
+        self.assertNotIn("OLD_VERSION", masked)
+        module = source.index("mod tests")
+        self.assertEqual(source[rust_item_end(source, module) - 1], "}")
+        self.assertIn(("literal", "lash.writer/v1"), rust_tokens(source))
+        self.assertIn(("char", "b'\"'"), rust_tokens(source))
+
+        for path, release_refusal in (("crates/demo/src/lib.rs", True),
+                                      ("crates/lash-sim/src/lib.rs", False),
+                                      ("examples/demo/src/lib.rs", True)):
+            with self.subTest(path=path):
+                rows, problems, constants = _inspect_file(path, source, frozenset())
+                self.assertEqual([row["constant"] for row in rows], ["WRITER_VERSION"])
+                self.assertEqual(constants, {f"{path}:WRITER_VERSION", f"{path}:SUPPORT_VERSION",
+                                             f"{path}:REQUIRED_VERSION"})
+                self.assertEqual(bool(problems), release_refusal)
+                if problems:
+                    self.assertIn("SUPPORT_VERSION is a version-shaped constant", problems[0])
+
     def test_discovery_lexer_preserves_literals_and_removes_nested_comments(self):
         source = '''const QUOTE: u8 = b'"';
 const BRACE: char = '{';

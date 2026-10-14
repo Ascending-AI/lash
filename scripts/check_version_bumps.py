@@ -92,7 +92,6 @@ from dataclasses import dataclass
 import fnmatch
 from functools import lru_cache
 import hashlib
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -100,9 +99,16 @@ import sys
 import tomllib
 from typing import Iterable
 
+from discover_version_surfaces import (
+    REGISTRY, RUST_SOURCE_PATTERNS, SourceError as CheckError, WorktreeSources,
+    Token, _is_test_source, _rust_group_end, _rust_top_level_items, _test_only_cfg,
+    _rust_trivia_end, discover, rust_item_end,
+    rust_item_start_with_attributes, rust_outer_attribute_ranges, rust_tokens,
+    strip_rust_trivia, test_only_module_ranges,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = "scripts/versioned-surfaces.toml"
 MARKER = "version_guard"
 GUARD_KINDS = ("items", "shapes", "impls", "file", "roots")
 # FIG-4494 flips this at the 1.0 cut for every caller, including CI.
@@ -112,10 +118,6 @@ STRICT_VERSION_BUMPS = False
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
 UPCASTER_TABLE = "RECORD_UPCASTERS"
 SYNTHETIC_NEXT_CFG = '#[cfg(feature="synthetic-next")]'
-
-
-class CheckError(RuntimeError):
-    """Configuration, repository, or source-shape error."""
 
 
 # A non-unique `CREATE INDEX IF NOT EXISTS ... ;` statement, whole.
@@ -280,437 +282,12 @@ class RevisionView(TreeView):
             )
 
 
-class WorktreeView(TreeView):
-    """The files on disk, so the registry check reads what a commit would."""
-
-    label = "working tree"
+class WorktreeView(WorktreeSources, TreeView):
+    """Filesystem source view with the gate's projection and closure caches."""
 
     def __init__(self, repo: Path) -> None:
-        super().__init__()
-        self.repo = repo
-        self._contents: dict[str, str | None] = {}
-        self._listings: dict[str, tuple[str, ...]] = {}
-
-    def _listing(self, prefix: str) -> tuple[str, ...]:
-        """Every file under `prefix`, build output and vendored trees left out."""
-        if prefix not in self._listings:
-            found: list[str] = []
-            base = self.repo / prefix
-            for directory, names, files in os.walk(base):
-                names[:] = [
-                    name
-                    for name in names
-                    if name not in {"target", "node_modules"} and not name.startswith(".")
-                ]
-                relative = os.path.relpath(directory, self.repo).replace(os.sep, "/")
-                stem = "" if relative == "." else relative + "/"
-                found.extend(stem + name for name in files)
-            self._listings[prefix] = tuple(found)
-        return self._listings[prefix]
-
-    def matching_paths(self, patterns: Iterable[str]) -> tuple[str, ...]:
-        matches: set[str] = set()
-        for pattern in patterns:
-            wildcard = re.search(r"[*?\[]", pattern)
-            if wildcard is None:
-                if (self.repo / pattern).is_file():
-                    matches.add(pattern)
-                continue
-            prefix = pattern[: wildcard.start()].rpartition("/")[0]
-            if not (self.repo / prefix).is_dir():
-                continue
-            matches.update(
-                relative
-                for relative in self._listing(prefix)
-                if fnmatch.fnmatchcase(relative, pattern)
-            )
-        return tuple(sorted(matches))
-
-    def content(self, path: str) -> str | None:
-        if path not in self._contents:
-            try:
-                data = (self.repo / path).read_bytes()
-            except OSError:
-                self._contents[path] = None
-            else:
-                self._contents[path] = data.decode("utf-8", errors="surrogateescape")
-        return self._contents[path]
-
-
-def _raw_string_start(text: str, index: int) -> tuple[int, str] | None:
-    prefix = index
-    if text.startswith("br", index):
-        prefix += 1
-    if not text.startswith("r", prefix):
-        return None
-    cursor = prefix + 1
-    while cursor < len(text) and text[cursor] == "#":
-        cursor += 1
-    if cursor >= len(text) or text[cursor] != '"':
-        return None
-    hashes = text[prefix + 1 : cursor]
-    return cursor + 1, '"' + hashes
-
-
-def _char_literal_end(text: str, index: int) -> int | None:
-    quote = index + 1 if text.startswith("b'", index) else index
-    if quote >= len(text) or text[quote] != "'" or quote + 1 >= len(text):
-        return None
-    cursor = quote + 1
-    if text[cursor] == "\\":
-        cursor += 2
-        while cursor < len(text):
-            if text[cursor] == "'":
-                return cursor + 1
-            cursor += 2 if text[cursor] == "\\" else 1
-        return None
-    if cursor + 1 < len(text) and text[cursor + 1] == "'":
-        return cursor + 2
-    return None
-
-
-def rust_item_end(text: str, start: int) -> int:
-    """Return the end of one Rust item, ignoring delimiters inside literals.
-
-    All three delimiter kinds are tracked, not braces alone, because an item's
-    terminator is only its terminator at the top level of the item. A brace
-    inside a bracket is a struct literal in an initializer -- the registry
-    constant ``const XS: &[Builtin] = &[Builtin { .. }, ..];`` is the shape that
-    matters here -- and a semicolon inside a bracket is an array length. Reading
-    either as the end truncates the item after its first element, which reads as
-    a guard over a table while covering only its head: appending to the table
-    then changes nothing the guard can see.
-    """
-    index = start
-    brace_depth = 0
-    bracket_depth = 0
-    paren_depth = 0
-    saw_brace = False
-    block_comment_depth = 0
-    state = "normal"
-    raw_closer = ""
-    while index < len(text):
-        char = text[index]
-        following = text[index + 1] if index + 1 < len(text) else ""
-        if state == "line_comment":
-            if char == "\n":
-                state = "normal"
-            index += 1
-            continue
-        if state == "block_comment":
-            if char == "/" and following == "*":
-                block_comment_depth += 1
-                index += 2
-            elif char == "*" and following == "/":
-                block_comment_depth -= 1
-                index += 2
-                if block_comment_depth == 0:
-                    state = "normal"
-            else:
-                index += 1
-            continue
-        if state == "string":
-            if char == "\\":
-                index += 2
-            else:
-                index += 1
-                if char == '"':
-                    state = "normal"
-            continue
-        if state == "char":
-            if char == "\\":
-                index += 2
-            else:
-                index += 1
-                if char == "'":
-                    state = "normal"
-            continue
-        if state == "raw":
-            closing = text.find(raw_closer, index)
-            if closing < 0:
-                raise CheckError(
-                    "unterminated Rust raw string while extracting guarded item"
-                )
-            index = closing + len(raw_closer)
-            state = "normal"
-            continue
-
-        if char == "/" and following == "/":
-            state = "line_comment"
-            index += 2
-        elif char == "/" and following == "*":
-            state = "block_comment"
-            block_comment_depth = 1
-            index += 2
-        elif raw := _raw_string_start(text, index):
-            index, raw_closer = raw
-            state = "raw"
-        elif char == '"' or (char == "b" and following == '"'):
-            state = "string"
-            index += 2 if char == "b" else 1
-        elif char_end := _char_literal_end(text, index):
-            index = char_end
-        elif char == "{":
-            if brace_depth == 0 and bracket_depth == 0 and paren_depth == 0:
-                saw_brace = True
-            brace_depth += 1
-            index += 1
-        elif char == "}":
-            brace_depth -= 1
-            index += 1
-            if saw_brace and brace_depth == 0:
-                return index
-        elif char == "[":
-            bracket_depth += 1
-            index += 1
-        elif char == "]":
-            bracket_depth -= 1
-            index += 1
-        elif char == "(":
-            paren_depth += 1
-            index += 1
-        elif char == ")":
-            paren_depth -= 1
-            index += 1
-        elif char == ";" and not brace_depth and not bracket_depth and not paren_depth:
-            return index + 1
-        else:
-            index += 1
-    raise CheckError("unterminated Rust item while extracting guarded shape")
-
-
-@lru_cache(maxsize=None)
-def strip_rust_trivia(text: str) -> str:
-    """Remove Rust whitespace/comments while preserving literals and tokens."""
-    output: list[str] = []
-    index = 0
-    block_depth = 0
-    while index < len(text):
-        char = text[index]
-        following = text[index + 1] if index + 1 < len(text) else ""
-        if char.isspace():
-            index += 1
-        elif char == "/" and following == "/":
-            newline = text.find("\n", index + 2)
-            index = len(text) if newline < 0 else newline + 1
-        elif char == "/" and following == "*":
-            index += 2
-            block_depth = 1
-            while index < len(text) and block_depth:
-                if text.startswith("/*", index):
-                    block_depth += 1
-                    index += 2
-                elif text.startswith("*/", index):
-                    block_depth -= 1
-                    index += 2
-                else:
-                    index += 1
-        elif raw := _raw_string_start(text, index):
-            content_start, closer = raw
-            closing = text.find(closer, content_start)
-            if closing < 0:
-                raise CheckError(
-                    "unterminated Rust raw string while normalizing guarded item"
-                )
-            end = closing + len(closer)
-            output.append(text[index:end])
-            index = end
-        elif char == '"' or (char == "b" and following == '"'):
-            start = index
-            index += 2 if char == "b" else 1
-            while index < len(text):
-                if text[index] == "\\":
-                    index += 2
-                else:
-                    closing = text[index] == '"'
-                    index += 1
-                    if closing:
-                        break
-            output.append(text[start:index])
-        elif char_end := _char_literal_end(text, index):
-            output.append(text[index:char_end])
-            index = char_end
-        else:
-            output.append(char)
-            index += 1
-    return "".join(output)
-
-
-def rust_attribute_end(text: str, start: int) -> int:
-    """Return the end of one balanced Rust outer attribute."""
-    if not text.startswith("#[", start):
-        raise CheckError("Rust attribute extraction did not start at #[")
-    index = start + 2
-    bracket_depth = 1
-    block_comment_depth = 0
-    state = "normal"
-    raw_closer = ""
-    while index < len(text):
-        char = text[index]
-        following = text[index + 1] if index + 1 < len(text) else ""
-        if state == "line_comment":
-            if char == "\n":
-                state = "normal"
-            index += 1
-            continue
-        if state == "block_comment":
-            if char == "/" and following == "*":
-                block_comment_depth += 1
-                index += 2
-            elif char == "*" and following == "/":
-                block_comment_depth -= 1
-                index += 2
-                if block_comment_depth == 0:
-                    state = "normal"
-            else:
-                index += 1
-            continue
-        if state == "string":
-            if char == "\\":
-                index += 2
-            else:
-                index += 1
-                if char == '"':
-                    state = "normal"
-            continue
-        if state == "raw":
-            closing = text.find(raw_closer, index)
-            if closing < 0:
-                raise CheckError(
-                    "unterminated Rust raw string while extracting attribute"
-                )
-            index = closing + len(raw_closer)
-            state = "normal"
-            continue
-
-        if char == "/" and following == "/":
-            state = "line_comment"
-            index += 2
-        elif char == "/" and following == "*":
-            state = "block_comment"
-            block_comment_depth = 1
-            index += 2
-        elif raw := _raw_string_start(text, index):
-            index, raw_closer = raw
-            state = "raw"
-        elif char == '"' or (char == "b" and following == '"'):
-            state = "string"
-            index += 2 if char == "b" else 1
-        elif char_end := _char_literal_end(text, index):
-            index = char_end
-        elif char == "[":
-            bracket_depth += 1
-            index += 1
-        elif char == "]":
-            bracket_depth -= 1
-            index += 1
-            if bracket_depth == 0:
-                return index
-        else:
-            index += 1
-    raise CheckError("unterminated Rust outer attribute")
-
-
-def _raw_outer_attribute_ranges(text: str, start: int) -> tuple[tuple[int, int], ...]:
-    """Conservatively recover attributes after malformed Rust trivia."""
-    ranges: list[tuple[int, int]] = []
-    cursor = start
-    while True:
-        attribute_start = text.find("#[", cursor)
-        if attribute_start < 0:
-            return tuple(ranges)
-        try:
-            attribute_end = rust_attribute_end(text, attribute_start)
-        except CheckError:
-            cursor = attribute_start + 2
-        else:
-            ranges.append((attribute_start, attribute_end))
-            cursor = attribute_end
-
-
-_SCAN_CANDIDATE = re.compile(r"""#\[|/[/*]|["']|b["']|b?r[#"]""")
-
-
-@lru_cache(maxsize=None)
-def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
-    """Find outer attributes while ignoring attribute-looking text in trivia."""
-    ranges: list[tuple[int, int]] = []
-    index = 0
-    while index < len(text):
-        following = text[index + 1] if index + 1 < len(text) else ""
-        if text.startswith("#[", index):
-            end = rust_attribute_end(text, index)
-            ranges.append((index, end))
-            index = end
-        elif text[index] == "/" and following == "/":
-            newline = text.find("\n", index + 2)
-            index = len(text) if newline < 0 else newline + 1
-        elif text[index] == "/" and following == "*":
-            malformed_start = index + 2
-            index += 2
-            block_depth = 1
-            while index < len(text) and block_depth:
-                if text.startswith("/*", index):
-                    block_depth += 1
-                    index += 2
-                elif text.startswith("*/", index):
-                    block_depth -= 1
-                    index += 2
-                else:
-                    index += 1
-            if block_depth:
-                ranges.extend(_raw_outer_attribute_ranges(text, malformed_start))
-                return tuple(ranges)
-        elif raw := _raw_string_start(text, index):
-            content_start, closer = raw
-            closing = text.find(closer, content_start)
-            if closing < 0:
-                ranges.extend(_raw_outer_attribute_ranges(text, content_start))
-                return tuple(ranges)
-            index = closing + len(closer)
-        elif text[index] == '"' or (text[index] == "b" and following == '"'):
-            malformed_start = index + (2 if text[index] == "b" else 1)
-            index += 2 if text[index] == "b" else 1
-            closed = False
-            while index < len(text):
-                if text[index] == "\\":
-                    index += 2
-                else:
-                    closing = text[index] == '"'
-                    index += 1
-                    if closing:
-                        closed = True
-                        break
-            if not closed:
-                ranges.extend(_raw_outer_attribute_ranges(text, malformed_start))
-                return tuple(ranges)
-        elif char_end := _char_literal_end(text, index):
-            index = char_end
-        else:
-            # Nothing starts here; skip to the next character that could open
-            # an attribute, a comment or a literal.
-            candidate = _SCAN_CANDIDATE.search(text, index + 1)
-            index = len(text) if candidate is None else candidate.start()
-    return tuple(ranges)
-
-
-def rust_item_start_with_attributes(
-    text: str,
-    declaration_start: int,
-    attribute_ranges: tuple[tuple[int, int], ...] | None = None,
-) -> int:
-    """Walk back across complete attributes and interleaved Rust comments."""
-    line_start = text.rfind("\n", 0, declaration_start) + 1
-    cursor = line_start
-    ranges = attribute_ranges or rust_outer_attribute_ranges(text[:declaration_start])
-    eligible = [attribute for attribute in ranges if attribute[1] <= cursor]
-    while eligible:
-        start, end = eligible[-1]
-        if strip_rust_trivia(text[end:cursor]):
-            break
-        cursor = start
-        eligible.pop()
-    return cursor
+        TreeView.__init__(self)
+        WorktreeSources.__init__(self, repo)
 
 
 NON_WIRE_DERIVES = {
@@ -726,111 +303,6 @@ NON_WIRE_DERIVES = {
     "schemars::JsonSchema",
     "thiserror::Error",
 }
-
-
-def _rust_group_end(text: str, open_index: int) -> int | None:
-    """Return the exclusive end of a token-aware parenthesized Rust group."""
-    if open_index >= len(text) or text[open_index] != "(":
-        return None
-    index = open_index + 1
-    depth = 1
-    while index < len(text):
-        following = text[index + 1] if index + 1 < len(text) else ""
-        if text.startswith("//", index):
-            newline = text.find("\n", index + 2)
-            index = len(text) if newline < 0 else newline + 1
-        elif text.startswith("/*", index):
-            skipped = _rust_trivia_end(text, index)
-            if skipped is None:
-                return None
-            index = skipped
-        elif raw := _raw_string_start(text, index):
-            content_start, closer = raw
-            closing = text.find(closer, content_start)
-            if closing < 0:
-                return None
-            index = closing + len(closer)
-        elif text[index] == '"' or (text[index] == "b" and following == '"'):
-            index += 2 if text[index] == "b" else 1
-            while index < len(text):
-                if text[index] == "\\":
-                    index += 2
-                else:
-                    closing = text[index] == '"'
-                    index += 1
-                    if closing:
-                        break
-            else:
-                return None
-        elif char_end := _char_literal_end(text, index):
-            index = char_end
-        elif text[index] == "(":
-            depth += 1
-            index += 1
-        elif text[index] == ")":
-            depth -= 1
-            index += 1
-            if depth == 0:
-                return index
-        else:
-            index += 1
-    return None
-
-
-def _rust_top_level_items(text: str, start: int, end: int) -> tuple[tuple[int, int], ...] | None:
-    """Split a Rust token range on top-level commas."""
-    items: list[tuple[int, int]] = []
-    item_start = start
-    index = start
-    delimiters: list[str] = []
-    pairs = {"(": ")", "[": "]", "{": "}"}
-    while index < end:
-        following = text[index + 1] if index + 1 < end else ""
-        if text.startswith("//", index):
-            newline = text.find("\n", index + 2, end)
-            index = end if newline < 0 else newline + 1
-        elif text.startswith("/*", index):
-            skipped = _rust_trivia_end(text[:end], index)
-            if skipped is None:
-                return None
-            index = skipped
-        elif raw := _raw_string_start(text, index):
-            content_start, closer = raw
-            closing = text.find(closer, content_start, end)
-            if closing < 0:
-                return None
-            index = closing + len(closer)
-        elif text[index] == '"' or (text[index] == "b" and following == '"'):
-            index += 2 if text[index] == "b" else 1
-            while index < end:
-                if text[index] == "\\":
-                    index += 2
-                else:
-                    closing = text[index] == '"'
-                    index += 1
-                    if closing:
-                        break
-            else:
-                return None
-        elif char_end := _char_literal_end(text, index):
-            index = char_end
-        elif text[index] in pairs:
-            delimiters.append(pairs[text[index]])
-            index += 1
-        elif text[index] in ")]}":
-            if not delimiters or delimiters.pop() != text[index]:
-                return None
-            index += 1
-        elif text[index] == "," and not delimiters:
-            items.append((item_start, index))
-            item_start = index + 1
-            index += 1
-        else:
-            index += 1
-    if delimiters:
-        return None
-    items.append((item_start, end))
-    return tuple(items)
 
 
 def _derive_contents(text: str, start: int, end: int) -> tuple[int, int] | None:
@@ -922,168 +394,6 @@ RUST_SERDE_IMPL = re.compile(
     r"((?:serde::)?(?:Serialize|Deserialize)(?:[ \t]*<[^>{}]*>)?)"
     r"[ \t]+for[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
-RUST_INLINE_MODULE = re.compile(
-    r"(?:pub(?:\s*\(\s*(?:crate|self|super|in\s+(?:crate|self|super)"
-    r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*\))?\s+)?"
-    r"mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
-    re.ASCII,
-)
-
-
-_CFG_ASCII_SPACE = " \t\r\n"
-_CFG_SIMPLE_STRING = re.compile(r'"[A-Za-z0-9_.-]*"')
-
-
-def _rust_space_end(text: str, start: int) -> int:
-    cursor = start
-    while cursor < len(text) and text[cursor] in _CFG_ASCII_SPACE:
-        cursor += 1
-    return cursor
-
-
-def _rust_string_end(text: str, start: int) -> int | None:
-    """Return one simple cfg string's end, refusing anything with escapes.
-
-    Proving a predicate test-only never requires interpreting Rust escape
-    semantics, so instead of validating escapes this accepts only the plain
-    identifier-like strings real cfg values use. Any other string leaves the
-    predicate unproven and the region swept.
-    """
-    matched = _CFG_SIMPLE_STRING.match(text, start)
-    return None if matched is None else matched.end()
-
-
-def _cfg_predicate(text: str, start: int = 0) -> tuple[int, bool] | None:
-    """Strictly parse enough cfg grammar to prove a predicate requires `test`."""
-    cursor = _rust_space_end(text, start)
-    identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[cursor:])
-    if identifier is None:
-        return None
-    name = identifier.group(0)
-    cursor = _rust_space_end(text, cursor + len(name))
-    if cursor == len(text) or text[cursor] in ",)":
-        return cursor, name == "test"
-    if text[cursor] == "=":
-        cursor = _rust_space_end(text, cursor + 1)
-        string_end = _rust_string_end(text, cursor)
-        if string_end is None:
-            return None
-        return _rust_space_end(text, string_end), False
-    if text[cursor] != "(" or name not in {"all", "any", "not"}:
-        return None
-
-    cursor = _rust_space_end(text, cursor + 1)
-    children: list[bool] = []
-    while cursor < len(text) and text[cursor] != ")":
-        child = _cfg_predicate(text, cursor)
-        if child is None:
-            return None
-        cursor, test_only = child
-        children.append(test_only)
-        if cursor < len(text) and text[cursor] == ",":
-            cursor = _rust_space_end(text, cursor + 1)
-        elif cursor >= len(text) or text[cursor] != ")":
-            return None
-    if cursor >= len(text) or text[cursor] != ")":
-        return None
-    if name == "not" and len(children) != 1:
-        return None
-    if name == "all":
-        test_only = any(children)
-    elif name == "any":
-        test_only = bool(children) and all(children)
-    else:
-        test_only = False
-    return cursor + 1, test_only
-
-
-def _test_only_cfg(attribute: str) -> bool:
-    cursor = _rust_space_end(attribute, 0)
-    if cursor >= len(attribute) or attribute[cursor] != "#":
-        return False
-    cursor = _rust_space_end(attribute, cursor + 1)
-    if cursor >= len(attribute) or attribute[cursor] != "[":
-        return False
-    cursor = _rust_space_end(attribute, cursor + 1)
-    cfg = re.match(r"cfg\b", attribute[cursor:])
-    if cfg is None:
-        return False
-    cursor = _rust_space_end(attribute, cursor + len(cfg.group(0)))
-    if cursor >= len(attribute) or attribute[cursor] != "(":
-        return False
-    parsed = _cfg_predicate(attribute, cursor + 1)
-    if parsed is None:
-        return False
-    cursor, test_only = parsed
-    if cursor >= len(attribute) or attribute[cursor] != ")":
-        return False
-    cursor = _rust_space_end(attribute, cursor + 1)
-    if cursor >= len(attribute) or attribute[cursor] != "]":
-        return False
-    cursor = _rust_space_end(attribute, cursor + 1)
-    return cursor == len(attribute) and test_only
-
-
-def _rust_trivia_end(text: str, start: int) -> int | None:
-    """Skip whitespace and comments, returning None for malformed trivia."""
-    cursor = start
-    while cursor < len(text):
-        if text[cursor] in _CFG_ASCII_SPACE:
-            cursor += 1
-        elif text.startswith("//", cursor):
-            newline = text.find("\n", cursor + 2)
-            cursor = len(text) if newline < 0 else newline + 1
-        elif text.startswith("/*", cursor):
-            cursor += 2
-            depth = 1
-            while cursor < len(text) and depth:
-                if text.startswith("/*", cursor):
-                    depth += 1
-                    cursor += 2
-                elif text.startswith("*/", cursor):
-                    depth -= 1
-                    cursor += 2
-                else:
-                    cursor += 1
-            if depth:
-                return None
-        else:
-            break
-    return cursor
-
-
-def test_only_module_ranges(
-    text: str, attribute_ranges: tuple[tuple[int, int], ...]
-) -> tuple[tuple[int, int], ...]:
-    """Return bodies of inline modules that are certainly gated on `test`."""
-    ranges: list[tuple[int, int]] = []
-    attributes_by_start = {start: end for start, end in attribute_ranges}
-    for start, end in attribute_ranges:
-        if not _test_only_cfg(text[start:end]):
-            continue
-        cursor = end
-        while True:
-            cursor = _rust_trivia_end(text, cursor)
-            if cursor is None:
-                break
-            next_attribute = attributes_by_start.get(cursor)
-            if next_attribute is None:
-                break
-            cursor = next_attribute
-        if cursor is None:
-            continue
-        module = RUST_INLINE_MODULE.match(text, cursor)
-        if module is None:
-            continue
-        try:
-            item_end = rust_item_end(text, cursor)
-        except CheckError:
-            continue
-        if text[item_end - 1] == "}":
-            ranges.append((module.end(), item_end - 1))
-    return tuple(ranges)
-
-
 def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
     """Every production declaration called one of `names`.
 
@@ -1551,8 +861,6 @@ RUST_MODULE_FILE = re.compile(
 )
 RUST_MACRO_DEFINITION = re.compile(r"(?m)^[ \t]*macro_rules![ \t]+([A-Za-z_][A-Za-z0-9_]*)\b")
 RUST_MACRO_CALL = re.compile(r"(?m)^([ \t]*)([A-Za-z_][A-Za-z0-9_]*)![ \t]*[({\[]")
-RUST_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-RUST_NUMBER = re.compile(r"[0-9][0-9A-Za-z_]*(?:\.[0-9][0-9A-Za-z_]*)?")
 
 # Names every Rust file has without importing them.
 RUST_PRELUDE_TYPES = frozenset(
@@ -1561,60 +869,8 @@ RUST_PRELUDE_TYPES = frozenset(
 )
 RUST_STANDARD_CRATES = frozenset({"std", "core", "alloc"})
 RUST_TYPE_KEYWORDS = frozenset({"mut", "const", "unsafe", "extern", "fn", "for", "Self", "as"})
-RUST_SOURCE_PATTERNS = ("crates/*.rs", "examples/*.rs")
 CARGO_MANIFEST_PATTERNS = ("Cargo.toml", "crates/*Cargo.toml", "examples/*Cargo.toml", "runbooks/*Cargo.toml")
 MAX_REPORTED_PROBLEMS = 12
-
-Token = tuple[str, str]
-
-
-@lru_cache(maxsize=None)
-def rust_tokens(text: str) -> tuple[Token, ...]:
-    """Split Rust source into identifiers, lifetimes, literals and punctuation."""
-    tokens: list[Token] = []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if char.isspace():
-            index += 1
-        elif text.startswith("//", index) or text.startswith("/*", index):
-            skipped = _rust_trivia_end(text, index)
-            if skipped is None:
-                raise CheckError("unterminated Rust comment while reading a guarded shape")
-            index = skipped
-        elif raw := _raw_string_start(text, index):
-            content_start, closer = raw
-            closing = text.find(closer, content_start)
-            if closing < 0:
-                raise CheckError("unterminated Rust raw string while reading a guarded shape")
-            tokens.append(("literal", text[content_start:closing]))
-            index = closing + len(closer)
-        elif char == '"' or text.startswith('b"', index):
-            start = index = index + (2 if char == "b" else 1)
-            while index < len(text) and text[index] != '"':
-                index += 2 if text[index] == "\\" else 1
-            tokens.append(("literal", text[start:index]))
-            index += 1
-        elif char_end := _char_literal_end(text, index):
-            tokens.append(("char", text[index:char_end]))
-            index = char_end
-        elif char == "'" and (name := RUST_IDENTIFIER.match(text, index + 1)):
-            tokens.append(("lifetime", name.group(0)))
-            index = name.end()
-        elif name := RUST_IDENTIFIER.match(text, index):
-            tokens.append(("ident", name.group(0)))
-            index = name.end()
-        elif number := RUST_NUMBER.match(text, index):
-            tokens.append(("number", number.group(0)))
-            index = number.end()
-        elif text.startswith(("::", "->", "=>"), index):
-            tokens.append(("punct", text[index : index + 2]))
-            index += 2
-        else:
-            tokens.append(("punct", char))
-            index += 1
-    return tuple(tokens)
-
 
 @dataclass(frozen=True)
 class TypeRef:
@@ -2063,16 +1319,6 @@ class _Unresolved(Exception):
 # What resolving a standard-library or prelude name returns: nothing to
 # follow, and, unlike an empty result, an answer.
 _STANDARD: list[Shape] = []
-
-
-def _is_test_source(path: str) -> bool:
-    parts = path.split("/")
-    return (
-        "tests" in parts[:-1]
-        or "benches" in parts[:-1]
-        or parts[-1] in {"tests.rs", "test.rs"}
-        or parts[-1].endswith("_tests.rs")
-    )
 
 
 class Reachability:
@@ -3287,6 +2533,13 @@ def check_surfaces(
     )
 
 
+def discovered_surfaces(view: TreeView, *, enforce: bool = True) -> tuple[Surface, ...]:
+    if view.content(REGISTRY) is None:
+        raise CheckError(f"{view.label}: cannot read {REGISTRY}")
+    rows, _ = discover(view, enforce=enforce)
+    return tuple(surface_of(row, row["constant"]) for row in rows)
+
+
 def check_views(
     base_view: TreeView,
     head_view: TreeView,
@@ -3299,15 +2552,14 @@ def check_views(
     head_registry = head_view.content(REGISTRY)
     if head_registry is None:
         raise CheckError(f"{head_view.label}: cannot read {REGISTRY}")
-    from discover_version_surfaces import surfaces as discover_surfaces
-    surfaces = discover_surfaces(head_view)
+    surfaces = discovered_surfaces(head_view)
     base_registry = base_view.content(REGISTRY)
     base_surfaces = (
         {}
         if base_registry is None
         else {
             surface.key: surface
-            for surface in discover_surfaces(base_view, enforce=False)
+            for surface in discovered_surfaces(base_view, enforce=False)
         }
     )
     head_keys = {surface.key for surface in surfaces}
@@ -3546,8 +2798,7 @@ def guarded_path_patterns(repo: Path) -> frozenset[str]:
     if registry is None:
         raise CheckError(f"cannot read {REGISTRY}")
     patterns = {REGISTRY, UPCASTER_REGISTRY}
-    from discover_version_surfaces import surfaces as discover_surfaces
-    for surface in discover_surfaces(view):
+    for surface in discovered_surfaces(view):
         patterns.add(surface.constant_path)
         declaration = _declaration(view, surface)
         if declaration is not None:

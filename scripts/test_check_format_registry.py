@@ -545,17 +545,17 @@ reason = "key of a prompt section, not a stored-format version"
 
 class RealRepositoryTests(unittest.TestCase):
     def test_rlm_prompt_section_keys_are_not_stored_format_versions(self) -> None:
-        from discover_version_surfaces import _discover_file
+        from discover_version_surfaces import _inspect_file
 
         path = "crates/lash-protocol-rlm/src/prompt_sections.rs"
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         source = (gate.ROOT / path).read_text(encoding="utf-8")
-        rows, problems = _discover_file(path, source, frozenset(registry.unregistered))
+        rows, problems, _ = _inspect_file(path, source, frozenset(registry.unregistered))
         self.assertEqual(rows, ())
         self.assertEqual(problems, ())
 
     def test_prompt_section_exclusion_does_not_hide_other_format_constants(self) -> None:
-        from discover_version_surfaces import _discover_file
+        from discover_version_surfaces import _inspect_file
 
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         for path, constant in (
@@ -563,7 +563,7 @@ class RealRepositoryTests(unittest.TestCase):
             ("crates/lash-protocol-rlm/src/snapshot.rs", "FINAL_ANSWER_FORMAT"),
         ):
             with self.subTest(path=path, constant=constant):
-                _, problems = _discover_file(
+                _, problems, _ = _inspect_file(
                     path, f"pub const {constant}: u8 = 1;\n",
                     frozenset(registry.unregistered),
                 )

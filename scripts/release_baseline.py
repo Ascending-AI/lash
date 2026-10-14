@@ -18,40 +18,12 @@ import re
 import sys
 import tomllib
 
+from discover_version_surfaces import (
+    SourceError as BaselineError, WorktreeSources, definitions, discover, without_comments,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = Path("scripts/versioned-surfaces.toml")
-CONST = re.compile(
-    r"^[ \t]*(?P<attrs>(?:#\[[^\]]*\]\s*)*)"
-    r"(?:pub(?:\([^)]*\))?\s+)?const\s+(?P<name>[A-Z][A-Z0-9_]*)"
-    r"\s*:\s*[^=;]+?=\s*(?P<value>[^;]+);", re.MULTILINE,
-)
-LEXEME = re.compile(r'r(?P<hashes>\#*)".*?"(?P=hashes)|"(?:\\.|[^"\\])*"|//[^\n]*|/\*', re.DOTALL)
-
-
-class BaselineError(Exception):
-    """The source or declaration cannot establish the baseline."""
-
-
-def without_comments(text: str) -> str:
-    # Preserve offsets for the reset planner, including comments between attrs.
-    result = list(text)
-    at = 0
-    while match := LEXEME.search(text, at):
-        at = match.end()
-        if match.group().startswith("/*"):
-            depth = 1
-            while depth:
-                token = re.search(r"/\*|\*/", text[at:])
-                if token is None:
-                    raise BaselineError("unterminated Rust block comment")
-                at += token.end()
-                depth += 1 if token.group() == "/*" else -1
-        elif not match.group().startswith("//"):
-            continue
-        for index in range(match.start(), at):
-            if result[index] != "\n":
-                result[index] = " "
-    return "".join(result)
 
 
 def enabled(attrs: str, synthetic: bool) -> bool:
@@ -72,10 +44,6 @@ def enabled(attrs: str, synthetic: bool) -> bool:
     if "cfg_attr" in attrs:
         raise BaselineError("cfg_attr on a version constant is unsupported")
     return True
-
-
-def definitions(text: str):
-    return list(CONST.finditer(without_comments(text)))
 
 
 def typed_version(expression: str):
@@ -131,12 +99,7 @@ def resolve(text: str, name: str, synthetic: bool):
 
 
 def surfaces(repo: Path):
-    import check_version_bumps as gate
-    from discover_version_surfaces import discover
-    try:
-        discovered, _ = discover(gate.WorktreeView(repo))
-    except gate.CheckError as error:
-        raise BaselineError(str(error)) from error
+    discovered, _ = discover(WorktreeSources(repo))
     return discovered
 
 

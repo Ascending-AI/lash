@@ -65,13 +65,6 @@ MANIFEST = Path("crates/lash/src/formats.rs")
 # surface claims such a row as ``format_manifest = "engine:<id>"``. No engine
 # registers one until the durable engine does.
 ENGINE_REGISTRIES: tuple[Path, ...] = ()
-SWEPT_ROOTS = ("crates", "examples")
-
-VERSION_CONSTANT = re.compile(
-    r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?const[ \t]+"
-    r"(?P<name>[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH|_FORMAT))[ \t]*:",
-    re.MULTILINE,
-)
 MANIFEST_ROW = re.compile(
     r"format:\s*DurableFormat::(?P<variant>\w+),\s*"
     r"version:\s*FormatVersion::\w+\((?P<symbol>\w+)(?:\s+as\s+u32)?\),\s*"
@@ -110,7 +103,6 @@ GUARDED_LAWS = (
     "unknown_version_is_refused_with_zero_mutation",
     "upcast_preserves_immutable_bytes_and_hashes",
 )
-TEST_ATTRIBUTE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
 
 class RegistryError(Exception):
@@ -123,53 +115,6 @@ class Registry:
     classes: dict[str, str]
     unregistered: dict[str, str]
     unregistered_upgrades: dict[str, str]
-
-
-def is_test_path(relative: str) -> bool:
-    parts = relative.split("/")
-    name = parts[-1]
-    return (
-        "tests" in parts[:-1]
-        or "benches" in parts[:-1]
-        or name in {"tests.rs", "test.rs"}
-        or name.endswith("_tests.rs")
-    )
-
-
-def test_module_ranges(text: str) -> list[tuple[int, int]]:
-    """Bodies of inline ``#[cfg(test)] mod name { ... }`` modules."""
-    ranges: list[tuple[int, int]] = []
-    for match in TEST_ATTRIBUTE.finditer(text):
-        depth = 1
-        index = match.end()
-        while index < len(text) and depth:
-            if text[index] == "{":
-                depth += 1
-            elif text[index] == "}":
-                depth -= 1
-            index += 1
-        ranges.append((match.end(), index))
-    return ranges
-
-
-def sweep(repo: Path) -> set[str]:
-    """Every non-test ``path:CONSTANT`` key whose name is version-shaped."""
-    keys: set[str] = set()
-    for root in SWEPT_ROOTS:
-        base = repo / root
-        if not base.is_dir():
-            continue
-        for path in sorted(base.rglob("*.rs")):
-            relative = path.relative_to(repo).as_posix()
-            if "/target/" in f"/{relative}" or is_test_path(relative):
-                continue
-            text = path.read_text(encoding="utf-8", errors="surrogateescape")
-            excluded = test_module_ranges(text)
-            for match in VERSION_CONSTANT.finditer(text):
-                if any(start <= match.start() < end for start, end in excluded):
-                    continue
-                keys.add(f"{relative}:{match.group('name')}")
-    return keys
 
 
 def _reason(raw: dict, field: str, location: str) -> str:
@@ -425,13 +370,14 @@ def row_label(row: str) -> str:
 def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
     problems: list[str] = []
 
-    from discover_version_surfaces import discover
+    from discover_version_surfaces import inspect
     try:
-        discovered, discovery_problems = discover(
-            check_version_bumps.WorktreeView(repo), unregistered=registry.unregistered, enforce=False,
+        inventory = inspect(
+            check_version_bumps.WorktreeView(repo), unregistered=registry.unregistered,
         )
     except check_version_bumps.CheckError as error:
         raise RegistryError(str(error)) from error
+    discovered, discovery_problems = inventory.surfaces, inventory.problems
     problems.extend(sorted(discovery_problems))
     for row in discovered:
         key = f'{row["constant_path"]}:{row["constant"]}'
@@ -441,7 +387,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
         {f'{r["constant_path"]}:{r["constant"]}': r for r in discovered},
         registry.classes, registry.unregistered, registry.unregistered_upgrades,
     )
-    swept = sweep(repo)
+    swept = inventory.version_constants
     for key in sorted(swept):
         if key in registry.surfaces or key in registry.unregistered:
             continue
