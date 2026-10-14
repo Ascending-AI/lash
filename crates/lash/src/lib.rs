@@ -664,6 +664,7 @@ pub mod plugins {
         ResolvedProcessDefinition, ServedOnlyRange, WeakProcessEngineRegistry,
     };
     pub use lash_core_store::session_identity::FrameNodeIdError;
+    pub use lash_core_store::transcript::CellCallLedger;
     pub use lash_core_worker::execution::runtime::ProcessEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;
     pub use lash_sansio::{
