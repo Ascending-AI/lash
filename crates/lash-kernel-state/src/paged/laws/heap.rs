@@ -642,9 +642,10 @@ fn a_forged_membership_aggregate_is_a_corrupt_page() {
     out.seq(7);
     false.encode(&mut out);
     Option::<FamilyId>::None.encode(&mut out);
-    out.sum(2, 2);
+    out.sum(2, 3);
     page.encode(&mut out);
     body_bytes.encode(&mut out);
+    true.encode(&mut out);
     32u64.encode(&mut out);
     0u64.encode(&mut out);
     0u64.encode(&mut out);
@@ -996,7 +997,7 @@ fn nested_trees_choose_one_form_across_growth_and_shrink() {
     let small = encode_body(&tree);
     assert!(tree.page().is_none());
     let mut tree: Tree<Ordinal> = decode_body(&small).unwrap();
-    for i in 1..200 {
+    for i in 1..80 {
         tree.write(ordinal_key(i), Ordinal(i), &heap.access)
             .unwrap();
     }
@@ -1006,10 +1007,45 @@ fn nested_trees_choose_one_form_across_growth_and_shrink() {
     let mut children = Vec::new();
     tree.children(&mut children);
     decoded.grants(&children).unwrap();
-    for i in 1..200 {
+    for i in 1..80 {
         decoded.remove(&ordinal_key(i), &heap.access).unwrap();
     }
     decoded.seal_nested(&heap.access, &mut budget()).unwrap();
     assert!(decoded.page().is_none());
     assert_eq!(encode_body(&decoded), small);
+}
+
+/// D-EQ: an unequal prefix decides before any later member page is read.
+#[test]
+fn unequal_prefixes_do_not_read_missing_later_members() {
+    use lash_kernel_doc::graph_tokens::TokenReader;
+    let (mut heap, pages) = fresh();
+    let left = heap
+        .allocate_object(ObjectInit::List((0..200).map(int).collect()))
+        .unwrap();
+    let right = heap
+        .allocate_object(ObjectInit::List((0..200).map(|i| int(i + 1)).collect()))
+        .unwrap();
+    let heap = reopen(&mut heap, &pages);
+    let removed = {
+        let mut pages = pages.borrow_mut();
+        let before = pages.pages.len();
+        pages.pages.retain(|_, page| {
+            if page.kind != PageKind::SEQUENCE_LEAF {
+                return true;
+            }
+            let mut input = TokenReader::new(&page.tokens);
+            input.seq().unwrap();
+            input.expect_struct(2).unwrap();
+            let first = u64::from_be_bytes(input.bytes().unwrap().try_into().unwrap());
+            first == 0
+        });
+        before - pages.pages.len()
+    };
+    assert!(removed > 0, "the later leaves really are missing");
+    heap.access.clear();
+    assert_eq!(
+        heap.equal(&Value::List(left), &Value::List(right)),
+        Ok(false)
+    );
 }

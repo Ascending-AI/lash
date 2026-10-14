@@ -96,9 +96,10 @@ impl<T: Cell> Tree<T> {
             match &root.link {
                 Link::Inline { .. } => return Ok(true),
                 Link::Sealed(_)
-                    if root
-                        .encoded_bytes
-                        .is_some_and(|n| n > INLINE_TREE_BYTES as u64) =>
+                    if root.is_leaf == Some(false)
+                        || root
+                            .encoded_bytes
+                            .is_some_and(|n| n > INLINE_TREE_BYTES as u64) =>
                 {
                     return Ok(true);
                 }
@@ -133,6 +134,7 @@ impl<T: Cell> Tree<T> {
                         let root = self.root.as_mut().expect("nonempty tree");
                         root.link = Link::Dirty(Rc::new(RefCell::new(Node::Leaf(rows))));
                         root.encoded_bytes = None;
+                        root.is_leaf = None;
                         return self.seal(access, work);
                     }
                     children.sort_by_key(|p| p.id);
@@ -143,6 +145,7 @@ impl<T: Cell> Tree<T> {
                         children,
                     };
                     root.encoded_bytes = Some(root.link_tokens_len());
+                    root.is_leaf = Some(true);
                     return Ok(true);
                 }
             }
@@ -165,6 +168,7 @@ impl<T: Cell> Tree<T> {
                 Ok(Branch {
                     family: r.family,
                     encoded_bytes: r.encoded_bytes,
+                    is_leaf: r.is_leaf,
                     first: r.first,
                     summary: r.summary,
                     tasks_known: r.tasks_known,
@@ -201,20 +205,22 @@ impl<T: Cell> TokenCodec for Tree<T> {
                     out.bytes(tokens);
                 }
                 Link::Sealed(page) => {
-                    out.sum(2, 2);
+                    out.sum(2, 3);
                     page.encode(out);
                     r.encoded_bytes.unwrap_or(u64::MAX).encode(out);
+                    r.is_leaf.unwrap_or(true).encode(out);
                 }
                 // Packing estimates only. Preparing the containing record
                 // replaces this placeholder before publication.
                 Link::Dirty(_) => {
-                    out.sum(2, 2);
+                    out.sum(2, 3);
                     PageRef {
                         id: PageId([0; 32]),
                         grant: lash_kernel_doc::heap::PageGrant::NONE,
                     }
                     .encode(out);
                     u64::MAX.encode(out);
+                    true.encode(out);
                 }
             },
         }
@@ -231,10 +237,10 @@ impl<T: Cell> TokenCodec for Tree<T> {
         let sequence = bool::decode(input)?;
         let family = Option::<FamilyId>::decode(input)?;
         let (tag, fields) = input.sum()?;
-        let (link, encoded_bytes) = match tag {
+        let (link, encoded_bytes, is_leaf) = match tag {
             0 => {
                 TokenReader::expect_fields(fields, 0)?;
-                (None, None)
+                (None, None, None)
             }
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
@@ -248,16 +254,18 @@ impl<T: Cell> TokenCodec for Tree<T> {
                         children: Vec::new(),
                     }),
                     Some(tokens.len() as u64),
+                    Some(true),
                 )
             }
             2 => {
-                TokenReader::expect_fields(fields, 2)?;
+                TokenReader::expect_fields(fields, 3)?;
                 let page = PageRef::decode(input)?;
                 let bytes = u64::decode(input)?;
-                if bytes <= INLINE_TREE_BYTES as u64 || bytes == u64::MAX {
+                let leaf = bool::decode(input)?;
+                if (leaf && bytes <= INLINE_TREE_BYTES as u64) || bytes == u64::MAX {
                     return Err(TokenError::Invalid("noncanonical paged nested tree".into()));
                 }
-                (Some(Link::Sealed(page)), Some(bytes))
+                (Some(Link::Sealed(page)), Some(bytes), Some(leaf))
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         };
@@ -275,6 +283,7 @@ impl<T: Cell> TokenCodec for Tree<T> {
         let root = link.map(|link| Branch {
             family,
             encoded_bytes,
+            is_leaf,
             first: Key(Vec::new()),
             summary,
             tasks_known: true,

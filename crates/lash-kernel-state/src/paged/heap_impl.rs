@@ -1070,7 +1070,7 @@ pub(super) fn value_depth(value: &Value) -> u32 {
         _ => 0,
     }
 }
-fn text_same(heap: &PagedHeap, a: &TextRef, b: &TextRef) -> Result<bool, HeapFault> {
+pub(super) fn text_same(heap: &PagedHeap, a: &TextRef, b: &TextRef) -> Result<bool, HeapFault> {
     if a.summary != b.summary {
         return Ok(false);
     }
@@ -1079,7 +1079,7 @@ fn text_same(heap: &PagedHeap, a: &TextRef, b: &TextRef) -> Result<bool, HeapFau
     }
     Ok(heap.copy_text(a)? == heap.copy_text(b)?)
 }
-fn bytes_same(heap: &PagedHeap, a: &BytesRef, b: &BytesRef) -> Result<bool, HeapFault> {
+pub(super) fn bytes_same(heap: &PagedHeap, a: &BytesRef, b: &BytesRef) -> Result<bool, HeapFault> {
     if a.len != b.len {
         return Ok(false);
     }
@@ -1154,103 +1154,6 @@ pub(super) fn census_fault(error: CensusFault) -> HeapFault {
     match error {
         CensusFault::Heap(error) => error,
         CensusFault::Malformed(message) => HeapFault::Malformed(message),
-    }
-}
-
-impl PagedHeap {
-    pub(super) fn equal_values(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
-        let mut pending = vec![(a.clone(), b.clone())];
-        let mut seen = BTreeSet::new();
-        while let Some((a, b)) = pending.pop() {
-            match (&a, &b) {
-                (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => (),
-                (Value::Bool(a), Value::Bool(b)) if a == b => (),
-                (Value::Int(a), Value::Int(b)) if self.copy_int(a)? == self.copy_int(b)? => (),
-                (Value::Float(a), Value::Float(b)) if a.get() == b.get() => (),
-                (Value::Int(i), Value::Float(f)) | (Value::Float(f), Value::Int(i)) => {
-                    if integral_float(f.get()).as_ref() != Some(&self.copy_int(i)?) {
-                        return Ok(false);
-                    }
-                }
-                (Value::Text(a), Value::Text(b)) if text_same(self, a, b)? => (),
-                (Value::Bytes(a), Value::Bytes(b)) if bytes_same(self, a, b)? => (),
-                (Value::Timestamp(a), Value::Timestamp(b)) if a == b => (),
-                (Value::Function(a), Value::Function(b)) if a == b => (),
-                (Value::Handle(a), Value::Handle(b)) if a == b => (),
-                (Value::Task(a), Value::Task(b)) if a == b => (),
-                (Value::Ref(a), Value::Ref(b)) if a == b => (),
-                (Value::Closure(a), Value::Closure(b)) if a == b => (),
-                (Value::Tuple(a), Value::Tuple(b)) => {
-                    if a.summary.len != b.summary.len {
-                        return Ok(false);
-                    }
-                    for i in 0..a.summary.len {
-                        pending.push((
-                            required_value(self.tuple_get(a, i)?)?,
-                            required_value(self.tuple_get(b, i)?)?,
-                        ));
-                    }
-                }
-                (Value::Error(a), Value::Error(b)) => {
-                    if !text_same(self, &a.kind, &b.kind)?
-                        || !text_same(self, &a.message, &b.message)?
-                    {
-                        return Ok(false);
-                    }
-                    pending.push((self.error_data(a)?, self.error_data(b)?));
-                }
-                (Value::List(a), Value::List(b)) => {
-                    if !seen.insert((0, *a, *b)) {
-                        continue;
-                    }
-                    let len = self.len(*a)?;
-                    if len != self.len(*b)? {
-                        return Ok(false);
-                    }
-                    for i in 0..len {
-                        pending.push((
-                            required_value(self.list_get(*a, i)?)?,
-                            required_value(self.list_get(*b, i)?)?,
-                        ));
-                    }
-                }
-                (Value::Map(a), Value::Map(b))
-                | (Value::Set(a), Value::Set(b))
-                | (Value::Record(a), Value::Record(b)) => {
-                    if !seen.insert((1, *a, *b)) {
-                        continue;
-                    }
-                    if self.len(*a)? != self.len(*b)? {
-                        return Ok(false);
-                    }
-                    let Some(ObjectHead {
-                        body: Body::Table { rows, .. },
-                        ..
-                    }) = self.head(*a)?
-                    else {
-                        return Err(HeapFault::Malformed("table identity missing".into()));
-                    };
-                    let mut error = None;
-                    let mut same = true;
-                    rows.visit(&self.access, &mut |_, e| {
-                        match self.table_get(*b, &e.key) {
-                            Ok(Some(v)) => pending.push((e.value.clone(), v)),
-                            Ok(None) => same = false,
-                            Err(e) => error = Some(e),
-                        }
-                        same && error.is_none()
-                    })?;
-                    if let Some(e) = error {
-                        return Err(e);
-                    }
-                    if !same {
-                        return Ok(false);
-                    }
-                }
-                _ => return Ok(false),
-            }
-        }
-        Ok(true)
     }
 }
 

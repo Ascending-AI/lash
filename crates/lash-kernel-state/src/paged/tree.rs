@@ -173,6 +173,7 @@ enum Link<T: Cell> {
 struct Branch<T: Cell> {
     family: Option<FamilyId>,
     encoded_bytes: Option<u64>,
+    is_leaf: Option<bool>,
     first: Key,
     summary: Summary,
     tasks_known: bool,
@@ -236,6 +237,7 @@ impl<T: Cell> Tree<T> {
             root: page.map(|p| Branch {
                 family: None,
                 encoded_bytes: None,
+                is_leaf: None,
                 tasks_known: false,
                 members_known: false,
                 first: Key(Vec::new()),
@@ -332,6 +334,12 @@ impl<T: Cell> Tree<T> {
                 } else {
                     PageKind::KEYED_INDEX
                 };
+                if branch
+                    .is_leaf
+                    .is_some_and(|hint| hint != (answer.kind == leaf))
+                {
+                    return Err(corrupt(*p, "tree root kind mismatch"));
+                }
                 let mut node = if answer.kind == leaf {
                     {
                         let mut input = TokenReader::new(&answer.tokens);
@@ -362,6 +370,7 @@ impl<T: Cell> Tree<T> {
                         rows.into_iter()
                             .map(|(first, (summary, (family, page)))| Branch {
                                 encoded_bytes: None,
+                                is_leaf: None,
                                 tasks_known: true,
                                 members_known: true,
                                 family: family.or(branch.family),
@@ -724,11 +733,13 @@ impl<T: Cell> Tree<T> {
             if !work.take(tokens.len() as u64 + children.len() as u64 * 32 + 32) {
                 return Ok(false);
             }
+            let is_leaf = matches!(&*node, Node::Leaf(_));
             let encoded_bytes = tokens.len() as u64;
             let sealed = access.seal(kind, tokens, children)?;
             drop(node);
             branch.link = Link::Sealed(sealed);
             branch.encoded_bytes = Some(encoded_bytes);
+            branch.is_leaf = Some(is_leaf);
             Ok(true)
         }
         self.root
@@ -745,6 +756,7 @@ fn make_dirty<T: Cell>(
         let node = Tree::load(branch, access, seq)?;
         branch.family = None;
         branch.encoded_bytes = None;
+        branch.is_leaf = None;
         branch.link = Link::Dirty(Rc::new(RefCell::new(node)));
     }
     if let Link::Dirty(page) = &mut branch.link
@@ -764,6 +776,7 @@ fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
     let mut branch = Branch {
         family: None,
         encoded_bytes: None,
+        is_leaf: None,
         tasks_known: true,
         members_known: true,
         first: Key(Vec::new()),
@@ -775,6 +788,7 @@ fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
 }
 fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFault> {
     branch.encoded_bytes = None;
+    branch.is_leaf = None;
     branch.tasks_known = true;
     branch.members_known = true;
     branch.summary = match node {

@@ -90,8 +90,29 @@ pub(crate) fn scalar_same(a: &Value, b: &Value) -> Option<bool> {
 }
 
 pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFault> {
-    let mut pending = vec![(a.clone(), b.clone())];
-    while let Some((a, b)) = pending.pop() {
+    enum Step {
+        Pair(Value, Value),
+        Members(
+            lash_kernel_doc::heap::TupleRef,
+            lash_kernel_doc::heap::TupleRef,
+            u64,
+        ),
+    }
+    let mut pending = vec![Step::Pair(a.clone(), b.clone())];
+    while let Some(step) = pending.pop() {
+        let (a, b) = match step {
+            Step::Pair(a, b) => (a, b),
+            Step::Members(a, b, index) => {
+                if index == a.summary.len {
+                    continue;
+                }
+                let left = required(heap.tuple_get(&a, index)?)?;
+                let right = required(heap.tuple_get(&b, index)?)?;
+                pending.push(Step::Members(a, b, index + 1));
+                pending.push(Step::Pair(left, right));
+                continue;
+            }
+        };
         if let Some(same) = scalar_same(&a, &b) {
             if !same {
                 return Ok(false);
@@ -103,12 +124,7 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
                 if a.summary.len != b.summary.len {
                     return Ok(false);
                 }
-                for index in 0..a.summary.len {
-                    pending.push((
-                        required(heap.tuple_get(a, index)?)?,
-                        required(heap.tuple_get(b, index)?)?,
-                    ));
-                }
+                pending.push(Step::Members(a.clone(), b.clone(), 0));
             }
             (Value::Error(a), Value::Error(b)) => {
                 if !heap.equal(&Value::Text(a.kind.clone()), &Value::Text(b.kind.clone()))?
@@ -119,7 +135,7 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
                 {
                     return Ok(false);
                 }
-                pending.push((heap.error_data(a)?, heap.error_data(b)?));
+                pending.push(Step::Pair(heap.error_data(a)?, heap.error_data(b)?));
             }
             (Value::Int(_), Value::Int(_))
             | (Value::Text(_), Value::Text(_))

@@ -48,6 +48,7 @@ pub use root::{
 pub use source::{PageAnswer, PageBody, PageKind, PageSource};
 
 mod codec;
+mod equality;
 pub mod tree;
 
 pub mod directory;
