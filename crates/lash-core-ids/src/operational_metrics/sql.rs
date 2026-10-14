@@ -2,9 +2,9 @@
 //! Counts exclude pool pings, preparation and protocol messages. SQL values are
 //! discarded before the bounded shape map retains a key.
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, RwLock};
 
 use serde::Serialize;
 
@@ -85,6 +85,8 @@ pub struct Receipt {
     pub shapes: BTreeMap<String, Shape>,
     pub unretained_shape_statements: u64,
     pub configured_shape_limit: usize,
+    /// Statement texts this window's observations normalized into shape keys.
+    pub normalized_sql_texts: u64,
 }
 
 /// Retained durable actor fence: a physical summary joins the owner commit
@@ -163,6 +165,7 @@ impl Window {
                 shapes: BTreeMap::new(),
                 unretained_shape_statements: 0,
                 configured_shape_limit: SHAPE_LIMIT,
+                normalized_sql_texts: 0,
             })),
             parent: parent.map(Box::new),
         }
@@ -200,38 +203,47 @@ impl Window {
         work()
     }
     pub fn statement(&self, sql: &str) {
-        self.record(sql, true, false, None);
+        let key = ShapeKey::of(sql);
+        self.record(&key, true, false, None);
     }
     pub fn row(&self, sql: &str) {
-        self.record(sql, false, true, None);
+        let key = ShapeKey::of(sql);
+        self.record(&key, false, true, None);
     }
     pub fn work(&self, sql: &str, work: SqliteWork) {
-        self.record(sql, false, false, Some(work));
+        let key = ShapeKey::of(sql);
+        self.record(&key, false, false, Some(work));
     }
     /// Physical payload counters, propagated through nested operation windows.
     pub fn payload(&self, sql: &str, rows_affected: u64, bound_bytes: u64, result_bytes: u64) {
+        self.add_payload(&ShapeKey::of(sql), rows_affected, bound_bytes, result_bytes);
+    }
+    fn add_payload(&self, key: &ShapeKey, rows_affected: u64, bound_bytes: u64, result_bytes: u64) {
         if let Some(parent) = &self.parent {
-            parent.payload(sql, rows_affected, bound_bytes, result_bytes);
+            parent.add_payload(key, rows_affected, bound_bytes, result_bytes);
         }
-        let key = normalize(sql);
         let mut receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        receipt.normalized_sql_texts += u64::from(key.normalized);
         receipt.rows_affected += rows_affected;
         receipt.bound_bytes += bound_bytes;
         receipt.result_bytes += result_bytes;
-        if let Some(shape) = receipt.shapes.get_mut(&key) {
+        if let Some(shape) = receipt.shapes.get_mut(&*key.shape) {
             shape.rows_affected += rows_affected;
             shape.bound_bytes += bound_bytes;
             shape.result_bytes += result_bytes;
         }
     }
     pub fn unmeasured_bound(&self, sql: &str) {
+        self.add_unmeasured_bound(&ShapeKey::of(sql));
+    }
+    fn add_unmeasured_bound(&self, key: &ShapeKey) {
         if let Some(parent) = &self.parent {
-            parent.unmeasured_bound(sql);
+            parent.add_unmeasured_bound(key);
         }
-        let key = normalize(sql);
         let mut receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        receipt.normalized_sql_texts += u64::from(key.normalized);
         receipt.unmeasured_bound_statements += 1;
-        if let Some(shape) = receipt.shapes.get_mut(&key) {
+        if let Some(shape) = receipt.shapes.get_mut(&*key.shape) {
             shape.unmeasured_bound_statements += 1;
         }
     }
@@ -244,30 +256,87 @@ impl Window {
             .unwrap_or_else(PoisonError::into_inner)
             .newly_installed_graph_bytes += bytes;
     }
-    fn record(&self, sql: &str, statement: bool, row: bool, work: Option<SqliteWork>) {
+    fn record(&self, key: &ShapeKey, statement: bool, row: bool, work: Option<SqliteWork>) {
         if let Some(parent) = &self.parent {
-            parent.record(sql, statement, row, work);
+            parent.record(key, statement, row, work);
         }
-        let key = normalize(sql);
         let mut receipt = self.receipt.lock().unwrap_or_else(PoisonError::into_inner);
+        receipt.normalized_sql_texts += u64::from(key.normalized);
         receipt.statements += u64::from(statement);
         receipt.rows_returned += u64::from(row);
         if let (Some(total), Some(work)) = (&mut receipt.sqlite_work, work) {
             total.add(work);
         }
-        if !receipt.shapes.contains_key(&key) && receipt.shapes.len() == SHAPE_LIMIT {
-            receipt.unretained_shape_statements += u64::from(statement);
-            return;
+        if !receipt.shapes.contains_key(&*key.shape) {
+            if receipt.shapes.len() == SHAPE_LIMIT {
+                receipt.unretained_shape_statements += u64::from(statement);
+                return;
+            }
+            let sqlite_work = receipt.sqlite_work.map(|_| SqliteWork::default());
+            receipt.shapes.insert(
+                key.shape.to_string(),
+                Shape {
+                    sqlite_work,
+                    ..Shape::default()
+                },
+            );
         }
-        let sqlite_work = receipt.sqlite_work.map(|_| SqliteWork::default());
-        let shape = receipt.shapes.entry(key).or_insert_with(|| Shape {
-            sqlite_work,
-            ..Shape::default()
-        });
+        let Some(shape) = receipt.shapes.get_mut(&*key.shape) else {
+            return;
+        };
         shape.statements += u64::from(statement);
         shape.rows_returned += u64::from(row);
         if let (Some(total), Some(work)) = (&mut shape.sqlite_work, work) {
             total.add(work);
+        }
+    }
+}
+
+/// Distinct statement texts whose shape keys the process keeps. Past it, a
+/// new text is normalized on each observation rather than retained.
+const SHAPE_KEY_CACHE_LIMIT: usize = 4096;
+
+/// A statement text's length and SipHash digest: no statement text, nor any
+/// literal in it, is retained.
+type TextDigest = (usize, u64);
+
+/// Shape keys by statement text digest.
+static SHAPE_KEYS: LazyLock<RwLock<HashMap<TextDigest, Arc<str>>>> = LazyLock::new(RwLock::default);
+
+/// A statement text's shape key, and whether this observation normalized it.
+struct ShapeKey {
+    shape: Arc<str>,
+    normalized: bool,
+}
+
+impl ShapeKey {
+    /// Each distinct text is normalized once per process: every later start,
+    /// row, end and payload observation of it reuses its key (FIG-6276).
+    fn of(sql: &str) -> Self {
+        let digest = (sql.len(), {
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(sql, &mut hasher);
+            std::hash::Hasher::finish(&hasher)
+        });
+        let cached = SHAPE_KEYS
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&digest)
+            .cloned();
+        if let Some(shape) = cached {
+            return Self {
+                shape,
+                normalized: false,
+            };
+        }
+        let shape: Arc<str> = normalize(sql).into();
+        let mut keys = SHAPE_KEYS.write().unwrap_or_else(PoisonError::into_inner);
+        if keys.len() < SHAPE_KEY_CACHE_LIMIT {
+            keys.insert(digest, Arc::clone(&shape));
+        }
+        Self {
+            shape,
+            normalized: true,
         }
     }
 }

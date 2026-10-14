@@ -748,8 +748,8 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
         );
         assert_eq!(world.writes.lock().unwrap().len() as u64, count);
         eprintln!(
-            "FIG-6260 occurrences={count} elapsed={elapsed:?} fact_decodes={decodes} statements={}",
-            receipt.statements
+            "FIG-6260 occurrences={count} elapsed={elapsed:?} fact_decodes={decodes} statements={} normalized_sql_texts={}",
+            receipt.statements, receipt.normalized_sql_texts
         );
         assert!(
             decodes >= 3 * count,
@@ -760,6 +760,15 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
         assert!(
             decodes <= 12 * count,
             "consumed history was decoded again: {decodes} facts for {count} occurrences"
+        );
+        // FIG-6276: observing a statement must not normalize its text again.
+        // Each effect runs about 156 statements whose start, rows and end are
+        // all observed; normalizing on every event was half the run's time.
+        let shapes = receipt.shapes.len() as u64;
+        assert!(
+            receipt.normalized_sql_texts <= shapes,
+            "observation normalized {} statement texts for {shapes} shapes over {count} occurrences",
+            receipt.normalized_sql_texts
         );
         core.shutdown().await.unwrap();
     }

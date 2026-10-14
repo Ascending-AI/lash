@@ -38,6 +38,7 @@ store observer retroactively.
 | `elapsed_nanos` | Elapsed caller-window wall time in nanoseconds, including queueing and observation, measured at the snapshot. It is not SQL server time. |
 | `configured_shape_limit` | Configured upper bound of 64 retained normalized SQL shapes; not measured cardinality. |
 | `unretained_shape_statements` | Sum of calls whose shape could not be retained after the bound. Total statements, rows and work still include them. The shape map's length is retained cardinality, not total unique shapes. |
+| `normalized_sql_texts` | Statement texts the window's observations normalized into shape keys. Each distinct text is normalized once per process; every later start, row, end and payload observation of it reuses the key, so a warm window counts zero. Keys are cached under the text's length and digest, never the text, for up to 4096 distinct texts; texts past that bound are normalized on each observation and counted each time. |
 
 Shape keys fold whitespace/case, remove comments and replace literals and bind
 positions; bound values are discarded before receipt retention. SQLite briefly
