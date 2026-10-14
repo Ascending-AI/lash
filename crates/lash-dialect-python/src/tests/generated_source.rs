@@ -320,7 +320,11 @@ fn try_handler_presence_and_empty_bodies_reconstruct_exactly() {
                 );
                 for maps in [false, true] {
                     let printed = roundtrip(&document, maps);
-                    assert!(printed.source.contains("with k.try_("));
+                    assert!(printed.source.contains(if catch || finally {
+                        "try:\n"
+                    } else {
+                        "with k.try_("
+                    }));
                     assert!(printed.source.contains("with k.block():"));
                 }
             }
@@ -405,7 +409,7 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         HAND_WRITTEN.replace("k.int(\"7\")", "k.clock()()"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.int(\"7\", \"8\")"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.invoke(helper_missing, [])"),
-        HAND_WRITTEN.replace("k.int(\"7\")", "7"),
+        HAND_WRITTEN.replace("k.int(\"7\")", "07"),
         HAND_WRITTEN.replace(
             "            answer",
             "            answer\n            answer",
@@ -1341,3 +1345,5 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
         crate::GeneratedSourceCode::GeneratedSourceBytes.as_str()
     );
 }
+
+mod readable;

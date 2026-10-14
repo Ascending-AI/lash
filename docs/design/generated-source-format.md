@@ -51,7 +51,7 @@ k.main(function() { /* body */ });
 
 Python uses the same seven logical operands and the format identifier
 `lash.generated.python`, version `1`; its codec documents its function/body
-syntax in the [Python generic inventory](generated-source-python.md). The version belongs to generated
+syntax in the [Python generic and readable inventory](generated-source-python.md). The version belongs to generated
 source, not the kernel's stored/wire version. `SourceFormat::TypeScriptV1` and
 `PythonV1` identify the selected syntax.
 

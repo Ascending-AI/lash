@@ -34,7 +34,7 @@ fn depth_error() -> Diagnostic {
     )
 }
 /// Reconstruct an unadmitted Document, without an installed helper catalogue.
-/// Only the explicit Python v1 envelope and its generic forms are accepted.
+/// Only the explicit Python v1 envelope and its paired exact forms are accepted.
 pub fn compile_generated(source: &str, limits: GeneratedSourceLimits) -> Result<k::Document> {
     if source.len() > limits.max_bytes {
         return Err(error(
@@ -65,7 +65,7 @@ pub fn compile_generated(source: &str, limits: GeneratedSourceLimits) -> Result<
 }
 
 /// A cursor reads only the small generic operand grammar, never a Python AST.
-/// It does not recurse: arrays contain strings, aliases or atoms, and action
+/// Cursor primitives do not recurse: metadata arrays contain strings, aliases or atoms, and action
 /// calls have exactly one callee level. Unexpected nested syntax refuses here.
 struct Cursor<'a> {
     text: &'a str,
@@ -437,16 +437,10 @@ impl<'a> Reader<'a> {
     fn statement(&mut self, indent: usize, depth: usize) -> Result<k::Stmt> {
         self.depth(depth)?;
         let (mut c, suite) = self.line(indent)?;
-        let op = c.operation()?;
         if !suite {
-            let stmt = match op {
-                "break_" => k::Stmt::Break,
-                "continue_" => k::Stmt::Continue,
-                _ => return Err(invalid("expected a statement suite")),
-            };
-            c.end(false)?;
-            return Ok(stmt);
+            return self.readable_statement(c, indent, depth);
         }
+        let op = c.operation()?;
         let i = indent + 1;
         let d = depth + 1;
         let stmt = match op {
@@ -549,6 +543,225 @@ impl<'a> Reader<'a> {
         self.closed(indent)?;
         Ok(stmt)
     }
+    fn starts(&self, indent: usize, prefix: &str) -> bool {
+        self.lines
+            .get(self.next)
+            .is_some_and(|l| l.indent == indent && l.text.starts_with(prefix))
+    }
+    fn readable_block(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
+        self.depth(depth)?;
+        let mut body = vec![];
+        if !self.empty(indent) {
+            if !self.more(indent) {
+                return Err(invalid("empty suites require pass"));
+            }
+            while self.more(indent) {
+                body.push(self.statement(indent, depth + 1)?);
+            }
+        }
+        self.closed(indent - 1)?;
+        Ok(body)
+    }
+    fn readable_if(&mut self, mut c: Cursor<'_>, indent: usize, depth: usize) -> Result<k::Stmt> {
+        self.depth(depth)?;
+        let condition = self.inline(&mut c, depth + 1)?;
+        c.expect(":")?;
+        c.finish()?;
+        let then_block = self.readable_block(indent + 1, depth + 1)?;
+        let else_block = if self.starts(indent, "elif ") {
+            // Exact inverse: elif is one If statement inside the else Block.
+            self.depth(depth + 1)?;
+            let (mut c, _) = self.line(indent)?;
+            c.expect("elif ")?;
+            vec![self.readable_if(c, indent, depth + 2)?]
+        } else {
+            let (mut c, suite) = self.line(indent)?;
+            if suite {
+                return Err(invalid("expected else clause"));
+            }
+            c.expect("else:")?;
+            c.finish()?;
+            self.readable_block(indent + 1, depth + 1)?
+        };
+        Ok(k::Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        })
+    }
+    fn readable_statement(
+        &mut self,
+        mut c: Cursor<'_>,
+        indent: usize,
+        depth: usize,
+    ) -> Result<k::Stmt> {
+        let stmt = if c.take("if ") {
+            self.readable_if(c, indent, depth)?
+        } else if c.take("for ") {
+            let binding = self.name(&mut c)?;
+            c.expect("in ")?;
+            let iterable = self.inline(&mut c, depth + 1)?;
+            c.expect(":")?;
+            c.finish()?;
+            k::Stmt::For {
+                binding,
+                iterable,
+                body: self.readable_block(indent + 1, depth + 1)?,
+            }
+        } else if c.take("while ") {
+            let condition = self.inline(&mut c, depth + 1)?;
+            c.expect(":")?;
+            c.finish()?;
+            k::Stmt::While {
+                condition,
+                body: self.readable_block(indent + 1, depth + 1)?,
+            }
+        } else if c.take("try:") {
+            c.finish()?;
+            let body = self.readable_block(indent + 1, depth + 1)?;
+            let catch = if self.starts(indent, "except ") {
+                let (mut c, suite) = self.line(indent)?;
+                if suite {
+                    return Err(invalid("expected except clause"));
+                }
+                c.expect("except BaseException as ")?;
+                let binding = self.name(&mut c)?;
+                c.expect(":")?;
+                c.finish()?;
+                Some(k::Catch {
+                    binding,
+                    body: self.readable_block(indent + 1, depth + 1)?,
+                })
+            } else {
+                None
+            };
+            let finally = if self.starts(indent, "finally:") {
+                let (mut c, _) = self.line(indent)?;
+                c.expect("finally:")?;
+                c.finish()?;
+                Some(self.readable_block(indent + 1, depth + 1)?)
+            } else {
+                None
+            };
+            if catch.is_none() && finally.is_none() {
+                return Err(invalid("try requires a handler"));
+            }
+            k::Stmt::Try(k::TryStmt {
+                body,
+                catch,
+                finally,
+            })
+        } else if c.take("return ") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.finish()?;
+            k::Stmt::Return { value }
+        } else if c.take("raise ") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.finish()?;
+            k::Stmt::Throw { value }
+        } else if c.text == "break" || c.text == "continue" {
+            if c.text == "break" {
+                k::Stmt::Break
+            } else {
+                k::Stmt::Continue
+            }
+        } else {
+            let op = c.operation()?;
+            let stmt = match op {
+                "break_" => k::Stmt::Break,
+                "continue_" => k::Stmt::Continue,
+                "print" | "finish" | "fail" => {
+                    let value = self.inline(&mut c, depth + 1)?;
+                    match op {
+                        "print" => k::Stmt::Print { value },
+                        "finish" => k::Stmt::Finish { value },
+                        _ => k::Stmt::Fail { value },
+                    }
+                }
+                _ => return Err(invalid("unknown readable statement")),
+            };
+            c.end(false)?;
+            stmt
+        };
+        self.closed(indent)?;
+        Ok(stmt)
+    }
+    fn inline(&self, c: &mut Cursor<'_>, depth: usize) -> Result<k::Expr> {
+        self.depth(depth)?;
+        let (expr, height) = self.inline_value(c, 0)?;
+        self.depth(depth + height - 1)?;
+        Ok(expr)
+    }
+    // Parentheses create no Node. Bound syntax recursion separately and compute
+    // real tree height as postfixes are wrapped, before allocating deep trees.
+    fn inline_value(&self, c: &mut Cursor<'_>, nesting: usize) -> Result<(k::Expr, usize)> {
+        if nesting > self.limit * 2 + 2 {
+            return Err(depth_error());
+        }
+        let (mut expr, mut height) = if c.take("(") {
+            let value = self.inline_value(c, nesting + 1)?;
+            c.expect(")")?;
+            value
+        } else if c.text.trim_start().starts_with("helper_") {
+            let function = self.id(c)?;
+            c.expect("(")?;
+            let mut args = vec![];
+            let mut height = 1;
+            if !c.take(")") {
+                loop {
+                    let (arg, h) = self.inline_value(c, nesting + 1)?;
+                    height = height.max(h + 1);
+                    self.depth(height - 1)?;
+                    args.push(arg);
+                    if c.take(")") {
+                        break;
+                    }
+                    c.expect(",")?;
+                }
+            }
+            (k::Expr::Call { function, args }, height)
+        } else if c.take("k.clock()") {
+            (k::Expr::Clock, 1)
+        } else if c.take("k.random()") {
+            (k::Expr::Random, 1)
+        } else {
+            let atom = self.atom(c)?;
+            (
+                match atom {
+                    k::Atom::Variable(n) => k::Expr::Variable(n),
+                    k::Atom::Literal(l) => k::Expr::Literal(l),
+                },
+                1,
+            )
+        };
+        loop {
+            let member = if c.take(".") {
+                let field = c.word()?;
+                if !crate::printer::legal_identifier(field) {
+                    return Err(invalid("reserved attribute spelling"));
+                }
+                self.depth(height)?;
+                k::Member::Field {
+                    target: expr,
+                    field: field.into(),
+                }
+            } else if c.take("[") {
+                let (index, h) = self.inline_value(c, nesting + 1)?;
+                c.expect("]")?;
+                height = height.max(h);
+                self.depth(height)?;
+                k::Member::Index {
+                    target: expr,
+                    index,
+                }
+            } else {
+                break;
+            };
+            height += 1;
+            expr = k::Expr::Member(Box::new(member));
+        }
+        Ok((expr, height))
+    }
     fn member(
         &mut self,
         field: bool,
@@ -590,18 +803,9 @@ impl<'a> Reader<'a> {
         self.depth(depth)?;
         let (mut c, suite) = self.line(indent)?;
         if !suite {
-            if c.text.trim() == "k.clock()" {
-                return Ok(k::Expr::Clock);
-            }
-            if c.text.trim() == "k.random()" {
-                return Ok(k::Expr::Random);
-            }
-            let atom = self.atom(&mut c)?;
+            let expr = self.inline(&mut c, depth)?;
             c.finish()?;
-            return Ok(match atom {
-                k::Atom::Variable(n) => k::Expr::Variable(n),
-                k::Atom::Literal(l) => k::Expr::Literal(l),
-            });
+            return Ok(expr);
         }
         let op = c.operation()?;
         let i = indent + 1;
@@ -687,6 +891,27 @@ impl<'a> Reader<'a> {
         if c.text.trim_start().starts_with('"') {
             return Ok(k::Atom::Literal(k::Literal::Text(c.string()?)));
         }
+        c.text = c.text.trim_start_matches(' ');
+        if c.text
+            .starts_with(|ch: char| ch.is_ascii_digit() || ch == '-')
+        {
+            let end = c
+                .text
+                .find(|ch: char| !ch.is_ascii_digit() && !matches!(ch, '.' | 'e' | '-'))
+                .unwrap_or(c.text.len());
+            let token = &c.text[..end];
+            c.text = &c.text[end..];
+            let literal = if token.contains(['.', 'e']) {
+                let n = k::Float::parse(token).map_err(|e| invalid(e.to_string()))?;
+                if !n.get().is_finite() {
+                    return Err(invalid("non-finite native number"));
+                }
+                k::Literal::Float(n)
+            } else {
+                k::Literal::Int(k::Integer::parse(token).map_err(|e| invalid(e.to_string()))?)
+            };
+            return Ok(k::Atom::Literal(literal));
+        }
         let word = c.word()?;
         let lit = match word {
             "None" => k::Literal::Null,
@@ -744,6 +969,27 @@ impl<'a> Reader<'a> {
         c.expect(")")?;
         Ok(callee)
     }
+    fn action_operands(&self, c: &mut Cursor<'_>) -> Result<(k::Callee, Vec<k::Atom>)> {
+        if c.text.trim_start().starts_with("helper_") {
+            let id = self.id(c)?;
+            c.expect("(")?;
+            let mut args = vec![];
+            if !c.take(")") {
+                loop {
+                    args.push(self.atom(c)?);
+                    if c.take(")") {
+                        break;
+                    }
+                    c.expect(",")?;
+                }
+            }
+            Ok((k::Callee::Library(id), args))
+        } else {
+            let callee = self.callee(c)?;
+            c.expect(",")?;
+            Ok((callee, self.atoms(c)?))
+        }
+    }
     fn action_line(&mut self, indent: usize, depth: usize) -> Result<k::Action> {
         self.depth(depth)?;
         let (mut c, suite) = self.line(indent)?;
@@ -752,20 +998,12 @@ impl<'a> Reader<'a> {
         }
         let action = match c.operation()? {
             "call" => {
-                let callee = self.callee(&mut c)?;
-                c.expect(",")?;
-                k::Action::Call {
-                    callee,
-                    args: self.atoms(&mut c)?,
-                }
+                let (callee, args) = self.action_operands(&mut c)?;
+                k::Action::Call { callee, args }
             }
             "spawn" => {
-                let callee = self.callee(&mut c)?;
-                c.expect(",")?;
-                k::Action::Spawn {
-                    callee,
-                    args: self.atoms(&mut c)?,
-                }
+                let (callee, args) = self.action_operands(&mut c)?;
+                k::Action::Spawn { callee, args }
             }
             "perform" => {
                 let effect = k::EffectName::new(c.string()?).map_err(|e| invalid(e.to_string()))?;

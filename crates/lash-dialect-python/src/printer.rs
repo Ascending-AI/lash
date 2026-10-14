@@ -1,4 +1,4 @@
-//! Complete Python generic forms; paired inverses live in generated.rs.
+//! Exact Python spelling; paired inverses live in generated.rs.
 use crate::Python;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
@@ -13,9 +13,11 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         return Err(PrintError::Invalid("unsupported kernel version".into()));
     }
     let plan = NamePlan::new(document, legal_identifier);
+    let inline = InlinePlan::new(document);
     let mut r = Renderer {
         out: SourceWriter::new(options),
         plan: &plan,
+        inline: &inline,
         indent: 0,
     };
     r.out.write("k.document(\"lash.generated.python\", \"1\", ");
@@ -280,9 +282,183 @@ const BUILTINS: &[&str] = &[
 struct Renderer<'a> {
     out: SourceWriter,
     plan: &'a NamePlan,
+    inline: &'a InlinePlan,
     indent: usize,
 }
 impl Renderer<'_> {
+    fn inline_expr(&mut self, expr: &k::Expr) {
+        self.out.begin_node(None);
+        self.inline_body(expr);
+        self.out.end_node();
+    }
+    fn inline_body(&mut self, expr: &k::Expr) {
+        match expr {
+            k::Expr::Literal(l) => self.literal(l),
+            k::Expr::Variable(n) => self.name(n),
+            k::Expr::Clock => self.out.write("k.clock()"),
+            k::Expr::Random => self.out.write("k.random()"),
+            k::Expr::Call { function, args } => {
+                self.helper(function);
+                self.out.write("(");
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.inline_expr(arg);
+                }
+                self.out.write(")");
+            }
+            k::Expr::Member(member) => {
+                let target = match member.as_ref() {
+                    k::Member::Field { target, .. } | k::Member::Index { target, .. } => target,
+                };
+                let grouped = !matches!(
+                    target,
+                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
+                );
+                if grouped {
+                    self.out.write("(");
+                }
+                self.inline_expr(target);
+                if grouped {
+                    self.out.write(")");
+                }
+                match member.as_ref() {
+                    k::Member::Field { field, .. } => {
+                        self.out.write(".");
+                        self.out.write(field);
+                    }
+                    k::Member::Index { index, .. } => {
+                        self.out.write("[");
+                        self.inline_expr(index);
+                        self.out.write("]");
+                    }
+                }
+            }
+            _ => self
+                .out
+                .refuse(PrintError::Invalid("ineligible inline expression".into())),
+        }
+    }
+    // The caller owns the block's indentation and any clause label. Empty
+    // suites spell pass, so every real block has a nonempty final-text range.
+    fn readable_block(&mut self, block: &k::Block) {
+        self.out.begin_node(None);
+        self.indent += 1;
+        if block.is_empty() {
+            self.empty();
+        }
+        for stmt in block {
+            self.node(k::Node::Stmt(stmt), None);
+        }
+        self.indent -= 1;
+        self.out.end_node();
+    }
+    fn readable_if(
+        &mut self,
+        condition: &k::Expr,
+        then_block: &k::Block,
+        else_block: &k::Block,
+        keyword: &str,
+    ) {
+        self.out.write(keyword);
+        self.out.write(" ");
+        self.inline_expr(condition);
+        self.out.write(":\n");
+        self.readable_block(then_block);
+        // An elif is exactly one nested If in the else Block. Keep both map
+        // frames; this changes layout, never the stored statement boundaries.
+        if let [
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+        ] = else_block.as_slice()
+            && self.inline.contains(condition)
+        {
+            self.out.begin_node(None); // else Block
+            self.out.begin_node(None); // nested If
+            self.padding();
+            self.readable_if(condition, then_block, else_block, "elif");
+            self.out.end_node();
+            self.out.end_node();
+        } else {
+            self.padding();
+            self.out.write("else:\n");
+            self.readable_block(else_block);
+        }
+    }
+    fn readable_statement(&mut self, stmt: &k::Stmt) -> bool {
+        match stmt {
+            k::Stmt::Break => self.out.write("break\n"),
+            k::Stmt::Continue => self.out.write("continue\n"),
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } if self.inline.contains(condition) => {
+                self.readable_if(condition, then_block, else_block, "if");
+            }
+            k::Stmt::For {
+                binding,
+                iterable,
+                body,
+            } if self.inline.contains(iterable) => {
+                self.out.write("for ");
+                self.name(binding);
+                self.out.write(" in ");
+                self.inline_expr(iterable);
+                self.out.write(":\n");
+                self.readable_block(body);
+            }
+            k::Stmt::While { condition, body } if self.inline.contains(condition) => {
+                self.out.write("while ");
+                self.inline_expr(condition);
+                self.out.write(":\n");
+                self.readable_block(body);
+            }
+            k::Stmt::Try(scope) if scope.catch.is_some() || scope.finally.is_some() => {
+                self.out.write("try:\n");
+                self.readable_block(&scope.body);
+                if let Some(catch) = &scope.catch {
+                    self.padding();
+                    self.out.write("except BaseException as ");
+                    self.name(&catch.binding);
+                    self.out.write(":\n");
+                    self.readable_block(&catch.body);
+                }
+                if let Some(finally) = &scope.finally {
+                    self.padding();
+                    self.out.write("finally:\n");
+                    self.readable_block(finally);
+                }
+            }
+            k::Stmt::Return { value }
+            | k::Stmt::Throw { value }
+            | k::Stmt::Print { value }
+            | k::Stmt::Finish { value }
+            | k::Stmt::Fail { value }
+                if self.inline.contains(value) =>
+            {
+                let call = !matches!(stmt, k::Stmt::Return { .. } | k::Stmt::Throw { .. });
+                self.out.write(match stmt {
+                    k::Stmt::Return { .. } => "return ",
+                    k::Stmt::Throw { .. } => "raise ",
+                    k::Stmt::Print { .. } => "k.print(",
+                    k::Stmt::Finish { .. } => "k.finish(",
+                    _ => "k.fail(",
+                });
+                self.inline_expr(value);
+                if call {
+                    self.out.write(")");
+                }
+                self.out.write("\n");
+            }
+            _ => return false,
+        }
+        true
+    }
     fn metadata(&mut self, value: &impl serde::Serialize) {
         self.out.metadata(value);
     }
@@ -372,13 +548,14 @@ impl Renderer<'_> {
         }
     }
     fn statement(&mut self, stmt: &k::Stmt) {
+        if self.readable_statement(stmt) {
+            return;
+        }
         match stmt {
-            k::Stmt::Break => {
-                self.out.write("k.break_()\n");
-                return;
-            }
-            k::Stmt::Continue => {
-                self.out.write("k.continue_()\n");
+            k::Stmt::Break | k::Stmt::Continue => {
+                self.out.refuse(PrintError::Invalid(
+                    "unhandled readable leaf statement".into(),
+                ));
                 return;
             }
             k::Stmt::Let { name, value } => {
@@ -472,23 +649,16 @@ impl Renderer<'_> {
         self.indent -= 1;
     }
     fn expression(&mut self, expr: &k::Expr) {
+        if self.inline.contains(expr) {
+            self.inline_body(expr);
+            self.out.write("\n");
+            return;
+        }
         match expr {
-            k::Expr::Literal(l) => {
-                self.literal(l);
-                self.out.write("\n");
-                return;
-            }
-            k::Expr::Variable(n) => {
-                self.name(n);
-                self.out.write("\n");
-                return;
-            }
-            k::Expr::Clock => {
-                self.out.write("k.clock()\n");
-                return;
-            }
-            k::Expr::Random => {
-                self.out.write("k.random()\n");
+            k::Expr::Literal(_) | k::Expr::Variable(_) | k::Expr::Clock | k::Expr::Random => {
+                self.out.refuse(PrintError::Invalid(
+                    "unhandled inline leaf expression".into(),
+                ));
                 return;
             }
             k::Expr::Member(m) => self.member_header("", m),
@@ -562,10 +732,9 @@ impl Renderer<'_> {
             k::Literal::Bool(b) => self.out.write(if *b { "True" } else { "False" }),
             k::Literal::Text(s) => self.out.json(s),
             k::Literal::Int(n) => {
-                self.out.write("k.int(");
-                self.out.json(&n.to_string());
-                self.out.write(")");
+                self.out.write(&n.to_string());
             }
+            k::Literal::Float(n) if n.get().is_finite() => self.out.write(&n.to_string()),
             k::Literal::Float(n) => {
                 self.out.write("k.float(");
                 self.out.json(&n.to_string());
@@ -618,6 +787,29 @@ impl Renderer<'_> {
     }
     fn action(&mut self, action: &k::Action) {
         match action {
+            k::Action::Call {
+                callee: k::Callee::Library(id),
+                args,
+            }
+            | k::Action::Spawn {
+                callee: k::Callee::Library(id),
+                args,
+            } => {
+                self.out.write(if matches!(action, k::Action::Call { .. }) {
+                    "k.call("
+                } else {
+                    "k.spawn("
+                });
+                self.helper(id);
+                self.out.write("(");
+                for (i, atom) in args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.atom(atom);
+                }
+                self.out.write(")");
+            }
             k::Action::Call { callee, args } | k::Action::Spawn { callee, args } => {
                 self.out.write(if matches!(action, k::Action::Call { .. }) {
                     "k.call("
@@ -667,5 +859,47 @@ impl Renderer<'_> {
             k::Action::Yield => self.out.write("k.yield_("),
         }
         self.out.write(")");
+    }
+}
+
+/// Memoize the applicability predicate in one postorder pass. This is naming/
+/// rendering work even with maps off; it creates no Sites or source tree.
+struct InlinePlan(std::collections::HashSet<*const k::Expr>);
+impl InlinePlan {
+    fn new(document: &k::Document) -> Self {
+        let mut plan = Self(Default::default());
+        plan.collect(k::Node::Block(&document.main));
+        for f in document.functions.values() {
+            plan.collect(k::Node::Block(&f.body));
+        }
+        plan
+    }
+    fn contains(&self, expr: &k::Expr) -> bool {
+        self.0.contains(&(expr as *const _))
+    }
+    fn collect(&mut self, node: k::Node<'_>) {
+        for child in node.children() {
+            self.collect(child);
+        }
+        if let k::Node::Expr(expr) = node {
+            let eligible = match expr {
+                k::Expr::Literal(_) | k::Expr::Variable(_) | k::Expr::Clock | k::Expr::Random => {
+                    true
+                }
+                k::Expr::Member(member) => match member.as_ref() {
+                    k::Member::Field { target, field } => {
+                        legal_identifier(field) && self.contains(target)
+                    }
+                    k::Member::Index { target, index } => {
+                        self.contains(target) && self.contains(index)
+                    }
+                },
+                k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+                _ => false,
+            };
+            if eligible {
+                self.0.insert(expr as *const _);
+            }
+        }
     }
 }

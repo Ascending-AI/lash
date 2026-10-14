@@ -1,13 +1,13 @@
 # Python generated source, format v1
 
-This is the Python generic codec under the [shared exact-source contract](generated-source-format.md).
+This is the Python exact codec under the [shared exact-source contract](generated-source-format.md).
 `lash_dialect_python::print(Document, PrintOptions)` renders only;
 `compile_generated(source, GeneratedSourceLimits)` reconstructs an unadmitted
 Document directly. Neither operation resolves a library. Python's authored
-`lower` remains a separate cell operation. Host and worker integration, and
-readable Python rules, belong to FIG-6205 and FIG-6204 respectively.
+`lower` remains a separate cell operation. Host and worker integration belongs to FIG-6205. The readable rules below
+extend the landed generic codec without a second printer or decoder.
 
-The source is a Python syntax subset with kernel semantics. Every compound
+The source is a Python syntax subset with kernel semantics. In the complete generic spelling, every compound
 node is a `with k.form(operands):` suite. Children appear as separate lines,
 in `Node::children` order, indented by four spaces. Empty blocks and empty
 expression-child sequences contain exactly `pass`. No body is hidden in
@@ -86,8 +86,104 @@ introduction occurs. Every expected child must be consumed exactly once.
 Strings use JSON quoting/escapes with Unicode scalar values, including text
 and metadata; raw numeric literals, triple strings, concatenation, imports,
 operators and arbitrary Python statements are outside this generic subset.
+The readable subset below additionally accepts exact native numbers and
+its enumerated statement, member and helper-call spellings.
 Blank lines and whole-line comments are ignored. In-line comments and
 non-four-space indentation are outside this canonical generic spelling.
+
+## Paired readable rule inventory
+
+The printer chooses these spellings by structural predicates, without trying
+compilation. `InlinePlan` computes eligibility once in postorder and remembers
+eligible expression addresses for this print only. Its membership lookups never
+control ordering or alias allocation. The extra pass and expected hash-table
+cost are O(nodes); output remains append-only O(bytes). The decoder uses its
+own bounded operand grammar, never Python authored lowering or a library.
+
+An inline expression is a literal, variable, clock/random leaf, an eligible
+member, or a helper expression call whose arguments are all inline. Collections,
+closures and projection reads keep explicit suites. This preserves tuple/list/
+set/map/record distinctions and lets closures remain at their exact tree position.
+A generic suite can contain readable children, and a readable block can contain
+generic statements. No statements or temporaries disappear.
+
+Every conditional row has a complete-byte positive and nearest-fallback witness
+in `tests::generated_source::readable::paired_readable_rules_pin_positive_and_near_miss_spellings`.
+The existing bounded naming and stored-field inventories also cover the reused
+unconditional leaf rules.
+
+| Rule and applicability | Readable spelling and exact inverse | Positive / nearest fallback witness |
+| --- | --- | --- |
+| Original identifier: shared legal, injective name plan | `λ` reconstructs the exact Name through its envelope row | `λ` / keyword `return` becomes `kernel_name_1`; aliases apply equally to shadowed bindings |
+| Native integer: Literal::Int, all canonical decimal integers | `-7` reconstructs Int regardless of number policy, including arbitrary precision | Int `-7` / Function named `-7` stays `k.function("-7")` |
+| Native float: Literal::Float with finite value | `-0.0`, `1.0`, `1e20` reconstruct Float through its kernel canonical parser; a point or exponent distinguishes Int | signed zero / infinity stays `k.float("inf")`; nan and negative infinity also stay explicit |
+| Existing scalar leaves: null, bool or text | `None`, `True`/`False`, JSON-quoted text preserve their variants | null / absent stays `k.absent`; text / function and bytes stay `k.function` and `k.bytes` |
+| Attribute: inline target and field satisfying the codec's conservative binding-identifier predicate | `object_value.title` wraps the target in Member::Field, preserving field text; non-variable/call/member targets are parenthesized | legal `title` / keyword field or closure target keeps `k.field` suite |
+| Subscript: target and index both inline | `items[-1]` wraps them in Member::Index, in target/index child order | literal index / closure index keeps `k.index` suite |
+| Expression helper call: every argument inline | `helper_function(3, λ)` constructs Expr::Call with the envelope's full FunctionId; empty argument lists are allowed | scalar args / closure argument keeps `k.invoke` suite |
+| Library Call or Spawn Action: callee is Library; operands remain atoms | `k.call(helper_function(3))`, `k.spawn(helper_function(3))` construct Action::Call/Spawn with Library callee; no expression call is introduced | Library / Value or Declared callee keeps explicit `k.value`/`k.declared` plus atom list |
+| If: inline condition | `if ready:` and mandatory `else:` decode directly to If with both Blocks; empty bodies spell `pass` | variable condition / closure condition keeps `k.if_` suite |
+| Elif: else Block has exactly one If whose condition is inline | `elif second:` reconstructs an else Block containing that one If; both Nodes keep their Sites | singleton nested If / extra statement preserves `else:` plus nested `if` |
+| For: inline iterable | `for item in ready:` preserves binding, iterable and body, without iterator/coercion nodes | variable iterable / closure iterable keeps `k.for_` suite |
+| While: inline condition | `while ready:` preserves condition and body exactly | variable condition / closure condition keeps `k.while_` suite |
+| Try: at least one handler present | `try:`, optional `except BaseException as error:`, optional `finally:` preserve absent versus present empty Blocks; BaseException is reserved clause syntax, not an effect or lookup | finally-only / handlerless Try keeps `k.try_(None, False)` suite |
+| Terminal expression statement: inline value | `return ready`, `raise ready`, `k.print(ready)`, `k.finish(ready)`, `k.fail(ready)` each reconstruct their distinct Stmt variant | variable value / closure value keeps the corresponding explicit suite |
+| Break and Continue: unconditional Stmt leaves | `break`, `continue` preserve their variants | both positive leaves; a function literal named `break` remains an explicit expression, never a statement |
+
+For example, the same generic envelope and main wrapper can contain:
+
+```python
+with k.main():
+    with k.block():
+        with k.let(answer):
+            helper_math_add(input_value.total, 2)
+        if ready:
+            k.finish(answer)
+        elif retry:
+            while pending:
+                with k.do():
+                    k.call(helper_worker(answer))
+        else:
+            try:
+                raise "unavailable"
+            except BaseException as error:
+                k.fail(error)
+            finally:
+                pass
+```
+
+Here every identifier and helper alias must be declared by the envelope. The
+nested `while` does not insert a condition evaluation temporary. Let and Assign
+remain distinct explicit suites, and action wrappers never fuse spawn/join.
+Numeric selection ignores the manifest's authored number policy: the spelling
+itself records the stored variant. Only canonical numeric text is accepted;
+leading zeros, noncanonical floats and overflowing native floats refuse.
+
+Readable blocks emit statements directly at one deeper indentation, or exactly
+`pass`. Else is mandatory even when empty; it is never inferred from a missing
+clause. A flattened elif creates exactly the same two kernel Nodes as an explicit
+else containing one If. The reader accounts for both levels in its node-depth
+budget. Postfix expression depth is checked independently of indentation;
+parentheses introduce no Node and have a separate bounded syntax-depth guard.
+Unexpected operators, calls through variable identifiers, non-atomic action
+arguments, extra handlers or leftover clauses refuse.
+
+Maps begin and end frames in `Node::children` order during final writing,
+including inline arguments, member target/index, direct Blocks and both elif
+frames. Clause labels create no synthetic Site. Even empty Blocks have their
+`pass` range; no new implicit-node category is needed. Each inline invocation
+has its own range, whereas the shared alias declaration has no Site.
+
+The acceptance and independent handwritten-source laws pin the inverses rather
+than execution observations. The additional bounded domain is exactly 6 names
+× 7 literals × 8 control contexts × 2 empty/nonempty choices = 672 Documents,
+with map-on/off canonical-byte checks, foreign full IDs, duplicate helper labels,
+keyword/namespace aliases, closure shadowing and escaping. The native literal
+law additionally covers arbitrary-precision integers, finite binary64 extrema,
+subnormals, exponents and both signed zeroes under both number policies.
+The independent finite form inventory, admitted Python corpus, TypeScript-origin
+batch and 64 Smith seeds are reused. Dropping the else Block in the readable
+inverse makes the independent reader fixture's complete-byte law fail.
 
 ## Limits, maps and proof
 
