@@ -9,7 +9,10 @@ path under the facade. This walks rustdoc JSON documents (one per crate) and
 fails listing each unreachable type with the facade items whose signatures name
 it. Host-facing signatures also cannot name the store-author ProcessRecord;
 classification follows facade module homes (persistence and durability for
-stores, every other supported module for hosts and plugins).
+stores, every other supported module for hosts and plugins). A sealed crate --
+a dependency one first-party adapter wraps, such as the MCP SDK -- is never
+facade surface: no `lash::` path may reach one of its items, and no reachable
+signature may name one, hidden or not (FIG-6269).
 
 Reachability starts at the facade root and follows public modules and `pub use`
 re-exports, including globs and re-exports from other crates; a re-export's
@@ -55,6 +58,13 @@ SIGNATURE_KINDS = frozenset(
         "variant",
     }
 )
+
+# Crates one first-party adapter owns and wraps. Their layouts are the adapter's
+# implementation, not a host contract: the facade neither re-exports their
+# items nor names them in any reachable signature (FIG-6269).
+SEALED_CRATES = {
+    "rmcp": "lash-rmcp, the MCP SDK lash-plugin-mcp adapts",
+}
 
 
 @dataclass(frozen=True)
@@ -336,6 +346,32 @@ class Facade:
                     violations.update(homes)
         return violations
 
+    def sealed_crate_leaks(self) -> dict[str, set[str]]:
+        """Facade paths that reach a sealed crate's item or name one -> the items leaked."""
+
+        leaks: dict[str, set[str]] = defaultdict(set)
+        for ref, facade_path in self.reachable.items():
+            item = self.item(ref)
+            if ref.crate in SEALED_CRATES:
+                leaks[facade_path].add(f"{ref.crate}::{item.get('name') or '<item>'}")
+                continue
+            if kind_of(item) not in SIGNATURE_KINDS:
+                continue
+            for document, path_id in self.signature_ids(ref):
+                entry = document.paths.get(str(path_id))
+                if entry is None:
+                    continue
+                crate = document.crate_of(entry)
+                if crate in SEALED_CRATES:
+                    leaks[facade_path].add("::".join(entry["path"]))
+        # A re-exported sealed module reaches all of its items: report the module.
+        sealed_paths = [path for ref, path in self.reachable.items() if ref.crate in SEALED_CRATES]
+        return {
+            path: leaked
+            for path, leaked in leaks.items()
+            if not any(path.startswith(f"{outer}::") for outer in sealed_paths)
+        }
+
     def gaps(self) -> dict[tuple[str, str], set[str]]:
         """Unreachable first-party (crate, definition path) -> facade items naming it."""
 
@@ -392,8 +428,17 @@ def main(argv: list[str]) -> int:
     facade.walk()
     gaps = facade.gaps()
     boundaries = facade.process_record_boundaries()
+    leaks = facade.sealed_crate_leaks()
     for path in sorted(boundaries):
         print(f"host-facing signature names store-author ProcessRecord: {path}", file=sys.stderr)
+    for path, leaked in sorted(leaks.items()):
+        crates = sorted({name.split("::")[0] for name in leaked})
+        print(
+            f"facade item reaches sealed crate {', '.join(crates)}: {path} names "
+            f"{', '.join(sorted(leaked)[:3])}"
+            f"{f' (+{len(leaked) - 3} more)' if len(leaked) > 3 else ''}",
+            file=sys.stderr,
+        )
     for reexport in facade.unresolved_reexports:
         print(f"unresolved re-export {reexport}", file=sys.stderr)
     for (crate, path), users in sorted(gaps.items()):
@@ -404,18 +449,21 @@ def main(argv: list[str]) -> int:
             f"named by {', '.join(shown[:3])}{more}",
             file=sys.stderr,
         )
-    if gaps or facade.unresolved_reexports or boundaries:
+    if gaps or facade.unresolved_reexports or boundaries or leaks:
         print(
             f"facade completeness: {len(gaps)} first-party type(s) named by facade signatures "
             f"have no `{args.facade}::` path; export each through the facade or narrow the "
-            f"signature that names it; {len(boundaries)} host-facing ProcessRecord boundary violation(s)",
+            f"signature that names it; {len(boundaries)} host-facing ProcessRecord boundary "
+            f"violation(s); {len(leaks)} facade item(s) reaching a sealed crate "
+            f"({', '.join(sorted(SEALED_CRATES))}): give each a lash-owned type",
             file=sys.stderr,
         )
         return 1
     print(
         f"facade completeness: {len(facade.reachable)} reachable items across "
         f"{len(facade.documents)} crates; every first-party signature type is nameable "
-        f"through `{args.facade}::`; host signatures keep ProcessRecord in store-author modules"
+        f"through `{args.facade}::`; host signatures keep ProcessRecord in store-author modules; "
+        f"no facade item reaches a sealed crate"
     )
     return 0
 

@@ -54,13 +54,7 @@ impl McpPluginFactoryBuilder {
 
     pub async fn build(mut self) -> Result<McpPluginFactory, McpError> {
         if let Some(handler) = self.elicitation_handler {
-            let capability = handler.capability();
-            if capability.form.is_none() && capability.url.is_none() {
-                return Err(McpError::Config(
-                    "an MCP elicitation handler must advertise form, URL, or both modes"
-                        .to_string(),
-                ));
-            }
+            let capability = handler.modes().capability();
             self.host_services.elicitation = Some(McpElicitationService {
                 handler,
                 capability,

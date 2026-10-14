@@ -18,8 +18,8 @@ pub enum McpError {
     #[error("MCP server `{server}` requires {expected}, but offered {offered:?}")]
     UnsupportedProtocolRevision {
         server: String,
-        expected: rmcp::model::ProtocolVersion,
-        offered: Vec<rmcp::model::ProtocolVersion>,
+        expected: String,
+        offered: Vec<String>,
     },
     #[error("MCP protocol error: {0}")]
     Protocol(String),
@@ -112,8 +112,10 @@ pub struct McpStartupFailure {
 /// Typed revision mismatch retained when an unavailable server stays configured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpProtocolRevisionRefusal {
-    pub expected: rmcp::model::ProtocolVersion,
-    pub offered: Vec<rmcp::model::ProtocolVersion>,
+    /// Always [`MCP_PROTOCOL_VERSION`](crate::MCP_PROTOCOL_VERSION).
+    pub expected: String,
+    /// The revisions the server offered instead.
+    pub offered: Vec<String>,
 }
 
 /// Evidence from one startup attempt, retained after its bounded cleanup.

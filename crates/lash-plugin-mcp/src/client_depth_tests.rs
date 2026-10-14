@@ -10,20 +10,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rmcp::model::{
-    ElicitResult, ElicitationAction, ElicitationCapability, ErrorData, FormElicitationCapability,
-    Implementation, ProtocolVersion, Root, ServerCapabilities, ServerConfig,
-    UrlElicitationCapability,
-};
+use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerConfig};
 use rmcp::{ClientHandler, ClientServiceExt, ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 
 use lash_core::facade_support::PluginFactory;
 
 use crate::{
-    McpElicitationHandler, McpElicitationParams, McpElicitationRequest, McpPluginFactory,
-    McpRootsProvider, McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpServerConfig,
-    McpStdioTransport, McpToolProvider, McpTransport,
+    MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationModes, McpElicitationParams,
+    McpElicitationRequest, McpElicitationResult, McpHostRefusal, McpPluginFactory, McpRoot,
+    McpRootsProvider, McpRootsRequest, McpSamplingHandler, McpSamplingRequest, McpSamplingResult,
+    McpServerConfig, McpStdioTransport, McpToolProvider, McpTransport,
 };
 
 #[derive(Clone)]
@@ -48,8 +45,8 @@ async fn modern_discovery_negotiates_the_only_supported_revision() {
         .await;
     let client = client.expect("modern discovery");
     assert_eq!(
-        client.peer_info().unwrap().protocol_version,
-        ProtocolVersion::V_2026_07_28
+        client.peer_info().unwrap().protocol_version.as_str(),
+        MCP_PROTOCOL_VERSION
     );
     assert_eq!(
         client.service().get_info().protocol_version,
@@ -76,8 +73,8 @@ async fn older_only_server_is_refused_with_typed_revisions() {
     let refusal = failure
         .protocol_refusal
         .expect("typed revisions survive cleanup");
-    assert_eq!(refusal.expected, ProtocolVersion::V_2026_07_28);
-    assert_eq!(refusal.offered, vec![ProtocolVersion::V_2025_11_25]);
+    assert_eq!(refusal.expected, MCP_PROTOCOL_VERSION);
+    assert_eq!(refusal.offered, vec!["2025-11-25".to_string()]);
     assert!(
         read_trace(&trace)
             .iter()
@@ -95,47 +92,43 @@ impl McpSamplingHandler for InputHost {
     async fn create_message(
         &self,
         request: McpSamplingRequest<'_>,
-    ) -> Result<rmcp::model::CreateMessageResult, ErrorData> {
+    ) -> Result<McpSamplingResult, McpHostRefusal> {
         assert_eq!(request.context.server_name(), "modern");
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(rmcp::model::CreateMessageResult::new(
-            rmcp::model::SamplingMessage::assistant_text("sampled"),
-            "host-model".into(),
-        ))
+        Ok(McpSamplingResult::text("sampled", "host-model"))
     }
 }
 #[async_trait]
 impl McpElicitationHandler for InputHost {
-    fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability::new()
-            .with_form(FormElicitationCapability::default())
-            .with_url(UrlElicitationCapability::default())
+    fn modes(&self) -> McpElicitationModes {
+        McpElicitationModes::FormAndUrl
     }
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<ElicitResult, ErrorData> {
+    ) -> Result<McpElicitationResult, McpHostRefusal> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         match request.params {
             McpElicitationParams::Form { message, .. } if message == "invalid" => {
-                Ok(ElicitResult::new(ElicitationAction::Accept)
-                    .with_content(json!({"answer":true})))
+                Ok(McpElicitationResult::Accept {
+                    content: Some(json!({"answer":true})),
+                })
             }
             McpElicitationParams::Form { .. } => request
                 .accept(json!({"answer":"yes"}))
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None)),
+                .map_err(McpHostRefusal::from),
             McpElicitationParams::Url { url, .. } => {
                 assert_eq!(url, "https://example.invalid/approve");
-                Ok(ElicitResult::new(ElicitationAction::Accept))
+                Ok(McpElicitationResult::Accept { content: None })
             }
         }
     }
 }
 #[async_trait]
 impl McpRootsProvider for InputHost {
-    async fn list_roots(&self, _: McpRootsRequest<'_>) -> Result<Vec<Root>, ErrorData> {
+    async fn list_roots(&self, _: McpRootsRequest<'_>) -> Result<Vec<McpRoot>, McpHostRefusal> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(vec![Root::new("file:///workspace/law")])
+        Ok(vec![McpRoot::new("file:///workspace/law")])
     }
 }
 
@@ -269,17 +262,17 @@ struct CancellingHost {
 }
 #[async_trait]
 impl McpElicitationHandler for CancellingHost {
-    fn capability(&self) -> ElicitationCapability {
-        ElicitationCapability::new().with_form(FormElicitationCapability::default())
+    fn modes(&self) -> McpElicitationModes {
+        McpElicitationModes::Form
     }
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<ElicitResult, ErrorData> {
+    ) -> Result<McpElicitationResult, McpHostRefusal> {
         self.started.notify_one();
         request.context.cancellation_token().cancelled().await;
         self.cancelled.notify_one();
-        Err(ErrorData::internal_error("host input cancelled", None))
+        Err(McpHostRefusal::internal("host input cancelled"))
     }
 }
 

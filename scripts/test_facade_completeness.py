@@ -204,6 +204,48 @@ class FacadeCompletenessTest(unittest.TestCase):
         facade.walk()
         self.assertEqual(set(), facade.process_record_boundaries())
 
+    def test_no_facade_path_reaches_or_names_a_sealed_crate(self) -> None:
+        # f::mcp::handle(&rmcp::ErrorData) and `pub use rmcp::model as sdk`,
+        # both nameable, both leak the SDK the adapter owns (FIG-6269).
+        sdk = {
+            "root": 0,
+            "index": {"0": module("rmcp", [1]), "1": module("model", [2]), "2": struct("ErrorData", [])},
+            "paths": {
+                "0": {"crate_id": 0, "path": ["rmcp"], "kind": "module"},
+                "1": {"crate_id": 0, "path": ["rmcp", "model"], "kind": "module"},
+                "2": {"crate_id": 0, "path": ["rmcp", "model", "ErrorData"], "kind": "struct"},
+            },
+            "external_crates": {},
+        }
+        raw = crate_f([])
+        raw["external_crates"]["3"] = {"name": "rmcp"}
+        raw["paths"]["200"] = {"crate_id": 3, "path": ["rmcp", "model"], "kind": "module"}
+        raw["paths"]["201"] = {"crate_id": 3, "path": ["rmcp", "model", "ErrorData"], "kind": "struct"}
+        raw["index"]["0"]["inner"]["module"]["items"] += [40]
+        raw["index"].update({
+            "40": module("mcp", [41, 42]),
+            "41": function("handle", [["error", {"borrowed_ref": {"type": ty("ErrorData", 201)}}]], None),
+            "42": use("sdk", "rmcp::model", 200),
+        })
+        documents = {"f": fc.Document("f", raw), "rmcp": fc.Document("rmcp", sdk)}
+        for document in documents.values():
+            for item_id, entry in document.raw["paths"].items():
+                if entry["crate_id"] == 0:
+                    document.by_path.setdefault(tuple(entry["path"]), []).append(item_id)
+        facade = fc.Facade(documents, "f")
+        facade.walk()
+        self.assertEqual(
+            {
+                "f::mcp::handle": {"rmcp::model::ErrorData"},
+                "f::mcp::sdk": {"rmcp::model"},
+            },
+            facade.sealed_crate_leaks(),
+        )
+        raw["index"]["40"]["inner"]["module"]["items"] = []
+        facade = fc.Facade(documents, "f")
+        facade.walk()
+        self.assertEqual({}, facade.sealed_crate_leaks())
+
     def test_trait_parameters_and_inherent_returns_must_be_nameable(self) -> None:
         self.assertEqual(
             {

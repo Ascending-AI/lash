@@ -9,7 +9,6 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use http::{HeaderName, HeaderValue};
-use rmcp::model::ProtocolVersion;
 use rmcp::service::ClientInitializeError;
 use rmcp::service::{RoleClient, RunningService};
 use rmcp::transport::streamable_http_client::{
@@ -111,7 +110,7 @@ pub(crate) fn connect_service(
                         if let Some(versions) = unsupported_versions(&err) {
                             return McpError::UnsupportedProtocolRevision {
                                 server: server_name,
-                                expected: crate::host::MCP_PROTOCOL_VERSION,
+                                expected: crate::host::MCP_PROTOCOL_VERSION.to_string(),
                                 offered: versions,
                             };
                         }
@@ -148,7 +147,7 @@ pub(crate) fn connect_service(
                         if let Some(versions) = unsupported_versions(&err) {
                             return McpError::UnsupportedProtocolRevision {
                                 server: server_name,
-                                expected: crate::host::MCP_PROTOCOL_VERSION,
+                                expected: crate::host::MCP_PROTOCOL_VERSION.to_string(),
                                 offered: versions,
                             };
                         }
@@ -166,7 +165,7 @@ pub(crate) fn connect_service(
 
 pub(crate) fn client_lifecycle() -> ClientLifecycleMode {
     ClientLifecycleMode::Discover {
-        preferred_versions: vec![crate::host::MCP_PROTOCOL_VERSION],
+        preferred_versions: vec![crate::host::PROTOCOL_REVISION],
     }
 }
 
@@ -174,13 +173,13 @@ fn validate_protocol(
     running: RunningService<RoleClient, LashMcpClientHandler>,
 ) -> Result<RunningService<RoleClient, LashMcpClientHandler>, Box<ClientInitializeError>> {
     if let Some(info) = running.peer_info()
-        && info.protocol_version != crate::host::MCP_PROTOCOL_VERSION
+        && info.protocol_version != crate::host::PROTOCOL_REVISION
     {
         let server_supported = vec![info.protocol_version.clone()];
         running.cancellation_token().cancel();
         return Err(Box::new(
             ClientInitializeError::NoCompatibleProtocolVersion {
-                client_supported: vec![crate::host::MCP_PROTOCOL_VERSION],
+                client_supported: vec![crate::host::PROTOCOL_REVISION],
                 server_supported,
             },
         ));
@@ -188,11 +187,11 @@ fn validate_protocol(
     Ok(running)
 }
 
-fn unsupported_versions(error: &ClientInitializeError) -> Option<Vec<ProtocolVersion>> {
+fn unsupported_versions(error: &ClientInitializeError) -> Option<Vec<String>> {
     match error {
         ClientInitializeError::NoCompatibleProtocolVersion {
             server_supported, ..
-        } => Some(server_supported.clone()),
+        } => Some(server_supported.iter().map(ToString::to_string).collect()),
         _ => None,
     }
 }

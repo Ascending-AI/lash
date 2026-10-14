@@ -29,8 +29,15 @@
 //! redact it. Exit evidence distinguishes observations made before failure
 //! from exits during cleanup, including forced termination.
 //!
+//! Host seams for server-to-client requests (sampling, roots, elicitation) take
+//! and return Lash-owned values: [`McpSamplingParams`], [`McpSamplingResult`],
+//! [`McpRoot`], [`McpElicitationResult`] and the shared [`McpHostRefusal`].
+//! The SDK is an implementation detail of this adapter and is not re-exported:
+//! conversion and validation happen at the wire, and SDK input these values
+//! cannot carry is refused to the server as invalid params.
+//!
 //! Implementation note: the wire-level client is provided by the official
-//! [`rmcp`] SDK. The plugin owns a single connection pool (`McpConnectionPool`)
+//! `rmcp` SDK. The plugin owns a single connection pool (`McpConnectionPool`)
 //! that is shared across every session built from the same `LashCore`, so
 //! e.g. stdio servers are spawned once per process rather than per session.
 
@@ -79,9 +86,6 @@ pub mod pool;
 mod service_lifecycle;
 mod stdio_transport;
 
-/// The MCP SDK types named by plugin signatures, available without a separate dependency.
-pub use rmcp as sdk;
-
 pub use config::{
     McpCallPolicy, McpDataLimits, McpDiagnosticsPolicy, McpServerConfig, McpShutdownPolicy,
     McpStdioTransport, McpStreamableHttpTransport, McpTransport, ReconnectAttempts,
@@ -90,6 +94,11 @@ pub use config::{
 pub use error::{
     McpDecodeCause, McpDiagnosticContent, McpError, McpExitObservation, McpInvalidLine, McpPeer,
     McpProtocolRevisionRefusal, McpStartupFailure, McpStartupObservation,
+};
+pub use host::protocol::{
+    McpContextInclusion, McpElicitationModes, McpElicitationResult, McpHostRefusal,
+    McpModelPreferences, McpRefusalKind, McpRole, McpRoot, McpSamplingContent, McpSamplingMessage,
+    McpSamplingParams, McpSamplingResult, McpStopReason, McpToolChoice,
 };
 pub use host::{
     MCP_PROTOCOL_VERSION, McpElicitationHandler, McpElicitationParams, McpElicitationRequest,
@@ -101,16 +110,6 @@ pub use plugin::{
     McpPluginFactoryBuilder, McpToolProvider,
 };
 pub use pool::{McpConnectionPool, McpServerFault, McpServerHealth, McpServerStatus};
-#[allow(
-    deprecated,
-    reason = "existing sampling and roots are retained during the MCP deprecation window"
-)]
-pub use rmcp::model::{
-    CreateMessageRequestParams, CreateMessageResult as CreateMessageOutcome,
-    ElicitResult as CreateElicitationOutcome, ElicitationAction, ElicitationCapability,
-    ErrorData as McpProtocolError, FormElicitationCapability, Root, SamplingMessage,
-    SamplingMessageContentBlock, UrlElicitationCapability,
-};
 
 /// Model-facing names keyed by raw native tool name for one server's current
 /// catalog. Cleanup preserves tool case; all members of a cleanup or length

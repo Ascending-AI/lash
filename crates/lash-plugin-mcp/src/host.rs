@@ -3,6 +3,8 @@
 //! Lash only provides protocol routing. Whether a server may sample a model,
 //! how elicitation is presented, and which workspace roots are visible are all
 //! decisions made by the embedding host through these dyn-compatible seams.
+//! The seams take and return Lash-owned values ([`protocol`]); the SDK model
+//! is converted and validated here, at the wire.
 
 #![allow(
     deprecated,
@@ -17,8 +19,8 @@ use async_trait::async_trait;
 use rmcp::ClientHandler;
 use rmcp::model::{
     ClientCapabilities, ClientConfig, CreateMessageRequestParams, CreateMessageResult,
-    ElicitResult, ElicitationAction, ElicitationCapability, ErrorCode, ErrorData, Implementation,
-    ListRootsResult, ProtocolVersion, Root, RootsCapabilities, SamplingCapability,
+    ElicitResult, ElicitationCapability, ErrorCode, ErrorData, Implementation, ListRootsResult,
+    ProtocolVersion, RootsCapabilities, SamplingCapability,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleClient};
 use serde_json::Value;
@@ -26,9 +28,19 @@ use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+pub mod protocol;
+
+use protocol::{
+    McpElicitationModes, McpElicitationResult, McpHostRefusal, McpRoot, McpSamplingParams,
+    McpSamplingResult,
+};
+
 /// The sole supported MCP revision. Startup uses `server/discover`; requests
 /// carry their protocol revision, client identity and capabilities in `_meta`.
-pub const MCP_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2026_07_28;
+pub const MCP_PROTOCOL_VERSION: &str = "2026-07-28";
+
+/// [`MCP_PROTOCOL_VERSION`] as the SDK negotiates it.
+pub(crate) const PROTOCOL_REVISION: ProtocolVersion = ProtocolVersion::V_2026_07_28;
 
 /// Per-request MCP host context.
 ///
@@ -61,8 +73,8 @@ impl McpRequestContext {
 }
 
 pub struct McpSamplingRequest<'a> {
-    /// Protocol request payload.
-    pub params: &'a CreateMessageRequestParams,
+    /// Protocol request payload, validated against SEP-1577.
+    pub params: &'a McpSamplingParams,
     /// Sealed request context supplied by Lash.
     pub context: &'a McpRequestContext,
 }
@@ -129,13 +141,19 @@ impl McpElicitationRequest<'_> {
     /// than returning a malformed answer to Lash.
     pub fn validate_response(
         &self,
-        response: &ElicitResult,
+        response: &McpElicitationResult,
     ) -> Result<(), McpElicitationValidationError> {
         validate_elicitation_response(self.params, response, self.validator)
     }
 
-    pub fn accept(&self, content: Value) -> Result<ElicitResult, McpElicitationValidationError> {
-        let response = ElicitResult::new(ElicitationAction::Accept).with_content(content);
+    /// Accept with a form answer, validated against the requested schema.
+    pub fn accept(
+        &self,
+        content: Value,
+    ) -> Result<McpElicitationResult, McpElicitationValidationError> {
+        let response = McpElicitationResult::Accept {
+            content: Some(content),
+        };
         self.validate_response(&response)?;
         Ok(response)
     }
@@ -164,15 +182,14 @@ impl McpElicitationValidationError {
     pub fn message(&self) -> &str {
         &self.message
     }
+}
 
-    fn into_protocol_error(self) -> ErrorData {
-        ErrorData::invalid_params(
-            self.to_string(),
-            Some(serde_json::json!({
-                "kind": "elicitation_response_validation",
-                "message": self.message,
-            })),
-        )
+impl From<McpElicitationValidationError> for McpHostRefusal {
+    fn from(error: McpElicitationValidationError) -> Self {
+        Self::invalid_params(error.to_string()).with_data(serde_json::json!({
+            "kind": "elicitation_response_validation",
+            "message": error.message,
+        }))
     }
 }
 
@@ -182,31 +199,30 @@ pub trait McpSamplingHandler: Send + Sync + 'static {
     async fn create_message(
         &self,
         request: McpSamplingRequest<'_>,
-    ) -> Result<CreateMessageResult, ErrorData>;
+    ) -> Result<McpSamplingResult, McpHostRefusal>;
 }
 
 /// Host-owned MCP elicitation policy and interaction.
 #[async_trait]
 pub trait McpElicitationHandler: Send + Sync + 'static {
     /// Exact elicitation modes this handler supports, read once and snapshotted
-    /// when the factory builds.
-    ///
-    /// Returning an empty capability is invalid: an installed handler must
-    /// advertise at least form or URL elicitation honestly. URL interactions
-    /// return their result through `create_elicitation` before the originating
-    /// request is retried.
-    fn capability(&self) -> ElicitationCapability;
+    /// when the factory builds. URL interactions return their result through
+    /// `create_elicitation` before the originating request is retried.
+    fn modes(&self) -> McpElicitationModes;
 
     async fn create_elicitation(
         &self,
         request: McpElicitationRequest<'_>,
-    ) -> Result<ElicitResult, ErrorData>;
+    ) -> Result<McpElicitationResult, McpHostRefusal>;
 }
 
 /// Host-owned workspace roots visible to MCP servers.
 #[async_trait]
 pub trait McpRootsProvider: Send + Sync + 'static {
-    async fn list_roots(&self, request: McpRootsRequest<'_>) -> Result<Vec<Root>, ErrorData>;
+    async fn list_roots(
+        &self,
+        request: McpRootsRequest<'_>,
+    ) -> Result<Vec<McpRoot>, McpHostRefusal>;
 }
 
 /// Optional server-to-client handlers shared by every connection in a pool.
@@ -318,7 +334,7 @@ impl LashMcpClientHandler {
     pub(crate) fn new(server_name: &str, services: McpHostServices) -> Self {
         let implementation = Implementation::new("lash", env!("CARGO_PKG_VERSION"));
         let client_info = ClientConfig::new(services.capabilities(), implementation)
-            .with_protocol_version(MCP_PROTOCOL_VERSION);
+            .with_protocol_version(PROTOCOL_REVISION);
         Self {
             observations: Arc::new(Mutex::new(crate::observations::Routes::new(
                 server_name,
@@ -362,17 +378,18 @@ impl LashMcpClientHandler {
         self.request_tasks
             .run(async move {
                 let validator = compile_elicitation_response_validator(&params)
-                    .map_err(McpElicitationValidationError::into_protocol_error)?;
+                    .map_err(|error| McpHostRefusal::from(error).into_protocol_error())?;
                 let response = handler
                     .create_elicitation(McpElicitationRequest {
                         params: &params,
                         context: &host_context,
                         validator: validator.as_ref(),
                     })
-                    .await?;
+                    .await
+                    .map_err(McpHostRefusal::into_protocol_error)?;
                 validate_elicitation_response(&params, &response, validator.as_ref())
-                    .map_err(McpElicitationValidationError::into_protocol_error)?;
-                Ok(response)
+                    .map_err(|error| McpHostRefusal::from(error).into_protocol_error())?;
+                Ok(response.into_sdk())
             })
             .await
     }
@@ -399,6 +416,8 @@ impl ClientHandler for LashMcpClientHandler {
         let Some(handler) = &self.services.sampling else {
             return Err(Self::unavailable("sampling", "sampling"));
         };
+        let params =
+            McpSamplingParams::from_sdk(params).map_err(McpHostRefusal::into_protocol_error)?;
         let handler = Arc::clone(handler);
         let host_context = McpRequestContext::new(self.server_name.clone(), context.ct);
         self.request_tasks
@@ -409,6 +428,8 @@ impl ClientHandler for LashMcpClientHandler {
                         context: &host_context,
                     })
                     .await
+                    .map_err(McpHostRefusal::into_protocol_error)?
+                    .into_sdk()
             })
             .await
     }
@@ -429,7 +450,10 @@ impl ClientHandler for LashMcpClientHandler {
                         context: &host_context,
                     })
                     .await
-                    .map(ListRootsResult::new)
+                    .map(|roots| {
+                        ListRootsResult::new(roots.into_iter().map(McpRoot::into_sdk).collect())
+                    })
+                    .map_err(McpHostRefusal::into_protocol_error)
             })
             .await
     }
@@ -500,50 +524,40 @@ impl ClientHandler for LashMcpClientHandler {
 
 fn validate_elicitation_response(
     request: &McpElicitationParams,
-    response: &ElicitResult,
+    response: &McpElicitationResult,
     validator: Option<&jsonschema::Validator>,
 ) -> Result<(), McpElicitationValidationError> {
-    match response.action {
-        ElicitationAction::Accept => match request {
-            McpElicitationParams::Form { .. } => {
-                let content = response.content.as_ref().ok_or_else(|| {
-                    McpElicitationValidationError::new(
-                        "an accepted form elicitation must contain an answer",
-                    )
-                })?;
-                let validator = validator.ok_or_else(|| {
-                    McpElicitationValidationError::new(
-                        "requested schema was not compiled before answer validation",
-                    )
-                })?;
-                if let Err(error) = validator.validate(content) {
-                    return Err(McpElicitationValidationError::new(format!(
-                        "answer does not match requested schema at `{}`: {error}",
-                        error.instance_path()
-                    )));
-                }
-                Ok(())
+    let McpElicitationResult::Accept { content } = response else {
+        return Ok(());
+    };
+    match request {
+        McpElicitationParams::Form { .. } => {
+            let content = content.as_ref().ok_or_else(|| {
+                McpElicitationValidationError::new(
+                    "an accepted form elicitation must contain an answer",
+                )
+            })?;
+            let validator = validator.ok_or_else(|| {
+                McpElicitationValidationError::new(
+                    "requested schema was not compiled before answer validation",
+                )
+            })?;
+            if let Err(error) = validator.validate(content) {
+                return Err(McpElicitationValidationError::new(format!(
+                    "answer does not match requested schema at `{}`: {error}",
+                    error.instance_path()
+                )));
             }
-            McpElicitationParams::Url { .. } => {
-                if response.content.is_some() {
-                    return Err(McpElicitationValidationError::new(
-                        "an accepted URL elicitation must not contain form content",
-                    ));
-                }
-                Ok(())
-            }
-        },
-        ElicitationAction::Decline | ElicitationAction::Cancel => {
-            if response.content.is_some() {
+            Ok(())
+        }
+        McpElicitationParams::Url { .. } => {
+            if content.is_some() {
                 return Err(McpElicitationValidationError::new(
-                    "declined or cancelled elicitation responses must not contain content",
+                    "an accepted URL elicitation must not contain form content",
                 ));
             }
             Ok(())
         }
-        _ => Err(McpElicitationValidationError::new(
-            "unsupported elicitation action",
-        )),
     }
 }
 
