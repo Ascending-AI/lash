@@ -3,7 +3,7 @@
 //! declaring-site tree; syncing a frame updates bounded control records.
 use super::{Completion, Control, Cursor, Frame, LibraryCall, TryPhase};
 use crate::compile::{CodeId, Executable, Form};
-use lash_kernel_doc::graph_tokens::{TokenCodec, encode_body};
+use lash_kernel_doc::graph_tokens::TokenCodec;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_state::paged::directory::ordinal_key;
@@ -31,7 +31,7 @@ fn write<T: Cell>(
 ) -> Result<(), HeapFault> {
     let key = ordinal_key(index);
     if let Some(old) = tree.get(&key, access)?
-        && encode_body(&old) == encode_body(&value)
+        && old.same_version(&value)
     {
         return Ok(());
     }

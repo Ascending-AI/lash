@@ -13,6 +13,11 @@ use std::rc::Rc;
 /// Cells maintain their child links and accounting before publication.
 pub trait Cell: TokenCodec + Clone {
     fn cost(&self) -> u64;
+    /// Whether two record versions can be retained as one. Mutable nested
+    /// trees override this: their packing placeholders are not identities.
+    fn same_version(&self, other: &Self) -> bool {
+        encode_body(self) == encode_body(other)
+    }
     fn task_edges(&self) -> u64 {
         0
     }
@@ -126,7 +131,7 @@ pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> 
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Summary {
     len: u64,
     cost: u64,
@@ -184,6 +189,22 @@ impl<T: Cell> Default for Tree<T> {
     }
 }
 impl<T: Cell> Tree<T> {
+    pub fn same_version(&self, other: &Self) -> bool {
+        if self.sequence != other.sequence {
+            return false;
+        }
+        match (&self.root, &other.root) {
+            (None, None) => true,
+            (Some(a), Some(b)) if a.family == b.family && a.summary == b.summary => {
+                match (&a.link, &b.link) {
+                    (Link::Sealed(a), Link::Sealed(b)) => a.id == b.id,
+                    (Link::Dirty(a), Link::Dirty(b)) => Rc::ptr_eq(a, b),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
     /// Reads through a synchronous borrowed port with the same validation and
     /// bounded residency used by an activation's owned port.
     pub fn get_from_source(

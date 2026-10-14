@@ -568,6 +568,19 @@ pub mod execution {
         }
     }
     impl Cell for FrameRecord {
+        fn same_version(&self, other: &Self) -> bool {
+            self.statement == other.statement
+                && self.bindings.same_version(&other.bindings)
+                && self.loops.same_version(&other.loops)
+                && self.finally.same_version(&other.finally)
+                && self.iterated.same_version(&other.iterated)
+                && self.departing.same_version(&other.departing)
+                && match (&self.arguments, &other.arguments) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_version(b),
+                    _ => false,
+                }
+        }
         fn task_edges(&self) -> u64 {
             self.bindings.task_edges()
                 + self.iterated.task_edges()
