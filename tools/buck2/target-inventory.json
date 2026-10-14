@@ -63637,6 +63637,7 @@
       "declared_features": [],
       "dependencies": [
         "lash-kernel-doc",
+        "lash-kernel-state",
         "lash-regress",
         "num-traits",
         "thiserror"

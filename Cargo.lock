@@ -2053,6 +2053,7 @@ name = "lash-ext-regex-ecma"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-regress",
  "num-traits",
  "thiserror",

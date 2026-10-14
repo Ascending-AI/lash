@@ -179,7 +179,9 @@ PACKAGE_DEPS = {
     },
     "lash-ext-regex-ecma": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
+        },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_regress": "//crates/lash-regress:lash-regress",

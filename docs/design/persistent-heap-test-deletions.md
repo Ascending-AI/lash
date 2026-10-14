@@ -77,3 +77,4 @@ certification machinery; it delegates to the real heap.
 | `prepared_tests::prepared_entries_answer_as_the_general_call` | Each independent numeric corpus case checks its prepared answer; strict release native replay compares prepared fingerprints. |
 | `collections::tests::k_bnd_003_collection_expansion_reserves_before_building_results` | `collections::tests::collection_expansion_refuses_under_the_real_census` |
 | Flat-heap charge and Room assertions in collection range/key-identity tests | The VM-level numeric-bound and identity laws remain; strict release native corpus certifies exact charges and reserve observations. |
+| `lash-ext-regex-ecma::tests::a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` | `tests::a_regex_expansion_refuses_under_the_real_census` uses the real S7 census; regex semantic and cold/warm laws retain their existing expectations. |
