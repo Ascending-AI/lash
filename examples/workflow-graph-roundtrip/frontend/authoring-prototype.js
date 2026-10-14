@@ -17,7 +17,13 @@ import {
   startPosition as scopeStart,
   appendPosition,
 } from "./authoring-projection.mjs";
+import { approvalControl } from "./authoring-approvals.mjs";
 const $ = (id) => document.getElementById(id);
+const approvals = approvalControl(
+  $("approve"),
+  (key) => call(`/approvals/${encodeURIComponent(key)}`, { approved: true }),
+  (error) => report(errorText(error), true),
+);
 const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
   templates = [],
@@ -108,6 +114,7 @@ async function action(work) {
   }
 }
 function show(next, correspondence) {
+  approvals.reset();
   $("node-panel").hidden = true;
   $("node-form").replaceChildren();
   const old = selected?.site;
@@ -377,6 +384,7 @@ function output(text, error = false) {
   $("run-output").append(line);
 }
 async function run() {
+  approvals.reset();
   running = true;
   controls();
   statuses = new Map();
@@ -404,8 +412,7 @@ async function run() {
       finalOutput = undefined;
       observationGap = true;
       sawTerminal = false;
-      $("approve").hidden = true;
-      $("approve").onclick = null;
+      approvals.reset();
       $("run-output").replaceChildren();
       $("run-status").textContent = "Recovering observation";
       output(
@@ -473,16 +480,7 @@ async function run() {
     for (const [name, value] of Object.entries(delta.lights ?? {}))
       output(`${name}: ${value}`);
     if (delta.progress !== undefined) output(`Progress ${delta.progress}%`);
-    if (event.approvalKey) {
-      $("approve").hidden = false;
-      $("approve").onclick = () =>
-        action(async () => {
-          await call(`/approvals/${encodeURIComponent(event.approvalKey)}`, {
-            approved: true,
-          });
-          $("approve").hidden = true;
-        });
-    }
+    if (event.approvalKey) approvals.add(event.approvalKey);
     renderCanvas();
   }
   try {
@@ -537,7 +535,7 @@ async function run() {
     running = false;
     renderInvocationOutput();
     if (selected) renderCallData(selected);
-    $("approve").hidden = true;
+    approvals.reset();
     controls();
   }
 }
