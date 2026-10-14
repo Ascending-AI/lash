@@ -22,6 +22,7 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         indent: 0,
         effects: &document.manifest.effects,
         operators: generated_operators::bindings(&document.manifest),
+        types: Default::default(),
     };
     renderer
         .out
@@ -35,6 +36,7 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     let names: Vec<_> = plan
         .names
         .iter()
+        .filter(|(name, alias)| name.as_str() != alias.as_str())
         .map(|(name, alias)| (alias, name))
         .collect();
     renderer.metadata(&names);
@@ -47,9 +49,11 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         renderer.name(name);
         let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
         renderer.parameters(&function.params);
+        renderer.types = Default::default();
         renderer.node(k::Node::Block(&function.body), unit.as_ref());
         renderer.out.write("\n");
     }
+    renderer.types = Default::default();
     renderer.out.write("async function main() ");
     renderer.node(
         k::Node::Block(&document.main),
@@ -165,7 +169,8 @@ struct Renderer<'a> {
     plan: &'a NamePlan,
     indent: usize,
     effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
-    operators: std::collections::BTreeMap<Operator, k::FunctionId>,
+    operators: generated_operators::Operators,
+    types: lash_kernel_dialect::source_types::Types,
 }
 impl Renderer<'_> {
     fn metadata(&mut self, value: &impl serde::Serialize) {
@@ -181,7 +186,9 @@ impl Renderer<'_> {
     fn function(&mut self, params: &[k::Name], body: &k::Block, unit: Option<&k::Unit>) {
         self.out.write("async function");
         self.parameters(params);
+        let parent = std::mem::take(&mut self.types);
         self.node(k::Node::Block(body), unit);
+        self.types = parent;
     }
     fn parameters(&mut self, params: &[k::Name]) {
         self.out.write("(");
@@ -208,7 +215,10 @@ impl Renderer<'_> {
                 self.indentation();
                 self.out.write("}");
             }
-            k::Node::Stmt(stmt) => self.statement(stmt),
+            k::Node::Stmt(stmt) => {
+                self.statement(stmt);
+                self.types.statement(stmt, self.operators.functions());
+            }
             k::Node::Expr(expr) => self.expression(expr),
             k::Node::Action(action) => self.action(action),
         }
@@ -268,7 +278,9 @@ impl Renderer<'_> {
                 self.out.write("if (");
                 self.expr(condition);
                 self.out.write(") ");
+                let saved = self.types.narrow(condition, self.operators.functions());
                 self.block(then_block);
+                self.types.restore(saved);
                 if else_block.is_empty() {
                     // The omitted empty else is the sole implicit TS node rule.
                     self.out.begin_node(None);
@@ -363,18 +375,8 @@ impl Renderer<'_> {
         match expr {
             k::Expr::Call { function, args } => self
                 .operators
-                .iter()
-                .find_map(|(op, id)| {
-                    (*id == *function
-                        && args.len()
-                            == if matches!(op, Operator::Unary(_)) {
-                                1
-                            } else {
-                                2
-                            })
-                    .then(|| op.precedence())
-                })
-                .unwrap_or(18),
+                .operator(function, args, &self.types)
+                .map_or(18, Operator::precedence),
             k::Expr::Tuple(_) => 2,
             k::Expr::Closure(_) | k::Expr::Record(_) => 1,
             k::Expr::Literal(k::Literal::Int(_) | k::Literal::Float(_)) => 15,
@@ -395,10 +397,10 @@ impl Renderer<'_> {
         match expr {
             k::Expr::Literal(k::Literal::Int(value)) => value.is_negative(),
             k::Expr::Literal(k::Literal::Float(value)) => value.get().is_sign_negative(),
-            k::Expr::Call { function, args } if args.len() == 1 => self
-                .operators
-                .iter()
-                .any(|(operator, id)| matches!(operator, Operator::Unary(_)) && id == function),
+            k::Expr::Call { function, args } => matches!(
+                self.operators.operator(function, args, &self.types),
+                Some(Operator::Unary(_))
+            ),
             _ => false,
         }
     }
@@ -616,16 +618,7 @@ impl Renderer<'_> {
             k::Expr::Member(m) => self.member(m),
             k::Expr::Closure(c) => self.function(&c.params, &c.body, None),
             k::Expr::Call { function, args } => {
-                if let Some(op) = self.operators.iter().find_map(|(op, id)| {
-                    (*id == *function
-                        && args.len()
-                            == if matches!(op, Operator::Unary(_)) {
-                                1
-                            } else {
-                                2
-                            })
-                    .then_some(*op)
-                }) {
+                if let Some(op) = self.operators.operator(function, args, &self.types) {
                     match op {
                         Operator::Unary(_) => {
                             self.out.write(op.token());

@@ -26,11 +26,11 @@ impl Reader<'_> {
             None
         };
         let (mut expr, mut height) = if let Some(token) = unary {
+            let (arg, h) = self.inline_value(c, nesting + 1)?;
             let function = self
                 .operators
-                .id(token)
+                .id(token, std::slice::from_ref(&arg), &self.scope.types)
                 .ok_or_else(|| invalid("operator has no unique identity"))?;
-            let (arg, h) = self.inline_value(c, nesting + 1)?;
             c.expect(")")?;
             self.depth(h)?;
             (
@@ -137,21 +137,16 @@ impl Reader<'_> {
                     .into_iter()
                     .find(|token| c.take(token));
                     if let Some(token) = token {
+                        let (right, h) = self.inline_value(c, nesting + 1)?;
+                        let args = vec![value.0, right];
                         let function = self
                             .operators
-                            .id(token.trim())
+                            .id(token.trim(), &args, &self.scope.types)
                             .ok_or_else(|| invalid("operator has no unique identity"))?;
-                        let (right, h) = self.inline_value(c, nesting + 1)?;
                         let height = value.1.max(h) + 1;
                         self.depth(height - 1)?;
                         c.expect(")")?;
-                        (
-                            k::Expr::Call {
-                                function,
-                                args: vec![value.0, right],
-                            },
-                            height,
-                        )
+                        (k::Expr::Call { function, args }, height)
                     } else {
                         c.expect(")")?;
                         value

@@ -1,6 +1,6 @@
 //! Direct decoder of Python generated-source v1; no authored lowering or library.
 //! The paired generic rule inventory is docs/design/generated-source-python.md.
-use crate::GeneratedSourceCode as Code;
+use crate::{GeneratedSourceCode as Code, generated_scope::BindingScope};
 use lash_kernel_dialect::{
     Diagnostic, GeneratedSourceLimits, PrintError, check_document_depth, check_metadata_uniqueness,
 };
@@ -224,7 +224,7 @@ struct Reader<'a> {
     byte_limit: usize,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
-    bound: BTreeSet<k::Name>,
+    scope: BindingScope,
     main: bool,
     effects: BTreeMap<k::EffectName, k::Signature>,
     operators: crate::generated_operators::Operators,
@@ -259,7 +259,7 @@ impl<'a> Reader<'a> {
             byte_limit: limits.max_bytes,
             names: BTreeMap::new(),
             helpers: BTreeMap::new(),
-            bound: BTreeSet::new(),
+            scope: Default::default(),
             main: false,
             effects: BTreeMap::new(),
             operators: Default::default(),
@@ -312,10 +312,18 @@ impl<'a> Reader<'a> {
         }
     }
     fn named(&self, alias: &str) -> Result<k::Name> {
-        let name = self
-            .names
-            .get(alias)
-            .ok_or_else(|| invalid("undeclared identifier alias"))?;
+        let native;
+        let name = if let Some(name) = self.names.get(alias) {
+            name
+        } else {
+            if !crate::printer::legal_identifier(alias)
+                || self.names.values().any(|name| name.as_str() == alias)
+            {
+                return Err(invalid("undeclared identifier alias"));
+            }
+            native = k::Name::new(alias);
+            &native
+        };
         // Alias compression can multiply a large original string. Bound the
         // total bytes of reconstructed Names before cloning, not after a whole
         // Document has already been allocated. Canonical bytes contain at least
@@ -362,14 +370,7 @@ impl<'a> Reader<'a> {
         if c.take("await ") {
             return self.await_call(c).map(k::Rhs::Action);
         }
-        // Explicit async operations remain tagged; atoms carry no expression Sites.
-        let mut probe = Cursor::new(c.text);
-        if probe.operation().is_ok_and(|op| {
-            matches!(
-                op,
-                "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "cancel" | "yield_"
-            )
-        }) {
+        if Self::action_form(c.text) {
             return self.action_cursor(c).map(k::Rhs::Action);
         }
         self.inline(c, depth).map(k::Rhs::Expr)
@@ -535,7 +536,7 @@ impl<'a> Reader<'a> {
         let mut main = false;
         while self.more(0) {
             let (mut c, suite) = self.line(0)?;
-            if !suite && c.take("def ") && !main {
+            if !suite && (c.take("async def ") || c.take("def ")) && !main {
                 let alias = c.word()?;
                 let name = if alias == "main" {
                     None
@@ -546,7 +547,7 @@ impl<'a> Reader<'a> {
                 c.expect(":")?;
                 c.finish()?;
                 self.main = name.is_none();
-                self.bound = params.iter().cloned().collect();
+                self.scope = BindingScope::new(&params);
                 let body = self.readable_block(1, 0)?;
                 if let Some(name) = name {
                     if document
@@ -576,7 +577,7 @@ impl<'a> Reader<'a> {
                     c.expect(",")?;
                     let params = self.names(&mut c)?;
                     c.end(true)?;
-                    self.bound = params.iter().cloned().collect();
+                    self.scope = BindingScope::new(&params);
                     let body = self.block(1, 0)?;
                     self.closed(0)?;
                     if document
@@ -590,7 +591,7 @@ impl<'a> Reader<'a> {
                 "main" => {
                     c.end(true)?;
                     self.main = false; // Explicit generic wrappers retain explicit terminals.
-                    self.bound.clear();
+                    self.scope = Default::default();
                     document.main = self.block(1, 0)?;
                     self.closed(0)?;
                     main = true;
@@ -626,7 +627,11 @@ impl<'a> Reader<'a> {
         self.depth(depth)?;
         let (mut c, suite) = self.line(indent)?;
         if !suite {
-            return self.readable_statement(c, indent, depth);
+            let stmt = self.readable_statement(c, indent, depth)?;
+            self.scope
+                .types
+                .statement(&stmt, self.operators.functions());
+            return Ok(stmt);
         }
         let op = c.operation()?;
         let i = indent + 1;
@@ -634,7 +639,7 @@ impl<'a> Reader<'a> {
         let stmt = match op {
             "let" | "assign" => {
                 let name = self.name(&mut c)?;
-                self.bound.insert(name.clone());
+                self.scope.bind(&name, Some(op == "let"));
                 c.end(true)?;
                 let value = self.rhs(i, d)?;
                 if op == "let" {
@@ -673,7 +678,7 @@ impl<'a> Reader<'a> {
             }
             "for_" => {
                 let binding = self.name(&mut c)?;
-                self.bound.insert(binding.clone());
+                self.scope.introduce(&binding);
                 c.end(true)?;
                 k::Stmt::For {
                     binding,
@@ -705,7 +710,7 @@ impl<'a> Reader<'a> {
                     None
                 } else {
                     let name = self.named(alias)?;
-                    self.bound.insert(name.clone());
+                    self.scope.introduce(&name);
                     Some(name)
                 };
                 c.expect(",")?;
@@ -733,6 +738,9 @@ impl<'a> Reader<'a> {
             _ => return Err(invalid("unknown statement form")),
         };
         self.closed(indent)?;
+        self.scope
+            .types
+            .statement(&stmt, self.operators.functions());
         Ok(stmt)
     }
     fn starts(&self, indent: usize, prefix: &str) -> bool {
@@ -782,6 +790,9 @@ impl<'a> Reader<'a> {
         })
     }
     fn action_form(text: &str) -> bool {
+        if text.trim_start().starts_with("await ") {
+            return true;
+        }
         let mut probe = Cursor::new(text);
         probe.operation().is_ok_and(|op| {
             matches!(
@@ -821,26 +832,26 @@ impl<'a> Reader<'a> {
             c.expect(")")?;
             c.finish()?;
             stmt
-        } else if c.take("def ") {
+        } else if c.take("async def ") || c.take("def ") {
             let name = self.name(&mut c)?;
             self.depth(depth + 1)?;
             let params = self.parameters(&mut c)?;
-            let declaration = if c.take("-> Final") {
-                true
+            let explicit = if c.take("-> Final") {
+                Some(true)
             } else if c.take("-> reassigned") {
-                false
+                Some(false)
             } else {
-                !self.bound.contains(&name)
+                None
             };
-            self.bound.insert(name.clone());
+            let (declaration, _) = self.scope.bind(&name, explicit);
             c.expect(":")?;
             c.finish()?;
-            let parent = std::mem::replace(&mut self.bound, params.iter().cloned().collect());
+            let parent = std::mem::replace(&mut self.scope, BindingScope::new(&params));
             let outer_main = self.main;
             self.main = false;
             let body = self.readable_block(indent + 1, depth + 2)?;
             self.main = outer_main;
-            self.bound = parent;
+            self.scope = parent;
             let value = k::Rhs::Expr(k::Expr::Closure(Box::new(k::Closure { params, body })));
             if declaration {
                 k::Stmt::Let { name, value }
@@ -867,7 +878,7 @@ impl<'a> Reader<'a> {
             self.readable_if(c, indent, depth)?
         } else if c.take("for ") {
             let binding = self.name(&mut c)?;
-            self.bound.insert(binding.clone());
+            self.scope.introduce(&binding);
             c.expect("in ")?;
             let iterable = self.inline(&mut c, depth + 1)?;
             c.expect(":")?;
@@ -895,7 +906,7 @@ impl<'a> Reader<'a> {
                 }
                 c.expect("except BaseException as ")?;
                 let binding = self.name(&mut c)?;
-                self.bound.insert(binding.clone());
+                self.scope.introduce(&binding);
                 c.expect(":")?;
                 c.finish()?;
                 Some(k::Catch {
@@ -963,16 +974,18 @@ impl<'a> Reader<'a> {
             // Parse the place separately from the RHS; an annotation is the
             // exact stored distinction between declaration and reassignment.
             let target = self.inline(&mut c, depth)?;
-            let declaration = if c.take(": Final") {
-                true
+            let explicit = if c.take(": Final") {
+                Some(true)
             } else if c.take(": reassigned") {
-                false
+                Some(false)
             } else {
-                matches!(&target, k::Expr::Variable(name) if !self.bound.contains(name))
+                None
             };
-            if let k::Expr::Variable(name) = &target {
-                self.bound.insert(name.clone());
-            }
+            let declaration = if let k::Expr::Variable(name) = &target {
+                self.scope.bind(name, explicit).0
+            } else {
+                explicit.unwrap_or(false)
+            };
             c.expect("=")?;
             let value = self.inline_rhs(&mut c, depth + 1)?;
             c.finish()?;
@@ -1039,13 +1052,7 @@ impl<'a> Reader<'a> {
             .lines
             .get(self.next)
             .ok_or_else(|| invalid("missing right-hand side"))?;
-        let mut c = Cursor::new(line.text);
-        let action = c.operation().is_ok_and(|op| {
-            matches!(
-                op,
-                "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "cancel" | "yield_"
-            )
-        });
+        let action = Self::action_form(line.text);
         if action {
             self.action_line(indent, depth).map(k::Rhs::Action)
         } else {
@@ -1070,12 +1077,12 @@ impl<'a> Reader<'a> {
             "closure" => {
                 let params = self.names(&mut c)?;
                 c.end(true)?;
-                let parent = std::mem::replace(&mut self.bound, params.iter().cloned().collect());
+                let parent = std::mem::replace(&mut self.scope, BindingScope::new(&params));
                 let outer_main = self.main;
                 self.main = false;
                 let body = self.block(i, d)?;
                 self.main = outer_main;
-                self.bound = parent;
+                self.scope = parent;
                 k::Expr::Closure(Box::new(k::Closure { params, body }))
             }
             "read" => {
@@ -1182,7 +1189,11 @@ impl<'a> Reader<'a> {
         if suite {
             return Err(invalid("actions have only atomic operands"));
         }
-        let action = self.action_cursor(&mut c)?;
+        let action = if c.take("await ") {
+            self.await_call(&mut c)?
+        } else {
+            self.action_cursor(&mut c)?
+        };
         c.finish()?;
         Ok(action)
     }

@@ -306,19 +306,20 @@ impl Reader {
         }
     }
     fn operator(&mut self, operator: Operator, args: &[&s::Expr]) -> Result<k::Expr, Diagnostic> {
-        let function = self.operators.get(&operator).copied().ok_or_else(|| {
-            invalid(
-                "operator has no unique full-identity envelope binding",
-                None,
-            )
-        })?;
-        Ok(k::Expr::Call {
-            function,
-            args: args
-                .iter()
-                .map(|arg| self.expression(arg))
-                .collect::<Result<_, _>>()?,
-        })
+        let args = args
+            .iter()
+            .map(|arg| self.expression(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        let function = self
+            .operators
+            .id(operator, &args, &self.types)
+            .ok_or_else(|| {
+                invalid(
+                    "operator has no unique full-identity envelope binding",
+                    None,
+                )
+            })?;
+        Ok(k::Expr::Call { function, args })
     }
     fn native_collection(&mut self, new: &s::NewExpr) -> Result<k::Expr, Diagnostic> {
         if new.type_args.is_some() {

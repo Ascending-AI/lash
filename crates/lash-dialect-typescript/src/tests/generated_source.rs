@@ -15,6 +15,7 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
     .expect("valid in-budget document prints");
     let decoded = crate::compile_generated(&printed.source, Default::default())
         .expect("generated source decodes without a library");
+    assert_eq!(document.identity().unwrap(), decoded.identity().unwrap());
     assert_eq!(
         document.canonical_bytes().unwrap(),
         decoded.canonical_bytes().unwrap(),

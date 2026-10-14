@@ -91,11 +91,7 @@ impl NamePlan {
         for name in document.entries.keys().chain(&document.private_bindings) {
             add(name);
         }
-        let mut used: BTreeSet<String> = ordered
-            .iter()
-            .filter(|n| legal(n.as_str()))
-            .map(|n| n.as_str().to_owned())
-            .collect();
+        let mut used: BTreeSet<String> = ordered.iter().map(|n| n.as_str().to_owned()).collect();
         let mut next = 0usize;
         let names = ordered
             .into_iter()

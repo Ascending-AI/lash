@@ -22,6 +22,7 @@ workspace = true
 
 [dependencies]
 unicode-ident = "1"
+unicode-normalization = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 ruff_python_ast = { workspace = true }

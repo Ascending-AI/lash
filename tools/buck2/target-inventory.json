@@ -66112,7 +66112,8 @@
         "ruff_text_size",
         "serde",
         "serde_json",
-        "unicode-ident"
+        "unicode-ident",
+        "unicode-normalization"
       ],
       "doc": "//crates/lash-dialect-python:lash-dialect-python__doc",
       "manifest": "crates/lash-dialect-python/Cargo.toml",

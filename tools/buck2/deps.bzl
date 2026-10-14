@@ -123,7 +123,8 @@ PACKAGE_DEPS = {
             "ruff_text_size": "//third-party/rust:p0292",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
-            "unicode_ident": "//third-party/rust:p0412"
+            "unicode_ident": "//third-party/rust:p0412",
+            "unicode_normalization": "//third-party/rust:p0413"
         }
     },
     "lash-dialect-typescript": {

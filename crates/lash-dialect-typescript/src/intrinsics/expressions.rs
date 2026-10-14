@@ -50,10 +50,10 @@ impl Reader {
             .body
             .as_ref()
             .ok_or_else(|| invalid("kernel functions have a body", Some(function.span)))?;
-        Ok(k::Function {
-            params,
-            body: self.block(&body.stmts)?,
-        })
+        let parent = std::mem::take(&mut self.types);
+        let body = self.block(&body.stmts)?;
+        self.types = parent;
+        Ok(k::Function { params, body })
     }
     pub(super) fn expression(&mut self, expr: &s::Expr) -> Result<k::Expr, Diagnostic> {
         if let Some(native) = self.native_expression(expr) {

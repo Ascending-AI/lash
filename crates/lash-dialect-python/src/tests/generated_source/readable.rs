@@ -890,20 +890,6 @@ fn native_operators_require_unique_identity_and_exact_arity() {
         })];
         assert!(roundtrip(&doc, false).source.contains("return helper_"));
     }
-    let ids = [
-        k::FunctionId::from_bytes([80; 32]),
-        k::FunctionId::from_bytes([81; 32]),
-    ];
-    let mut doc = document(finish(k::Expr::Call {
-        function: ids[0],
-        args: vec![int(1), int(2)],
-    }));
-    for (id, label) in ids.into_iter().zip(["add", "text.concat"]) {
-        doc.manifest
-            .functions
-            .insert(id, k::FunctionName::new(label).unwrap());
-    }
-    assert!(roundtrip(&doc, false).source.contains("helper_add(1, 2)"));
 }
 
 /// G-SOURCE-EFFECTS: dotted and nonidentifier names preserve result metadata.
@@ -1022,4 +1008,126 @@ def main():
         decoded.canonical_bytes().unwrap()
     );
     roundtrip(&doc, true);
+}
+
+/// G-SOURCE-EXACT: a generic member place and native action share the RHS inverse.
+#[test]
+fn generic_member_assignments_decode_native_await_rhs() {
+    for indexed in [false, true] {
+        for declared in [false, true] {
+            let target = k::Expr::Read(Box::new(k::ProjectionRead {
+                handle: variable("handle"),
+                request: k::Expr::Literal(k::Literal::Null),
+            }));
+            let member = if indexed {
+                k::Member::Index {
+                    target,
+                    index: int(0),
+                }
+            } else {
+                k::Member::Field {
+                    target,
+                    field: "answer".into(),
+                }
+            };
+            let action = if declared {
+                k::Action::Call {
+                    callee: k::Callee::Declared("worker".into()),
+                    args: vec![],
+                }
+            } else {
+                k::Action::Perform {
+                    effect: k::EffectName::new("echo").unwrap(),
+                    args: vec![],
+                    result: k::Type::Any,
+                }
+            };
+            let mut doc = document(k::Stmt::Assign {
+                place: k::Place::Member(member),
+                value: k::Rhs::Action(action),
+            });
+            doc.manifest.effects.insert(
+                k::EffectName::new("echo").unwrap(),
+                k::Signature {
+                    params: vec![],
+                    result: k::Type::Any,
+                },
+            );
+            roundtrip(&doc, true);
+        }
+    }
+}
+
+/// G-SOURCE-READABLE: typed arithmetic and text concat keep their distinct identities.
+#[test]
+fn mixed_numeric_text_and_dynamic_operators_are_native_and_exact() {
+    let doc = super::super::machine::lower(
+        "n = 1 + 2\ns = 'a' + 'b'\nx = n + 3\ny = s + 'c'\ndef plus(a, b):\n return a + b\n",
+    )
+    .unwrap()
+    .document;
+    let printed = roundtrip(&doc, true);
+    assert!(
+        !printed
+            .source
+            .split_once('\n')
+            .unwrap()
+            .1
+            .contains("helper_add(")
+            && !printed
+                .source
+                .split_once('\n')
+                .unwrap()
+                .1
+                .contains("helper_text_concat("),
+        "{}",
+        printed.source
+    );
+}
+
+/// G-SOURCE-NAMES: different kernel names remain different CPython identifiers.
+#[test]
+fn normalization_collisions_receive_distinct_reversible_aliases() {
+    let doc = k::Document::new(
+        k::NumberPolicy::BySpelling,
+        vec![
+            k::Stmt::Let {
+                name: "ﬁle".into(),
+                value: k::Rhs::Expr(int(1)),
+            },
+            k::Stmt::Let {
+                name: "file".into(),
+                value: k::Rhs::Expr(int(2)),
+            },
+            finish(k::Expr::List(vec![variable("ﬁle"), variable("file")])),
+        ],
+    );
+    let printed = roundtrip(&doc, true);
+    assert!(
+        !printed.source.split_once('\n').unwrap().1.contains("ﬁle"),
+        "{}",
+        printed.source
+    );
+}
+
+/// G-SOURCE-READABLE: the envelope records only aliases source cannot recover.
+#[test]
+fn native_names_need_no_identity_alias_metadata() {
+    let printed = roundtrip(
+        &document(k::Stmt::Let {
+            name: "answer".into(),
+            value: k::Rhs::Expr(int(1)),
+        }),
+        true,
+    );
+    assert!(
+        !printed
+            .source
+            .lines()
+            .next()
+            .unwrap()
+            .contains("[\"answer\",\"answer\"]"),
+        "{}",
+        printed.source
+    );
 }

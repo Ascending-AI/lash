@@ -32,7 +32,7 @@ pub struct Occurrence {
     pub case: &'static str,
     pub site: k::Site,
     pub node_kind: &'static str,
-    pub rule: &'static str,
+    pub rule: String,
     pub reason: &'static str,
 }
 
@@ -78,6 +78,11 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                 {
                     return Err("canonical bytes differ".into());
                 }
+                if decoded.identity().map_err(|e| e.to_string())?
+                    != case.document.identity().map_err(|e| e.to_string())?
+                {
+                    return Err("DocumentId differs".into());
+                }
                 let map = printed
                     .source_map
                     .as_ref()
@@ -122,30 +127,58 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                             .source
                             .get(range.start..range.end)
                             .ok_or("invalid mapped UTF-8 range")?;
-                        let Some(rule) = (dialect.generic)(node, source) else {
-                            continue;
-                        };
-                        let node_kind = node_kind(node);
-                        let allowed = dialect.unavoidable.iter().find(|allowed| {
-                            allowed.rule == rule
-                                && allowed.node_kind == node_kind
-                                && !allowed.reason.is_empty()
-                        });
-                        let reason = allowed
-                            .map_or("no documented unavoidable reason", |allowed| allowed.reason);
-                        report.generic_forms.push(Occurrence {
-                            dialect: dialect.name.into(),
-                            case: case.name,
-                            site: mapped.site.clone(),
-                            node_kind,
-                            rule,
-                            reason,
-                        });
-                        if allowed.is_none() {
-                            report.failures.push(format!(
-                                "{} / {} / {}: {node_kind} {rule}: {reason}",
-                                dialect.name, case.name, mapped.site
-                            ));
+                        // Remove descendant ranges before lexing: each spelling belongs
+                        // to its innermost real Site, and quoted data is never syntax.
+                        let mut owned = printed.source.as_bytes()[range.start..range.end].to_vec();
+                        for child in &map.sites {
+                            if child.site.unit == mapped.site.unit
+                                && child.site.path.len() > mapped.site.path.len()
+                                && child.site.path.starts_with(&mapped.site.path)
+                            {
+                                for child_range in &child.ranges {
+                                    let start = child_range.start.max(range.start);
+                                    let end = child_range.end.min(range.end);
+                                    if start < end {
+                                        owned[start - range.start..end - range.start].fill(b' ');
+                                    }
+                                }
+                            }
+                        }
+                        let owned = std::str::from_utf8(&owned).map_err(|e| e.to_string())?;
+                        let mut rules = fallback_rules(owned);
+                        if rules.is_empty() && !owned.trim().is_empty() {
+                            rules.extend((dialect.generic)(node, owned));
+                        }
+                        for detected in rules {
+                            let rule = if detected == "kernel-form" {
+                                (dialect.generic)(node, source).unwrap_or(detected)
+                            } else {
+                                detected
+                            };
+                            let node_kind = node_kind(node);
+                            let allowed = dialect.unavoidable.iter().find(|allowed| {
+                                allowed.rule == rule
+                                    && allowed.node_kind == node_kind
+                                    && !allowed.reason.is_empty()
+                            });
+                            let reason = allowed
+                                .map_or("no documented unavoidable reason", |allowed| {
+                                    allowed.reason
+                                });
+                            report.generic_forms.push(Occurrence {
+                                dialect: dialect.name.into(),
+                                case: case.name,
+                                site: mapped.site.clone(),
+                                node_kind,
+                                rule: rule.into(),
+                                reason,
+                            });
+                            if allowed.is_none() {
+                                report.failures.push(format!(
+                                    "{} / {} / {}: {node_kind} {rule}: {reason}: {owned}",
+                                    dialect.name, case.name, mapped.site
+                                ));
+                            }
                         }
                     }
                 }
@@ -159,6 +192,82 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
         }
     }
     report
+}
+
+/// This lexer belongs to the harness, so a dialect cannot self-grade away forms.
+fn fallback_rules(source: &str) -> Vec<&str> {
+    let mut tokens = vec![];
+    let mut chars = source.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if matches!(ch, '\'' | '"' | '`') {
+            let mut escaped = false;
+            for (_, next) in chars.by_ref() {
+                if escaped {
+                    escaped = false;
+                } else if next == '\\' {
+                    escaped = true;
+                } else if next == ch {
+                    break;
+                }
+            }
+        } else if ch == '#' {
+            for (_, next) in chars.by_ref() {
+                if next == '\n' {
+                    break;
+                }
+            }
+        } else if ch.is_alphanumeric() || ch == '_' {
+            let mut end = start + ch.len_utf8();
+            while let Some((index, next)) = chars.peek().copied() {
+                if !next.is_alphanumeric() && next != '_' {
+                    break;
+                }
+                chars.next();
+                end = index + next.len_utf8();
+            }
+            tokens.push(&source[start..end]);
+        } else if !ch.is_whitespace() {
+            tokens.push(&source[start..start + ch.len_utf8()]);
+        }
+    }
+    let mut rules = vec![];
+    for (i, token) in tokens.iter().enumerate() {
+        let next = tokens.get(i + 1).copied();
+        let rule = match *token {
+            "k" if next == Some(".") => Some("kernel-form"),
+            token if token.starts_with("helper_") && next == Some("(") => Some(token),
+            "spawn" | "sleep" | "join" | "cancel" | "yieldTask" if next == Some("(") => {
+                Some("task-action")
+            }
+            "projection" if next == Some(".") && tokens.get(i + 2) == Some(&"read") => {
+                Some("projection-read")
+            }
+            "Promise"
+                if next == Some(".")
+                    && tokens.get(i + 2).is_some_and(|name| {
+                        matches!(*name, "all" | "allSettled" | "race" | "any")
+                    }) =>
+            {
+                Some("task-action")
+            }
+            "-" if next == Some("(") => Some("unary-identity"),
+            "record" if next == Some("(") => Some("record-kind"),
+            "returned" if next == Some("(") => Some("return-kind"),
+            "finish" if next == Some("(") => Some("finish-kind"),
+            "failure" if next == Some("(") => Some("failure-kind"),
+            "declared" if next == Some(".") => Some("declared-callee"),
+            "Final" | "reassigned" => Some("binding-kind"),
+            "KernelType" => Some("result-type"),
+            "Object" if next == Some(".") && tokens.get(i + 2) == Some(&"fromEntries") => {
+                Some("record-order")
+            }
+            _ => None,
+        };
+        if let Some(rule) = rule {
+            rules.push(rule);
+        }
+    }
+    rules
 }
 
 pub fn node_kind(node: k::Node<'_>) -> &'static str {
@@ -353,6 +462,21 @@ mod tests {
     use crate::{PrintError, SourceFormat, SourceWriter};
 
     struct Witness;
+    struct Spelling(&'static str);
+    impl Printer for Spelling {
+        fn print(
+            &self,
+            document: &k::Document,
+            options: PrintOptions,
+        ) -> Result<crate::PrintedSource, PrintError> {
+            let mut printed = Witness.print(document, options)?;
+            let old = printed.source.len();
+            printed.source = printed.source.strip_suffix("generic").unwrap().to_owned() + self.0;
+            printed.source_map.as_mut().unwrap().sites[0].ranges[0].end = printed.source.len();
+            assert!(old > 0);
+            Ok(printed)
+        }
+    }
     impl Printer for Witness {
         fn print(
             &self,
@@ -442,5 +566,60 @@ mod tests {
             unequal.failures,
             ["witness / empty: canonical bytes differ"]
         );
+    }
+    #[test]
+    fn detectors_cannot_hide_helpers_or_pseudo_intrinsics() {
+        let cases = [Case {
+            name: "fallback",
+            document: k::Document::new(k::NumberPolicy::Float, vec![]),
+        }];
+        for source in [
+            "k.random()",
+            "spawn(worker, [])",
+            "await sleep(1)",
+            "await join(task)",
+            "await cancel(task)",
+            "await yieldTask()",
+            "await Promise.all(tasks)",
+            "projection.read(handle, request)",
+            "-(7)",
+            "helper_num_add(1, 2)",
+            "record({})",
+            "return returned(None)",
+            "return finish(None)",
+            "raise failure(None)",
+            "declared.worker",
+            "x: Final = 1",
+            "x: reassigned = 1",
+            "x as KernelType<\"any\">",
+            "Object.fromEntries([])",
+        ] {
+            let printer = Spelling(source);
+            let report = check(
+                &cases,
+                &[Dialect {
+                    name: "witness",
+                    printer: &printer,
+                    decode,
+                    generic: |_, _| None,
+                    unavoidable: &[],
+                }],
+            );
+            assert!(!report.generic_forms.is_empty(), "detector missed {source}");
+            assert!(!report.failures.is_empty());
+        }
+        let printer = Spelling("\"k.random() helper_add() record({})\"");
+        let report = check(
+            &cases,
+            &[Dialect {
+                name: "witness",
+                printer: &printer,
+                decode,
+                generic: |_, _| None,
+                unavoidable: &[],
+            }],
+        );
+        report.assert_passed();
+        assert!(report.generic_forms.is_empty());
     }
 }

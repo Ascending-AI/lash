@@ -17,6 +17,11 @@ impl Reader {
         }
     }
     pub(super) fn statement(&mut self, stmt: &s::Stmt) -> Result<k::Stmt, Diagnostic> {
+        let stmt = self.read_statement(stmt)?;
+        self.types.statement(&stmt, self.operators.functions());
+        Ok(stmt)
+    }
+    fn read_statement(&mut self, stmt: &s::Stmt) -> Result<k::Stmt, Diagnostic> {
         Ok(match stmt {
             s::Stmt::Decl(s::Decl::Var(var))
                 if matches!(var.kind, s::VarDeclKind::Let | s::VarDeclKind::Const)
@@ -46,16 +51,22 @@ impl Reader {
                 }
             }
             s::Stmt::Expr(statement) => return self.expression_statement(&statement.expr),
-            s::Stmt::If(statement) => k::Stmt::If {
-                condition: self.expression(&statement.test)?,
-                then_block: self.body(&statement.cons)?,
-                else_block: statement
-                    .alt
-                    .as_ref()
-                    .map(|body| self.body(body))
-                    .transpose()?
-                    .unwrap_or_default(),
-            },
+            s::Stmt::If(statement) => {
+                let condition = self.expression(&statement.test)?;
+                let saved = self.types.narrow(&condition, self.operators.functions());
+                let cons = self.body(&statement.cons);
+                self.types.restore(saved);
+                k::Stmt::If {
+                    condition,
+                    then_block: cons?,
+                    else_block: statement
+                        .alt
+                        .as_ref()
+                        .map(|body| self.body(body))
+                        .transpose()?
+                        .unwrap_or_default(),
+                }
+            }
             s::Stmt::ForOf(statement) if !statement.is_await => {
                 let s::ForHead::VarDecl(var) = &statement.left else {
                     return Err(invalid(

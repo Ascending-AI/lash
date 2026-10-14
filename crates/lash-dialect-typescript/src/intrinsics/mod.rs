@@ -22,7 +22,8 @@ pub(crate) struct Reader {
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
     effects: BTreeMap<k::EffectName, k::Signature>,
-    operators: BTreeMap<crate::generated_operators::Operator, k::FunctionId>,
+    operators: crate::generated_operators::Operators,
+    types: lash_kernel_dialect::source_types::Types,
 }
 
 /// A generated module starts with `k.document` (or an incomplete declare/main). Trivia is insignificant. This
@@ -221,7 +222,8 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
         names: BTreeMap::new(),
         helpers: BTreeMap::new(),
         effects: BTreeMap::new(),
-        operators: BTreeMap::new(),
+        operators: Default::default(),
+        types: Default::default(),
     };
     let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
     let mut items = module.body.iter();
@@ -436,6 +438,14 @@ impl Reader {
         self.names
             .get(ident.sym.as_ref())
             .cloned()
+            .or_else(|| {
+                (crate::printer::legal_identifier(ident.sym.as_ref())
+                    && !self
+                        .names
+                        .values()
+                        .any(|name| name.as_str() == ident.sym.as_ref()))
+                .then(|| k::Name::new(ident.sym.as_ref()))
+            })
             .ok_or_else(|| invalid("undeclared identifier alias", Some(ident.span)))
     }
     pub(crate) fn id(&self, expr: &s::Expr) -> Result<k::FunctionId, Diagnostic> {

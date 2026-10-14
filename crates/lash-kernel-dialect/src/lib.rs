@@ -43,3 +43,7 @@ pub use imperative::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
     SourceSite, SourceWriter, check_document_depth,
 };
+
+/// Operand facts used only by exact generated-source codecs.
+#[doc(hidden)]
+pub mod source_types;

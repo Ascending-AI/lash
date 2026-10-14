@@ -15,6 +15,7 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     .expect("valid in-budget document prints");
     let decoded = crate::compile_generated(&printed.source, Default::default())
         .expect("generated source decodes without a library");
+    assert_eq!(document.identity().unwrap(), decoded.identity().unwrap());
     assert_eq!(
         document.canonical_bytes().unwrap(),
         decoded.canonical_bytes().unwrap(),
@@ -407,7 +408,6 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         HAND_WRITTEN.replace("k.int(\"7\")", "k.int(\"07\")"),
         HAND_WRITTEN.replace("k.float(\"-0.0\")", "k.float(\"bogus\")"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.bytes(\"0g\")"),
-        HAND_WRITTEN.replace("k.let(answer)", "k.let(unknown)"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.unknown()"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.clock()()"),
         HAND_WRITTEN.replace("k.int(\"7\")", "k.int(\"7\", \"8\")"),

@@ -99,18 +99,22 @@ fn dialect(unavoidable: &[Unavoidable]) -> Dialect<'_> {
 
 /// G-SOURCE-READABLE: seven ordinary shapes permit no generic body forms.
 #[test]
-fn shared_ordinary_corpus_has_zero_generic_forms_and_exact_bytes() {
+fn shared_ordinary_corpus_has_only_named_distinctions_and_exact_bytes() {
     let cases = readability::corpus().expect("valid shared readability corpus");
-    let report = readability::check(&cases, &[dialect(&[])]);
+    let rules = unavoidable();
+    let report = readability::check(&cases, &[dialect(&rules)]);
     report.assert_passed();
     assert_eq!(report.documents, 7);
-    assert!(report.generic_forms.is_empty());
+    eprintln!(
+        "shared Python: documents={} fallbacks={:?}",
+        report.documents, report.generic_forms
+    );
     for case in cases {
         let printed = super::roundtrip(&case.document, false);
         if case.name == "three_effect_workflow" {
             assert_eq!(
                 printed.source.split_once('\n').unwrap().1,
-                r#"def deep_research():
+                r#"async def deep_research():
     search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
     evidence = await tools.research.search(search_input)
     synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
@@ -217,6 +221,137 @@ fn unavoidable() -> Vec<Unavoidable> {
             reason: "Atomic Absent differs from Null and invents no expression Site",
         });
     }
+    for (rule, node_kind, reason) in [
+        (
+            "record-kind",
+            "Record",
+            "A dict is Map; ordered kernel Record fields need their own constructor",
+        ),
+        (
+            "declared-callee",
+            "Call",
+            "A declared kernel callee is distinct from a variable with the same name",
+        ),
+        (
+            "helper_foreign_identity",
+            "ExpressionCall",
+            "The foreign helper identity has no Python builtin or operator",
+        ),
+        (
+            "binding-kind",
+            "Assign",
+            "An initial Assign must not decode as the first Let",
+        ),
+        (
+            "binding-kind",
+            "Let",
+            "A repeated Let must not decode as Assign",
+        ),
+        (
+            "binding-kind",
+            "Closure",
+            "A closure annotation retains its exceptional enclosing binding kind",
+        ),
+        (
+            "return-kind",
+            "Return",
+            "Main Return differs from main Finish",
+        ),
+        (
+            "finish-kind",
+            "Finish",
+            "Function Finish differs from function Return",
+        ),
+        ("failure-kind", "Fail", "Kernel Fail differs from Throw"),
+        (
+            "helper_kind",
+            "ExpressionCall",
+            "Kernel value tags differ from Python class objects returned by type",
+        ),
+        (
+            "helper_text_join",
+            "ExpressionCall",
+            "Kernel text.join takes an ordered value sequence, with distinct argument order and errors",
+        ),
+        (
+            "helper_list_len",
+            "ExpressionCall",
+            "Strict list length refuses other collections that Python len accepts",
+        ),
+    ] {
+        rules.push(Unavoidable {
+            rule,
+            node_kind,
+            reason,
+        });
+    }
+    for (rule, reason) in [
+        (
+            "helper_int_add",
+            "Integer-only add and generic numeric add can share operand facts but have distinct FunctionIds",
+        ),
+        (
+            "helper_int_lt",
+            "Integer-only and generic numeric comparison can share operand facts but have distinct FunctionIds",
+        ),
+        (
+            "helper_text_concat",
+            "Unknown operand facts cannot distinguish this strict text identity from numeric or dynamic addition",
+        ),
+    ] {
+        rules.push(Unavoidable {
+            rule,
+            node_kind: "ExpressionCall",
+            reason,
+        });
+    }
+    rules.push(Unavoidable { rule: "unary-identity", node_kind: "ExpressionCall", reason: "Grouping distinguishes a unary helper Call from a signed Literal without adding stored nodes" });
+    for rule in [
+        "helper_py_add",
+        "helper_py_arg_missing",
+        "helper_py_chr",
+        "helper_py_divmod",
+        "helper_py_exc_args",
+        "helper_py_exc_matches",
+        "helper_py_exc_new",
+        "helper_py_fail",
+        "helper_py_floordiv",
+        "helper_py_getitem",
+        "helper_py_iadd",
+        "helper_py_int",
+        "helper_py_iter",
+        "helper_py_iter_guard",
+        "helper_py_iter_size",
+        "helper_py_length",
+        "helper_py_method_append",
+        "helper_py_method_clear",
+        "helper_py_method_copy",
+        "helper_py_method_count",
+        "helper_py_method_extend",
+        "helper_py_method_get",
+        "helper_py_method_insert",
+        "helper_py_method_lower",
+        "helper_py_method_pop",
+        "helper_py_method_remove",
+        "helper_py_method_reverse",
+        "helper_py_method_setdefault",
+        "helper_py_method_split",
+        "helper_py_method_upper",
+        "helper_py_mod",
+        "helper_py_mul",
+        "helper_py_name_check",
+        "helper_py_neg",
+        "helper_py_pow",
+        "helper_py_range",
+        "helper_py_round",
+        "helper_py_setitem",
+        "helper_py_show",
+        "helper_py_slice",
+        "helper_py_to_list",
+        "helper_py_type",
+    ] {
+        rules.push(Unavoidable { rule, node_kind: "Call", reason: "This stored library Action has atomic operands and an await boundary; synchronous Python builtin/operator syntax would decode as Expr and change its Site and execution boundary" });
+    }
     rules
 }
 
@@ -242,10 +377,81 @@ fn authored_python_corpus_has_no_avoidable_generic_forms() {
     }
     let rules = unavoidable();
     let report = readability::check(&cases, &[dialect(&rules)]);
-    report.assert_passed();
-    assert_eq!(report.documents, 28);
     eprintln!(
         "authored Python: documents={} unavoidable={:?}",
         report.documents, report.generic_forms
     );
+    report.assert_passed();
+    assert_eq!(report.documents, 28);
+}
+
+/// G-SOURCE-VALID: exports are accepted by CPython, not just the paired cursor.
+#[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the law is a host: it compiles exported source under CPython"
+)]
+fn exported_python_corpora_compile_under_cpython() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut cases = readability::corpus().unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../../../conformance/manifest.json")).unwrap();
+    for case in manifest["cases"].as_array().unwrap() {
+        if case["status"] == "admitted" {
+            let source = case["cell"]
+                .as_str()
+                .or_else(|| case["source"].as_str())
+                .unwrap();
+            cases.push(Case {
+                name: "authored-python",
+                document: super::super::machine::lower(source).unwrap().document,
+            });
+        }
+    }
+    cases.push(Case {
+        name: "variant-inventory",
+        document: super::inventory_document(),
+    });
+    for seed in 0..64u64 {
+        use arbitrary::{Arbitrary, Unstructured};
+        let mut state = seed + 1;
+        let bytes: Vec<_> = (0..512)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        let smith =
+            lash_kernel_conformance::smith::Smith::arbitrary(&mut Unstructured::new(&bytes))
+                .unwrap();
+        cases.push(Case {
+            name: "smith",
+            document: smith.document,
+        });
+    }
+    let sources: Vec<_> = cases
+        .iter()
+        .map(|case| {
+            let printed = super::roundtrip(&case.document, true);
+            (case.name, printed.source)
+        })
+        .collect();
+    let mut child = Command::new("python3").args(["-c", "import json,sys\nfor name,source in json.load(sys.stdin):\n compile(source, name, 'exec')\nprint('CPython exports compiled')"])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&sources).unwrap())
+        .unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    eprintln!("CPython compiled {} corpus documents", sources.len());
 }

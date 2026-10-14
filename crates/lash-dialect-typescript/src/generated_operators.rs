@@ -64,17 +64,24 @@ impl Operator {
     }
 }
 
-/// A unique label binds one exact operator alias. Duplicate labels have no
-/// unambiguous operator inverse and retain their ordinary helper calls.
-pub(crate) fn bindings(manifest: &k::Manifest) -> BTreeMap<Operator, k::FunctionId> {
-    let mut by_label = BTreeMap::new();
-    for (id, name) in &manifest.functions {
-        let ids = by_label.entry(name.as_str()).or_insert_with(Vec::new);
-        ids.push(*id);
-    }
-    let mut result = BTreeMap::new();
+#[derive(Default)]
+pub(crate) struct Operators {
+    candidates: BTreeMap<Operator, Vec<k::FunctionId>>,
+    functions: BTreeMap<k::FunctionId, k::FunctionName>,
+}
+pub(crate) fn bindings(manifest: &k::Manifest) -> Operators {
+    let mut result: BTreeMap<Operator, Vec<k::FunctionId>> = BTreeMap::new();
     for (label, op) in [
         ("ts.add", BinaryOp::Add),
+        ("num.add", BinaryOp::Add),
+        ("text.concat", BinaryOp::Add),
+        ("num.sub", BinaryOp::Sub),
+        ("num.mul", BinaryOp::Mul),
+        ("num.div", BinaryOp::Div),
+        ("num.rem_trunc", BinaryOp::Mod),
+        ("num.lt", BinaryOp::Lt),
+        ("num.le", BinaryOp::LtEq),
+        ("eq", BinaryOp::EqEqEq),
         ("ts.sub", BinaryOp::Sub),
         ("ts.mul", BinaryOp::Mul),
         ("ts.div", BinaryOp::Div),
@@ -96,25 +103,95 @@ pub(crate) fn bindings(manifest: &k::Manifest) -> BTreeMap<Operator, k::Function
         ("ts.shr", BinaryOp::RShift),
         ("ts.ushr", BinaryOp::ZeroFillRShift),
     ] {
-        if let Some(ids) = by_label.get(label)
-            && let [id] = ids.as_slice()
-        {
-            result.insert(Operator::Binary(op), *id);
+        for (id, name) in &manifest.functions {
+            if name.as_str() == label {
+                result.entry(Operator::Binary(op)).or_default().push(*id);
+            }
         }
     }
     for (label, op) in [
         ("ts.neg", UnaryOp::Minus),
+        ("num.neg", UnaryOp::Minus),
+        ("bool.not", UnaryOp::Bang),
         ("ts.pos", UnaryOp::Plus),
         ("ts.not", UnaryOp::Bang),
         ("ts.bit_not", UnaryOp::Tilde),
     ] {
-        if let Some(ids) = by_label.get(label)
-            && let [id] = ids.as_slice()
-        {
-            result.insert(Operator::Unary(op), *id);
+        for (id, name) in &manifest.functions {
+            if name.as_str() == label {
+                result.entry(Operator::Unary(op)).or_default().push(*id);
+            }
         }
     }
-    result
+    Operators {
+        candidates: result,
+        functions: manifest.functions.clone(),
+    }
+}
+impl Operators {
+    pub(crate) fn functions(&self) -> &BTreeMap<k::FunctionId, k::FunctionName> {
+        &self.functions
+    }
+    pub(crate) fn id(
+        &self,
+        op: Operator,
+        args: &[k::Expr],
+        types: &lash_kernel_dialect::source_types::Types,
+    ) -> Option<k::FunctionId> {
+        use lash_kernel_dialect::source_types::Kind;
+        let candidates = self.candidates.get(&op)?;
+        if let [id] = candidates.as_slice() {
+            return Some(*id);
+        }
+        let numeric = args
+            .iter()
+            .all(|arg| types.expression(arg, &self.functions) == Kind::Number);
+        let text = args
+            .iter()
+            .all(|arg| types.expression(arg, &self.functions) == Kind::Text);
+        let boolean = args
+            .iter()
+            .all(|arg| types.expression(arg, &self.functions) == Kind::Bool);
+        let candidates: Vec<_> = candidates
+            .iter()
+            .filter(|id| {
+                let label = self.functions[id].as_str();
+                if label.starts_with("num.") {
+                    numeric
+                } else if label == "text.concat" {
+                    text
+                } else if label == "bool.not" {
+                    boolean
+                } else if label == "ts.not" {
+                    !boolean
+                } else if label == "eq" {
+                    true
+                } else {
+                    !numeric && !text
+                }
+            })
+            .collect();
+        match candidates.as_slice() {
+            [id] => Some(**id),
+            _ => None,
+        }
+    }
+    pub(crate) fn operator(
+        &self,
+        id: &k::FunctionId,
+        args: &[k::Expr],
+        types: &lash_kernel_dialect::source_types::Types,
+    ) -> Option<Operator> {
+        self.candidates.keys().copied().find(|op| {
+            args.len()
+                == if matches!(op, Operator::Unary(_)) {
+                    1
+                } else {
+                    2
+                }
+                && self.id(*op, args, types) == Some(*id)
+        })
+    }
 }
 
 impl Ord for Operator {

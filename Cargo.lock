@@ -2094,6 +2094,7 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-ident",
+ "unicode-normalization",
 ]
 
 [[package]]

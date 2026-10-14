@@ -9,16 +9,16 @@ The generated subset uses kernel semantics; stock Python execution is not promis
 The shared seven-field envelope contains native Python dictionaries and lists,
 including complete signatures and full helper identities. No body is hidden in
 metadata and no metadata is escaped JSON. Original names use deterministic,
-injective aliases from `NamePlan`. Python keywords, builtins and the generated
+injective aliases from `NamePlan`. Identity aliases are omitted; native names reconstruct directly. Only NFKC-stable identifiers may remain unaliased, so Python normalization cannot collapse two kernel names. Python keywords, builtins and the generated
 namespaces are reserved; aliases apply to declarations, parameters, references,
 function values, entries and private names, including shadowing. Helper labels
 never resolve dependencies against an installed library.
 
 ```python
-k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [["answer", "answer"], ["items", "items"], ["worker", "worker"]], [])
+k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [], [])
 def worker(items):
     return items[0]
-def main():
+async def main():
     items = [1, 2]
     answer = await declared.worker(items)
     return answer
@@ -34,7 +34,7 @@ ordered tables and output uses the shared append-only writer.
 
 | Rule and applicability | Python spelling and exact inverse | Positive / boundary witness |
 | --- | --- | --- |
-| Document function or main | `def worker(x):` / `def main():` with direct suites; aliases reconstruct original names and parameters | Declared worker / function originally named `main` receives a reversible alias |
+| Document function or main | `async def` for a body containing native awaits, otherwise `def` with direct suites; aliases reconstruct original names and parameters | Declared worker / function originally named `main` receives a reversible alias |
 | First binding in a Python function scope | `x = value` reconstructs Let; after a parameter, loop/catch binding or previous assignment, it reconstructs Assign | First Let, repeated Assign / repeated Let uses `x: Final = value`; an Assign before any binding uses `x: reassigned = value` |
 | Bound closure RHS | `def nested(x):` reconstructs the closure RHS and its enclosing binding statement, with a fresh parameter scope | First Let and subsequent Assign / `-> Final` or `-> reassigned` carries an exceptional binding kind; an unbound block expression stays explicit |
 | Literal variants | Native integers, finite canonical floats, `None`, booleans and quoted text; `float("nan")`, `float("inf")`, `bytes.fromhex("00ff")`, `declared.worker` preserve nonfinite floats, bytes and Function versus Variable | Signed zero, huge integers, UTF-8 escapes / Absent remains `k.absent` because None is Null |
@@ -63,8 +63,7 @@ Operator aliases are generated syntax, not algebraic rewrites. The fixed label
 inventory is `add`, `text.concat`, `py.add` (+), `sub`, `py.sub` (-), `mul`,
 `py.mul` (*), `py.truediv` (/), `py.floordiv` (//), `py.mod` (%), `py.pow` (**),
 `eq` (==), `same` (is), `lt` (<), `le` (<=), `gt` (>), `ge` (>=), `bool.not`
-(not), and `neg`, `py.neg` (unary -). Only one full requirement identity may
-occupy each operator token. Competing requirements retain explicit helper calls.
+(not), and `neg`, `py.neg` (unary -). Operand facts from literal, binding and result types select numeric, text or dynamic requirements when they share a token. Printer and reader share the same operand inference. Distinct identities with identical operand facts, duplicate labels and unknown facts retain explicit helper calls. Integer-only labels (`int.add`, `int.sub`, `int.mul`, `int.lt`, `int.le`) also participate.
 The decoder uses the preserved identity and exact stored argument order, never
 assumptions about operator behavior or a live library.
 
@@ -98,8 +97,7 @@ obsolete escaped envelopes refuse and require re-exporting the original Document
 Each paired witness runs print, public compile_generated and complete canonical
 byte comparison. The independent finite form/stored-field inventory, 64 Smith
 seeds, 28 authored Python cases, four foreign TypeScript cases and the 560- and
-672-document bounded domains remain in use. The shared seven-document readability
-corpus registers Python with no generic allowances. Authored-source acceptance
+672-document bounded domains remain in use. The shared harness independently lexes every node's own mapped spelling, excludes descendant ranges and quoted data, and counts `k.*`, every `helper_*` call and pseudo-intrinsics. The seven-document corpus reports its named exactness distinctions (Record versus Map, declared callees and foreign helper identity). Authored-source acceptance
 reports any generic form against the documented unavoidable list. A mutation of
 the first-binding inverse fails the canonical-byte law.
 
@@ -114,3 +112,16 @@ all real Nodes from `Node::children`, including direct root Blocks, closures,
 actions and atomic-free calls; aliases and atomic operands invent no Sites.
 Ranges use final UTF-8 byte offsets and maps never change output bytes. Every
 empty block has its `pass` range; no new implicit-node category is necessary.
+
+The authored corpus also reports pseudo-intrinsics: exceptional binding annotations
+retain Let versus Assign, `returned`/`finish`/`failure` retain distinct terminal
+kinds. Strict `list.len`, kernel `kind`, and `text.join` have different domains,
+results or argument conventions from Python builtins. Integer-only arithmetic
+and unknown text operands retain helpers when their full identities cannot be
+selected from the source operand facts.
+
+The following authored helper Actions remain explicit and are individually
+counted by the harness. Each has atomic operands and a stored await boundary;
+a synchronous Python expression would change Action to Expr and its execution
+boundary. These are exact document exports, not a rewrite of authored lowering:
+`helper_py_add`, `helper_py_arg_missing`, `helper_py_chr`, `helper_py_divmod`, `helper_py_exc_args`, `helper_py_exc_matches`, `helper_py_exc_new`, `helper_py_fail`, `helper_py_floordiv`, `helper_py_getitem`, `helper_py_iadd`, `helper_py_int`, `helper_py_iter`, `helper_py_iter_guard`, `helper_py_iter_size`, `helper_py_length`, `helper_py_method_append`, `helper_py_method_clear`, `helper_py_method_copy`, `helper_py_method_count`, `helper_py_method_extend`, `helper_py_method_get`, `helper_py_method_insert`, `helper_py_method_lower`, `helper_py_method_pop`, `helper_py_method_remove`, `helper_py_method_reverse`, `helper_py_method_setdefault`, `helper_py_method_split`, `helper_py_method_upper`, `helper_py_mod`, `helper_py_mul`, `helper_py_name_check`, `helper_py_neg`, `helper_py_pow`, `helper_py_range`, `helper_py_round`, `helper_py_setitem`, `helper_py_show`, `helper_py_slice`, `helper_py_to_list`, `helper_py_type`.

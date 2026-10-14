@@ -1,10 +1,13 @@
 //! Exact Python spelling; paired inverses live in generated.rs.
-use crate::Python;
+use crate::{Python, generated_scope::BindingScope};
+mod names;
+mod readable;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
     check_document_depth,
 };
 use lash_kernel_doc as k;
+pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 
 /// Render exact generated Python without compiling or resolving dependencies.
 pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSource, PrintError> {
@@ -19,7 +22,7 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         plan: &plan,
         inline: &inline,
         indent: 0,
-        bound: Default::default(),
+        scope: Default::default(),
         main: false,
         effects: &document.manifest.effects,
         operators: crate::generated_operators::Operators::new(&document.manifest.functions),
@@ -31,24 +34,37 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     r.out.write(", ");
     r.out.json(&document.private_bindings);
     r.out.write(", ");
-    let names: Vec<_> = plan.names.iter().map(|(n, a)| (a, n)).collect();
+    let names: Vec<_> = plan
+        .names
+        .iter()
+        .filter(|(name, alias)| name.as_str() != alias.as_str())
+        .map(|(n, a)| (a, n))
+        .collect();
     r.metadata(&names);
     r.out.write(", ");
     let helpers: Vec<_> = plan.helpers.iter().map(|(id, a)| (a, id)).collect();
     r.metadata(&helpers);
     r.out.write(")\n");
     for (name, function) in &document.functions {
-        r.out.write("def ");
+        r.out.write(if awaits(&function.body) {
+            "async def "
+        } else {
+            "def "
+        });
         r.name(name);
         r.parameters(&function.params);
         r.out.write(":\n");
         let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
-        r.bound = function.params.iter().cloned().collect();
+        r.scope = BindingScope::new(&function.params);
         r.root_block(&function.body, unit.as_ref());
     }
-    r.bound.clear();
+    r.scope = Default::default();
     r.main = true;
-    r.out.write("def main():\n");
+    r.out.write(if awaits(&document.main) {
+        "async def main():\n"
+    } else {
+        "def main():\n"
+    });
     r.root_block(&document.main, options.source_map.then_some(&k::Unit::Main));
     r.out.finish(document, SourceFormat::PythonV1)
 }
@@ -62,280 +78,12 @@ impl Printer for Python {
     }
 }
 
-pub(crate) fn identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|c| c == '_' || unicode_ident::is_xid_start(c))
-        && chars.all(unicode_ident::is_xid_continue)
-}
-pub(crate) fn attribute_identifier(name: &str) -> bool {
-    identifier(name)
-        && !matches!(
-            name,
-            "False"
-                | "None"
-                | "True"
-                | "and"
-                | "as"
-                | "assert"
-                | "async"
-                | "await"
-                | "break"
-                | "class"
-                | "continue"
-                | "def"
-                | "del"
-                | "elif"
-                | "else"
-                | "except"
-                | "finally"
-                | "for"
-                | "from"
-                | "global"
-                | "if"
-                | "import"
-                | "in"
-                | "is"
-                | "lambda"
-                | "nonlocal"
-                | "not"
-                | "or"
-                | "pass"
-                | "raise"
-                | "return"
-                | "try"
-                | "while"
-                | "with"
-                | "yield"
-        )
-}
-pub(crate) fn legal_identifier(name: &str) -> bool {
-    identifier(name)
-        && !name.starts_with("helper_")
-        && !name.starts_with("kernel_name_")
-        && !matches!(
-            name,
-            "k" | "main"
-                | "Final"
-                | "reassigned"
-                | "tools"
-                | "record"
-                | "finish"
-                | "failure"
-                | "returned"
-                | "declared"
-                | "False"
-                | "None"
-                | "True"
-                | "and"
-                | "as"
-                | "assert"
-                | "async"
-                | "await"
-                | "break"
-                | "class"
-                | "continue"
-                | "def"
-                | "del"
-                | "elif"
-                | "else"
-                | "except"
-                | "finally"
-                | "for"
-                | "from"
-                | "global"
-                | "if"
-                | "import"
-                | "in"
-                | "is"
-                | "lambda"
-                | "nonlocal"
-                | "not"
-                | "or"
-                | "pass"
-                | "raise"
-                | "return"
-                | "try"
-                | "while"
-                | "with"
-                | "yield"
-                | "match"
-                | "case"
-                | "type"
-                | "__debug__"
-                | "Ellipsis"
-                | "NotImplemented"
-        )
-        && !BUILTINS.contains(&name)
-}
-// Python 3.13 builtins are reserved, including unsupported authored builtins.
-const BUILTINS: &[&str] = &[
-    "ArithmeticError",
-    "AssertionError",
-    "AttributeError",
-    "BaseException",
-    "BaseExceptionGroup",
-    "BlockingIOError",
-    "BrokenPipeError",
-    "BufferError",
-    "BytesWarning",
-    "ChildProcessError",
-    "ConnectionAbortedError",
-    "ConnectionError",
-    "ConnectionRefusedError",
-    "ConnectionResetError",
-    "DeprecationWarning",
-    "EOFError",
-    "Ellipsis",
-    "EncodingWarning",
-    "EnvironmentError",
-    "Exception",
-    "ExceptionGroup",
-    "False",
-    "FileExistsError",
-    "FileNotFoundError",
-    "FloatingPointError",
-    "FutureWarning",
-    "GeneratorExit",
-    "IOError",
-    "ImportError",
-    "ImportWarning",
-    "IndentationError",
-    "IndexError",
-    "InterruptedError",
-    "IsADirectoryError",
-    "KeyError",
-    "KeyboardInterrupt",
-    "LookupError",
-    "MemoryError",
-    "ModuleNotFoundError",
-    "NameError",
-    "None",
-    "NotADirectoryError",
-    "NotImplemented",
-    "NotImplementedError",
-    "OSError",
-    "OverflowError",
-    "PendingDeprecationWarning",
-    "PermissionError",
-    "ProcessLookupError",
-    "PythonFinalizationError",
-    "RecursionError",
-    "ReferenceError",
-    "ResourceWarning",
-    "RuntimeError",
-    "RuntimeWarning",
-    "StopAsyncIteration",
-    "StopIteration",
-    "SyntaxError",
-    "SyntaxWarning",
-    "SystemError",
-    "SystemExit",
-    "TabError",
-    "TimeoutError",
-    "True",
-    "TypeError",
-    "UnboundLocalError",
-    "UnicodeDecodeError",
-    "UnicodeEncodeError",
-    "UnicodeError",
-    "UnicodeTranslateError",
-    "UnicodeWarning",
-    "UserWarning",
-    "ValueError",
-    "Warning",
-    "ZeroDivisionError",
-    "__build_class__",
-    "__debug__",
-    "__doc__",
-    "__import__",
-    "__loader__",
-    "__name__",
-    "__package__",
-    "__spec__",
-    "abs",
-    "aiter",
-    "all",
-    "anext",
-    "any",
-    "ascii",
-    "bin",
-    "bool",
-    "breakpoint",
-    "bytearray",
-    "bytes",
-    "callable",
-    "chr",
-    "classmethod",
-    "compile",
-    "complex",
-    "copyright",
-    "credits",
-    "delattr",
-    "dict",
-    "dir",
-    "divmod",
-    "enumerate",
-    "eval",
-    "exec",
-    "exit",
-    "filter",
-    "float",
-    "format",
-    "frozenset",
-    "getattr",
-    "globals",
-    "hasattr",
-    "hash",
-    "help",
-    "hex",
-    "id",
-    "input",
-    "int",
-    "isinstance",
-    "issubclass",
-    "iter",
-    "len",
-    "license",
-    "list",
-    "locals",
-    "map",
-    "max",
-    "memoryview",
-    "min",
-    "next",
-    "object",
-    "oct",
-    "open",
-    "ord",
-    "pow",
-    "print",
-    "property",
-    "quit",
-    "range",
-    "repr",
-    "reversed",
-    "round",
-    "set",
-    "setattr",
-    "slice",
-    "sorted",
-    "staticmethod",
-    "str",
-    "sum",
-    "super",
-    "tuple",
-    "type",
-    "vars",
-    "zip",
-];
 struct Renderer<'a> {
     out: SourceWriter,
     plan: &'a NamePlan,
     inline: &'a InlinePlan,
     indent: usize,
-    bound: std::collections::BTreeSet<k::Name>,
+    scope: BindingScope,
     main: bool,
     effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
     operators: crate::generated_operators::Operators,
@@ -362,405 +110,6 @@ impl Renderer<'_> {
         }
         self.indent -= 1;
         self.out.end_node();
-    }
-    fn inline_rhs(&self, rhs: &k::Rhs) -> bool {
-        match rhs {
-            k::Rhs::Expr(e) => self.inline.contains(e),
-            k::Rhs::Action(_) => true,
-        }
-    }
-    fn write_inline_rhs(&mut self, rhs: &k::Rhs) {
-        match rhs {
-            k::Rhs::Expr(e) => self.inline_expr(e),
-            k::Rhs::Action(a) => {
-                self.out.begin_node(None);
-                self.action(a);
-                self.out.end_node();
-            }
-        }
-    }
-    fn inline_member(&self, member: &k::Member) -> bool {
-        match member {
-            k::Member::Field { target, .. } => self.inline.contains(target),
-            k::Member::Index { target, index } => {
-                self.inline.contains(target) && self.inline.contains(index)
-            }
-        }
-    }
-    fn write_member(&mut self, member: &k::Member) {
-        match member {
-            k::Member::Field { target, field } => {
-                let grouped = !matches!(
-                    target,
-                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
-                );
-                if grouped {
-                    self.out.write("(");
-                }
-                self.inline_expr(target);
-                if grouped {
-                    self.out.write(")");
-                }
-                self.out.write(".");
-                self.out.write(field);
-            }
-            k::Member::Index { target, index } => {
-                self.inline_expr(target);
-                self.out.write("[");
-                self.inline_expr(index);
-                self.out.write("]");
-            }
-        }
-    }
-    fn inline_expr(&mut self, expr: &k::Expr) {
-        self.out.begin_node(None);
-        self.inline_body(expr);
-        self.out.end_node();
-    }
-    fn inline_body(&mut self, expr: &k::Expr) {
-        match expr {
-            k::Expr::Literal(l) => self.literal(l),
-            k::Expr::Variable(n) => self.name(n),
-            k::Expr::Clock => self.out.write("k.clock()"),
-            k::Expr::Random => self.out.write("k.random()"),
-            k::Expr::Call { function, args } => {
-                if let Some(token) = self.operators.token(function, args.len()) {
-                    match token {
-                        "not" | "neg" => {
-                            self.out.write(if token == "not" { "not (" } else { "-(" });
-                            self.inline_expr(&args[0]);
-                            self.out.write(")");
-                        }
-                        _ => {
-                            self.out.write("(");
-                            self.inline_expr(&args[0]);
-                            self.out.write(" ");
-                            self.out.write(token);
-                            self.out.write(" ");
-                            self.inline_expr(&args[1]);
-                            self.out.write(")");
-                        }
-                    }
-                } else {
-                    self.helper(function);
-                    self.out.write("(");
-                    for (i, arg) in args.iter().enumerate() {
-                        if i > 0 {
-                            self.out.write(", ");
-                        }
-                        self.inline_expr(arg);
-                    }
-                    self.out.write(")");
-                }
-            }
-            k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
-                let (open, close) = match expr {
-                    k::Expr::List(_) => ("[", "]"),
-                    k::Expr::Tuple(_) => ("(", ")"),
-                    _ if items.is_empty() => ("set(", ")"),
-                    _ => ("{", "}"),
-                };
-                self.out.write(open);
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.inline_expr(item);
-                }
-                if matches!(expr, k::Expr::Tuple(_)) && items.len() == 1 {
-                    self.out.write(",");
-                }
-                self.out.write(close);
-            }
-            k::Expr::Map(items) => {
-                self.out.write("{");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.inline_expr(&item.key);
-                    self.out.write(": ");
-                    self.inline_expr(&item.value);
-                }
-                self.out.write("}");
-            }
-            k::Expr::Record(items) => {
-                self.out.write("record({");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
-                    }
-                    self.out.json(&item.field);
-                    self.out.write(": ");
-                    self.inline_expr(&item.value);
-                }
-                self.out.write("})");
-            }
-            k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Field { field, .. } if !attribute_identifier(field)) =>
-            {
-                let k::Member::Field { target, field } = member.as_ref() else {
-                    unreachable!()
-                };
-                self.out.write("getattr(");
-                self.inline_expr(target);
-                self.out.write(", ");
-                self.out.json(field);
-                self.out.write(")");
-            }
-            k::Expr::Member(member) => {
-                let target = match member.as_ref() {
-                    k::Member::Field { target, .. } | k::Member::Index { target, .. } => target,
-                };
-                let grouped = !matches!(
-                    target,
-                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
-                );
-                if grouped {
-                    self.out.write("(");
-                }
-                self.inline_expr(target);
-                if grouped {
-                    self.out.write(")");
-                }
-                match member.as_ref() {
-                    k::Member::Field { field, .. } => {
-                        self.out.write(".");
-                        self.out.write(field);
-                    }
-                    k::Member::Index { index, .. } => {
-                        self.out.write("[");
-                        self.inline_expr(index);
-                        self.out.write("]");
-                    }
-                }
-            }
-            _ => self
-                .out
-                .refuse(PrintError::Invalid("ineligible inline expression".into())),
-        }
-    }
-    // The caller owns the block's indentation and any clause label. Empty
-    // suites spell pass, so every real block has a nonempty final-text range.
-    fn readable_block(&mut self, block: &k::Block) {
-        self.out.begin_node(None);
-        self.indent += 1;
-        if block.is_empty() {
-            self.empty();
-        }
-        for stmt in block {
-            self.node(k::Node::Stmt(stmt), None);
-        }
-        self.indent -= 1;
-        self.out.end_node();
-    }
-    fn readable_if(
-        &mut self,
-        condition: &k::Expr,
-        then_block: &k::Block,
-        else_block: &k::Block,
-        keyword: &str,
-    ) {
-        self.out.write(keyword);
-        self.out.write(" ");
-        self.inline_expr(condition);
-        self.out.write(":\n");
-        self.readable_block(then_block);
-        // An elif is exactly one nested If in the else Block. Keep both map
-        // frames; this changes layout, never the stored statement boundaries.
-        if let [
-            k::Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            },
-        ] = else_block.as_slice()
-            && self.inline.contains(condition)
-        {
-            self.out.begin_node(None); // else Block
-            self.out.begin_node(None); // nested If
-            self.padding();
-            self.readable_if(condition, then_block, else_block, "elif");
-            self.out.end_node();
-            self.out.end_node();
-        } else {
-            self.padding();
-            self.out.write("else:\n");
-            self.readable_block(else_block);
-        }
-    }
-    fn readable_statement(&mut self, stmt: &k::Stmt) -> bool {
-        match stmt {
-            k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(k::Expr::Closure(c)),
-            }
-            | k::Stmt::Assign {
-                place: k::Place::Variable(name),
-                value: k::Rhs::Expr(k::Expr::Closure(c)),
-            } => {
-                self.out.write("def ");
-                self.name(name);
-                self.out.begin_node(None); // Closure expression
-                self.parameters(&c.params);
-                let was_bound = self.bound.contains(name);
-                let is_let = matches!(stmt, k::Stmt::Let { .. });
-                self.bound.insert(name.clone());
-                if is_let == was_bound {
-                    self.out.write(if is_let {
-                        " -> Final"
-                    } else {
-                        " -> reassigned"
-                    });
-                }
-                let parent = std::mem::replace(&mut self.bound, c.params.iter().cloned().collect());
-                let outer_main = self.main;
-                self.main = false;
-                self.out.write(":\n");
-                self.readable_block(&c.body);
-                self.main = outer_main;
-                self.bound = parent;
-                self.out.end_node();
-            }
-            k::Stmt::Let { name, value } if self.inline_rhs(value) => {
-                self.name(name);
-                if !self.bound.insert(name.clone()) {
-                    self.out.write(": Final");
-                }
-                self.out.write(" = ");
-                self.write_inline_rhs(value);
-                self.out.write("\n");
-            }
-            k::Stmt::Assign {
-                place: k::Place::Member(k::Member::Field { target, field }),
-                value,
-            } if !attribute_identifier(field)
-                && self.inline.contains(target)
-                && self.inline_rhs(value) =>
-            {
-                self.out.write("setattr(");
-                self.inline_expr(target);
-                self.out.write(", ");
-                self.out.json(field);
-                self.out.write(", ");
-                self.write_inline_rhs(value);
-                self.out.write(")\n");
-            }
-            k::Stmt::Assign { place, value }
-                if self.inline_rhs(value)
-                    && match place {
-                        k::Place::Variable(_) => true,
-                        k::Place::Member(m) => self.inline_member(m),
-                    } =>
-            {
-                match place {
-                    k::Place::Variable(n) => {
-                        self.name(n);
-                        if self.bound.insert(n.clone()) {
-                            self.out.write(": reassigned");
-                        }
-                    }
-                    k::Place::Member(m) => self.write_member(m),
-                }
-                self.out.write(" = ");
-                self.write_inline_rhs(value);
-                self.out.write("\n");
-            }
-            k::Stmt::Remove {
-                member: k::Member::Field { target, field },
-            } if !attribute_identifier(field) && self.inline.contains(target) => {
-                self.out.write("delattr(");
-                self.inline_expr(target);
-                self.out.write(", ");
-                self.out.json(field);
-                self.out.write(")\n");
-            }
-            k::Stmt::Remove { member } if self.inline_member(member) => {
-                self.out.write("del ");
-                self.write_member(member);
-                self.out.write("\n");
-            }
-            k::Stmt::Do { action } => {
-                self.out.begin_node(None);
-                self.action(action);
-                self.out.end_node();
-                self.out.write("\n");
-            }
-            k::Stmt::Break => self.out.write("break\n"),
-            k::Stmt::Continue => self.out.write("continue\n"),
-            k::Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } if self.inline.contains(condition) => {
-                self.readable_if(condition, then_block, else_block, "if");
-            }
-            k::Stmt::For {
-                binding,
-                iterable,
-                body,
-            } if self.inline.contains(iterable) => {
-                self.out.write("for ");
-                self.name(binding);
-                self.bound.insert(binding.clone());
-                self.out.write(" in ");
-                self.inline_expr(iterable);
-                self.out.write(":\n");
-                self.readable_block(body);
-            }
-            k::Stmt::While { condition, body } if self.inline.contains(condition) => {
-                self.out.write("while ");
-                self.inline_expr(condition);
-                self.out.write(":\n");
-                self.readable_block(body);
-            }
-            k::Stmt::Try(scope) if scope.catch.is_some() || scope.finally.is_some() => {
-                self.out.write("try:\n");
-                self.readable_block(&scope.body);
-                if let Some(catch) = &scope.catch {
-                    self.padding();
-                    self.out.write("except BaseException as ");
-                    self.name(&catch.binding);
-                    self.bound.insert(catch.binding.clone());
-                    self.out.write(":\n");
-                    self.readable_block(&catch.body);
-                }
-                if let Some(finally) = &scope.finally {
-                    self.padding();
-                    self.out.write("finally:\n");
-                    self.readable_block(finally);
-                }
-            }
-            k::Stmt::Return { value }
-            | k::Stmt::Throw { value }
-            | k::Stmt::Print { value }
-            | k::Stmt::Finish { value }
-            | k::Stmt::Fail { value }
-                if self.inline.contains(value) =>
-            {
-                let call = match stmt {
-                    k::Stmt::Return { .. } => self.main,
-                    k::Stmt::Finish { .. } => !self.main,
-                    k::Stmt::Throw { .. } => false,
-                    _ => true,
-                };
-                self.out.write(match stmt {
-                    k::Stmt::Return { .. } if self.main => "return returned(",
-                    k::Stmt::Return { .. } => "return ",
-                    k::Stmt::Throw { .. } => "raise ",
-                    k::Stmt::Print { .. } => "print(",
-                    k::Stmt::Finish { .. } if self.main => "return ",
-                    k::Stmt::Finish { .. } => "return finish(",
-                    _ => "raise failure(",
-                });
-                self.inline_expr(value);
-                if call {
-                    self.out.write(")");
-                }
-                self.out.write("\n");
-            }
-            _ => return false,
-        }
-        true
     }
     fn metadata(&mut self, value: &impl serde::Serialize) {
         self.out.metadata(value, SourceFormat::PythonV1);
@@ -851,6 +200,10 @@ impl Renderer<'_> {
         }
     }
     fn statement(&mut self, stmt: &k::Stmt) {
+        self.render_statement(stmt);
+        self.scope.types.statement(stmt, self.operators.functions());
+    }
+    fn render_statement(&mut self, stmt: &k::Stmt) {
         if self.readable_statement(stmt) {
             return;
         }
@@ -864,7 +217,7 @@ impl Renderer<'_> {
             k::Stmt::Let { name, value } => {
                 self.out.write("with k.let(");
                 self.name(name);
-                self.bound.insert(name.clone());
+                self.scope.bind(name, Some(true));
                 self.suite();
                 self.rhs(value);
             }
@@ -873,7 +226,7 @@ impl Renderer<'_> {
                     k::Place::Variable(n) => {
                         self.out.write("with k.assign(");
                         self.name(n);
-                        self.bound.insert(n.clone());
+                        self.scope.bind(n, Some(false));
                         self.suite();
                     }
                     k::Place::Member(m) => self.member_header("assign_", m),
@@ -904,7 +257,7 @@ impl Renderer<'_> {
             } => {
                 self.out.write("with k.for_(");
                 self.name(binding);
-                self.bound.insert(binding.clone());
+                self.scope.introduce(binding);
                 self.suite();
                 self.expr(iterable);
                 self.block(body);
@@ -934,7 +287,7 @@ impl Renderer<'_> {
                 self.out.write("with k.try_(");
                 if let Some(catch) = &scope.catch {
                     self.name(&catch.binding);
-                    self.bound.insert(catch.binding.clone());
+                    self.scope.introduce(&catch.binding);
                 } else {
                     self.out.write("None");
                 }
@@ -1010,12 +363,12 @@ impl Renderer<'_> {
                 self.out.write("with k.closure(");
                 self.names(&c.params);
                 self.suite();
-                let parent = std::mem::replace(&mut self.bound, c.params.iter().cloned().collect());
+                let parent = std::mem::replace(&mut self.scope, BindingScope::new(&c.params));
                 let outer_main = self.main;
                 self.main = false;
                 self.block(&c.body);
                 self.main = outer_main;
-                self.bound = parent;
+                self.scope = parent;
             }
             k::Expr::Call { function, args } => {
                 self.out.write("with k.invoke(");
@@ -1237,4 +590,28 @@ impl InlinePlan {
             }
         }
     }
+}
+
+/// Only native calls emit await. A bound closure has its own function context.
+fn awaits(body: &k::Block) -> bool {
+    fn node(node: k::Node<'_>) -> bool {
+        match node {
+            k::Node::Action(k::Action::Call { .. } | k::Action::Perform { .. }) => true,
+            k::Node::Stmt(
+                k::Stmt::Let {
+                    value: k::Rhs::Expr(k::Expr::Closure(_)),
+                    ..
+                }
+                | k::Stmt::Assign {
+                    place: k::Place::Variable(_),
+                    value: k::Rhs::Expr(k::Expr::Closure(_)),
+                },
+            ) => false,
+            _ => node.children().into_iter().any(node_awaits),
+        }
+    }
+    fn node_awaits(value: k::Node<'_>) -> bool {
+        node(value)
+    }
+    body.iter().any(|stmt| node(k::Node::Stmt(stmt)))
 }

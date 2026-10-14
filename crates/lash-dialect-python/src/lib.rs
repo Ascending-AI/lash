@@ -139,3 +139,5 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
         functions,
     }
 }
+
+mod generated_scope;
