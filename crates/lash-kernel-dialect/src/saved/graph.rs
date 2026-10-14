@@ -52,7 +52,7 @@ pub enum BundleRefusal {
 
 impl Bundle {
     /// The bundle of the function bound to `root` in `functions`, keyed by
-    /// binding as [`super::closure_of`] reads them. A function a member uses
+    /// binding under their saved names. A function a member uses
     /// that `functions` does not hold is left out: a cell that installs the
     /// member is refused for it as ever ([`super::Unusable::Missing`]).
     /// `None` when `root` holds no function.

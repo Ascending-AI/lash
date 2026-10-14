@@ -21,7 +21,7 @@ impl PagedHeap {
         writer.finish(value).map(|(frozen, _)| frozen)
     }
 }
-fn text(access: &Access, text: &str) -> Result<TextRef, HeapFault> {
+fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault> {
     Ok(TextRef {
         summary: text_summary(text),
         body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
@@ -31,7 +31,7 @@ fn text(access: &Access, text: &str) -> Result<TextRef, HeapFault> {
         },
     })
 }
-fn bytes(access: &Access, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
+fn bytes(access: &Access<'_>, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
     Ok(BytesRef {
         len: bytes.len() as u64,
         body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
@@ -108,6 +108,7 @@ impl Freezer<'_> {
                 Value::Tuple(TupleRef {
                     family: None,
                     summary: TupleSummary {
+                        task_edges: 0,
                         len: rows.len(),
                         cost: LogicalBytes(rows.cost()),
                         has_edges: edges,
@@ -218,17 +219,12 @@ impl Freezer<'_> {
                 let kind = text(&self.heap.access, &e.kind)?;
                 let message = text(&self.heap.access, &e.message)?;
                 let data = self.datum(&e.data)?;
-                let cost = LogicalBytes(plus(
-                    plus(kind.summary.utf8_bytes, message.summary.utf8_bytes)?,
-                    value_cost(&data),
-                )?);
-                Value::Error(Arc::new(ErrorRef {
+                Value::Error(Arc::new(frozen_error(
+                    &self.heap.access,
                     kind,
                     message,
-                    has_edges: has_edges(&data),
-                    data: Arc::new(data),
-                    cost,
-                }))
+                    data,
+                )?))
             }
         };
         self.depth -= 1;

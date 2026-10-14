@@ -48,15 +48,6 @@ fn relative(value: &Value, out: &mut TokenWriter) {
         Value::Map(id) => encode_relative(1, id.ordinal, out),
         Value::Set(id) => encode_relative(2, id.ordinal, out),
         Value::Record(id) => encode_relative(3, id.ordinal, out),
-        Value::Error(e) => {
-            out.sum(14, 1);
-            out.seq(5);
-            e.kind.encode(out);
-            e.message.encode(out);
-            relative(&e.data, out);
-            e.cost.encode(out);
-            e.has_edges.encode(out);
-        }
         _ => value.encode(out),
     }
 }
@@ -106,6 +97,7 @@ impl Cell for RelativeEntry {
         self.0.grants(children)
     }
 }
+#[derive(Clone)]
 struct FrozenHeader {
     charge: u64,
     summary: FrozenSummary,
@@ -130,15 +122,18 @@ impl TokenCodec for FrozenHeader {
         })
     }
 }
-fn read_header(access: &Access, frozen: &FrozenRef) -> Result<FrozenHeader, HeapFault> {
-    let answer = access.read(frozen.root)?;
-    if answer.kind != PageKind::FROZEN_ROOT {
+fn read_header(access: &Access<'_>, frozen: &FrozenRef) -> Result<FrozenHeader, HeapFault> {
+    decode_header(&access.read(frozen.root)?, frozen)
+}
+fn decode_header(answer: &PageAnswer, frozen: &FrozenRef) -> Result<FrozenHeader, HeapFault> {
+    if answer.page.id != frozen.root.id || answer.kind != PageKind::FROZEN_ROOT {
         return Err(invalid("expected frozen root"));
     }
     let mut input = TokenReader::new(&answer.tokens);
     let mut header = FrozenHeader::decode(&mut input).map_err(|e| invalid(e.to_string()))?;
     input.finish().map_err(|e| invalid(e.to_string()))?;
-    if header.summary != frozen.summary
+    if header.charge == 0
+        || header.summary != frozen.summary
         || header.objects.len() != header.summary.entities
         || header.summary.cost.0 != plus(header.objects.cost(), value_cost(&header.value.0))?
         || header.summary.cost.0
@@ -150,9 +145,36 @@ fn read_header(access: &Access, frozen: &FrozenRef) -> Result<FrozenHeader, Heap
     {
         return Err(invalid("frozen root summary mismatch"));
     }
+    validate_occurrence(&header.value.0, header.summary.entities)?;
     header.objects.grants(&answer.children)?;
     header.value.grants(&answer.children)?;
     Ok(header)
+}
+fn validate_occurrence(value: &Value, extent: u64) -> Result<(), HeapFault> {
+    match value {
+        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+            if id.family != RELATIVE || id.ordinal >= extent {
+                return Err(invalid("frozen root occurrence is outside its family"));
+            }
+        }
+        Value::Tuple(t) => {
+            if let Payload::Resident(values) = &t.body {
+                for value in values.iter() {
+                    validate_occurrence(value, extent)?;
+                }
+            }
+        }
+        Value::Error(e) => {
+            if let Payload::Resident(data) = &e.data {
+                validate_occurrence(data, extent)?;
+            }
+        }
+        Value::Closure(_) | Value::Task(_) | Value::Ref(_) => {
+            return Err(invalid("a frozen root contains a runtime identity"));
+        }
+        _ => (),
+    }
+    Ok(())
 }
 fn context(value: &mut Value, family: Option<FamilyId>) -> Result<(), HeapFault> {
     match value {
@@ -161,13 +183,22 @@ fn context(value: &mut Value, family: Option<FamilyId>) -> Result<(), HeapFault>
                 family.ok_or_else(|| invalid("zero-entity frozen root contains an occurrence"))?
         }
         Value::Tuple(t) => t.family = family,
-        Value::Error(e) => context(Arc::make_mut(&mut Arc::make_mut(e).data), family)?,
+        Value::Error(e) => {
+            let error = Arc::make_mut(e);
+            error.family = family;
+            if let Payload::Resident(data) = &mut error.data {
+                context(Arc::make_mut(data), family)?;
+            }
+        }
         _ => (),
     }
     Ok(())
 }
 /// Resolves just the requested occurrence's index path, never its members.
-pub struct FrozenBase;
+#[derive(Default)]
+pub struct FrozenBase {
+    header: Option<(FrozenRef, FrozenHeader)>,
+}
 impl FamilyBase for FrozenBase {
     fn base_object(
         &mut self,
@@ -175,82 +206,34 @@ impl FamilyBase for FrozenBase {
         frozen: &FrozenRef,
         pages: &mut dyn PageSource,
     ) -> Result<Option<ObjectHead>, HeapFault> {
-        // Access owns ports; this borrowed port forwards only this synchronous read.
-        let answer = pages.read(&[frozen.root])?;
-        let [answer] = answer.as_slice() else {
-            return Err(invalid("frozen port returned wrong count"));
-        };
-        if answer.page.id != frozen.root.id || answer.kind != PageKind::FROZEN_ROOT {
-            return Err(invalid("expected frozen root"));
+        if !self
+            .header
+            .as_ref()
+            .is_some_and(|(held, _)| held.root == frozen.root && held.summary == frozen.summary)
+        {
+            let answers = pages.read(&[frozen.root])?;
+            let [answer] = answers.as_slice() else {
+                return Err(invalid("frozen port returned wrong count"));
+            };
+            self.header = Some((*frozen, decode_header(answer, frozen)?));
         }
-        let mut input = TokenReader::new(&answer.tokens);
-        let mut header = FrozenHeader::decode(&mut input).map_err(|e| invalid(e.to_string()))?;
-        input.finish().map_err(|e| invalid(e.to_string()))?;
-        if header.summary != frozen.summary || header.objects.len() != frozen.summary.entities {
-            return Err(invalid("frozen root summary mismatch"));
-        }
-        header.objects.grants(&answer.children)?;
-        // A narrow local forwarding port avoids retaining an activation source.
-        let mut requested = Vec::new();
-        let objects = header.objects;
-        loop {
-            let access = Access::new(Box::new(Replay {
-                answers: requested.clone(),
-            }));
-            match objects.get(&ordinal_key(entity.ordinal), &access) {
-                Ok(head) => {
-                    return Ok(head.map(|mut h| {
-                        h.family = entity.family;
-                        match &mut h.body {
-                            Body::List { rows, .. } => {
-                                *rows = rows.clone().in_family(entity.family)
-                            }
-                            Body::Table { rows, .. } => {
-                                *rows = rows.clone().in_family(entity.family)
-                            }
-                            _ => (),
-                        }
-                        h
-                    }));
-                }
-                Err(HeapFault::Missing { page }) => {
-                    // The tree discovered the grant from an authenticated parent.
-                    let grant = requested
-                        .iter()
-                        .flat_map(|a: &PageAnswer| &a.children)
-                        .chain(&answer.children)
-                        .find(|p| p.id == page)
-                        .copied()
-                        .ok_or_else(|| invalid("missing frozen child grant"))?;
-                    let mut next = pages.read(&[grant])?;
-                    if next.len() != 1 || next[0].page.id != page {
-                        return Err(invalid("frozen port returned wrong page"));
-                    }
-                    requested.push(next.remove(0));
-                }
-                Err(error) => return Err(error),
+        let header = &self
+            .header
+            .as_ref()
+            .ok_or_else(|| invalid("frozen header cache missing"))?
+            .1;
+        let head = header
+            .objects
+            .get_from_source(&ordinal_key(entity.ordinal), pages)?;
+        Ok(head.map(|mut head| {
+            head.family = entity.family;
+            match &mut head.body {
+                Body::List { rows, .. } => *rows = rows.clone().in_family(entity.family),
+                Body::Table { rows, .. } => *rows = rows.clone().in_family(entity.family),
+                _ => (),
             }
-        }
-    }
-}
-struct Replay {
-    answers: Vec<PageAnswer>,
-}
-impl PageSource for Replay {
-    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        pages
-            .iter()
-            .map(|p| {
-                self.answers
-                    .iter()
-                    .find(|a| a.page.id == p.id)
-                    .cloned()
-                    .ok_or(HeapFault::Missing { page: p.id })
-            })
-            .collect()
-    }
-    fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
-        Err(invalid("frozen reader cannot seal"))
+            head
+        }))
     }
 }
 
@@ -315,9 +298,19 @@ impl Freezer<'_> {
                     .iter()
                     .map(|v| self.value(v))
                     .collect::<Result<Vec<_>, _>>()?;
+                let has_edges = values.iter().any(super::directory::value_has_edges);
+                let depth = values
+                    .iter()
+                    .map(super::heap_impl::value_depth)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
                 let rows = self.sequence(values)?;
                 let mut summary = t.summary;
                 summary.cost = LogicalBytes(rows.cost());
+                summary.has_edges = has_edges;
+                summary.task_edges = 0;
+                summary.depth = depth;
                 Ok(Value::Tuple(TupleRef {
                     family: None,
                     summary,
@@ -327,9 +320,13 @@ impl Freezer<'_> {
                 }))
             }
             Value::Error(e) => {
-                let mut e = (**e).clone();
-                e.data = Arc::new(self.value(&e.data)?);
-                Ok(Value::Error(Arc::new(e)))
+                let data = self.value(&self.heap.error_data(e)?)?;
+                Ok(Value::Error(Arc::new(frozen_error(
+                    &self.heap.access,
+                    e.kind.clone(),
+                    e.message.clone(),
+                    data,
+                )?)))
             }
             _ => Ok(value.clone()),
         };
@@ -518,8 +515,10 @@ impl HeapLifecycle for PagedHeap {
         } else {
             Some(self.register_family(*frozen)?)
         };
-        self.set_family_base(Box::new(FrozenBase));
-        let mut value = header.value.0;
+        let mut value = header.value.0.clone();
+        self.set_family_base(Box::new(FrozenBase {
+            header: Some((*frozen, header)),
+        }));
         context(&mut value, family)?;
         Ok(value)
     }
@@ -606,16 +605,21 @@ impl HeapLifecycle for PagedHeap {
         let bindings = classification.carried;
         // A selected root is already sealed. Replacing it updates only its
         // holding summary and the root, never reconstructing its members.
-        self.set_session_root(Tree::open(
-            bindings.page,
-            bindings.len,
-            bindings.cost,
-            false,
-        ))
-        .map_err(|error| match error {
-            HeapWriteError::Fault(error) => error,
-            other => invalid(format!("session root transfer failed: {other}")),
-        })?;
+        if self.session.page().map(|p| p.id) != bindings.page.map(|p| p.id)
+            || self.session.len() != bindings.len
+            || self.session.cost() != bindings.cost.0
+        {
+            self.set_session_root(Tree::open(
+                bindings.page,
+                bindings.len,
+                bindings.cost,
+                false,
+            ))
+            .map_err(|error| match error {
+                HeapWriteError::Fault(error) => error,
+                other => invalid(format!("session root transfer failed: {other}")),
+            })?;
+        }
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
         Ok(SessionRoot {
@@ -636,7 +640,7 @@ impl HeapLifecycle for PagedHeap {
                 "session population certificate differs from its heap",
             ));
         }
-        self.set_family_base(Box::new(FrozenBase));
+        self.set_family_base(Box::new(FrozenBase::default()));
         // The heap-header certificate already includes this binding holding
         // cost. Attach the admitted root without adding that cost again.
         self.session = Tree::open(
@@ -660,4 +664,32 @@ impl Cell for PageRef {
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         super::tree::grant(self, children)
     }
+}
+
+fn frozen_error(
+    access: &Access<'_>,
+    kind: TextRef,
+    message: TextRef,
+    data: Value,
+) -> Result<ErrorRef, HeapFault> {
+    let mut rows = Tree::new(true);
+    rows.write(ordinal_key(0), RelativeValue(data.clone()), access)?;
+    rows.seal(access, &mut SealWork::new(budget()))?;
+    let cost = LogicalBytes(plus(
+        plus(kind.summary.utf8_bytes, message.summary.utf8_bytes)?,
+        value_cost(&data),
+    )?);
+    Ok(ErrorRef {
+        family: None,
+        task_edges: 0,
+        kind,
+        message,
+        depth: super::heap_impl::value_depth(&data) + 1,
+        cost,
+        has_edges: super::directory::value_has_edges(&data),
+        data: Payload::Paged(
+            rows.page()
+                .ok_or_else(|| invalid("error data page missing"))?,
+        ),
+    })
 }

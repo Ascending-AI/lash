@@ -83,7 +83,7 @@ pub enum NotSaved {
     #[error("its function uses `{function}`, which is not a saved function")]
     Needs { function: Name },
     /// The token the binding held its function in holds data about it that
-    /// is not constant ([`Constant`]).
+    /// cannot be frozen as eligible capture data.
     #[error("its function's value holds data about the function that is no constant")]
     Token,
     /// The function performs an effect whose call ends the turn. Only a

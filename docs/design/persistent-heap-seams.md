@@ -686,8 +686,8 @@ pub trait HeapLifecycle {
     fn adopt(&mut self, session: &SessionRoot) -> Result<KeyedRoot, HeapFault>;
 }
 pub trait FamilyBase {
-    fn base_object(&mut self, entity: EntityId) -> Result<Option<ObjectInit>, HeapFault>;
-    fn member(&mut self, entity: EntityId) -> Result<bool, HeapFault>;
+    fn base_object(&mut self, entity: EntityId, frozen: &FrozenRef,
+        pages: &mut dyn PageSource) -> Result<Option<ObjectHead>, HeapFault>;
 }
 ```
 

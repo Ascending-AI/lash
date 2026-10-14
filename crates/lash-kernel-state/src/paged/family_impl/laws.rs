@@ -249,7 +249,7 @@ fn a_swept_family_ordinal_never_resurrects() {
         EditEpoch(2),
     )
     .expect("open");
-    reopened.set_family_base(Box::new(FrozenBase));
+    reopened.set_family_base(Box::new(FrozenBase::default()));
     assert_eq!(reopened.kind(id).expect("membership"), None);
 }
 #[test]
@@ -501,4 +501,57 @@ fn scalar_delivery_creates_no_dead_family_and_releases_its_temporary_credit() {
     }
     assert_eq!(heap.families.len(), families);
     assert_eq!(heap.certificate(), before);
+}
+
+#[test]
+fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
+    let (mut heap, pages) = fresh();
+    let datum = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+        kind: "outer".into(),
+        message: "message".into(),
+        data: lash_kernel_doc::Datum::Tuple(vec![lash_kernel_doc::Datum::Error(Box::new(
+            lash_kernel_doc::ErrorDatum {
+                kind: "inner".into(),
+                message: "message".into(),
+                data: lash_kernel_doc::Datum::List(vec![lash_kernel_doc::Datum::Int(1.into())]),
+            },
+        ))]),
+    }));
+    let frozen = heap.freeze_datum(&datum).expect("freeze");
+    let a = heap.instantiate(&frozen).expect("first");
+    let b = heap.instantiate(&frozen).expect("second");
+    fn child(heap: &PagedHeap, value: Value) -> EntityId {
+        let Value::Error(error) = value else {
+            panic!("outer error")
+        };
+        let Value::Tuple(tuple) = heap.error_data(&error).expect("outer data") else {
+            panic!("tuple")
+        };
+        let Value::Error(error) = heap
+            .tuple_get(&tuple, 0)
+            .expect("tuple member")
+            .expect("present")
+        else {
+            panic!("inner error")
+        };
+        list(heap.error_data(&error).expect("inner data"))
+    }
+    let a = child(&heap, a);
+    let b = child(&heap, b);
+    assert_ne!(a.family, b.family);
+    heap.list_write(a, 0, int(2)).expect("edit");
+    seal(&mut heap);
+    let mut reopened = PagedHeap::open_header(
+        heap.sealed_root().expect("header"),
+        Box::new(Source(Rc::clone(&pages))),
+        EditEpoch(2),
+    )
+    .expect("open");
+    reopened.set_family_base(Box::new(FrozenBase::default()));
+    assert!(
+        matches!(reopened.list_get(a, 0).expect("first"), Some(Value::Int(IntRef::Inline(n))) if n == 2.into())
+    );
+    assert!(
+        matches!(reopened.list_get(b, 0).expect("second"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
+    );
 }
