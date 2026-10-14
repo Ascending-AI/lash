@@ -29,7 +29,8 @@ use crate::conn::cached_execute;
 /// row carries exactly what its phase restores from (FIG-5221): no
 /// checkpoint while admitted and one after, and the model pin exactly in the
 /// model phase, whose attempt is the phase argument and whose call is
-/// `model_calls`, the count of model calls the turn admitted.
+/// `model_calls`, the count of model calls the turn admitted, and the pinned
+/// call's receipt only in the model phase.
 /// `trace_exported` records that the admission's trace export is
 /// discharged (FIG-5457).
 pub(crate) const TABLES: &str = "
@@ -41,9 +42,11 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     phase_arg INTEGER,
     iteration INTEGER NOT NULL,
     -- The phase's PhaseRoot node and the post-cell working SessionExecution
-    -- (FIG-5887 §6, §7).
+    -- (FIG-5887 §6, §7), and the pinned call's receipt: its placed text,
+    -- from model.answer until the next phase.
     checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     working_execution_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    answer_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
+    CONSTRAINT ck_turn_phases_answer CHECK (answer_ref IS NULL OR phase = 'model'),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
@@ -77,6 +81,7 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
 CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
 CREATE INDEX IF NOT EXISTS idx_turn_phases_working_execution_ref
     ON turn_phases (working_execution_ref);
+CREATE INDEX IF NOT EXISTS idx_turn_phases_answer_ref ON turn_phases (answer_ref);
 CREATE INDEX IF NOT EXISTS idx_turn_namespaces_graph_root_ref ON turn_namespaces (graph_root_ref);
 ";
 
@@ -162,15 +167,18 @@ pub(super) fn apply(
         } => {
             let (stored, argument) = phase.stored();
             let pin = phase.model();
-            // The phase's PhaseRoot it replaces, peeled once the commit's
-            // writes are applied.
-            let replaced = tx
-                .prepare_cached(SQL.phase_root.sql())?
+            // The phase's PhaseRoot it replaces and the receipt it consumes,
+            // peeled once the commit's writes are applied.
+            let (replaced, consumed) = tx
+                .prepare_cached(SQL.phase_roots.sql())?
                 .query_row([session.as_str(), run.as_str()], |row| {
-                    row.get::<_, Option<String>>(0)
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
                 })
                 .optional()?
-                .flatten();
+                .unwrap_or_default();
             let advanced = tx
                 .prepare_cached(SQL.advance_phase.sql())?
                 .query_row(
@@ -196,8 +204,36 @@ pub(super) fn apply(
                     if let Some(old) = replaced.filter(|old| Some(old) != next.as_ref()) {
                         commit.retired.stored(old);
                     }
+                    if let Some(answer) = consumed {
+                        commit.retired.stored(answer);
+                    }
                     Ok(Ok(()))
                 }
+                None => refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                }),
+            }
+        }
+        TurnWrite::Answer {
+            session,
+            run,
+            answer,
+        } => {
+            let recorded = tx
+                .prepare_cached(SQL.answer_set.sql())?
+                .query_row(
+                    rusqlite::params![
+                        session.as_str(),
+                        run.as_str(),
+                        answer.to_hex(),
+                        commit.epoch.0
+                    ],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            match recorded {
+                Some(()) => Ok(Ok(())),
                 None => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
@@ -364,8 +400,8 @@ pub(super) fn apply(
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
             }
             // The turn's phase row and namespaces go with it, and their
-            // roots with them: its working execution and namespace values
-            // whole, its PhaseRoot alone (the TurnContent ordering
+            // roots with them: its working execution, receipt and namespace
+            // values whole, its PhaseRoot alone (the TurnContent ordering
             // constraint, [`super::Retired`]).
             let phase = tx
                 .prepare_cached(SQL.delete_phase.sql())?
@@ -373,15 +409,16 @@ pub(super) fn apply(
                     Ok((
                         row.get::<_, Option<String>>(0)?,
                         row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
                     ))
                 })
                 .optional()?;
-            if let Some((checkpoint, working)) = phase {
+            if let Some((checkpoint, working, answer)) = phase {
                 if let Some(checkpoint) = checkpoint {
                     commit.retired.phase_end(checkpoint);
                 }
-                if let Some(working) = working {
-                    commit.retired.stored(working);
+                for root in [working, answer].into_iter().flatten() {
+                    commit.retired.stored(root);
                 }
             }
             let namespaces = tx
@@ -677,6 +714,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         iteration: i64,
         checkpoint: Option<String>,
         working: Option<String>,
+        answer: Option<String>,
         request: Option<String>,
         deadline: Option<i64>,
         turn_deadline: Option<i64>,
@@ -696,6 +734,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
                 iteration: row.get(4)?,
                 checkpoint: row.get(5)?,
                 working: row.get(13)?,
+                answer: row.get(14)?,
                 request: row.get(6)?,
                 deadline: row.get(7)?,
                 turn_deadline: row.get(8)?,
@@ -732,6 +771,10 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         Ok(working) => working,
         Err(error) => return Ok(Err(error)),
     };
+    let answer = match stored.answer.as_deref().map(node_ref).transpose() {
+        Ok(answer) => answer,
+        Err(error) => return Ok(Err(error)),
+    };
     let Some(phase) = UnfinishedPhase::parse(&stored.phase, argument, checkpoint, pin, model_calls)
     else {
         return Ok(Err(corrupt("turn phase", &stored.phase)));
@@ -746,6 +789,7 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         admission,
         phase,
         working,
+        answer,
         iteration,
         model_calls,
         turn_deadline: stored.turn_deadline.map(DurableInstant),

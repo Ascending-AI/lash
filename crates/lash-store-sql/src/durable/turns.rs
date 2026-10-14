@@ -10,7 +10,8 @@
 /// admission authority (its one-unfinished-run index); this row carries only
 /// the phase with what a restore resumes it from: its PhaseRoot checkpoint
 /// graph node, the working SessionExecution of its last successful cell,
-/// and, in the model phase, the model pin (its attempt is `phase_arg`, its
+/// and, in the model phase, the receipt of the pinned call once it answered
+/// (`answer_ref`, a placed text the next phase consumes) and the model pin (its attempt is `phase_arg`, its
 /// call `model_calls`, and the live replay cursor its first attempt streamed
 /// after), how many model calls the turn admitted, and whether its
 /// admission's trace export is recorded (FIG-5457).
@@ -47,14 +48,22 @@ crate::statements! {
 
         /// Move run `?2` of session `?1` to phase `?3` (argument `?4`) at
         /// iteration `?5` with checkpoint `?6` and model pin `?7`, `?8`,
-        /// `?11`, at epoch `?9`. A model phase's call `?10` becomes the
-        /// turn's latest; a null `?10` keeps the count. No row when the run
-        /// has no phase row.
+        /// `?11`, at epoch `?9`, consuming its receipt. A model phase's call
+        /// `?10` becomes the turn's latest; a null `?10` keeps the count. No
+        /// row when the run has no phase row.
         advance_phase = "UPDATE turn_phases
              SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
                  model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
-                 model_calls = COALESCE(?10, model_calls), model_stream_from = ?11
+                 model_calls = COALESCE(?10, model_calls), model_stream_from = ?11,
+                 answer_ref = NULL
              WHERE session_id = ?1 AND run = ?2
+             RETURNING run";
+
+        /// Record receipt `?3` of the call run `?2` of session `?1` pins in
+        /// its model phase, at epoch `?4`. No row when the run has no phase
+        /// row, is not in its model phase, or holds a receipt.
+        answer_set = "UPDATE turn_phases SET answer_ref = ?3, written_epoch = ?4
+             WHERE session_id = ?1 AND run = ?2 AND phase = 'model' AND answer_ref IS NULL
              RETURNING run";
 
         /// Record that run `?2` of session `?1` exported its admission's
@@ -102,10 +111,10 @@ crate::statements! {
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
              RETURNING run";
 
-        /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot
-        /// and working execution.
+        /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot,
+        /// working execution and receipt.
         delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
-             RETURNING checkpoint_ref, working_execution_ref";
+             RETURNING checkpoint_ref, working_execution_ref, answer_ref";
 
         /// Record plugin `?3`'s namespace entry `?4` for run `?2` of session
         /// `?1`, with values root `?5`. `?6` retains the held root for a
@@ -130,6 +139,14 @@ crate::statements! {
         /// Run `?2` of session `?1`'s phase root.
         phase_root = "SELECT checkpoint_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
 
+        /// Run `?2` of session `?1`'s phase root and receipt: what an advance
+        /// replaces.
+        phase_roots = "SELECT checkpoint_ref, answer_ref FROM turn_phases
+             WHERE session_id = ?1 AND run = ?2";
+
+        /// Run `?2` of session `?1`'s receipt root.
+        answer_root = "SELECT answer_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+
         /// Run `?2` of session `?1`'s working execution root.
         working_root = "SELECT working_execution_ref FROM turn_phases
              WHERE session_id = ?1 AND run = ?2";
@@ -150,7 +167,7 @@ crate::statements! {
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.trace_exported, p.working_execution_ref
+                    p.trace_exported, p.working_execution_ref, p.answer_ref
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

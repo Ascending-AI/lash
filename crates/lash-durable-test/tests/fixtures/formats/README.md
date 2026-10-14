@@ -57,6 +57,13 @@ the fingerprint probe, then rebased. The orchestrator authorized re-recording
 exactly `lashvm` and `session` on the fixed build; their old fingerprints were
 a bad recording of the intended baseline.
 
+FIG-6253 changed the SQLite baseline schema in place: `turn_phases` gained
+`answer_ref`, the model-call receipt's root, so no earlier image could read
+its turn rows. The orchestrator authorized re-recording `lashvm`, `session`
+and all six images of set `4b1b3a0d68` in place on one build rebased onto
+`origin/main`. The set keeps its id, programs and expected results; every
+re-recorded image resumed to the result it recorded before.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

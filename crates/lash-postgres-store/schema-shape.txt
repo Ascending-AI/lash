@@ -549,6 +549,7 @@ table lash_turn_namespaces
   primary-key (session_id, run, plugin)
   foreign-key (graph_root_ref) references lash_blobs (hash) on delete restrict
 table lash_turn_phases
+  column answer_ref text nullable
   column checkpoint_ref text nullable
   column iteration bigint not-null
   column model_calls bigint not-null default
@@ -564,6 +565,7 @@ table lash_turn_phases
   column working_execution_ref text nullable
   column written_epoch bigint not-null
   primary-key (session_id, run)
+  foreign-key (answer_ref) references lash_blobs (hash) on delete restrict
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete restrict
   foreign-key (working_execution_ref) references lash_blobs (hash) on delete restrict
 table lash_waits

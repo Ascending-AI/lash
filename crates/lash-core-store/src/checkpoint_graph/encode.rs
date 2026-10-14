@@ -437,8 +437,15 @@ impl GraphStaging {
     }
 
     /// Stages `text`'s leaves and index and returns its root, whatever its
-    /// length: the caller has decided it is placed.
-    pub(crate) fn place_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
+    /// length: the caller has decided it is placed. A text that fits one
+    /// leaf is that one TextLeaf. [`GraphDecoder::text`] reads it back.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::EncodeMemoryLimit`] past the lease.
+    ///
+    /// [`GraphDecoder::text`]: super::GraphDecoder::text
+    pub fn place_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
         self.memoized(EncodingKind::Text, text.as_bytes(), |staging| {
             staging.encode_text(text)
         })

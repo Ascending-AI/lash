@@ -161,6 +161,10 @@ pub struct TurnRow {
     /// successful cell, while the turn has one: rooted until the next
     /// successful cell replaces it or the turn's commit transfers it.
     pub working: Option<NodeId>,
+    /// The receipt of the pinned model call, once `model.answer` committed
+    /// it and until the turn's next phase consumes it: `Some` only in the
+    /// model phase.
+    pub answer: Option<NodeId>,
     /// The protocol iteration.
     pub iteration: u32,
     /// How many model calls the turn admitted: the latest call's ordinal,
@@ -197,7 +201,8 @@ pub enum TurnWrite {
     },
     /// Move an unfinished turn to `phase`. A model phase admits its pin's
     /// call, which becomes the turn's latest; any other phase keeps the
-    /// turn's call count. Refused with
+    /// turn's call count. Every phase consumes the turn's receipt
+    /// ([`Self::Answer`]): the row drops it and its root goes. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Advance {
@@ -209,6 +214,21 @@ pub enum TurnWrite {
         phase: UnfinishedPhase,
         /// The protocol iteration.
         iteration: u32,
+    },
+    /// Record `answer`, a receipt of the model call the unfinished turn's
+    /// model phase pins, beside its phase (`model.answer`): the phase and
+    /// its root stay as they are, and the receipt is rooted until the
+    /// turn's next phase or its end. A receipt is written once. Refused
+    /// with [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen)
+    /// when it is not the session's unfinished turn, the turn is not in its
+    /// model phase, or the phase holds a receipt already.
+    Answer {
+        /// The session.
+        session: SessionId,
+        /// The run.
+        run: TurnId,
+        /// The receipt's root.
+        answer: NodeId,
     },
     /// Record that the admission of the trace scope the unfinished turn's
     /// admission retained is exported, by the owner that exported it, in
@@ -253,7 +273,8 @@ pub enum TurnWrite {
         /// The working state from this commit on.
         working: Option<NodeId>,
     },
-    /// End the turn and drop its phase row and its run's namespace rows,
+    /// End the turn and drop its phase row, with its receipt, and its run's
+    /// namespace rows,
     /// whether its commit promoted them or a cancel discards them, and the
     /// working state of every cell the turn stopped in: each cell's root,
     /// effect admissions and own run facts. Its accepted cancel request

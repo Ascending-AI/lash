@@ -84,7 +84,6 @@ fn encode_phase(
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
         config: drive.run_config(),
-        answered: drive.owed_answer().cloned(),
     };
     StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
 }
@@ -137,8 +136,13 @@ pub(super) fn bind_delivered(
 }
 
 /// `model.answer`: the receipt of the pinned call `drive` just answered,
-/// the provider's outcome, committed in the call's phase checkpoint under
-/// the owner fence, before anything derives from it. Its acknowledgement is
+/// the provider's outcome, committed beside the call's model phase under
+/// the owner fence, before anything derives from it. The receipt is one
+/// immutable placed text the turn's row names: the phase and its root stay
+/// as `model.start` committed them, for the machine waits on the same call
+/// at the same checkpoint, so the commit writes the receipt's own nodes and
+/// the row's reference, never a new phase root (FIG-6253). The receipt
+/// states the callbacks its derivation owes (S7). Its acknowledgement is
 /// awaited: a failed or unacknowledged commit fails the attempt, whose next
 /// pass reconciles from the rows (a committed receipt restores at
 /// `model.answer` and is derived, never sent again; an uncommitted one
@@ -149,28 +153,31 @@ async fn record_answer(
     drive: &mut dyn TurnDrive,
     session: &SessionId,
     run: &TurnId,
-    pin: &lash_durable::domain::ModelPin,
 ) -> Result<lash_durable::ActorCommit, TurnError> {
-    let mut tx = cx.begin().await?;
-    if let Some(bind) = bind_delivered(drive, session, run) {
-        tx.write(bind);
+    let answer = drive
+        .owed_answer()
+        .ok_or_else(|| TurnError::Exec("the model call answered no receipt".to_owned()))?;
+    let owed = answer.owed_callbacks();
+    let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+        ),
+    );
+    let root = lash_core_execution::runtime::actor::model_receipt::ModelReceipt {
+        owed: owed.clone(),
+        answer,
     }
-    let written = write_run_changes(drive, &mut tx, session, run);
-    let (checkpoint, stored) = encode_checkpoint(drive)?.staged_in(&mut tx);
-    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+    .stage(&mut staging)
+    .map_err(TurnError::Exec)?;
+    let mut tx = cx.begin().await?;
+    tx.stage_all(staging);
+    tx.owe(root, owed);
+    tx.write(DomainWrite::Turn(TurnWrite::Answer {
         session: session.clone(),
         run: run.clone(),
-        phase: UnfinishedPhase::Model {
-            pin: pin.clone(),
-            checkpoint,
-        },
-        iteration: iteration(drive.machine()),
+        answer: root,
     }));
-    let committed = cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
-    stored.committed(drive);
-    drive.run_changes_committed(&written);
-    drive.phase_committed().await;
-    Ok(committed)
+    Ok(cx.commit(tx, CommitLabel::MODEL_ANSWER).await?)
 }
 
 fn iteration(machine: &TurnMachine) -> u32 {
@@ -502,7 +509,7 @@ pub async fn run_phases(
                     let stopped = stopped(drive, &mut carry, &mut answered_cell);
                     return stop(cx, services, &row, request, stopped, heads).await;
                 }
-                if let model_call::ModelStart::Send { pin, .. } = &start
+                if matches!(start, model_call::ModelStart::Send { .. })
                     && drive.owed_answer().is_some()
                 {
                     // The provider answered: its outcome commits as the
@@ -510,7 +517,7 @@ pub async fn run_phases(
                     // is finished, any response hook runs, or anything is
                     // admitted, launched or published from it. Every call
                     // takes this path, with or without hooks.
-                    let committed = record_answer(cx, drive.as_mut(), &session, &run, pin).await?;
+                    let committed = record_answer(cx, drive.as_mut(), &session, &run).await?;
                     // An immediate cancel the turn accepted while the call
                     // answered wins over its derivation; the receipt stops
                     // with the turn.

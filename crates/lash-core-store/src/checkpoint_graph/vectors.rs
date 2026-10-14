@@ -587,6 +587,12 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "postgres": "lash_session_runs.terminal_window_config_ref",
       "source": "terminal_config",
       "sqlite": "session_runs.terminal_window_config_ref"
+    },
+    {
+      "number": 14,
+      "postgres": "lash_turn_phases.answer_ref",
+      "source": "answer",
+      "sqlite": "turn_phases.answer_ref"
     }
   ]
 }"##;

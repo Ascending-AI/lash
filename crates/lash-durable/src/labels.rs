@@ -33,9 +33,10 @@ impl CommitLabel {
     /// `model.done`: A model response, the next checkpoint and the round's admission, fused (C4).
     pub const MODEL_DONE: Self = Self::new("model.done");
     /// `model.answer`: A model call's receipt, the provider's outcome,
-    /// recorded in its phase checkpoint before anything derives from it, so
+    /// recorded beside its model phase before anything derives from it, so
     /// every derivation and every restore reads it and the call is never
-    /// sent again (FIG-6230).
+    /// sent again (FIG-6230). The receipt is its own root; the phase stays
+    /// as `model.start` committed it (FIG-6253).
     pub const MODEL_ANSWER: Self = Self::new("model.answer");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");

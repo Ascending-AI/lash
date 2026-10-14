@@ -36,7 +36,7 @@ attempt re-delivers the cell without deriving it again.
 ### 2. A crash in the hold costs a derivation, not a provider call
 
 If the node dies before any commit holds the derived response, recovery
-finds the call's receipt in its phase checkpoint. It derives the response
+finds the call's receipt beside its model phase. It derives the response
 again from the receipt: it replays the recorded stream through the recorded
 stream hooks, runs the recorded response hooks and re-delivers the same
 cell. The provider is not asked again. Response hooks are pure derivations,

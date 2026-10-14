@@ -112,6 +112,10 @@ law!(
     |store, _advance| { laws::a_turn_counts_the_model_calls_it_admitted(store) }
 );
 law!(
+    a_receipt_stands_beside_its_model_phase_until_the_next_phase,
+    |store, _advance| { laws::a_receipt_stands_beside_its_model_phase_until_the_next_phase(store) }
+);
+law!(
     a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it,
     |store, _advance| {
         laws::a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it(store)

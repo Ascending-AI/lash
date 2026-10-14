@@ -186,8 +186,8 @@
       "workload": "chat-short",
       "metric": "sql_rows_written",
       "check": "per_turn_median",
-      "max": 250,
-      "why": "247 rows: 203 before FIG-6230, plus 22 for each of the turn's two model.answer receipts (actor fence 1, turn_phases 1, the receipt's phase root and checkpoint node with their 8 edges, and the model.start root it replaces reclaimed with its 8 edges)"
+      "max": 215,
+      "why": "211 rows: 203 before FIG-6230, plus 4 for each of the turn's two model.answer receipts (FIG-6253): the actor fence 1, turn_phases.answer_ref set 1 and the receipt's one TextLeaf 1 at the receipt, and that leaf peeled 1 by the commit that consumes it; the phase root is no longer replaced"
     },
     {
       "workload": "ts-codemode",

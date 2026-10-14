@@ -56,7 +56,10 @@ pub use formats::{
     actors_in_a_format_set_and_a_turns_cells_are_listed,
 };
 pub use hand_back::an_abandoned_activation_hands_back_only_its_original_grant;
-pub use model_calls::a_turn_counts_the_model_calls_it_admitted;
+pub use model_calls::{
+    a_receipt_stands_beside_its_model_phase_until_the_next_phase,
+    a_turn_counts_the_model_calls_it_admitted,
+};
 pub use prompts::{
     deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,
     prompt_snapshot_roots_survive_phase_pruning_until_released,

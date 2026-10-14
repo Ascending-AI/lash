@@ -6,7 +6,7 @@
 //! records as uses of claim tokens ([`ObligationUse`]): each call admitted
 //! and not settled owes its binding's callbacks, a parked cell owes the
 //! providers and codecs of the deferred matches it committed, the turn's
-//! phase owes the response callbacks of a paid model answer it retains, a
+//! phase owes the callbacks of the model-call receipt beside it, a
 //! session's head owes the observers of the config change it has not
 //! delivered, and a process owes its environment's component configs.
 //! `requires` is the union of their tokens. A token stays required while any one of its uses is
@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus, PhaseRoot};
+use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeLimits, EncodedNode, GraphDecoder, NodeId, NodeKind, NodeSource, StoredNode,
 };
@@ -49,9 +49,9 @@ pub enum ObligationSite {
     /// A parked execution's root: the deferred matches its cell committed,
     /// whose later calls run on their providers and codecs, until it ends.
     Execution { exec: ExecKey },
-    /// The unfinished turn's phase: the response callbacks of the paid
-    /// model answer its checkpoint retains, until the answer is derived or
-    /// the turn ends.
+    /// The unfinished turn's phase: the callbacks of the model-call
+    /// receipt beside it, until the next phase consumes the receipt or the
+    /// turn ends.
     Phase,
     /// The config change the session's head has not delivered, at its
     /// revision: each observer it is owed to, until the head retires it.
@@ -231,10 +231,10 @@ impl RecordedWork {
         let Some(turn) = reads.turn(session).await? else {
             return Ok(());
         };
-        if let Some(root) = turn.phase.checkpoint() {
+        if let Some(root) = turn.answer {
             let graph = reads
                 .hydrate(
-                    RootOwner::TurnPhase {
+                    RootOwner::ModelAnswer {
                         session: session.clone(),
                         run: turn.run.clone(),
                     },
@@ -242,7 +242,7 @@ impl RecordedWork {
                     phase_limits,
                 )
                 .await?;
-            self.apply_phase(&graph, root, phase_limits)?;
+            self.apply_receipt(&graph, root, phase_limits)?;
             if max_rows.is_some() {
                 consume_limits(&mut limits, &graph.nodes)?;
             }
@@ -410,16 +410,14 @@ impl RecordedWork {
                 DomainWrite::ExecRoot(
                     ExecRootWrite::Retire { exec, .. } | ExecRootWrite::Clear { exec },
                 ) => self.end(exec),
-                // The writer of a phase's root states what it owes; a root
-                // it does not state is read from the nodes `tx` stages, and
-                // a phase without a root owes nothing.
-                DomainWrite::Turn(TurnWrite::Advance { phase, .. }) => match phase.checkpoint() {
-                    Some(root) => match tx.owed(&root) {
-                        Some(owed) => self.owe_phase(owed),
-                        None => self.apply_phase(&staged, root, phase_limits)?,
-                    },
-                    None => self.put(ObligationSite::Phase, []),
+                // The writer of a receipt states what it owes; a receipt it
+                // does not state is read from the nodes `tx` stages. The
+                // next phase consumes it: a phase owes nothing of its own.
+                DomainWrite::Turn(TurnWrite::Answer { answer, .. }) => match tx.owed(answer) {
+                    Some(owed) => self.owe_phase(owed),
+                    None => self.apply_receipt(&staged, *answer, phase_limits)?,
                 },
+                DomainWrite::Turn(TurnWrite::Advance { .. }) => self.put(ObligationSite::Phase, []),
                 DomainWrite::Turn(TurnWrite::Terminal { .. }) => self.end_turn(),
                 _ => {}
             }
@@ -447,7 +445,11 @@ impl RecordedWork {
                     kind: RunFactKind::Admit | RunFactKind::XOutcome,
                     ..
                 }) | DomainWrite::ExecRoot(_)
-                    | DomainWrite::Turn(TurnWrite::Advance { .. } | TurnWrite::Terminal { .. })
+                    | DomainWrite::Turn(
+                        TurnWrite::Advance { .. }
+                            | TurnWrite::Answer { .. }
+                            | TurnWrite::Terminal { .. }
+                    )
                     | DomainWrite::SessionCommit(_)
             )
         })
@@ -525,20 +527,20 @@ impl RecordedWork {
         Ok(())
     }
 
-    /// Take what the phase root `root`, read from `source`, owes: the
-    /// response callbacks of the paid answer it retains (S7), its `owed`.
-    /// With [`Self::owe_phase`], the one projection of a phase's debts: a
-    /// cold read, a commit and diagnostics all take it here.
-    fn apply_phase(
+    /// Take what the model-call receipt `root`, read from `source`, owes
+    /// (S7): its `owed`, the callbacks its derivation runs. With
+    /// [`Self::owe_phase`], the one projection of a phase's debts: a cold
+    /// read, a commit and diagnostics all take it here.
+    fn apply_receipt(
         &mut self,
         source: &dyn NodeSource,
         root: NodeId,
         limits: DecodeLimits,
     ) -> Result<(), DurableError> {
-        let body: PhaseRoot = GraphDecoder::new(source, limits)
-            .decode(root, NodeKind::PHASE_ROOT)
-            .map_err(|refusal| corrupt("a turn's phase root", &refusal.to_string()))?;
-        self.owe_phase(&body.owed);
+        let receipt =
+            super::model_receipt::ModelReceipt::<serde::de::IgnoredAny>::load(source, root, limits)
+                .map_err(|reason| corrupt("a model call's receipt", &reason))?;
+        self.owe_phase(&receipt.owed);
         Ok(())
     }
 

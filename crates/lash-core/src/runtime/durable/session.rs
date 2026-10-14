@@ -1101,10 +1101,6 @@ pub struct PhaseCheckpoint {
     /// which a resume and a cancel restore serve instead of resolving again
     /// (FIG-6021). `None` for a drive that resolves no configuration.
     pub config: Option<super::run_config::RecordedRunConfig>,
-    /// The pinned call's receipt, which no derivation has answered
-    /// ([`TurnDrive::owed_answer`]): `Some` only in the checkpoint
-    /// `model.answer` commits.
-    pub answered: Option<ModelAnswer>,
 }
 
 impl PhaseCheckpoint {
@@ -1169,8 +1165,8 @@ pub struct RestoredTurn {
     pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
-    /// The pinned call's receipt, which no derivation has answered, if the
-    /// checkpoint is `model.answer`'s.
+    /// The pinned call's receipt, which no derivation has answered, if
+    /// `model.answer` committed one beside the phase.
     pub answered: Option<ModelAnswer>,
     /// The turn's row.
     pub row: TurnRow,
@@ -1334,6 +1330,7 @@ pub async fn admit_turn(
         model_calls: 0,
         turn_deadline: None,
         working: None,
+        answer: None,
         written_epoch: cx.epoch(),
         cancel: None,
         trace_exported: false,
@@ -1417,6 +1414,34 @@ impl<'a> TurnRestore<'a> {
         self.row
     }
 
+    /// The receipt `root` the turn's row names beside its model phase.
+    async fn receipt(
+        &self,
+        root: lash_durable::domain::checkpoint_graph::NodeId,
+    ) -> Result<ModelAnswer, TurnRestoreError> {
+        let limits = self.cx.backend().config().settings().graph_reads.owner();
+        let graph = self
+            .cx
+            .durable_reads()?
+            .hydrate(
+                lash_durable::domain::graph::RootOwner::ModelAnswer {
+                    session: self.row.session.clone(),
+                    run: self.row.run.clone(),
+                },
+                Some(root),
+                limits,
+            )
+            .await?;
+        lash_core_execution::runtime::actor::model_receipt::ModelReceipt::<ModelAnswer>::load(
+            &graph, root, limits,
+        )
+        .map(|receipt| receipt.answer)
+        .map_err(|reason| TurnRestoreError::Undecodable {
+            run: self.row.run.clone(),
+            reason,
+        })
+    }
+
     /// What the turn's checkpoint records for preparing the resumed turn:
     /// its before-turn callback decisions, its retained trace scope and its
     /// run's recorded configuration, so no before-turn callback runs, no
@@ -1461,15 +1486,16 @@ impl<'a> TurnRestore<'a> {
         self.phase().await?;
         let Some((
             PhaseCheckpoint {
-                saved,
-                delivered,
-                answered,
-                ..
+                saved, delivered, ..
             },
             stored,
         )) = self.phase.take()
         else {
             return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
+        };
+        let answered = match row.answer {
+            Some(root) => Some(self.receipt(root).await?),
+            None => None,
         };
         let window = match saved.checkpoint.window_pin() {
             Some(pin) => Some(

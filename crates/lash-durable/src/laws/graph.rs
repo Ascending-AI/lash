@@ -595,6 +595,33 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     let exec = owner.exec("roots");
     let facts = OwnerKey::Cell(owner.session.clone(), run.clone(), CellId::new("roots"));
     let effect = EffectKey(vec![9].into());
+    // The turn's phase root as it stands: a receipt is recorded beside it,
+    // in its model phase, and the next phase over the same root consumes it.
+    let mut phase_root = phase0;
+    let phase_over = |phase_root: NodeId, model: bool| {
+        DomainWrite::Turn(TurnWrite::Advance {
+            session: owner.session.clone(),
+            run: run.clone(),
+            phase: if model {
+                UnfinishedPhase::Model {
+                    pin: crate::domain::ModelPin {
+                        call: 1,
+                        attempt: 1,
+                        request_ref: "graph-roots-request".into(),
+                        deadline: crate::DurableInstant(1_000),
+                        stream_from: "graph-roots-stream".into(),
+                    },
+                    checkpoint: phase_root,
+                }
+            } else {
+                UnfinishedPhase::Tools {
+                    run: RunSeq(0),
+                    checkpoint: phase_root,
+                }
+            },
+            iteration: 1,
+        })
+    };
     for source in RootSource::ALL {
         let mut nodes = staging();
         let unique = big(source.catalog_name());
@@ -668,6 +695,25 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 Some(namespace(StoredValues::Root(root))),
                 Some(namespace(StoredValues::Base)),
             ),
+            RootSource::ModelAnswer => {
+                owner_commit(
+                    tier,
+                    &owner,
+                    BTreeMap::new(),
+                    vec![phase_over(phase_root, true)],
+                )
+                .await
+                .map_err(|error| refused("the model phase", error))?;
+                (
+                    Some(DomainWrite::Turn(TurnWrite::Answer {
+                        session: owner.session.clone(),
+                        run: run.clone(),
+                        answer: root,
+                    })),
+                    // The next phase consumes the receipt.
+                    Some(phase_over(phase_root, false)),
+                )
+            }
             RootSource::ReleasePin => (
                 Some(DomainWrite::ReleasePin(ReleasePinWrite::Install {
                     release: "release".into(),
@@ -829,18 +875,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     tier,
                     &owner,
                     next.into_nodes(),
-                    vec![DomainWrite::Turn(TurnWrite::Advance {
-                        session: owner.session.clone(),
-                        run: run.clone(),
-                        phase: UnfinishedPhase::Tools {
-                            run: RunSeq(0),
-                            checkpoint: replacement,
-                        },
-                        iteration: 1,
-                    })],
+                    vec![phase_over(replacement, false)],
                 )
                 .await
                 .map_err(|error| refused("the next phase", error))?;
+                phase_root = replacement;
             }
             (source, ..) => return Err(LawBroken(format!("{source:?} has no retirement"))),
         }

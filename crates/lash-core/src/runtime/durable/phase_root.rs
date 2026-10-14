@@ -36,8 +36,6 @@ struct PhaseText<'a> {
     before_turn: &'a [crate::plugin::RecordedTurnContribution],
     #[serde(skip_serializing_if = "Option::is_none")]
     trace: &'a Option<lash_trace::DurableTraceScope>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    answered: &'a Option<super::session::ModelAnswer>,
 }
 
 /// The root's text read back.
@@ -51,8 +49,6 @@ struct PhaseRead {
     before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     #[serde(default)]
     trace: Option<lash_trace::DurableTraceScope>,
-    #[serde(default)]
-    answered: Option<super::session::ModelAnswer>,
 }
 
 /// Kind 39's body: one content blob's canonical JSON text.
@@ -75,8 +71,6 @@ pub(super) struct StagedPhase {
     staging: GraphStaging,
     held: Vec<NodeId>,
     stored: PhaseStored,
-    /// What the root owes, stated with its commit (S7).
-    owed: Vec<crate::plugin::PluginCallbackIdentity>,
 }
 
 /// The blobs a staged phase added, each by the node it is stored as: what
@@ -128,17 +122,11 @@ impl StagedPhase {
                 })
             })
             .transpose()?;
-        let owed = checkpoint
-            .answered
-            .as_ref()
-            .map(super::session::ModelAnswer::owed_callbacks)
-            .unwrap_or_default();
         let text = serde_json::to_string(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
             delivered: &checkpoint.delivered,
             before_turn: &checkpoint.before_turn,
             trace: &checkpoint.trace,
-            answered: &checkpoint.answered,
         })
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
         let mut content = Vec::new();
@@ -164,7 +152,6 @@ impl StagedPhase {
                     content,
                     run: config.as_ref().map(|config| config.run),
                     surface: config.as_ref().and_then(|config| config.surface),
-                    owed: owed.clone(),
                 },
             )
             .map_err(refused)?;
@@ -180,7 +167,6 @@ impl StagedPhase {
         Ok(Self {
             root,
             staging,
-            owed,
             held: held_nodes,
             stored: PhaseStored {
                 content: stored,
@@ -196,7 +182,6 @@ impl StagedPhase {
             tx.require(node);
         }
         tx.stage_all(self.staging);
-        tx.owe(self.root, self.owed);
         (self.root, self.stored)
     }
 }
@@ -234,7 +219,6 @@ pub(super) fn restaged_text(
         tx.require(*node);
     }
     tx.stage_all(staging);
-    tx.owe(root, body.owed);
     Ok(root)
 }
 
@@ -296,7 +280,6 @@ pub(super) fn load(
             before_turn: read.before_turn,
             trace: read.trace,
             config,
-            answered: read.answered,
         },
         PhaseStored {
             content: stored,

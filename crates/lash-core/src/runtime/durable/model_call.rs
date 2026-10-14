@@ -55,9 +55,10 @@ use lash_sansio::TurnCheckpoint;
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))
 const MODEL_REQUEST_PIN_DOMAIN: &str = "lash-model-request-pin/v1";
 
-/// A model call's receipt: the provider's normalized outcome, committed in
-/// its call's phase checkpoint under `model.answer`, under the owner fence,
-/// and acknowledged before anything derives from it. It holds everything a
+/// A model call's receipt: the provider's normalized outcome, committed
+/// beside its call's model phase under `model.answer` (one placed text the
+/// turn's row names, [`ModelReceipt`]), under the owner fence, and
+/// acknowledged before anything derives from it. It holds everything a
 /// derivation reads: the response (parts, correlations, opaque replay
 /// metadata and usage) or the call's typed unsuccessful end, the attempt
 /// that answered and the call's sealed record (its winning attempt and
@@ -68,7 +69,10 @@ const MODEL_REQUEST_PIN_DOMAIN: &str = "lash-model-request-pin/v1";
 /// durably recorded response is never purchased again. Only the receipt's
 /// own commit can be lost after the provider executed (see
 /// [`send`]); the commit that consumes the receipt (`model.done`, a cell's
-/// first save or `turn.commit`) leaves the model phase and drops it.
+/// first save, the next `model.start` or `turn.commit`) leaves the model
+/// phase and drops it.
+///
+/// [`ModelReceipt`]: lash_core_execution::runtime::actor::model_receipt::ModelReceipt
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelAnswer {

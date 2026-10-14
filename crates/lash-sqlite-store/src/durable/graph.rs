@@ -110,7 +110,8 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
         WHERE terminal_window_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'revision_config', config_ref FROM session_revisions
     UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM session_runs
-        WHERE terminal_window_config_ref IS NOT NULL;
+        WHERE terminal_window_config_ref IS NOT NULL
+    UNION ALL SELECT 'answer', answer_ref FROM turn_phases WHERE answer_ref IS NOT NULL;
 ";
 
 lash_store_sql::statements! {
@@ -326,6 +327,11 @@ fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
         RootOwner::WorkingExecution { session, run } => one(
             tx,
             SQL.turns.working_root.sql(),
+            [session.as_str(), run.as_str()],
+        )?,
+        RootOwner::ModelAnswer { session, run } => one(
+            tx,
+            SQL.turns.answer_root.sql(),
             [session.as_str(), run.as_str()],
         )?,
         RootOwner::TurnNamespace {

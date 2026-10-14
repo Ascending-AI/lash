@@ -98,6 +98,8 @@ pub enum RootOwner {
     TurnPhase { session: SessionId, run: TurnId },
     /// `turn_phases.working_execution_ref`.
     WorkingExecution { session: SessionId, run: TurnId },
+    /// `turn_phases.answer_ref`.
+    ModelAnswer { session: SessionId, run: TurnId },
     /// `turn_namespaces`.
     TurnNamespace {
         session: SessionId,
@@ -126,6 +128,7 @@ impl RootOwner {
             Self::EffectAdmission { .. } => RootSource::EffectAdmission,
             Self::TurnPhase { .. } => RootSource::TurnPhase,
             Self::WorkingExecution { .. } => RootSource::WorkingExecution,
+            Self::ModelAnswer { .. } => RootSource::ModelAnswer,
             Self::TurnNamespace { .. } => RootSource::TurnNamespace,
             Self::SessionRevision { .. } => RootSource::SessionRevision,
             Self::SessionAdmissionBase { .. } => RootSource::SessionAdmissionBase,
@@ -548,6 +551,18 @@ impl DomainWrite {
                     Some(checkpoint),
                 )
             })),
+            Self::Turn(TurnWrite::Answer {
+                session,
+                run,
+                answer,
+            }) => one(change(
+                RootOwner::ModelAnswer {
+                    session: session.clone(),
+                    run: run.clone(),
+                },
+                None,
+                Some(*answer),
+            )),
             Self::Turn(TurnWrite::Working {
                 session,
                 run,

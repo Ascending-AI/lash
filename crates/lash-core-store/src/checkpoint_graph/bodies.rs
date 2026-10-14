@@ -6,9 +6,7 @@
 //! a child of a stated kind, checked by [`ExecRoot::check_children`] and
 //! [`ProcessState::check_children`].
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, TokenCodec, TokenError, TokenReader, TokenWriter,
-};
+use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
 use super::decode::GraphDecoder;
 use super::node::NodeId;
@@ -175,21 +173,15 @@ discriminator! {
 /// phase's JSON without its content, which it names by digest, each a
 /// TurnContent node, ascending; its run's recorded configuration is the
 /// TurnContent nodes of its resolved shape and its installed tool surface.
-/// The integrator owns the text; the seam reads the root's debts.
+/// The integrator owns the text. A phase root owes nothing: the receipt of
+/// a model call whose derivation is owed is its own root
+/// (`turn_phases.answer_ref`), never a field of the phase's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhaseRoot {
     pub checkpoint: String,
     pub content: Vec<(String, NodeId)>,
     pub run: Option<NodeId>,
     pub surface: Option<NodeId>,
-    /// The callbacks the phase owes while it stands (S7): the response
-    /// callbacks of a paid model answer whose derivation is still owed, in
-    /// their recorded order. Empty once the answer is consumed.
-    ///
-    /// A root that owes nothing is the four-field struct every root was
-    /// before FIG-6164, byte for byte; only a root with debts carries the
-    /// fifth field, never empty.
-    pub owed: Vec<PluginCallbackIdentity>,
 }
 
 fn encode_node_ref(node: Option<&NodeId>, out: &mut TokenWriter) {
@@ -212,7 +204,7 @@ fn decode_node_ref(input: &mut TokenReader<'_>) -> Result<Option<NodeId>, TokenE
 
 impl TokenCodec for PhaseRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(if self.owed.is_empty() { 4 } else { 5 });
+        out.seq(4);
         out.text(&self.checkpoint);
         out.seq(self.content.len() as u64);
         for (digest, node) in &self.content {
@@ -222,20 +214,10 @@ impl TokenCodec for PhaseRoot {
         }
         encode_node_ref(self.run.as_ref(), out);
         encode_node_ref(self.surface.as_ref(), out);
-        if !self.owed.is_empty() {
-            self.owed.encode(out);
-        }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let fields = input.seq()?;
-        if !matches!(fields, 4 | 5) {
-            return Err(CanonicalFault::FieldCount {
-                expected: 5,
-                found: fields,
-            }
-            .into());
-        }
+        input.expect_struct(4)?;
         let checkpoint = input.text()?.to_owned();
         let count = input.seq()?;
         let mut content = Vec::new();
@@ -246,25 +228,11 @@ impl TokenCodec for PhaseRoot {
         }
         let run = decode_node_ref(input)?;
         let surface = decode_node_ref(input)?;
-        let owed = if fields == 5 {
-            let owed = Vec::decode(input)?;
-            if owed.is_empty() {
-                return Err(CanonicalFault::FieldCount {
-                    expected: 4,
-                    found: 5,
-                }
-                .into());
-            }
-            owed
-        } else {
-            Vec::new()
-        };
         Ok(Self {
             checkpoint,
             content,
             run,
             surface,
-            owed,
         })
     }
 }

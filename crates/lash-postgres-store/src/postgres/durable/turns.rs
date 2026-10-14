@@ -35,10 +35,11 @@ lash_store_sql::statements! {
     struct PostgresTurnStatements @ "durable_turn_postgres" {
         /// A terminal's phase, namespaces and answered cancel share one end,
         /// answering the roots they held as one row: the PhaseRoot, the
-        /// working execution and the namespace values (FIG-5949).
+        /// working execution, and the receipt with the namespace values
+        /// (FIG-5949).
         delete_terminal_state = "WITH phase AS (
                  DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
-                 RETURNING checkpoint_ref, working_execution_ref
+                 RETURNING checkpoint_ref, working_execution_ref, answer_ref
              ), namespaces AS (
                  DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
                  RETURNING graph_root_ref
@@ -47,8 +48,10 @@ lash_store_sql::statements! {
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,
-                 ARRAY(SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
-                     AS namespace_roots";
+                 ARRAY(SELECT answer_ref FROM phase WHERE answer_ref IS NOT NULL
+                     UNION ALL
+                     SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
+                     AS closure_roots";
 
         /// Number revision `?2` of session `?1` as its next terminal, once,
         /// and advance the head's terminal ordinal to it.
@@ -145,6 +148,11 @@ pub(super) static ADVANCE_PHASE: Entry = Entry::new(
     ],
     Shape::Returning,
 );
+pub(super) static ANSWER_SET: Entry = Entry::new(
+    || &SQL.answer_set,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    Shape::Returning,
+);
 pub(super) static TRACE_EXPORTED: Entry = Entry::new(
     || &SQL.trace_exported,
     &[Ty::Text, Ty::Text, Ty::Int],
@@ -169,10 +177,13 @@ pub(super) static WORKING_SET: Entry = Entry::new(
     &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
     Shape::Returning,
 );
-/// The PhaseRoot an advance replaces: retired with the advance, and
-/// peeled unless the new phase names it again (FIG-5949).
-pub(super) static PHASE_ROOT: Entry =
-    Entry::new(|| &SQL.phase_root, &[Ty::Text, Ty::Text], Shape::Select).retiring("checkpoint_ref");
+/// The PhaseRoot an advance replaces and the receipt it consumes: retired
+/// with the advance, and peeled unless the new phase names them again
+/// (FIG-5949).
+pub(super) static PHASE_ROOTS: Entry =
+    Entry::new(|| &SQL.phase_roots, &[Ty::Text, Ty::Text], Shape::Select)
+        .retiring("checkpoint_ref")
+        .retiring("answer_ref");
 /// The namespace values roots a namespace write may replace: retired with
 /// it, and peeled unless a row still names them (FIG-5949).
 pub(super) static NAMESPACE_ROOTS: Entry = Entry::new(
@@ -232,7 +243,7 @@ pub(super) static TERMINAL_STATE: Entry = Entry::new(
 )
 .collecting(Collect::PhaseEnd("checkpoint_ref"))
 .collecting(Collect::Closure("working_execution_ref"))
-.collecting(Collect::Closures("namespace_roots"));
+.collecting(Collect::Closures("closure_roots"));
 /// A referrer's or an artifact's advisory lock, by its key.
 pub(super) static LOCK_KEY: Entry = Entry::new(
     || &crate::connection_sql::connection_sql().lock_xact_by_text,
@@ -355,7 +366,7 @@ fn terminal_steps(
         program.push(Step::any(entry, vec![Value::text(cells.as_str())]));
     }
     // The turn's phase row and namespaces go with it, and their roots with
-    // them: its working execution and namespace values whole, its
+    // them: its working execution, receipt and namespace values whole, its
     // PhaseRoot alone (the TurnContent ordering constraint,
     // [`super::Retired`]).
     program.push(Step::any(&TERMINAL_STATE, turn()));
@@ -419,9 +430,18 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::Text(pin.map(|pin| pin.stream_from.clone())),
             ]);
             vec![
-                Step::any(&PHASE_ROOT, turn(session, run)),
+                Step::any(&PHASE_ROOTS, turn(session, run)),
                 Step::one(&ADVANCE_PHASE, values),
             ]
+        }
+        TurnWrite::Answer {
+            session,
+            run,
+            answer,
+        } => {
+            let mut values = turn(session, run);
+            values.extend([Value::text(answer.to_hex()), Value::int(epoch.0)]);
+            vec![Step::one(&ANSWER_SET, values)]
         }
         TurnWrite::TraceExported { session, run } => {
             let mut values = turn(session, run);
@@ -534,6 +554,7 @@ pub(super) async fn apply(
             }
         }
         TurnWrite::Advance { session, run, .. }
+        | TurnWrite::Answer { session, run, .. }
         | TurnWrite::TraceExported { session, run }
         | TurnWrite::Namespaces { session, run, .. }
         | TurnWrite::Working { session, run, .. } => {
@@ -845,6 +866,8 @@ pub(super) async fn turn(
     let checkpoint = checkpoint.as_deref().map(node_ref).transpose()?;
     let working: Option<String> = row.try_get(13).map_err(decode)?;
     let working = working.as_deref().map(node_ref).transpose()?;
+    let answer: Option<String> = row.try_get(14).map_err(decode)?;
+    let answer = answer.as_deref().map(node_ref).transpose()?;
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
     let stream_from: Option<String> = row.try_get(11).map_err(decode)?;
@@ -871,6 +894,7 @@ pub(super) async fn turn(
         admission,
         phase,
         working,
+        answer,
         iteration,
         model_calls,
         turn_deadline: turn_deadline.map(DurableInstant),

@@ -11,6 +11,7 @@ pub mod claim_obligations;
 mod core;
 pub mod ingress;
 pub mod journal;
+pub mod model_receipt;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;

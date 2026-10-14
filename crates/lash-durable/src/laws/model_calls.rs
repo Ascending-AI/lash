@@ -122,3 +122,195 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
     }
     Ok(())
 }
+
+/// A model call's receipt stands beside its model phase (FIG-6253): the
+/// unfinished turn records it only in its model phase, once, leaving the
+/// phase and its root as they were; the receipt is the root its row names
+/// until the turn's next phase consumes it, and the turn's end takes it
+/// with the phase row.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    let id = SessionId::try_from("receipt-session".to_owned())
+        .map_err(|_| LawBroken("a constant session id".into()))?;
+    let run = TurnId::try_from("receipt-turn".to_owned())
+        .map_err(|_| LawBroken("a constant turn id".into()))?;
+    let actor = session(id.as_str())?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    let owner = node(store, "receipt-owner").await?;
+    let epoch = store.claim(&owner, 1).await?[0].epoch;
+    let (actor, id, run) = (&actor, &id, &run);
+    let commit = |write: TurnWrite,
+                  node: Option<lash_core_store::checkpoint_graph::EncodedNode>| async move {
+        let mut tx = store.begin(actor, epoch).await?;
+        tx.stage(node);
+        tx.write(DomainWrite::Turn(write));
+        store.commit(tx, LABEL).await.map(|_| ())
+    };
+    let answer = |root| TurnWrite::Answer {
+        session: id.clone(),
+        run: run.clone(),
+        answer: root,
+    };
+    let refused = |result: Result<(), crate::DurableError>| {
+        matches!(
+            result,
+            Err(crate::DurableError::Domain(
+                crate::domain::DomainRefusal::TurnNotOpen { .. }
+            ))
+        )
+    };
+    let row = || async move {
+        store
+            .turn(id)
+            .await?
+            .ok_or_else(|| LawBroken("the admitted turn vanished".into()))
+    };
+    let receipt = || async move {
+        store
+            .hydrate(
+                crate::domain::RootOwner::ModelAnswer {
+                    session: id.clone(),
+                    run: run.clone(),
+                },
+                None,
+                lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20),
+            )
+            .await
+            .map(|graph| graph.root)
+    };
+    let retired = |found: Result<_, crate::DurableError>| {
+        matches!(
+            found,
+            Err(crate::DurableError::Graph(
+                lash_core_store::checkpoint_graph::GraphRefusal::RootRetired
+            ))
+        )
+    };
+
+    commit(
+        TurnWrite::Admit {
+            session: id.clone(),
+            run: run.clone(),
+            admission: RunAdmissionRecord::Turn {
+                took: AdmittedTurnRows::Inputs {
+                    ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
+                        "receipt-batch",
+                    )),
+                },
+                trace: None,
+            },
+            turn_deadline: None,
+        },
+        None,
+    )
+    .await?;
+    let (first, first_node) = super::tagged_node("receipt-1");
+    ensure!(
+        refused(commit(answer(first), Some(first_node.clone())).await),
+        "an admitted turn took a receipt"
+    );
+
+    let (checkpoint, checkpoint_node) = super::tagged_node("receipt-phase");
+    let model = UnfinishedPhase::Model {
+        pin: ModelPin {
+            call: 1,
+            attempt: 1,
+            request_ref: "request-1".to_owned(),
+            deadline: DurableInstant(1_000),
+            stream_from: "stream-1".to_owned(),
+        },
+        checkpoint,
+    };
+    let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
+        session: id.clone(),
+        run: run.clone(),
+        phase,
+        iteration: 1,
+    };
+    commit(advance(model.clone()), Some(checkpoint_node)).await?;
+    ensure!(
+        row().await?.answer.is_none() && retired(receipt().await),
+        "a model phase held a receipt before one was recorded"
+    );
+    commit(answer(first), Some(first_node)).await?;
+    let answered = row().await?;
+    ensure!(
+        answered.answer == Some(first) && answered.phase == model,
+        "the receipt read back {:?} over {:?}",
+        answered.answer,
+        answered.phase
+    );
+    ensure!(
+        receipt().await? == first,
+        "the receipt's root is not the receipt"
+    );
+    let (second, second_node) = super::tagged_node("receipt-2");
+    ensure!(
+        refused(commit(answer(second), Some(second_node)).await),
+        "a receipt was written twice"
+    );
+    ensure!(
+        row().await?.answer == Some(first),
+        "a refused receipt replaced the first"
+    );
+
+    let (round, round_node) = super::tagged_node("receipt-round");
+    commit(
+        advance(UnfinishedPhase::Tools {
+            run: RunSeq(1),
+            checkpoint: round,
+        }),
+        Some(round_node),
+    )
+    .await?;
+    ensure!(
+        row().await?.answer.is_none() && retired(receipt().await),
+        "the next phase did not consume the receipt"
+    );
+    let (third, third_node) = super::tagged_node("receipt-3");
+    ensure!(
+        refused(commit(answer(third), Some(third_node.clone())).await),
+        "a tool round took a receipt"
+    );
+
+    let (next, next_node) = super::tagged_node("receipt-next-phase");
+    commit(
+        advance(UnfinishedPhase::Model {
+            pin: ModelPin {
+                call: 2,
+                attempt: 1,
+                request_ref: "request-2".to_owned(),
+                deadline: DurableInstant(1_000),
+                stream_from: "stream-2".to_owned(),
+            },
+            checkpoint: next,
+        }),
+        Some(next_node),
+    )
+    .await?;
+    commit(answer(third), Some(third_node)).await?;
+    commit(
+        TurnWrite::Terminal {
+            session: id.clone(),
+            run: run.clone(),
+            cause: Box::new(
+                lash_core_store::store::RunTerminalCause::OperatorCancelled {
+                    intent: lash_core_store::store::ControlIntentId::from_sequence(1),
+                },
+            ),
+            head_revision: None,
+        },
+        None,
+    )
+    .await?;
+    ensure!(
+        store.turn(id).await?.is_none() && retired(receipt().await),
+        "the turn's end left its receipt"
+    );
+    Ok(())
+}

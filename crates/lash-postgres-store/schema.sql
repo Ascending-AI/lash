@@ -1006,8 +1006,9 @@ CREATE TABLE IF NOT EXISTS lash_prompt_prefixes (
 -- phase with what a restore resumes it from: no checkpoint while admitted and
 -- one after, and the pinned model call exactly in the model phase, whose
 -- attempt is phase_arg and whose call is model_calls, the count of model
--- calls the turn admitted. trace_exported records that the admission's trace
--- export is discharged (FIG-5457).
+-- calls the turn admitted, and the pinned call's receipt only in the model
+-- phase. trace_exported records that the admission's trace export is
+-- discharged (FIG-5457).
 CREATE TABLE IF NOT EXISTS lash_turn_phases (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -1016,9 +1017,11 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     phase_arg BIGINT,
     iteration BIGINT NOT NULL,
     -- The phase's PhaseRoot node and the post-cell working SessionExecution
-    -- (FIG-5887 §6, §7).
+    -- (FIG-5887 §6, §7), and the pinned call's receipt: its placed text,
+    -- from model.answer until the next phase.
     checkpoint_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     working_execution_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    answer_ref TEXT REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms BIGINT,
     model_stream_from TEXT,
@@ -1029,6 +1032,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
+    CONSTRAINT ck_turn_phases_answer CHECK (answer_ref IS NULL OR phase = 'model'),
     CONSTRAINT ck_turn_phases_model CHECK (
         (phase = 'model') = (model_request_ref IS NOT NULL)
         AND (phase = 'model') = (model_deadline_ms IS NOT NULL)
@@ -1051,6 +1055,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_namespaces (
 CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_checkpoint_ref ON lash_turn_phases (checkpoint_ref);
 CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_working_execution_ref
     ON lash_turn_phases (working_execution_ref);
+CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_answer_ref ON lash_turn_phases (answer_ref);
 CREATE INDEX IF NOT EXISTS idx_lash_turn_namespaces_graph_root_ref
     ON lash_turn_namespaces (graph_root_ref);
 
@@ -1166,7 +1171,8 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
         WHERE terminal_window_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'revision_config', config_ref FROM lash_session_revisions
     UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM lash_session_runs
-        WHERE terminal_window_config_ref IS NOT NULL;
+        WHERE terminal_window_config_ref IS NOT NULL
+    UNION ALL SELECT 'answer', answer_ref FROM lash_turn_phases WHERE answer_ref IS NOT NULL;
 
 -- One-call owner commits (FIG-5936): each call's answer, recorded under its
 -- token as the call's last write. A call whose answer was lost is reconciled
@@ -1243,9 +1249,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry b3364a73f837fe52); a call
+    -- Generated from this build's statements (registry 012582136e52999c); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'b3364a73f837fe52'
+    IF p_registry IS DISTINCT FROM '012582136e52999c'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1445,8 +1451,19 @@ BEGIN
             FOR v_row IN UPDATE lash_turn_phases
              SET phase = (v_p->>2), phase_arg = ((v_p->>3)::BIGINT), iteration = ((v_p->>4)::BIGINT), checkpoint_ref = (v_p->>5),
                  model_request_ref = (v_p->>6), model_deadline_ms = ((v_p->>7)::BIGINT), written_epoch = ((v_p->>8)::BIGINT),
-                 model_calls = COALESCE(((v_p->>9)::BIGINT), model_calls), model_stream_from = (v_p->>10)
+                 model_calls = COALESCE(((v_p->>9)::BIGINT), model_calls), model_stream_from = (v_p->>10),
+                 answer_ref = NULL
              WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+             RETURNING run LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_turn.answer_set' THEN
+            v_rows := 0;
+            FOR v_row IN UPDATE lash_turn_phases SET answer_ref = (v_p->>2), written_epoch = ((v_p->>3)::BIGINT)
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND phase = 'model' AND answer_ref IS NULL
              RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
@@ -1501,14 +1518,16 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'durable_turn.phase_root' THEN
+        WHEN 'durable_turn.phase_roots' THEN
             v_rows := 0;
-            FOR v_row IN SELECT checkpoint_ref FROM lash_turn_phases WHERE session_id = (v_p->>0) AND run = (v_p->>1) LOOP
+            FOR v_row IN SELECT checkpoint_ref, answer_ref FROM lash_turn_phases
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
                 v_rows := v_rows + 1;
                 IF v_row."checkpoint_ref" IS NOT NULL THEN v_retired := v_retired || v_row."checkpoint_ref"::TEXT; END IF;
+                IF v_row."answer_ref" IS NOT NULL THEN v_retired := v_retired || v_row."answer_ref"::TEXT; END IF;
             END LOOP;
         WHEN 'durable_turn_postgres.namespace_roots' THEN
             v_rows := 0;
@@ -1794,7 +1813,7 @@ BEGIN
             v_rows := 0;
             FOR v_row IN WITH phase AS (
                  DELETE FROM lash_turn_phases WHERE session_id = (v_p->>0) AND run = (v_p->>1)
-                 RETURNING checkpoint_ref, working_execution_ref
+                 RETURNING checkpoint_ref, working_execution_ref, answer_ref
              ), namespaces AS (
                  DELETE FROM lash_turn_namespaces WHERE session_id = (v_p->>0) AND run = (v_p->>1)
                  RETURNING graph_root_ref
@@ -1803,15 +1822,17 @@ BEGIN
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,
-                 ARRAY(SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
-                     AS namespace_roots LOOP
+                 ARRAY(SELECT answer_ref FROM phase WHERE answer_ref IS NOT NULL
+                     UNION ALL
+                     SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
+                     AS closure_roots LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
                 v_rows := v_rows + 1;
                 IF v_row."checkpoint_ref" IS NOT NULL THEN v_phase_ends := v_phase_ends || v_row."checkpoint_ref"::TEXT; END IF;
                 IF v_row."working_execution_ref" IS NOT NULL THEN v_retired := v_retired || v_row."working_execution_ref"::TEXT; END IF;
-                v_retired := v_retired || COALESCE(v_row."namespace_roots", '{}'::TEXT[]);
+                v_retired := v_retired || COALESCE(v_row."closure_roots", '{}'::TEXT[]);
             END LOOP;
         WHEN 'durable_wait.revoke_scope' THEN
             v_rows := 0;
