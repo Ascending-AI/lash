@@ -4,8 +4,7 @@ use std::sync::Arc;
 use lash_kernel_dialect::{NamedLibrary, define_functions};
 use lash_kernel_doc::{Datum, Integer, Name, Timestamp, parse_document};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step,
-    Target,
+    Bounds, CellStart, End, Host, Machine, PreparedLibrary, Program, Step, Target,
 };
 
 // Independent pre-optimization TrimString oracle; never used in production.
@@ -104,6 +103,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     let make_program = |helper: &str| {
         let document = parse_document(&format!("{header}entry trim(text: Text, leading: Bool, trailing: Bool) -> Text\nfn trim(text, leading, trailing) {{ let output = invoke {helper}(text, leading, trailing) print output return output }} main {{}}")).unwrap();
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document),
             library: prepared.clone(),
         }
@@ -119,13 +119,16 @@ fn native_trim_agrees_with_generic_utf16_scan() {
         join_members: 10,
     };
     let observe = |program: &Program, args: Vec<Datum>| {
-        let mut machine = KernelMachine::start(
+        let mut machine = super::pages::start(
             program.clone(),
             bounds,
-            Start {
+            CellStart {
                 target: Target::Entry(Name::new("trim")),
                 args,
-                bindings: Bindings::default(),
+                session: None,
+                owner: super::pages::OWNER,
+                modes: Default::default(),
+                host: Vec::new(),
             },
         )
         .unwrap();

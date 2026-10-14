@@ -131,6 +131,32 @@ pub struct ProtocolSessionContext<'a> {
     fleet_format: crate::FleetFormat,
     recorded_render: Option<&'a crate::RecordedRender>,
     prompt_history: Option<&'a SessionReadView>,
+    session_pages: Option<SessionPages>,
+}
+
+/// Where a session's committed execution state stands on the persistent
+/// heap, and the fence its executor reads it under (FIG-6193): the owner
+/// row whose root reaches the session's pages, that root, and the store.
+/// An executor leases the root once, when it first reads a committed
+/// page, and reads every page of the session under that lease.
+#[derive(Clone)]
+pub struct SessionPages {
+    pub store: Arc<dyn lash_durable::domain::pages::PageStore>,
+    pub actor: lash_durable::ActorKey,
+    pub epoch: lash_durable::Epoch,
+    pub owner: lash_durable::domain::graph::RootOwner,
+    pub root: lash_core_store::checkpoint_graph::NodeId,
+}
+
+impl std::fmt::Debug for SessionPages {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionPages")
+            .field("actor", &self.actor)
+            .field("epoch", &self.epoch)
+            .field("owner", &self.owner)
+            .field("root", &self.root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> ProtocolSessionContext<'a> {
@@ -140,7 +166,22 @@ impl<'a> ProtocolSessionContext<'a> {
             fleet_format,
             recorded_render: None,
             prompt_history: None,
+            session_pages: None,
         }
+    }
+
+    /// This context with `pages` as where the session's committed
+    /// execution state stands.
+    #[must_use]
+    pub fn with_session_pages(mut self, pages: Option<SessionPages>) -> Self {
+        self.session_pages = pages;
+        self
+    }
+
+    /// Where the session's committed execution state stands, when the
+    /// caller reads it over a store.
+    pub fn session_pages(&self) -> Option<&SessionPages> {
+        self.session_pages.as_ref()
     }
 
     pub fn with_recorded_render(mut self, recorded: &'a crate::RecordedRender) -> Self {
@@ -224,19 +265,6 @@ pub struct StoredCell {
     pub graph: lash_durable::domain::graph::HydratedGraph,
 }
 
-/// A cell's root carried to this build's formats
-/// ([`CodeExecutorPlugin::carried_cell_snapshot`]): the nodes of its new
-/// complete root and the writes that publish it in place of the stored one,
-/// its admissions re-keyed with it.
-#[derive(Clone, Debug)]
-pub struct CarriedCell {
-    pub nodes: std::collections::BTreeMap<
-        lash_core_store::checkpoint_graph::NodeId,
-        lash_core_store::checkpoint_graph::EncodedNode,
-    >,
-    pub writes: Vec<lash_durable::DomainWrite>,
-}
-
 #[async_trait::async_trait]
 pub trait CodeExecutorPlugin: Send + Sync {
     async fn execute_code(
@@ -293,23 +321,25 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(Ok(()))
     }
 
-    /// `snapshot`, a cell's stored snapshot written by the build before
-    /// this one, carried to this build's formats, or `None` when it is in
-    /// them already. A turn restored on the cell asks once every live node
-    /// that serves sessions decodes this build's session set, and commits
-    /// the answer before the cell runs again. The inner `Err` is the
-    /// account of a snapshot the carry refuses. An executor whose cells
-    /// snapshot nothing keeps the default.
+    /// Whether `cell`, a cell's stored root written by the build before
+    /// this one, runs on under this build. A turn restored on the cell asks
+    /// once every live node that serves sessions decodes this build's
+    /// session set, before the cell runs again. The inner `Err` is the
+    /// account of a root no carry this build ships moves forward: a parked
+    /// cell's heap pages are carried by no migrator, so the cell stays
+    /// parked, its rows intact, and resumes on a build that runs its
+    /// kernel (FIG-6193). An executor whose cells snapshot nothing keeps
+    /// the default.
     ///
     /// # Errors
     ///
-    /// [`crate::RuntimeError`] when the carry itself could not run: nothing
+    /// [`crate::RuntimeError`] when the check itself could not run: nothing
     /// is known of the snapshot, and the restore is tried again.
     async fn carried_cell_snapshot(
         &self,
         _cell: &StoredCell,
-    ) -> Result<Result<Option<CarriedCell>, String>, crate::RuntimeError> {
-        Ok(Ok(None))
+    ) -> Result<Result<(), String>, crate::RuntimeError> {
+        Ok(Ok(()))
     }
 
     /// The executable generation this executor runs cells under (FIG-3571):

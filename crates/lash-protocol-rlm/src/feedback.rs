@@ -23,7 +23,6 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_dialect::NotSaved;
 use lash_kernel_doc::{Annotations, Datum, Name, Site, TaskIdentity};
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
@@ -79,7 +78,7 @@ impl CellObservation {
     /// How a run's error ended the cell. An uncaught unbound-variable error
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
-    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, NotSaved>) -> Self {
+    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, String>) -> Self {
         match error {
             RunError::Uncaught(value) => {
                 if let Datum::Error(error) = &value
@@ -89,7 +88,7 @@ impl CellObservation {
                 {
                     Self::BindingNotCarried {
                         binding: binding.clone(),
-                        why: why.to_string(),
+                        why: why.clone(),
                     }
                 } else {
                     Self::Uncaught(value)
@@ -370,13 +369,17 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
+    use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
     use lash_kernel_doc::{
         ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Timestamp,
         Value, parse_definition, parse_document,
     };
-    use lash_kernel_vm::{
-        Bindings, Bounds, End, Host, KernelMachine, Machine, Program, Start, Target,
+    use lash_kernel_state::paged::census_impl::Census;
+    use lash_kernel_state::paged::{
+        AccountingCertificate, AccountingMetric, AllocationCensus as _, PageAnswer, PageBody,
+        PageSource,
     };
+    use lash_kernel_vm::{Bounds, CellStart, End, Host, KernelMachine, Machine, Program, Target};
 
     use super::*;
 
@@ -395,6 +398,43 @@ mod tests {
     }
 
     struct World;
+
+    /// The pages a run seals, kept in memory.
+    #[derive(Default)]
+    struct Pages(BTreeMap<PageId, PageAnswer>);
+
+    impl PageSource for Pages {
+        fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+            pages
+                .iter()
+                .map(|page| {
+                    self.0
+                        .get(&page.id)
+                        .cloned()
+                        .ok_or(HeapFault::Missing { page: page.id })
+                })
+                .collect()
+        }
+
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            let mut tokens = body.kind.0.to_be_bytes().to_vec();
+            tokens.extend_from_slice(&body.tokens);
+            let page = PageRef {
+                id: PageId(lash_kernel_doc::heap_values::key_digest(&tokens)),
+                grant: PageGrant::NONE,
+            };
+            self.0.insert(
+                page.id,
+                PageAnswer {
+                    page,
+                    kind: body.kind,
+                    tokens: body.tokens.into(),
+                    children: body.children,
+                },
+            );
+            Ok(page)
+        }
+    }
 
     impl Host for World {
         fn clock(&mut self) -> Timestamp {
@@ -435,43 +475,62 @@ mod tests {
             let document = parse_document(&format!(
             "kernel 1\nnumbers by_spelling\nuse work.spin = @{function}\nmain {{ return work.spin() }}",
         )).expect("document");
+            let bounds = Bounds {
+                charge: 1000,
+                memory: 1 << 20,
+                call_depth: 100,
+                live_tasks: 10,
+                requests_per_park: 10,
+                join_members: 10,
+            };
+            let census = Census::restore(
+                AccountingCertificate {
+                    metric: AccountingMetric::LocalCostV1,
+                    upper: LogicalBytes(0),
+                    entities: 0,
+                    refinements: 0,
+                },
+                LogicalBytes(bounds.memory),
+            )
+            .expect("census");
             let mut machine = KernelMachine::start(
                 Program {
+                    release: PageId([8; 32]),
                     document: Arc::new(document),
                     library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
                 },
-                Bounds {
-                    charge: 1000,
-                    memory: 1 << 20,
-                    call_depth: 100,
-                    live_tasks: 10,
-                    requests_per_park: 10,
-                    join_members: 10,
-                },
-                Start {
+                bounds,
+                CellStart {
+                    owner: PageId([9; 32]),
                     target: Target::Main,
                     args: Vec::new(),
-                    bindings: Bindings::default(),
+                    session: None,
+                    modes: Default::default(),
+                    host: Vec::new(),
                 },
+                Box::new(Pages::default()),
+                Box::new(census),
             )
             .expect("started");
             let lash_kernel_vm::Step::Ended(end) = machine.run(&mut World, 1000).expect("run")
             else {
                 panic!("the guard must end the run");
             };
-            let state = lash_vm_broker::kernel::state::export_end_state(
-                &end,
-                lash_kernel_doc::KERNEL_VERSION,
-                u64::MAX,
-            )
-            .expect("staged")
-            .expect("recorded");
-            let end = lash_vm_broker::kernel::state::read_end_in(
-                &state.nodes,
-                state.root,
-                lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 24),
-            )
-            .expect("read back");
+            let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+                lash_core_store::checkpoint_graph::EncodeBudget::new(
+                    lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+                ),
+            );
+            let record = lash_vm_broker::kernel::EndRecord::stage(&end, &mut staging)
+                .expect("staged")
+                .expect("recorded");
+            let nodes = staging.into_nodes();
+            let end = record
+                .end(&mut lash_core_store::checkpoint_graph::GraphDecoder::new(
+                    &nodes,
+                    lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 24),
+                ))
+                .expect("read back");
             let End::Error(error) = end else {
                 panic!("bound error");
             };

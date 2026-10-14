@@ -1,48 +1,156 @@
-//! The lash kernel's parked run.
-//!
-//! In Lash, recovery loads committed state; uncommitted computation and diagnostics may
-//! repeat. Committed effect outcomes do not re-execute; unfinished calls follow
-//! their execution policy. Hosts deduplicate external effects on `call_id`.
-//! See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash)
-//! for the storage assumption, `Once`/`Repeatable` rules and model resend windows.
-//!
-//! A run that is not executing is data in the document's terms
-//! (`docs/kernel/design.md` §6, `docs/kernel/parked-state.md`): where each
-//! task stands is a site of the document, a variable is a name and the
-//! node that declares it, a wait is its effect's identity. Nothing in it
-//! names a position in an executable, so a machine resumes it against one
-//! it has just compiled, laid out however it likes.
-//!
-//! [`ParkedRun`] is the whole of it, and a host reads it without a
-//! machine. It is stored as one document, or in parts: a [`Header`] and
-//! one [`Fragment`] per [`Root`], the roots being each session binding,
-//! each task handle, each active call's bindings and the values each
-//! call's control state alone holds. Every live heap object is written
-//! once, in the fragment of the first root that reaches it.
-//! [`ParkedRun::save`] writes the parts and names the ones that changed
-//! since a [`Baseline`]; [`ParkedRun::load`] reads them back and refuses
-//! bytes this writer would not have produced.
-//!
-//! The crate stores nothing and commits nothing: it produces and consumes
-//! bytes. It depends on `lash-kernel-doc` and on no other lash crate.
+//! Persistent semantic heap pages and the admitted requests resumed workers receive.
+pub mod paged;
+use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_doc::{Datum, EffectIdentity, EffectName};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-mod codec_variants;
-mod fragments;
-mod schema;
-mod terminal;
-mod whole;
+/// One wait a machine hands out, numbered in request order.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(transparent)]
+pub struct WaitId(pub u64);
+/// A sleep's length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Pause {
+    pub seconds: u64,
+    /// Below one second.
+    pub nanoseconds: u32,
+}
 
-#[cfg(test)]
-mod tests;
+impl From<Duration> for Pause {
+    fn from(duration: Duration) -> Self {
+        Self {
+            seconds: duration.as_secs(),
+            nanoseconds: duration.subsec_nanos(),
+        }
+    }
+}
 
-pub use fragments::{Baseline, LoadError, Objects, SaveError, Saved, SavedFragment, save};
-pub use schema::{
-    Binding, Bound, Call, EffectOutcome, Ended, Entered, Finally, Fragment, Header, Held, Incoming,
-    ListJoin, Loop, Occurrence, Owned, ParkedCall, ParkedRun, ParkedTask, Pause, Perform,
-    PerformState, ReadyQueue, Request, Root, RootState, Run, SleepOutcome, Task, TaskState, WaitId,
-};
-pub use terminal::{TerminalBound, TerminalEnd, TerminalWhole};
-pub use whole::{
-    AdmittedRequest, AdmittedWait, CommittedOutcome, KernelWhole, WaitKind, WaitState, WholeError,
-    WholeTask, WholeTaskState, WholeWait,
-};
+impl Pause {
+    /// The duration, or `None` when the nanoseconds reach a second.
+    pub fn duration(self) -> Option<Duration> {
+        (self.nanoseconds < 1_000_000_000).then(|| Duration::new(self.seconds, self.nanoseconds))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AdmittedRequest {
+    Effect {
+        effect: EffectName,
+        args: Vec<Datum>,
+    },
+    Sleep {
+        duration: Pause,
+    },
+}
+
+/// One admitted wait, keyed by its effect identity: what a parent hands a
+/// worker beside a checkpoint root to resume it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AdmittedWait {
+    pub identity: EffectIdentity,
+    pub request: AdmittedRequest,
+}
+
+fn unsupported(variant: u32) -> TokenError {
+    TokenError::UnsupportedVariant { variant }
+}
+
+fn invalid(problem: &str) -> TokenError {
+    TokenError::Invalid(problem.to_owned())
+}
+
+/// Reads a sum header and checks the variant's field count with `arity`.
+pub(crate) fn variant(
+    input: &mut TokenReader<'_>,
+    arity: impl FnOnce(u32) -> Option<u64>,
+) -> Result<u32, TokenError> {
+    let (variant, fields) = input.sum()?;
+    let expected = arity(variant).ok_or_else(|| unsupported(variant))?;
+    TokenReader::expect_fields(fields, expected)?;
+    Ok(variant)
+}
+
+impl TokenCodec for WaitId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.unsigned(self.0);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.unsigned().map(Self)
+    }
+}
+
+impl TokenCodec for Pause {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        out.unsigned(self.seconds);
+        out.unsigned(u64::from(self.nanoseconds));
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        let pause = Self {
+            seconds: input.unsigned()?,
+            nanoseconds: input.unsigned_u32()?,
+        };
+        pause
+            .duration()
+            .map(|_| pause)
+            .ok_or_else(|| invalid("a pause's nanoseconds reach a second"))
+    }
+}
+
+impl TokenCodec for AdmittedRequest {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Effect { effect, args } => {
+                out.sum(0, 2);
+                effect.encode(out);
+                args.encode(out);
+            }
+            Self::Sleep { duration } => {
+                out.sum(1, 1);
+                duration.encode(out);
+            }
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(
+            match variant(input, |variant| match variant {
+                0 => Some(2),
+                1 => Some(1),
+                _ => None,
+            })? {
+                0 => Self::Effect {
+                    effect: EffectName::decode(input)?,
+                    args: Vec::decode(input)?,
+                },
+                _ => Self::Sleep {
+                    duration: Pause::decode(input)?,
+                },
+            },
+        )
+    }
+}
+
+impl TokenCodec for AdmittedWait {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.identity.encode(out);
+        self.request.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            identity: EffectIdentity::decode(input)?,
+            request: AdmittedRequest::decode(input)?,
+        })
+    }
+}

@@ -367,3 +367,144 @@ fn an_observation_no_frame_carries_is_refused_with_its_bound() {
     );
     assert_eq!(chunker.finish().len(), 1);
 }
+
+/// A page exchange is held to its batch bounds both ways and on both
+/// sides (FIG-6190): a sender cannot encode a read of more than
+/// `PAGE_BATCH_PAGES` pages, or a seal or read reply of more than
+/// `PAGE_BATCH_BYTES` envelope bytes, and a receiver refuses one a hostile
+/// peer framed by hand, before the page service or the heap sees it.
+#[test]
+fn page_exchanges_respect_batch_bounds() {
+    use crate::message::{ParentFrame, ParentMessage};
+    use crate::page::{
+        PageAuthority, PageCapability, PageEnvelope, PageExchangeId, PageReply, PageRequest,
+        ReadPage,
+    };
+    use crate::{PAGE_BATCH_BYTES, PAGE_BATCH_PAGES};
+
+    // Frames large enough that only the batch bounds refuse.
+    let codec = FrameCodec::new(DecodeLimits {
+        max_frame_bytes: 16 << 20,
+        max_allocation_bytes: 256 << 20,
+        ..DecodeLimits::standard()
+    });
+    let capability = |index: usize| PageCapability {
+        page: [index as u8; 32],
+        authority: PageAuthority::Root(1),
+        epoch: 1,
+        mac: [7; 32],
+    };
+    let envelope = |index: usize, bytes: usize| PageEnvelope {
+        id: [index as u8; 32],
+        envelope: vec![0; bytes],
+    };
+    let worker = |request: PageRequest| WorkerFrame {
+        header: fence().next_header(),
+        message: WorkerMessage::Pages {
+            id: PageExchangeId(0),
+            request,
+        },
+    };
+    let parent = |reply: PageReply| ParentFrame {
+        header: fence().next_header(),
+        message: ParentMessage::Pages {
+            id: PageExchangeId(0),
+            reply,
+        },
+    };
+    let hostile = |frame: &dyn erased::Frame| frame_around(&codec, &frame.payload());
+    let big = (PAGE_BATCH_BYTES as usize).div_ceil(PAGE_BATCH_PAGES) + 1;
+
+    // At the bounds, every exchange crosses both ways.
+    let read = PageRequest::Read {
+        pages: (0..PAGE_BATCH_PAGES).map(capability).collect(),
+    };
+    let bytes = codec
+        .encode_worker(&worker(read.clone()))
+        .expect("at the bound");
+    assert_eq!(
+        codec.decode_worker(&bytes).expect("decodes").message,
+        worker(read).message
+    );
+    let reply = PageReply::Read {
+        pages: (0..PAGE_BATCH_PAGES)
+            .map(|index| ReadPage {
+                page: envelope(index, big - 1),
+                children: vec![capability(index)],
+            })
+            .collect(),
+    };
+    let bytes = codec
+        .encode_parent(&parent(reply.clone()))
+        .expect("at the bound");
+    assert_eq!(
+        codec.decode_parent(&bytes).expect("decodes").message,
+        parent(reply).message
+    );
+
+    // Past them, neither side encodes and neither decodes.
+    let too_many = PageRequest::Read {
+        pages: (0..=PAGE_BATCH_PAGES).map(capability).collect(),
+    };
+    let too_heavy = PageRequest::Seal {
+        pages: (0..PAGE_BATCH_PAGES)
+            .map(|index| envelope(index, big))
+            .collect(),
+        children: Vec::new(),
+    };
+    for (request, pages, bytes) in [
+        (too_many, PAGE_BATCH_PAGES as u64 + 1, 0),
+        (
+            too_heavy,
+            PAGE_BATCH_PAGES as u64,
+            (big * PAGE_BATCH_PAGES) as u64,
+        ),
+    ] {
+        let frame = worker(request);
+        let refusal = CodecRefusal::PageBatch { pages, bytes };
+        assert_eq!(codec.encode_worker(&frame), Err(refusal.clone()));
+        assert_eq!(codec.decode_worker(&hostile(&frame)), Err(refusal));
+    }
+    let too_heavy = parent(PageReply::Read {
+        pages: (0..PAGE_BATCH_PAGES)
+            .map(|index| ReadPage {
+                page: envelope(index, big),
+                children: Vec::new(),
+            })
+            .collect(),
+    });
+    let refusal = CodecRefusal::PageBatch {
+        pages: PAGE_BATCH_PAGES as u64,
+        bytes: (big * PAGE_BATCH_PAGES) as u64,
+    };
+    assert_eq!(codec.encode_parent(&too_heavy), Err(refusal.clone()));
+    assert_eq!(codec.decode_parent(&hostile(&too_heavy)), Err(refusal));
+    let too_many = parent(PageReply::Sealed {
+        pages: (0..=PAGE_BATCH_PAGES).map(capability).collect(),
+    });
+    assert!(matches!(
+        codec.decode_parent(&hostile(&too_many)),
+        Err(CodecRefusal::PageBatch { .. })
+    ));
+    // A refused batch is a broken frame, retried on a fresh worker.
+    assert!(
+        crate::InfrastructureOutcome::from(CodecRefusal::PageBatch {
+            pages: 65,
+            bytes: 0
+        })
+        .is_retryable()
+    );
+}
+
+/// A frame's payload as a hostile peer would write it, past any sender
+/// check.
+mod erased {
+    pub trait Frame {
+        fn payload(&self) -> Vec<u8>;
+    }
+    impl<T: serde::Serialize> Frame for T {
+        fn payload(&self) -> Vec<u8> {
+            rmp_serde::to_vec_named(self).expect("a frame serializes")
+        }
+    }
+}

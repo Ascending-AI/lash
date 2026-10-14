@@ -9,6 +9,8 @@ use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
+use lash_core_store::checkpoint_graph::stage::StageFault;
+use lash_vm_broker::kernel::pages::SpoolRoot;
 
 mod source;
 pub use source::SourceServiceError;
@@ -29,7 +31,7 @@ pub enum Request {
         bindings: BTreeSet<Name>,
         /// The functions the session holds: the document declares the
         /// ones the source names.
-        functions: BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
+        functions: BTreeMap<Name, LowerFunction>,
         /// The helper release whose names the source resolves against: the
         /// newest every live node holds (FIG-5799).
         helpers: u32,
@@ -60,6 +62,59 @@ pub enum Request {
         source: String,
         limits: lash_kernel_dialect::GeneratedSourceLimits,
     },
+}
+
+/// A saved function as lowering reads it: its code and what it requires.
+/// Its frozen captures and token members stay in heap pages; lowering never
+/// reads them (S8), so they do not cross.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LowerFunction {
+    pub name: Name,
+    pub document: lash_kernel_doc::Document,
+    pub helper_owners: BTreeSet<Name>,
+    pub references: BTreeSet<Name>,
+    pub written: Option<lash_kernel_dialect::Written>,
+    /// The tag of the function value that held it, when one did.
+    pub token: Option<String>,
+}
+
+impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
+    fn from(function: &lash_kernel_dialect::SavedFunction) -> Self {
+        Self {
+            name: function.name.clone(),
+            document: function.document.clone(),
+            helper_owners: function.helper_owners.clone(),
+            references: function.references.clone(),
+            written: function.written.clone(),
+            token: function.token.as_ref().map(|token| token.tag.clone()),
+        }
+    }
+}
+
+impl LowerFunction {
+    /// The saved function lowering installs: no captures, which only a
+    /// call instantiates, and no release, which only the machine pins.
+    #[must_use]
+    pub fn into_saved(self) -> lash_kernel_dialect::SavedFunction {
+        lash_kernel_dialect::SavedFunction {
+            name: self.name,
+            document: self.document,
+            captures: BTreeMap::new(),
+            release: lash_kernel_doc::heap::PageRef {
+                id: lash_kernel_doc::heap::PageId([0; 32]),
+                grant: lash_kernel_doc::heap::PageGrant::NONE,
+            },
+            helper_owners: self.helper_owners,
+            references: self.references,
+            written: self.written,
+            token: self.token.map(|tag| lash_kernel_dialect::Token {
+                tag,
+                before: Vec::new(),
+                after: Vec::new(),
+            }),
+        }
+    }
 }
 
 /// A front end's or printer's typed refusal of a source or a document.
@@ -153,6 +208,8 @@ pub struct Service {
     pub(crate) documents: Arc<Mutex<crate::machine::DocumentEncodings>>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
+    /// The parent's staging directory, opened on first use.
+    spools: Arc<std::sync::OnceLock<Result<Arc<SpoolRoot>, StageFault>>>,
     pub(crate) budget: Option<ExecutionBudget>,
     /// One execution's worker, kept from lowering its document until the
     /// run starts on it: the lowering and the run share one lease, with no
@@ -174,6 +231,7 @@ impl Service {
             documents: Arc::new(Mutex::new(crate::machine::DocumentEncodings::default())),
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
+            spools: Arc::default(),
             budget: None,
             retained: None,
         }
@@ -256,6 +314,26 @@ impl Service {
     }
     pub fn config(&self) -> &PoolConfig {
         &self.config
+    }
+
+    /// The staging directory this parent's activations open their spools
+    /// under ([`PoolConfig::staging_dir`]), opened on first use with the
+    /// configured per-spool quota.
+    ///
+    /// # Errors
+    ///
+    /// The directory's fault, which every later call answers too.
+    pub fn spools(&self) -> Result<Arc<SpoolRoot>, StageFault> {
+        self.spools
+            .get_or_init(|| {
+                let dir = self
+                    .config
+                    .staging_dir
+                    .clone()
+                    .unwrap_or_else(|| std::env::temp_dir().join("lash-staging"));
+                SpoolRoot::open(&dir, self.config.staging_quota_bytes).map(Arc::new)
+            })
+            .clone()
     }
 
     /// The worker this execution kept from lowering its document, when its

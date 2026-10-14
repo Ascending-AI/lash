@@ -7,7 +7,9 @@ use std::sync::Arc;
 use lash_core_execution::testing::TestClock;
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
 use lash_durable::DurableStore;
+use lash_durable::domain::pages::PageStore;
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier};
+use lash_durable::laws::pages::{self, PageTier};
 
 use crate::{SqliteDurableStore, SqliteStoreSet};
 
@@ -15,31 +17,49 @@ struct Tier {
     _root: Option<tempfile::TempDir>,
     _set: SqliteStoreSet,
     store: SqliteDurableStore,
+    clock: Arc<TestClock>,
 }
 
-async fn tier(file: bool) -> Tier {
-    let clock = Arc::new(TestClock::new(1_000_000));
-    let (root, set) = if file {
-        let root = tempfile::tempdir().expect("store root");
-        let set = SqliteStoreSet::open_with_clock(
-            root.path().join("lash.db"),
+async fn open_set(root: Option<&std::path::Path>, clock: &Arc<TestClock>) -> SqliteStoreSet {
+    match root {
+        Some(root) => SqliteStoreSet::open_with_clock(
+            root.join("lash.db"),
             crate::SqliteSynchronous::Normal,
             clock.clone(),
         )
         .await
-        .expect("open the file store set");
-        (Some(root), set)
-    } else {
-        let set = SqliteStoreSet::memory_with_clock(clock.clone())
+        .expect("open the file store set"),
+        None => SqliteStoreSet::memory_with_clock(clock.clone())
             .await
-            .expect("open the memory store set");
-        (None, set)
-    };
+            .expect("open the memory store set"),
+    }
+}
+
+async fn tier(file: bool) -> Tier {
+    let clock = Arc::new(TestClock::new(1_000_000));
+    let root = file.then(|| tempfile::tempdir().expect("store root"));
+    let set = open_set(root.as_ref().map(tempfile::TempDir::path), &clock).await;
     let store = set.durable_store();
     Tier {
         _root: root,
         _set: set,
         store,
+        clock,
+    }
+}
+
+/// Runs retirement steps until nothing is held: how many nodes they
+/// deleted.
+async fn settle(store: &SqliteDurableStore) -> Result<u64, lash_durable::DurableError> {
+    let mut deleted = 0;
+    loop {
+        let progress = store
+            .retire_step(lash_durable::domain::pages::RetirementBudget { nodes: 4_096 })
+            .await?;
+        if progress.holds_advanced == 0 && progress.leases_reaped == 0 {
+            return Ok(deleted);
+        }
+        deleted += progress.nodes_deleted;
     }
 }
 
@@ -91,6 +111,10 @@ impl GraphTier for Tier {
 
     async fn audit(&self) -> Result<u64, GraphRefusal> {
         self.store.audit_orphans().await
+    }
+
+    async fn retire(&self) -> Result<u64, lash_durable::DurableError> {
+        settle(&self.store).await
     }
 
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
@@ -267,6 +291,155 @@ macro_rules! law {
     };
 }
 
+#[async_trait::async_trait]
+impl PageTier for Tier {
+    fn pages(&self) -> &dyn PageStore {
+        &self.store
+    }
+
+    async fn stored(&self) -> BTreeSet<NodeId> {
+        self.texts("SELECT hash FROM blobs")
+            .await
+            .iter()
+            .map(|hash| NodeId::from_hex(hash).expect("a stored digest"))
+            .collect()
+    }
+
+    async fn catalog(&self) -> Vec<NodeId> {
+        self.texts("SELECT root_ref FROM graph_root_catalog")
+            .await
+            .iter()
+            .map(|hash| NodeId::from_hex(hash).expect("a stored root"))
+            .collect()
+    }
+
+    async fn drop_blob(&self, node: &NodeId) {
+        for sql in [
+            "DELETE FROM blob_edges WHERE parent_hash = ?1 OR child_hash = ?1",
+            "DELETE FROM semantic_admissions WHERE root_ref = ?1",
+            "DELETE FROM blobs WHERE hash = ?1",
+        ] {
+            self.raw(sql.to_owned(), vec![hex(node)]).await;
+        }
+    }
+
+    fn advance(&self, millis: u64) {
+        self.clock.advance(millis);
+    }
+
+    fn peak_buffered(&self) -> u64 {
+        SqliteDurableStore::candidate_peak_buffered_for_testing()
+    }
+
+    async fn reopen(&mut self) {
+        let Some(root) = self._root.as_ref().map(|root| root.path().to_owned()) else {
+            return;
+        };
+        let set = open_set(Some(&root), &self.clock).await;
+        self.store = set.durable_store();
+        self._set = set;
+    }
+
+    fn resident_high_water(&self) -> Option<u64> {
+        // Test tooling: the law reads the platform's own report.
+        #[allow(clippy::disallowed_methods)]
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmHWM:"))
+            .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
+    }
+}
+
+macro_rules! page_law {
+    ($name:ident) => {
+        mod $name {
+            use super::*;
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn memory() {
+                let tier = tier(false).await;
+                pages::$name(&tier)
+                    .await
+                    .unwrap_or_else(|broken| panic!("{broken}"));
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn file() {
+                let tier = tier(true).await;
+                pages::$name(&tier)
+                    .await
+                    .unwrap_or_else(|broken| panic!("{broken}"));
+            }
+        }
+    };
+}
+
+page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
+page_law!(publication_is_atomic_with_admissions_and_semantic_admission);
+page_law!(a_step_outcome_owns_its_candidate);
+page_law!(a_host_read_never_descends_into_a_heap_page);
+page_law!(a_leased_root_survives_concurrent_retirement);
+page_law!(an_expired_lease_reads_nothing);
+page_law!(the_lost_receipt_resolves_by_commit_identity);
+page_law!(publication_keeps_global_digest_lock_order);
+page_law!(an_ownership_transfer_fences_the_old_activation);
+
+/// D-RET over retired leaves, with a restart between steps.
+mod retirement_advances_in_bounded_steps_and_reclaims_everything_unowned {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory() {
+        let mut tier = tier(false).await;
+        pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(
+            &mut tier, 5_000,
+        )
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file() {
+        let mut tier = tier(true).await;
+        pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(
+            &mut tier, 5_000,
+        )
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "benchmark: run with --ignored to measure 100 000-leaf retirement on a file"]
+    async fn hundred_thousand_on_file() {
+        let mut tier = tier(true).await;
+        pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(
+            &mut tier, 100_000,
+        )
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+}
+
+/// S5/S6: a candidate larger than every buffer installs within them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_large_candidate_installs_within_bounded_buffers() {
+    let tier = tier(true).await;
+    pages::a_large_candidate_installs_within_bounded_buffers(&tier, 20_000)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
+
+/// The bounded-memory install of one million new pages, on a file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "benchmark: run with --ignored to measure a one-million-page install"]
+async fn a_million_page_candidate_installs_within_bounded_buffers() {
+    let tier = tier(true).await;
+    pages::a_large_candidate_installs_within_bounded_buffers(&tier, 1_000_000)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
+
 law!(a_refused_owner_graph_commit_writes_nothing);
 law!(an_owner_refuses_a_second_outcome_for_one_call);
 law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
@@ -346,10 +519,14 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
         .await
         .unwrap();
     tx.write(retire("retired", retired));
+    tier.store
+        .commit(tx, CommitLabel::new("peel.retire"))
+        .await
+        .unwrap();
     let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
         "peel.retire",
         "sqlite",
-        tier.store.commit(tx, CommitLabel::new("peel.retire")),
+        settle(&tier.store),
     )
     .await;
     answer.unwrap();
@@ -396,6 +573,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
         .commit(tx, CommitLabel::new("peel.last_refs"))
         .await
         .unwrap();
+    settle(&tier.store).await.unwrap();
     assert_eq!(
         tier.blobs().await,
         initial,

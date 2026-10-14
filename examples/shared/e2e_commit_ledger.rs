@@ -461,6 +461,10 @@ impl DurableStore for LedgerStore {
         self.inner.now().await
     }
 
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash::durable::domain::pages::PageStore>> {
+        self.inner.pages()
+    }
+
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
         let answer = self.inner.register_node(spec).await;
         self.ledger.record(

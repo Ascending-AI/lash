@@ -1191,6 +1191,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
             lash_core::EngineState {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
+                pages: None,
             },
             action,
         ))

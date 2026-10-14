@@ -2,14 +2,17 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Element, Float, FunctionDefinition, Identity, Integer, NativeCall, NativeError, NativeFunction,
-    NativeHeap, Object, ObjectId, PreparedNative, Value, parse_definition,
+    Element, EntityId, Float, FunctionDefinition, Identity, Integer, NativeCall, NativeError,
+    NativeFunction, NativeHeap, Object, PreparedNative, Value, parse_definition,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
 
 use super::{CollectionError, copy, raise};
 use crate::numbers::KIND_NAMES;
+use lash_kernel_doc::heap::{
+    ErrorRef, FieldName, HeapFault, IntRef, LogicalBytes, Payload, TextRef,
+};
 
 type NativeDefinition = (FunctionDefinition, Arc<dyn NativeFunction>);
 
@@ -374,10 +377,28 @@ impl NativeFunction for HoldsNone {
         };
         let mut refused = [false; KIND_NAMES.len()];
         let mut unknown = false;
+        let mut fault = None;
         call.heap.visit(*kinds, &mut |element| {
             let named = match element {
                 Element::Item(Value::Text(name)) => {
-                    KIND_NAMES.iter().position(|(_, kind)| *kind == &**name)
+                    let mut named = None;
+                    for (index, (_, kind)) in KIND_NAMES.iter().enumerate() {
+                        match call
+                            .heap
+                            .equal(&Value::Text(name.clone()), &Value::text(*kind))
+                        {
+                            Ok(true) => {
+                                named = Some(index);
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(error) => {
+                                fault = Some(error);
+                                return ControlFlow::Break(());
+                            }
+                        }
+                    }
+                    named
                 }
                 _ => None,
             };
@@ -386,7 +407,10 @@ impl NativeFunction for HoldsNone {
                 None => unknown = true,
             }
             ControlFlow::Continue(())
-        });
+        })?;
+        if let Some(error) = fault {
+            return Err(error.into());
+        }
         if unknown {
             return Err(raise("type_error", "kinds must be a set of kind names"));
         }
@@ -414,12 +438,33 @@ fn bool_not(args: &[Value]) -> Result<Value, NativeError> {
     }
 }
 fn error_new(args: &[Value]) -> Result<Value, NativeError> {
-    let kind = field(nth(args, 0)?)?.to_owned();
-    let message = field(nth(args, 1)?)?.to_owned();
-    Ok(Value::Error(Arc::new(lash_kernel_doc::ErrorValue {
+    let kind = field(nth(args, 0)?)?.clone();
+    let message = field(nth(args, 1)?)?.clone();
+    let data = args.get(2).cloned().unwrap_or(Value::Absent);
+    let depth = match &data {
+        Value::Tuple(t) => t.summary.depth,
+        Value::Error(e) => e.depth,
+        _ => 0,
+    } + 1;
+    let has_edges = data.object().is_some()
+        || matches!(&data, Value::Task(_) | Value::Ref(_))
+        || matches!(&data,Value::Tuple(t) if t.summary.has_edges)
+        || matches!(&data,Value::Error(e) if e.has_edges);
+    let cost = LogicalBytes(
+        kind.summary.utf8_bytes
+            + message.summary.utf8_bytes
+            + lash_kernel_doc::heap_values::local_cost(&data),
+    );
+    let task_edges = lash_kernel_doc::heap_values::task_count(&data);
+    Ok(Value::Error(Arc::new(ErrorRef {
+        family: None,
+        task_edges,
         kind,
         message,
-        data: args.get(2).cloned().unwrap_or(Value::Absent),
+        data: Payload::Resident(Arc::new(data)),
+        depth,
+        cost,
+        has_edges,
     })))
 }
 fn function_check(args: &[Value]) -> Result<Value, NativeError> {
@@ -445,7 +490,7 @@ fn int_check(args: &[Value]) -> Result<Value, NativeError> {
     }
 }
 
-fn object(kind: Kind, value: &Value) -> Result<Option<ObjectId>, NativeError> {
+fn object(kind: Kind, value: &Value) -> Result<Option<EntityId>, NativeError> {
     match (kind, value) {
         (Kind::List, Value::List(id))
         | (Kind::Map, Value::Map(id))
@@ -462,91 +507,66 @@ fn nth(args: &[Value], index: usize) -> Result<&Value, NativeError> {
     args.get(index)
         .ok_or_else(|| raise("arity", "missing collection argument"))
 }
-fn integer(value: &Value) -> Result<Integer, NativeError> {
+fn integer(value: &Value) -> Result<IntRef, NativeError> {
     match value {
         Value::Int(n) => Ok(n.clone()),
         Value::Float(n) if n.get().is_finite() && n.get().fract() == 0.0 => {
-            if let Some(n) = n.get().to_i64() {
-                Ok(Integer::from(n))
-            } else {
-                BigInt::from_f64(n.get())
-                    .map(Integer::new)
-                    .ok_or_else(|| raise("index_out_of_range", "index must be integral"))
-            }
+            BigInt::from_f64(n.get())
+                .map(|n| IntRef::Inline(Integer::new(n)))
+                .ok_or_else(|| raise("index_out_of_range", "index must be integral"))
         }
         Value::Float(_) => Err(raise("index_out_of_range", "index must be integral")),
         _ => Err(raise("type_error", "index must be a number")),
     }
 }
 fn int(n: usize) -> Value {
-    Value::Int(match i64::try_from(n) {
-        Ok(n) => Integer::from(n),
-        Err(_) => Integer::new(BigInt::from(n)),
-    })
+    Value::Int(IntRef::Inline(Integer::new(BigInt::from(n))))
 }
-fn position(value: &Integer, length: usize, clamp: bool) -> Result<usize, NativeError> {
-    if let Some(mut n) = value.to_i128() {
-        let length = length as i128;
+fn negative(n: &IntRef) -> bool {
+    match n {
+        IntRef::Inline(n) => n.is_negative(),
+        IntRef::Paged { summary, .. } => summary.negative,
+    }
+}
+fn machine_index(n: &IntRef) -> Option<usize> {
+    match n {
+        IntRef::Inline(n) => n.to_usize(),
+        _ => None,
+    }
+}
+fn position(value: &IntRef, length: usize, clamp: bool) -> Result<usize, NativeError> {
+    let n = match value {
+        IntRef::Inline(n) => n.to_i128(),
+        _ => None,
+    };
+    if let Some(mut n) = n {
         if n < 0 {
-            n += length;
+            n += length as i128;
         }
         if clamp {
-            n = n.max(0).min(length);
-        } else if n < 0 || n >= length {
-            return Err(raise(
-                "index_out_of_range",
-                "index is outside the collection",
-            ));
+            return Ok(n.max(0).min(length as i128) as usize);
         }
-        return usize::try_from(n)
-            .map_err(|_| raise("index_out_of_range", "index is outside the collection"));
-    }
-    let mut n = value.as_bigint().into_owned();
-    let length = BigInt::from(length);
-    if n < BigInt::from(0) {
-        n += &length;
-    }
-    if clamp {
-        n = n.max(BigInt::from(0)).min(length);
-    } else if n < BigInt::from(0) || n >= length {
-        return Err(raise(
-            "index_out_of_range",
-            "index is outside the collection",
-        ));
-    }
-    n.to_usize()
-        .ok_or_else(|| raise("index_out_of_range", "index is outside the collection"))
-}
-fn key(value: &Value, depth: usize, limit: usize) -> Result<(), NativeError> {
-    if depth > limit {
-        return Err(raise(
-            "too_deep",
-            &format!("key exceeds the configured {limit}-level depth"),
-        ));
-    }
-    match value {
-        Value::Null
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Float(_)
-        | Value::Text(_)
-        | Value::Bytes(_)
-        | Value::Timestamp(_)
-        | Value::Function(_)
-        | Value::Ref(_) => Ok(()),
-        Value::Tuple(items) => {
-            for item in items.iter() {
-                key(item, depth + 1, limit)?;
-            }
-            Ok(())
+        if n >= 0 && n < length as i128 {
+            return Ok(n as usize);
         }
-        _ => Err(raise(
-            "invalid_key",
-            "expected an immutable key or explicit ref",
-        )),
+    } else if clamp {
+        return Ok(if negative(value) { 0 } else { length });
     }
+    Err(raise(
+        "index_out_of_range",
+        "index is outside the collection",
+    ))
 }
-fn field(value: &Value) -> Result<&str, NativeError> {
+fn key(value: &Value, heap: &dyn NativeHeap) -> Result<(), NativeError> {
+    if matches!(value,Value::Tuple(t) if t.summary.depth as usize > heap.value_depth_limit().min(128))
+    {
+        return Err(raise("too_deep", "key exceeds the configured value depth"));
+    }
+    heap.normal_key(value)?
+        .ok_or_else(|| raise("invalid_key", "expected an immutable key or explicit ref"))?;
+    Ok(())
+}
+fn field(value: &Value) -> Result<&TextRef, NativeError> {
     match value {
         Value::Text(text) => Ok(text),
         _ => Err(raise("type_error", "field name must be text")),
@@ -567,10 +587,10 @@ pub(super) fn snapshot(
         match element {
             Element::Item(item) => items.push(item.clone()),
             Element::Entry { key, value } => entries.push((key.clone(), value.clone())),
-            Element::Field { name, value } => fields.push((name.to_owned(), value.clone())),
+            Element::Field { name, value } => fields.push((name.clone(), value.clone())),
         }
         ControlFlow::Continue(())
-    });
+    })?;
     match value {
         Value::List(_) => Ok(Object::List(items)),
         Value::Map(_) => Ok(Object::Map(entries)),
@@ -581,46 +601,38 @@ pub(super) fn snapshot(
 }
 fn visit_sequence(
     value: &Value,
-    heap: &dyn lash_kernel_doc::NativeHeap,
+    heap: &dyn NativeHeap,
     visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>,
-) {
+) -> Result<(), HeapFault> {
     match value {
-        Value::Tuple(items) => {
-            let _ = items.iter().try_for_each(visitor);
-        }
-        Value::List(id) => heap.visit(*id, &mut |element| match element {
-            Element::Item(item) => visitor(item),
-            _ => unreachable!(),
+        Value::Tuple(t) => heap.tuple_visit(t, visitor),
+        Value::List(id) => heap.visit(*id, &mut |e| match e {
+            Element::Item(v) => visitor(v),
+            _ => ControlFlow::Break(()),
         }),
-        _ => unreachable!(),
+        _ => Err(HeapFault::Malformed("sequence has another kind".into())),
     }
 }
 fn append_range(
     value: &Value,
-    heap: &dyn lash_kernel_doc::NativeHeap,
+    heap: &dyn NativeHeap,
     start: usize,
     end: usize,
     items: &mut Vec<Value>,
-) {
-    if start >= end {
-        return;
+) -> Result<(), HeapFault> {
+    for index in start..end {
+        let value = match value {
+            Value::Tuple(t) => heap.tuple_get(t, index as u64)?,
+            Value::List(id) => heap.list_get(*id, index as u64)?,
+            _ => None,
+        };
+        items.push(
+            value.ok_or_else(|| {
+                HeapFault::Malformed("an admitted sequence member is absent".into())
+            })?,
+        );
     }
-    if let Value::Tuple(source) = value {
-        items.extend_from_slice(&source[start..end]);
-        return;
-    }
-    let mut index = 0;
-    visit_sequence(value, heap, &mut |item| {
-        if index >= start {
-            items.push(item.clone());
-        }
-        index += 1;
-        if index == end {
-            ControlFlow::Break(())
-        } else {
-            ControlFlow::Continue(())
-        }
-    });
+    Ok(())
 }
 fn result_items(
     heap: &mut dyn lash_kernel_doc::NativeHeap,
@@ -634,22 +646,26 @@ fn result_items(
         .map_err(|_| NativeError::Memory)?;
     Ok(items)
 }
-fn view_item(op: Op, kind: Kind, index: usize, element: Element<'_>) -> Value {
+enum Projection {
+    Value(Value),
+    Pair(Value, Value),
+}
+fn view_item(op: Op, kind: Kind, index: usize, element: Element<'_>) -> Projection {
     let key = || match element {
-        Element::Item(item) if matches!(kind, Kind::Set) => item.clone(),
+        Element::Item(v) if matches!(kind, Kind::Set) => v.clone(),
         Element::Item(_) => int(index),
         Element::Entry { key, .. } => key.clone(),
-        Element::Field { name, .. } => Value::text(name),
+        Element::Field { name, .. } => Value::Text(name.clone()),
     };
     let value = || match element {
-        Element::Item(item)
-        | Element::Entry { value: item, .. }
-        | Element::Field { value: item, .. } => item.clone(),
+        Element::Item(v) | Element::Entry { value: v, .. } | Element::Field { value: v, .. } => {
+            v.clone()
+        }
     };
     match op {
-        Op::Keys => key(),
-        Op::Values => value(),
-        Op::Entries => Value::Tuple(vec![key(), value()].into()),
+        Op::Keys => Projection::Value(key()),
+        Op::Values => Projection::Value(value()),
+        Op::Entries => Projection::Pair(key(), value()),
         _ => unreachable!(),
     }
 }
@@ -671,8 +687,11 @@ impl NativeFunction for Native {
         let xs = arg(&call, 0)?.clone();
         let id = object(self.kind, &xs)?;
         let length = match &xs {
-            Value::Tuple(items) => items.len(),
-            _ => id.map_or(0, |id| call.heap.len(id)),
+            Value::Tuple(items) => items.summary.len as usize,
+            _ => match id {
+                Some(id) => call.heap.len(id)? as usize,
+                None => 0,
+            },
         };
         match self.op {
             Op::Len
@@ -696,15 +715,18 @@ impl NativeFunction for Native {
                     let other = arg(&call, 1)?;
                     let other_id = object(self.kind, other)?;
                     let other_length = match other {
-                        Value::Tuple(items) => items.len(),
-                        _ => other_id.map_or(0, |id| call.heap.len(id)),
+                        Value::Tuple(items) => items.summary.len as usize,
+                        _ => match other_id {
+                            Some(id) => call.heap.len(id)? as usize,
+                            None => 0,
+                        },
                     };
                     let count = length
                         .checked_add(other_length)
                         .ok_or(NativeError::Memory)?;
                     let mut items = result_items(call.heap, count, 1)?;
-                    append_range(&xs, call.heap, 0, length, &mut items);
-                    append_range(other, call.heap, 0, other_length, &mut items);
+                    append_range(&xs, call.heap, 0, length, &mut items)?;
+                    append_range(other, call.heap, 0, other_length, &mut items)?;
                     items
                 } else {
                     let start = position(&integer(arg(&call, 1)?)?, length, true)?;
@@ -714,11 +736,11 @@ impl NativeFunction for Native {
                     }
                     .max(start);
                     let mut items = result_items(call.heap, end - start, 1)?;
-                    append_range(&xs, call.heap, start, end, &mut items);
+                    append_range(&xs, call.heap, start, end, &mut items)?;
                     items
                 };
                 match self.kind {
-                    Kind::Tuple => Ok(Value::Tuple(items.into())),
+                    Kind::Tuple => Ok(Value::Tuple(call.heap.tuple(items)?)),
                     _ => allocate(Kind::List, Object::List(items), &mut call),
                 }
             }
@@ -731,30 +753,44 @@ impl NativeFunction for Native {
                 if matches!(self.op, Op::Keys) && matches!(self.kind, Kind::List | Kind::Tuple) {
                     items.extend((0..length).map(int));
                 } else {
-                    let mut visit = |element: Element<'_>| {
-                        items.push(view_item(self.op, self.kind, items.len(), element));
+                    let mut projected = Vec::new();
+                    let mut visit = |e: Element<'_>| {
+                        projected.push(view_item(self.op, self.kind, projected.len(), e));
                         ControlFlow::Continue(())
                     };
                     match &xs {
-                        Value::Tuple(source) => {
-                            let _ = source
-                                .iter()
-                                .try_for_each(|item| visit(Element::Item(item)));
+                        Value::Tuple(t) => {
+                            call.heap.tuple_visit(t, &mut |v| visit(Element::Item(v)))?
                         }
                         Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
-                            call.heap.visit(*id, &mut visit);
+                            call.heap.visit(*id, &mut visit)?
                         }
                         _ => unreachable!(),
+                    }
+                    for projection in projected {
+                        items.push(match projection {
+                            Projection::Value(v) => v,
+                            Projection::Pair(k, v) => Value::Tuple(call.heap.tuple(vec![k, v])?),
+                        });
                     }
                 }
                 allocate(Kind::List, Object::List(items), &mut call)
             }
             Op::With | Op::Without => {
-                let name = field(arg(&call, 1)?)?.to_owned();
+                let name = field(arg(&call, 1)?)?.clone();
                 let Object::Record(mut fields) = snapshot(&xs, call.heap)? else {
                     unreachable!()
                 };
-                let at = fields.iter().position(|(k, _)| k == &name);
+                let mut at = None;
+                for (index, (key, _)) in fields.iter().enumerate() {
+                    if call
+                        .heap
+                        .equal(&Value::Text(key.clone()), &Value::Text(name.clone()))?
+                    {
+                        at = Some(index);
+                        break;
+                    }
+                }
                 if matches!(self.op, Op::Without) {
                     if let Some(at) = at {
                         fields.remove(at);
@@ -819,15 +855,18 @@ impl Native {
         let xs = nth(args, 0)?;
         let id = object(self.kind, xs)?;
         let length = match xs {
-            Value::Tuple(items) => items.len(),
-            _ => id.map_or(0, |id| heap.len(id)),
+            Value::Tuple(items) => items.summary.len as usize,
+            _ => match id {
+                Some(id) => heap.len(id)? as usize,
+                None => 0,
+            },
         };
         match self.op {
             Op::Len => Ok(int(length)),
             Op::Check => Ok(xs.clone()),
             Op::InsertIndex => {
                 let n = integer(nth(args, 1)?)?;
-                if n.to_usize().is_none_or(|n| n > length) {
+                if machine_index(&n).is_none_or(|n| n > length) {
                     return Err(raise(
                         "index_out_of_range",
                         "insert position is outside the collection",
@@ -838,40 +877,42 @@ impl Native {
             Op::Get | Op::GetOr | Op::At => match xs {
                 Value::List(id) => {
                     let index = integer(nth(args, 1)?)?;
-                    if matches!(self.op, Op::Get | Op::GetOr) && index.is_negative() {
+                    if matches!(self.op, Op::Get | Op::GetOr) && negative(&index) {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
                         ));
                     }
                     if matches!(self.op, Op::GetOr) {
-                        return Ok(index
-                            .to_usize()
-                            .and_then(|i| heap.list_get(*id, i))
-                            .unwrap_or_else(|| args.get(2).cloned().unwrap_or(Value::Absent)));
+                        return Ok(match machine_index(&index) {
+                            Some(i) => heap.list_get(*id, i as u64)?,
+                            None => None,
+                        }
+                        .unwrap_or_else(|| args.get(2).cloned().unwrap_or(Value::Absent)));
                     }
                     let i = position(&index, length, false)?;
-                    heap.list_get(*id, i)
+                    heap.list_get(*id, i as u64)?
                         .ok_or_else(|| raise("index_out_of_range", "missing list element"))
                 }
                 Value::Tuple(items) => {
                     let index = integer(nth(args, 1)?)?;
-                    if matches!(self.op, Op::Get | Op::GetOr) && index.is_negative() {
+                    if matches!(self.op, Op::Get | Op::GetOr) && negative(&index) {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
                         ));
                     }
-                    Ok(items[position(&index, length, false)?].clone())
+                    heap.tuple_get(items, position(&index, length, false)? as u64)?
+                        .ok_or_else(|| raise("index_out_of_range", "missing tuple element"))
                 }
                 Value::Map(id) => {
                     let k = nth(args, 1)?;
-                    key(k, 0, heap.value_depth_limit().min(128))?;
-                    heap.map_get(*id, k)
+                    key(k, heap)?;
+                    heap.map_get(*id, k)?
                         .ok_or_else(|| raise("key_missing", "map has no such key"))
                 }
                 Value::Record(id) => Ok(heap
-                    .record_get(*id, field(nth(args, 1)?)?)
+                    .record_get(*id, FieldName::Text(field(nth(args, 1)?)?))?
                     .unwrap_or(Value::Absent)),
                 _ => Err(raise("type_error", "collection has no get")),
             },
@@ -879,14 +920,17 @@ impl Native {
                 let value = nth(args, 1)?;
                 let found = match xs {
                     Value::Map(id) => {
-                        key(value, 0, heap.value_depth_limit().min(128))?;
-                        Some(heap.map_get(*id, value).is_some())
+                        key(value, heap)?;
+                        Some(heap.map_get(*id, value)?.is_some())
                     }
                     Value::Set(id) => {
-                        key(value, 0, heap.value_depth_limit().min(128))?;
-                        Some(heap.set_contains(*id, value))
+                        key(value, heap)?;
+                        Some(heap.set_contains(*id, value)?)
                     }
-                    Value::Record(id) => Some(heap.record_get(*id, field(value)?).is_some()),
+                    Value::Record(id) => Some(
+                        heap.record_get(*id, FieldName::Text(field(value)?))?
+                            .is_some(),
+                    ),
                     _ => None,
                 };
                 if let Some(found) = found {
@@ -894,17 +938,26 @@ impl Native {
                 }
                 let mut found = None;
                 let mut index = 0;
-                visit_sequence(xs, heap, &mut |item| {
-                    if crate::equal(item, value, heap) {
+                let mut fault = None;
+                visit_sequence(xs, heap, &mut |item| match heap.equal(item, value) {
+                    Ok(true) => {
                         found = Some(index);
                         ControlFlow::Break(())
-                    } else {
+                    }
+                    Ok(false) => {
                         index += 1;
                         ControlFlow::Continue(())
                     }
-                });
+                    Err(error) => {
+                        fault = Some(error);
+                        ControlFlow::Break(())
+                    }
+                })?;
+                if let Some(error) = fault {
+                    return Err(error.into());
+                }
                 Ok(match self.op {
-                    Op::IndexOf => found.map_or(Value::Int(Integer::from(-1)), int),
+                    Op::IndexOf => found.map_or(Value::Int(IntRef::Inline(Integer::from(-1))), int),
                     _ => Value::Bool(found.is_some()),
                 })
             }
@@ -926,10 +979,11 @@ fn index_of_range(call: NativeCall<'_>) -> Result<Value, NativeError> {
         return Err(raise("type_error", "expected list"));
     };
     let needle = arg(&call, 1)?;
-    let length = call.heap.len(*id);
-    let start = integer(arg(&call, 2)?)?;
-    let end = integer(arg(&call, 3)?)?;
-    let (Some(start), Some(end)) = (start.to_usize(), end.to_usize()) else {
+    let length = call.heap.len(*id)? as usize;
+    let (Some(start), Some(end)) = (
+        machine_index(&integer(arg(&call, 2)?)?),
+        machine_index(&integer(arg(&call, 3)?)?),
+    ) else {
         return Err(raise(
             "index_out_of_range",
             "range requires nonnegative indices",
@@ -941,30 +995,28 @@ fn index_of_range(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let (Value::Bool(reverse), Value::Bool(nan_equal)) = (arg(&call, 4)?, arg(&call, 5)?) else {
         return Err(raise("type_error", "search options require booleans"));
     };
-    let mut index = 0;
     let mut found = None;
-    call.heap.visit(*id, &mut |element| {
-        if let Element::Item(value) = element {
-            if index >= start && index < end {
-                let equal = crate::equal(value, needle, call.heap)
-                    || (*nan_equal && matches!((value, needle),
-                        (Value::Float(a), Value::Float(b)) if a.get().is_nan() && b.get().is_nan()));
-                if equal {
-                    found = Some(index);
-                    if !reverse { return ControlFlow::Break(()); }
-                }
-            }
-            index += 1;
+    for at in 0..end - start {
+        let index = if *reverse { end - at - 1 } else { start + at };
+        let value = call
+            .heap
+            .list_get(*id, index as u64)?
+            .ok_or_else(|| raise("index_out_of_range", "missing list element"))?;
+        if call.heap.equal(&value, needle)?
+            || (*nan_equal
+                && matches!((&value,needle),(Value::Float(a),Value::Float(b)) if a.get().is_nan()&&b.get().is_nan()))
+        {
+            found = Some(index);
+            break;
         }
-        ControlFlow::Continue(())
-    });
+    }
     // Even the scalar result uses the run's remaining room before its
     // integer digits are allocated. Zero has no magnitude bytes; -1 has one.
     let bytes = found.map_or(1, |index| {
         u64::from(usize::BITS - index.leading_zeros()).div_ceil(8)
     });
     call.heap.reserve(0, bytes)?;
-    Ok(found.map_or_else(|| Value::Int(Integer::from(-1)), int))
+    Ok(found.map_or_else(|| Value::Int(IntRef::Inline(Integer::from(-1))), int))
 }
 
 /// K-COL-017: project immutable tuple structure, never object contents.
@@ -1021,16 +1073,21 @@ fn project_identity(
         return Ok(value);
     }
     match value {
-        Value::Tuple(items) => {
-            call.heap.reserve(items.len() as u64, 0)?;
-            let projected = items
-                .iter()
-                .map(|item| project_identity(item, absent, tag, depth + 1, call))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Value::Tuple(projected.into()))
+        Value::Tuple(tuple) => {
+            call.heap.reserve(tuple.summary.len, 0)?;
+            let mut projected = Vec::new();
+            for index in 0..tuple.summary.len {
+                let item = call
+                    .heap
+                    .tuple_get(tuple, index)?
+                    .ok_or_else(|| raise("type_error", "missing tuple member"))?;
+                projected.push(project_identity(&item, absent, tag, depth + 1, call)?);
+            }
+            Ok(Value::Tuple(call.heap.tuple(projected)?))
         }
         Value::Error(error) => {
-            let data = match &error.data {
+            let held = call.heap.error_data(error)?;
+            let data = match &held {
                 Value::Task(task) => Value::Ref(Identity::Task(*task)),
                 other => {
                     Value::Ref(Identity::Object(other.object().ok_or_else(|| {
@@ -1039,15 +1096,12 @@ fn project_identity(
                 }
             };
             call.heap.reserve(4, 0)?;
-            Ok(Value::Tuple(
-                vec![
-                    tag.clone(),
-                    data,
-                    Value::text(error.kind.clone()),
-                    Value::text(error.message.clone()),
-                ]
-                .into(),
-            ))
+            Ok(Value::Tuple(call.heap.tuple(vec![
+                tag.clone(),
+                data,
+                Value::Text(error.kind.clone()),
+                Value::Text(error.message.clone()),
+            ])?))
         }
         _ => unreachable!("scalar identity covered other values"),
     }

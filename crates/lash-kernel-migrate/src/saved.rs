@@ -42,6 +42,8 @@ pub fn saved_function(
         name: function.name.clone(),
         document: rewritten.document,
         captures: function.captures.clone(),
+        release: function.release,
+        references: function.references.clone(),
         helper_owners: function.helper_owners.clone(),
         written: function.written.clone(),
         token: function.token.clone(),

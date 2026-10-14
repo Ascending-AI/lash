@@ -27,6 +27,7 @@ pub(super) const DATA: &str = r####"{
 "b91cdff79ff794ebb9a8f635522a24482e37a761cf558a3087381dd08780d62c":[{"text":"0"},{"text":"0"},{"text":"null"}],
 "b91d6f964e645259b2e382ab0c89e84f570606deac185dfc1fc0ef1b8e44e8b0":{"charge":4,"outcome":"ok {\"int\":\"211732889288981024\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b91ef76f94dd75d4509d81fefc89fcca6b8e41dc4f016945213aeff724d4bf32":[{"int":"1"},{"int":"0"},{"int":"0"}],
+"b928eddf526082fe918bbb78e8992b305c72b0776789aa720ccfed91a62be8df":{"charge":16390,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b93493b3b55aecb940a3c6e6504802d00c581186b69ccd09f6e671d17b2725f8":[{"float":"0.0"},{"set":87},{"text":"g"},{"tuple":[{"int":"-7"},{"int":"-7"},{"bool":false},{"bool":false}]}],
 "b935fb955680b91f01e2816efdd76769e442ec8f4a540be452ba82c9cbbb68d9":[{"text":""},{"text":"Hello, Wörld"}],
 "b936ba746371027d9aaf9293096f59e3cbbe3718fa8d48e79dcb93714734f5c9":[{"int":"1425595254599090164"}],

@@ -18,7 +18,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use lash_durable::{DurableSettings, GroupCommit, LeaseSettings, Notifier};
+use lash_durable::{DurableSettings, GroupCommit, LeaseSettings, Notifier, RetirementSettings};
 use serde::{Deserialize, Serialize};
 
 use super::serde_ms;
@@ -858,6 +858,16 @@ enum NotifierDef {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(remote = "RetirementSettings", deny_unknown_fields)]
+struct RetirementSettingsDef {
+    #[serde(rename = "every_ms", with = "serde_ms")]
+    every: Duration,
+    batch_nodes: u64,
+    steps_per_sweep: u32,
+    backlog_limit: u64,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(remote = "DurableSettings", deny_unknown_fields)]
 struct DurableSettingsDef {
     graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
@@ -874,6 +884,8 @@ struct DurableSettingsDef {
     cascade_batch: usize,
     #[serde(with = "NotifierDef")]
     notifier: Notifier,
+    #[serde(with = "RetirementSettingsDef")]
+    retirement: RetirementSettings,
 }
 
 /// Host name admission within PostgreSQL's 63-byte identifier space. The

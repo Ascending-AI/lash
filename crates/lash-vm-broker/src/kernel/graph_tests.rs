@@ -368,7 +368,7 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
     ));
 
     let state = staging
-        .encode_value(NodeKind::KERNEL_WHOLE, &7_u64)
+        .encode_value(NodeKind::CHECKPOINT_ROOT, &7_u64)
         .unwrap();
     let (root, write) = stage_exec_root(
         &mut staging,

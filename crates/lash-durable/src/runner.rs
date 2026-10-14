@@ -57,7 +57,7 @@
 //! piece of work.
 
 use crate::config::{LeaseConfig, LeaseSettings};
-use crate::durable_config::DurableConfig;
+use crate::durable_config::{DurableConfig, RetirementSettings};
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
@@ -91,6 +91,8 @@ pub struct RunnerConfig {
     pub max_active: usize,
     /// The most actors one claim takes.
     pub claim_batch: usize,
+    /// The node's page retirement and its backpressure.
+    pub retirement: RetirementSettings,
 }
 
 impl RunnerConfig {
@@ -113,6 +115,7 @@ impl RunnerConfig {
             lease: config.lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
+            retirement: settings.retirement,
         }
     }
 }
@@ -1026,6 +1029,16 @@ impl Runner {
         // ages the lease. Dropping the set on any return cancels it.
         let (ended_tx, ended) = watch::channel(None);
         let mut renewal: JoinSet<()> = JoinSet::new();
+        // Page retirement runs beside the renewal and ends with it.
+        let behind = crate::retirement::Behind::default();
+        if let Some(pages) = self.store.pages() {
+            renewal.spawn(crate::retirement::retire(
+                pages,
+                Arc::clone(&self.clock),
+                self.config.retirement,
+                behind.clone(),
+            ));
+        }
         renewal.spawn(renew(
             Arc::clone(&self.store),
             Arc::clone(&self.clock),
@@ -1111,7 +1124,9 @@ impl Runner {
                     break Stopped::Drained;
                 }
             }
-            self.hints.offer_room(if self.drain.started() {
+            // A node behind on retirement takes no new actors.
+            let held_back = behind.get();
+            self.hints.offer_room(if self.drain.started() || held_back {
                 0
             } else {
                 self.config.max_active.saturating_sub(active.len())
@@ -1226,7 +1241,7 @@ impl Runner {
                     }
                 }
             }
-            if now >= next_claim && !self.drain.started() {
+            if now >= next_claim && !self.drain.started() && !held_back {
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
                     match self

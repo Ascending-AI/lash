@@ -235,6 +235,7 @@ impl ProcessEngine for WriteEngine {
         let state = EngineState {
             format: self.state_format(),
             bytes: serde_json::to_vec(&serde_json::Value::Null).map_err(infra)?,
+            pages: None,
         };
         Ok((state, action))
     }

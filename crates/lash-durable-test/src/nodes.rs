@@ -179,6 +179,7 @@ impl SimNodes {
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,
+                retirement: lash_durable::RetirementSettings::standard(),
             },
             activation,
         )

@@ -8,17 +8,16 @@
 //! Pool failures fence the checkout and never retry guest execution locally.
 
 mod embedding;
-pub mod graph;
-#[cfg(all(test, unix))]
-mod graph_laws;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
-#[cfg(feature = "testing")]
+#[cfg(all(unix, feature = "testing"))]
 pub mod in_process;
 /// The library functions lash ships, as `lash-vm-releases`' build defines
 /// each dialect's helpers against them.
 #[path = "../../lash-vm-releases/src/library.rs"]
 mod library;
+#[cfg(all(test, unix))]
+mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod read_laws;
 #[cfg(all(test, unix))]
@@ -39,6 +38,7 @@ mod perf_witness;
 #[cfg(unix)]
 mod process;
 #[cfg(unix)]
+mod save;
 mod service;
 #[cfg(unix)]
 mod worker;

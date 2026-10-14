@@ -6,6 +6,9 @@ thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     static GRAPH: Cell<[u64; 6]> = const { Cell::new([0; 6]) };
     static PEAK: Cell<u64> = const { Cell::new(0) };
+    /// Pages the heap read through the wire and sealed into the parent's
+    /// staging since the last receipt.
+    static PAGES: Cell<[u64; 2]> = const { Cell::new([0; 2]) };
 }
 
 pub(crate) struct Witness {
@@ -14,21 +17,12 @@ pub(crate) struct Witness {
 }
 #[cfg(feature = "testing")]
 pub(crate) fn install(args: &[String]) -> Result<Witness, crate::PoolError> {
-    use lash_kernel_vm::perf_witness::{Probe, enable_work};
     if !args.iter().any(|arg| arg == "--count-heap-work") {
         return Ok(Witness { _collector: None });
     }
-    let probe = args.iter().find_map(|arg| arg.strip_prefix("--heap-walk="));
-    let probe = match probe {
-        None => None,
-        Some("checkpoint") => Some(Probe::Checkpoint),
-        Some("resume") => Some(Probe::Resume),
-        Some("carry") => Some(Probe::Carry),
-        _ => return Err(crate::PoolError::InvalidConfiguration),
-    };
     let collector = lash_core_execution::perf_witness::Collector::install()
         .map_err(|_| crate::PoolError::InvalidConfiguration)?;
-    enable_work(probe);
+    lash_kernel_vm::perf_witness::enable_work();
     ACTIVE.set(true);
     Ok(Witness {
         _collector: Some(collector),
@@ -36,10 +30,7 @@ pub(crate) fn install(args: &[String]) -> Result<Witness, crate::PoolError> {
 }
 #[cfg(not(feature = "testing"))]
 pub(crate) fn install(args: &[String]) -> Result<Witness, crate::PoolError> {
-    if args
-        .iter()
-        .any(|arg| arg == "--count-heap-work" || arg.starts_with("--heap-walk="))
-    {
+    if args.iter().any(|arg| arg == "--count-heap-work") {
         return Err(crate::PoolError::InvalidConfiguration);
     }
     Ok(Witness {})
@@ -54,6 +45,29 @@ pub(crate) fn buffer(bytes: usize) {
     let _ = bytes;
 }
 
+/// `pages` pages crossed from the parent: misses of the worker's clean
+/// residency.
+pub(crate) fn pages_loaded(pages: u64) {
+    #[cfg(feature = "testing")]
+    if ACTIVE.get() {
+        let [loaded, sealed] = PAGES.get();
+        PAGES.set([loaded + pages, sealed]);
+    }
+    #[cfg(not(feature = "testing"))]
+    let _ = pages;
+}
+
+/// `pages` pages crossed to the parent's staging.
+pub(crate) fn pages_sealed(pages: u64) {
+    #[cfg(feature = "testing")]
+    if ACTIVE.get() {
+        let [loaded, sealed] = PAGES.get();
+        PAGES.set([loaded, sealed + pages]);
+    }
+    #[cfg(not(feature = "testing"))]
+    let _ = pages;
+}
+
 pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
     #[cfg(feature = "testing")]
     {
@@ -63,18 +77,17 @@ pub(crate) fn take() -> Option<lash_vm_protocol::WorkerWork> {
         let work = lash_kernel_vm::perf_witness::take_work()?;
         let graph = lash_core_execution::perf_witness::graph_work();
         let previous = GRAPH.replace(graph);
+        let [pages_loaded, pages_sealed] = PAGES.replace([0; 2]);
         Some(lash_vm_protocol::WorkerWork {
             serialized_body_bytes: graph[4] - previous[4],
             decoded_body_bytes: graph[5] - previous[5],
             vm_steps: work.vm_steps,
-            checkpoint_values: work.checkpoint_values,
-            resume_values: work.resume_values,
-            carry_values: work.carry_values,
+            pages_loaded,
+            pages_sealed,
             encoded_nodes: graph[0] - previous[0],
             encoded_bytes: graph[1] - previous[1],
             decoded_nodes: graph[2] - previous[2],
             decoded_bytes: graph[3] - previous[3],
-            probe_units: work.probe_units,
             peak_buffer_bytes: PEAK.replace(0),
         })
     }

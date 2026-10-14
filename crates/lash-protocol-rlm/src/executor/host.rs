@@ -452,8 +452,8 @@ impl KernelEffects for CellHost<'_> {
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
-        outstanding: &[lash_kernel_doc::TaskIdentity],
-        live: &[lash_kernel_doc::TaskIdentity],
+        outstanding: u64,
+        live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
         let (invocation, frozen) = match self.tool_call(request, call) {
             Ok(called) => called,
@@ -482,7 +482,7 @@ impl KernelEffects for CellHost<'_> {
         if control {
             let cause = if request.identity.task != lash_kernel_doc::TaskIdentity::Main {
                 Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
-            } else if !outstanding.is_empty() || !live.is_empty() {
+            } else if outstanding > 0 || live > 0 {
                 Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
             } else if self
                 .ledgers

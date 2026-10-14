@@ -6,31 +6,22 @@ use super::machine;
 /// including nested records and the typed exception for a missing key.
 #[test]
 fn history_records_support_dict_reads_and_typed_key_errors() {
-    use lash_kernel_doc::{Datum, Name, Object, ObjectId, Value};
-    use lash_kernel_vm::{Bindings, End, RunError};
+    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_vm::{End, RunError};
     use std::collections::BTreeMap;
-
-    let bindings = Bindings {
-        variables: BTreeMap::from([(Name::new("history"), Value::List(ObjectId(1)))]),
-        objects: BTreeMap::from([
-            (
-                ObjectId(1),
-                Object::List(vec![Value::Null, Value::Record(ObjectId(2))]),
-            ),
-            (
-                ObjectId(2),
-                Object::Record(vec![("final_output".into(), Value::Record(ObjectId(3)))]),
-            ),
-            (
-                ObjectId(3),
-                Object::Record(vec![
-                    ("attachment".into(), Value::Text("retained-value".into())),
-                    ("empty".into(), Value::Record(ObjectId(4))),
+    let bindings = super::pages::Session::seeded([(
+        Name::new("history"),
+        Datum::List(vec![
+            Datum::Null,
+            Datum::Record(vec![(
+                "final_output".into(),
+                Datum::Record(vec![
+                    ("attachment".into(), Datum::Text("retained-value".into())),
+                    ("empty".into(), Datum::Record(Vec::new())),
                 ]),
-            ),
-            (ObjectId(4), Object::Record(Vec::new())),
+            )]),
         ]),
-    };
+    )]);
     let source = "\
 output = history[1]['final_output']
 print(output['attachment'])

@@ -67,7 +67,7 @@ impl RlmRuntimeState {
                             names.extend(patch.set_default.keys().cloned())
                         }
                         RlmProtocolEvent::RlmSeed(seed) => {
-                            names.extend(seed.globals.keys().chain(seed.functions.keys()).cloned());
+                            names.extend(seed.globals.keys().cloned());
                             names.extend(seed.projected.entries.into_iter().map(|(name, _)| name));
                         }
                         _ => {}
@@ -124,6 +124,7 @@ impl RlmRuntimeState {
         recorded: Option<&lash_core::RecordedRender>,
         history: Option<&lash_core::SessionReadView>,
         images: bool,
+        pages: Option<&lash_core::plugin::SessionPages>,
     ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
@@ -148,7 +149,7 @@ impl RlmRuntimeState {
             .execution
             .lock()
             .await
-            .prepare_bound_variables_prompt(&exclude, params.preview, provenance)
+            .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
             .render();
         Ok(crate::prompt_sections::RlmPromptFacts {
@@ -269,7 +270,8 @@ impl RlmRuntimeState {
             .execution
             .lock()
             .await
-            .capture_execution_graph(purpose)?;
+            .capture_execution_graph(purpose)
+            .await?;
         if purpose == lash_core_store::execution_state::ExecutionGraphPurpose::Final {
             self.dialect.clear_history_cache();
         }
@@ -300,7 +302,8 @@ impl RlmRuntimeState {
             .execution
             .lock()
             .await
-            .acknowledge_execution_state_capture();
+            .acknowledge_execution_state_capture()
+            .await;
     }
 
     pub(crate) async fn abort_execution_state_capture(&self) {
@@ -353,11 +356,6 @@ impl RlmRuntimeState {
                             },
                             &protected_names,
                         )
-                        .await?;
-                }
-                if !seed.functions.is_empty() {
-                    execution
-                        .seed_functions(&seed.functions, &protected_names)
                         .await?;
                 }
             }
@@ -447,8 +445,7 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
     async fn carried_cell_snapshot(
         &self,
         cell: &lash_core::plugin::StoredCell,
-    ) -> Result<Result<Option<lash_core::plugin::CarriedCell>, String>, lash_core::RuntimeError>
-    {
+    ) -> Result<Result<(), String>, lash_core::RuntimeError> {
         Ok(self
             .state
             .dialect
@@ -639,6 +636,8 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = Arc::new(RlmRuntimeState::new_for_tests().expect("state"));
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let session = crate::plugin::protocol_session::RlmProtocolSession::new(
                     crate::plugin::RlmProtocolPluginConfig::builder()
                         .channel(crate::plugin::RlmChannel::Cell)
@@ -680,6 +679,7 @@ mod tests {
                 );
                 let response = execute_cell(
                     &state,
+                    &host,
                     cell("let persisted = 4815; await control.finish(persisted);"),
                 )
                 .await
@@ -725,19 +725,36 @@ mod tests {
     /// own.
     async fn execute_cell(
         state: &RlmRuntimeState,
+        host: &crate::testing::DurableHost,
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
-        let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-        let (provider, catalog) = crate::testing::with_finish(Arc::new(crate::testing::NoTools));
+        // Each cell is an execution of its own in the turn.
+        static CELLS: AtomicUsize = AtomicUsize::new(0);
+        let key: &'static str = Box::leak(
+            format!("exec-code:{}", CELLS.fetch_add(1, Ordering::SeqCst)).into_boxed_str(),
+        );
         Box::pin(state.execute_code(
-            lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-                handler.ports(),
-                provider,
-                catalog,
+            crate::testing::cell_context(
+                host,
+                "test-session",
+                "test-turn",
+                key,
+                Arc::new(crate::testing::NoTools),
             ),
             request,
         ))
         .await
+    }
+
+    /// The turn's phase commit after a settled cell: the session's state as
+    /// its working state, which the next cell reads.
+    async fn phase(state: &RlmRuntimeState, host: &crate::testing::DurableHost) {
+        let capture = state
+            .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Working)
+            .await
+            .expect("the session's state captures");
+        host.commit_working(&capture).await;
+        state.acknowledge_execution_state_capture().await;
     }
 
     /// The scope [`admitted_context`] claims.
@@ -950,14 +967,18 @@ mod tests {
     }
 
     /// The value `finish baton` yields on the state's live execution.
-    async fn live_baton(state: &RlmRuntimeState) -> serde_json::Value {
-        let response = execute_cell(state, cell("await control.finish(baton);"))
+    async fn live_baton(
+        state: &RlmRuntimeState,
+        host: &crate::testing::DurableHost,
+    ) -> serde_json::Value {
+        let response = execute_cell(state, host, cell("await control.finish(baton);"))
             .await
             .expect("the baton cell runs");
         state
             .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
             .await
             .expect("settle the baton cell");
+        phase(state, host).await;
         assert_eq!(response.error(), None);
         response
             .finish_value()
@@ -1196,11 +1217,13 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                execute_cell(&state, cell("let first = 1;"))
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+                execute_cell(&state, &host, cell("let first = 1;"))
                     .await
                     .expect("first cell");
 
-                let overlapping = execute_cell(&state, cell("let second = 2;"))
+                let overlapping = execute_cell(&state, &host, cell("let second = 2;"))
                     .await
                     .expect_err("an unsettled response fences the next cell");
                 assert!(matches!(
@@ -1213,7 +1236,7 @@ mod tests {
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("settle first response");
-                execute_cell(&state, cell("let second = 2;"))
+                execute_cell(&state, &host, cell("let second = 2;"))
                     .await
                     .expect("settlement releases the next cell");
             });
@@ -1227,9 +1250,11 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true)
+                    .prompt_facts(Some(&render), None, true, None)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1237,6 +1262,7 @@ mod tests {
 
                 execute_cell(
                     &state,
+                    &host,
                     lash_core::ExecRequest {
                         code: "let scratch_note = \"after execution\";".to_string(),
                     },
@@ -1245,7 +1271,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true)
+                    .prompt_facts(Some(&render), None, true, None)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1263,16 +1289,18 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
                 execute_cell(
                     &state,
+                    &host,
                     cell("const rate = 2;\nfunction scale(value: number): number { return value * rate; }"),
                 )
                 .await
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true)
+                    .prompt_facts(Some(&render), None, true, None)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1294,20 +1322,22 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
 
-                execute_cell(&state, cell("let survives = 7;"))
+                execute_cell(&state, &host, cell("let survives = 7;"))
                     .await
                     .expect("execute accepted cell");
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
                     .await
                     .expect("accept first cell");
-                execute_cell(&state, cell("let cancelled_tail = 1;"))
+                execute_cell(&state, &host, cell("let cancelled_tail = 1;"))
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true)
+                    .prompt_facts(Some(&render), None, true, None)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1318,7 +1348,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true)
+                    .prompt_facts(Some(&render), None, true, None)
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1337,6 +1367,8 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 state
                     .restore_runtime_session_state(restore_view(
                         "frame-1",
@@ -1346,19 +1378,22 @@ mod tests {
                     .await
                     .expect("restore seeds the committed baton");
                 assert_eq!(
-                    Box::pin(live_baton(&state)).await,
+                    Box::pin(live_baton(&state, &host)).await,
                     serde_json::json!("committed")
                 );
 
                 let mutated = execute_cell(
                     &state,
+                    &host,
                     cell("let baton = \"uncommitted\";\nawait control.finish(baton);"),
                 )
                 .await
                 .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.finish_value().cloned(),
-                    Some(serde_json::json!("uncommitted"))
+                    Some(serde_json::json!("uncommitted")),
+                    "{:?}",
+                    mutated.error()
                 );
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
@@ -1374,7 +1409,7 @@ mod tests {
                     .await
                     .expect("a same-frame restore without a snapshot succeeds");
                 assert_eq!(
-                    Box::pin(live_baton(&state)).await,
+                    Box::pin(live_baton(&state, &host)).await,
                     serde_json::json!("committed"),
                     "the restore must rebuild the execution from the view, not keep the \
                      uncommitted assignment"
@@ -1394,6 +1429,8 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("state");
+                let host =
+                    crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 state
                     .restore_runtime_session_state(restore_view(
                         "frame-1",
@@ -1402,6 +1439,7 @@ mod tests {
                     ))
                     .await
                     .expect("restore seeds the committed baton");
+                phase(&state, &host).await;
                 let committed = state
                     .hydrated_execution_graph()
                     .await
@@ -1410,13 +1448,16 @@ mod tests {
 
                 let mutated = execute_cell(
                     &state,
+                    &host,
                     cell("let baton = \"uncommitted\";\nawait control.finish(baton);"),
                 )
                 .await
                 .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.finish_value().cloned(),
-                    Some(serde_json::json!("uncommitted"))
+                    Some(serde_json::json!("uncommitted")),
+                    "{:?}",
+                    mutated.error()
                 );
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
@@ -1444,7 +1485,7 @@ mod tests {
                     "the restored execution is exactly the view's snapshot"
                 );
                 assert_eq!(
-                    Box::pin(live_baton(&state)).await,
+                    Box::pin(live_baton(&state, &host)).await,
                     serde_json::json!("committed")
                 );
             });

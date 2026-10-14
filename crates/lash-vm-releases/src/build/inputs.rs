@@ -5,14 +5,12 @@
 //! and zero-work/zero-room calls. Recorded inputs are replayed verbatim; changing
 //! this generator does not replace any release's expected answers.
 
-use lash_kernel_doc::{
-    Bytes, ErrorValue, Float, FunctionDefinition, Handle, Integer, Object, TaskId, Timestamp, Type,
-    Value,
+use super::probe::{
+    Input,
+    fixtures::{RecordedError as ErrorValue, RecordedObject as Object, RecordedValue as Value},
 };
-
-use lash_kernel_lib::Key;
-
-use super::probe::{Input, ProbeHeap};
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::{Bytes, Float, FunctionDefinition, Handle, Integer, TaskId, Timestamp, Type};
 
 use super::corpus::MAX_CASES;
 const WORK: u64 = 100_000;
@@ -29,7 +27,7 @@ const EDGES: usize = 64;
 )]
 pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<Input> {
     let mut cases = seeds.to_vec();
-    let mut heap = ProbeHeap::default();
+    let mut heap = RecordedObjects::default();
     let choices: Vec<_> = definition
         .signature
         .params
@@ -75,7 +73,7 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
     seed.copy_from_slice(&identity.as_bytes()[..8]);
     let mut random = Random(u64::from_le_bytes(seed) | 1);
     for _ in 0..RANDOM_CALLS {
-        let mut heap = ProbeHeap::default();
+        let mut heap = RecordedObjects::default();
         let args = definition
             .signature
             .params
@@ -99,9 +97,8 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
     // so they cannot be truncated by the per-type choice bound.
     for (position, param) in definition.signature.params.iter().enumerate() {
         for family in 0..3 {
-            let mut deep_heap = ProbeHeap {
+            let mut deep_heap = RecordedObjects {
                 objects: heap.objects.clone(),
-                ..Default::default()
             };
             if let Some(value) = deep_value(&param.ty, &mut deep_heap, 65, family) {
                 let mut args = base.clone();
@@ -121,7 +118,7 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
                 Value::Timestamp(Timestamp {
                     nanoseconds: Integer::from(i64::MAX),
                 }),
-                Value::Tuple(Vec::new().into()),
+                Value::Tuple(Vec::new()),
                 Value::Error(std::sync::Arc::new(ErrorValue::new("type_error", "corpus"))),
                 Value::Task(TaskId(0)),
                 Value::Function(lash_kernel_doc::Name::new("corpus")),
@@ -171,9 +168,8 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
                 if !key_fits(key_type, stored) || !key_fits(&other.ty, queried) {
                     continue;
                 }
-                let mut alias_heap = ProbeHeap {
+                let mut alias_heap = RecordedObjects {
                     objects: heap.objects.clone(),
-                    ..Default::default()
                 };
                 let value = match &param.ty {
                     Type::Map(map) => {
@@ -209,6 +205,14 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
         definition.name,
         cases.len()
     );
+    // Fixture rows are not a second heap grammar: every reachable collection
+    // must be constructible by the same heap that replays it. In particular,
+    // an Any edge is not necessarily a legal map key or set member.
+    for input in &cases {
+        super::probe::fixtures::Replay::load(input).unwrap_or_else(|error| {
+            panic!("{}: invalid generated fixture: {error}", definition.name)
+        });
+    }
     cases
 }
 
@@ -219,7 +223,7 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
         reason = "registered signatures and generated acyclic values have valid identities and JSON"
     )
 )]
-fn edges(ty_outer: &Type, heap: &mut ProbeHeap, depth: usize) -> Vec<Value> {
+fn edges(ty_outer: &Type, heap: &mut RecordedObjects, depth: usize) -> Vec<Value> {
     let int = |value: i64| Value::Int(Integer::from(value));
     let float = |value: f64| Value::Float(Float::new(value));
     let mut values = match ty_outer {
@@ -383,7 +387,9 @@ fn edges(ty_outer: &Type, heap: &mut ProbeHeap, depth: usize) -> Vec<Value> {
                     if matches!(ty_outer, Type::Set(_)) {
                         let mut seen = std::collections::HashSet::new();
                         items.retain(|value| {
-                            Key::new(value.clone()).is_ok_and(|key| seen.insert(key))
+                            heap.key(value)
+                                .unwrap_or_else(|error| panic!("fixture key: {error}"))
+                                .is_some_and(|key| seen.insert(key))
                         });
                         Value::Set(heap.object(Object::Set(items)))
                     } else {
@@ -396,7 +402,11 @@ fn edges(ty_outer: &Type, heap: &mut ProbeHeap, depth: usize) -> Vec<Value> {
         Type::Map(map) => {
             let keys: Vec<_> = edges(&map.key, heap, depth.saturating_sub(1))
                 .into_iter()
-                .filter(|key| Key::new(key.clone()).is_ok())
+                .filter(|key| {
+                    heap.key(key)
+                        .unwrap_or_else(|error| panic!("fixture key: {error}"))
+                        .is_some()
+                })
                 .collect();
             let values = edges(&map.value, heap, depth.saturating_sub(1));
             let mut maps = vec![Value::Map(heap.object(Object::Map(vec![])))];
@@ -465,7 +475,7 @@ impl Random {
     }
 }
 
-fn random_value(ty: &Type, heap: &mut ProbeHeap, random: &mut Random, depth: usize) -> Value {
+fn random_value(ty: &Type, heap: &mut RecordedObjects, random: &mut Random, depth: usize) -> Value {
     match ty {
         Type::Int => Value::Int(Integer::from(random.next() as i64)),
         Type::Float => Value::Float(Float::new(f64::from_bits(random.next()))),
@@ -533,7 +543,12 @@ fn random_value(ty: &Type, heap: &mut ProbeHeap, random: &mut Random, depth: usi
     }
 }
 
-fn deep_value(ty: &Type, heap: &mut ProbeHeap, layers: usize, family: usize) -> Option<Value> {
+fn deep_value(
+    ty: &Type,
+    heap: &mut RecordedObjects,
+    layers: usize,
+    family: usize,
+) -> Option<Value> {
     if layers == 0 {
         return Some(Value::Null);
     }
@@ -558,7 +573,7 @@ fn deep_value(ty: &Type, heap: &mut ProbeHeap, layers: usize, family: usize) -> 
         Type::Set(item) if **item == Type::Any => {
             let mut value = Value::Null;
             for _ in 0..layers {
-                value = Value::Tuple(vec![value].into());
+                value = Value::Tuple(vec![value]);
             }
             Value::Set(heap.object(Object::Set(vec![value])))
         }
@@ -600,5 +615,60 @@ fn key_fits(ty: &Type, value: &Value) -> bool {
         Type::Number => matches!(value, Value::Int(_) | Value::Float(_)),
         Type::Union(types) => types.iter().any(|ty| key_fits(ty, value)),
         _ => false,
+    }
+}
+
+impl ErrorValue {
+    pub(crate) fn new(kind: &str, message: &str) -> Self {
+        Self {
+            kind: kind.into(),
+            message: message.into(),
+            data: Value::Null,
+        }
+    }
+}
+impl Value {
+    pub(crate) fn text(value: impl Into<String>) -> Self {
+        Self::Text(value.into())
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RecordedObjects {
+    pub(crate) objects: Vec<Object>,
+}
+impl RecordedObjects {
+    pub(crate) fn object(&mut self, object: Object) -> u64 {
+        let keys: Vec<_> = match &object {
+            Object::Set(values) => values.iter().collect(),
+            Object::Map(entries) => entries.iter().map(|(key, _)| key).collect(),
+            _ => Vec::new(),
+        };
+        for key in keys {
+            assert!(
+                self.key(key)
+                    .unwrap_or_else(|error| panic!("fixture key: {error}"))
+                    .is_some(),
+                "the generator must refuse an illegal fixture key"
+            );
+        }
+        let id = self.objects.len() as u64;
+        self.objects.push(object);
+        id
+    }
+    pub(crate) fn key(
+        &self,
+        value: &Value,
+    ) -> Result<Option<lash_kernel_doc::heap::NormalKey>, String> {
+        let replay = super::probe::fixtures::Replay::load(&Input {
+            args: vec![value.clone()],
+            objects: self.objects.clone(),
+            work: 0,
+            room: 1 << 30,
+        })?;
+        replay
+            .heap
+            .normal_key(&replay.args[0])
+            .map_err(|e| e.to_string())
     }
 }

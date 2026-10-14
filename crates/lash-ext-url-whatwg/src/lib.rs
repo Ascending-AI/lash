@@ -2,9 +2,10 @@
 //!
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
+use lash_kernel_doc::heap::{ErrorRef, Payload};
 use lash_kernel_doc::{
-    ErrorValue, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Object,
-    RegistryError, Value, parse_definition,
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Object, RegistryError,
+    Value, parse_definition,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
@@ -63,13 +64,22 @@ enum Op {
     QueryStringify,
 }
 fn raise(message: &str) -> NativeError {
-    NativeError::Raised(ErrorValue::new("type_error", message))
+    NativeError::Raised(Arc::new(ErrorRef::new("type_error", message)))
 }
-fn text<'a>(call: &'a NativeCall<'_>, index: usize) -> Result<&'a str, NativeError> {
+fn text(call: &mut NativeCall<'_>, index: usize) -> Result<Arc<str>, NativeError> {
     match call.args.get(index) {
-        Some(Value::Text(value)) => Ok(value),
+        Some(Value::Text(value)) => match &value.body {
+            Payload::Resident(text) => Ok(text.clone()),
+            Payload::Paged(_) => call.heap.materialize_text(value),
+        },
         _ => Err(raise("Expected text")),
     }
+}
+fn field_name(name: &str) -> lash_kernel_doc::heap::TextRef {
+    let Value::Text(name) = Value::text(name) else {
+        unreachable!()
+    };
+    name
 }
 fn allocate(call: &mut NativeCall<'_>, object: Object) -> Result<Value, NativeError> {
     let list = matches!(object, Object::List(_));
@@ -129,24 +139,24 @@ fn record(call: &mut NativeCall<'_>, url: &Url) -> Result<Value, NativeError> {
         ),
     ]
     .into_iter()
-    .map(|(name, value)| (name.to_owned(), Value::text(value)))
+    .map(|(name, value)| (field_name(name), Value::text(value)))
     .collect();
     let state = allocate(call, Object::Record(fields))?;
     let decoded = pairs(call, url.query().unwrap_or(""))?;
     let params = allocate(
         call,
         Object::Record(vec![
-            ("brand".into(), Value::text("url.search_params")),
-            ("pairs".into(), decoded),
-            ("owner".into(), state.clone()),
+            (field_name("brand"), Value::text("url.search_params")),
+            (field_name("pairs"), decoded),
+            (field_name("owner"), state.clone()),
         ]),
     )?;
     allocate(
         call,
         Object::Record(vec![
-            ("brand".into(), Value::text("url.whatwg")),
-            ("state".into(), state),
-            ("searchParams".into(), params),
+            (field_name("brand"), Value::text("url.whatwg")),
+            (field_name("state"), state),
+            (field_name("searchParams"), params),
         ]),
     )
 }
@@ -154,32 +164,35 @@ impl NativeFunction for Op {
     fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
         match self {
             Self::Parse => {
-                let input = text(&call, 0)?;
+                let input = text(&mut call, 0)?;
                 let url = match call.args.get(1) {
-                    Some(Value::Absent) => Url::parse(input),
-                    Some(Value::Text(base)) => Url::parse(base).and_then(|base| base.join(input)),
+                    Some(Value::Absent) => Url::parse(&input),
+                    Some(Value::Text(_)) => {
+                        let base = text(&mut call, 1)?;
+                        Url::parse(&base).and_then(|base| base.join(&input))
+                    }
                     _ => return Err(raise("Expected text or absent base")),
                 }
                 .map_err(|_| raise("Invalid URL"))?;
                 record(&mut call, &url)
             }
             Self::Update => {
-                let mut url = Url::parse(text(&call, 0)?).map_err(|_| raise("Invalid URL"))?;
-                let field = text(&call, 1)?;
-                let value = text(&call, 2)?;
-                match field {
-                    "href" => url = url.join(value).map_err(|_| raise("Invalid URL"))?,
+                let mut url = Url::parse(&text(&mut call, 0)?).map_err(|_| raise("Invalid URL"))?;
+                let field = text(&mut call, 1)?;
+                let value = text(&mut call, 2)?;
+                match field.as_ref() {
+                    "href" => url = url.join(&value).map_err(|_| raise("Invalid URL"))?,
                     "protocol" => {
                         let _ = url.set_scheme(value.trim_end_matches(':'));
                     }
                     "username" => {
-                        let _ = url.set_username(value);
+                        let _ = url.set_username(&value);
                     }
                     "password" => {
-                        let _ = url.set_password(Some(value));
+                        let _ = url.set_password(Some(&value));
                     }
                     "hostname" => {
-                        let _ = url.set_host(Some(value));
+                        let _ = url.set_host(Some(&value));
                     }
                     "host" => {
                         let authority = format!("{}://{value}/", url.scheme());
@@ -195,7 +208,7 @@ impl NativeFunction for Op {
                             let _ = url.set_port(Some(port));
                         }
                     }
-                    "pathname" => url.set_path(value),
+                    "pathname" => url.set_path(&value),
                     "search" => url.set_query(if value.is_empty() {
                         None
                     } else {
@@ -211,7 +224,7 @@ impl NativeFunction for Op {
                 record(&mut call, &url)
             }
             Self::QueryParse => {
-                let input = text(&call, 0)?.to_owned();
+                let input = text(&mut call, 0)?.to_owned();
                 pairs(&mut call, &input)
             }
             Self::QueryStringify => {
@@ -219,31 +232,33 @@ impl NativeFunction for Op {
                     return Err(raise("Expected pair list"));
                 };
                 let mut serializer = form_urlencoded::Serializer::new(String::new());
-                for index in 0..call.heap.len(*id) {
+                for index in 0..call.heap.len(*id)? {
                     let Value::List(pair) = call
                         .heap
-                        .list_get(*id, index)
+                        .list_get(*id, index)?
                         .ok_or_else(|| raise("Missing pair"))?
                     else {
                         return Err(raise("Expected pair"));
                     };
                     let Value::Text(name) = call
                         .heap
-                        .list_get(pair, 0)
+                        .list_get(pair, 0)?
                         .ok_or_else(|| raise("Missing name"))?
                     else {
                         return Err(raise("Expected name"));
                     };
                     let Value::Text(value) = call
                         .heap
-                        .list_get(pair, 1)
+                        .list_get(pair, 1)?
                         .ok_or_else(|| raise("Missing value"))?
                     else {
                         return Err(raise("Expected value"));
                     };
+                    let name = call.heap.materialize_text(&name)?;
+                    let value = call.heap.materialize_text(&value)?;
                     serializer.append_pair(&name, &value);
                 }
-                Ok(Value::text(serializer.finish()))
+                Ok(Value::Text(call.heap.text(&serializer.finish())?))
             }
         }
     }

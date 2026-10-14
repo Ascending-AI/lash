@@ -19,9 +19,16 @@ use lash_dialect_typescript::{DiagnosticCode, define_helpers};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, PreparedLibrary, Program, RunError, Start,
-    Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, RunError, Step,
+    Target,
 };
+
+#[expect(
+    dead_code,
+    reason = "shared test page fixture includes session and reopen helpers"
+)]
+#[path = "../../src/tests/pages.rs"]
+mod pages;
 
 use super::ingest::{data_path, harness_shim, source_for, source_without_unshimmed};
 use super::metadata::{self, Metadata, Phase, TestFlag};
@@ -114,6 +121,7 @@ fn registry() -> &'static Arc<FunctionRegistry> {
 pub(crate) struct Execution {
     end: End,
     prints: Vec<Datum>,
+    completed: bool,
 }
 
 pub(crate) trait Executor: Sync {
@@ -173,15 +181,27 @@ impl Host for TestHost {
 impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = Program {
+            release: pages::RELEASE,
             document: Arc::new(lowered.document.clone()),
             library: self.library.clone(),
         };
-        let start = Start {
+        let session = pages::Session::default();
+        let start = CellStart {
+            owner: pages::OWNER,
+            modes: lash_kernel_vm::EffectModes::recorded(),
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            host: Vec::new(),
         };
-        let mut machine = M::start(program, BOUNDS, start).map_err(|error| error.to_string())?;
+        let mut machine = M::start(
+            program,
+            BOUNDS,
+            start,
+            Box::new(session.source.clone()),
+            session.census(BOUNDS.memory),
+        )
+        .map_err(|error| error.to_string())?;
         let mut host = TestHost::default();
         // The value the program's `finish` call ended it with.
         let mut finished_with = None;
@@ -194,9 +214,14 @@ impl<M: Machine> Executor for OnMachine<M> {
                     if let (End::Finished(finished), Some(value)) = (&mut end, finished_with) {
                         finished.result = value;
                     }
+                    let completed = match &end {
+                        End::Finished(finished) => completed(finished, &session.source)?,
+                        _ => false,
+                    };
                     return Ok(Execution {
                         end,
                         prints: host.prints,
+                        completed,
                     });
                 }
                 Step::Slice => {}
@@ -288,16 +313,33 @@ fn thrown_name(value: &Datum) -> Option<String> {
 /// statement binds [`super::ingest::COMPLETED`] to `true`. No call marks
 /// it, so the test's code lowers as it is written, with no top-level
 /// `await`.
-fn completed(finished: &lash_kernel_vm::Finished) -> bool {
-    finished
-        .bindings
-        .variables
-        .get(&Name::new(super::ingest::COMPLETED))
-        == Some(&lash_kernel_doc::Value::Bool(true))
+fn completed(finished: &lash_kernel_vm::Finished, source: &pages::Source) -> Result<bool, String> {
+    use lash_kernel_state::paged::{BindingRecord, BoundRecord, EditEpoch, PagedHeap, tree::Tree};
+    let Some(session) = finished.carry else {
+        return Ok(false);
+    };
+    let heap = PagedHeap::open_header(session.heap, Box::new(source.clone()), EditEpoch(1))
+        .map_err(|e| e.to_string())?;
+    let bindings = Tree::<BindingRecord>::of_keyed(&session.bindings);
+    let key =
+        lash_kernel_state::paged::metadata::metadata_key(&Name::new(super::ingest::COMPLETED));
+    Ok(matches!(
+        bindings
+            .get(&key, &heap.access)
+            .map_err(|e| e.to_string())?,
+        Some(BindingRecord {
+            value: BoundRecord::Value(lash_kernel_doc::Value::Bool(true)),
+            ..
+        })
+    ))
 }
 
 fn judge(execution: Execution, meta: &Metadata) -> Observed {
-    let Execution { end, prints } = execution;
+    let Execution {
+        end,
+        prints,
+        completed,
+    } = execution;
     if meta.flags.contains(&TestFlag::Async) {
         // doneprintHandle.js is Test262's completion protocol. A successful
         // script end without $DONE, a failure, or repeated completion fails.
@@ -320,7 +362,7 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
         {
             Observed::Pass
         }
-        (End::Finished(finished), None) if completed(&finished) => Observed::Pass,
+        (End::Finished(_), None) if completed => Observed::Pass,
         (End::Finished(finished), _) => {
             Observed::Diverged(format!("the program finished with {:?}", finished.result))
         }

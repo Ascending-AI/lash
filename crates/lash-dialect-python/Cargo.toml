@@ -38,6 +38,7 @@ lash-ext-regex-ecma = { workspace = true }
 arbitrary = "1"
 lash-kernel-conformance = { workspace = true }
 lash-dialect-typescript = { workspace = true }
+lash-kernel-state = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-kernel-vm = { workspace = true }

@@ -2062,23 +2062,46 @@ fn with_a_stale_continuation(
     root.format = u32::MAX;
 }
 
-/// The cell's root over a parked kernel state that states another kernel
-/// version than the one the root records: the root, its owner and its
-/// document are the image's.
+/// The cell's root over a parked checkpoint root that states another kernel
+/// version than the one the execution root records: the root, its owner and
+/// its document are the image's, and its pages are the image's own.
 fn with_bytes_of_another_kernel_version(
     graph: &lash_durable::domain::HydratedGraph,
     root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
     staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
 ) {
-    use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
-    let mut whole: lash_kernel_state::KernelWhole =
-        GraphDecoder::new(graph, lash_durable::domain::graph::OWNER_READ_LIMITS)
-            .decode(root.state, NodeKind::KERNEL_WHOLE)
-            .expect("the image's cell stopped on a parked kernel run");
-    whole.kernel = root.format + 1;
-    root.state = staging
-        .encode_value(NodeKind::KERNEL_WHOLE, &whole)
-        .expect("the stale parked run encodes");
+    use lash_core_store::checkpoint_graph::node::{direct_logical, frame_direct};
+    use lash_core_store::checkpoint_graph::{
+        DecodeLimits, MAX_ROOT_BYTES, NodeKind, TokenCodec as _, TokenReader, TokenWriter,
+        check_envelope,
+    };
+    let page = graph
+        .nodes
+        .get(&root.state)
+        .expect("the image's cell stopped on a parked kernel run");
+    let envelope = check_envelope(
+        &page.bytes,
+        root.state,
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .expect("the parked checkpoint root frames");
+    let logical = direct_logical(&envelope, root.state).expect("its body is canonical");
+    let mut reader = TokenReader::new(&logical);
+    let mut header = lash_kernel_state::paged::CheckpointRoot::decode(&mut reader)
+        .expect("the image's checkpoint root decodes");
+    header.kernel = root.format + 1;
+    let mut body = TokenWriter::new();
+    header.encode(&mut body);
+    let stale = frame_direct(
+        NodeKind::CHECKPOINT_ROOT,
+        &body.into_bytes(),
+        MAX_ROOT_BYTES,
+    )
+    .expect("the stale checkpoint root frames");
+    root.state = stale.id;
+    staging
+        .adopt(stale)
+        .expect("the stale checkpoint root stages");
 }
 
 #[async_trait::async_trait]

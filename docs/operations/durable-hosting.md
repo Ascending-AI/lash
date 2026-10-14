@@ -961,10 +961,32 @@ rule.
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
 | `cascade_batch` | 256 | How many `Until` children one cascade transaction marks. |
 | `notifier` | `AfterCommit` | `AfterCommit` publishes wake hints and holds the liveness lock, on PostgreSQL and on a SQLite file; `PollOnly` relies on the claim poll alone. |
+| `retirement.every` | 1 s | How long the node's retirement task waits between sweeps once it caught up. |
+| `retirement.batch_nodes` | 256 (at most 4 096) | The most page nodes one retirement step, one transaction, deletes. |
+| `retirement.steps_per_sweep` | 16 (at most 256) | The most steps one sweep runs. |
+| `retirement.backlog_limit` | 10 000 holds (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
 
 Counts must be at least 1 (`Zero`), durations at least 1 ms
-(`BelowResolution`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
+(`BelowResolution`), retirement values at most their hard maxima
+(`AboveMaximum`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
 and the lease rules (`Lease(LeaseConfigError)`).
+
+### Page retirement
+
+A replaced or released heap root is not deleted in the transaction that
+replaces it: it becomes a retirement hold (`D-RET`). Each node runs a
+retirement task beside its lease renewal. A sweep runs up to
+`steps_per_sweep` bounded steps, each one transaction that deletes at most
+`batch_nodes` unreachable pages and reaps expired root leases, and stops
+early once a step finds nothing to do. Steps take row locks under the shared
+graph gate, so they never stop publication. When the store's
+`retirement_backlog` is above `backlog_limit`, the node takes no new actors
+(its running actors carry on) and sweeps back to back until the backlog is
+under the limit again. A failed step is retried at the next sweep.
+
+Page staging is bounded per activation by the worker service's
+`staging_quota_bytes` (1 GiB); passing it is a host outcome, the
+activation's `StagingExhausted`.
 
 ### Parked work and redrive
 

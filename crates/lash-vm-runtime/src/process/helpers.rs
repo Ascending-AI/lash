@@ -13,24 +13,24 @@
 //!
 //! [`plan_carry`] is that carry's correspondence: it replaces each library
 //! function a document lists with the function the successor names under
-//! the same name, rewrites the document (`lash_kernel_migrate::adopt`), and
-//! carries the parked run onto it; a run that stands inside a replaced body
-//! no correspondence carries is refused, typed. [`plan_helper_adoption`]
-//! plans it onto the build's own helpers, and [`survey_helper_processes`]
-//! lists the dependents for `lashctl kernel-migration list`, each with the
-//! typed reason its run would not carry onto them.
+//! the same name and rewrites the document (`lash_kernel_migrate::adopt`).
+//! A parked run is never carried: its heap pages are carried by no
+//! migrator this build ships, so it is refused, typed
+//! ([`ParkedRefusal::StateNotCarried`]), stays parked with its rows
+//! intact, and resumes on a build that retains its release (FIG-6193).
+//! [`plan_helper_adoption`] plans it onto the build's own helpers, and
+//! [`survey_helper_processes`] lists the dependents for `lashctl
+//! kernel-migration list`, each with the typed reason its run would not
+//! carry onto them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::ProcessId;
-use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionId, FunctionName, FunctionRegistry,
-    KernelVersion, Site, Unit, validate_document,
+    KernelVersion, validate_document,
 };
 use lash_kernel_migrate::{ParkedRefusal, Rewritten};
-use lash_kernel_state::AdmittedWait;
-use lash_vm_broker::kernel::state::{OpenedRun, WholeState, capture_whole};
 
 use super::state::KernelProcessInput;
 use super::{KernelDocuments, KernelMigrationSurveyError, advance};
@@ -46,11 +46,6 @@ pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
 #[serde(rename_all = "snake_case", tag = "refused")]
 #[non_exhaustive]
 pub enum HelperAdoptionRefusal {
-    /// The run stands inside the body of `function`, a helper the adoption
-    /// replaces with a changed one, and no declared correspondence says
-    /// where `site` is in its replacement.
-    #[error("the run stands at {site}, inside helper {function}, which the adoption changes")]
-    ParkedInsideChanged { function: FunctionId, site: Site },
     /// The document reaches `function`, and the build has no function of
     /// its name to adopt.
     #[error("helper `{name}` ({function}) has no counterpart in this build")]
@@ -87,13 +82,11 @@ pub enum HelperAdoptionRefusal {
     OtherEntry { entry: lash_kernel_doc::Name },
 }
 
-/// A document adopted onto a build's helpers, and the run parked under it
-/// carried onto the result.
+/// A document adopted onto a build's helpers.
 #[derive(Clone, Debug)]
 pub struct AdoptedRun {
     pub from: DocumentId,
     pub rewritten: Rewritten,
-    pub parked: Option<WholeState>,
 }
 
 /// The functions of `retired` that `listed`, the library functions a
@@ -120,10 +113,9 @@ pub fn retired_functions_reached(
     reached
 }
 
-/// `document`, and `parked`, a run of it with the admission of each wait it
-/// holds, adopted onto the counterparts of the `retired` functions it
-/// reaches and pinning the build's helper release; `None` when it reaches
-/// none.
+/// `document` adopted onto the counterparts of the `retired` functions it
+/// reaches; `None` when it reaches none. With a run `parked` under it, the
+/// adoption is refused: no migrator carries a parked run's pages.
 /// `functions` is the build's library, the retired functions and their
 /// counterparts among them.
 ///
@@ -132,10 +124,9 @@ pub fn retired_functions_reached(
 /// The typed refusal of a document or run that is not adopted.
 pub fn plan_helper_adoption(
     document: &Document,
-    parked: Option<(&WholeState, &[AdmittedWait])>,
+    parked: bool,
     functions: &FunctionRegistry,
     retired: &RetiredHelpers,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
     let reached = retired_functions_reached(
@@ -158,27 +149,32 @@ pub fn plan_helper_adoption(
         };
         replacements.insert(function, counterpart);
     }
-    plan_carry(document, parked, functions, &replacements, limits).map(Some)
+    plan_carry(document, parked, functions, &replacements).map(Some)
 }
 
-/// `document`, and `parked`, a run of it with the admission of each wait it
-/// holds, carried onto `replacements`: each library function it names
-/// replaced by its counterpart, and the run pinning the build's helper
-/// release. `functions` holds every function the document reaches and
-/// every replacement.
+/// `document` carried onto `replacements`: each library function it names
+/// replaced by its counterpart. `functions` holds every function the
+/// document reaches and every replacement. A run `parked` under the
+/// document is refused, typed: its pages stay as they are, and it resumes
+/// only on a build that retains what it pins.
 ///
 /// # Errors
 ///
 /// The typed refusal of a document or run that is not carried.
 pub fn plan_carry(
     document: &Document,
-    parked: Option<(&WholeState, &[AdmittedWait])>,
+    parked: bool,
     functions: &FunctionRegistry,
     replacements: &BTreeMap<FunctionId, FunctionId>,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<AdoptedRun, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
     let from = document.identity().map_err(|error| state(error.message))?;
+    if parked {
+        return Err(HelperAdoptionRefusal::Parked {
+            document: from,
+            refusal: parked_not_carried(),
+        });
+    }
     let rewritten = lash_kernel_migrate::adopt(document, replacements, functions, &BTreeMap::new())
         .map_err(|refusal| state(refusal.to_string()))?;
     validate_document(&rewritten.document, functions).map_err(|invalid| {
@@ -187,87 +183,17 @@ pub fn plan_carry(
             reason: invalid.to_string(),
         }
     })?;
-    let parked = parked
-        .map(|(parked, admitted)| {
-            adopt_run(
-                parked,
-                admitted,
-                document,
-                from,
-                &rewritten,
-                replacements,
-                limits,
-            )
-        })
-        .transpose()?;
-    Ok(AdoptedRun {
-        from,
-        rewritten,
-        parked,
-    })
+    Ok(AdoptedRun { from, rewritten })
 }
 
-/// The release an explicit successor pair selects within the pinned
-/// dialect's line. A kernel-format carry never calls this selector.
-fn current_release(pinned: &ChildRef) -> Result<ChildRef, String> {
-    let releases = lash_vm_broker::kernel::state::release_manifests()
-        .map_err(|failure| failure.to_string())?;
-    releases
-        .manifests
-        .dialect_of(pinned)
-        .and_then(|dialect| releases.manifests.current(dialect))
-        .ok_or_else(|| "the run pins a helper release this build does not hold".to_owned())
-}
-
-/// `parked`, a run of `base`, carried onto `rewritten` under its own kernel
-/// version and owner, pinning the build's helper release.
-fn adopt_run(
-    parked: &WholeState,
-    admitted: &[AdmittedWait],
-    base: &Document,
-    from: DocumentId,
-    rewritten: &Rewritten,
-    replacements: &BTreeMap<FunctionId, FunctionId>,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
-) -> Result<WholeState, HelperAdoptionRefusal> {
-    let state = |message: String| HelperAdoptionRefusal::State { message };
-    let version = KernelVersion::of(parked.kernel).ok_or_else(|| {
-        state(format!(
-            "kernel version {} is not interpreted",
-            parked.kernel
-        ))
-    })?;
-    let opened = super::migrate::open_run(parked, admitted, base, limits).map_err(state)?;
-    let carried =
-        lash_kernel_migrate::carry(&opened.run, base, rewritten, version).map_err(|refusal| {
-            let inside = match &refusal {
-                ParkedRefusal::SiteNotCarried { site, .. } => match &site.unit {
-                    Unit::Library(function) if replacements.contains_key(function) => {
-                        Some((*function, site.clone()))
-                    }
-                    _ => None,
-                },
-                _ => None,
-            };
-            match inside {
-                Some((function, site)) => {
-                    HelperAdoptionRefusal::ParkedInsideChanged { function, site }
-                }
-                None => HelperAdoptionRefusal::Parked {
-                    document: from,
-                    refusal,
-                },
-            }
-        })?;
-    capture_whole(
-        &OpenedRun {
-            run: carried,
-            release: current_release(&opened.release).map_err(state)?,
-            binding: opened.binding,
-        },
-        u64::MAX,
-    )
-    .map_err(|failure| state(failure.to_string()))
+/// Why a parked run is not carried onto another document: no migrator
+/// this build ships carries its heap pages (FIG-6193).
+pub(crate) fn parked_not_carried() -> ParkedRefusal {
+    ParkedRefusal::StateNotCarried {
+        detail: "a parked run's heap pages are carried by no migrator this build ships; \
+                 it stays parked and resumes on a build that retains what it pins"
+            .to_owned(),
+    }
 }
 
 /// A kernel process that pins a function of a helper release a build stops
@@ -364,35 +290,8 @@ pub async fn survey_helper_processes(
             if reached.is_empty() {
                 continue;
             }
-            let parked = decoded.as_ref().and_then(|state| {
-                let admitted: Vec<AdmittedWait> = state
-                    .admissions
-                    .values()
-                    .map(|admission| admission.0.clone())
-                    .collect();
-                Some((super::migrate::unsealed(state.parked.as_ref()?), admitted))
-            });
-            let refused = match &parked {
-                Some((Err(message), _)) => Some(HelperAdoptionRefusal::State {
-                    message: message.clone(),
-                }),
-                Some((Ok(whole), admitted)) => plan_helper_adoption(
-                    &document,
-                    Some((whole, admitted)),
-                    functions,
-                    retired,
-                    backend.config().settings().graph_reads.execution(),
-                )
-                .err(),
-                None => plan_helper_adoption(
-                    &document,
-                    None,
-                    functions,
-                    retired,
-                    backend.config().settings().graph_reads.execution(),
-                )
-                .err(),
-            };
+            let parked = decoded.as_ref().is_some_and(|state| state.parked.is_some());
+            let refused = plan_helper_adoption(&document, parked, functions, retired).err();
             dependents.push(HelperDependentProcess {
                 process: record.id,
                 functions: reached,

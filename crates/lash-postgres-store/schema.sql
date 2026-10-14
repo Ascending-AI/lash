@@ -1151,6 +1151,44 @@ CREATE TABLE IF NOT EXISTS lash_graph_release_pins (
 CREATE INDEX IF NOT EXISTS idx_lash_graph_release_pins_root_ref
     ON lash_graph_release_pins (root_ref);
 
+-- An activation's lease on the exact committed root it reads on demand
+-- (FIG-6191, D-LEASE): a root of the catalog until released or reaped,
+-- though reads and renewals past its expiry are refused.
+CREATE TABLE IF NOT EXISTS lash_root_leases (
+    lease_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    owner_key BYTEA NOT NULL,
+    root_ref TEXT NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    actor_key TEXT COLLATE "C" NOT NULL,
+    epoch BIGINT NOT NULL,
+    ttl_ms BIGINT NOT NULL CONSTRAINT ck_root_leases_ttl CHECK (ttl_ms > 0),
+    expires_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_root_leases_root_ref ON lash_root_leases (root_ref);
+CREATE INDEX IF NOT EXISTS idx_lash_root_leases_expiry ON lash_root_leases (expires_at_ms, lease_id);
+
+-- The durable retirement frontier (FIG-6191, D-RET): a retired root, or a
+-- node under one a bounded step has not peeled yet. A root of the catalog
+-- until its step removes it; a hold without `closure` peels the node alone.
+CREATE TABLE IF NOT EXISTS lash_retirement_holds (
+    root_ref TEXT PRIMARY KEY REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    closure BOOLEAN NOT NULL,
+    queued_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_retirement_holds_queue
+    ON lash_retirement_holds (queued_at_ms, root_ref);
+
+-- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
+-- that certified the pages it changed, written with the root. Not a root
+-- owner: it goes with its root.
+CREATE TABLE IF NOT EXISTS lash_semantic_admissions (
+    root_ref TEXT PRIMARY KEY REFERENCES lash_blobs(hash) ON DELETE CASCADE,
+    kernel BIGINT NOT NULL,
+    page_format BIGINT NOT NULL,
+    validator TEXT NOT NULL,
+    commit_id BYTEA NOT NULL
+        CONSTRAINT ck_semantic_admissions_commit_id CHECK (octet_length(commit_id) = 32)
+);
+
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     SELECT 'exec' AS source, root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
@@ -1172,7 +1210,9 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     UNION ALL SELECT 'revision_config', config_ref FROM lash_session_revisions
     UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM lash_session_runs
         WHERE terminal_window_config_ref IS NOT NULL
-    UNION ALL SELECT 'answer', answer_ref FROM lash_turn_phases WHERE answer_ref IS NOT NULL;
+    UNION ALL SELECT 'answer', answer_ref FROM lash_turn_phases WHERE answer_ref IS NOT NULL
+    UNION ALL SELECT 'lease', root_ref FROM lash_root_leases
+    UNION ALL SELECT 'retirement', root_ref FROM lash_retirement_holds;
 
 -- One-call owner commits (FIG-5936): each call's answer, recorded under its
 -- token as the call's last write. A call whose answer was lost is reconciled
@@ -1227,8 +1267,6 @@ DECLARE
     v_state TEXT := 'owned';
     v_retired TEXT[] := '{}';
     v_phase_ends TEXT[] := '{}';
-    v_frontier TEXT[];
-    v_locked TEXT[];
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{}';
@@ -2442,55 +2480,24 @@ BEGIN
             v_wakes := '{}';
         END IF;
     END LOOP;
-    -- Peel what the steps retired: each level deletes what no root names
-    -- and no edge reaches, skipping what another transaction holds
-    -- (FIG-5949). An ended turn's PhaseRoot is peeled alone.
-    v_frontier := ARRAY(SELECT DISTINCT unnest(v_retired));
-    WHILE cardinality(v_frontier) > 0 LOOP
-        SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_frontier)::text[])
-             ORDER BY hash FOR UPDATE SKIP LOCKED)
-        INTO v_locked;
-        EXIT WHEN cardinality(v_locked) = 0;
-        WITH dead AS (
-                 DELETE FROM lash_blobs AS candidate
-                 WHERE candidate.hash = ANY((v_locked)::text[])
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_graph_root_catalog AS root
-                       WHERE root.root_ref = candidate.hash
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidate.hash
-                   )
-                 RETURNING candidate.hash
-             )
-             SELECT (SELECT count(*) FROM dead),
-                 ARRAY(SELECT DISTINCT edge.child_hash
-                     FROM dead JOIN lash_blob_edges AS edge ON edge.parent_hash = dead.hash)
-        INTO v_rows, v_frontier;
-    END LOOP;
-    v_frontier := ARRAY(SELECT DISTINCT unnest(v_phase_ends));
-    IF cardinality(v_frontier) > 0 THEN
-        SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_frontier)::text[])
-             ORDER BY hash FOR UPDATE SKIP LOCKED)
-        INTO v_locked;
-        IF cardinality(v_locked) > 0 THEN
-            WITH dead AS (
-                 DELETE FROM lash_blobs AS candidate
-                 WHERE candidate.hash = ANY((v_locked)::text[])
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_graph_root_catalog AS root
-                       WHERE root.root_ref = candidate.hash
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidate.hash
-                   )
-                 RETURNING candidate.hash
-             )
-             SELECT (SELECT count(*) FROM dead),
-                 ARRAY(SELECT DISTINCT edge.child_hash
-                     FROM dead JOIN lash_blob_edges AS edge ON edge.parent_hash = dead.hash)
-            INTO v_rows, v_frontier;
-        END IF;
+    -- Hold what the steps retired for the bounded retirement steps
+    -- (FIG-6191, D-RET): each retired root's closure, and an ended turn's
+    -- PhaseRoot alone.
+    IF cardinality(v_retired) > 0 THEN
+        INSERT INTO lash_retirement_holds AS held (root_ref, closure, queued_at_ms)
+             SELECT node.hash, (TRUE)::boolean, (v_now)::bigint
+             FROM (SELECT hash FROM lash_blobs WHERE hash = ANY((v_retired)::text[])
+                   ORDER BY hash FOR KEY SHARE) AS node
+             ORDER BY node.hash
+             ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure;
+    END IF;
+    IF cardinality(v_phase_ends) > 0 THEN
+        INSERT INTO lash_retirement_holds AS held (root_ref, closure, queued_at_ms)
+             SELECT node.hash, (FALSE)::boolean, (v_now)::bigint
+             FROM (SELECT hash FROM lash_blobs WHERE hash = ANY((v_phase_ends)::text[])
+                   ORDER BY hash FOR KEY SHARE) AS node
+             ORDER BY node.hash
+             ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure;
     END IF;
     IF p_formats IS NOT NULL THEN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);

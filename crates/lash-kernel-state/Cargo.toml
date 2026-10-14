@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "The lash kernel's parked run: its schema in the document's terms and its encoding as one fragment per root."
+description = "The lash kernel's paged semantic heap and persistent execution records."
 keywords = ["lash", "kernel", "workflow", "state"]
 categories = ["data-structures", "encoding"]
 publish = false
@@ -33,7 +33,3 @@ serde = { workspace = true, features = ["derive", "rc"] }
 # `K-VAL-034`, and each level is two of JSON's).
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 thiserror = { workspace = true }
-
-[[bin]]
-name = "parked_schema_generator"
-path = "src/bin/parked_schema_generator.rs"

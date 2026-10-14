@@ -1032,11 +1032,13 @@ pub enum RoundFact {
     /// 5: the round's presentation, in admitted order.
     Present,
     /// 6: the attempt started at `start` settled the call, with the plugin
-    /// state its completion resolved (as a tree).
+    /// state its completion resolved (as a tree) and the CheckpointRoot of
+    /// the heap pages it published, which the fact owns (FIG-6193).
     Outcome {
         start: u64,
         output: SettledFact,
         state: Vec<lash_core_store::tool_run::StateResolution>,
+        pages: Option<NodeId>,
     },
     /// 7: a cell's report: a reference to its ReportView over the
     /// original outcomes, never a re-admission or a re-settlement.
@@ -1098,6 +1100,12 @@ impl RoundFact {
                 if let Some(material) = &output.material {
                     decoder.child_kind(id, material.node(), &[material.kind()])?;
                 }
+                if let Self::Outcome {
+                    pages: Some(pages), ..
+                } = &fact
+                {
+                    decoder.child_kind(id, *pages, &[NodeKind::CHECKPOINT_ROOT])?;
+                }
             }
             Self::CellReport { report } => {
                 decoder.child_kind(id, *report, &[NodeKind::REPORT_VIEW])?;
@@ -1154,11 +1162,13 @@ impl TokenCodec for RoundFact {
                 start,
                 output,
                 state,
+                pages,
             } => {
-                out.sum(variant, 3);
+                out.sum(variant, 4);
                 out.unsigned(*start);
                 output.encode(out);
                 encode_tree(state, out);
+                pages.encode(out);
             }
             Self::CellReport { report } => {
                 out.sum(variant, 1);
@@ -1217,11 +1227,12 @@ impl TokenCodec for RoundFact {
                 Self::Present
             }
             RunFactKind::XOutcome => {
-                expect(3)?;
+                expect(4)?;
                 Self::Outcome {
                     start: input.unsigned()?,
                     output: SettledFact::decode(input)?,
                     state: decode_tree(input)?,
+                    pages: Option::decode(input)?,
                 }
             }
             RunFactKind::CellReport => {

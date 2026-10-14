@@ -50,6 +50,7 @@ fn state(version: u32, bytes: Vec<u8>) -> EngineState {
             version,
         },
         bytes,
+        pages: None,
     }
 }
 

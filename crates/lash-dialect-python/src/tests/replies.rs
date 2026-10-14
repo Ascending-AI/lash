@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 
 use lash_kernel_doc::{Datum, NumberToken};
-use lash_kernel_vm::{Bindings, End, Outcome, Request};
+use lash_kernel_vm::{End, Outcome, Request};
 
 use super::machine;
 
@@ -39,7 +39,7 @@ fn printed(source: &str, replies: &[(&str, Datum)]) -> Vec<String> {
     let (last, end) = machine::drive(
         source,
         machine::effects(),
-        Bindings::default(),
+        super::pages::Session::default(),
         |logged, park, text| {
             lines.extend(logged);
             pending.extend(park.requests);

@@ -220,6 +220,7 @@ impl ProcessEngine for SimProcessEngine {
             EngineState {
                 format: self.state_format(),
                 bytes,
+                pages: None,
             },
             action,
         ))

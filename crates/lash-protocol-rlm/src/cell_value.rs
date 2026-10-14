@@ -1,11 +1,11 @@
 //! Kernel values as the JSON a host reads, and host JSON as kernel values.
 //!
 //! A cell's values leave the run as [`Datum`] trees (a print, a finish
-//! value, a tool argument) or stay in the session as [`Value`]s over a heap
-//! of [`Object`]s. Hosts, history and prompts read JSON. Two readings exist
-//! and they differ on purpose:
+//! value, a tool argument, a session binding a host reads); the session
+//! keeps them on its heap's pages. Hosts, history and prompts read JSON.
+//! Two readings exist and they differ on purpose:
 //!
-//! - [`datum_json`] and [`binding_json`] are total: every kernel value has a
+//! - [`datum_json`] is total: every kernel value has a
 //!   JSON reading, so a print never fails for what it prints. A kind JSON
 //!   has no spelling for is read as a record that names its kind under
 //!   [`KIND_KEY`]. These readings are typed facts for hosts and renderers;
@@ -14,12 +14,10 @@
 //!   (`lash_vm_broker::kernel::datum_to_json`), which refuses what JSON
 //!   cannot carry.
 //!
-//! [`bind_json`] goes the other way, for values a host seeds a session
-//! with: each array and object becomes a fresh heap object.
+//! [`json_datum`] goes the other way, for values a host seeds a session
+//! with.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use lash_kernel_doc::{Datum, Float, Integer, NumberPolicy, Object, ObjectId, Value};
+use lash_kernel_doc::{Datum, Float, Integer, NumberPolicy};
 use serde_json::{Map, Number, Value as Json};
 
 /// The field that names the kind of a value JSON has no spelling for.
@@ -217,130 +215,13 @@ pub(crate) fn datum_json(value: &Datum) -> Json {
     }
 }
 
-/// A session binding as JSON, read through the session's heap. An object
-/// met again on the path that reached it is a cycle, read as the kind
-/// `cycle`; a shared object that is no cycle is read at each place it
-/// appears. Total: see the module docs.
-pub(crate) fn binding_json(value: &Value, objects: &BTreeMap<ObjectId, Object>) -> Json {
-    binding_json_on(value, objects, &mut BTreeSet::new())
-}
-
-fn binding_json_on(
-    value: &Value,
-    objects: &BTreeMap<ObjectId, Object>,
-    path: &mut BTreeSet<ObjectId>,
-) -> Json {
-    let object = |id: &ObjectId, path: &mut BTreeSet<ObjectId>| -> Json {
-        if !path.insert(*id) {
-            return kinded("cycle", []);
-        }
-        let json = match objects.get(id) {
-            Some(Object::List(items)) => Json::Array(
-                items
-                    .iter()
-                    .map(|item| binding_json_on(item, objects, path))
-                    .collect(),
-            ),
-            Some(Object::Set(members)) => {
-                let members = members
-                    .iter()
-                    .map(|member| binding_json_on(member, objects, path))
-                    .collect();
-                kinded("set", [("members", Json::Array(members))])
-            }
-            Some(Object::Record(fields)) => Json::Object(
-                fields
-                    .iter()
-                    .map(|(name, value)| (name.clone(), binding_json_on(value, objects, path)))
-                    .collect(),
-            ),
-            Some(Object::Map(entries)) => {
-                let read: Vec<(Json, Json, Option<String>)> = entries
-                    .iter()
-                    .map(|(key, value)| {
-                        let text = match key {
-                            Value::Text(text) => Some(text.to_string()),
-                            _ => None,
-                        };
-                        (
-                            binding_json_on(key, objects, path),
-                            binding_json_on(value, objects, path),
-                            text,
-                        )
-                    })
-                    .collect();
-                entries_json(
-                    read.into_iter()
-                        .map(|(key, value, text)| ((key, text), value)),
-                    |(_, text)| text.clone(),
-                    |(key, _)| key.clone(),
-                    Json::clone,
-                )
-            }
-            // A session binding never reaches these (`K-SES-003`).
-            Some(Object::Closure(_)) => kinded("closure", []),
-            Some(Object::Variable(value)) => binding_json_on(value, objects, path),
-            None => Json::Null,
-        };
-        path.remove(id);
-        json
-    };
-    match value {
-        Value::Null | Value::Absent => Json::Null,
-        Value::Bool(value) => Json::Bool(*value),
-        Value::Int(value) => integer_json(value),
-        Value::Float(value) => float_json(*value),
-        Value::Text(text) => Json::String(text.to_string()),
-        Value::Bytes(bytes) => kinded(
-            "bytes",
-            [("hex", serde_json::to_value(bytes).unwrap_or(Json::Null))],
-        ),
-        Value::Timestamp(at) => kinded(
-            "timestamp",
-            [("nanoseconds", Json::String(at.nanoseconds.to_string()))],
-        ),
-        Value::Tuple(items) => Json::Array(
-            items
-                .iter()
-                .map(|item| binding_json_on(item, objects, path))
-                .collect(),
-        ),
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => object(id, path),
-        Value::Closure(_) => kinded("closure", []),
-        Value::Error(error) => kinded(
-            "error",
-            [
-                ("kind", Json::String(error.kind.clone())),
-                ("message", Json::String(error.message.clone())),
-                ("data", binding_json_on(&error.data, objects, path)),
-            ],
-        ),
-        Value::Task(_) => kinded("task", []),
-        Value::Function(name) => kinded("function", [("name", Json::String(name.to_string()))]),
-        Value::Handle(handle) => kinded(
-            "handle",
-            [
-                ("handle", Json::String(handle.kind.clone())),
-                ("id", Json::String(handle.id.clone())),
-            ],
-        ),
-        Value::Ref(_) => kinded("ref", []),
-    }
-}
-
-/// A host's JSON as a kernel value: an array is a fresh list and an object
-/// a fresh record, each allocated by `allocate` and written to `objects`.
-/// A number is decoded by `numbers`, the session dialect's policy for a
-/// bare number (`K-EFF-005`).
-pub(crate) fn bind_json(
-    json: &Json,
-    numbers: NumberPolicy,
-    allocate: &mut dyn FnMut() -> ObjectId,
-    objects: &mut BTreeMap<ObjectId, Object>,
-) -> Value {
+/// A host's JSON as data a session binds: an array is a list and an object
+/// a record. A number is decoded by `numbers`, the session dialect's policy
+/// for a bare number (`K-EFF-005`).
+pub(crate) fn json_datum(json: &Json, numbers: NumberPolicy) -> Datum {
     match json {
-        Json::Null => Value::Null,
-        Json::Bool(value) => Value::Bool(*value),
+        Json::Null => Datum::Null,
+        Json::Bool(value) => Datum::Bool(*value),
         Json::Number(number) => {
             let integer = match numbers {
                 NumberPolicy::Float => None,
@@ -350,29 +231,20 @@ pub(crate) fn bind_json(
                     .or_else(|| number.as_u64().map(Integer::new)),
             };
             match integer {
-                Some(integer) => Value::Int(integer),
-                None => Value::Float(Float::new(number.as_f64().unwrap_or(f64::NAN))),
+                Some(integer) => Datum::Int(integer),
+                None => Datum::Float(Float::new(number.as_f64().unwrap_or(f64::NAN))),
             }
         }
-        Json::String(text) => Value::text(text.as_str()),
+        Json::String(text) => Datum::Text(text.clone()),
         Json::Array(items) => {
-            let id = allocate();
-            let items = items
-                .iter()
-                .map(|item| bind_json(item, numbers, allocate, objects))
-                .collect();
-            objects.insert(id, Object::List(items));
-            Value::List(id)
+            Datum::List(items.iter().map(|item| json_datum(item, numbers)).collect())
         }
-        Json::Object(fields) => {
-            let id = allocate();
-            let fields = fields
+        Json::Object(fields) => Datum::Record(
+            fields
                 .iter()
-                .map(|(name, value)| (name.clone(), bind_json(value, numbers, allocate, objects)))
-                .collect();
-            objects.insert(id, Object::Record(fields));
-            Value::Record(id)
-        }
+                .map(|(name, value)| (name.clone(), json_datum(value, numbers)))
+                .collect(),
+        ),
     }
 }
 
@@ -408,30 +280,11 @@ mod tests {
         );
     }
 
-    /// A seeded value reads back as the JSON it was seeded from, and a
-    /// cycle in a session's heap is read as one rather than followed.
+    /// A seeded value reads back as the JSON it was seeded from.
     #[test]
-    fn seeded_json_reads_back_and_a_cycle_ends() {
-        let mut objects = BTreeMap::new();
-        let mut next = 0;
-        let mut allocate = || {
-            next += 1;
-            ObjectId(next)
-        };
+    fn seeded_json_reads_back() {
         let seeded = serde_json::json!({"rows": [1, 2.5, "x"], "ok": true});
-        let value = bind_json(
-            &seeded,
-            NumberPolicy::BySpelling,
-            &mut allocate,
-            &mut objects,
-        );
-        assert_eq!(binding_json(&value, &objects), seeded);
-
-        let id = ObjectId(99);
-        objects.insert(id, Object::List(vec![Value::List(id)]));
-        assert_eq!(
-            binding_json(&Value::List(id), &objects),
-            serde_json::json!([{"$kind": "cycle"}])
-        );
+        let datum = json_datum(&seeded, NumberPolicy::BySpelling);
+        assert_eq!(datum_json(&datum), seeded);
     }
 }

@@ -30,7 +30,6 @@
 //! `lash-kernel-edit` and `lash-kernel-state`, and on no other lash crate.
 
 mod adopt;
-mod carry;
 mod migration;
 mod rewrite;
 mod saved;
@@ -38,7 +37,6 @@ mod saved;
 mod synthetic;
 
 pub use adopt::adopt;
-pub use carry::carry;
 pub use lash_kernel_edit::{Correspondence, Survivor};
 pub use migration::{
     DocumentRefusal, MigrateRegistryError, Migration, ParkedRefusal, Rewritten, migrate_registry,

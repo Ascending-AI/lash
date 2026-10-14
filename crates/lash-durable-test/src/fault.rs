@@ -11,6 +11,10 @@
 use crate::clock::{SimClock, settle};
 use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
+use lash_durable::domain::pages::{
+    CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, SemanticAdmission, StoredPage,
+};
 use lash_durable::domain::{
     AdmittedId, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner,
     RunFactKind, RunFactWrite, RunFacts, ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
@@ -216,6 +220,7 @@ pub(crate) type Wakes = Arc<dyn Fn(&MailCommit) + Send + Sync>;
 
 /// One node's store: the deployment's database under the deployment's
 /// fault script.
+#[derive(Clone)]
 pub struct FaultStore {
     inner: Arc<dyn DurableStore>,
     node: Arc<str>,
@@ -238,6 +243,7 @@ impl Effect for HeartbeatOutcome {}
 impl Effect for ActorCommit {}
 
 impl Effect for MailCommit {}
+impl Effect for lash_durable::domain::pages::CandidateReceipt {}
 impl Effect for () {}
 
 impl Effect for Vec<Reaped> {
@@ -425,10 +431,183 @@ impl FaultStore {
 
 fn keep<T>(_: &mut T) {}
 
+impl FaultStore {
+    /// One owner commit of `tx` under `label`, sent by `send`, under the
+    /// script: observed, refused, cut and answered as every fenced commit
+    /// is. `receipt` is the actor commit its answer holds.
+    async fn owner_commit<T, F>(
+        &self,
+        tx: ActorTx,
+        label: CommitLabel,
+        send: impl FnOnce(Arc<dyn DurableStore>, ActorTx) -> F + Send + 'static,
+        receipt: fn(&T) -> &ActorCommit,
+    ) -> Result<T, DurableError>
+    where
+        T: Effect + Send + 'static,
+        F: Future<Output = Result<T, DurableError>> + Send + 'static,
+    {
+        let actor = tx.actor().clone();
+        self.script.observe(label, &tx);
+        let refusal = self.script.refusal(label, tx.domain());
+        let starts = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::RunFact(RunFactWrite::Append {
+                    owner,
+                    run,
+                    ordinal,
+                    kind: RunFactKind::XStart,
+                    ..
+                }) => Some(AdmittedId {
+                    owner: owner.clone(),
+                    run: *run,
+                    ordinal: *ordinal,
+                }),
+                _ => None,
+            })
+            .collect();
+        let observer = self.script.actor_receipt.lock_recover().clone();
+        let observed = observer.as_ref().map(|_| tx.clone());
+        let answer = self
+            .write_carrying(
+                WriteKind::Actor,
+                label,
+                Some(&actor),
+                starts,
+                self.call(|store| async move {
+                    if let Some(refusal) = refusal {
+                        Err(DurableError::Domain(refusal))
+                    } else {
+                        let answer = send(store, tx).await;
+                        if let (Some(observer), Some(observed), Ok(answer)) =
+                            (&observer, &observed, &answer)
+                        {
+                            observer(label, observed, receipt(answer));
+                        }
+                        answer
+                    }
+                }),
+                keep,
+            )
+            .await;
+        let observer = self.script.actor_reply.lock_recover().clone();
+        if let Some(observer) = observer {
+            let reply = answer
+                .as_ref()
+                .map(|answer| receipt(answer).clone())
+                .map_err(Clone::clone);
+            observer(label, &actor, &reply);
+        }
+        answer
+    }
+
+    fn page_store(&self) -> Result<Arc<dyn PageStore>, DurableError> {
+        self.inner.pages().ok_or_else(|| {
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                message: "the deployment's store publishes no heap pages".to_owned(),
+            })
+        })
+    }
+}
+
+/// Page publication on a node: leases, reads and retirement are reads a
+/// paused or dead node makes none of; a candidate's publication is an owner
+/// commit under the script, cut and answered as any other.
+#[async_trait::async_trait]
+impl PageStore for FaultStore {
+    async fn acquire_root_lease(
+        &self,
+        request: RootLeaseRequest,
+    ) -> Result<RootLease, DurableError> {
+        let pages = self.page_store()?;
+        self.read(async move { pages.acquire_root_lease(request).await })
+            .await
+    }
+
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+        let pages = self.page_store()?;
+        self.read(pages.renew_root_lease(lease)).await
+    }
+
+    async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
+        let pages = self.page_store()?;
+        self.read(pages.release_root_lease(lease)).await
+    }
+
+    async fn read_pages(
+        &self,
+        lease: &RootLease,
+        pages: &[lash_core_store::checkpoint_graph::NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        let store = self.page_store()?;
+        self.read(store.read_pages(lease, pages)).await
+    }
+
+    async fn commit_candidate(
+        &self,
+        tx: ActorTx,
+        candidate: CandidatePublication,
+        label: CommitLabel,
+    ) -> Result<CandidateReceipt, DurableError> {
+        let pages = self.page_store()?;
+        self.owner_commit(
+            tx,
+            label,
+            move |_, tx| async move { pages.commit_candidate(tx, candidate, label).await },
+            |receipt: &CandidateReceipt| &receipt.actor,
+        )
+        .await
+    }
+
+    async fn admission(
+        &self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+    ) -> Result<Option<SemanticAdmission>, DurableError> {
+        let pages = self.page_store()?;
+        self.read(pages.admission(root)).await
+    }
+
+    async fn candidate_state(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<
+        Option<(
+            lash_core_store::checkpoint_graph::NodeId,
+            lash_core_store::checkpoint_graph::CommitId,
+        )>,
+        DurableError,
+    > {
+        let pages = self.page_store()?;
+        self.read(pages.candidate_state(exec)).await
+    }
+
+    async fn retire_step(
+        &self,
+        budget: RetirementBudget,
+    ) -> Result<RetirementProgress, DurableError> {
+        let pages = self.page_store()?;
+        self.read(pages.retire_step(budget)).await
+    }
+
+    async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError> {
+        let pages = self.page_store()?;
+        self.read(pages.retirement_backlog()).await
+    }
+}
+
 #[async_trait::async_trait]
 impl DurableStore for FaultStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.read(self.inner.now()).await
+    }
+
+    /// The deployment's page publication under this node's script: a
+    /// candidate commits through the fault path every owner commit takes.
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
+        self.inner.pages()?;
+        Some(Arc::new(self.clone()))
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -560,56 +739,13 @@ impl DurableStore for FaultStore {
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
-        let actor = tx.actor().clone();
-        self.script.observe(label, &tx);
-        let refusal = self.script.refusal(label, tx.domain());
-        let starts = tx
-            .domain()
-            .iter()
-            .filter_map(|write| match write {
-                DomainWrite::RunFact(RunFactWrite::Append {
-                    owner,
-                    run,
-                    ordinal,
-                    kind: RunFactKind::XStart,
-                    ..
-                }) => Some(AdmittedId {
-                    owner: owner.clone(),
-                    run: *run,
-                    ordinal: *ordinal,
-                }),
-                _ => None,
-            })
-            .collect();
-        let observer = self.script.actor_receipt.lock_recover().clone();
-        let observed = observer.as_ref().map(|_| tx.clone());
-        let answer = self
-            .write_carrying(
-                WriteKind::Actor,
-                label,
-                Some(&actor),
-                starts,
-                self.call(|store| async move {
-                    if let Some(refusal) = refusal {
-                        Err(DurableError::Domain(refusal))
-                    } else {
-                        let answer = store.commit(tx, label).await;
-                        if let (Some(observer), Some(observed), Ok(receipt)) =
-                            (&observer, &observed, &answer)
-                        {
-                            observer(label, observed, receipt);
-                        }
-                        answer
-                    }
-                }),
-                keep,
-            )
-            .await;
-        let observer = self.script.actor_reply.lock_recover().clone();
-        if let Some(observer) = observer {
-            observer(label, &actor, &answer);
-        }
-        answer
+        self.owner_commit(
+            tx,
+            label,
+            move |store, tx| async move { store.commit(tx, label).await },
+            |commit| commit,
+        )
+        .await
     }
 
     async fn commit_mail(

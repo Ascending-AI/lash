@@ -42,6 +42,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The model response that asked for the cell the turn runs next, held
     /// for the cell's first save (FIG-6000), until that cell runs.
     pub(super) held_response: Option<crate::HeldResponse>,
+    /// Where the session's committed execution state stands on the
+    /// persistent heap: the head this turn started from, then the working
+    /// state its last committed cell left (FIG-6193).
+    pub(super) session_pages: Option<crate::plugin::SessionPages>,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,

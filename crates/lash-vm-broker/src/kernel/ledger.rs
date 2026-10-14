@@ -281,28 +281,9 @@ impl EffectLedger {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use lash_kernel_doc::{Datum, Site, TaskIdentity, Unit};
-    use lash_kernel_vm::{End, RunError};
+    use lash_kernel_doc::{Site, TaskIdentity, Unit};
 
     use super::*;
-
-    /// `K-ERR-003`, ADR 0132 §8: restoring a recorded end returns the
-    /// original thrown value, including a value that is not an error: the
-    /// end's TerminalWhole reads back as the end it records.
-    #[test]
-    fn a_recorded_uncaught_end_keeps_the_thrown_value() {
-        let end = End::Error(RunError::Uncaught(Datum::Int(7.into())));
-        let state = crate::kernel::state::export_end_state(&end, 1, u64::MAX)
-            .expect("an uncaught end stages")
-            .expect("an uncaught end is recorded");
-        let restored = crate::kernel::state::read_end_in(
-            &state.nodes,
-            state.root,
-            lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
-        )
-        .expect("the end reads back");
-        assert_eq!(restored, end);
-    }
 
     fn identity(occurrence: u64) -> EffectIdentity {
         EffectIdentity {

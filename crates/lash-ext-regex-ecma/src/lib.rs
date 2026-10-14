@@ -43,6 +43,8 @@ mod pattern;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod testsupport;
 
 use std::sync::Arc;
 

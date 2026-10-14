@@ -42,6 +42,8 @@ static SQL_RECEIPTS_ENABLED: AtomicBool = AtomicBool::new(false);
 static SQL_ROWS_READ: AtomicU64 = AtomicU64::new(0);
 static SQL_ROWS_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static STORE_PAGES_WRITTEN: AtomicU64 = AtomicU64::new(0);
+static SPOOL_BYTES: AtomicU64 = AtomicU64::new(0);
+static RETIREMENT_BATCHES: AtomicU64 = AtomicU64::new(0);
 
 /// Statement text and expanded byte length, without retaining bound values.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +172,10 @@ pub struct Snapshot {
     /// Database pages the store's connections wrote to the WAL (SQLite's
     /// `DBSTATUS_CACHE_WRITE`); bytes are pages times the page size.
     pub store_pages_written: u64,
+    /// Heap page bytes the parent's activations wrote to their spools.
+    pub spool_bytes: u64,
+    /// Retirement steps the store ran, each one bounded transaction.
+    pub retirement_batches: u64,
 }
 
 /// Exclusive process-global runtime-work witness.
@@ -217,6 +223,8 @@ impl Collector {
         SQL_ROWS_READ.store(0, Ordering::Relaxed);
         SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
         STORE_PAGES_WRITTEN.store(0, Ordering::Relaxed);
+        SPOOL_BYTES.store(0, Ordering::Relaxed);
+        RETIREMENT_BATCHES.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -253,6 +261,8 @@ impl Collector {
             sql_rows_read: SQL_ROWS_READ.load(Ordering::Relaxed),
             sql_rows_written: SQL_ROWS_WRITTEN.load(Ordering::Relaxed),
             store_pages_written: STORE_PAGES_WRITTEN.load(Ordering::Relaxed),
+            spool_bytes: SPOOL_BYTES.load(Ordering::Relaxed),
+            retirement_batches: RETIREMENT_BATCHES.load(Ordering::Relaxed),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
                 .map(|verb| {
@@ -351,6 +361,22 @@ pub fn record_sql_writes(rows: u64, pages: u64) {
     }
     SQL_ROWS_WRITTEN.fetch_add(rows, Ordering::Relaxed);
     STORE_PAGES_WRITTEN.fetch_add(pages, Ordering::Relaxed);
+}
+
+/// Record one heap page of `bytes` written to an activation's spool.
+#[inline]
+pub fn record_spool_bytes(bytes: usize) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        SPOOL_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+}
+
+/// Record one retirement step, one bounded transaction.
+#[inline]
+pub fn record_retirement_batch() {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
+        RETIREMENT_BATCHES.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub fn sql_receipts_enabled() -> bool {

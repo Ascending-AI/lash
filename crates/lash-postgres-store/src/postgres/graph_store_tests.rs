@@ -2,7 +2,8 @@
 //! PostgreSQL, each on its own isolated database: PC-ATOMIC, PC-ROOTS with
 //! R-LIVE and R-DEAD, the orphan audit, PC-SIZE, the read, audit and fork
 //! (R-RACE) races, the one-statement hydration and the audit under load;
-//! and what PostgreSQL's graph traffic costs.
+//! the persistent-heap page laws (`lash_durable::laws::pages`); and what
+//! PostgreSQL's graph traffic costs.
 
 // FIG-2971: this file is test code; ambient env access is sanctioned here
 // (the workspace clippy ban targets production library code).
@@ -18,7 +19,9 @@ use lash_core_store::checkpoint_graph::{
     NodeKind, TokenWriter, TypedBody,
 };
 use lash_durable::domain::graph::{HydratedGraph, RootOwner};
+use lash_durable::domain::pages::PageStore;
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier, LockHold, ServerProbe};
+use lash_durable::laws::pages::{self, PageTier};
 use lash_durable::{DurableError, DurableReads as _, DurableStore};
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -30,24 +33,49 @@ struct Tier {
     _storage: crate::PostgresStorage,
     pool: PgPool,
     store: PostgresDurableStore,
+    clock: Arc<TestClock>,
 }
 
 async fn tier() -> Option<Tier> {
     let database_url = crate::postgres_test_support::database_url()?;
     let database = IsolatedDatabase::create(&database_url).await;
-    let storage = crate::testing::connect(database.url())
-        .await
-        .expect("open the isolated store");
     let clock = Arc::new(TestClock::new(1_000_000));
-    let store = storage
-        .durable_store()
-        .with_clock_for_testing(clock.clone());
+    let (storage, store) = open(&database, &clock).await;
     Some(Tier {
         pool: storage.pool().clone(),
         _database: database,
         _storage: storage,
         store,
+        clock,
     })
+}
+
+async fn open(
+    database: &IsolatedDatabase,
+    clock: &Arc<TestClock>,
+) -> (crate::PostgresStorage, PostgresDurableStore) {
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(clock.clone());
+    (storage, store)
+}
+
+/// Runs retirement steps until nothing is held: how many nodes they
+/// deleted.
+async fn settle(store: &PostgresDurableStore) -> Result<u64, DurableError> {
+    let mut deleted = 0;
+    loop {
+        let progress = store
+            .retire_step(lash_durable::domain::pages::RetirementBudget { nodes: 4_096 })
+            .await?;
+        if progress.holds_advanced == 0 && progress.leases_reaped == 0 {
+            return Ok(deleted);
+        }
+        deleted += progress.nodes_deleted;
+    }
 }
 
 fn hex(node: &NodeId) -> String {
@@ -62,6 +90,10 @@ impl GraphTier for Tier {
 
     async fn audit(&self) -> Result<u64, GraphRefusal> {
         self.store.audit_orphans().await
+    }
+
+    async fn retire(&self) -> Result<u64, DurableError> {
+        settle(&self.store).await
     }
 
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
@@ -312,6 +344,125 @@ law!(an_owner_commit_is_admitted_on_its_whole_encoding);
 law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
 law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
+
+#[async_trait::async_trait]
+impl PageTier for Tier {
+    fn pages(&self) -> &dyn PageStore {
+        &self.store
+    }
+
+    async fn stored(&self) -> BTreeSet<NodeId> {
+        GraphTier::blobs(self)
+            .await
+            .iter()
+            .map(|hash| NodeId::from_hex(hash).expect("a stored digest"))
+            .collect()
+    }
+
+    async fn catalog(&self) -> Vec<NodeId> {
+        GraphTier::roots(self)
+            .await
+            .iter()
+            .map(|hash| NodeId::from_hex(hash).expect("a stored root"))
+            .collect()
+    }
+
+    /// Runs past the schema's foreign keys: foreign damage does not ask
+    /// them.
+    async fn drop_blob(&self, node: &NodeId) {
+        let mut tx = self.pool.begin().await.expect("a foreign transaction");
+        sqlx::query("SET LOCAL session_replication_role = replica")
+            .execute(&mut *tx)
+            .await
+            .expect("foreign damage skips the foreign keys");
+        for sql in [
+            "DELETE FROM lash_blob_edges WHERE parent_hash = $1 OR child_hash = $1",
+            "DELETE FROM lash_semantic_admissions WHERE root_ref = $1",
+            "DELETE FROM lash_blobs WHERE hash = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(hex(node))
+                .execute(&mut *tx)
+                .await
+                .expect("a foreign delete");
+        }
+        tx.commit().await.expect("commit the foreign damage");
+    }
+
+    fn advance(&self, millis: u64) {
+        self.clock.advance(millis);
+    }
+
+    fn peak_buffered(&self) -> u64 {
+        PostgresDurableStore::candidate_peak_buffered_for_testing()
+    }
+
+    async fn reopen(&mut self) {
+        let (storage, store) = open(&self._database, &self.clock).await;
+        self.pool = storage.pool().clone();
+        self._storage = storage;
+        self.store = store;
+    }
+
+    fn resident_high_water(&self) -> Option<u64> {
+        // Test tooling: the law reads the platform's own report.
+        #[allow(clippy::disallowed_methods)]
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmHWM:"))
+            .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
+    }
+}
+
+macro_rules! page_law {
+    ($name:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let Some(tier) = tier().await else {
+                eprintln!("skipping {}: database URL is not set", stringify!($name));
+                return;
+            };
+            pages::$name(&tier)
+                .await
+                .unwrap_or_else(|broken| panic!("{broken}"));
+        }
+    };
+}
+
+page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
+page_law!(publication_is_atomic_with_admissions_and_semantic_admission);
+page_law!(a_step_outcome_owns_its_candidate);
+page_law!(a_host_read_never_descends_into_a_heap_page);
+page_law!(a_leased_root_survives_concurrent_retirement);
+page_law!(an_expired_lease_reads_nothing);
+page_law!(the_lost_receipt_resolves_by_commit_identity);
+page_law!(publication_keeps_global_digest_lock_order);
+page_law!(an_ownership_transfer_fences_the_old_activation);
+
+/// D-RET over retired leaves, with a reconnect between steps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retirement_advances_in_bounded_steps_and_reclaims_everything_unowned() {
+    let Some(mut tier) = tier().await else {
+        eprintln!("skipping retirement: database URL is not set");
+        return;
+    };
+    pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(&mut tier, 5_000)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
+
+/// S5/S6: a candidate larger than every buffer installs within them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_large_candidate_installs_within_bounded_buffers() {
+    let Some(tier) = tier().await else {
+        eprintln!("skipping the bounded install: database URL is not set");
+        return;
+    };
+    pages::a_large_candidate_installs_within_bounded_buffers(&tier, 20_000)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
 
 macro_rules! server_law {
     ($name:ident) => {

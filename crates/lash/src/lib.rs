@@ -758,12 +758,11 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        AfterTurnDecisions, CarriedCell, CellCallReferences, CheckpointApplication,
-        CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture,
-        ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceEntry, NamespaceValues,
-        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
-        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
-        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        AfterTurnDecisions, CellCallReferences, CheckpointApplication, CheckpointComponentKey,
+        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
+        HydratedExecutionGraph, NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
+        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
+        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
         RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, StoredCell,
@@ -899,7 +898,8 @@ pub mod plugins {
         CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
         EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
         EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
-        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepCandidate, StepName,
+        StepPages, StepPublication, StepRequest,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{

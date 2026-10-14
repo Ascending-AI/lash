@@ -3,12 +3,9 @@
 //! [`embedder`].
 
 mod bounds;
-mod embedder;
-mod fast;
+mod census;
+pub(crate) mod embedder;
 mod forms;
 mod layout;
-mod observe;
-mod parked;
-mod stream;
+mod paged;
 mod tasks;
-mod whole;

@@ -188,7 +188,7 @@ impl RuntimeDrive {
         driver.reinstall_tool_surface().await?;
         // The session's state after the turn's last consumed cell is
         // installed before any model continuation or cell compiles.
-        restore_working(cx, &driver, &row).await?;
+        restore_working(cx, &mut driver, &row).await?;
         if let Some(crate::Effect::ExecCode { id, .. }) = &pending {
             check_cell_snapshot(cx, &driver, &machine, *id).await?;
         }
@@ -301,30 +301,18 @@ async fn check_cell_snapshot(
     if !cx.carries_sessions().await? {
         return Ok(());
     }
-    let Some(carried) = code_executor
+    code_executor
         .carried_cell_snapshot(&cell)
         .await
         .map_err(runtime)?
-        .map_err(undecodable)?
-    else {
-        return Ok(());
-    };
-    let mut tx = cx.begin().await?;
-    tx.stage(carried.nodes.into_values());
-    for write in carried.writes {
-        tx.write(write);
-    }
-    tx.stamp_formats(cx.backend().formats().session().clone());
-    cx.commit(tx, lash_durable::CommitLabel::CELL_SNAPSHOT)
-        .await?;
-    Ok(())
+        .map_err(undecodable)
 }
 
 /// Install `row`'s working execution state (FIG-5887 §6), if it holds one,
 /// into the session's code executor as the turn's working state.
 async fn restore_working(
     cx: &ActorContext,
-    driver: &RuntimeTurnDriver<'static>,
+    driver: &mut RuntimeTurnDriver<'static>,
     row: &crate::runtime::durable::session::TurnRow,
 ) -> Result<(), TurnError> {
     let Some(root) = row.working else {
@@ -333,35 +321,75 @@ async fn restore_working(
     let Some(code_executor) = driver.session.plugins().code_executor() else {
         return Ok(());
     };
-    let limits = cx.backend().config().settings().graph_reads.owner();
-    let graph = cx
-        .durable_reads()?
-        .hydrate(
-            lash_durable::domain::graph::RootOwner::WorkingExecution {
-                session: row.session.clone(),
-                run: row.run.clone(),
-            },
-            Some(root),
-            limits,
-        )
-        .await?;
+    // The working state is a page of the persistent heap: its executor
+    // reads it, and what it reaches, under a lease on the turn's working
+    // root (FIG-6193); nothing of it is hydrated here.
+    let pages = working_pages(cx, &row.session, &row.run, root);
+    driver.session_pages = pages.clone();
     let undecodable = |reason: String| TurnError::UndecodableState {
         state: ParkedTurnState::ExecutionState,
         reason,
     };
-    let nodes = lash_core_store::checkpoint_graph::closure(&graph, root, &limits)
-        .map_err(|error| undecodable(error.to_string()))?;
+    let Some(read) = pages.as_ref() else {
+        return Err(undecodable(
+            "the store publishes no heap pages for the turn's working state".to_owned(),
+        ));
+    };
+    let lease = read
+        .store
+        .acquire_root_lease(lash_durable::domain::pages::RootLeaseRequest {
+            owner: read.owner.clone(),
+            expected: root,
+            actor: read.actor.clone(),
+            epoch: read.epoch,
+            ttl_millis: 60_000,
+        })
+        .await?;
+    let page = read.store.read_pages(&lease, &[root]).await;
+    let _ = read.store.release_root_lease(lease.id).await;
+    let page = page?
+        .into_iter()
+        .next()
+        .ok_or_else(|| undecodable("the turn's working root was not read".to_owned()))?;
+    let nodes = std::collections::BTreeMap::from([(
+        root,
+        lash_core_store::checkpoint_graph::EncodedNode {
+            id: root,
+            bytes: page.bytes,
+        },
+    )]);
     code_executor
         .restore_execution_graph(
             crate::plugin::ProtocolSessionContext::new(
                 &driver.session_id,
                 driver.session.fleet_format(),
-            ),
+            )
+            .with_session_pages(pages),
             &crate::plugin::HydratedExecutionGraph { root, nodes },
             crate::plugin::ExecutionGraphPurpose::Working,
         )
         .await
         .map_err(|error| undecodable(error.to_string()))
+}
+
+/// Where a turn's working state stands: the turn's working row, at `root`.
+/// None for a store that publishes no heap pages.
+fn working_pages(
+    cx: &ActorContext,
+    session: &crate::SessionId,
+    run: &crate::TurnId,
+    root: lash_core_store::checkpoint_graph::NodeId,
+) -> Option<crate::plugin::SessionPages> {
+    Some(crate::plugin::SessionPages {
+        store: cx.pages().ok()?,
+        actor: cx.actor().clone(),
+        epoch: cx.epoch(),
+        owner: lash_durable::domain::graph::RootOwner::WorkingExecution {
+            session: session.clone(),
+            run: run.clone(),
+        },
+        root,
+    })
 }
 
 /// `exec`'s root, read whole under one protection: its row and every node
@@ -887,6 +915,12 @@ impl TurnDrive for RuntimeDrive {
             return;
         };
         self.working = Some(staged);
+        self.driver.session_pages = working_pages(
+            &self.driver.scoped_effect_controller,
+            &self.driver.session_id,
+            &self.driver.turn_id,
+            staged,
+        );
         if let Some(code_executor) = self.driver.session.plugins().code_executor() {
             code_executor.acknowledge_execution_state_capture().await;
         }

@@ -1,4 +1,8 @@
-//! HEAP-METER: released-worker retained-state work, independent of wall time.
+//! HEAP-METER: released-worker retained-state work, independent of wall
+//! time, and the paged heap's counted laws over it: checkpoint work is flat
+//! in H at a fixed change, a cold continuation is flat in H at a fixed
+//! working set, a length read loads no payload and a cell that touches
+//! nothing loads and seals O(1) pages.
 use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt as _};
 use lash_core::llm::types::{LlmRequest, LlmRole};
@@ -16,11 +20,8 @@ const SCENARIOS: [&str; 6] = [
     "next-cell",
     "worker-resets",
 ];
-const COUNTERS: [&str; 17] = [
+const COUNTERS: [&str; 18] = [
     "vm_steps",
-    "checkpoint_values",
-    "resume_values",
-    "carry_values",
     "encoded_nodes",
     "encoded_bytes",
     "decoded_nodes",
@@ -34,7 +35,17 @@ const COUNTERS: [&str; 17] = [
     "broker_peak_buffer_bytes",
     "serialized_body_bytes",
     "decoded_body_bytes",
+    "pages_loaded",
+    "pages_sealed",
+    "spool_bytes",
+    "retirement_batches",
 ];
+/// Column indices of the counters the laws read.
+const PAGES_LOADED: usize = 14;
+const PAGES_SEALED: usize = 15;
+const SPOOL_BYTES: usize = 16;
+const _: () = assert!(matches!(COUNTERS[PAGES_LOADED].as_bytes(), b"pages_loaded"));
+const _: () = assert!(matches!(COUNTERS[SPOOL_BYTES].as_bytes(), b"spool_bytes"));
 const LIMIT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -42,17 +53,11 @@ pub struct Row {
     scenario: String,
     h: usize,
     park: usize,
-    counts: [u64; 17],
-    probe_units: u64,
+    counts: [u64; 18],
     wall_ns: u128,
     resets: u64,
     /// Owner-commit geometry from the shared declared-reads recorder.
     committed_parks: usize,
-    /// The integrator fills these using page instrumentation after cutover.
-    pages_loaded: Option<u64>,
-    pages_sealed: Option<u64>,
-    spool_bytes: Option<u64>,
-    retirement_batches: Option<u64>,
 }
 struct Mark {
     at_us: u64,
@@ -88,9 +93,6 @@ impl Meter {
             let b = pool.worker_work;
             let counts = [
                 b.vm_steps - a.vm_steps,
-                b.checkpoint_values - a.checkpoint_values,
-                b.resume_values - a.resume_values,
-                b.carry_values - a.carry_values,
                 b.encoded_nodes - a.encoded_nodes + store.graph_envelopes
                     - mark.store.graph_envelopes,
                 b.encoded_bytes - a.encoded_bytes + store.graph_encoded_bytes
@@ -115,6 +117,10 @@ impl Meter {
                     - mark.store.graph_serialized_body_bytes,
                 b.decoded_body_bytes - a.decoded_body_bytes + store.graph_decoded_body_bytes
                     - mark.store.graph_decoded_body_bytes,
+                b.pages_loaded - a.pages_loaded,
+                b.pages_sealed - a.pages_sealed,
+                store.spool_bytes - mark.store.spool_bytes,
+                store.retirement_batches - mark.store.retirement_batches,
             ];
             let committed_parks = self
                 .recorder
@@ -127,14 +133,9 @@ impl Meter {
                 h: self.h,
                 park: phase,
                 counts,
-                probe_units: b.probe_units - a.probe_units,
                 wall_ns: mark.at.elapsed().as_nanos(),
                 resets: pool.resets - mark.pool.resets,
                 committed_parks,
-                pages_loaded: None,
-                pages_sealed: None,
-                spool_bytes: None,
-                retirement_batches: None,
             };
             state.rows.push(row);
         }
@@ -227,27 +228,18 @@ fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
             }
         }).build().into_handle()
 }
-async fn sample(
-    worker: &Path,
-    database: &Path,
-    scenario: &str,
-    h: usize,
-    probe: Option<&str>,
-) -> Result<Vec<Row>> {
+async fn sample(worker: &Path, database: &Path, scenario: &str, h: usize) -> Result<Vec<Row>> {
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         database,
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
-    sample_with_stores(worker_service(worker, probe), stores, scenario, h, probe).await
+    sample_with_stores(worker_service(worker), stores, scenario, h).await
 }
 
-fn worker_service(worker: &Path, probe: Option<&str>) -> lash::vm::WorkerService {
+fn worker_service(worker: &Path) -> lash::vm::WorkerService {
     let mut config = lash::vm::WorkerService::subprocess(worker).config().clone();
     config.entry.args.push("--count-heap-work".to_owned());
-    if let Some(probe) = probe {
-        config.entry.args.push(format!("--heap-walk={probe}"));
-    }
     config.deadlines.compute = LIMIT;
     config.deadlines.serialization = LIMIT;
     config.deadlines.cumulative_cpu = LIMIT;
@@ -259,7 +251,6 @@ async fn sample_with_stores(
     stores: lash_sqlite_store::SqliteStoreSet,
     scenario: &str,
     h: usize,
-    probe: Option<&str>,
 ) -> Result<Vec<Row>> {
     let recorder = Arc::new(super::recorder::Recorder::default());
     let stores = super::recorder::RecordingStores::new(
@@ -371,8 +362,9 @@ async fn sample_with_stores(
     let output = result??;
     ensure!(
         matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
-        "heap turn failed: {:?}",
-        output.result.outcome
+        "heap turn failed: {:?}: {:?}",
+        output.result.outcome,
+        output.result.errors
     );
     let rows = meter
         .state
@@ -391,27 +383,81 @@ async fn sample_with_stores(
             row.committed_parks == 1,
             "{scenario}/{h} interval did not contain exactly one committed owner park: {row:?}"
         );
-        for (name, count) in COUNTERS.iter().zip(row.counts) {
-            if *name == "carry_values" {
-                continue;
-            }
-            ensure!(count > 0, "{scenario}/{h}/{} has no {name}", row.park);
+        // Every interval steps the machine, crosses frames, commits and
+        // seals its park's changed pages; the rest may be zero.
+        for name in ["vm_steps", "ipc_messages", "sql_statements", "pages_sealed"] {
+            let index = COUNTERS
+                .iter()
+                .position(|counter| *counter == name)
+                .unwrap_or(0);
+            ensure!(
+                row.counts[index] > 0,
+                "{scenario}/{h}/{} has no {name}",
+                row.park
+            );
         }
         ensure!(
             row.resets > 0,
             "{scenario}/{h} did not release/reset its worker"
         );
-        if scenario == "next-cell" {
-            ensure!(row.counts[3] > 0, "cell carried no retained bindings");
-        }
-        if probe.is_some() && (probe != Some("carry") || scenario == "next-cell") {
-            ensure!(
-                row.probe_units >= h as u64,
-                "whole-heap probe was invisible: {row:?}"
-            );
-        }
     }
     Ok(rows)
+}
+
+/// The most a counted law lets a count grow across the populations: the
+/// least-squares exponent of log count against log H. Flat work grows only
+/// with the trees' depth, which a 100x larger heap deepens by a level.
+const FLAT: f64 = 0.25;
+
+/// The counted laws over each scenario's measured intervals (`park` 1),
+/// at two or more H. Counts, never wall time.
+fn laws(rows: &[Row]) -> Result<()> {
+    let interval = |scenario: &str| -> Vec<&Row> {
+        rows.iter()
+            .filter(|row| row.scenario == scenario && row.park == 1)
+            .collect()
+    };
+    let flat = |scenario: &str, what: &str, counter: &dyn Fn(&Row) -> u64| -> Result<()> {
+        let rows = interval(scenario);
+        let slope = exponent(&rows, counter).unwrap_or(0.0);
+        ensure!(
+            slope <= FLAT,
+            "{scenario}: {what} grows with H (exponent {slope:.3}): {:?}",
+            rows.iter()
+                .map(|row| (row.h, counter(row)))
+                .collect::<Vec<_>>()
+        );
+        Ok(())
+    };
+    // Checkpoint work at a fixed change D: the pages a park seals and the
+    // bytes it spools.
+    for scenario in [
+        "list-update",
+        "objects-update",
+        "drop-subgraph",
+        "worker-resets",
+    ] {
+        flat(scenario, "checkpoint pages", &|row| {
+            row.counts[PAGES_SEALED]
+        })?;
+        flat(scenario, "spooled bytes", &|row| row.counts[SPOOL_BYTES])?;
+    }
+    // A cold continuation at a fixed working set W: a released worker
+    // resumes and loads only the pages the run touches.
+    for scenario in ["list-update", "objects-update", "worker-resets"] {
+        flat(scenario, "pages a resume loads", &|row| {
+            row.counts[PAGES_LOADED]
+        })?;
+    }
+    // A length read loads no payload: the string's length is its summary.
+    flat("string-length", "pages a length read loads", &|row| {
+        row.counts[PAGES_LOADED]
+    })?;
+    // A cell that touches nothing loads and seals O(1) pages.
+    flat("next-cell", "pages a no-op cell moves", &|row| {
+        row.counts[PAGES_LOADED] + row.counts[PAGES_SEALED]
+    })?;
+    Ok(())
 }
 /// Least-squares exponent of log count against log H; zero/absent counts
 /// have no exponent. Wall time is never an oracle.
@@ -436,17 +482,13 @@ fn exponent(rows: &[&Row], counter: impl Fn(&Row) -> u64) -> Option<f64> {
         .sum::<f64>();
     (variance > 0.0).then_some(covariance / variance)
 }
-pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> Result<()> {
+pub async fn run(run: &super::Run<'_>, sizes: &[usize]) -> Result<()> {
     let super::deploy::Database::Sqlite(base) = &run.database else {
         anyhow::bail!("heap-scaling uses SQLite");
     };
     ensure!(
         sizes.len() >= 2 && sizes.iter().all(|h| *h > 0) && sizes.windows(2).all(|h| h[0] < h[1]),
         "H must be positive and strictly increasing"
-    );
-    ensure!(
-        probe.is_none_or(|p| ["checkpoint", "resume", "carry"].contains(&p)),
-        "unknown heap-walk location"
     );
     let mut all = Vec::new();
     for scenario in SCENARIOS {
@@ -456,7 +498,6 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> 
                 &base.with_file_name(format!("heap-{scenario}-{h}.sqlite")),
                 scenario,
                 h,
-                probe,
             )
             .await?;
             for row in rows {
@@ -466,7 +507,7 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> 
         }
     }
     println!(
-        "# released-worker heap baseline; main_sha={}; probe={}; H=entries/objects (string: bytes); buffers=transport working allocations; SQL bytes=expanded statement literals; page counters=n/a",
+        "# released-worker paged heap baseline; main_sha={}; H=entries/objects (string: bytes); buffers=transport working allocations; SQL bytes=expanded statement literals; pages=worker page port; spool=parent staging",
         std::process::Command::new("git")
             .args(["merge-base", "HEAD", "origin/main"])
             .output()
@@ -475,15 +516,11 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> 
             .and_then(|output| String::from_utf8(output.stdout).ok())
             .map(|sha| sha.trim().to_owned())
             .unwrap_or_else(|| "unknown".to_owned()),
-        probe.unwrap_or("off")
     );
-    println!(
-        "scenario H park {} probe_units wall_ms resets pages_loaded pages_sealed spool_bytes retirement_batches",
-        COUNTERS.join(" ")
-    );
+    println!("scenario H park {} wall_ms resets", COUNTERS.join(" "));
     for row in &all {
         println!(
-            "{} {} {} {} {} {:.3} {} n/a n/a n/a n/a",
+            "{} {} {} {} {:.3} {}",
             row.scenario,
             row.h,
             row.park,
@@ -492,7 +529,6 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> 
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join(" "),
-            row.probe_units,
             row.wall_ns as f64 / 1e6,
             row.resets
         );
@@ -508,68 +544,40 @@ pub async fn run(run: &super::Run<'_>, sizes: &[usize], probe: Option<&str>) -> 
                     .map_or_else(|| "n/a".to_owned(), |slope| format!("{slope:.3}"))
             })
             .collect();
-        println!(
-            "{scenario} exponent - {} {} - - n/a n/a n/a n/a",
-            slopes.join(" "),
-            exponent(&rows, |row| row.probe_units)
-                .map_or_else(|| "n/a".to_owned(), |slope| format!("{slope:.3}"))
-        );
+        println!("{scenario} exponent - {} - -", slopes.join(" "));
     }
-    Ok(())
+    laws(&all)
 }
 
 #[cfg(test)]
 mod tests {
     /// HEAP-METER: every released-worker park/resume seam is measured for all
-    /// six retained-state scenarios; each slowdown location sees a heap walk.
+    /// six retained-state scenarios at H 100 and 2,000, and the paged heap's
+    /// counted laws hold over them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn six_scenarios_count_released_worker_work_and_see_heap_walks() {
+    async fn six_scenarios_obey_the_paged_heaps_counted_laws() {
         let worker = std::env::var_os("LASH_VM_WORKER").expect("worker runfile");
         let started = std::time::Instant::now();
-        // The law counts work at released-worker seams, independently of
-        // fsync latency or cold process startup. Keep the full size matrix.
-        let service = super::worker_service(Path::new(&worker), None);
+        // The laws count work at released-worker seams, independently of
+        // fsync latency or cold process startup.
+        let service = super::worker_service(Path::new(&worker));
+        let mut rows = Vec::new();
         for scenario in super::SCENARIOS {
-            for h in [100, 1000] {
-                super::sample_with_stores(
-                    service.clone(),
-                    lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
-                    scenario,
-                    h,
-                    None,
-                )
-                .await
-                .unwrap();
-            }
-        }
-        for (probe, scenario) in [
-            ("checkpoint", "list-update"),
-            ("resume", "list-update"),
-            ("carry", "next-cell"),
-        ] {
-            let service = super::worker_service(Path::new(&worker), Some(probe));
-            let mut rows = Vec::new();
-            for h in [100, 1000] {
+            for h in [100, 2000] {
                 rows.extend(
                     super::sample_with_stores(
                         service.clone(),
                         lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
                         scenario,
                         h,
-                        Some(probe),
                     )
                     .await
                     .unwrap(),
                 );
             }
-            let samples: Vec<_> = rows.iter().collect();
-            let exponent = super::exponent(&samples, |row| row.probe_units).unwrap();
-            assert!(
-                exponent > 0.9,
-                "{probe} walk was not H-proportional: {rows:?}"
-            );
         }
-        eprintln!("HEAP-METER: 18 populations in {:?}", started.elapsed());
+        super::laws(&rows).unwrap();
+        eprintln!("HEAP-METER: 12 populations in {:?}", started.elapsed());
     }
     use std::path::Path;
 }

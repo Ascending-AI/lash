@@ -6,7 +6,7 @@ use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value, WorkCounte
 use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
-use crate::numeric::{as_float, number_cmp, ratio_to_float};
+use crate::numeric::{Numeric, ratio_to_float, scalar_cmp as number_cmp, scalar_float as as_float};
 use crate::raised;
 
 #[derive(Clone, Copy, Debug)]
@@ -48,27 +48,30 @@ pub(crate) fn binary(
     counter: &mut WorkCounter,
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
-    match (plain(op, a, b)?, a, b) {
-        (Some(result), _, _) => Ok(result),
-        (None, Value::Int(a), Value::Int(b)) => Ok(Value::Int(Integer::new(integer_pow(
+    let a = Numeric::read(a, heap)?;
+    let b = Numeric::read(b, heap)?;
+    let result = match (plain(op, &a, &b)?, &a, &b) {
+        (Some(result), _, _) => result,
+        (None, Numeric::Int(a), Numeric::Int(b)) => Numeric::Int(Integer::new(integer_pow(
             &a.as_bigint(),
             &b.as_bigint(),
             counter,
             heap,
-        )?))),
+        )?)),
         (None, _, _) => unreachable!("only an integer power counts its work"),
-    }
+    };
+    result.store(heap)
 }
 
 /// [`binary`] for every operation but an integer power past the 64-bit
 /// word, which counts its work and reserves its room: `None` for that one.
 #[inline]
-pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, NativeError> {
-    if let (Value::Int(a), Value::Int(b)) = (a, b) {
+pub(crate) fn plain(op: Binary, a: &Numeric, b: &Numeric) -> Result<Option<Numeric>, NativeError> {
+    if let (Numeric::Int(a), Numeric::Int(b)) = (a, b) {
         if let (Some(a), Some(b)) = (a.to_i64(), b.to_i64())
             && let Some(result) = in_word(op, a, b)
         {
-            return Ok(Some(Value::Int(Integer::from(result))));
+            return Ok(Some(Numeric::Int(Integer::from(result))));
         }
         let (a, b) = (a.as_bigint(), b.as_bigint());
         let (a, b) = (&*a, &*b);
@@ -77,7 +80,7 @@ pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, N
             Binary::Sub => a - b,
             Binary::Mul => a * b,
             Binary::Div => {
-                return ratio_to_float(a, b).map(|value| Some(Value::Float(Float::new(value))));
+                return ratio_to_float(a, b).map(|value| Some(Numeric::Float(Float::new(value))));
             }
             Binary::DivFloor | Binary::DivTrunc | Binary::RemFloor | Binary::RemTrunc => {
                 if b.is_zero() {
@@ -102,16 +105,16 @@ pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, N
             Binary::Min => a.min(b).clone(),
             Binary::Max => a.max(b).clone(),
         };
-        return Ok(Some(Value::Int(Integer::new(result))));
+        return Ok(Some(Numeric::Int(Integer::new(result))));
     }
     if matches!(op, Binary::Min | Binary::Max) {
         let order = number_cmp(a, b)?;
         // Min/max propagate NaN and otherwise return an original operand.
         // Opposite floating zeros choose -0 for min and +0 for max.
         if order.is_none() {
-            return Ok(Some(Value::Float(Float::new(f64::NAN))));
+            return Ok(Some(Numeric::Float(Float::new(f64::NAN))));
         }
-        if let (Value::Float(a), Value::Float(b)) = (a, b)
+        if let (Numeric::Float(a), Numeric::Float(b)) = (a, b)
             && a.get() == 0.0
             && b.get() == 0.0
         {
@@ -120,7 +123,7 @@ pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, N
             } else {
                 a.get().is_sign_negative() && b.get().is_sign_negative()
             };
-            return Ok(Some(Value::Float(Float::new(if negative {
+            return Ok(Some(Numeric::Float(Float::new(if negative {
                 -0.0
             } else {
                 0.0
@@ -157,7 +160,7 @@ pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, N
         Binary::Pow => libm::pow(a, b),
         Binary::Min | Binary::Max => unreachable!("min/max returned before float arithmetic"),
     };
-    Ok(Some(Value::Float(Float::new(result))))
+    Ok(Some(Numeric::Float(Float::new(result))))
 }
 
 fn floor_remainder(a: f64, b: f64) -> f64 {
@@ -271,42 +274,42 @@ fn in_word(op: Binary, a: i64, b: i64) -> Option<i64> {
 }
 
 #[inline]
-pub(crate) fn unary(op: Unary, value: &Value) -> Result<Value, NativeError> {
-    if let Value::Int(value) = value {
+pub(crate) fn scalar_unary(op: Unary, value: &Numeric) -> Result<Numeric, NativeError> {
+    if let Numeric::Int(value) = value {
         let word = value.to_i64();
         return Ok(match op {
             Unary::Neg => match word.and_then(i64::checked_neg) {
-                Some(negated) => Value::Int(Integer::from(negated)),
-                None => Value::Int(Integer::new(-value.as_bigint().into_owned())),
+                Some(negated) => Numeric::Int(Integer::from(negated)),
+                None => Numeric::Int(Integer::new(-value.as_bigint().into_owned())),
             },
             Unary::Abs => match word.and_then(i64::checked_abs) {
-                Some(magnitude) => Value::Int(Integer::from(magnitude)),
-                None => Value::Int(Integer::new(value.as_bigint().abs())),
+                Some(magnitude) => Numeric::Int(Integer::from(magnitude)),
+                None => Numeric::Int(Integer::new(value.as_bigint().abs())),
             },
             Unary::Floor
             | Unary::Ceil
             | Unary::Trunc
             | Unary::RoundEven
             | Unary::RoundAway
-            | Unary::RoundUp => Value::Int(value.clone()),
-            Unary::Sign => Value::Int(Integer::from(if value.is_negative() {
+            | Unary::RoundUp => Numeric::Int(value.clone()),
+            Unary::Sign => Numeric::Int(Integer::from(if value.is_negative() {
                 -1
             } else {
                 i64::from(value.bits() > 0)
             })),
-            Unary::IsFinite | Unary::IsInteger => Value::Bool(true),
-            Unary::IsInfinite | Unary::IsNan => Value::Bool(false),
+            Unary::IsFinite | Unary::IsInteger => Numeric::Bool(true),
+            Unary::IsInfinite | Unary::IsNan => Numeric::Bool(false),
         });
     }
     let value = as_float(value)?;
     Ok(match op {
-        Unary::Neg => Value::Float(Float::new(-value)),
-        Unary::Abs => Value::Float(Float::new(value.abs())),
-        Unary::Floor => Value::Float(Float::new(value.floor())),
-        Unary::Ceil => Value::Float(Float::new(value.ceil())),
-        Unary::Trunc => Value::Float(Float::new(value.trunc())),
-        Unary::RoundEven => Value::Float(Float::new(value.round_ties_even())),
-        Unary::RoundAway => Value::Float(Float::new(value.round())),
+        Unary::Neg => Numeric::Float(Float::new(-value)),
+        Unary::Abs => Numeric::Float(Float::new(value.abs())),
+        Unary::Floor => Numeric::Float(Float::new(value.floor())),
+        Unary::Ceil => Numeric::Float(Float::new(value.ceil())),
+        Unary::Trunc => Numeric::Float(Float::new(value.trunc())),
+        Unary::RoundEven => Numeric::Float(Float::new(value.round_ties_even())),
+        Unary::RoundAway => Numeric::Float(Float::new(value.round())),
         Unary::RoundUp => {
             // Avoid adding .5 to a large integer float or a value immediately
             // below a half: compare the fraction without introducing a tie.
@@ -316,22 +319,30 @@ pub(crate) fn unary(op: Unary, value: &Value) -> Result<Value, NativeError> {
             } else {
                 value.ceil()
             };
-            Value::Float(Float::new(if result == 0.0 {
+            Numeric::Float(Float::new(if result == 0.0 {
                 libm::copysign(0.0, value)
             } else {
                 result
             }))
         }
-        Unary::Sign => Value::Float(Float::new(if value.is_nan() || value == 0.0 {
+        Unary::Sign => Numeric::Float(Float::new(if value.is_nan() || value == 0.0 {
             value
         } else if value < 0.0 {
             -1.0
         } else {
             1.0
         })),
-        Unary::IsFinite => Value::Bool(value.is_finite()),
-        Unary::IsInfinite => Value::Bool(value.is_infinite()),
-        Unary::IsNan => Value::Bool(value.is_nan()),
-        Unary::IsInteger => Value::Bool(value.is_finite() && value.trunc() == value),
+        Unary::IsFinite => Numeric::Bool(value.is_finite()),
+        Unary::IsInfinite => Numeric::Bool(value.is_infinite()),
+        Unary::IsNan => Numeric::Bool(value.is_nan()),
+        Unary::IsInteger => Numeric::Bool(value.is_finite() && value.trunc() == value),
     })
+}
+
+pub(crate) fn unary(
+    op: Unary,
+    value: &Value,
+    heap: &mut dyn NativeHeap,
+) -> Result<Value, NativeError> {
+    scalar_unary(op, &Numeric::read(value, heap)?)?.store(heap)
 }

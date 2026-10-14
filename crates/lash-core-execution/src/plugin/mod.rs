@@ -116,11 +116,11 @@ pub use hooks::{
     ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
-    AssistantProseProjectorPlugin, CarriedCell, CellCallReferences, CheckpointComponentKey,
+    AssistantProseProjectorPlugin, CellCallReferences, CheckpointComponentKey,
     CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
     HydratedExecutionGraph, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
     ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolSessionRestoreView, StoredCell, TranscriptDecoderPlugin,
+    ProtocolSessionRestoreView, SessionPages, StoredCell, TranscriptDecoderPlugin,
 };
 mod recipe;
 mod service_bindings;

@@ -16,6 +16,7 @@ mod advance;
 mod documents;
 mod helpers;
 mod migrate;
+mod pages;
 mod run;
 mod state;
 mod succession;
@@ -40,8 +41,8 @@ pub use helpers::{
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_run, migrate_saved_function, migration_refusal,
-    plan_migration, survey_kernel_processes,
+    UnmigratedKernelSession, migrate_saved_function, migration_refusal, plan_migration,
+    survey_kernel_processes,
 };
 pub use run::with_definitions;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};

@@ -42,16 +42,16 @@ fn infra(message: impl Into<String>) -> ProcessInfraError {
 }
 
 /// `state` in the format of the kernel version its run is parked under,
-/// or `written` when it holds no run yet.
+/// or `written` when it holds no run yet, standing on its run's page.
 pub(crate) fn encode(
     state: &KernelEngineState,
     written: KernelVersion,
 ) -> Result<EngineState, ProcessInfraError> {
     let kernel = match &state.parked {
-        Some(parked) => KernelVersion::of(parked.0.kernel()).ok_or_else(|| {
+        Some(parked) => KernelVersion::of(parked.kernel).ok_or_else(|| {
             infra(format!(
                 "the run is parked under kernel version {}, which this build does not interpret",
-                parked.0.kernel()
+                parked.kernel
             ))
         })?,
         None => written,
@@ -59,6 +59,7 @@ pub(crate) fn encode(
     Ok(EngineState {
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
+        pages: state.parked.map(|parked| parked.root),
     })
 }
 
@@ -79,6 +80,11 @@ pub(crate) fn decode(
         })?;
     let decoded: KernelEngineState =
         serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))?;
+    if decoded.parked.map(|parked| parked.root) != state.pages {
+        return Err(infra(
+            "the state names another run page than the process's root holds",
+        ));
+    }
     Ok((decoded, written))
 }
 
@@ -299,6 +305,8 @@ fn run_settled(
     };
     match output {
         KernelRunOutput::Ended { outcome } => {
+            // An ended run stands on no page.
+            state.parked = None;
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }

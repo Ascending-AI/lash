@@ -97,7 +97,7 @@ use super::{
     SettledOutput, Stop, StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry,
     start_retry,
 };
-use crate::runtime::process::{CapacityVerdict, EngineStepAnswer};
+use crate::runtime::process::{CapacityVerdict, EngineStepAnswer, StepCandidate};
 
 /// What a member's body answers: its output, and the store-local effects
 /// its completion or its park commits with.
@@ -114,6 +114,9 @@ pub struct MemberOutcome {
     /// ([`CapacityVerdict`]): honoured, nothing is recorded and the
     /// member runs again uncounted; refused, `output` is recorded.
     pub capacity: Option<CapacityVerdict>,
+    /// The heap pages a completion publishes with its outcome
+    /// ([`EngineStepAnswer::Paged`]): the outcome's run fact owns them.
+    pub candidate: Option<StepCandidate>,
 }
 
 impl From<SettledOutput> for MemberOutcome {
@@ -123,6 +126,7 @@ impl From<SettledOutput> for MemberOutcome {
             store_local: Vec::new(),
             terminal: None,
             capacity: None,
+            candidate: None,
         }
     }
 }
@@ -134,6 +138,10 @@ impl From<EngineStepAnswer> for MemberOutcome {
     fn from(answer: EngineStepAnswer) -> Self {
         match answer {
             EngineStepAnswer::Settled(output) => (*output).into(),
+            EngineStepAnswer::Paged { output, candidate } => Self {
+                candidate: Some(candidate),
+                ..(*output).into()
+            },
             EngineStepAnswer::Capacity(verdict) => Self {
                 capacity: Some(verdict),
                 ..SettledOutput::Interrupted.into()
@@ -671,23 +679,53 @@ impl Lifecycle {
                     discard_answer(result);
                 }
             }
+            // One transaction publishes at most one candidate: a second
+            // paged completion waits for the next batch.
+            let deferred: Vec<(AdmittedId, Result<MemberOutcome, Stop>)> = self
+                .finished
+                .iter()
+                .filter(|(_, result)| matches!(result, Ok(outcome) if outcome.candidate.is_some()))
+                .skip(1)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .filter_map(|id| self.finished.remove(&id).map(|result| (id, result)))
+                .collect();
             let mut retried = false;
             let mut outcomes = BTreeSet::new();
             let mut unanswered = Vec::new();
+            let mut publication = None;
+            let mut unused = Vec::new();
             for (id, result) in &self.finished {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
                 };
                 let dropped = result.is_err();
-                match self.record_finished(&mut tx, &execution, result.clone(), now)? {
+                // The ordinal the outcome's record takes.
+                let place = (
+                    execution.id().owner.clone(),
+                    execution.id().run,
+                    execution.cursor().peek(),
+                );
+                let (recorded, candidate) =
+                    self.record_finished(&mut tx, &execution, result.clone(), now)?;
+                match recorded {
                     Recorded::Retry => retried = true,
-                    Recorded::Outcome(output) => {
+                    Recorded::Outcome { output, paged } => {
                         outcomes.insert(id.clone());
                         if dropped {
                             unanswered.push((execution, *output));
                         }
+                        if paged {
+                            publication = candidate.map(|candidate| (candidate, place));
+                            continue;
+                        }
                     }
                 }
+                unused.extend(candidate);
+            }
+            for candidate in unused {
+                candidate.0.abandoned().await;
             }
             let label = if retried && outcomes.is_empty() {
                 CommitLabel::ROUND_RETRY
@@ -704,7 +742,7 @@ impl Lifecycle {
                 && self.running.is_empty()
                 && self.finished.values().all(|result| {
                     matches!(result,
-                    Ok(MemberOutcome { store_local, terminal: None, output, capacity: None })
+                    Ok(MemberOutcome { store_local, terminal: None, output, capacity: None, candidate: None })
                         if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
                 })
                 && folded.rounds().all(|view| {
@@ -723,7 +761,10 @@ impl Lifecycle {
                     capacity: None,
                 })));
             }
-            let act = self.commit(tx, label).await?;
+            let act = match publication {
+                Some((candidate, place)) => self.commit_paged(tx, label, candidate, place).await?,
+                None => self.commit(tx, label).await?,
+            };
             if matches!(act, Act::Committed(_)) {
                 // The outcomes are durable: their plugin state publishes now,
                 // before the reservations they hold are released.
@@ -737,12 +778,17 @@ impl Lifecycle {
                     self.bodies.unanswered(execution, output);
                 }
             }
+            if !deferred.is_empty() {
+                self.finished.extend(deferred);
+                self.batch_opened
+                    .get_or_insert_with(|| self.cx.clock().now());
+            }
             return Ok(Some(act));
         }
         if !settlements.is_empty() {
             let mut tx = self.cx.begin().await?;
             for (execution, outcome) in &settlements {
-                settle(&mut tx, execution, outcome.clone(), Vec::new())?;
+                settle(&mut tx, execution, outcome.clone(), Vec::new(), None)?;
             }
             let act = self.commit(tx, self.settlement_label).await?;
             if matches!(act, Act::Committed(_)) {
@@ -964,6 +1010,58 @@ impl Lifecycle {
         }
     }
 
+    /// Commit `tx`, which records `candidate`'s outcome at `place`, with
+    /// the candidate's pages in its one fenced transaction, owned by that
+    /// run fact (FIG-6193, P1). The staging settles once the commit is
+    /// authoritative. Any other end abandons it and ends the activation:
+    /// the pages were never published, or a lost acknowledgement left them
+    /// the store's under the fact, and the step's next owner settles the
+    /// call as its records say.
+    async fn commit_paged(
+        &mut self,
+        tx: lash_durable::ActorTx,
+        label: CommitLabel,
+        candidate: StepCandidate,
+        (owner, run, ordinal): (
+            lash_durable::domain::OwnerKey,
+            RunSeq,
+            lash_durable::domain::Ordinal,
+        ),
+    ) -> Result<Act, RoundError> {
+        let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
+        let commit = lash_core_store::checkpoint_graph::CommitId::mint();
+        let (manifest, admission) = match candidate.0.publication(commit).await {
+            Ok(publication) => publication,
+            Err(error) => {
+                candidate.0.abandoned().await;
+                return Err(error.into());
+            }
+        };
+        let publication = lash_durable::domain::pages::CandidatePublication {
+            owner: lash_durable::domain::pages::CandidateOwner::RunFactAppend {
+                owner,
+                run,
+                ordinal,
+            },
+            manifest,
+            admission,
+        };
+        match self
+            .cx
+            .commit_candidate_owing(tx, publication, label, None)
+            .await
+        {
+            Ok(_) => {
+                candidate.0.settled(commit).await;
+                Ok(Act::Committed(appended))
+            }
+            Err(error) => {
+                candidate.0.abandoned().await;
+                Err(error.into())
+            }
+        }
+    }
+
     fn spawn(&mut self, execution: AdmittedExecution) {
         let body = self.bodies.body(&execution);
         let stop_grace = self.bodies.stop_grace();
@@ -983,21 +1081,26 @@ impl Lifecycle {
                 Vec<StoreLocalEffect>,
                 Option<crate::ProcessId>,
                 Option<CapacityVerdict>,
+                Option<StepCandidate>,
             );
             let carried: Arc<Mutex<Carried>> = Arc::default();
             let slot = Arc::clone(&carried);
             let tool_body: ToolBody = Box::new(move |token| {
                 Box::pin(async move {
                     let result = body(token).await;
-                    *slot.lock().unwrap_or_else(PoisonError::into_inner) =
-                        (result.store_local, result.terminal, result.capacity);
+                    *slot.lock().unwrap_or_else(PoisonError::into_inner) = (
+                        result.store_local,
+                        result.terminal,
+                        result.capacity,
+                        result.candidate,
+                    );
                     result.output
                 })
             });
             let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
                 .await
                 .and_then(|output| {
-                    let (store_local, terminal, capacity) = std::mem::take(
+                    let (store_local, terminal, capacity, candidate) = std::mem::take(
                         &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
                     );
                     match capacity {
@@ -1007,6 +1110,7 @@ impl Lifecycle {
                             store_local,
                             terminal,
                             capacity: None,
+                            candidate,
                         }),
                     }
                 });
@@ -1021,15 +1125,23 @@ impl Lifecycle {
 
     /// Record one finished attempt on `tx`: its final outcome with its
     /// store-local effect, or a retry when its pinned contract repeats it.
+    /// A completion's heap pages are recorded with its outcome, which owns
+    /// them once `tx` commits with their publication; the candidate is
+    /// handed back with whether its root was recorded.
     fn record_finished(
         &self,
         tx: &mut lash_durable::ActorTx,
         execution: &AdmittedExecution,
         result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
-    ) -> Result<Recorded, RoundError> {
-        let (mut output, store_local, terminal) = match result {
-            Ok(result) => (result.output, result.store_local, result.terminal),
+    ) -> Result<(Recorded, Option<StepCandidate>), RoundError> {
+        let (mut output, store_local, terminal, candidate) = match result {
+            Ok(result) => (
+                result.output,
+                result.store_local,
+                result.terminal,
+                result.candidate,
+            ),
             Err(Stop::Limit(cause)) => (
                 SettledOutput::TimedOut {
                     cause,
@@ -1037,14 +1149,15 @@ impl Lifecycle {
                 },
                 Vec::new(),
                 None,
+                None,
             ),
             Err(Stop::Cancelled | Stop::Activation | Stop::Lapsed) => {
-                (cancelled_outcome(), Vec::new(), None)
+                (cancelled_outcome(), Vec::new(), None, None)
             }
             Err(Stop::Durable(error)) => return Err(error.into()),
             // Never held as finished: the lifecycle keeps an honoured
             // verdict's member aside, without an outcome.
-            Err(Stop::Capacity(_)) => (SettledOutput::Interrupted, Vec::new(), None),
+            Err(Stop::Capacity(_)) => (SettledOutput::Interrupted, Vec::new(), None, None),
         };
         // A park whose resolver awaits a process waits on its terminal too:
         // the wait is pinned with the park, under the park's own deadline.
@@ -1067,10 +1180,20 @@ impl Lifecycle {
         }
         if let Some(due) = self.retry_due(execution, &output, now) {
             settle_retry(tx, execution, output, due)?;
-            return Ok(Recorded::Retry);
+            return Ok((Recorded::Retry, candidate));
         }
-        settle(tx, execution, output.clone(), store_local)?;
-        Ok(Recorded::Outcome(Box::new(output)))
+        let pages = candidate
+            .as_ref()
+            .filter(|_| matches!(output, SettledOutput::Completed(_)))
+            .map(StepCandidate::root);
+        settle(tx, execution, output.clone(), store_local, pages)?;
+        Ok((
+            Recorded::Outcome {
+                output: Box::new(output),
+                paged: pages.is_some(),
+            },
+            candidate,
+        ))
     }
 
     /// When `outcome` of `execution` is retried: a known failure or a slice
@@ -1110,8 +1233,12 @@ impl Lifecycle {
 
 enum Recorded {
     Retry,
-    /// The call's final outcome, as it was recorded.
-    Outcome(Box<SettledOutput>),
+    /// The call's final outcome, as it was recorded, and whether it names
+    /// its candidate's pages.
+    Outcome {
+        output: Box<SettledOutput>,
+        paged: bool,
+    },
 }
 
 /// An owner's stop, as the open read of one of its transactions says: see

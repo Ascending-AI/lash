@@ -1,13 +1,13 @@
 //! Executable kernel laws for the built-ins' dialect adaptations (§2.4/§4).
 use super::machine::{self, Ended};
-use lash_kernel_doc::{Datum, Name, Value};
-use lash_kernel_vm::Bindings;
+use super::pages::Session;
+use lash_kernel_doc::{Datum, Name};
 
 pub(super) fn agrees(source: &str) {
-    agrees_with_bindings(source, Bindings::default());
+    agrees_with_bindings(source, super::pages::Session::default());
 }
 
-fn agrees_with_bindings(source: &str, bindings: Bindings) {
+fn agrees_with_bindings(source: &str, bindings: Session) {
     let (prefix, checks) = source
         .rsplit_once("await finish(")
         .expect("a law ends with checks");
@@ -232,10 +232,7 @@ fn json_reviver_replacer_and_pretty_layout_keep_holder_and_omission_rules() {
 /// the actual JavaScript row, including its callable value and receiver.
 #[test]
 fn json_sparse_slots_are_undefined_to_replacers_and_null_through_indirect_calls() {
-    let mut bindings = Bindings::default();
-    bindings
-        .variables
-        .insert(Name::new("reservedHole"), Value::Tuple(Vec::new().into()));
+    let bindings = Session::seeded([(Name::new("reservedHole"), Datum::Tuple(Vec::new()))]);
     agrees_with_bindings(
         "const sparse = [reservedHole, undefined]; let sawUndefined = false; let sameHolder = false; const replacer = function (key, value) { if (key === '0') { sawUndefined = value === undefined; sameHolder = this === sparse; } return value; }; const stringify = JSON.stringify; const bound = stringify.bind(null); await finish(JSON.stringify(sparse) === '[null,null]' && stringify.call(null, sparse, replacer) === '[null,null]' && stringify.apply(null, [sparse]) === '[null,null]' && bound(sparse) === '[null,null]' && sawUndefined && sameHolder && JSON.stringify({omitted: undefined}) === '{}' && sparse.length === 2);",
         bindings,
@@ -313,21 +310,16 @@ fn text_brand_fields_remain_ordinary_guest_data() {
         result.push(literal.brand, Object.keys(literal));
         await finish(JSON.stringify(result));
     "#;
-    let mut bindings = Bindings::default();
-    let record = lash_kernel_doc::ObjectId(0);
-    bindings.objects.insert(
-        record,
-        lash_kernel_doc::Object::Record(vec![
-            ("brand".into(), Value::text("Nike")),
+    let bindings = Session::seeded([(
+        Name::new("toolRecord"),
+        Datum::Record(vec![
+            ("brand".into(), Datum::Text("Nike".into())),
             (
                 "price".into(),
-                Value::Float(lash_kernel_doc::Float::new(3.0)),
+                Datum::Float(lash_kernel_doc::Float::new(3.0)),
             ),
         ]),
-    );
-    bindings
-        .variables
-        .insert(Name::new("toolRecord"), Value::Record(record));
+    )]);
     assert_eq!(
         machine::end_with_bindings(source, bindings),
         Ended::Finished(Datum::Text(r#"[["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["__ts_brand","brand","size"],"{\"__ts_brand\":[\"Promise\"],\"brand\":\"shoe\",\"size\":42}"],false,true,"boot",["brand"]]"#.into()))

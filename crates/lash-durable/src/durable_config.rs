@@ -37,6 +37,47 @@ pub struct GroupCommit {
     pub window: Duration,
 }
 
+/// The node's page retirement (`D-RET`): a maintenance task runs the
+/// store's bounded retirement steps, and a node whose store's backlog
+/// passes `backlog_limit` claims no new actors until it falls back under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetirementSettings {
+    /// How long the task waits between sweeps once it caught up.
+    pub every: Duration,
+    /// The most nodes one step (one transaction) deletes; at most
+    /// [`RetirementSettings::MAX_BATCH_NODES`].
+    pub batch_nodes: u64,
+    /// The most steps one sweep runs; at most
+    /// [`RetirementSettings::MAX_STEPS_PER_SWEEP`].
+    pub steps_per_sweep: u32,
+    /// The retirement holds above which the node takes no new work and
+    /// sweeps without waiting; at most
+    /// [`RetirementSettings::MAX_BACKLOG_LIMIT`].
+    pub backlog_limit: u64,
+}
+
+impl RetirementSettings {
+    /// The hard maximum of `batch_nodes`: one step's transaction stays
+    /// short beside publication.
+    pub const MAX_BATCH_NODES: u64 = 4096;
+    /// The hard maximum of `steps_per_sweep`.
+    pub const MAX_STEPS_PER_SWEEP: u32 = 256;
+    /// The hard maximum of `backlog_limit`.
+    pub const MAX_BACKLOG_LIMIT: u64 = 1_000_000;
+
+    /// Standard production: a sweep every second of at most 16 steps of
+    /// 256 nodes each, and backpressure above 10,000 holds. No workload
+    /// measurement establishes these values.
+    pub fn standard() -> Self {
+        Self {
+            every: Duration::from_secs(1),
+            batch_nodes: 256,
+            steps_per_sweep: 16,
+            backlog_limit: 10_000,
+        }
+    }
+}
+
 /// The substrate's parameters as a host configures them. Plain data; it
 /// takes effect only through [`DurableSettings::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +106,8 @@ pub struct DurableSettings {
     /// L8: how wakes reach other nodes, and whether a node's crash is seen
     /// through its listener's liveness lock.
     pub notifier: Notifier,
+    /// The node's page retirement and its backpressure.
+    pub retirement: RetirementSettings,
 }
 
 impl Default for DurableSettings {
@@ -76,7 +119,8 @@ impl Default for DurableSettings {
 impl DurableSettings {
     /// Standard production: standard leases, claims of 16 / 256 active,
     /// idle eviction 60 s, activation loop budget 8, groups of 64 / 5 ms,
-    /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes.
+    /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes,
+    /// standard retirement ([`RetirementSettings::standard`]).
     /// Lease timing evidence is documented by `LeaseSettings::standard`;
     /// no workload measurement establishes the other numerical values.
     pub fn standard() -> Self {
@@ -94,6 +138,7 @@ impl DurableSettings {
             snapshot_every_fuel: 1_000_000,
             cascade_batch: 256,
             notifier: Notifier::AfterCommit,
+            retirement: RetirementSettings::standard(),
         }
     }
 }
@@ -116,6 +161,14 @@ pub enum DurableConfigError {
     BelowResolution {
         /// The field.
         field: &'static str,
+    },
+    /// A value is above its hard maximum.
+    #[error("`{field}` must be at most {maximum}")]
+    AboveMaximum {
+        /// The field.
+        field: &'static str,
+        /// Its hard maximum.
+        maximum: u64,
     },
     /// A claim could take more actors than the node may run.
     #[error("claim_batch ({claim_batch}) must not exceed max_active ({max_active})")]
@@ -201,10 +254,38 @@ impl DurableSettings {
                 field: "snapshot_every_fuel",
             });
         }
-        if self.idle_evict.as_millis() == 0 {
-            return Err(DurableConfigError::BelowResolution {
-                field: "idle_evict",
-            });
+        for (field, value) in [
+            ("idle_evict", self.idle_evict),
+            ("retirement.every", self.retirement.every),
+        ] {
+            if value.as_millis() == 0 {
+                return Err(DurableConfigError::BelowResolution { field });
+            }
+        }
+        let retirement = self.retirement;
+        for (field, value, maximum) in [
+            (
+                "retirement.batch_nodes",
+                retirement.batch_nodes,
+                RetirementSettings::MAX_BATCH_NODES,
+            ),
+            (
+                "retirement.steps_per_sweep",
+                u64::from(retirement.steps_per_sweep),
+                u64::from(RetirementSettings::MAX_STEPS_PER_SWEEP),
+            ),
+            (
+                "retirement.backlog_limit",
+                retirement.backlog_limit,
+                RetirementSettings::MAX_BACKLOG_LIMIT,
+            ),
+        ] {
+            if value == 0 {
+                return Err(DurableConfigError::Zero { field });
+            }
+            if value > maximum {
+                return Err(DurableConfigError::AboveMaximum { field, maximum });
+            }
         }
         if self.claim_batch > self.max_active {
             return Err(DurableConfigError::ClaimBeyondCapacity {

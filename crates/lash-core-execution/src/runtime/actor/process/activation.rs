@@ -673,7 +673,7 @@ impl ProcessActivation {
                     let output =
                         self.steps
                             .admitted_output(process, request, member.call(), output);
-                    round::settle(&mut tx, &view.execution(member), output, Vec::new())
+                    round::settle(&mut tx, &view.execution(member), output, Vec::new(), None)
                         .map_err(|error| corrupt("a drifted process step", error))?;
                     settled_links = true;
                 }

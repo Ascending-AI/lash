@@ -1388,7 +1388,7 @@ pub(super) async fn apply(
 
 /// The store's own head commit (`commit_runtime_state`): the commit
 /// `planner` prepared, applied in `tx` at `now` as a store writer, its
-/// retired roots peeled before the caller commits.
+/// retired roots held for retirement steps before the caller commits.
 pub(crate) async fn apply_store_commit(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
     planner: &RuntimeCommitPlanner,
@@ -1399,14 +1399,15 @@ pub(crate) async fn apply_store_commit(
     let actor = ActorKey::session(session.as_str())
         .map_err(|error| StoreError::Backend(format!("session actor key: {error}")))?;
     let retired = super::Retired::default();
+    let now = DurableInstant(sql_int("commit instant", now)?);
     let context = super::steps::Context {
         retired: &retired,
         actor: &actor,
-        now: DurableInstant(sql_int("commit instant", now)?),
+        now,
     };
     let result = apply(tx, planner, HeadWriter::Store, &context, chunk_size).await?;
-    super::graph::reclaim(tx, retired)
+    super::pages::hold_retired(tx, retired, now)
         .await
-        .map_err(crate::support::graph_store_error)?;
+        .map_err(crate::support::store_sqlx_error)?;
     Ok(result)
 }

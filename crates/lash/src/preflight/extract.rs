@@ -286,11 +286,11 @@ fn session_execution_state(payload: Payload<'_>) -> Vec<Extraction> {
         Err(extraction) => return vec![extraction],
     };
     match node.envelope() {
-        Ok(envelope) if envelope.kind == NodeKind::SESSION_EXECUTION => execution_surface(format),
+        Ok(envelope) if envelope.kind == NodeKind::SESSION_ROOT => execution_surface(format),
         Ok(envelope) => vec![Extraction::Undecodable {
             format,
             reason: format!(
-                "execution-state root is a node of kind {}, not a SessionExecution",
+                "execution-state root is a node of kind {}, not a SessionRoot page",
                 envelope.kind.0
             ),
         }],

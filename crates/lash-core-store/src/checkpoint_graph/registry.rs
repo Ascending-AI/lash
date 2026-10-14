@@ -2,8 +2,10 @@
 //! enum ordinals, with each kind's body shape, size bound and owning lane.
 //!
 //! Numbers are the format. A new kind takes an unused number; none is ever
-//! renumbered or reused. Kinds 1000 to 1999 are reserved for a future
-//! complete object graph (§14) and are not registered in 1.0.
+//! renumbered or reused. Kinds 1000 to 1999 are the persistent heap's
+//! semantic pages (FIG-6187, D-ENV): every one is direct-bodied and
+//! node-bounded but the root-bounded CheckpointRoot, and its canonical body
+//! is the kernel's (`lash_kernel_state::paged::PageKind`).
 
 use std::fmt;
 use std::ops::RangeInclusive;
@@ -82,13 +84,13 @@ pub struct KindSpec {
 }
 
 macro_rules! registry {
-    ($($konst:ident = $number:literal, $name:literal, $shape:ident, $bound:ident, $owner:ident;)*) => {
+    ($table:ident, $doc:literal, $($konst:ident = $number:literal, $name:literal, $shape:ident, $bound:ident, $owner:ident;)*) => {
         impl NodeKind {
             $(pub const $konst: Self = Self($number);)*
         }
 
-        /// Every 1.0 kind, in number order.
-        pub const REGISTRY: &[KindSpec] = &[
+        #[doc = $doc]
+        pub const $table: &[KindSpec] = &[
             $(KindSpec {
                 kind: NodeKind($number),
                 name: $name,
@@ -101,6 +103,7 @@ macro_rules! registry {
 }
 
 registry! {
+    REGISTRY, "Every 1.0 graph kind below the semantic range, in number order; retired numbers are absent.",
     TEXT_LEAF = 1, "TextLeaf", Direct, Node, Seams;
     BYTES_LEAF = 2, "BytesLeaf", Direct, Node, Seams;
     TEXT_INDEX = 3, "TextIndex", Direct, Node, Seams;
@@ -116,7 +119,6 @@ registry! {
     RELEASE_MANIFEST = 13, "ReleaseManifest", Enveloped, Node, Kernel;
     HELPER_DEFINITION = 14, "HelperDefinition", Enveloped, Node, Kernel;
     CELL_ENVELOPE = 15, "CellEnvelope", Enveloped, Node, Host;
-    KERNEL_WHOLE = 16, "KernelWhole", Enveloped, Root, Kernel;
     EFFECT_MEMBERSHIP = 17, "EffectMembership", Enveloped, Node, Host;
     ADMISSION = 18, "Admission", Enveloped, Node, Host;
     FROZEN_REQUEST = 19, "FrozenRequest", Enveloped, Node, Host;
@@ -127,9 +129,7 @@ registry! {
     HOST_ROOT = 24, "HostRoot", Enveloped, Root, Host;
     EVENT_PAGE = 25, "EventPage", Enveloped, Node, Host;
     EVENT_INDEX = 26, "EventIndex", Direct, Node, Host;
-    TERMINAL_WHOLE = 27, "TerminalWhole", Enveloped, Node, Kernel;
     CELL_END = 28, "CellEnd", Enveloped, Root, Host;
-    SESSION_EXECUTION = 29, "SessionExecution", Enveloped, Root, Cell;
     FUNCTION_BUNDLE = 30, "FunctionBundle", Enveloped, Node, Cell;
     PRESENTATION = 31, "Presentation", Enveloped, Node, Host;
     REPORT_VIEW = 32, "ReportView", Enveloped, Node, Host;
@@ -143,16 +143,38 @@ registry! {
     CALL_BODY = 40, "CallBody", Enveloped, Node, Host;
 }
 
-impl NodeKind {
-    /// Kinds reserved for a future complete object graph (FIG-5887 §14):
-    /// never registered in 1.0.
-    pub const RESERVED_FUTURE: RangeInclusive<u32> = 1000..=1999;
+registry! {
+    SEMANTIC_REGISTRY, "The persistent heap's semantic page kinds, in number order (D-ENV).",
+    CHECKPOINT_ROOT = 1000, "CheckpointRoot", Direct, Root, Kernel;
+    SEQUENCE_INDEX = 1001, "SequenceIndex", Direct, Node, Kernel;
+    SEQUENCE_LEAF = 1002, "SequenceLeaf", Direct, Node, Kernel;
+    KEYED_INDEX = 1003, "KeyedIndex", Direct, Node, Kernel;
+    KEYED_LEAF = 1004, "KeyedLeaf", Direct, Node, Kernel;
+    PAYLOAD_LEAF = 1005, "PayloadLeaf", Direct, Node, Kernel;
+    PAYLOAD_INDEX = 1006, "PayloadIndex", Direct, Node, Kernel;
+    FROZEN_ROOT = 1007, "FrozenRoot", Direct, Node, Kernel;
+    SESSION_ROOT = 1008, "SessionRoot", Direct, Node, Kernel;
+}
 
-    /// This kind's registry row, when 1.0 registers it.
+impl NodeKind {
+    /// The semantic page range (D-ENV): the kernel's persistent heap pages.
+    /// A number in it past [`SEMANTIC_REGISTRY`] is a later format's.
+    pub const SEMANTIC: RangeInclusive<u32> = 1000..=1999;
+
+    /// This kind's registry row, when this build registers it. Retired
+    /// numbers (16, 27 and 29: the whole-image kinds the persistent heap
+    /// replaced, FIG-6193) have none and are never reused.
     #[must_use]
     pub fn spec(self) -> Option<&'static KindSpec> {
-        let index = usize::try_from(self.0).ok()?.checked_sub(1)?;
-        REGISTRY.get(index).filter(|spec| spec.kind == self)
+        let table = if Self::SEMANTIC.contains(&self.0) {
+            SEMANTIC_REGISTRY
+        } else {
+            REGISTRY
+        };
+        table
+            .binary_search_by_key(&self.0, |spec| spec.kind.0)
+            .ok()
+            .map(|index| &table[index])
     }
 
     /// Whether this is a placed large value's leaf or index: a child of one

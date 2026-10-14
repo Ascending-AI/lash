@@ -1,0 +1,212 @@
+//! S6: store publication of persistent-heap pages (FIG-6195,
+//! `docs/design/persistent-heap-seams.md`).
+//!
+//! Declarations only. Both SQL stores implement [`PageStore`] over the
+//! generic content-addressed node store and the existing fenced owner
+//! transaction:
+//!
+//! - a root lease is a root-catalog owner row: while it lives, reclamation
+//!   keeps every node its root reaches, and the parent serves demand reads
+//!   under it without a recursive closure query;
+//! - a candidate's install checks and key-share locks only its direct
+//!   external references ([`check_graph`](super::graph_commit::check_graph)'s
+//!   inductive rule), inserts its fresh nodes in global digest order, then
+//!   their edges, then publishes the execution root, host records, effect
+//!   admissions and the [`SemanticAdmission`] in the same fenced
+//!   transaction;
+//! - retiring an old root moves it to a durable retirement hold in the
+//!   publication transaction; bounded background steps peel it later.
+
+use std::sync::Arc;
+
+use lash_core_store::checkpoint_graph::stage::CandidateManifest;
+use lash_core_store::checkpoint_graph::{CommitId, NodeId};
+
+use super::graph::RootOwner;
+use super::keys::{ExecKey, Ordinal, OwnerKey, RunSeq};
+use crate::error::DurableError;
+use crate::ids::{ActorKey, CommitLabel, DurableInstant, Epoch};
+use crate::port::{ActorCommit, DurableStore};
+use crate::tx::ActorTx;
+
+/// A root lease's id: its catalog row's key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RootLeaseId(pub u64);
+
+/// What a broker asks to lease, transactionally checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootLeaseRequest {
+    /// The owning row whose root is leased (an execution, a session's
+    /// carried root, a function bundle).
+    pub owner: RootOwner,
+    /// The root the owner must hold now; another is refused.
+    pub expected: NodeId,
+    /// The actor whose fence the activation runs under, at `epoch`.
+    pub actor: ActorKey,
+    pub epoch: Epoch,
+    pub ttl_millis: i64,
+}
+
+/// A live lease on one committed root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootLease {
+    pub id: RootLeaseId,
+    pub owner: RootOwner,
+    pub root: NodeId,
+    pub actor: ActorKey,
+    pub epoch: Epoch,
+    /// Past this instant of the store's clock every read and renewal under
+    /// the lease is refused; the row stays a root owner until released or
+    /// reaped by retirement.
+    pub expires_at: DurableInstant,
+}
+
+/// One page read under a lease, its bytes as stored.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredPage {
+    pub id: NodeId,
+    pub bytes: Arc<[u8]>,
+}
+
+/// The semantic admission of a checkpoint root: which validator certified
+/// the pages it changed, recorded with the root in its publishing
+/// transaction. A content hash certifies bytes only; this certifies the
+/// root's object references, memory summaries and guest schema under the
+/// named validator. A root whose admission names another validator is not
+/// trusted by this one: it needs full validation first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticAdmission {
+    /// The CheckpointRoot node.
+    pub root: NodeId,
+    pub kernel: u32,
+    /// The semantic page format number (`lash_kernel_state::paged`).
+    pub page_format: u32,
+    /// The validator's identity: kernel version, page format and the
+    /// digest of the validating build's page schema.
+    pub validator: String,
+    pub commit: CommitId,
+}
+
+/// The one write of the owner commit that owns a candidate (FIG-6197 F1):
+/// the root it publishes reaches the candidate's semantic root through
+/// nodes the commit supplies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CandidateOwner {
+    /// The execution root `exec`'s row moves to (a park or an end). The
+    /// manifest is built against the root the row holds now.
+    ExecRootPut(ExecKey),
+    /// The run fact appended at `(owner, run, ordinal)`: a process engine
+    /// step's outcome, whose record owns the candidate until the process's
+    /// own root names it. The manifest has no base.
+    RunFactAppend {
+        owner: OwnerKey,
+        run: RunSeq,
+        ordinal: Ordinal,
+    },
+}
+
+/// A candidate published by the owner commit it travels with.
+pub struct CandidatePublication {
+    pub owner: CandidateOwner,
+    pub manifest: Box<dyn CandidateManifest>,
+    pub admission: SemanticAdmission,
+}
+
+/// An authoritative publication: the activation's new baseline. Its
+/// effect admissions are committed; dispatch may start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CandidateReceipt {
+    pub actor: ActorCommit,
+    pub root: NodeId,
+    pub commit: CommitId,
+}
+
+/// The bounds of one retirement step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RetirementBudget {
+    /// The most nodes one step deletes.
+    pub nodes: u64,
+}
+
+/// What one retirement step did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RetirementProgress {
+    /// Holds the step removed (each replaced by holds on its children that
+    /// it did not delete).
+    pub holds_advanced: u64,
+    pub nodes_deleted: u64,
+    /// Expired root leases the step removed.
+    pub leases_reaped: u64,
+}
+
+/// The retirement backlog, for host admission and backpressure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RetirementBacklog {
+    pub holds: u64,
+    pub oldest_at: Option<DurableInstant>,
+}
+
+/// Publication, leases and reclamation of persistent-heap pages.
+///
+/// Implemented by the SQLite and PostgreSQL durable stores (layer
+/// hp-publish, FIG-6191).
+#[async_trait::async_trait]
+pub trait PageStore: DurableStore {
+    /// Leases `request.owner`'s root: in one transaction under the actor's
+    /// fence, checks the owner holds `expected` and inserts the lease row.
+    ///
+    /// # Errors
+    ///
+    /// [`DurableError::OwnershipLost`] for a stale epoch, and a graph
+    /// refusal (`RevisionConflict`, `RootRetired`) for another root.
+    async fn acquire_root_lease(
+        &self,
+        request: RootLeaseRequest,
+    ) -> Result<RootLease, DurableError>;
+
+    /// Extends a live lease by its ttl under the same fence.
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError>;
+
+    /// Ends a lease; its root stays owned by its other owners.
+    async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError>;
+
+    /// Reads `pages` in one transaction that checks the lease is live. The
+    /// caller authorizes each page by capability; the store checks only
+    /// the lease, never a closure.
+    async fn read_pages(
+        &self,
+        lease: &RootLease,
+        pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError>;
+
+    /// Commits `tx` with `candidate` in its one fenced transaction: the
+    /// candidate's nodes and edges with the transaction's own staged nodes,
+    /// its domain writes (the execution root, host records, effect
+    /// admissions) and the semantic admission, atomically.
+    async fn commit_candidate(
+        &self,
+        tx: ActorTx,
+        candidate: CandidatePublication,
+        label: CommitLabel,
+    ) -> Result<CandidateReceipt, DurableError>;
+
+    /// The semantic admission recorded with `root`, if any.
+    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError>;
+
+    /// The execution's current root and commit identity: how an ambiguous
+    /// publication is resolved before it is retried or discarded.
+    async fn candidate_state(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Option<(NodeId, CommitId)>, DurableError>;
+
+    /// One bounded retirement step: takes one hold, deletes the nodes under
+    /// it that no root owner, lease or inbound edge keeps, and installs
+    /// holds on their children, atomically.
+    async fn retire_step(
+        &self,
+        budget: RetirementBudget,
+    ) -> Result<RetirementProgress, DurableError>;
+
+    async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError>;
+}

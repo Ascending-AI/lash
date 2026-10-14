@@ -6,16 +6,21 @@
 //! here. Numbers keep their tokens and objects their identities, so nothing
 //! is reduced on the way.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
+use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
+use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, Handle, Name, Object, ObjectId, Type, Value,
+    Datum, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Handle, Name,
+    TaskIdentity, Type,
 };
+use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{
-    Bindings, EffectModes, EffectRequest, Outcome, Park, Request, SleepRequest, Start, Target,
-    WaitId,
+    Bound, BoundExceeded, EffectModes, EffectRequest, End, Finished, Outcome, Park, Request,
+    RunError, SleepRequest, Target, WaitId,
 };
+use lash_vm_broker::kernel::MachinePark;
+use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::{EncodedPayload, PayloadKind};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -83,51 +88,148 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
     Ok(value)
 }
 
-/// How a new run starts ([`Start`]), and the effects it performs as reads
-/// ([`EffectModes`]).
+/// A carried session as it crosses (S8): its [`SessionRoot`] in the
+/// kernel's token encoding, and a capability for each page it names, in
+/// its order (heap, bindings, functions). The receiver authorizes every
+/// page by its capability; a root naming a page with none is refused.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CarryWire {
+    #[serde(with = "serde_bytes")]
+    pub root: Vec<u8>,
+    pub pages: Vec<PageCapability>,
+}
+
+impl CarryWire {
+    /// `session`, each of its pages carried by the capability `issue`
+    /// gives it.
+    pub fn of(session: &SessionRoot, mut issue: impl FnMut(PageRef) -> PageCapability) -> Self {
+        Self {
+            root: encode_body(session),
+            pages: session_pages(session).into_iter().map(&mut issue).collect(),
+        }
+    }
+
+    /// The session this carries, each page granted what `grant` makes of
+    /// its capability.
+    ///
+    /// # Errors
+    ///
+    /// A payload breach for a root that does not decode, or capabilities
+    /// that are not its pages'.
+    pub fn session(
+        &self,
+        mut grant: impl FnMut(&PageCapability) -> Result<PageGrant, PoolError>,
+    ) -> Result<SessionRoot, PoolError> {
+        let breach = |problem: &str| PoolError::payload(PayloadKind::Start, problem);
+        let mut session: SessionRoot = decode_body(&self.root)
+            .map_err(|error| PoolError::payload(PayloadKind::Start, error))?;
+        let named = session_pages(&session);
+        if named.len() != self.pages.len()
+            || named
+                .iter()
+                .zip(&self.pages)
+                .any(|(page, capability)| page.id.0 != capability.page)
+        {
+            return Err(breach(
+                "a carried session's capabilities are not its pages'",
+            ));
+        }
+        let mut grants = self.pages.iter();
+        let mut next = || -> Result<PageGrant, PoolError> {
+            grants
+                .next()
+                .ok_or_else(|| breach("a carried session's capabilities run out"))
+                .and_then(&mut grant)
+        };
+        session.heap.grant = next()?;
+        if let Some(page) = session.bindings.page_mut() {
+            page.grant = next()?;
+        }
+        if let Some(page) = session.functions.page_mut() {
+            page.grant = next()?;
+        }
+        Ok(session)
+    }
+}
+
+/// The pages `session` names, in its order.
+fn session_pages(session: &SessionRoot) -> Vec<PageRef> {
+    let mut pages = vec![session.heap];
+    pages.extend(session.bindings.page());
+    pages.extend(session.functions.page());
+    pages
+}
+
+/// How a new run starts ([`lash_kernel_vm::CellStart`], less its owner
+/// binding, which the protocol's `Start` carries), and the effects it
+/// performs as reads ([`EffectModes`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartWire {
     /// The entry to run; `None` runs the document's `main`.
     pub entry: Option<Name>,
     pub args: Vec<Datum>,
-    pub variables: BTreeMap<Name, Value>,
-    pub objects: Vec<(ObjectId, Object)>,
+    /// The carried session a cell opens in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<CarryWire>,
     /// The effects the run performs as reads (`K-EFF-012`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reads: Vec<EffectName>,
+    /// The host's read-only bindings a cell's `main` starts with.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host: Vec<(Name, Datum)>,
+}
+
+/// What a session cell's end needs to save the functions its carry would
+/// drop (`K-SES-004`), beside the dialect's function values the worker
+/// holds: the controls its effects declare and the annotations its
+/// lowering wrote.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveWire {
+    pub controls: std::collections::BTreeMap<
+        EffectName,
+        std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
+    >,
+    /// The cell's annotations, in their JSON encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<String>,
 }
 
 impl StartWire {
-    /// `start`, performing its effects in the modes `modes` binds.
+    /// A run of `target` over `args`, opening `session`, performing its
+    /// effects in the modes `modes` binds.
     #[must_use]
-    pub fn of(start: Start, modes: &EffectModes) -> Self {
+    pub fn of(
+        target: Target,
+        args: Vec<Datum>,
+        session: Option<CarryWire>,
+        modes: &EffectModes,
+        host: Vec<(Name, Datum)>,
+    ) -> Self {
         Self {
-            entry: match start.target {
+            entry: match target {
                 Target::Main => None,
                 Target::Entry(name) => Some(name),
             },
-            args: start.args,
-            variables: start.bindings.variables,
-            objects: start.bindings.objects.into_iter().collect(),
+            args,
+            session,
             reads: modes.reads().iter().cloned().collect(),
+            host,
         }
     }
 
-    /// The start and the effect modes this wire carries.
+    /// The target this wire runs.
     #[must_use]
-    pub fn into_start(self) -> (Start, EffectModes) {
-        (
-            Start {
-                target: self.entry.map_or(Target::Main, Target::Entry),
-                args: self.args,
-                bindings: Bindings {
-                    variables: self.variables,
-                    objects: self.objects.into_iter().collect(),
-                },
-            },
-            EffectModes::reading(self.reads),
-        )
+    pub fn target(&self) -> Target {
+        self.entry.clone().map_or(Target::Main, Target::Entry)
+    }
+
+    /// The effect modes this wire carries.
+    #[must_use]
+    pub fn modes(&self) -> EffectModes {
+        EffectModes::reading(self.reads.clone())
     }
 }
 
@@ -188,14 +290,15 @@ pub enum RequestWire {
     },
 }
 
-/// What a park hands the parent ([`Park`]).
+/// What a park hands the parent ([`Park`]): its task table stays in the
+/// machine's heap, and only its counts cross.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParkWire {
     pub requests: Vec<RequestWire>,
     pub withdrawn: Vec<WaitId>,
-    pub outstanding: Vec<lash_kernel_doc::TaskIdentity>,
-    pub live: Vec<lash_kernel_doc::TaskIdentity>,
+    pub outstanding: u64,
+    pub live: u64,
 }
 
 impl From<Park> for ParkWire {
@@ -227,7 +330,7 @@ impl From<Park> for ParkWire {
     }
 }
 
-impl TryFrom<ParkWire> for Park {
+impl TryFrom<ParkWire> for MachinePark {
     type Error = PoolError;
 
     fn try_from(wire: ParkWire) -> Result<Self, Self::Error> {
@@ -301,9 +404,152 @@ impl From<OutcomeWire> for Outcome {
     }
 }
 
-/// How a run ended: its TerminalWhole as sealed graph state, or `None` for
-/// a cancelled run, which records no end.
-pub type EndWire = Option<lash_vm_protocol::SealedGraphState>;
+/// Which bound a run passed ([`Bound`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum BoundWire {
+    Charge,
+    Memory,
+    CallDepth,
+    LiveTasks,
+    RequestsPerPark,
+    JoinMembers,
+    Guard { function: FunctionId },
+}
+
+/// How a run ended ([`End`]). A finished cell's carry crosses as the
+/// session root it sealed, with a capability for each page.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum EndWire {
+    Finished {
+        result: Datum,
+        finish: bool,
+        carry: Option<CarryWire>,
+        not_carried: Vec<(Name, String)>,
+    },
+    Failed(Datum),
+    Uncaught(Datum),
+    TasksOutstanding {
+        unfinished: Vec<TaskIdentity>,
+        unobserved: Vec<TaskIdentity>,
+    },
+    Deadlock {
+        waiting: Vec<TaskIdentity>,
+    },
+    Bound {
+        bound: BoundWire,
+        limit: u64,
+        function: Option<FunctionName>,
+    },
+    Cancelled,
+}
+
+impl EndWire {
+    /// `end`, its carry's pages carried by the capability `issue` gives
+    /// each.
+    pub fn of(end: End, issue: impl FnMut(PageRef) -> PageCapability) -> Self {
+        match end {
+            End::Finished(finished) => {
+                let Finished {
+                    result,
+                    finish,
+                    carry,
+                    not_carried,
+                } = *finished;
+                Self::Finished {
+                    result,
+                    finish,
+                    carry: carry.map(|session| CarryWire::of(&session, issue)),
+                    not_carried,
+                }
+            }
+            End::Failed(reason) => Self::Failed(reason),
+            End::Error(RunError::Uncaught(error)) => Self::Uncaught(error),
+            End::Error(RunError::TasksOutstanding {
+                unfinished,
+                unobserved,
+            }) => Self::TasksOutstanding {
+                unfinished,
+                unobserved,
+            },
+            End::Error(RunError::Deadlock { waiting }) => Self::Deadlock { waiting },
+            End::Error(RunError::Bound(exceeded)) => Self::Bound {
+                bound: match exceeded.bound {
+                    Bound::Charge => BoundWire::Charge,
+                    Bound::Memory => BoundWire::Memory,
+                    Bound::CallDepth => BoundWire::CallDepth,
+                    Bound::LiveTasks => BoundWire::LiveTasks,
+                    Bound::RequestsPerPark => BoundWire::RequestsPerPark,
+                    Bound::JoinMembers => BoundWire::JoinMembers,
+                    Bound::Guard { function } => BoundWire::Guard { function },
+                },
+                limit: exceeded.limit,
+                function: exceeded.function,
+            },
+            End::Cancelled => Self::Cancelled,
+        }
+    }
+
+    /// The end this carries, its carry's pages granted what `grant` makes
+    /// of each capability.
+    ///
+    /// # Errors
+    ///
+    /// As [`CarryWire::session`].
+    pub fn into_end(
+        self,
+        grant: impl FnMut(&PageCapability) -> Result<PageGrant, PoolError>,
+    ) -> Result<End, PoolError> {
+        Ok(match self {
+            Self::Finished {
+                result,
+                finish,
+                carry,
+                not_carried,
+            } => End::Finished(Box::new(Finished {
+                result,
+                finish,
+                carry: carry.map(|carry| carry.session(grant)).transpose()?,
+                not_carried,
+            })),
+            Self::Failed(reason) => End::Failed(reason),
+            Self::Uncaught(error) => End::Error(RunError::Uncaught(error)),
+            Self::TasksOutstanding {
+                unfinished,
+                unobserved,
+            } => End::Error(RunError::TasksOutstanding {
+                unfinished,
+                unobserved,
+            }),
+            Self::Deadlock { waiting } => End::Error(RunError::Deadlock { waiting }),
+            Self::Bound {
+                bound,
+                limit,
+                function,
+            } => End::Error(RunError::Bound(BoundExceeded {
+                bound: match bound {
+                    BoundWire::Charge => Bound::Charge,
+                    BoundWire::Memory => Bound::Memory,
+                    BoundWire::CallDepth => Bound::CallDepth,
+                    BoundWire::LiveTasks => Bound::LiveTasks,
+                    BoundWire::RequestsPerPark => Bound::RequestsPerPark,
+                    BoundWire::JoinMembers => Bound::JoinMembers,
+                    BoundWire::Guard { function } => Bound::Guard { function },
+                },
+                limit,
+                function,
+            })),
+            Self::Cancelled => End::Cancelled,
+        })
+    }
+}
+
+/// The page a capability names.
+#[must_use]
+pub fn page_of(capability: &PageCapability) -> PageId {
+    PageId(capability.page)
+}
 
 /// A read through a projection handle. The answer is
 /// [`ProjectionAnswer`].
@@ -327,11 +573,11 @@ mod tests {
         let identity = serde_json::json!({"task": "main", "site": {"unit": "main", "path": [0, 0]}, "occurrence": 0, "loops": []});
         for seconds in [0, u64::MAX] {
             for nanoseconds in [0, 999_999_999, 1_000_000_000, u32::MAX] {
-                let json = serde_json::json!({"requests": [{"sleep": {"wait": 0, "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": [], "live": []});
+                let json = serde_json::json!({"requests": [{"sleep": {"wait": 0, "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": 0, "live": 0});
                 let payload = encode(PayloadKind::Park, &json).unwrap();
                 let decoded = decode::<ParkWire>(PayloadKind::Park, &payload);
                 if nanoseconds < 1_000_000_000 {
-                    let park = Park::try_from(decoded.unwrap()).unwrap();
+                    let park = MachinePark::try_from(decoded.unwrap()).unwrap();
                     let Request::Sleep(sleep) = &park.requests[0] else {
                         panic!("sleep")
                     };

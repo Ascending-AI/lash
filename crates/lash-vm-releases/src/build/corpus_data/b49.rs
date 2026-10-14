@@ -107,6 +107,7 @@ pub(super) const DATA: &str = r####"{
 "49b181efb0b5114c0acf01f44318bec100274fda39e5378cfea617d613ce9728":[{"list":0},{"text":"not a date"}],
 "49b1e199ee157f8c615a7c24fa42296879ea11ea6549b79749afffe7ea2d9619":[{"text":""},{"text":"12.5"},{"text":"a"}],
 "49b5d5362652b9f73399917dba6fb253ecbf8ae7667549ea2f47c4bdaac88446":[{"float":"-6.774929498474636e295"}],
+"49b6f24c3791d6275b82a7f59317a45db19ca79e645f1df9e3c20635079f58ee":{"charge":264,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":1},
 "49b7ffbd0a7dccf6640d8fdf885f58ead8386c358e330bde71816c7ecdc2b098":[{"map":39},{"text":"򡉺􋣞𘘯򞻣􏇾􉆝񖟾󫚱򻞜򤿳򅆬򮨏𦘛񀸗󳇋󽽨󹣖󹩧򿚓󐮾󚀩񢄩򈄫𛓩󻯀򠚷񪍺碼󻭍򪽻󟋥󁡀򩡰񓥀񓴲𑿈񖗷򗓼񮤕񱎇򆡠򙚰𺆝妞욭򀩠񇉴񔶐"}],
 "49b81709af61ac0d5c70cebbc1542b32c8ad12a59cb1c82e8aed1f4e325ee654":[{"list":85},"null",{"int":"0"},{"int":"31"},{"bool":false},{"bool":false}],
 "49bd38b3f9919abd840a8962ccefb9eab3fa501d861d59313d3be9059bc30869":[{"text":"񛨎𿋺򈆟𔝜󩣒􈽣ẽ񽟀🁯򈁏󛪏󆐺򪉲󀎶󲈱󡈵򹍑񵀷򍍗󉔱⽇󍛙򄴴񰺮𭤳񦹁𛫝𕓨🦀󽞱񽩞񟡪󷤚鍨񴡎󽵞𘕤􋥮􁎜򟚻𚆖𰍕򓘓蚿򾩲񖼦򈹸򤕤񟻮񤚓𴫞𮷋󦻐򀀍񃝍񼁣󰼣񁇽󱢞✯򆢡򂐰񕁸򥃘籹𲫁𗛔򮬹򺪯񓸺򂛆񧬋󥴽󝃇"},"null"],

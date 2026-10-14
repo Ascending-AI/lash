@@ -1,12 +1,14 @@
 //! The `kernel_run` engine step: resume the saved run, hand it what
 //! settled, and run it until no task is ready.
 //!
-//! The step performs nothing. It answers the state the machine exported at
-//! its park with the waits it asked for there; the process activation
-//! commits both, with the admission of each wait's step, in one
-//! `process.advance` transaction. The step is `Repeatable`: a run that
-//! never committed is a recomputation of an effect-free stretch of guest
-//! code from the same saved state and the same outcomes.
+//! The step performs nothing. It answers the CheckpointRoot the machine
+//! sealed at its park with the waits it asked for there: the step's outcome
+//! publishes the root's pages and owns them (FIG-6193, P1), and the process
+//! activation commits the waits, with the admission of each wait's step,
+//! in one `process.advance` transaction whose root names the page. The
+//! step is `Repeatable`: a run that never committed is a recomputation of
+//! an effect-free stretch of guest code from the same saved state and the
+//! same outcomes, and its staging is dropped unpublished.
 
 use std::sync::Arc;
 
@@ -16,17 +18,18 @@ use lash_core::{
     SettledOutput,
 };
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Name, Timestamp};
-use lash_kernel_vm::{Bounds, End, Request, RunError, Start, Step, Target};
+use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{
-    DrivenMachine, KernelFailure, Machines, datum_from_json, datum_to_json,
+    DrivenMachine, KernelFailure, MachineStep, Machines, datum_from_json, datum_to_json,
 };
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use lash_vm_protocol::{PoolFault, ProtocolBreach};
 use tokio_util::sync::CancellationToken;
 
+use super::pages::{RunCandidate, StepActivation};
 use super::state::{
-    Admission, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput, SealedRun,
+    Admission, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput, ParkedPage,
 };
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
@@ -65,8 +68,17 @@ pub(crate) async fn run_kernel_step(
 ) -> EngineStepAnswer {
     let process = run.process.clone();
     match kernel_run(engine, run, stop).await {
-        Ok(output) => match serde_json::to_string(&output) {
-            Ok(text) => SettledOutput::Completed(material(&process, text)).into(),
+        Ok((output, candidate)) => match serde_json::to_string(&output) {
+            Ok(text) => {
+                let output = Box::new(SettledOutput::Completed(material(&process, text)));
+                match candidate {
+                    Some(candidate) => EngineStepAnswer::Paged {
+                        output,
+                        candidate: lash_core::StepCandidate(Arc::new(candidate)),
+                    },
+                    None => EngineStepAnswer::Settled(output),
+                }
+            }
             Err(error) => failed(&process, &RunFault(error.to_string())).into(),
         },
         Err(Unsettled::Fault(fault)) => failed(&process, &fault).into(),
@@ -148,17 +160,23 @@ impl RunHost for StepHost {
     }
 }
 
-fn ended(outcome: lash_core::ProcessOutcome) -> Result<KernelRunOutput, Unsettled> {
-    Ok(KernelRunOutput::Ended {
-        outcome: Box::new(outcome),
-    })
+/// What a run answers: its output, with the candidate its park sealed.
+type Answered = (KernelRunOutput, Option<RunCandidate>);
+
+fn ended(outcome: lash_core::ProcessOutcome) -> Result<Answered, Unsettled> {
+    Ok((
+        KernelRunOutput::Ended {
+            outcome: Box::new(outcome),
+        },
+        None,
+    ))
 }
 
 async fn kernel_run(
     engine: &KernelProcessEngine,
     run: EngineStepRun,
     stop: CancellationToken,
-) -> Result<KernelRunOutput, Unsettled> {
+) -> Result<Answered, Unsettled> {
     let input: KernelRunInput = serde_json::from_value(run.input)
         .map_err(|error| RunFault(format!("kernel_run input: {error}")))?;
     let process_input = match KernelProcessInput::from_payload(&input.payload) {
@@ -248,39 +266,36 @@ async fn kernel_run(
         }),
         &document,
         &settings.dialect,
-        Start {
+        lash_vm_client::RunStart {
             target: Target::Entry(process_input.entry.clone()),
             args,
-            bindings: Default::default(),
+            session: None,
+            modes: lash_kernel_vm::EffectModes::recorded(),
+            host: Vec::new(),
+            save: None,
         },
-        lash_kernel_vm::EffectModes::recorded(),
         settings.bounds(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
-    let driven = drive(
-        &machines,
-        &run.process,
-        &process_input.document.to_string(),
-        input,
-        engine.workers.config().tuning.slice,
-        &stop,
-    )
-    .await;
+    let Some(step_pages) = run.pages.as_ref() else {
+        return Err(RunFault("the store holds no heap pages for the run".to_owned()).into());
+    };
+    let driven = drive(&machines, engine, step_pages, &run.process, input, &stop).await;
     let (step, state) = match driven {
         Ok(driven) => driven,
         Err(failure) => return worker_failure(failure),
     };
     match step {
-        Step::Ended(end) => {
+        MachineStep::Ended(end) => {
             let outcome = outcome_of_end(end);
             if let Some(trace) = &trace {
                 trace.finished(&outcome);
             }
             ended(outcome)
         }
-        Step::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
-        Step::Parked(park) => {
-            let Some(state) = state else {
+        MachineStep::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
+        MachineStep::Parked(park) => {
+            let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
             let withdrawn: Vec<u64> = park.withdrawn.iter().map(|wait| wait.0).collect();
@@ -300,48 +315,78 @@ async fn kernel_run(
                     trace.issued(issued);
                 }
             }
-            Ok(KernelRunOutput::Parked {
-                state,
-                issued,
-                withdrawn,
-            })
+            Ok((
+                KernelRunOutput::Parked {
+                    state,
+                    issued,
+                    withdrawn,
+                },
+                Some(candidate),
+            ))
         }
     }
 }
 
-/// Starts or resumes the machine, hands it the settled outcomes and runs
-/// it until it parks or ends. A parked machine answers its exported state,
-/// bound to `process` and sealed under `document`.
+/// Starts or resumes the machine over a page activation of the process's
+/// run, hands it the settled outcomes and runs it until it parks or ends.
+/// A parked machine answers the root it sealed, checked, with the
+/// candidate that publishes it.
 async fn drive(
     machines: &lash_vm_client::RemoteMachines,
+    engine: &KernelProcessEngine,
+    step: &lash_core::StepPages,
     process: &ProcessId,
-    document: &str,
     input: KernelRunInput,
+    stop: &CancellationToken,
+) -> Result<(MachineStep, Option<(ParkedPage, RunCandidate)>), KernelFailure> {
+    let binding = lash_vm_broker::kernel::graph::owner_binding_node(
+        &lash_durable::domain::ExecKey::Process(process.clone()),
+    )
+    .map_err(|refusal| KernelFailure::State(refusal.into()))?;
+    let config = engine.workers.config();
+    let spools = engine.workers.spools()?;
+    let mut activation = StepActivation::open(
+        step,
+        process,
+        input.parked,
+        input
+            .admissions
+            .iter()
+            .map(|admission| admission.0.clone())
+            .collect(),
+        binding,
+        machines.releases()?,
+        &spools,
+        lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
+    )
+    .await?;
+    let driven = run_machine(
+        machines,
+        &mut activation,
+        binding,
+        input.deliver,
+        config.tuning.slice,
+        stop,
+    )
+    .await;
+    activation.end_reads().await;
+    driven
+}
+
+async fn run_machine(
+    machines: &lash_vm_client::RemoteMachines,
+    activation: &mut StepActivation,
+    binding: lash_core_store::checkpoint_graph::NodeId,
+    deliver: Vec<super::state::Delivery>,
     slice: u64,
     stop: &CancellationToken,
-) -> Result<(Step, Option<SealedRun>), KernelFailure> {
-    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
-        process: process.as_str().to_owned(),
+) -> Result<(MachineStep, Option<(ParkedPage, RunCandidate)>), KernelFailure> {
+    let pages = std::sync::Arc::clone(&activation.pages);
+    let mut machine = match &activation.parked {
+        Some(parked) => machines.resume(parked, binding, pages).await?,
+        None => machines.start(binding, pages).await?,
     };
-    let mut machine = match input.parked {
-        Some(parked) => {
-            machines
-                .resume_sealed(
-                    lash_vm_protocol::ParkedGraph {
-                        state: parked.0,
-                        admissions: input
-                            .admissions
-                            .iter()
-                            .map(|admission| lash_vm_client::graph::admission(&admission.0))
-                            .collect(),
-                    },
-                    &binding,
-                )
-                .await?
-        }
-        None => machines.start(&binding).await?,
-    };
-    for delivery in input.deliver {
+    for delivery in deliver {
         machine
             .deliver(
                 lash_kernel_vm::WaitId(delivery.wait),
@@ -352,17 +397,28 @@ async fn drive(
     loop {
         match machine.run(slice, false).await? {
             // A stopped step is asked again from the same input.
-            Step::Slice if stop.is_cancelled() => return Ok((Step::Slice, None)),
-            Step::Slice => {}
-            Step::Parked(park) => {
-                let state = machine.export(&binding).await?;
+            MachineStep::Slice if stop.is_cancelled() => return Ok((MachineStep::Slice, None)),
+            MachineStep::Slice => {}
+            MachineStep::Parked(park) => {
+                let sealed = lash_vm_broker::kernel::run::sealed(
+                    &mut machine,
+                    &activation.pages,
+                    binding,
+                    &machines.document(),
+                )
+                .await?;
                 machine.release().await?;
-                let sealed = SealedRun(state.sealed(machines.owner().clone(), document));
-                return Ok((Step::Parked(park), Some(sealed)));
+                let page = ParkedPage {
+                    root: sealed.root,
+                    kernel: sealed.header.kernel,
+                };
+                let candidate =
+                    RunCandidate::new(std::sync::Arc::clone(&activation.pages), sealed.root);
+                return Ok((MachineStep::Parked(park), Some((page, candidate))));
             }
-            Step::Ended(end) => {
+            MachineStep::Ended(end) => {
                 machine.release().await?;
-                return Ok((Step::Ended(end), None));
+                return Ok((MachineStep::Ended(end), None));
             }
         }
     }
@@ -372,14 +428,14 @@ async fn drive(
 /// when every attempt would meet it the same way, the host's capacity
 /// verdict, which records nothing and runs again uncounted, or a fault of
 /// this attempt, which is asked again within the step's attempts.
-fn worker_failure(failure_: KernelFailure) -> Result<KernelRunOutput, Unsettled> {
+fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
     if let KernelFailure::Worker { outcome } = &failure_
         && let Some(cause) = capacity_cause(outcome)
     {
         return Err(Unsettled::Capacity(cause, failure_.to_string()));
     }
     match &failure_ {
-        KernelFailure::Start(_) | KernelFailure::Import(_) | KernelFailure::Document(_) => {
+        KernelFailure::Start(_) | KernelFailure::Open(_) | KernelFailure::Document(_) => {
             ended(failure(
                 KernelProcessFailureCode::RunRefused,
                 failure_.to_string(),
@@ -429,6 +485,9 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
         | InfrastructureOutcome::ProtocolViolation { .. } => {
             Some(CapacityCause::RetryableInfrastructure)
         }
+        InfrastructureOutcome::PageRefused { .. } => outcome
+            .is_retryable()
+            .then_some(CapacityCause::RetryableInfrastructure),
         InfrastructureOutcome::RunRefused { .. }
         | InfrastructureOutcome::WorkerDeployment { .. } => None,
     }

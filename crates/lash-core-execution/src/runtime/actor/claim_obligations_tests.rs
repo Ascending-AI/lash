@@ -93,7 +93,14 @@ fn admitting(run: u64, drafts: Vec<ExecutionDraft>) -> (ActorTx, Vec<AdmittedExe
 /// A transaction settling `member`.
 fn settling(member: &AdmittedExecution) -> ActorTx {
     let mut tx = opened();
-    round::settle(&mut tx, member, SettledOutput::Interrupted, Vec::new()).unwrap();
+    round::settle(
+        &mut tx,
+        member,
+        SettledOutput::Interrupted,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
     tx
 }
 

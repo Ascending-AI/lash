@@ -1,6 +1,7 @@
 //! The checkpoint graph on SQLite: the `graph` domain's DDL, the
-//! owner graph installation, hydration, and the peel that reclaims a
-//! retired root's closure (FIG-5887 §5, §7; FIG-5949).
+//! owner graph installation, hydration, and the retirement holds a commit
+//! leaves for bounded retirement steps (FIG-5887 §5, §7; FIG-5949;
+//! FIG-6191).
 //!
 //! # One transaction, one lock
 //!
@@ -8,7 +9,7 @@
 //! database's write lock (`BEGIN IMMEDIATE`) and the writer fence come
 //! first, then the owner's epoch fence, then the commit in the order of
 //! [`lash_durable::domain::graph`]'s contracts. SQLite has one writer, so a
-//! peel never interleaves with an install.
+//! retirement step never interleaves with an install.
 //!
 //! A hydration is one read transaction that selects the owner's root first,
 //! fixing its snapshot, and reads every descendant on it, so a writer that
@@ -17,15 +18,15 @@
 //!
 //! # Reclamation
 //!
-//! The root catalog (`graph_root_catalog`) is a view of the owning columns.
-//! The graph is a DAG, so a node no root reaches is an orphan (no root row,
-//! no edge to it) or reached only from such nodes: deleting orphans, whose
-//! edges go with them, deletes exactly what nothing reaches. Every
-//! transaction that retires a root peels it before it commits: the root
-//! goes when nothing else names it, then each child its edges no longer
-//! reach, level by level, stopping at a node something still names. The
-//! orphan audit ([`audit_page`]) peels whatever a write outside the peel
-//! left behind.
+//! The root catalog (`graph_root_catalog`) is a view of the owning columns,
+//! root leases and retirement holds among them. The graph is a DAG, so a
+//! node no root reaches is an orphan (no root row, no edge to it) or
+//! reached only from such nodes: deleting orphans, whose edges go with
+//! them, deletes exactly what nothing reaches. A transaction that retires a
+//! root moves it to a retirement hold (D-RET) and peels nothing; a bounded
+//! retirement step ([`super::pages`]) takes one hold and peels under it.
+//! The orphan audit ([`audit_page`]) peels whatever a write outside the
+//! holds left behind.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -33,7 +34,7 @@ use std::sync::LazyLock;
 use lash_core_store::checkpoint_graph::node::immutable_closure;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
-    NodeSource, StoredNode, check_envelope,
+    NodeSource, StoredNode, check_envelope, node::is_semantic,
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
@@ -90,6 +91,45 @@ CREATE TABLE IF NOT EXISTS graph_release_pins (
 );
 CREATE INDEX IF NOT EXISTS idx_graph_release_pins_root_ref ON graph_release_pins (root_ref);
 
+-- A root lease (FIG-6191, D-LEASE): an activation's hold on the exact
+-- committed root it reads on demand, taken under its actor's fence. A root
+-- of the catalog until released, or reaped by a retirement step once the
+-- store's clock passes its expiry; reads and renewals stop at expiry.
+CREATE TABLE IF NOT EXISTS root_leases (
+    lease_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_key BLOB NOT NULL,
+    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    actor_key TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    ttl_ms INTEGER NOT NULL CONSTRAINT ck_root_leases_ttl CHECK (ttl_ms > 0),
+    expires_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_root_leases_root_ref ON root_leases (root_ref);
+CREATE INDEX IF NOT EXISTS idx_root_leases_expiry ON root_leases (expires_at_ms);
+
+-- The durable retirement frontier (FIG-6191, D-RET): a retired root, or a
+-- node under one a bounded step has not peeled yet. A root of the catalog
+-- until its step removes it; `closure` 0 peels the node alone.
+CREATE TABLE IF NOT EXISTS retirement_holds (
+    root_ref TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
+    closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
+    queued_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_retirement_holds_queue
+    ON retirement_holds (queued_at_ms, root_ref);
+
+-- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
+-- that certified the pages it changed, written with the root. Not a root
+-- owner: it goes with its root.
+CREATE TABLE IF NOT EXISTS semantic_admissions (
+    root_ref TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
+    kernel INTEGER NOT NULL,
+    page_format INTEGER NOT NULL,
+    validator TEXT NOT NULL,
+    commit_id BLOB NOT NULL
+        CONSTRAINT ck_semantic_admissions_commit_id CHECK (length(commit_id) = 32)
+);
+
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     SELECT 'exec' AS source, root_ref FROM exec_snapshots WHERE root_ref IS NOT NULL
@@ -111,7 +151,9 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     UNION ALL SELECT 'revision_config', config_ref FROM session_revisions
     UNION ALL SELECT 'terminal_config', terminal_window_config_ref FROM session_runs
         WHERE terminal_window_config_ref IS NOT NULL
-    UNION ALL SELECT 'answer', answer_ref FROM turn_phases WHERE answer_ref IS NOT NULL;
+    UNION ALL SELECT 'answer', answer_ref FROM turn_phases WHERE answer_ref IS NOT NULL
+    UNION ALL SELECT 'lease', root_ref FROM root_leases
+    UNION ALL SELECT 'retirement', root_ref FROM retirement_holds;
 ";
 
 lash_store_sql::statements! {
@@ -173,7 +215,7 @@ lash_store_sql::statements! {
 /// 999-parameter limit (the bundled build allows 32,766). The first-cell
 /// measurements select 32 rows to amortize statement entry without making
 /// small graphs allocate a full graph-sized parameter list.
-const BLOB_BATCH_ROWS: usize = 32;
+pub(super) const BLOB_BATCH_ROWS: usize = 32;
 
 /// SQLite's multi-row VALUES program yields through a coroutine for each
 /// body. Keep small
@@ -212,6 +254,12 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     }
 });
 
+/// The multi-row blob insert for `rows` rows (1 to [`BLOB_BATCH_ROWS`]),
+/// `?1, ?2` the first row's digest and bytes.
+pub(super) fn blob_batch_sql(rows: usize) -> &'static str {
+    &SQL.blob_batches[rows - 1]
+}
+
 /// One page of the orphan audit.
 const GRAPH_AUDIT: CommitLabel = CommitLabel::new("graph.audit");
 
@@ -248,11 +296,11 @@ fn from_durable(error: DurableError) -> GraphRefusal {
     }
 }
 
-fn node_of(stored: &str) -> Result<NodeId, GraphRefusal> {
+pub(super) fn node_of(stored: &str) -> Result<NodeId, GraphRefusal> {
     NodeId::from_hex(stored).ok_or_else(|| corrupt("node reference", stored))
 }
 
-fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
+pub(super) fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
     match stored {
         0 => Ok(BlobEncoding::Opaque),
         1 => Ok(BlobEncoding::Graph),
@@ -274,7 +322,7 @@ fn stored_blob(tx: &Connection, hash: &str) -> GraphAnswer<Option<(Vec<u8>, Blob
     })
 }
 
-fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEncoding>> {
+pub(super) fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEncoding>> {
     let row = tx
         .prepare_cached(SQL.graph.blob_encoding.sql())?
         .query_row([node.to_hex()], |row| row.get::<_, i64>(0))
@@ -283,7 +331,7 @@ fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEnc
 }
 
 /// `owner`'s current root, or none when its row is gone or holds none.
-fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
+pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
     fn one(
         tx: &Connection,
         sql: &str,
@@ -523,6 +571,13 @@ fn walk_within(
         }
         if encoding == BlobEncoding::Graph {
             match check_envelope(&bytes, id, limits) {
+                // A persistent-heap page is read as a leaf: its header,
+                // never what it reaches (FIG-6193).
+                Ok(envelope) if is_semantic(envelope.kind) => {
+                    if roots.contains(&id) {
+                        return Ok(Err(GraphRefusal::SemanticPage(id)));
+                    }
+                }
                 Ok(envelope) => stack.extend(envelope.children.iter()),
                 Err(refusal) => return Ok(Err(refusal)),
             }
@@ -621,14 +676,14 @@ pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Res
 }
 
 /// `values` as one JSON array, the binding a `json_each` statement reads.
-fn json_array(values: &impl serde::Serialize) -> String {
+pub(super) fn json_array(values: &impl serde::Serialize) -> String {
     #[expect(clippy::expect_used, reason = "strings always encode as JSON")]
     serde_json::to_string(values).expect("a list of digests encodes")
 }
 
 /// One level of [`peel`]: deletes every node of `frontier` nothing names or
 /// reaches, and answers how many with the children their edges reached.
-fn peel_level(
+pub(super) fn peel_level(
     tx: &Connection,
     frontier: &BTreeSet<String>,
 ) -> rusqlite::Result<(usize, BTreeSet<String>)> {
@@ -663,16 +718,18 @@ fn peel_level(
     Ok((gone.len(), children))
 }
 
-/// Peels what `retired` recorded, before its transaction commits: each
-/// retired root's closure, and each ended turn's PhaseRoot alone. Answers
-/// how many blobs it deleted.
-pub(super) fn reclaim(tx: &Connection, retired: Retired) -> rusqlite::Result<usize> {
+/// Moves what `retired` recorded to retirement holds, before its
+/// transaction commits (D-RET): each retired root's closure, and each ended
+/// turn's PhaseRoot alone. Nothing is peeled here; a retirement step does
+/// that later in bounded transactions.
+pub(super) fn hold_retired(
+    tx: &Connection,
+    retired: Retired,
+    now: DurableInstant,
+) -> rusqlite::Result<()> {
     let (closures, phase_ends) = retired.into_parts();
-    let mut deleted = peel(tx, closures)?.deleted;
-    if !phase_ends.is_empty() {
-        deleted += peel_level(tx, &phase_ends)?.0;
-    }
-    Ok(deleted)
+    super::pages::hold(tx, &closures, true, now)?;
+    super::pages::hold(tx, &phase_ends, false, now)
 }
 
 /// How many roots the catalog names and how many blobs are stored.
@@ -978,7 +1035,7 @@ pub(super) fn install(
 
 /// `ids` as one JSON array of digests, the binding a `json_each`
 /// statement reads.
-fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
+pub(super) fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
     let mut array = String::from("[");
     for id in ids {
         if array.len() > 1 {

@@ -7,7 +7,8 @@
 //! shared, the owner fence and its turn-cancel read, the database clock),
 //! installs the commit's graph, key-share locking every staged node another
 //! writer stored, runs each step's statement as static SQL dispatched by the
-//! statement's name, peels the roots the steps retired (FIG-5949), then the
+//! statement's name, holds the roots the steps retired for retirement steps
+//! (FIG-5949, FIG-6191), then the
 //! formats stamp, the acknowledgement and the release, in one autocommit
 //! transaction. Every statement keeps a cached plan: none is text the
 //! function executes.
@@ -329,8 +330,7 @@ fn mechanics() -> Vec<&'static str> {
         prompts::closure().sql(),
         connection_sql().lock_xact_by_text_batch_seeded.sql(),
         prompts::read_children().sql(),
-        graph::peel_lock().sql(),
-        graph::peel_level().sql(),
+        super::pages::hold().sql(),
         SQL.actor.stamp_formats.sql(),
         SQL.postgres.ack_through.sql(),
         SQL.mail.delete_all.sql(),

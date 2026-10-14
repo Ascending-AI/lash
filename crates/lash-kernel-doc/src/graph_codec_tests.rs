@@ -1,8 +1,6 @@
 //! PC-EXACT, codec half: the kernel's values, forms and definitions read
 //! back exactly from their one binary spelling.
 
-use std::sync::Arc;
-
 use num_bigint::BigInt;
 
 use super::*;
@@ -60,8 +58,8 @@ fn integers_take_one_spelling_at_every_width_boundary() {
 /// one, and another NaN's bits are refused rather than repaired.
 #[test]
 fn floats_keep_signed_zero_and_refuse_a_second_nan() {
-    let positive = round_trip(&Value::Float(Float::new(0.0)));
-    let negative = round_trip(&Value::Float(Float::new(-0.0)));
+    let positive = round_trip(&Datum::Float(Float::new(0.0)));
+    let negative = round_trip(&Datum::Float(Float::new(-0.0)));
     assert_ne!(positive, negative);
     let nan = round_trip(&Datum::Float(Float::new(f64::from_bits(
         0x7ff0_0000_0000_0001,
@@ -81,40 +79,10 @@ fn floats_keep_signed_zero_and_refuse_a_second_nan() {
     );
 }
 
-/// The pinned FIG-5887 §2 discriminants: each Value and Datum variant is the
+/// The pinned FIG-5887 §2 discriminants: each Datum variant is the
 /// sum number the design fixes, whatever the Rust declaration order.
 #[test]
-fn value_and_datum_variants_carry_their_pinned_numbers() {
-    let values = [
-        Value::Null,
-        Value::Absent,
-        Value::Bool(true),
-        Value::Int(Integer::from(7)),
-        Value::Float(Float::new(1.5)),
-        Value::text("t"),
-        Value::Bytes(Bytes::new(vec![1, 2])),
-        Value::Timestamp(Timestamp {
-            nanoseconds: Integer::from(-3),
-        }),
-        Value::Tuple(Arc::from(vec![Value::Null, Value::List(ObjectId(4))])),
-        Value::List(ObjectId(1)),
-        Value::Map(ObjectId(2)),
-        Value::Set(ObjectId(3)),
-        Value::Record(ObjectId(4)),
-        Value::Closure(ObjectId(5)),
-        Value::Error(Arc::new(ErrorValue::new("boom", "it broke"))),
-        Value::Task(TaskId(6)),
-        Value::Function(Name::new("f")),
-        Value::Handle(Arc::new(Handle {
-            kind: "file".into(),
-            id: "x".into(),
-        })),
-        Value::Ref(Identity::Task(TaskId(2))),
-    ];
-    for (number, value) in values.iter().enumerate() {
-        let bytes = round_trip(value);
-        assert_eq!(&bytes[..2], &[0x0c, number as u8], "{value:?}");
-    }
+fn datum_variants_carry_their_pinned_numbers() {
     let data = [
         Datum::Null,
         Datum::Absent,
@@ -169,11 +137,6 @@ fn documents_and_definitions_read_back_exactly() {
     for definition in catalog().0.values() {
         round_trip(definition);
     }
-    let object = Object::Map(vec![
-        (Value::text("b"), Value::Int(Integer::from(1))),
-        (Value::text("a"), Value::Map(ObjectId(9))),
-    ]);
-    round_trip(&object);
     let mut data = std::collections::BTreeMap::new();
     data.insert(
         "span".to_owned(),
@@ -213,10 +176,10 @@ fn an_unsorted_or_repeated_key_is_refused() {
     out.map(2);
     for _ in 0..2 {
         Name::new("a").encode(&mut out);
-        Value::Null.encode(&mut out);
+        Datum::Null.encode(&mut out);
     }
     assert_eq!(
-        decode_body::<BTreeMap<Name, Value>>(out.as_bytes()),
+        decode_body::<BTreeMap<Name, Datum>>(out.as_bytes()),
         Err(TokenError::NonCanonical(
             CanonicalFault::UnsortedOrDuplicateKey
         ))
