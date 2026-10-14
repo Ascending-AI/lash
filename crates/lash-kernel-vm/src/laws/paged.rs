@@ -459,3 +459,74 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
     assert_eq!(error.message, "m".repeat(1 << 20));
     assert_eq!(error.data, lash_kernel_doc::Datum::Null);
 }
+
+/// `K-SES-003` across helper releases (FIG-6193): the session a main
+/// cell under one release carries, classified by `classify_carry` over the
+/// real heap and census, is adopted by the next cell under the same
+/// release or another one with every binding it carried and their aliases,
+/// a closure dropped with its typed diagnostic, and that cell's root pins
+/// its own release.
+#[test]
+fn a_session_carried_under_one_release_is_adopted_under_another() {
+    let mut first = Embedder::new(
+        "main { let xs = [1, 2] let ys = xs let n = num.add(40, 2) let f = fn(k) { return num.add(k, 1) } return null }",
+    );
+    let crate::End::Finished(finished) = first.run_to_end(&[]) else {
+        panic!("the first cell finishes")
+    };
+    let dropped: Vec<&str> = finished
+        .not_carried
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(dropped, ["f"], "a closure ends with its cell");
+    let session = finished.carry.expect("a main cell carries its session");
+    let mut source = first.source.clone();
+    let certificate = heap_accounting(&mut source, session.heap).unwrap();
+    for release in [
+        lash_kernel_doc::heap::PageId([8; 32]),
+        lash_kernel_doc::heap::PageId([7; 32]),
+    ] {
+        let mut next = Embedder::new(
+            "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform echo(1) as Any return got }",
+        );
+        let (mut program, _) = next.program(true);
+        program.release = release;
+        next.source = first.source.clone();
+        next.machine = crate::KernelMachine::start(
+            program,
+            Setup::default().bounds,
+            crate::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: crate::Target::Main,
+                args: Vec::new(),
+                session: Some(session.clone()),
+                modes: crate::EffectModes::recorded(),
+                host: Vec::new(),
+            },
+            Box::new(next.source.clone()),
+            Box::new(
+                Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(next.run(), Step::Parked(_)));
+        let sealed = next
+            .machine
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            sealed.root.release, release,
+            "the next cell pins its own release"
+        );
+        next.deliver("echo");
+        let crate::End::Finished(ended) = next.run_to_end(&[]) else {
+            panic!("the next cell finishes under {release:?}")
+        };
+        assert_eq!(ended.result, int(49), "under {release:?}");
+    }
+}
