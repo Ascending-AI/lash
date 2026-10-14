@@ -25,7 +25,7 @@ mod tests;
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
-pub use intrinsics::compile_generated;
+pub use intrinsics::read;
 pub use lash_kernel_dialect::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
     SourceSite,
@@ -82,8 +82,8 @@ pub fn lower_with_limits(
     lower::lower(&program, source, environment)
 }
 
-/// Lowers a host-authored whole workflow, including the exact source the
-/// printer writes. Exported async declarations and const-bound async literals
+/// Lowers a host-authored whole workflow. Exported source printed from a
+/// document is read back with [`read`] against that document instead. Exported async declarations and const-bound async literals
 /// (optionally wrapped in `process(...)`) become document entries even when
 /// the environment offers no process-start tools. This runs no effect and
 /// returns an unchecked document; a host must admit it before use.
@@ -94,31 +94,12 @@ pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Low
     lower_workflow_with_limits(source, environment, SourceLimits::standard())
 }
 
-/// Whether trusted whole-workflow dispatch must use the generated decoder.
-/// This includes incomplete reserved envelopes so malformed generated modules
-/// cannot fall through to authored lowering. It grants no model-cell authority.
-pub fn is_generated_workflow(source: &str) -> bool {
-    intrinsics::source_probe(source).0
-}
-
 /// Lower a whole TypeScript workflow under host source admission policy.
 pub fn lower_workflow_with_limits(
     source: &str,
     environment: &Environment<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    if is_generated_workflow(source) {
-        let document = compile_generated(source, GeneratedSourceLimits::default())?;
-        let mut annotations =
-            lash_kernel_doc::Annotations::new(document.identity().map_err(|error| {
-                Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None)
-            })?);
-        annotations.dialect = Some("typescript".into());
-        return Ok(Lowered {
-            document,
-            annotations,
-        });
-    }
     lower::check_binding_names(
         environment
             .bindings

@@ -91,10 +91,50 @@ fn dialect(unavoidable: &[Unavoidable]) -> Dialect<'_> {
     Dialect {
         name: "python",
         printer: &PRINTER,
-        decode: crate::compile_generated,
+        decode: crate::read,
         generic,
         unavoidable,
     }
+}
+
+/// FIG-6272: a real agent cell prints as the Python an agent writes: no
+/// header, declarations, casts or tables, its typed tool signatures staying
+/// in the document, and reads back against it to the same identity.
+#[test]
+fn deep_research_agent_cell_prints_as_plain_python_and_reads_back_exactly() {
+    let document = readability::deep_research().expect("the deep_research document decodes");
+    let printed = super::roundtrip(&document, false);
+    assert_eq!(
+        printed.source,
+        r#"async def deep_research():
+    search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
+    evidence = await tools.research.search(search_input)
+    synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
+    report = await tools.research.synthesize(synthesis_input)
+    display_input = record({"text": report.summary})
+    await tools.display.show_message(display_input)
+    return report
+def main():
+    return None
+"#
+    );
+    let rules = unavoidable();
+    let report = readability::check(
+        &[Case {
+            name: "deep_research",
+            document,
+        }],
+        &[dialect(&rules)],
+    );
+    report.assert_passed();
+    assert!(
+        report
+            .generic_forms
+            .iter()
+            .all(|form| form.rule == "record-kind"),
+        "{:?}",
+        report.generic_forms
+    );
 }
 
 /// G-SOURCE-READABLE: seven ordinary shapes permit no generic body forms.
@@ -113,7 +153,7 @@ fn shared_ordinary_corpus_has_only_named_distinctions_and_exact_bytes() {
         let printed = super::roundtrip(&case.document, false);
         if case.name == "three_effect_workflow" {
             assert_eq!(
-                printed.source.split_once('\n').unwrap().1,
+                printed.source,
                 r#"async def deep_research():
     search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
     evidence = await tools.research.search(search_input)
@@ -127,14 +167,8 @@ def main():
 "#
             );
         }
-        let header = printed.source.lines().next().unwrap();
-        assert!(!header.contains("\\\""), "{}: {header}", case.name);
         assert!(
-            !printed
-                .source
-                .lines()
-                .skip(1)
-                .any(|line| line.contains("k.")),
+            !printed.source.lines().any(|line| line.contains("k.")),
             "{}:\n{}",
             case.name,
             printed.source
@@ -306,51 +340,89 @@ fn unavoidable() -> Vec<Unavoidable> {
         });
     }
     rules.push(Unavoidable { rule: "unary-identity", node_kind: "ExpressionCall", reason: "Grouping distinguishes a unary helper Call from a signed Literal without adding stored nodes" });
-    for rule in [
-        "helper_py_add",
-        "helper_py_arg_missing",
-        "helper_py_chr",
-        "helper_py_divmod",
-        "helper_py_exc_args",
-        "helper_py_exc_matches",
-        "helper_py_exc_new",
-        "helper_py_fail",
-        "helper_py_floordiv",
-        "helper_py_getitem",
-        "helper_py_iadd",
-        "helper_py_int",
-        "helper_py_iter",
-        "helper_py_iter_guard",
-        "helper_py_iter_size",
-        "helper_py_length",
-        "helper_py_method_append",
-        "helper_py_method_clear",
-        "helper_py_method_copy",
-        "helper_py_method_count",
-        "helper_py_method_extend",
-        "helper_py_method_get",
-        "helper_py_method_insert",
-        "helper_py_method_lower",
-        "helper_py_method_pop",
-        "helper_py_method_remove",
-        "helper_py_method_reverse",
-        "helper_py_method_setdefault",
-        "helper_py_method_split",
-        "helper_py_method_upper",
-        "helper_py_mod",
-        "helper_py_mul",
-        "helper_py_name_check",
-        "helper_py_neg",
-        "helper_py_pow",
-        "helper_py_range",
-        "helper_py_round",
-        "helper_py_setitem",
-        "helper_py_show",
-        "helper_py_slice",
-        "helper_py_to_list",
-        "helper_py_type",
+    // Library actions print as the builtin or method an author writes
+    // (`len(x)`, `xs.append(v)`, `x[a:b]`, `type(x).__name__`). These have
+    // no authored spelling that is the node's exact inverse.
+    for (rule, reason) in [
+        (
+            "helper_py_add",
+            "`x + y` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_py_mul",
+            "`x * y` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_py_neg",
+            "`-x` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_py_mod",
+            "`x % y` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_py_floordiv",
+            "`x // y` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_py_pow",
+            "`x ** y` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        ("helper_py_getitem", "`x[i]` is the kernel Index member"),
+        (
+            "helper_py_setitem",
+            "`x[i] = v` is the kernel member Assign",
+        ),
+        (
+            "helper_py_iadd",
+            "`x += y` also assigns; the stored node is only the call",
+        ),
+        (
+            "helper_py_exc_args",
+            "`error.args` is the kernel Field member",
+        ),
+        (
+            "helper_py_show",
+            "print's text is formatted before the Print statement, which has its own spelling",
+        ),
+        (
+            "helper_py_arg_missing",
+            "a missing-argument check lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_exc_matches",
+            "an except-clause class test lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_exc_new",
+            "an exception construction lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_fail",
+            "a typed failure lowering raises; no source spells it",
+        ),
+        (
+            "helper_py_iter",
+            "a for-loop iteration step lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_iter_guard",
+            "a for-loop guard lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_iter_size",
+            "a for-loop size check lowering inserts; no source spells it",
+        ),
+        (
+            "helper_py_name_check",
+            "an unbound-name check lowering inserts; no source spells it",
+        ),
     ] {
-        rules.push(Unavoidable { rule, node_kind: "Call", reason: "This stored library Action has atomic operands and an await boundary; synchronous Python builtin/operator syntax would decode as Expr and change its Site and execution boundary" });
+        rules.push(Unavoidable {
+            rule,
+            node_kind: "Call",
+            reason,
+        });
     }
     rules
 }
@@ -395,6 +467,10 @@ fn exported_python_corpora_compile_under_cpython() {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let mut cases = readability::corpus().unwrap();
+    cases.push(Case {
+        name: "deep_research",
+        document: readability::deep_research().unwrap(),
+    });
     let manifest: serde_json::Value =
         serde_json::from_str(include_str!("../../../conformance/manifest.json")).unwrap();
     for case in manifest["cases"].as_array().unwrap() {
@@ -440,7 +516,10 @@ fn exported_python_corpora_compile_under_cpython() {
         })
         .collect();
     let mut child = Command::new("python3").args(["-c", "import json,sys\nfor name,source in json.load(sys.stdin):\n compile(source, name, 'exec')\nprint('CPython exports compiled')"])
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+        // A hard dependency, not a skip: the test executors provide python3
+        // (docs/design/generated-source-python.md, "Proof").
+        .expect("this law runs CPython: python3 must be on PATH");
     child
         .stdin
         .take()

@@ -1,4 +1,5 @@
-//! Format v1 exact forms. Paired readable rules: generated_rules.md.
+//! Exported TypeScript: plain source whose environment stays in the base
+//! document. Paired rules: generated_rules.md.
 use crate::{
     TypeScript,
     generated_operators::{self, Operator},
@@ -9,7 +10,9 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc as k;
 
-/// Print without compilation, library lookup or admission.
+/// Print without compilation, library lookup or admission. The manifest,
+/// entries' result types, private bindings, helper identities and name
+/// renames are not written: [`crate::read`] takes them from the base document.
 pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
@@ -20,32 +23,15 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         out: SourceWriter::new(options),
         plan: &plan,
         indent: 0,
-        effects: &document.manifest.effects,
         operators: generated_operators::bindings(&document.manifest),
         types: Default::default(),
     };
-    renderer
-        .out
-        .write("k.document(\"lash.generated.typescript\", \"1\", ");
-    renderer.metadata(&document.manifest);
-    renderer.out.write(", ");
-    renderer.metadata(&document.entries);
-    renderer.out.write(", ");
-    renderer.out.json(&document.private_bindings);
-    renderer.out.write(", ");
-    let names: Vec<_> = plan
-        .names
-        .iter()
-        .filter(|(name, alias)| name.as_str() != alias.as_str())
-        .map(|(name, alias)| (alias, name))
-        .collect();
-    renderer.metadata(&names);
-    renderer.out.write(", ");
-    let helpers: Vec<_> = plan.helpers.iter().map(|(id, alias)| (alias, id)).collect();
-    renderer.metadata(&helpers);
-    renderer.out.write(");\n");
     for (name, function) in &document.functions {
-        renderer.out.write("async function ");
+        renderer.out.write(if document.entries.contains_key(name) {
+            "export async function "
+        } else {
+            "async function "
+        });
         renderer.name(name);
         let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
         renderer.parameters(&function.params);
@@ -168,7 +154,6 @@ struct Renderer<'a> {
     out: SourceWriter,
     plan: &'a NamePlan,
     indent: usize,
-    effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
     operators: generated_operators::Operators,
     types: lash_kernel_dialect::source_types::Types,
 }
@@ -473,6 +458,26 @@ impl Renderer<'_> {
     }
     fn action(&mut self, action: &k::Action) {
         match action {
+            k::Action::Call {
+                callee: k::Callee::Library(id),
+                args,
+            } if self.operators.authored(id, args).is_some() => {
+                match self.operators.authored(id, args) {
+                    Some(generated_operators::Authored::ConsoleLog) => {
+                        self.out.write("console.log(...");
+                        self.atom(&args[1]);
+                    }
+                    Some(generated_operators::Authored::Method(name)) => {
+                        self.atom(&args[0]);
+                        self.out.write(".");
+                        self.out.write(name);
+                        self.out.write("(...");
+                        self.atom(&args[2]);
+                    }
+                    None => unreachable!("guarded above"),
+                }
+                self.out.write(")");
+            }
             k::Action::Call { callee, args } => {
                 self.out.write("await ");
                 self.callee(callee);
@@ -497,11 +502,8 @@ impl Renderer<'_> {
                 self.out.write("(");
                 self.arguments(args);
                 self.out.write(")");
-                if !self
-                    .effects
-                    .get(effect)
-                    .is_some_and(|signature| signature.result == *result)
-                {
+                // Authored lowering performs as `any`; only another result is spelled.
+                if *result != k::Type::Any {
                     self.out.write(" as KernelType<");
                     self.metadata(result);
                     self.out.write(">");

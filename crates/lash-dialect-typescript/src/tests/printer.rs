@@ -116,7 +116,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };
-    let lowered = crate::compile_generated(&source, Default::default())
+    let lowered = crate::read(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
@@ -370,7 +370,7 @@ fn generated_decoding_does_not_require_installed_dependencies() {
         },
     });
     let source = crate::print(&document, Default::default()).unwrap().source;
-    let decoded = crate::compile_generated(&source, Default::default())
+    let decoded = crate::read(&source, &document, Default::default())
         .expect("decoding is independent of admission");
     assert_eq!(
         document.canonical_bytes().unwrap(),

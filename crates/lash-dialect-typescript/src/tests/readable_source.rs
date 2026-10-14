@@ -183,7 +183,8 @@ fn helper_calls_keep_expression_action_and_callee_kinds_unambiguous() {
     assert!(source.contains("spawn(helper_foreign_same_2, []);"));
     assert!(source.contains("await result();"));
     assert!(source.contains("await (result)();"));
-    assert_eq!(source.matches(&id.to_string()).count(), 2); // manifest and alias, never call sites
+    // Identities stay in the base document, never in the source.
+    assert_eq!(source.matches(&id.to_string()).count(), 0);
 }
 
 #[test]
@@ -357,14 +358,15 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
 }
 
 // Independent reader witness: these native forms are not obtained from print().
-const NATIVE_HEADER: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"numbers":"float"}, {}, [], [["page","page"]], []);"#;
+// The base document carries the environment; the source is only code.
+fn native_base() -> k::Document {
+    k::Document::new(k::NumberPolicy::Float, vec![])
+}
 
 #[test]
 fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {
-    let source = format!(
-        "{NATIVE_HEADER}\nasync function main() {{ finish([7, 7.0, -0.0, [1, 2], {{λ: true}}, page.λ, page[\"λ\"]] as const); }}"
-    );
-    let decoded = crate::compile_generated(&source, Default::default()).unwrap();
+    let source = "async function main() { finish([7, 7.0, -0.0, [1, 2], {λ: true}, page.λ, page[\"λ\"]] as const); }";
+    let decoded = crate::read(source, &native_base(), Default::default()).unwrap();
     let expected = k::Document::new(
         k::NumberPolicy::Float,
         vec![k::Stmt::Finish {
@@ -422,16 +424,15 @@ fn native_near_misses_refuse_without_authored_lowering() {
         "async function(page: any) { return page; }",
         "function named() { return null; }",
     ] {
-        let source = format!("{NATIVE_HEADER}\nasync function main() {{ finish({expression}); }}");
+        let source = format!("async function main() {{ finish({expression}); }}");
         assert!(
-            crate::compile_generated(&source, Default::default()).is_err(),
+            crate::read(&source, &native_base(), Default::default()).is_err(),
             "{source}"
         );
     }
 }
 // The independently pinned spelling is also a production-reader witness.
-const ORDINARY_WORKFLOW: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"effects":{"display.show_message":{"params":[{"name":"input","ty":"any"}],"result":"any"},"research.search":{"params":[{"name":"input","ty":"any"}],"result":"any"},"research.synthesize":{"params":[{"name":"input","ty":"any"}],"result":"any"}},"numbers":"float"}, {"deep_research":{"result":"any"}}, [], [], []);
-async function deep_research() {
+const ORDINARY_WORKFLOW: &str = r#"export async function deep_research() {
   let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
   let evidence = await tools.research.search(search_input);
   let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
@@ -473,25 +474,72 @@ main {
     let source = roundtrip(&document, true).source;
     assert_eq!(source, ORDINARY_WORKFLOW);
     assert_eq!(
-        crate::compile_generated(ORDINARY_WORKFLOW, Default::default())
+        crate::read(ORDINARY_WORKFLOW, &document, Default::default())
             .unwrap()
             .canonical_bytes()
             .unwrap(),
         document.canonical_bytes().unwrap()
     );
-    let body = source.split_once('\n').unwrap().1;
-    assert!(!body.contains("k."), "{source}");
     assert!(
-        !source.contains("\\\""),
-        "metadata must be structured: {source}"
+        !source.contains("k.") && !source.contains(" as "),
+        "{source}"
+    );
+}
+
+/// FIG-6272: a real agent cell prints as the TypeScript an agent writes: no
+/// header, declarations, casts or tables, its typed tool signatures staying
+/// in the document, and reads back against it to the same identity.
+#[test]
+fn deep_research_agent_cell_prints_as_plain_typescript_and_reads_back_exactly() {
+    use lash_kernel_dialect::readability::{self, Case, Dialect};
+    let document = readability::deep_research().expect("the deep_research document decodes");
+    let source = roundtrip(&document, false).source;
+    assert_eq!(
+        source,
+        r#"export async function deep_research() {
+  let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3};
+  let evidence = await tools.research.search(search_input);
+  let synthesis_input = {topic: evidence.topic, sources: evidence.sources};
+  let report = await tools.research.synthesize(synthesis_input);
+  let display_input = {text: report.summary};
+  await tools.display.show_message(display_input);
+  return report;
+}
+async function main() {
+  finish(null);
+}
+"#
+    );
+    let report = readability::check(
+        &[Case {
+            name: "deep_research",
+            document,
+        }],
+        &[Dialect {
+            name: "typescript",
+            printer: &crate::TypeScript::default(),
+            decode: generated_decoder,
+            generic: generic_form,
+            unavoidable: &unavoidable(),
+        }],
+    );
+    report.assert_passed();
+    assert!(
+        report
+            .generic_forms
+            .iter()
+            .all(|form| form.rule == "finish-kind"),
+        "{:?}",
+        report.generic_forms
     );
 }
 
 fn generated_decoder(
     source: &str,
+    base: &k::Document,
     limits: lash_kernel_dialect::GeneratedSourceLimits,
 ) -> Result<k::Document, lash_kernel_dialect::Diagnostic> {
-    crate::compile_generated(source, limits).map_err(Into::into)
+    crate::read(source, base, limits).map_err(Into::into)
 }
 fn generic_form(node: k::Node<'_>, source: &str) -> Option<&'static str> {
     let source = source.trim_start();
@@ -566,20 +614,52 @@ fn unavoidable() -> Vec<lash_kernel_dialect::readability::Unavoidable> {
         node_kind: "Read",
         reason: "Kernel projection read is a dedicated expression, not an ordinary library call",
     });
-    for rule in [
-        "helper_ts_add",
-        "helper_ts_array_iterator",
-        "helper_ts_call_member",
-        "helper_ts_console_log",
-        "helper_ts_get",
-        "helper_ts_iterate",
-        "helper_ts_map_value",
-        "helper_ts_member_name",
-        "helper_ts_not",
-        "helper_ts_pad",
-        "helper_ts_receiver",
+    // `console.log(...args)` and `target.name(...args)` print as authored.
+    // These library actions have no authored spelling that is the node's
+    // exact inverse.
+    for (rule, reason) in [
+        (
+            "helper_ts_add",
+            "`a + b` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_ts_not",
+            "`!a` is the expression operator; this is the action lowering emits for dynamic operands",
+        ),
+        (
+            "helper_ts_get",
+            "`a[k]` and `a.k` are the kernel Index and Field members",
+        ),
+        (
+            "helper_ts_receiver",
+            "a receiver classification lowering inserts; no source spells it",
+        ),
+        (
+            "helper_ts_pad",
+            "argument padding lowering inserts; no source spells it",
+        ),
+        (
+            "helper_ts_iterate",
+            "an iteration step lowering inserts; no source spells it",
+        ),
+        (
+            "helper_ts_array_iterator",
+            "an iterator lowering inserts; no source spells it",
+        ),
+        (
+            "helper_ts_map_value",
+            "a map-entry projection lowering inserts; no source spells it",
+        ),
+        (
+            "helper_ts_member_name",
+            "a property-key conversion lowering inserts; no source spells it",
+        ),
     ] {
-        rules.push(Unavoidable { rule, node_kind: "Call", reason: "A stored library Action retains atomic arguments, receiver/argument-list conventions and an await boundary; ordinary JavaScript expression syntax would change the call kind and stored boundaries" });
+        rules.push(Unavoidable {
+            rule,
+            node_kind: "Call",
+            reason,
+        });
     }
     rules
 }
@@ -614,11 +694,7 @@ fn shared_realistic_corpus_has_only_named_distinctions_and_exact_typescript() {
     );
     for case in &corpus {
         let source = roundtrip(&case.document, false).source;
-        assert!(
-            !source.split_once('\n').unwrap().1.contains("k."),
-            "{}: {source}",
-            case.name
-        );
+        assert!(!source.contains("k."), "{}: {source}", case.name);
     }
 }
 
@@ -695,22 +771,17 @@ fn native_operator_aliases_preserve_helper_identity_precedence_and_ambiguity() {
     );
     let ambiguous = roundtrip(&document, true).source;
     assert!(ambiguous.contains("helper_ts_add(1, 2 * 3)"), "{ambiguous}");
-    let independent = format!(
-        "{}\nasync function main() {{ finish([1 + 2 * 3, (1 + 2) * 3, 1 + (2 + 3), -(7), -7] as const); }}",
-        printed.split_once('\n').unwrap().0
-    );
+    let independent = "async function main() { finish([1 + 2 * 3, (1 + 2) * 3, 1 + (2 + 3), -(7), -7] as const); }";
+    document
+        .manifest
+        .functions
+        .remove(&k::FunctionId::from_bytes([44; 32]));
     assert_eq!(
-        crate::compile_generated(&independent, Default::default())
+        crate::read(independent, &document, Default::default())
             .unwrap()
             .canonical_bytes()
             .unwrap(),
-        {
-            document
-                .manifest
-                .functions
-                .remove(&k::FunctionId::from_bytes([44; 32]));
-            document.canonical_bytes().unwrap()
-        }
+        document.canonical_bytes().unwrap()
     );
     // Unary expressions on the left of exponentiation need an outer group;
     // the inner numeric group still distinguishes a helper from a literal.
@@ -784,12 +855,11 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
         ),
         "{printed}"
     );
+    // The manifest is the base document's: without a signature an `any`
+    // result still needs no annotation.
     document.manifest.effects.clear();
     let missing = roundtrip(&document, true).source;
-    assert!(
-        missing.contains("await tools.research.search() as KernelType<\"any\">;"),
-        "{missing}"
-    );
+    assert_eq!(missing, printed, "{missing}");
     for expression in [
         "await tools.research.search([1])",
         "await sleep()",
@@ -797,12 +867,9 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
         "await (first + second)()",
         "spawn(first, [1,,2])",
     ] {
-        let source = format!(
-            "{}\nasync function main() {{ let first = {expression}; }}",
-            printed.split_once('\n').unwrap().0
-        );
+        let source = format!("async function main() {{ let first = {expression}; }}");
         assert!(
-            crate::compile_generated(&source, Default::default()).is_err(),
+            crate::read(&source, &document, Default::default()).is_err(),
             "{source}"
         );
     }
@@ -820,29 +887,8 @@ fn typed_authored_arithmetic_and_comparison_export_native_operators() {
         let document = super::lower_with_effects(source).unwrap().document;
         let printed = roundtrip(&document, true).source;
         assert!(
-            !printed.split_once('\n').unwrap().1.contains("helper_num_")
-                && !printed
-                    .split_once('\n')
-                    .unwrap()
-                    .1
-                    .contains("helper_text_concat"),
+            !printed.contains("helper_num_") && !printed.contains("helper_text_concat"),
             "{printed}"
         );
     }
-}
-
-#[test]
-fn native_names_need_no_identity_alias_metadata() {
-    let document = super::lower_with_effects("let answer = 1;")
-        .unwrap()
-        .document;
-    let printed = roundtrip(&document, true).source;
-    assert!(
-        !printed
-            .lines()
-            .next()
-            .unwrap()
-            .contains("[\"answer\",\"answer\"]"),
-        "{printed}"
-    );
 }

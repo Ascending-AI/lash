@@ -13,8 +13,8 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
         },
     )
     .expect("valid in-budget document prints");
-    let decoded = crate::compile_generated(&printed.source, Default::default())
-        .expect("generated source decodes without a library");
+    let decoded = crate::read(&printed.source, document, Default::default())
+        .expect("exported source reads back against its base without a library");
     assert_eq!(document.identity().unwrap(), decoded.identity().unwrap());
     assert_eq!(
         document.canonical_bytes().unwrap(),
@@ -25,9 +25,10 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
     printed
 }
 // Independently written syntax, not obtained from the printer or its rule table.
-const HAND_WRITTEN: &str = r#"k.document("lash.generated.typescript", "1", {"kernel":1,"numbers":"by_spelling"}, {"worker":{"params":[],"result":"any"}}, ["odd name"], [["answer","odd name"],["worker","worker"]], []);
-async function worker() { return 7; }
-async function main() { let answer = -0.0; finish(answer); }"#;
+// Nothing but code: the base document holds the environment, including the
+// rename of the illegal identifier `odd name`.
+const HAND_WRITTEN: &str = r#"export async function worker() { return 7; }
+async function main() { let kernel_name_1 = -0.0; finish(kernel_name_1); }"#;
 fn hand_document() -> k::Document {
     let mut document = k::Document::new(
         k::NumberPolicy::BySpelling,
@@ -60,10 +61,12 @@ fn hand_document() -> k::Document {
     document.private_bindings.insert("odd name".into());
     document
 }
+/// The environment is the base document's: the same source read against a
+/// base that differs only outside the code gives that base back.
 #[test]
-fn independent_source_and_unequal_documents_pin_all_envelope_fields() {
+fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
-    let decoded = crate::compile_generated(HAND_WRITTEN, Default::default()).unwrap();
+    let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
     assert_eq!(
         decoded.canonical_bytes().unwrap(),
         expected.canonical_bytes().unwrap()
@@ -118,7 +121,10 @@ fn independent_source_and_unequal_documents_pin_all_envelope_fields() {
             expected.canonical_bytes().unwrap(),
             control.canonical_bytes().unwrap()
         );
-        roundtrip(&control, false);
+        let printed = roundtrip(&control, false);
+        if control.functions == expected.functions && control.entries == expected.entries {
+            assert_eq!(printed.source, roundtrip(&expected, false).source);
+        }
     }
 }
 #[test]
@@ -311,83 +317,86 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
     }
     assert_eq!(implicit, 1, "inventory has one omitted empty else");
 }
+/// An edit the reader has no exact inverse for is a typed refusal naming
+/// the construct; nothing falls through to authored lowering.
 #[test]
-fn malformed_generated_modules_refuse_without_authored_fallback() {
-    let mut cases = vec![
-        HAND_WRITTEN.replace("typescript", "python"),
-        HAND_WRITTEN.replace("\"1\"", "\"99\""),
-        HAND_WRITTEN.replace(
-            "[\"answer\",\"odd name\"]",
-            "[\"answer\",\"odd name\"],[\"answer\",\"other\"]",
+fn malformed_exported_modules_refuse_with_typed_diagnostics() {
+    let base = hand_document();
+    for (source, expected) in [
+        (
+            format!("{HAND_WRITTEN}\nlet extra = 1;"),
+            "expected native function declarations and main",
         ),
-        format!("{HAND_WRITTEN}\nlet extra = 1;"),
-        HAND_WRITTEN.replace("function main", "function worker"),
-        "k.document(\"old manifest\", \"entries\", []);".into(),
-    ];
-    let id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    for helpers in [
-        vec![("helper_one", id), ("helper_one", id)],
-        vec![("helper_one", id), ("helper_two", id)],
-        vec![("helper_one", "invalid-id")],
+        (
+            "export async function worker() { return 7; }".to_owned(),
+            "missing main",
+        ),
+        (
+            HAND_WRITTEN.replace("export async", "async"),
+            "is an entry in the base document",
+        ),
+        (
+            HAND_WRITTEN.replace("async function main", "export async function main"),
+            "main is not an entry",
+        ),
+        (
+            HAND_WRITTEN.replace("let kernel_name_1 =", "var kernel_name_1 ="),
+            "not a kernel source statement",
+        ),
+        (
+            HAND_WRITTEN.replace("function worker()", "function worker(): any"),
+            "annotat",
+        ),
+        (
+            HAND_WRITTEN.replace("return 7;", "return helper_unknown(7);"),
+            "undeclared helper alias",
+        ),
+        (
+            HAND_WRITTEN.replace(
+                "let kernel_name_1 = -0.0;",
+                "let kernel_name_1 = [await yieldTask()];",
+            ),
+            "",
+        ),
+        (
+            HAND_WRITTEN.replace(
+                "let kernel_name_1 = -0.0;",
+                "let kernel_name_1 = await sleep([1]);",
+            ),
+            "",
+        ),
+        (
+            "let x = 1;".to_owned(),
+            "expected native function declarations and main",
+        ),
     ] {
-        let json = serde_json::to_string(&helpers).unwrap();
-        let operand = json;
-        cases.push(HAND_WRITTEN.replacen("[]);", &format!("{operand});"), 1));
-    }
-    cases.push(HAND_WRITTEN.replace("\"kernel\":1", "\"kernel\":1,\"kernel\":1"));
-    cases.push(HAND_WRITTEN.replace("let answer =", "var answer ="));
-    cases.push(HAND_WRITTEN.replace("function worker()", "function worker(): any"));
-    cases.push(HAND_WRITTEN.replace("let answer = -0.0;", "let answer = [await yieldTask()];"));
-    cases.push(HAND_WRITTEN.replace("let answer = -0.0;", "let answer = await sleep([1]);"));
-    let env = lash_kernel_dialect::Environment {
-        library: super::library(),
-        effects: &BTreeMap::new(),
-        controls: &BTreeMap::new(),
-        tool_roots: &BTreeSet::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
-    };
-    for source in cases {
+        let error = crate::read(&source, &base, Default::default()).unwrap_err();
         assert!(
-            crate::compile_generated(&source, Default::default()).is_err(),
-            "{source}"
+            matches!(
+                error.code,
+                crate::DiagnosticCode::GeneratedSourceFormat | crate::DiagnosticCode::InvalidAst
+            ),
+            "{source}: {error}"
         );
-        assert!(crate::lower_workflow(&source, &env).is_err(), "{source}");
+        assert!(error.message.contains(expected), "{source}: {error}");
     }
-    assert_eq!(
-        crate::compile_generated("let x = 1;", Default::default())
-            .unwrap_err()
-            .code,
-        crate::DiagnosticCode::GeneratedSourceFormat
+    let mut extra_entry = base.clone();
+    extra_entry.functions.insert(
+        "helper".into(),
+        k::Function {
+            params: vec![],
+            body: vec![],
+        },
     );
-    for source in ["k.main(function() {});", "k.declare(\"f\", function() {});"] {
-        assert_eq!(
-            crate::lower_workflow(source, &env).unwrap_err().code,
-            crate::DiagnosticCode::GeneratedSourceFormat
-        );
-    }
-    let spaced = HAND_WRITTEN.replacen("k.document", "k /* trivia */ . /* trivia */ document", 1);
-    assert_eq!(
-        crate::lower_workflow(&spaced, &env)
-            .unwrap()
-            .document
-            .canonical_bytes()
-            .unwrap(),
-        hand_document().canonical_bytes().unwrap()
-    );
-    assert_eq!(
-        crate::lower(HAND_WRITTEN, &env).unwrap_err().code,
-        crate::DiagnosticCode::ReservedIdentifier
-    );
-    assert!(crate::lower_workflow("const text = 'k.document()';", &env).is_ok());
-    assert!(crate::lower_workflow("const text = 'k.yield()';", &env).is_ok());
-    assert!(crate::lower_workflow("const pattern = /k.document/;", &env).is_ok());
+    let printed = roundtrip(&extra_entry, false);
+    let exported = printed
+        .source
+        .replace("async function helper", "export async function helper");
     assert!(
-        crate::lower_workflow(
-            "const object = {k: {document: 1}}; console.log(object.k.document);",
-            &env
-        )
-        .is_ok()
+        crate::read(&exported, &extra_entry, Default::default())
+            .unwrap_err()
+            .message
+            .contains("is not an entry in the base document")
     );
 }
 #[test]
@@ -407,7 +416,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::compile_generated(&at_limit.source, limits)
+        crate::read(&at_limit.source, &document, limits)
             .unwrap()
             .canonical_bytes()
             .unwrap(),
@@ -428,7 +437,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Bytes { .. })
     ));
     assert_eq!(
-        crate::compile_generated(&printed.source, short)
+        crate::read(&printed.source, &document, short)
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceBytes
@@ -446,7 +455,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::compile_generated(&accepted.source, exact_depth)
+        crate::read(&accepted.source, &document, exact_depth)
             .unwrap()
             .canonical_bytes()
             .unwrap(),
@@ -467,28 +476,23 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Depth { .. })
     ));
     assert_eq!(
-        crate::compile_generated(&printed.source, shallow)
+        crate::read(&printed.source, &document, shallow)
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
     );
-    let deep = "k.document(".to_owned() + &"(".repeat(300);
+    let deep = "async function main() {".to_owned() + &"(".repeat(300);
     assert_eq!(
-        crate::compile_generated(&deep, Default::default())
+        crate::read(&deep, &document, Default::default())
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
     );
-    let nested_type = "{\"list\":".repeat(360) + "\"any\"" + &"}".repeat(360);
-    let metadata = format!(
-        "{{\"kernel\":1,\"numbers\":\"float\",\"effects\":{{\"deep\":{{\"result\":{nested_type}}}}}}}"
-    );
-    let source = format!(
-        "k.document(\"lash.generated.typescript\",\"1\",{},{{}},[],[],[]);async function main(){{}}",
-        metadata
-    );
+    let nested_type = "{list: ".repeat(360) + "\"any\"" + &"}".repeat(360);
+    let source =
+        format!("async function main() {{ await tools.deep() as KernelType<{nested_type}>; }}");
     assert_eq!(
-        crate::compile_generated(&source, Default::default())
+        crate::read(&source, &document, Default::default())
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
@@ -1247,7 +1251,7 @@ fn inventory_signature(signature: &k::Signature, variants: &mut BTreeSet<&'stati
 
 /// G-SOURCE-ENVELOPE: native literals carry nested optional types exactly.
 #[test]
-fn structured_envelope_and_types_keep_nested_optional_metadata() {
+fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unprinted() {
     let mut document = hand_document();
     let ty = k::Type::Record(k::RecordType {
         fields: vec![k::RecordTypeField {
@@ -1277,7 +1281,10 @@ fn structured_envelope_and_types_keep_nested_optional_metadata() {
         },
     });
     let source = roundtrip(&document, true).source;
-    assert!(source.contains("{\"kernel\":1"), "{source}");
+    assert!(
+        !source.contains("k.") && !source.contains("\"numbers\""),
+        "{source}"
+    );
     assert!(!source.contains("\\\""), "{source}");
     assert!(source.contains("as KernelType<{\"record\":"), "{source}");
     assert!(

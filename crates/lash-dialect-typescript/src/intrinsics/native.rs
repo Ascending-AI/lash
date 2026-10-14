@@ -40,6 +40,11 @@ impl Reader {
         if let s::Expr::Await(awaited) = expr {
             return Some(self.awaited_action(&awaited.arg, annotation));
         }
+        if annotation.is_none()
+            && let Some(action) = self.authored_action(expr)
+        {
+            return Some(action);
+        }
         if matches!(expr, s::Expr::Call(call) if matches!(&call.callee, s::Callee::Expr(callee) if path(callee).as_deref() == Some("spawn")))
         {
             return Some((|| {
@@ -63,6 +68,51 @@ impl Reader {
             })());
         }
         None
+    }
+    /// A library action spelled as an author writes it: `console.log(...args)`
+    /// or `target.name(...args)` (generated_operators::Authored). None when
+    /// the expression is not one; the base document must hold the helper once.
+    fn authored_action(&mut self, expr: &s::Expr) -> Option<Result<k::Action, Diagnostic>> {
+        let s::Expr::Call(call) = expr else {
+            return None;
+        };
+        let s::Callee::Expr(callee) = &call.callee else {
+            return None;
+        };
+        let s::Expr::Member(member) = callee.as_ref() else {
+            return None;
+        };
+        let s::MemberProp::Ident(name) = &member.prop else {
+            return None;
+        };
+        let s::Expr::Ident(target) = member.obj.as_ref() else {
+            return None;
+        };
+        let [argument] = call.args.as_slice() else {
+            return None;
+        };
+        argument.spread?;
+        let (label, console) = if target.sym == "console" && name.sym == "log" {
+            ("ts.console.log", true)
+        } else {
+            ("ts.call_member", false)
+        };
+        let function = self.operators.unique(label)?;
+        Some((|| {
+            let args = self.atom(&argument.expr)?;
+            Ok(k::Action::Call {
+                callee: k::Callee::Library(function),
+                args: if console {
+                    vec![k::Atom::Literal(k::Literal::Absent), args]
+                } else {
+                    vec![
+                        k::Atom::Variable(self.name(target)?),
+                        k::Atom::Literal(k::Literal::Text(name.sym.to_string())),
+                        args,
+                    ]
+                },
+            })
+        })())
     }
     fn native_callee(&self, expr: &s::Expr) -> Result<k::Callee, Diagnostic> {
         match expr {
@@ -102,19 +152,10 @@ impl Reader {
         {
             let effect = k::EffectName::new(effect)
                 .map_err(|e| invalid(e.to_string(), Some(expr.span())))?;
+            // An unannotated tool call is what authored lowering stores: `any`.
             let result = match annotation {
                 Some(annotation) => decode_type(annotation, self.limits)?,
-                None => self
-                    .effects
-                    .get(&effect)
-                    .ok_or_else(|| {
-                        invalid(
-                            "effect needs a manifest signature or explicit result type",
-                            Some(expr.span()),
-                        )
-                    })?
-                    .result
-                    .clone(),
+                None => k::Type::Any,
             };
             return Ok(k::Action::Perform {
                 effect,
@@ -315,7 +356,7 @@ impl Reader {
             .id(operator, &args, &self.types)
             .ok_or_else(|| {
                 invalid(
-                    "operator has no unique full-identity envelope binding",
+                    "operator has no unique full-identity binding in the base manifest",
                     None,
                 )
             })?;

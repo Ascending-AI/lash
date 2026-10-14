@@ -19,7 +19,8 @@ pub struct Unavoidable {
 pub struct Dialect<'a> {
     pub name: &'a str,
     pub printer: &'a dyn Printer,
-    pub decode: fn(&str, GeneratedSourceLimits) -> Result<k::Document, Diagnostic>,
+    /// Read exported source against the base document it was printed from.
+    pub decode: fn(&str, &k::Document, GeneratedSourceLimits) -> Result<k::Document, Diagnostic>,
     /// Return a documented generic rule for this node's final source range.
     /// Do not scan quoted data or count child occurrences again in a parent.
     pub generic: fn(k::Node<'_>, &str) -> Option<&'static str>,
@@ -71,7 +72,7 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                         },
                     )
                     .map_err(|e| e.to_string())?;
-                let decoded = (dialect.decode)(&printed.source, Default::default())
+                let decoded = (dialect.decode)(&printed.source, &case.document, Default::default())
                     .map_err(|e| format!("{e:?}"))?;
                 if decoded.canonical_bytes().map_err(|e| e.to_string())?
                     != case.document.canonical_bytes().map_err(|e| e.to_string())?
@@ -110,6 +111,21 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     map.sites.iter().map(|entry| entry.site.clone()).collect();
                 if actual != expected || actual.len() != map.sites.len() {
                     return Err("map does not cover every real kernel Site exactly once".into());
+                }
+                // The environment stays in the base document: no header,
+                // directive, table or kernel form may stand outside the code
+                // of a node, where no Site could own it.
+                let mut scaffolding = printed.source.as_bytes().to_vec();
+                for mapped in &map.sites {
+                    for range in &mapped.ranges {
+                        scaffolding[range.start..range.end].fill(b' ');
+                    }
+                }
+                let scaffolding = std::str::from_utf8(&scaffolding).map_err(|e| e.to_string())?;
+                if let Some(form) = environment_form(scaffolding) {
+                    return Err(format!(
+                        "`{form}` outside any node: exported source carries a header, directive or table"
+                    ));
                 }
                 for mapped in &map.sites {
                     if mapped.ranges.is_empty()
@@ -192,6 +208,24 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
         }
     }
     report
+}
+
+/// Outside the code of its nodes, exported source holds only function
+/// declarations: names, keywords and their parameter lists. Data, member
+/// access, statements or any fallback there is an environment the source
+/// should not carry.
+fn environment_form(scaffolding: &str) -> Option<String> {
+    if let Some(rule) = fallback_rules(scaffolding).first() {
+        return Some((*rule).to_owned());
+    }
+    scaffolding
+        .char_indices()
+        .find(|(_, ch)| {
+            !(ch.is_whitespace()
+                || ch.is_alphanumeric()
+                || matches!(ch, '_' | '(' | ')' | ',' | ':'))
+        })
+        .map(|(start, _)| scaffolding[start..].chars().take(40).collect())
 }
 
 /// This lexer belongs to the harness, so a dialect cannot self-grade away forms.
@@ -317,6 +351,15 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
         },
     }
 }
+
+/// A real agent cell (FIG-6272): a three-tool deep-research entry with typed
+/// tool signatures, as a host stored it. Every dialect must print it as
+/// plain source and read it back to the same identity.
+pub fn deep_research() -> Result<k::Document, Diagnostic> {
+    k::Document::from_json(DEEP_RESEARCH).map_err(|error| corpus_error(error.to_string()))
+}
+
+const DEEP_RESEARCH: &str = r#"{"manifest":{"kernel":1,"effects":{"display.show_message":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"text","ty":"text"}]}}}],"result":"null"},"research.search":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"max_sources","ty":"int"},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"topic","ty":"text"}],"rest":"any"}}},"research.synthesize":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}]}}}},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"citations","ty":{"list":{"record":{"fields":[{"name":"source_id","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"source_count","ty":"int"},{"name":"summary","ty":"text"},{"name":"title","ty":"text"}],"rest":"any"}}}},"numbers":"float"},"functions":{"deep_research":{"body":[{"let":{"name":"search_input","value":{"expr":{"record":[{"field":"topic","value":{"literal":{"text":"Reducing customer onboarding drop-off"}}},{"field":"max_sources","value":{"literal":{"int":"3"}}}]}}}},{"let":{"name":"evidence","value":{"action":{"perform":{"effect":"research.search","args":[{"variable":"search_input"}],"result":"any"}}}}},{"let":{"name":"synthesis_input","value":{"expr":{"record":[{"field":"topic","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"topic"}}}},{"field":"sources","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"sources"}}}}]}}}},{"let":{"name":"report","value":{"action":{"perform":{"effect":"research.synthesize","args":[{"variable":"synthesis_input"}],"result":"any"}}}}},{"let":{"name":"display_input","value":{"expr":{"record":[{"field":"text","value":{"member":{"field":{"target":{"variable":"report"},"field":"summary"}}}}]}}}},{"do":{"action":{"perform":{"effect":"display.show_message","args":[{"variable":"display_input"}],"result":"any"}}}},{"return":{"value":{"variable":"report"}}}]}},"entries":{"deep_research":{"result":"any"}},"main":[{"finish":{"value":{"literal":"null"}}}]}"#;
 
 /// Seven realistic shapes shared by all dialects. Helper identities are
 /// deliberately foreign: decoding and readability require no installed library.
@@ -484,22 +527,26 @@ mod tests {
             options: PrintOptions,
         ) -> Result<crate::PrintedSource, PrintError> {
             let mut writer = SourceWriter::new(options);
-            writer.json(document);
-            writer.write("\n");
+            writer.write("main\n");
             writer.begin_node(Some(&k::Unit::Main));
             writer.write("generic");
             writer.end_node();
             writer.finish(document, SourceFormat::TypeScriptV1)
         }
     }
-    fn decode(source: &str, _: GeneratedSourceLimits) -> Result<k::Document, Diagnostic> {
-        Ok(k::Document::from_json(source.split_once('\n').unwrap().0).unwrap())
+    fn decode(
+        _: &str,
+        base: &k::Document,
+        _: GeneratedSourceLimits,
+    ) -> Result<k::Document, Diagnostic> {
+        Ok(base.clone())
     }
     fn mutated_decode(
         source: &str,
+        base: &k::Document,
         limits: GeneratedSourceLimits,
     ) -> Result<k::Document, Diagnostic> {
-        let mut document = decode(source, limits)?;
+        let mut document = decode(source, base, limits)?;
         document.manifest.numbers = k::NumberPolicy::BySpelling;
         Ok(document)
     }
@@ -566,6 +613,64 @@ mod tests {
             unequal.failures,
             ["witness / empty: canonical bytes differ"]
         );
+    }
+    /// FIG-6272: the environment stays in the base document. A header,
+    /// directive or table outside every node fails, however it is spelled.
+    struct Header(&'static str);
+    impl Printer for Header {
+        fn print(
+            &self,
+            document: &k::Document,
+            options: PrintOptions,
+        ) -> Result<crate::PrintedSource, PrintError> {
+            let mut writer = SourceWriter::new(options);
+            writer.write(self.0);
+            writer.write("\nmain\n");
+            writer.begin_node(Some(&k::Unit::Main));
+            writer.write("generic");
+            writer.end_node();
+            writer.finish(document, SourceFormat::TypeScriptV1)
+        }
+    }
+    #[test]
+    fn headers_directives_and_tables_outside_nodes_fail() {
+        let cases = [Case {
+            name: "header",
+            document: k::Document::new(k::NumberPolicy::Float, vec![]),
+        }];
+        let allowed = [Unavoidable {
+            rule: "witness",
+            node_kind: "Block",
+            reason: "test witness has no native spelling",
+        }];
+        for header in [
+            r#"k.document("lash.generated.typescript", "1", {}, {}, [], [], [])"#,
+            r#"{"kernel": 1, "numbers": "float"}"#,
+            "declare const tools: any;",
+            "# lash: numbers=float",
+            "\"use kernel\"",
+            "helper_add = 1",
+        ] {
+            let printer = Header(header);
+            let report = check(
+                &cases,
+                &[Dialect {
+                    name: "witness",
+                    printer: &printer,
+                    decode,
+                    generic,
+                    unavoidable: &allowed,
+                }],
+            );
+            assert!(
+                report
+                    .failures
+                    .iter()
+                    .any(|failure| failure.contains("outside any node")),
+                "{header}: {:?}",
+                report.failures
+            );
+        }
     }
     #[test]
     fn detectors_cannot_hide_helpers_or_pseudo_intrinsics() {

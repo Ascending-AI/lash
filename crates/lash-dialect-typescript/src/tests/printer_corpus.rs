@@ -61,7 +61,7 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
                 let source = crate::print(&document, Default::default())
                     .map_err(|e| e.to_string())?
                     .source;
-                let lowered = crate::compile_generated(&source, Default::default())
+                let lowered = crate::read(&source, &document, Default::default())
                     .map_err(|e| e.to_string())?;
                 assert_eq!(
                     document.canonical_bytes().unwrap(),

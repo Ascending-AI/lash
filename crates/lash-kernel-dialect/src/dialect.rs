@@ -90,9 +90,13 @@ pub trait FrontEnd {
     fn lower(&self, source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic>;
 }
 
-/// Writes a document as exact generated source, without compiling or admitting it.
-/// The dialect's generated compiler reconstructs identical canonical bytes.
-/// Optional maps describe final UTF-8 offsets and never change the source.
+/// Writes a document as plain source in the dialect, without compiling or
+/// admitting it: only code an agent could have written. The environment (the
+/// manifest, entries' signatures, private bindings, helper identities and
+/// name renames) stays in the document; [`Package::read`] takes it from the
+/// document the source was printed from and reconstructs identical canonical
+/// bytes. Optional maps describe final UTF-8 offsets and never change the
+/// source.
 pub trait Printer {
     fn print(
         &self,
@@ -106,9 +110,11 @@ pub struct Package {
     /// The name annotations record a document's dialect under.
     pub dialect: String,
     pub front_end: Box<dyn FrontEnd>,
-    /// Decode exact generated source without a library, admission or execution.
-    /// This is separate from authored cell lowering and from printing.
-    pub compile_generated: fn(&str, crate::GeneratedSourceLimits) -> Result<Document, Diagnostic>,
+    /// Read exported source back against `base`, the document it was printed
+    /// from, without a library, admission or execution: the environment is
+    /// the base document's, the code is the source's. This is separate from
+    /// authored cell lowering and from printing.
+    pub read: fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<Document, Diagnostic>,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
     /// What the dialect's function values are, where a session of it keeps

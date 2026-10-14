@@ -255,7 +255,7 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
     let original = lower(source).expect("promise predicates lower");
     let printed =
         crate::print(&original.document, Default::default()).expect("the document prints");
-    let re_lowered = crate::compile_generated(&printed.source, Default::default())
+    let re_lowered = crate::read(&printed.source, &original.document, Default::default())
         .expect("printed promise predicates lower");
     // The same document runs the same.
     assert_eq!(

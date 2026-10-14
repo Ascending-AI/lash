@@ -24,7 +24,7 @@ mod scope;
 mod tests;
 
 pub use diagnostics::{Code, GeneratedSourceCode};
-pub use generated::compile_generated;
+pub use generated::read;
 pub use lash_kernel_dialect::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
     SourceSite,
@@ -133,7 +133,7 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
     Package {
         dialect: DIALECT.to_string(),
         front_end: Box::new(Python::default()),
-        compile_generated,
+        read,
         printer: Some(Box::new(Python::default())),
         function_values: Some(lash_kernel_dialect::FunctionValues::Bare),
         functions,

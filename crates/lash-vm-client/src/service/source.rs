@@ -48,7 +48,8 @@ impl Service {
     }
 
     /// Lower a whole authored TypeScript workflow under the host's source limits.
-    /// Generated workflows use [`Self::compile_generated`] independently.
+    /// Exported source is read back against its base document with
+    /// [`Self::read_exported`] instead.
     pub async fn import_typescript_workflow(
         &self,
         source: &str,
@@ -87,12 +88,15 @@ impl Service {
         }
     }
 
-    /// Decode exact generated source without resolving or admitting its
-    /// dependencies. A host may then compare `Document::canonical_bytes()`
-    /// and separately admit the document against its execution environment.
-    pub async fn compile_generated(
+    /// Read exported source back against `base`, the document it was printed
+    /// from, without resolving or admitting its dependencies. The source
+    /// carries only code; the environment is the base document's. A host may
+    /// then compare `Document::canonical_bytes()` and separately admit the
+    /// document against its execution environment.
+    pub async fn read_exported(
         &self,
         source: &str,
+        base: &Document,
         format: SourceFormat,
         limits: GeneratedSourceLimits,
     ) -> Result<Document, SourceServiceError> {
@@ -111,14 +115,15 @@ impl Service {
             }));
         }
         let response = self
-            .request_accounted(Request::CompileGenerated {
+            .request_accounted(Request::Read {
                 format,
                 source: source.to_owned(),
+                base: base.to_json()?.into_bytes(),
                 limits,
             })
             .await?;
         match response {
-            Response::Generated { document } => {
+            Response::Read { document } => {
                 let text = std::str::from_utf8(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
                 Document::from_json(text)

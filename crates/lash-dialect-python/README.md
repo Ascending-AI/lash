@@ -207,9 +207,10 @@ law for each entry.
 
 ## Exact generated source
 
-`print(document, PrintOptions::default())` emits Python generated-source v1;
-`compile_generated(source, GeneratedSourceLimits::default())` reconstructs
-identical canonical document bytes without authored lowering or library lookup.
+`print(document, PrintOptions::default())` emits plain Python with no header
+or tables; `read(source, &document, GeneratedSourceLimits::default())`
+reconstructs identical canonical document bytes against that base Document,
+without authored lowering or library lookup.
 Maps are optional and default off. Printing performs no compilation or admission.
 The [generic format and paired inventory](../../docs/design/generated-source-python.md)
 document indentation, explicit empty blocks, exact literals, aliases and limits.

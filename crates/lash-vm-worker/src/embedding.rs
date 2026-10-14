@@ -441,8 +441,8 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
         package: typescript::FrontEnd::new(tuning).map(|front_end| Package {
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
             front_end: Box::new(front_end),
-            compile_generated: |source, limits| {
-                lash_dialect_typescript::compile_generated(source, limits).map_err(Into::into)
+            read: |source, base, limits| {
+                lash_dialect_typescript::read(source, base, limits).map_err(Into::into)
             },
             printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),
             function_values: Some(lash_dialect_typescript::function_values()),

@@ -99,15 +99,20 @@
 //! source spans, admission refusals and typed unsupported reasons. Import
 //! writes no artifact and runs no effect. Exported async declarations and
 //! const-bound async literals, including `process(async (...) => ...)`, become
-//! entries. The printer's exact source is also accepted.
+//! entries.
 //!
 //! With the matching `typescript` or `python` feature, a workflow document's
-//! `typescript(options)` or `python(options)` returns exact generated source
-//! and an optional disposable map. Printing does not compile or admit it.
-//! Hosts compose `lash::typescript::compile_generated` or
-//! `lash::python::compile_generated` with `Document::canonical_bytes()` to
-//! check reconstruction. `vm::WorkerService` exposes separate `print` and
-//! `compile_generated` operations in a worker. Decoded documents still require
+//! `typescript(options)` or `python(options)` returns plain source, only the
+//! code an agent could have written, and an optional disposable map. The
+//! environment (effect manifest, number mode, entry signatures, private
+//! bindings, helper identities and name renames) stays in the document and
+//! is never printed. Printing does not compile or admit it. Hosts read the
+//! source back, edited or not, against the document it was printed from:
+//! `lash::typescript::read(source, &base, limits)` or `lash::python::read`,
+//! and compare `Document::canonical_bytes()` to check reconstruction.
+//! [`HostArtifacts::import_exported_workflow`](crate::process::HostArtifacts::import_exported_workflow)
+//! reads and admits in one step. `vm::WorkerService` exposes separate `print`
+//! and `read_exported` operations in a worker. Read documents still require
 //! normal admission before execution; maps are never stored automatically.
 
 #[cfg(feature = "typescript")]

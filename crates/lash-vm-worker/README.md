@@ -68,9 +68,10 @@ does (FIG-5922).
 dialect to a kernel document against the effects the host supplies and the
 session bindings in scope. `Request::Print` renders a document in a selected
 exact source format with host limits and an optional disposable map;
-`Request::CompileGenerated` separately decodes that source without admission.
-Neither printing nor decoding resolves dependencies or stores source/maps.
-The host-facing `WorkerService::print` and `::compile_generated` expose these
+`Request::Read` separately decodes that source against the base Document it
+was printed from, without admission. Neither printing nor reading resolves
+dependencies or stores source/maps.
+The host-facing `WorkerService::print` and `::read_exported` expose these
 operations; hosts compare the returned Documents' canonical bytes themselves.
 Both read guest-controlled input, so both run here. A dialect's parser runs on
 a thread whose reserved stack is 8 MiB plus 40,000 bytes per source byte at

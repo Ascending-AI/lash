@@ -1,4 +1,5 @@
-//! Exact Python spelling; paired inverses live in generated.rs.
+//! Exported Python: plain source whose environment stays in the base
+//! document; paired inverses live in generated.rs.
 use crate::{Python, generated_scope::BindingScope};
 mod names;
 mod readable;
@@ -9,7 +10,9 @@ use lash_kernel_dialect::{
 use lash_kernel_doc as k;
 pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 
-/// Render exact generated Python without compiling or resolving dependencies.
+/// Render plain Python without compiling or resolving dependencies. The
+/// manifest, entries, private bindings, helper identities and name renames
+/// are not written: [`crate::read`] takes them from the base document.
 pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
@@ -24,27 +27,8 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         indent: 0,
         scope: Default::default(),
         main: false,
-        effects: &document.manifest.effects,
         operators: crate::generated_operators::Operators::new(&document.manifest.functions),
     };
-    r.out.write("k.document(\"lash.generated.python\", \"1\", ");
-    r.metadata(&document.manifest);
-    r.out.write(", ");
-    r.metadata(&document.entries);
-    r.out.write(", ");
-    r.out.json(&document.private_bindings);
-    r.out.write(", ");
-    let names: Vec<_> = plan
-        .names
-        .iter()
-        .filter(|(name, alias)| name.as_str() != alias.as_str())
-        .map(|(n, a)| (a, n))
-        .collect();
-    r.metadata(&names);
-    r.out.write(", ");
-    let helpers: Vec<_> = plan.helpers.iter().map(|(id, a)| (a, id)).collect();
-    r.metadata(&helpers);
-    r.out.write(")\n");
     for (name, function) in &document.functions {
         r.out.write(if awaits(&function.body) {
             "async def "
@@ -85,7 +69,6 @@ struct Renderer<'a> {
     indent: usize,
     scope: BindingScope,
     main: bool,
-    effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
     operators: crate::generated_operators::Operators,
 }
 impl Renderer<'_> {
@@ -452,6 +435,52 @@ impl Renderer<'_> {
     fn action(&mut self, action: &k::Action) {
         match action {
             k::Action::Call { callee, args } => {
+                let authored = match callee {
+                    k::Callee::Library(id) => self.operators.authored(id, args),
+                    _ => None,
+                };
+                match authored {
+                    Some(crate::generated_operators::Authored::Builtin(name)) => {
+                        self.out.write(name);
+                        self.out.write("(");
+                        self.call_atoms(args);
+                        self.out.write(")");
+                        return;
+                    }
+                    Some(crate::generated_operators::Authored::Slice) => {
+                        self.atom(&args[0]);
+                        self.out.write("[");
+                        for (i, bound) in args[1..].iter().enumerate() {
+                            if i == 2 && matches!(bound, k::Atom::Literal(k::Literal::Absent)) {
+                                break;
+                            }
+                            if i > 0 {
+                                self.out.write(":");
+                            }
+                            if !matches!(bound, k::Atom::Literal(k::Literal::Absent)) {
+                                self.atom(bound);
+                            }
+                        }
+                        self.out.write("]");
+                        return;
+                    }
+                    Some(crate::generated_operators::Authored::TypeName) => {
+                        self.out.write("type(");
+                        self.atom(&args[0]);
+                        self.out.write(").__name__");
+                        return;
+                    }
+                    Some(crate::generated_operators::Authored::Method(method)) => {
+                        self.atom(&args[0]);
+                        self.out.write(".");
+                        self.out.write(&method);
+                        self.out.write("(");
+                        self.call_atoms(&args[1..]);
+                        self.out.write(")");
+                        return;
+                    }
+                    None => {}
+                }
                 self.out.write("await ");
                 match callee {
                     k::Callee::Library(id) => self.helper(id),
@@ -480,11 +509,8 @@ impl Renderer<'_> {
                 }
                 self.out.write("(");
                 self.call_atoms(args);
-                if !self
-                    .effects
-                    .get(effect)
-                    .is_some_and(|signature| &signature.result == result)
-                {
+                // Authored lowering performs as `any`; only another result is spelled.
+                if *result != k::Type::Any {
                     if !args.is_empty() {
                         self.out.write(", ");
                     }

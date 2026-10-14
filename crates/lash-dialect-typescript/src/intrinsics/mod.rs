@@ -21,18 +21,15 @@ pub(crate) struct Reader {
     limits: k::KernelDataLimits,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
-    effects: BTreeMap<k::EffectName, k::Signature>,
     operators: crate::generated_operators::Operators,
     types: lash_kernel_dialect::source_types::Types,
 }
 
-/// A generated module starts with `k.document` (or an incomplete declare/main). Trivia is insignificant. This
-/// lexical probe only selects a parser; it never extracts executable code.
-pub(crate) fn source_probe(source: &str) -> (bool, usize) {
+/// The deepest open-delimiter nesting of `source`, outside comments and
+/// quoted text. It bounds the parser's stack before SWC sees the source.
+fn syntax_depth(source: &str) -> usize {
     let bytes = source.as_bytes();
     let mut position = 0;
-    let mut kernel = false;
-    let mut envelope_token = 0;
     let mut depth = 0usize;
     let mut deepest = 0usize;
     while position < bytes.len() {
@@ -51,7 +48,6 @@ pub(crate) fn source_probe(source: &str) -> (bool, usize) {
                 position += 2;
             }
             quote @ (b'\'' | b'"' | b'`') => {
-                envelope_token = 3;
                 position += 1;
                 while position < bytes.len() {
                     if bytes[position] == b'\\' {
@@ -64,30 +60,7 @@ pub(crate) fn source_probe(source: &str) -> (bool, usize) {
                     }
                 }
             }
-            byte if byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$' => {
-                let start = position;
-                position += 1;
-                while bytes.get(position).is_some_and(|byte| {
-                    byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'$'
-                }) {
-                    position += 1;
-                }
-                let token = &source[start..position];
-                if envelope_token == 2 && matches!(token, "document" | "declare" | "main") {
-                    kernel = true;
-                }
-                envelope_token = if envelope_token == 0 && token == "k" {
-                    1
-                } else {
-                    3
-                };
-            }
-            b'.' => {
-                envelope_token = if envelope_token == 1 { 2 } else { 3 };
-                position += 1;
-            }
             b'(' | b'[' | b'{' => {
-                envelope_token = 3;
                 depth += 1;
                 deepest = deepest.max(depth);
                 position += 1;
@@ -96,19 +69,22 @@ pub(crate) fn source_probe(source: &str) -> (bool, usize) {
                 depth = depth.saturating_sub(1);
                 position += 1;
             }
-            byte if byte.is_ascii_whitespace() => position += 1,
-            _ => {
-                envelope_token = 3;
-                position += 1;
-            }
+            _ => position += 1,
         }
     }
-    (kernel, deepest)
+    deepest
 }
 
-/// Decode format v1 without library lookup or admission.
-pub fn compile_generated(
+/// Read exported TypeScript back into the document it was printed from, or
+/// into that document as edited, without library lookup or admission.
+///
+/// The source carries only code. The manifest, entries, private bindings,
+/// helper identities and name renames come from `base`, the document the
+/// source was printed from: printing `base` and reading the result with
+/// `base` gives `base` again, with the same identity.
+pub fn read(
     source: &str,
+    base: &k::Document,
     limits: GeneratedSourceLimits,
 ) -> Result<k::Document, Diagnostic> {
     if source.len() > limits.max_bytes {
@@ -118,10 +94,13 @@ pub fn compile_generated(
             None,
         ));
     }
-    let (_, depth) = source_probe(source);
+    if k::KernelVersion::of(base.manifest.kernel).is_none() {
+        return Err(format_error("unsupported kernel version"));
+    }
+    let depth = syntax_depth(source);
     let node_limit = limits.max_depth.min(64);
     // At most four syntax delimiters per admitted kernel node, plus the
-    // document/declaration envelope. Bound conversion and AST destruction
+    // function declarations around them. Bound conversion and AST destruction
     // on the caller's stack without imposing the ordinary dialect's limits.
     if depth > node_limit * 4 + 16 {
         return Err(Diagnostic::new(
@@ -169,7 +148,7 @@ pub fn compile_generated(
             .name("kernel-typescript-parse".into())
             .stack_size(stack_size)
             .spawn_scoped(scope, || {
-                let document = parse_module(source).and_then(read_module)?;
+                let document = parse_module(source).and_then(|module| read_module(module, base))?;
                 check_document_depth(&document, limits).map_err(|error| {
                     Diagnostic::new(
                         match error {
@@ -216,96 +195,42 @@ fn parse_module(source: &str) -> Result<s::Module, Diagnostic> {
     Ok(module)
 }
 
-fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
+fn read_module(module: s::Module, base: &k::Document) -> Result<k::Document, Diagnostic> {
+    let plan = lash_kernel_dialect::NamePlan::new(base, crate::printer::legal_identifier);
     let mut reader = Reader {
         limits: k::KernelDataLimits::standard(),
-        names: BTreeMap::new(),
-        helpers: BTreeMap::new(),
-        effects: BTreeMap::new(),
-        operators: Default::default(),
+        names: plan
+            .names
+            .into_iter()
+            .filter(|(name, alias)| name.as_str() != alias)
+            .map(|(name, alias)| (alias, name))
+            .collect(),
+        helpers: plan
+            .helpers
+            .into_iter()
+            .map(|(id, alias)| (alias, id))
+            .collect(),
+        operators: crate::generated_operators::bindings(&base.manifest),
         types: Default::default(),
     };
-    let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
-    let mut items = module.body.iter();
-    let header = items
-        .next()
-        .and_then(module_expr)
-        .and_then(|e| invocation(e).ok())
-        .filter(|(name, _)| name == "document")
-        .ok_or_else(|| format_error("missing generated-source v1 envelope"))?;
-    let header_result = (|| -> Result<(), Diagnostic> {
-        let [format, version, manifest, entries, private, names, helpers] = header.1.as_slice()
-        else {
-            return Err(format_error(
-                "obsolete or malformed generated envelope; re-export the Document with this toolchain",
-            ));
-        };
-        if string(format)? != "lash.generated.typescript" || string(version)? != "1" {
-            return Err(format_error(
-                "unsupported generated-source format or version",
-            ));
-        }
-        document.manifest = decode_metadata(manifest, reader.limits)?;
-        if k::KernelVersion::of(document.manifest.kernel).is_none() {
-            return Err(format_error("unsupported kernel version"));
-        }
-        document.entries = decode_metadata(entries, reader.limits)?;
-        for value in array(private)? {
-            if !document
-                .private_bindings
-                .insert(k::Name::new(string(value)?))
-            {
-                return Err(format_error("duplicate private binding"));
-            }
-        }
-        let aliases: Vec<(String, k::Name)> = decode_metadata(names, reader.limits)?;
-        let mut originals = std::collections::BTreeSet::new();
-        for (alias, name) in aliases {
-            let valid_alias = crate::printer::legal_identifier(&alias)
-                || alias.strip_prefix("kernel_name_").is_some_and(|suffix| {
-                    !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
-                });
-            if !valid_alias
-                || !originals.insert(name.clone())
-                || reader.names.insert(alias, name).is_some()
-            {
-                return Err(format_error(
-                    "duplicate, reserved or contradictory identifier alias",
-                ));
-            }
-        }
-        let aliases: Vec<(String, k::FunctionId)> = decode_metadata(helpers, reader.limits)?;
-        let mut ids = std::collections::BTreeSet::new();
-        for (alias, id) in aliases {
-            if !alias.strip_prefix("helper_").is_some_and(|suffix| {
-                !suffix.is_empty() && suffix.chars().all(swc_ecma_ast::Ident::is_valid_continue)
-            }) || !ids.insert(id)
-                || reader.helpers.insert(alias, id).is_some()
-            {
-                return Err(format_error(
-                    "duplicate, reserved or contradictory helper alias",
-                ));
-            }
-        }
-        Ok(())
-    })();
-    header_result.map_err(|mut error| {
-        if !matches!(
-            error.code,
-            DiagnosticCode::GeneratedSourceBytes | DiagnosticCode::GeneratedSourceDepth
-        ) {
-            error.code = DiagnosticCode::GeneratedSourceFormat;
-        }
-        error
-    })?;
-    reader.effects = document.manifest.effects.clone();
-    reader.operators = crate::generated_operators::bindings(&document.manifest);
+    let mut document = k::Document::new(base.manifest.numbers, vec![]);
+    document.manifest = base.manifest.clone();
+    document.entries = base.entries.clone();
+    document.private_bindings = base.private_bindings.clone();
+    let items = module.body.iter();
     let mut main_seen = false;
     for item in items {
-        let s::ModuleItem::Stmt(s::Stmt::Decl(s::Decl::Fn(declaration))) = item else {
-            return Err(format_error(
-                "expected native function declarations and main",
-            ));
+        let (declaration, exported) = match item {
+            s::ModuleItem::Stmt(s::Stmt::Decl(s::Decl::Fn(declaration))) => (declaration, false),
+            s::ModuleItem::ModuleDecl(s::ModuleDecl::ExportDecl(s::ExportDecl {
+                decl: s::Decl::Fn(declaration),
+                ..
+            })) => (declaration, true),
+            _ => {
+                return Err(format_error(
+                    "expected native function declarations and main",
+                ));
+            }
         };
         if declaration.declare || main_seen {
             return Err(format_error(
@@ -314,6 +239,9 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
         }
         let function = reader.read_function(&declaration.function)?;
         if declaration.ident.sym == "main" {
+            if exported {
+                return Err(format_error("main is not an entry and is not exported"));
+            }
             if !function.params.is_empty() {
                 return Err(format_error("main has no parameters"));
             }
@@ -321,6 +249,14 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
             main_seen = true;
         } else {
             let name = reader.name(&declaration.ident)?;
+            // Entries and their signatures are the base document's; the
+            // source cannot add, drop or retype one.
+            if exported != document.entries.contains_key(&name) {
+                return Err(format_error(format!(
+                    "`{name}` is {} in the base document; exporting a function is what makes it an entry",
+                    if exported { "not an entry" } else { "an entry" }
+                )));
+            }
             if document.functions.insert(name, function).is_some() {
                 return Err(format_error("duplicate declaration"));
             }
@@ -333,13 +269,6 @@ fn read_module(module: s::Module) -> Result<k::Document, Diagnostic> {
 }
 fn format_error(message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(DiagnosticCode::GeneratedSourceFormat, message, None)
-}
-fn module_expr(item: &s::ModuleItem) -> Option<&s::Expr> {
-    if let s::ModuleItem::Stmt(s::Stmt::Expr(statement)) = item {
-        Some(&statement.expr)
-    } else {
-        None
-    }
 }
 
 pub(crate) fn invalid(message: impl Into<String>, span: Option<swc_common::Span>) -> Diagnostic {
@@ -467,10 +396,10 @@ fn decode<T: serde::de::DeserializeOwned>(
     limits: k::KernelDataLimits,
 ) -> Result<T, Diagnostic> {
     // Match the kernel document decoder's non-recursive depth preflight.
-    if source_probe(text).1 > limits.document_json_depth() {
+    if syntax_depth(text) > limits.document_json_depth() {
         return Err(Diagnostic::new(
             DiagnosticCode::GeneratedSourceDepth,
-            "kernel metadata exceeds its nesting limit",
+            "kernel result type exceeds its nesting limit",
             None,
         ));
     }
@@ -482,73 +411,6 @@ fn decode<T: serde::de::DeserializeOwned>(
         .end()
         .map_err(|error| format_error(error.to_string()))?;
     Ok(value)
-}
-
-fn decode_metadata<T: serde::de::DeserializeOwned>(
-    expr: &s::Expr,
-    limits: k::KernelDataLimits,
-) -> Result<T, Diagnostic> {
-    decode(&metadata_text(expr)?, limits)
-}
-
-fn metadata_text(expr: &s::Expr) -> Result<String, Diagnostic> {
-    fn write(expr: &s::Expr, out: &mut String) -> Result<(), Diagnostic> {
-        match expr {
-            s::Expr::Lit(s::Lit::Str(_)) => out.push_str(&json_string(&string(expr)?)?),
-            s::Expr::Lit(s::Lit::Bool(v)) => out.push_str(if v.value { "true" } else { "false" }),
-            s::Expr::Lit(s::Lit::Null(_)) => out.push_str("null"),
-            s::Expr::Lit(s::Lit::Num(v)) => out.push_str(
-                v.raw
-                    .as_ref()
-                    .ok_or_else(|| invalid("metadata number needs its token", Some(expr.span())))?,
-            ),
-            s::Expr::Array(_) => {
-                out.push('[');
-                for (i, item) in array(expr)?.into_iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    write(item, out)?;
-                }
-                out.push(']');
-            }
-            s::Expr::Object(object) => {
-                out.push('{');
-                for (i, item) in object.props.iter().enumerate() {
-                    let s::PropOrSpread::Prop(item) = item else {
-                        return Err(invalid("metadata has no spread", Some(expr.span())));
-                    };
-                    let s::Prop::KeyValue(item) = item.as_ref() else {
-                        return Err(invalid("metadata needs explicit fields", Some(expr.span())));
-                    };
-                    let key = match &item.key {
-                        s::PropName::Str(key) => key.value.as_str().ok_or_else(|| {
-                            invalid("metadata key needs Unicode scalars", Some(expr.span()))
-                        })?,
-                        s::PropName::Ident(key) => key.sym.as_ref(),
-                        _ => return Err(invalid("metadata keys are text", Some(expr.span()))),
-                    };
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    out.push_str(&json_string(key)?);
-                    out.push(':');
-                    write(&item.value, out)?;
-                }
-                out.push('}');
-            }
-            _ => {
-                return Err(invalid(
-                    "expected structured metadata literal",
-                    Some(expr.span()),
-                ));
-            }
-        }
-        Ok(())
-    }
-    let mut text = String::new();
-    write(expr, &mut text)?;
-    Ok(text)
 }
 
 pub(super) fn json_string(value: &str) -> Result<String, Diagnostic> {

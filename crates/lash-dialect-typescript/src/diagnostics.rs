@@ -815,7 +815,7 @@ mod tests {
         use DiagnosticCode::*;
         let document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
         let generated = crate::print(&document, Default::default()).expect("small document prints");
-        let decoded = crate::compile_generated(&generated.source, Default::default())
+        let decoded = crate::read(&generated.source, &document, Default::default())
             .expect("small, shallow generated source decodes");
         assert_eq!(
             document.canonical_bytes().unwrap(),
@@ -1014,7 +1014,7 @@ mod tests {
         for (code, source) in examples {
             let accepted = match code {
                 GeneratedSourceBytes | GeneratedSourceDepth => {
-                    crate::compile_generated(source, Default::default()).map(|_| ())
+                    crate::read(source, &document, Default::default()).map(|_| ())
                 }
                 _ => crate::tests::lower_with_effects(source).map(|_| ()),
             };

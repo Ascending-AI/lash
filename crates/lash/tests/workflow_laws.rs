@@ -1345,15 +1345,20 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
     ).expect("document parses");
     let source = lash::typescript::print(&document, Default::default())
         .expect("the printer accepts the document");
-    let decoded = lash::typescript::compile_generated(&source.source, Default::default())
-        .expect("generated source decodes before admission");
+    let decoded = lash::typescript::read(&source.source, &document, Default::default())
+        .expect("exported source reads back before admission");
     assert_eq!(
         document.canonical_bytes().unwrap(),
         decoded.canonical_bytes().unwrap()
     );
     let WorkflowImport::Admission(WorkflowAdmissionRefusal::Document(refusal)) = core
         .host_artifacts()
-        .import_typescript_workflow(&source.source, &environment(true))
+        .import_exported_workflow(
+            &source.source,
+            lash::dialect::SourceFormat::TypeScriptV1,
+            &document,
+            &environment(true),
+        )
         .await
         .expect("import answers")
     else {

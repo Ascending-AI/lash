@@ -54,10 +54,13 @@ pub enum Request {
         document: Vec<u8>,
         options: lash_kernel_dialect::PrintOptions,
     },
-    /// Decode a whole generated workflow, without admission or helper resolution.
-    CompileGenerated {
+    /// Read exported source back against `base` (its JSON encoding), the
+    /// document it was printed from, without admission or helper resolution.
+    Read {
         format: lash_kernel_dialect::SourceFormat,
         source: String,
+        #[serde(with = "serde_bytes")]
+        base: Vec<u8>,
         limits: lash_kernel_dialect::GeneratedSourceLimits,
     },
 }
@@ -97,7 +100,7 @@ pub enum Response {
         reads: BTreeSet<EffectName>,
     },
     Printed(lash_kernel_dialect::PrintedSource),
-    Generated {
+    Read {
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
     },
@@ -304,7 +307,7 @@ pub enum WorkerPath {
     Lower,
     ImportWorkflow,
     Print,
-    CompileGenerated,
+    Read,
     /// A run of a document's `main`.
     Cell,
     /// A run of one of a document's entries.
@@ -477,7 +480,7 @@ pub mod runtime_ops {
                     Request::Lower { .. } => WorkerPath::Lower,
                     Request::ImportTypeScriptWorkflow { .. } => WorkerPath::ImportWorkflow,
                     Request::Print { .. } => WorkerPath::Print,
-                    Request::CompileGenerated { .. } => WorkerPath::CompileGenerated,
+                    Request::Read { .. } => WorkerPath::Read,
                 },
                 &worker,
             )?;

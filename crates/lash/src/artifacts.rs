@@ -254,8 +254,9 @@ impl HostArtifacts {
 
     /// Lower a host-authored TypeScript workflow and admit it against the
     /// same process environment as [`Self::publish_workflow`]. Exported async
-    /// declarations and const-bound async literals become document entries;
-    /// the printer's exact source is accepted too. The returned reference
+    /// declarations and const-bound async literals become document entries.
+    /// Source printed from a document is read back with
+    /// [`Self::import_exported_workflow`] instead. The returned reference
     /// selects `main`, with every entry available for editing and publication.
     ///
     /// The host supplies no dialect internals. This reads the tool catalogue
@@ -274,6 +275,110 @@ impl HostArtifacts {
         .await
     }
 
+    /// Read source exported from `base` (a host's edit of it, or the
+    /// printed text unchanged) and admit the result against the same process
+    /// environment as [`Self::publish_workflow`]. The source carries only
+    /// code; the manifest, entries, private bindings, helper identities and
+    /// name renames are the base document's, so an unchanged source reads
+    /// back as `base` itself, with its identity. A construct the reader has
+    /// no exact inverse for is a typed refusal naming it.
+    ///
+    /// This reads the tool catalogue, runs no effect and publishes nothing.
+    #[cfg(feature = "typescript")]
+    pub async fn import_exported_workflow(
+        &self,
+        source: &str,
+        format: crate::dialect::SourceFormat,
+        base: &crate::workflow::document::Document,
+        environment: &ProcessEnv,
+    ) -> Result<crate::workflow::WorkflowImport> {
+        use crate::workflow::WorkflowImport;
+        let (_, _, checked) = match self.import_context(environment).await? {
+            Ok(context) => context,
+            Err(refused) => return Ok(refused),
+        };
+        let document = match checked
+            .worker_service()
+            .read_exported(source, base, format, Default::default())
+            .await
+        {
+            Ok(document) => document,
+            Err(error) => return crate::workflow::typescript::source_refusal(error),
+        };
+        let identity = match document.identity() {
+            Ok(identity) => identity,
+            Err(error) => {
+                return Ok(WorkflowImport::Refused(vec![
+                    lash_kernel_dialect::Diagnostic {
+                        code: "GENERATED_SOURCE_INVALID".into(),
+                        message: error.to_string(),
+                        span: None,
+                        kind: lash_kernel_dialect::DiagnosticKind::ProgramDefect,
+                        repairs: Vec::new(),
+                    },
+                ]));
+            }
+        };
+        let mut annotations = lash_kernel_doc::Annotations::new(identity);
+        annotations.dialect = Some(format.dialect().into());
+        Ok(crate::workflow::typescript::admit(
+            document,
+            annotations,
+            &checked.checker(),
+        ))
+    }
+
+    /// What importing a workflow source admits against: the process tool
+    /// catalogue, its host boundary and the checked environment, or the
+    /// answer that refuses the import before any source is read.
+    #[cfg(feature = "typescript")]
+    async fn import_context(
+        &self,
+        environment: &ProcessEnv,
+    ) -> Result<
+        std::result::Result<
+            (
+                Arc<lash_core::ToolCatalog>,
+                lash_vm_runtime::HostBoundary,
+                crate::workflow::WorkflowEnvironment,
+            ),
+            crate::workflow::WorkflowImport,
+        >,
+    > {
+        use crate::workflow::{
+            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
+        };
+        if self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .is_none()
+        {
+            return Ok(Err(WorkflowImport::Unsupported(
+                WorkflowImportUnsupported::EngineUnavailable,
+            )));
+        }
+        let catalog = self.core.process_tool_catalog(environment)?;
+        let boundary = match lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
+            Ok(boundary) => boundary,
+            Err(error) => {
+                return Ok(Err(WorkflowImport::Admission(
+                    WorkflowAdmissionRefusal::Boundary {
+                        message: error.to_string(),
+                    },
+                )));
+            }
+        };
+        let Some(checked) = self
+            .workflow_environment_from_catalog(Arc::clone(&catalog))
+            .await?
+        else {
+            return Ok(Err(WorkflowImport::Unsupported(
+                WorkflowImportUnsupported::EngineUnavailable,
+            )));
+        };
+        Ok(Ok((catalog, boundary, checked)))
+    }
+
     /// Import a TypeScript workflow under the host's validated source policy.
     #[cfg(feature = "typescript")]
     pub async fn import_typescript_workflow_with_limits(
@@ -285,72 +390,10 @@ impl HostArtifacts {
         use crate::workflow::{
             WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
         };
-        if self
-            .engines
-            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            .is_none()
-        {
-            return Ok(WorkflowImport::Unsupported(
-                WorkflowImportUnsupported::EngineUnavailable,
-            ));
-        }
-        let catalog = self.core.process_tool_catalog(environment)?;
-        let boundary = match lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
-            Ok(boundary) => boundary,
-            Err(error) => {
-                return Ok(WorkflowImport::Admission(
-                    WorkflowAdmissionRefusal::Boundary {
-                        message: error.to_string(),
-                    },
-                ));
-            }
+        let (catalog, boundary, checked) = match self.import_context(environment).await? {
+            Ok(context) => context,
+            Err(refused) => return Ok(refused),
         };
-        let Some(checked) = self
-            .workflow_environment_from_catalog(Arc::clone(&catalog))
-            .await?
-        else {
-            return Ok(WorkflowImport::Unsupported(
-                WorkflowImportUnsupported::EngineUnavailable,
-            ));
-        };
-        // Exact imports already name every dependency by identity. A library
-        // may hold several definitions with one label; only authored lowering
-        // needs to resolve those labels before admission.
-        if crate::typescript::is_generated_workflow(source) {
-            let document = match checked
-                .worker_service()
-                .compile_generated(
-                    source,
-                    lash_kernel_dialect::SourceFormat::TypeScriptV1,
-                    Default::default(),
-                )
-                .await
-            {
-                Ok(document) => document,
-                Err(error) => return crate::workflow::typescript::source_refusal(error),
-            };
-            let identity = match document.identity() {
-                Ok(identity) => identity,
-                Err(error) => {
-                    return Ok(WorkflowImport::Refused(vec![
-                        lash_kernel_dialect::Diagnostic {
-                            code: "GENERATED_SOURCE_INVALID".into(),
-                            message: error.to_string(),
-                            span: None,
-                            kind: lash_kernel_dialect::DiagnosticKind::ProgramDefect,
-                            repairs: Vec::new(),
-                        },
-                    ]));
-                }
-            };
-            let mut annotations = lash_kernel_doc::Annotations::new(identity);
-            annotations.dialect = Some("typescript".into());
-            return Ok(crate::workflow::typescript::admit(
-                document,
-                annotations,
-                &checked.checker(),
-            ));
-        }
         let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
             Ok(library) => library,
             Err(refusal) => {

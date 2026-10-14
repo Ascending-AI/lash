@@ -1,5 +1,8 @@
 //! Native expression and statement rendering; exact generic suites live in the parent.
 use super::{BindingScope, PrintError, Renderer, attribute_identifier, awaits, k};
+
+/// The binding strength of atoms, calls and members.
+const PRIMARY: u8 = 10;
 impl Renderer<'_> {
     fn inline_rhs(&self, rhs: &k::Rhs) -> bool {
         match rhs {
@@ -28,27 +31,68 @@ impl Renderer<'_> {
     fn write_member(&mut self, member: &k::Member) {
         match member {
             k::Member::Field { target, field } => {
-                let grouped = !matches!(
-                    target,
-                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
-                );
-                if grouped {
-                    self.out.write("(");
-                }
-                self.inline_expr(target);
-                if grouped {
-                    self.out.write(")");
-                }
+                self.member_target(target, true);
                 self.out.write(".");
                 self.out.write(field);
             }
             k::Member::Index { target, index } => {
-                self.inline_expr(target);
+                self.member_target(target, false);
                 self.out.write("[");
                 self.inline_expr(index);
                 self.out.write("]");
             }
         }
+    }
+    /// A member's target is a primary: an operator is grouped, and so is any
+    /// target but a variable, member or call when `simple` asks for it.
+    fn member_target(&mut self, target: &k::Expr, simple: bool) {
+        let grouped = self.precedence(target) < PRIMARY
+            || simple
+                && !matches!(
+                    target,
+                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
+                );
+        self.grouped(target, grouped);
+    }
+    fn grouped(&mut self, expr: &k::Expr, grouped: bool) {
+        if grouped {
+            self.out.write("(");
+        }
+        self.inline_expr(expr);
+        if grouped {
+            self.out.write(")");
+        }
+    }
+    /// Python's binding strength of `expr` as printed: `not` 3, comparisons
+    /// 4, `+`/`-` 5, `*`/`/`/`//`/`%` 6, unary minus and negative numbers 7,
+    /// `**` 8, and every primary [`PRIMARY`].
+    fn precedence(&self, expr: &k::Expr) -> u8 {
+        match expr {
+            k::Expr::Call { function, args } => {
+                match self.operators.token(function, args, &self.scope.types) {
+                    Some("not") => 3,
+                    Some("==" | "is" | "<" | "<=" | ">" | ">=") => 4,
+                    Some("+" | "-") => 5,
+                    Some("*" | "/" | "//" | "%") => 6,
+                    Some("neg") => 7,
+                    Some("**") => 8,
+                    _ => PRIMARY,
+                }
+            }
+            k::Expr::Literal(k::Literal::Int(n)) if n.is_negative() => 7,
+            k::Expr::Literal(k::Literal::Float(n))
+                if n.get().is_finite() && n.get().is_sign_negative() =>
+            {
+                7
+            }
+            _ => PRIMARY,
+        }
+    }
+    /// Print `expr` as an operand that binds at least `minimum`, grouping it
+    /// only when Python would otherwise bind it differently.
+    fn operand(&mut self, expr: &k::Expr, minimum: u8) {
+        let grouped = self.precedence(expr) < minimum;
+        self.grouped(expr, grouped);
     }
     pub(super) fn inline_expr(&mut self, expr: &k::Expr) {
         self.out.begin_node(None);
@@ -64,19 +108,33 @@ impl Renderer<'_> {
             k::Expr::Call { function, args } => {
                 if let Some(token) = self.operators.token(function, args, &self.scope.types) {
                     match token {
-                        "not" | "neg" => {
-                            self.out.write(if token == "not" { "not (" } else { "-(" });
-                            self.inline_expr(&args[0]);
-                            self.out.write(")");
+                        "not" => {
+                            self.out.write("not ");
+                            self.operand(&args[0], 3);
+                        }
+                        "neg" => {
+                            self.out.write("-");
+                            // `-(7)` negates; `-7` is a negative literal.
+                            let number = matches!(
+                                &args[0],
+                                k::Expr::Literal(k::Literal::Int(_) | k::Literal::Float(_))
+                            );
+                            self.grouped(&args[0], number || self.precedence(&args[0]) < 7);
                         }
                         _ => {
-                            self.out.write("(");
-                            self.inline_expr(&args[0]);
+                            let (left, right) = match token {
+                                "==" | "is" | "<" | "<=" | ">" | ">=" => (5, 5),
+                                "**" => (PRIMARY, 7),
+                                _ => {
+                                    let own = self.precedence(expr);
+                                    (own, own + 1)
+                                }
+                            };
+                            self.operand(&args[0], left);
                             self.out.write(" ");
                             self.out.write(token);
                             self.out.write(" ");
-                            self.inline_expr(&args[1]);
-                            self.out.write(")");
+                            self.operand(&args[1], right);
                         }
                     }
                 } else {
@@ -149,17 +207,7 @@ impl Renderer<'_> {
                 let target = match member.as_ref() {
                     k::Member::Field { target, .. } | k::Member::Index { target, .. } => target,
                 };
-                let grouped = !matches!(
-                    target,
-                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
-                );
-                if grouped {
-                    self.out.write("(");
-                }
-                self.inline_expr(target);
-                if grouped {
-                    self.out.write(")");
-                }
+                self.member_target(target, true);
                 match member.as_ref() {
                     k::Member::Field { field, .. } => {
                         self.out.write(".");

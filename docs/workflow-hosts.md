@@ -382,9 +382,15 @@ components it names, and the worker's function registry,
 lowers the source, and admits the document. It runs no effect and publishes
 nothing. Exported async declarations and const-bound async literals (including
 `export const digest = process(async (inbox: string) => { return inbox; });`)
-become entries without requiring process-start tools. The printer's exact
-source also imports, preserving its behaviour and entries. The imported
-reference selects `main`; select an entry when publishing the document.
+become entries without requiring process-start tools. The imported reference
+selects `main`; select an entry when publishing the document.
+
+Printed source reads back through
+`HostArtifacts::import_exported_workflow(source, format, &base, &environment)`,
+where `base` is the stored Document it was printed from. The source carries
+only code; the manifest, entries, helper identities and renames come from
+`base`, and the result is admitted against `environment`. An edit the reader
+has no exact inverse for is a typed refusal naming the construct.
 
 `WorkflowImport::Imported { document, annotations }` carries the admitted
 workflow and source annotations. `Refused(diagnostics)` carries front-end

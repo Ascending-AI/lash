@@ -69,19 +69,17 @@ fn print_local(
     })
 }
 
-fn compile_local(source: &str, format: SourceFormat) -> Result<Document> {
+fn read_local(source: &str, base: &Document, format: SourceFormat) -> Result<Document> {
     Ok(match format {
-        SourceFormat::TypeScriptV1 => {
-            lash::typescript::compile_generated(source, Default::default())?
-        }
-        SourceFormat::PythonV1 => lash::python::compile_generated(source, Default::default())?,
+        SourceFormat::TypeScriptV1 => lash::typescript::read(source, base, Default::default())?,
+        SourceFormat::PythonV1 => lash::python::read(source, base, Default::default())?,
     })
 }
 
 fn compare(original: &Document, decoded: &Document) -> Result<()> {
     // Compare the complete canonical bytes, including manifest and unused bodies.
     if original.canonical_bytes()? != decoded.canonical_bytes()? {
-        return Err("generated source changed the document".into());
+        return Err("exported source changed the document".into());
     }
     Ok(())
 }
@@ -129,10 +127,10 @@ async fn measure(iterations: u32) -> Result<()> {
                         // Verify the print-only sample outside its timed region.
                         let decoded = if worker {
                             service
-                                .compile_generated(&printed.source, format, options.limits)
+                                .read_exported(&printed.source, &document, format, options.limits)
                                 .await?
                         } else {
-                            compile_local(&printed.source, format)?
+                            read_local(&printed.source, &document, format)?
                         };
                         compare(&document, &decoded)?;
                         sizes = (
@@ -153,10 +151,10 @@ async fn measure(iterations: u32) -> Result<()> {
                         };
                         let decoded = if worker {
                             service
-                                .compile_generated(&printed.source, format, options.limits)
+                                .read_exported(&printed.source, &document, format, options.limits)
                                 .await?
                         } else {
-                            compile_local(&printed.source, format)?
+                            read_local(&printed.source, &document, format)?
                         };
                         compare(&document, &decoded)?;
                         composed_time += start.elapsed();

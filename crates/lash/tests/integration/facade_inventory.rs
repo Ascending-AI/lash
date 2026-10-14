@@ -320,7 +320,7 @@ mod typescript_inventory {}
 
 #[cfg(feature = "python")]
 mod python_inventory {
-    use lash::python::{compile_generated as _, print as _};
+    use lash::python::{print as _, read as _};
 }
 
 #[cfg(feature = "http-transport")]

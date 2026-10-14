@@ -6,7 +6,7 @@ use lash_kernel_dialect::{
 };
 use lash_kernel_doc as k;
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 fn error(code: Code, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
@@ -36,9 +36,15 @@ fn depth_error() -> Diagnostic {
         "generated source exceeds depth budget",
     )
 }
-/// Reconstruct an unadmitted Document, without an installed helper catalogue.
-/// Only the explicit Python v1 envelope and its paired exact forms are accepted.
-pub fn compile_generated(source: &str, limits: GeneratedSourceLimits) -> Result<k::Document> {
+/// Read exported Python back into the document it was printed from, or into
+/// that document as edited, without an installed helper catalogue or
+/// admission. The source carries only code; the manifest, entries, private
+/// bindings, helper identities and name renames come from `base`.
+pub fn read(
+    source: &str,
+    base: &k::Document,
+    limits: GeneratedSourceLimits,
+) -> Result<k::Document> {
     if source.len() > limits.max_bytes {
         return Err(error(
             Code::GeneratedSourceBytes,
@@ -52,7 +58,7 @@ pub fn compile_generated(source: &str, limits: GeneratedSourceLimits) -> Result<
             .name("kernel-python-decode".into())
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let document = Reader::new(source, limits)?.document()?;
+                let document = Reader::new(source, base, limits)?.document(base)?;
                 check_document_depth(&document, limits).map_err(|e| match e {
                     PrintError::Bytes { .. } => error(Code::GeneratedSourceBytes, e.to_string()),
                     PrintError::Depth { .. } => depth_error(),
@@ -226,11 +232,14 @@ struct Reader<'a> {
     helpers: BTreeMap<String, k::FunctionId>,
     scope: BindingScope,
     main: bool,
-    effects: BTreeMap<k::EffectName, k::Signature>,
     operators: crate::generated_operators::Operators,
 }
 impl<'a> Reader<'a> {
-    fn new(source: &'a str, limits: GeneratedSourceLimits) -> Result<Self> {
+    fn new(source: &'a str, base: &k::Document, limits: GeneratedSourceLimits) -> Result<Self> {
+        if k::KernelVersion::of(base.manifest.kernel).is_none() {
+            return Err(format_error("unsupported kernel version"));
+        }
+        let plan = lash_kernel_dialect::NamePlan::new(base, crate::printer::legal_identifier);
         let limit = limits.max_depth.min(64);
         let mut lines = vec![];
         for line in source.lines() {
@@ -257,12 +266,20 @@ impl<'a> Reader<'a> {
             limit,
             name_bytes: Cell::new(0),
             byte_limit: limits.max_bytes,
-            names: BTreeMap::new(),
-            helpers: BTreeMap::new(),
+            names: plan
+                .names
+                .into_iter()
+                .filter(|(name, alias)| name.as_str() != alias)
+                .map(|(name, alias)| (alias, name))
+                .collect(),
+            helpers: plan
+                .helpers
+                .into_iter()
+                .map(|(id, alias)| (alias, id))
+                .collect(),
             scope: Default::default(),
             main: false,
-            effects: BTreeMap::new(),
-            operators: Default::default(),
+            operators: crate::generated_operators::Operators::new(&base.manifest.functions),
         })
     }
     fn line(&mut self, indent: usize) -> Result<(Cursor<'a>, bool)> {
@@ -373,7 +390,115 @@ impl<'a> Reader<'a> {
         if Self::action_form(c.text) {
             return self.action_cursor(c).map(k::Rhs::Action);
         }
+        if let Some(action) = self.authored_call(c)? {
+            return Ok(k::Rhs::Action(action));
+        }
         self.inline(c, depth).map(k::Rhs::Expr)
+    }
+    /// A library action spelled as an author writes it: a builtin call or a
+    /// method of a variable ([`crate::generated_operators::Authored`]). None
+    /// when the text is not one; the base document must hold its helper once.
+    fn authored_call(&self, c: &mut Cursor<'_>) -> Result<Option<k::Action>> {
+        let mut probe = Cursor::new(c.text);
+        let receiver = if probe.text.trim_start().starts_with('"') {
+            Err(probe.string()?)
+        } else {
+            let Ok(word) = probe.word() else {
+                return Ok(None);
+            };
+            if word == "type" && probe.take("(") {
+                let value = self.atom(&mut probe)?;
+                probe.expect(")")?;
+                probe.expect(".__name__")?;
+                return self.commit(c, probe, "py.type", vec![value]);
+            }
+            if let Some(label) = crate::generated_operators::builtin_label(word) {
+                if !probe.take("(") || probe.text.trim_start().starts_with(')') {
+                    return Ok(None);
+                }
+                let args = self.call_operands(&mut probe, vec![])?;
+                return self.commit(c, probe, label, args);
+            }
+            if probe.text.starts_with('[') {
+                // A slice; without a colon this is an index expression.
+                let mut slice = Cursor::new(probe.text);
+                slice.expect("[")?;
+                let mut bounds = vec![];
+                let mut colons = 0;
+                loop {
+                    bounds.push(if slice.text.trim_start().starts_with([':', ']']) {
+                        k::Atom::Literal(k::Literal::Absent)
+                    } else {
+                        match self.atom(&mut slice) {
+                            Ok(atom) => atom,
+                            Err(_) => return Ok(None),
+                        }
+                    });
+                    if slice.take("]") {
+                        break;
+                    }
+                    if !slice.take(":") || colons == 2 {
+                        return Ok(None);
+                    }
+                    colons += 1;
+                }
+                if colons == 0 {
+                    return Ok(None);
+                }
+                bounds.resize(3, k::Atom::Literal(k::Literal::Absent));
+                let mut args = vec![k::Atom::Variable(self.named(word)?)];
+                args.extend(bounds);
+                return self.commit(c, slice, "py.slice", args);
+            }
+            Ok(word)
+        };
+        if !probe.take(".") {
+            return Ok(None);
+        }
+        let Ok(method) = probe.word() else {
+            return Ok(None);
+        };
+        let label = format!("py.method.{method}");
+        if self.operators.unique(&label).is_none() || !probe.take("(") {
+            return Ok(None);
+        }
+        let receiver = match receiver {
+            Ok(word) => k::Atom::Variable(self.named(word)?),
+            Err(text) => k::Atom::Literal(k::Literal::Text(text)),
+        };
+        let args = self.call_operands(&mut probe, vec![receiver])?;
+        self.commit(c, probe, &label, args)
+    }
+    /// Atoms up to the closing parenthesis, after `leading`.
+    fn call_operands(&self, c: &mut Cursor<'_>, mut args: Vec<k::Atom>) -> Result<Vec<k::Atom>> {
+        if !c.take(")") {
+            loop {
+                args.push(self.atom(c)?);
+                if c.take(")") {
+                    break;
+                }
+                c.expect(",")?;
+            }
+        }
+        Ok(args)
+    }
+    fn commit<'c>(
+        &self,
+        c: &mut Cursor<'c>,
+        probe: Cursor<'c>,
+        label: &str,
+        args: Vec<k::Atom>,
+    ) -> Result<Option<k::Action>> {
+        let function = self.operators.unique(label).ok_or_else(|| {
+            invalid(format!(
+                "`{label}` has no unique library action in the base document"
+            ))
+        })?;
+        c.text = probe.text;
+        Ok(Some(k::Action::Call {
+            callee: k::Callee::Library(function),
+            args,
+        }))
     }
     fn await_call(&self, c: &mut Cursor<'_>) -> Result<k::Action> {
         if c.text.trim_start().starts_with("tools.") || c.text.trim_start().starts_with("tools[") {
@@ -409,13 +534,8 @@ impl<'a> Reader<'a> {
                     c.expect(",")?;
                 }
             }
-            let result = result
-                .or_else(|| {
-                    self.effects
-                        .get(&effect)
-                        .map(|signature| signature.result.clone())
-                })
-                .ok_or_else(|| invalid("effect call requires exact result metadata"))?;
+            // An unannotated tool call is what authored lowering stores: `any`.
+            let result = result.unwrap_or(k::Type::Any);
             return Ok(k::Action::Perform {
                 effect,
                 args,
@@ -456,83 +576,14 @@ impl<'a> Reader<'a> {
             c.expect(",")?;
         }
     }
-    fn document(mut self) -> Result<k::Document> {
-        let (mut c, suite) = self.line(0).map_err(|_| {
-            format_error("missing generated-source v1 envelope; re-export the Document")
-        })?;
-        let envelope = (|| -> Result<k::Document> {
-            if suite || c.operation()? != "document" {
-                return Err(format_error("missing generated-source v1 envelope"));
-            }
-            if c.string()? != "lash.generated.python" {
-                return Err(format_error("wrong generated-source dialect"));
-            }
-            c.expect(",")?;
-            if c.string()? != "1" {
-                return Err(format_error("unsupported generated-source version"));
-            }
-            c.expect(",")?;
-            let manifest: k::Manifest = c.metadata()?;
-            if k::KernelVersion::of(manifest.kernel).is_none() {
-                return Err(format_error("unsupported kernel version"));
-            }
-            c.expect(",")?;
-            let entries = c.metadata()?;
-            c.expect(",")?;
-            let mut private_bindings = BTreeSet::new();
-            for n in c.strings()? {
-                if !private_bindings.insert(k::Name::new(n)) {
-                    return Err(format_error("duplicate private binding"));
-                }
-            }
-            c.expect(",")?;
-            let aliases: Vec<(String, k::Name)> = c.metadata()?;
-            let mut originals = BTreeSet::new();
-            for (alias, name) in aliases {
-                let legal = crate::printer::legal_identifier(&alias)
-                    || alias
-                        .strip_prefix("kernel_name_")
-                        .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
-                if !legal
-                    || !originals.insert(name.clone())
-                    || self.names.insert(alias, name).is_some()
-                {
-                    return Err(format_error(
-                        "duplicate, reserved or contradictory identifier alias",
-                    ));
-                }
-            }
-            c.expect(",")?;
-            let aliases: Vec<(String, k::FunctionId)> = c.metadata()?;
-            let mut ids = BTreeSet::new();
-            for (alias, id) in aliases {
-                if !alias
-                    .strip_prefix("helper_")
-                    .is_some_and(|s| !s.is_empty() && s.chars().all(unicode_ident::is_xid_continue))
-                    || !ids.insert(id)
-                    || self.helpers.insert(alias, id).is_some()
-                {
-                    return Err(format_error("duplicate or malformed helper alias"));
-                }
-            }
-            c.end(false)?;
-            Ok(k::Document {
-                manifest,
-                entries,
-                private_bindings,
-                functions: BTreeMap::new(),
-                main: vec![],
-            })
-        })()
-        .map_err(|mut e| {
-            if e.code != Code::GeneratedSourceDepth.as_str() {
-                e.code = Code::GeneratedSourceFormat.as_str().into();
-            }
-            e
-        })?;
-        let mut document = envelope;
-        self.effects = document.manifest.effects.clone();
-        self.operators = crate::generated_operators::Operators::new(&document.manifest.functions);
+    fn document(mut self, base: &k::Document) -> Result<k::Document> {
+        let mut document = k::Document {
+            manifest: base.manifest.clone(),
+            entries: base.entries.clone(),
+            private_bindings: base.private_bindings.clone(),
+            functions: BTreeMap::new(),
+            main: vec![],
+        };
         let mut main = false;
         while self.more(0) {
             let (mut c, suite) = self.line(0)?;
@@ -566,38 +617,9 @@ impl<'a> Reader<'a> {
                 }
                 continue;
             }
-            if !suite || main {
-                return Err(format_error(
-                    "expected declarations followed by exactly one main",
-                ));
-            }
-            match c.operation()? {
-                "declare" => {
-                    let name = k::Name::new(c.string()?);
-                    c.expect(",")?;
-                    let params = self.names(&mut c)?;
-                    c.end(true)?;
-                    self.scope = BindingScope::new(&params);
-                    let body = self.block(1, 0)?;
-                    self.closed(0)?;
-                    if document
-                        .functions
-                        .insert(name, k::Function { params, body })
-                        .is_some()
-                    {
-                        return Err(format_error("duplicate declaration"));
-                    }
-                }
-                "main" => {
-                    c.end(true)?;
-                    self.main = false; // Explicit generic wrappers retain explicit terminals.
-                    self.scope = Default::default();
-                    document.main = self.block(1, 0)?;
-                    self.closed(0)?;
-                    main = true;
-                }
-                _ => return Err(format_error("unknown generated module item")),
-            }
+            return Err(format_error(
+                "expected function definitions followed by exactly one main",
+            ));
         }
         if !main || self.next != self.lines.len() {
             return Err(format_error("missing main or trailing program text"));
@@ -970,6 +992,10 @@ impl<'a> Reader<'a> {
             } else {
                 k::Stmt::Continue
             }
+        } else if let Some(action) = self.authored_call(&mut c)? {
+            self.depth(depth + 1)?;
+            c.finish()?;
+            k::Stmt::Do { action }
         } else if !c.text.starts_with("k.") {
             // Parse the place separately from the RHS; an annotation is the
             // exact stored distinction between declaration and reassignment.

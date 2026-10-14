@@ -1,27 +1,37 @@
-# Python generated source, format v1
+# Python exported source, format v1
 
 The Python codec implements the [shared exact-source contract](generated-source-format.md).
-`print(Document, PrintOptions)` only renders. `compile_generated(source, limits)`
-reconstructs the document directly, without authored lowering, admission or an
-installed library. Every accepted document retains its complete canonical bytes.
-The generated subset uses kernel semantics; stock Python execution is not promised.
+`print(Document, PrintOptions)` only renders plain Python an agent could have
+written: functions, then `def main():`, with no header, directive, stub block,
+name or helper table, and no `result=` cast in the ordinary case.
+`read(source, base, limits)` reconstructs the document directly against the
+base Document it was printed from, without authored lowering, admission or an
+installed library. The base supplies the manifest, entries, private bindings,
+helper identities and renames. Every accepted document retains its complete
+canonical bytes. The subset uses kernel semantics; stock Python execution is
+not promised.
 
-The shared seven-field envelope contains native Python dictionaries and lists,
-including complete signatures and full helper identities. No body is hidden in
-metadata and no metadata is escaped JSON. Original names use deterministic,
-injective aliases from `NamePlan`. Identity aliases are omitted; native names reconstruct directly. Only NFKC-stable identifiers may remain unaliased, so Python normalization cannot collapse two kernel names. Python keywords, builtins and the generated
-namespaces are reserved; aliases apply to declarations, parameters, references,
-function values, entries and private names, including shadowing. Helper labels
-never resolve dependencies against an installed library.
+Original names use deterministic, injective aliases from `NamePlan`, computed
+from the base by both printer and reader. Only NFKC-stable identifiers may
+remain unaliased, so Python normalization cannot collapse two kernel names.
+Python keywords, builtins and the generated namespaces are reserved; aliases
+apply to declarations, parameters, references, function values, entries and
+private names, including shadowing. Helper labels never resolve dependencies
+against an installed library.
+
+The real `deep_research` agent cell prints as:
 
 ```python
-k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [], [])
-def worker(items):
-    return items[0]
-async def main():
-    items = [1, 2]
-    answer = await declared.worker(items)
-    return answer
+async def deep_research():
+    search_input = record({"topic": "Reducing customer onboarding drop-off", "max_sources": 3})
+    evidence = await tools.research.search(search_input)
+    synthesis_input = record({"topic": evidence.topic, "sources": evidence.sources})
+    report = await tools.research.synthesize(synthesis_input)
+    display_input = record({"text": report.summary})
+    await tools.display.show_message(display_input)
+    return report
+def main():
+    return None
 ```
 
 ## Paired readable inventory
@@ -43,10 +53,10 @@ ordered tables and output uses the shared append-only writer.
 | Inline Record | `record({"field": value})` reconstructs Record field text and ordered values, including duplicates | Shared workflow records / child block expression requires a suite; unwrapped dict always means Map, which authored Python lowers to |
 | Field and Index | `value.title`, `value[index]`; `getattr(value, "return")` for fields Python cannot spell as attributes | Builtin attribute names and keyword fields / a target or index block expression requires a suite |
 | Member Assign and Remove | `value.title = rhs`, `value[index] = rhs`, `del value[index]`; `setattr` and `delattr` preserve nonidentifier Field places | Literal target is grouped / target, index or RHS block expression requires a suite |
-| Expression helper call | `helper_name(expressions)` reconstructs Expr::Call with its full envelope identity | Foreign helper and empty args / a child block expression requires an invocation suite |
-| Operators and comparisons | Parenthesized native operators reconstruct exactly one full identity through an unambiguous manifest requirement label | `add` becomes `(x + y)`, `eq` becomes `(x == y)`, `bool.not` becomes `not (x)` / ambiguous identity or wrong arity keeps the ordinary helper call |
-| Action Call | `await helper_name(atoms)`, `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls | All callee kinds / non-atomic operands refuse; Spawn remains a separate action |
-| Perform | `await tools.research.search(atoms)` preserves the effect name, using the manifest's exact result type; bracket names and `result=` native metadata cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata or non-atomic arguments refuse |
+| Expression helper call | `helper_name(expressions)` reconstructs Expr::Call with the full identity the base holds for that spelling | Foreign helper and empty args / a child block expression requires an invocation suite |
+| Operators and comparisons | Native operators with minimal parentheses by precedence reconstruct exactly one full identity through an unambiguous base manifest label | `add` becomes `x + y`, `eq` becomes `x == y`, `bool.not` becomes `not x`, `(a + b) * c` and `a ** (b ** c)` group only where precedence or associativity needs it, a negated numeric literal is `-(7)` / chained comparisons, an ungrouped unary base of `**` and ambiguous identities refuse or keep the helper call; `python_operators_print_minimal_parentheses_with_an_exact_inverse` |
+| Action Call | Builtins `len(x)`, `range(a, b)`, `abs`, `all`, `any`, `chr`, `dict`, `divmod`, `int`, `list`, `ord`, `repr`, `reversed`, `round`, `set`, `sum`, `tuple`; methods `xs.append(v)`, `"a b".split()`; slices `x[a:b:c]`; `type(x).__name__`; otherwise `await helper_name(atoms)`; `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls. An authored spelling applies only when the base labels that helper once | All callee kinds / non-atomic operands refuse; Spawn remains a separate action |
+| Perform | `await tools.research.search(atoms)` preserves the effect name; unannotated it reads as `result: any`, which authored lowering stores; bracket names and `result=` cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata or non-atomic arguments refuse |
 | If / Elif / Else | Direct clauses preserve both Blocks; elif is exactly one If in an else Block | Singleton nested If / extra statement requires an explicit else and nested if |
 | For / While | `for item in values:` and `while ready:` retain the exact binding, iterable, condition and body | List iteration and nested loops / a header block expression requires a suite |
 | Try / Except / Finally | `try:`, optional `except BaseException as error:`, optional `finally:` retain handler presence and empty blocks | Catch-only or finally-only / handlerless Try requires an explicit kernel form |
@@ -86,25 +96,41 @@ indentation and uses exactly `pass` when empty.
 | `clock` / `random` | `k.clock()` / `k.random()` | Kernel nondeterministic expressions are distinct from library calls and Python's time/random APIs |
 | `task-action` | `k.spawn`, `k.sleep`, `k.join`, `k.join_many`, `k.cancel`, `k.yield_` | Kernel task actions, modes and timing units differ from Python coroutine/library operations; no spawn/join fusion is allowed |
 
-The generic reader also accepts full explicit variants for the readable forms,
-including `with k.declare`, `with k.main`, `k.int`, `k.float`, `k.bytes`,
-`k.function`, `k.call`, and `k.perform`. The printer always chooses the eligible
-readable rule. The envelope is exclusively the current structured v1 contract;
-obsolete escaped envelopes refuse and require re-exporting the original Document.
+The generic reader also accepts full explicit body-level variants for the
+readable forms (`k.int`, `k.float`, `k.bytes`, `k.function`, `k.call`,
+`k.perform`); the printer always chooses the eligible readable rule. The
+`k.document` header and the `with k.declare`/`with k.main` wrappers are
+deleted; there is no dual format.
+
+Guard parity: Python lowering emits no operand-narrowing guards, so the reader
+infers none. Operator selection uses only literal, binding and result-type
+operand facts.
 
 ## Proof, limits and maps
 
-Each paired witness runs print, public compile_generated and complete canonical
-byte comparison. The independent finite form/stored-field inventory, 64 Smith
-seeds, 28 authored Python cases, four foreign TypeScript cases and the 560- and
-672-document bounded domains remain in use. The shared harness independently lexes every node's own mapped spelling, excludes descendant ranges and quoted data, and counts `k.*`, every `helper_*` call and pseudo-intrinsics. The seven-document corpus reports its named exactness distinctions (Record versus Map, declared callees and foreign helper identity). Authored-source acceptance
-reports any generic form against the documented unavoidable list. A mutation of
-the first-binding inverse fails the canonical-byte law.
+Each paired witness runs print, public `read` against the printed Document
+and complete canonical byte comparison. The independent finite
+form/stored-field inventory, 64 Smith seeds, 28 authored Python cases, four
+foreign TypeScript cases, the `deep_research` agent cell and the 560- and
+672-document bounded domains remain in use. The shared harness independently
+lexes every node's own mapped spelling, excludes descendant ranges and quoted
+data, and counts `k.*`, every `helper_*` call and pseudo-intrinsics; any text
+outside every node other than function declarations fails as a header,
+directive or table. The seven-document corpus reports its named exactness
+distinctions (Record versus Map, declared callees and foreign helper
+identity). Authored-source acceptance reports any generic form against the
+documented unavoidable list. A mutation of the first-binding inverse fails the
+canonical-byte law.
+
+The CPython compile law runs every export, `deep_research` included, through
+`python3` `compile(..., 'exec')`, the `ast.parse` check. It is a hard
+dependency: the test executors provide `python3`, and a missing interpreter
+fails the law rather than skipping it.
 
 Print and decode independently bound actual bytes and real node depth. Compressed
 source does not bypass the encoded input budget. Postfix and collection parsing
 track tree height before constructing deeper nodes, separately from syntax
-nesting. Alias expansion counts original-name bytes before cloning. Metadata
+nesting. Alias expansion counts original-name bytes before cloning. A `result=` type
 is depth-preflighted and rejects duplicate fields before deserialization.
 
 Maps default off and do no map-specific work in that mode. Requested maps cover
@@ -120,8 +146,20 @@ results or argument conventions from Python builtins. Integer-only arithmetic
 and unknown text operands retain helpers when their full identities cannot be
 selected from the source operand facts.
 
-The following authored helper Actions remain explicit and are individually
-counted by the harness. Each has atomic operands and a stored await boundary;
-a synchronous Python expression would change Action to Expr and its execution
-boundary. These are exact document exports, not a rewrite of authored lowering:
-`helper_py_add`, `helper_py_arg_missing`, `helper_py_chr`, `helper_py_divmod`, `helper_py_exc_args`, `helper_py_exc_matches`, `helper_py_exc_new`, `helper_py_fail`, `helper_py_floordiv`, `helper_py_getitem`, `helper_py_iadd`, `helper_py_int`, `helper_py_iter`, `helper_py_iter_guard`, `helper_py_iter_size`, `helper_py_length`, `helper_py_method_append`, `helper_py_method_clear`, `helper_py_method_copy`, `helper_py_method_count`, `helper_py_method_extend`, `helper_py_method_get`, `helper_py_method_insert`, `helper_py_method_lower`, `helper_py_method_pop`, `helper_py_method_remove`, `helper_py_method_reverse`, `helper_py_method_setdefault`, `helper_py_method_split`, `helper_py_method_upper`, `helper_py_mod`, `helper_py_mul`, `helper_py_name_check`, `helper_py_neg`, `helper_py_pow`, `helper_py_range`, `helper_py_round`, `helper_py_setitem`, `helper_py_show`, `helper_py_slice`, `helper_py_to_list`, `helper_py_type`.
+Library Actions with an authored spelling that is the node's exact inverse
+print as that builtin, method, slice or `type(x).__name__` call. The ones
+remaining as `await helper_*` calls, each counted by the harness with its
+reason, have none:
+
+| Helper | Reason |
+| --- | --- |
+| `helper_py_add`, `helper_py_mul`, `helper_py_neg`, `helper_py_mod`, `helper_py_floordiv`, `helper_py_pow` | The operator spelling is the expression operator; this is the action lowering emits for dynamic operands. |
+| `helper_py_getitem`, `helper_py_setitem`, `helper_py_exc_args` | `x[i]`, `x[i] = v` and `error.args` are the kernel Index, member Assign and Field nodes. |
+| `helper_py_iadd` | `x += y` also assigns; the stored node is only the call. |
+| `helper_py_show` | Print's text is formatted before the Print statement, which has its own spelling. |
+| `helper_py_arg_missing`, `helper_py_exc_matches`, `helper_py_exc_new`, `helper_py_fail`, `helper_py_iter`, `helper_py_iter_guard`, `helper_py_iter_size`, `helper_py_name_check` | Missing-argument checks, except-clause tests, exception construction, typed failures, loop iteration steps and guards, and unbound-name checks that lowering inserts; no source spells them. |
+
+A method call on a non-variable, non-text receiver, a slice of a non-variable
+and `float(...)` (whose `nan`/`inf` spellings are literal forms) also keep the
+helper call. A function whose body holds an authored builtin or method call
+prints as `async def`, because those calls are stored Actions.

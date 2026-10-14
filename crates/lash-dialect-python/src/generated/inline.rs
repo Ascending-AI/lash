@@ -9,38 +9,107 @@ impl Reader<'_> {
         Ok(expr)
     }
     // Parentheses create no Node. Bound syntax recursion separately and compute
-    // real tree height as postfixes are wrapped, before allocating deep trees.
+    // real tree height as operators and postfixes are wrapped, before
+    // allocating deep trees. Operators bind as Python binds them: `not` 3,
+    // comparisons 4 (never chained), `+`/`-` 5, `*`/`/`/`//`/`%` 6, unary
+    // minus 7 and `**` 8, right of which a unary operand may stand.
     pub(super) fn inline_value(
         &self,
         c: &mut Cursor<'_>,
         nesting: usize,
     ) -> Result<(k::Expr, usize)> {
+        self.binary(c, nesting, 3)
+    }
+    fn binary(&self, c: &mut Cursor<'_>, nesting: usize, minimum: u8) -> Result<(k::Expr, usize)> {
         if nesting > self.limit * 2 + 2 {
             return Err(depth_error());
         }
-        let unary = if c.take("not (") {
-            Some("not")
-        } else if c.take("-(") {
-            Some("neg")
-        } else {
-            None
-        };
-        let (mut expr, mut height) = if let Some(token) = unary {
-            let (arg, h) = self.inline_value(c, nesting + 1)?;
-            let function = self
-                .operators
-                .id(token, std::slice::from_ref(&arg), &self.scope.types)
-                .ok_or_else(|| invalid("operator has no unique identity"))?;
-            c.expect(")")?;
-            self.depth(h)?;
-            (
-                k::Expr::Call {
-                    function,
-                    args: vec![arg],
-                },
-                h + 1,
-            )
-        } else if c.take("getattr(") {
+        if minimum <= 3 && c.take("not ") {
+            let (arg, h) = self.binary(c, nesting + 1, 3)?;
+            return self.operator("not", vec![arg], h);
+        }
+        let (mut left, mut height) = self.unary(c, nesting)?;
+        let mut compared = false;
+        loop {
+            let rest = c.text.trim_start_matches(' ');
+            let Some((token, own)) = [
+                ("**", 8),
+                ("//", 6),
+                ("==", 4),
+                ("<=", 4),
+                (">=", 4),
+                ("is ", 4),
+                ("+", 5),
+                ("-", 5),
+                ("*", 6),
+                ("/", 6),
+                ("%", 6),
+                ("<", 4),
+                (">", 4),
+            ]
+            .into_iter()
+            .find(|(token, _)| rest.starts_with(token)) else {
+                break;
+            };
+            if own == 8 {
+                return Err(invalid("a negated base of ** needs parentheses"));
+            }
+            if own < minimum {
+                break;
+            }
+            if own == 4 && compared {
+                return Err(invalid(
+                    "chained comparisons have no exact inverse; group each comparison",
+                ));
+            }
+            c.expect(token)?;
+            let (right, h) = self.binary(c, nesting + 1, if own == 4 { 5 } else { own + 1 })?;
+            (left, height) = self.operator(token.trim(), vec![left, right], height.max(h))?;
+            compared = own == 4;
+        }
+        Ok((left, height))
+    }
+    /// Unary minus, or a negative number literal, or a power.
+    fn unary(&self, c: &mut Cursor<'_>, nesting: usize) -> Result<(k::Expr, usize)> {
+        if nesting > self.limit * 2 + 2 {
+            return Err(depth_error());
+        }
+        c.text = c.text.trim_start_matches(' ');
+        if let Some(rest) = c.text.strip_prefix('-') {
+            if rest.starts_with(|ch: char| ch.is_ascii_digit()) {
+                let literal = match self.atom(c)? {
+                    k::Atom::Literal(literal) => literal,
+                    k::Atom::Variable(_) => return Err(invalid("expected a number")),
+                };
+                let rest = c.text.trim_start_matches(' ');
+                if rest.starts_with("**") || rest.starts_with('.') || rest.starts_with('[') {
+                    return Err(invalid("a negative number needs parentheses here"));
+                }
+                return Ok((k::Expr::Literal(literal), 1));
+            }
+            c.expect("-")?;
+            let (arg, h) = self.unary(c, nesting + 1)?;
+            return self.operator("neg", vec![arg], h);
+        }
+        let (base, h) = self.primary(c, nesting)?;
+        if c.take("**") {
+            let (exponent, e) = self.unary(c, nesting + 1)?;
+            return self.operator("**", vec![base, exponent], h.max(e));
+        }
+        Ok((base, h))
+    }
+    /// The operator call `token` spells, by the base document's unique
+    /// identity for it; `height` is its tallest operand's.
+    fn operator(&self, token: &str, args: Vec<k::Expr>, height: usize) -> Result<(k::Expr, usize)> {
+        let function = self
+            .operators
+            .id(token, &args, &self.scope.types)
+            .ok_or_else(|| invalid("operator has no unique identity"))?;
+        self.depth(height)?;
+        Ok((k::Expr::Call { function, args }, height + 1))
+    }
+    fn primary(&self, c: &mut Cursor<'_>, nesting: usize) -> Result<(k::Expr, usize)> {
+        let (mut expr, mut height) = if c.take("getattr(") {
             let (target, h) = self.inline_value(c, nesting + 1)?;
             c.expect(",")?;
             let field = c.string()?;
@@ -131,26 +200,8 @@ impl Reader<'_> {
                     }
                     (k::Expr::Tuple(items), height)
                 } else {
-                    let token = [
-                        "**", "//", "==", "<=", ">=", "is ", "+", "-", "*", "/", "%", "<", ">",
-                    ]
-                    .into_iter()
-                    .find(|token| c.take(token));
-                    if let Some(token) = token {
-                        let (right, h) = self.inline_value(c, nesting + 1)?;
-                        let args = vec![value.0, right];
-                        let function = self
-                            .operators
-                            .id(token.trim(), &args, &self.scope.types)
-                            .ok_or_else(|| invalid("operator has no unique identity"))?;
-                        let height = value.1.max(h) + 1;
-                        self.depth(height - 1)?;
-                        c.expect(")")?;
-                        (k::Expr::Call { function, args }, height)
-                    } else {
-                        c.expect(")")?;
-                        value
-                    }
+                    c.expect(")")?;
+                    value
                 }
             }
         } else if c.text.trim_start().starts_with("helper_") {

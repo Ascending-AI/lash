@@ -196,7 +196,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
         "else:\n        if second:\n",
     );
     let id = k::FunctionId::from_bytes([31; 32]);
-    // Helper identity is in the envelope once; labels do not drive the reader.
+    // Helper identity is in the base document once; labels do not drive the reader.
     spelling(
         finish(k::Expr::Call {
             function: id,
@@ -260,21 +260,19 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
 /// An independently written reader fixture pins tree shape without using the printer.
 #[test]
 fn independent_readable_source_preserves_elif_blocks_and_call_kinds() {
-    let source = r#"k.document("lash.generated.python", "1", {"kernel":1,"numbers":"float"}, {}, [], [["x","x"],["y","y"],["error","error"]], [["helper_foreign","1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f"]])
-with k.main():
-    with k.block():
-        if x.field[helper_foreign(-0.0)]:
-            pass
-        elif y:
-            return 7
-        else:
-            try:
-                raise "λ\n\""
-            except BaseException as error:
-                with k.do():
-                    k.call(helper_foreign(7, x))
-            finally:
-                k.finish(k.function("x"))
+    let source = r#"def main():
+    if x.field[helper_foreign(-0.0)]:
+        pass
+    elif y:
+        return returned(7)
+    else:
+        try:
+            raise "λ\n\""
+        except BaseException as error:
+            with k.do():
+                k.call(helper_foreign(7, x))
+        finally:
+            k.finish(k.function("x"))
 "#;
     let id = k::FunctionId::from_bytes([31; 32]);
     let doc = k::Document::new(
@@ -314,7 +312,12 @@ with k.main():
             }],
         }],
     );
-    let decoded = crate::compile_generated(source, Default::default()).unwrap();
+    // The base document, not the source, binds `helper_foreign` to its identity.
+    let mut doc = doc;
+    doc.manifest
+        .functions
+        .insert(id, k::FunctionName::new("foreign").unwrap());
+    let decoded = crate::read(source, &doc, Default::default()).unwrap();
     assert_eq!(
         doc.canonical_bytes().unwrap(),
         decoded.canonical_bytes().unwrap()
@@ -416,7 +419,6 @@ fn bounded_readable_interactions_preserve_exact_bytes_and_maps() {
                     let on = roundtrip(&doc, true);
                     assert_eq!(off.source, on.source);
                     assert!(off.source_map.is_none());
-                    assert!(on.source.contains("helper_same_label_2"));
                     check_map(&doc, &on);
                     count += 1;
                 }
@@ -476,28 +478,27 @@ fn readable_inline_depth_and_malformed_syntax_refuse() {
     check_map(&doc, &printed);
     let bad = printed.source.replace("return x", "return x.title");
     assert_eq!(
-        crate::compile_generated(&bad, Default::default())
+        crate::read(&bad, &doc, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
     );
-    let header = super::HAND_WRITTEN.split("with k.declare").next().unwrap();
+    let base = super::hand_document();
     for body in [
-        "if answer:\n            pass\n", // else is required, even when empty
-        "try:\n            pass\n",       // handler-less try remains explicit
-        "if answer:\n            pass\n        else:\n            pass\n        else:\n            pass\n",
-        "for answer in answer:\n            pass\n        else:\n            pass\n",
+        "try:\n        pass\n", // handler-less try remains explicit
+        "if answer:\n        pass\n    else:\n        pass\n    else:\n        pass\n",
+        "for answer in answer:\n        pass\n    else:\n        pass\n",
         "k.finish(answer.return)\n",
         "k.finish(answer())\n",
         "k.finish(helper_unknown())\n",
         "k.finish(07)\n",
         "k.finish(7e999)\n",
         "k.finish(1.00)\n",
-        "with k.do():\n            k.call(helper_unknown(answer.field))\n",
+        "with k.do():\n        k.call(helper_unknown(answer.field))\n",
     ] {
-        let source = format!("{header}with k.main():\n    with k.block():\n        {body}");
+        let source = format!("def main():\n    {body}");
         assert_eq!(
-            crate::compile_generated(&source, Default::default())
+            crate::read(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             crate::GeneratedSourceCode::InvalidGeneratedSource.as_str(),
@@ -625,11 +626,7 @@ fn ordinary_python_body_uses_native_bindings_collections_and_definitions() {
         printed.source
     );
     assert!(
-        !printed
-            .source
-            .lines()
-            .skip(1)
-            .any(|line| line.contains("k.")),
+        !printed.source.lines().any(|line| line.contains("k.")),
         "{}",
         printed.source
     );
@@ -841,7 +838,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
     roundtrip(&doc, true);
 }
 
-/// G-SOURCE-OPERATORS: surface operators retain the envelope's full identity.
+/// G-SOURCE-OPERATORS: surface operators retain the base manifest's full identity.
 #[test]
 fn native_operators_require_unique_identity_and_exact_arity() {
     let labels = [
@@ -871,14 +868,14 @@ fn native_operators_require_unique_identity_and_exact_arity() {
             .insert(id, k::FunctionName::new(label).unwrap());
         let printed = roundtrip(&doc, true);
         let expected = match token {
-            "not" => "not (x)".to_owned(),
-            "neg" => "-(x)".to_owned(),
-            _ => format!("(x {token} 2)"),
+            "not" => "not x".to_owned(),
+            "neg" => "-x".to_owned(),
+            _ => format!("x {token} 2"),
         };
         assert!(printed.source.contains(&expected), "{}", printed.source);
         check_map(&doc, &printed);
         let changed = printed.source.replace(&expected, "x");
-        let decoded = crate::compile_generated(&changed, Default::default()).unwrap();
+        let decoded = crate::read(&changed, &doc, Default::default()).unwrap();
         assert_ne!(
             doc.canonical_bytes().unwrap(),
             decoded.canonical_bytes().unwrap()
@@ -889,6 +886,106 @@ fn native_operators_require_unique_identity_and_exact_arity() {
             args: vec![],
         })];
         assert!(roundtrip(&doc, false).source.contains("return helper_"));
+    }
+}
+
+/// FIG-6272: operators print with Python's own precedence and only the
+/// parentheses it needs, and read back to the same tree: grouping, left and
+/// right associativity, unchained comparisons, `-(7)` against `-7`, and a
+/// unary base of `**`.
+#[test]
+fn python_operators_print_minimal_parentheses_with_an_exact_inverse() {
+    let labels = ["add", "sub", "mul", "py.pow", "neg", "bool.not", "eq", "lt"];
+    let ids: Vec<_> = (0..labels.len())
+        .map(|i| k::FunctionId::from_bytes([i as u8 + 40; 32]))
+        .collect();
+    let op = |label: &str, args: Vec<k::Expr>| k::Expr::Call {
+        function: ids[labels.iter().position(|l| *l == label).unwrap()],
+        args,
+    };
+    let x = || variable("x");
+    let cases = [
+        (
+            op("mul", vec![op("add", vec![int(1), int(2)]), int(3)]),
+            "(1 + 2) * 3",
+        ),
+        (
+            op("add", vec![int(1), op("mul", vec![int(2), int(3)])]),
+            "1 + 2 * 3",
+        ),
+        (
+            op("sub", vec![int(1), op("sub", vec![int(2), int(3)])]),
+            "1 - (2 - 3)",
+        ),
+        (
+            op("sub", vec![op("sub", vec![int(1), int(2)]), int(3)]),
+            "1 - 2 - 3",
+        ),
+        (
+            op("py.pow", vec![int(2), op("py.pow", vec![int(3), int(2)])]),
+            "2 ** 3 ** 2",
+        ),
+        (
+            op("py.pow", vec![op("py.pow", vec![int(2), int(3)]), int(2)]),
+            "(2 ** 3) ** 2",
+        ),
+        (op("neg", vec![op("py.pow", vec![x(), int(2)])]), "-x ** 2"),
+        (
+            op("py.pow", vec![op("neg", vec![x()]), int(2)]),
+            "(-x) ** 2",
+        ),
+        (op("py.pow", vec![int(-7), int(2)]), "(-7) ** 2"),
+        (op("py.pow", vec![int(2), int(-7)]), "2 ** -7"),
+        (op("neg", vec![int(7)]), "-(7)"),
+        (int(-7), "-7"),
+        (
+            op("bool.not", vec![op("eq", vec![x(), int(1)])]),
+            "not x == 1",
+        ),
+        (
+            op("eq", vec![op("bool.not", vec![x()]), int(1)]),
+            "(not x) == 1",
+        ),
+        (
+            op("eq", vec![op("lt", vec![x(), int(1)]), int(1)]),
+            "(x < 1) == 1",
+        ),
+        (op("add", vec![field(x(), "y"), int(1)]), "x.y + 1"),
+        (field(op("add", vec![x(), int(1)]), "y"), "(x + 1).y"),
+        (index(op("add", vec![x(), int(1)]), int(0)), "(x + 1)[0]"),
+    ];
+    for (expr, spelled) in cases {
+        let mut doc = document(finish(expr));
+        for (id, label) in ids.iter().zip(labels) {
+            doc.manifest
+                .functions
+                .insert(*id, k::FunctionName::new(label).unwrap());
+        }
+        let printed = roundtrip(&doc, true);
+        assert!(
+            printed.source.contains(&format!("return {spelled}\n")),
+            "{spelled}: {}",
+            printed.source
+        );
+        check_map(&doc, &printed);
+    }
+    // Chained comparisons and an ungrouped unary base have no exact inverse.
+    let mut doc = document(finish(int(0)));
+    for (id, label) in ids.iter().zip(labels) {
+        doc.manifest
+            .functions
+            .insert(*id, k::FunctionName::new(label).unwrap());
+    }
+    for body in ["return x < 1 == 1", "return -7 ** 2", "return -7 .real"] {
+        assert!(
+            crate::read(
+                &format!("def main():\n    {body}\n"),
+                &doc,
+                Default::default()
+            )
+            .is_err(),
+            "{body}"
+        );
     }
 }
 
@@ -931,11 +1028,7 @@ fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
                     printed.source
                 );
                 assert!(
-                    !printed
-                        .source
-                        .lines()
-                        .skip(1)
-                        .any(|line| line.contains("k.")),
+                    !printed.source.lines().any(|line| line.contains("k.")),
                     "{}",
                     printed.source
                 );
@@ -948,8 +1041,7 @@ fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
 /// G-SOURCE-INVERSE: independently authored generated syntax pins Let/Assign and call kinds.
 #[test]
 fn independent_native_source_preserves_binding_and_call_kinds() {
-    let source = r#"k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [["worker", "worker"], ["incoming", "incoming"], ["items", "items"], ["answer", "answer"]], [])
-def worker(incoming):
+    let source = r#"def worker(incoming):
     incoming = 3
     return incoming
 def main():
@@ -1002,7 +1094,7 @@ def main():
             ],
         },
     );
-    let decoded = crate::compile_generated(source, Default::default()).unwrap();
+    let decoded = crate::read(source, &doc, Default::default()).unwrap();
     assert_eq!(
         doc.canonical_bytes().unwrap(),
         decoded.canonical_bytes().unwrap()
@@ -1068,18 +1160,7 @@ fn mixed_numeric_text_and_dynamic_operators_are_native_and_exact() {
     .document;
     let printed = roundtrip(&doc, true);
     assert!(
-        !printed
-            .source
-            .split_once('\n')
-            .unwrap()
-            .1
-            .contains("helper_add(")
-            && !printed
-                .source
-                .split_once('\n')
-                .unwrap()
-                .1
-                .contains("helper_text_concat("),
+        !printed.source.contains("helper_add(") && !printed.source.contains("helper_text_concat("),
         "{}",
         printed.source
     );
@@ -1103,31 +1184,5 @@ fn normalization_collisions_receive_distinct_reversible_aliases() {
         ],
     );
     let printed = roundtrip(&doc, true);
-    assert!(
-        !printed.source.split_once('\n').unwrap().1.contains("ﬁle"),
-        "{}",
-        printed.source
-    );
-}
-
-/// G-SOURCE-READABLE: the envelope records only aliases source cannot recover.
-#[test]
-fn native_names_need_no_identity_alias_metadata() {
-    let printed = roundtrip(
-        &document(k::Stmt::Let {
-            name: "answer".into(),
-            value: k::Rhs::Expr(int(1)),
-        }),
-        true,
-    );
-    assert!(
-        !printed
-            .source
-            .lines()
-            .next()
-            .unwrap()
-            .contains("[\"answer\",\"answer\"]"),
-        "{}",
-        printed.source
-    );
+    assert!(!printed.source.contains("ﬁle"), "{}", printed.source);
 }

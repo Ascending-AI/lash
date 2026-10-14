@@ -15,14 +15,12 @@ fn local(document: &WorkflowDocument, format: SourceFormat, maps: bool) -> Print
     .expect("local print succeeds")
 }
 
-fn decode(source: &str, format: SourceFormat) -> Document {
+fn decode(source: &str, base: &Document, format: SourceFormat) -> Document {
     match format {
-        SourceFormat::TypeScriptV1 => {
-            lash::typescript::compile_generated(source, Default::default())
-                .expect("TypeScript decodes without a library")
-        }
-        SourceFormat::PythonV1 => lash::python::compile_generated(source, Default::default())
-            .expect("Python decodes without a library"),
+        SourceFormat::TypeScriptV1 => lash::typescript::read(source, base, Default::default())
+            .expect("TypeScript reads against its base without a library"),
+        SourceFormat::PythonV1 => lash::python::read(source, base, Default::default())
+            .expect("Python reads against its base without a library"),
     }
 }
 
@@ -97,7 +95,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             let mut without_map = None;
             for maps in [false, true] {
                 let printed = local(&view, format, maps);
-                exact(&document, &decode(&printed.source, format));
+                exact(&document, &decode(&printed.source, &document, format));
                 let remote = service
                     .print(
                         &document,
@@ -114,7 +112,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                     "local and worker agree including final spans"
                 );
                 let decoded = service
-                    .compile_generated(&remote.source, format, Default::default())
+                    .read_exported(&remote.source, &document, format, Default::default())
                     .await
                     .expect("worker decode");
                 exact(&document, &decoded);
@@ -144,21 +142,12 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
     }
 }
 
-/// Decode preserves unavailable dependency identities. Both dialects refuse
-/// missing and mismatched requirements at normal admission, and a generated
-/// marker never makes a model cell a trusted workflow import.
+/// Reading preserves unavailable dependency identities. Both dialects refuse
+/// missing and mismatched requirements at normal admission.
 #[tokio::test]
-async fn generated_decoding_preserves_admission_and_model_cell_isolation() {
+async fn exported_reading_preserves_dependency_identities_for_admission() {
     let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
-    let environment = lash::dialect::Environment {
-        library: embedding.library(),
-        effects: &Default::default(),
-        tool_roots: &Default::default(),
-        controls: &Default::default(),
-        bindings: &Default::default(),
-        functions: &Default::default(),
-    };
     let mut document = k::parse_document("kernel 1\nnumbers float\nmain { finish null }\n")
         .expect("host document");
     let unavailable = k::FunctionId::from_bytes([0x57; 32]);
@@ -185,9 +174,14 @@ async fn generated_decoding_preserves_admission_and_model_cell_isolation() {
                 .print(&document, format, Default::default())
                 .await
                 .expect("print needs no helpers");
-            exact(&document, &decode(&printed.source, format));
+            exact(&document, &decode(&printed.source, &document, format));
             let decoded = service
-                .compile_generated(&printed.source, format, GeneratedSourceLimits::default())
+                .read_exported(
+                    &printed.source,
+                    &document,
+                    format,
+                    GeneratedSourceLimits::default(),
+                )
                 .await
                 .expect("decoding needs no helpers");
             exact(&document, &decoded);
@@ -195,19 +189,6 @@ async fn generated_decoding_preserves_admission_and_model_cell_isolation() {
                 .expect_err("dependency mismatch refuses admission");
             assert!(
                 matches!(refusal, WorkflowAdmissionRefusal::Document(ref refusal) if refusal.errors.iter().any(|error| error.reason.code() == expected_code))
-            );
-            let lowered = match format {
-                SourceFormat::TypeScriptV1 => {
-                    lash::typescript::lower(&printed.source, &environment)
-                        .map_err(|e| e.to_string())
-                }
-                SourceFormat::PythonV1 => {
-                    lash::python::lower(&printed.source, &environment).map_err(|e| e.to_string())
-                }
-            };
-            assert!(
-                lowered.is_err(),
-                "a model cell cannot import a generated module"
             );
         }
     }
@@ -269,14 +250,14 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
     let printed = lash::typescript::print(&document, Default::default()).expect("print");
     exact(
         &document,
-        &decode(&printed.source, SourceFormat::TypeScriptV1),
+        &decode(&printed.source, &document, SourceFormat::TypeScriptV1),
     );
     let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1))
         .build()
         .expect("environment");
     let imported = core
         .host_artifacts()
-        .import_typescript_workflow(&printed.source, &env)
+        .import_exported_workflow(&printed.source, SourceFormat::TypeScriptV1, &document, &env)
         .await
         .expect("import");
     let lash::workflow::WorkflowImport::Imported {

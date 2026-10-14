@@ -423,7 +423,7 @@ async fn link_cell(
                 format!("this session's cells are written against helper release {release}, and the worker does not hold it"),
             ).into());
         }
-        Ok(Response::Printed(_) | Response::Generated { .. }) => {
+        Ok(Response::Printed(_) | Response::Read { .. }) => {
             return Err(Refused::Worker(Box::new(
                 lash_vm_client::PoolError::breach(
                     lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,

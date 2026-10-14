@@ -116,15 +116,7 @@ pub(crate) fn perform(
             options,
         } => {
             let dialect = format.dialect();
-            let document = std::str::from_utf8(&document)
-                .map_err(|error| error.to_string())
-                .and_then(|text| Document::from_json(text).map_err(|error| error.to_string()))
-                .map_err(|error| {
-                    PoolError::refused(RunRefusal::Undecodable {
-                        input: RunInput::Document,
-                        detail: Detail::new(error),
-                    })
-                })?;
+            let document = decoded_document(document)?;
             match embedding
                 .dialects
                 .get(dialect)
@@ -139,16 +131,17 @@ pub(crate) fn perform(
                 },
             }
         }
-        Request::CompileGenerated {
+        Request::Read {
             format,
             source,
+            base,
             limits,
         } => match embedding.dialects.get(format.dialect()) {
             None => Response::UnknownDialect {
                 dialect: format.dialect().into(),
             },
-            Some(package) => match (package.compile_generated)(&source, limits) {
-                Ok(document) => Response::Generated {
+            Some(package) => match (package.read)(&source, &decoded_document(base)?, limits) {
+                Ok(document) => Response::Read {
                     document: encoded(document.to_json())?,
                 },
                 Err(error) => Response::DialectRefused(refusal(error)),
@@ -183,6 +176,19 @@ fn reached(
     }
 }
 
+/// A document a request carries as its JSON encoding.
+fn decoded_document(json: Vec<u8>) -> Result<Document, PoolError> {
+    std::str::from_utf8(&json)
+        .map_err(|error| error.to_string())
+        .and_then(|text| Document::from_json(text).map_err(|error| error.to_string()))
+        .map_err(|error| {
+            PoolError::refused(RunRefusal::Undecodable {
+                input: RunInput::Document,
+                detail: Detail::new(error),
+            })
+        })
+}
+
 fn encoded(json: Result<String, impl std::fmt::Display>) -> Result<Vec<u8>, PoolError> {
     json.map(String::into_bytes)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
@@ -204,11 +210,15 @@ mod tests {
     use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, SourceFormat};
 
     std::thread_local! {
-        static COMPILER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static READER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
-    fn counted_compiler(_: &str, _: GeneratedSourceLimits) -> Result<Document, Diagnostic> {
-        COMPILER_CALLS.set(COMPILER_CALLS.get() + 1);
+    fn counted_reader(
+        _: &str,
+        _: &Document,
+        _: GeneratedSourceLimits,
+    ) -> Result<Document, Diagnostic> {
+        READER_CALLS.set(READER_CALLS.get() + 1);
         Ok(Document::new(
             lash_kernel_doc::NumberPolicy::Float,
             vec![lash_kernel_doc::Stmt::Finish {
@@ -218,15 +228,15 @@ mod tests {
     }
 
     /// Printing invokes only the installed printer. Even mapped printing
-    /// makes zero generated-compiler calls; compilation is separately callable.
+    /// makes zero reader calls; reading is separately callable.
     #[test]
-    fn printing_never_invokes_the_generated_compiler() {
+    fn printing_never_invokes_the_reader() {
         let mut embedding =
             crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
         for package in embedding.dialects.values_mut() {
-            package.compile_generated = counted_compiler;
+            package.read = counted_reader;
         }
-        COMPILER_CALLS.set(0);
+        READER_CALLS.set(0);
         let document = lash_kernel_doc::parse_document(
             "kernel 1\nnumbers float\nmain { let greeting = \"λ\" finish greeting }",
         )
@@ -248,7 +258,7 @@ mod tests {
                 else {
                     panic!("printing must succeed");
                 };
-                assert_eq!(COMPILER_CALLS.get(), 0, "printing must not compile");
+                assert_eq!(READER_CALLS.get(), 0, "printing must not read");
                 assert_eq!(printed.source_map.is_some(), source_map);
                 assert_eq!(
                     serde_json::to_value(&printed)
@@ -259,59 +269,38 @@ mod tests {
                     "maps cross only when requested"
                 );
                 let decoded = match format {
-                    SourceFormat::TypeScriptV1 => lash_dialect_typescript::compile_generated(
+                    SourceFormat::TypeScriptV1 => lash_dialect_typescript::read(
                         &printed.source,
+                        &document,
                         Default::default(),
                     )
-                    .expect("TS decode"),
+                    .expect("TS read"),
                     SourceFormat::PythonV1 => {
-                        lash_dialect_python::compile_generated(&printed.source, Default::default())
-                            .expect("Python decode")
+                        lash_dialect_python::read(&printed.source, &document, Default::default())
+                            .expect("Python read")
                     }
                 };
                 assert_eq!(
                     document.canonical_bytes().expect("canonical"),
                     decoded.canonical_bytes().expect("canonical")
                 );
-                let cell = Request::Lower {
-                    dialect: format.dialect().into(),
-                    source: printed.source,
-                    effects: Default::default(),
-                    tool_roots: Default::default(),
-                    controls: Default::default(),
-                    bindings: Default::default(),
-                    functions: Default::default(),
-                    helpers: embedding.helper_release(),
-                    reads: Default::default(),
-                };
-                let response = perform(
-                    &embedding,
-                    &EncodedPayload(rmp_serde::to_vec_named(&cell).expect("cell request")),
-                )
-                .expect("cell response");
-                assert!(
-                    matches!(
-                        rmp_serde::from_slice::<Response>(&response.0).expect("cell response"),
-                        Response::DialectRefused(_)
-                    ),
-                    "a worker cell cannot use the generated marker to import"
-                );
-                assert_eq!(COMPILER_CALLS.get(), 0);
+                assert_eq!(READER_CALLS.get(), 0);
             }
             let encoded = EncodedPayload(
-                rmp_serde::to_vec_named(&Request::CompileGenerated {
+                rmp_serde::to_vec_named(&Request::Read {
                     format,
                     source: String::new(),
+                    base: document.to_json().expect("json").into_bytes(),
                     limits: Default::default(),
                 })
                 .expect("request"),
             );
-            let response = perform(&embedding, &encoded).expect("compile response");
+            let response = perform(&embedding, &encoded).expect("read response");
             assert!(matches!(
                 rmp_serde::from_slice::<Response>(&response.0).expect("response"),
-                Response::Generated { .. }
+                Response::Read { .. }
             ));
-            assert_eq!(COMPILER_CALLS.replace(0), 1);
+            assert_eq!(READER_CALLS.replace(0), 1);
         }
     }
 }

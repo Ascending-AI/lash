@@ -13,8 +13,8 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
         },
     )
     .expect("valid in-budget document prints");
-    let decoded = crate::compile_generated(&printed.source, Default::default())
-        .expect("generated source decodes without a library");
+    let decoded = crate::read(&printed.source, document, Default::default())
+        .expect("exported source reads back against its base without a library");
     assert_eq!(document.identity().unwrap(), decoded.identity().unwrap());
     assert_eq!(
         document.canonical_bytes().unwrap(),
@@ -24,18 +24,17 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     );
     printed
 }
-// Independently written syntax, not obtained from the printer or its rule table.
-const HAND_WRITTEN: &str = r#"k.document("lash.generated.python", "1", {"kernel":1,"numbers":"by_spelling"}, {"worker":{"params":[],"result":"any"}}, ["odd name"], [["answer","odd name"],["worker","worker"]], [])
-with k.declare("worker", []):
-    with k.block():
-        with k.return_():
-            k.int("7")
-with k.main():
-    with k.block():
-        with k.let(answer):
-            k.float("-0.0")
-        with k.finish():
-            answer
+// Independently written syntax, not obtained from the printer or its rule
+// table, using the explicit body-level variants. Nothing but code: the base
+// document holds the environment, including the rename of `odd name`.
+const HAND_WRITTEN: &str = r#"def worker():
+    with k.return_():
+        k.int("7")
+def main():
+    with k.let(kernel_name_1):
+        k.float("-0.0")
+    with k.finish():
+        kernel_name_1
 "#;
 fn hand_document() -> k::Document {
     let mut document = k::Document::new(
@@ -69,10 +68,12 @@ fn hand_document() -> k::Document {
     document.private_bindings.insert("odd name".into());
     document
 }
+/// The environment is the base document's: the same source read against a
+/// base that differs only outside the code gives that base back.
 #[test]
-fn independent_source_and_unequal_documents_pin_all_envelope_fields() {
+fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
-    let decoded = crate::compile_generated(HAND_WRITTEN, Default::default()).unwrap();
+    let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
     assert_eq!(
         decoded.canonical_bytes().unwrap(),
         expected.canonical_bytes().unwrap()
@@ -378,26 +379,21 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
         }
     }
 }
-/// G-SOURCE-FORMAT: envelopes and generic syntax are closed, with typed refusals.
+/// G-SOURCE-FORMAT: exported modules and generic syntax are closed, with
+/// typed refusals naming the construct; nothing falls through to lowering.
 #[test]
 fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
     use crate::GeneratedSourceCode as C;
+    let base = hand_document();
     for source in [
-        HAND_WRITTEN.replace("lash.generated.python", "lash.generated.typescript"),
-        HAND_WRITTEN.replace("\"1\"", "\"99\""),
-        HAND_WRITTEN.replace(
-            "[\"answer\",\"odd name\"]",
-            "[\"answer\",\"odd name\"],[\"answer\",\"other\"]",
-        ),
-        HAND_WRITTEN.replace("[\"worker\",\"worker\"]", "[\"worker\",\"odd name\"]"),
-        HAND_WRITTEN.replace("\"kernel\":1", "\"kernel\":1,\"kernel\":1"),
-        HAND_WRITTEN.replace("[\"answer\",", "[\"print\","),
-        HAND_WRITTEN.replace("[\"odd name\"]", "[\"odd name\",\"odd name\"]"),
-        HAND_WRITTEN.to_owned() + "with k.main():\n    with k.block():\n        pass\n",
-        "with k.main():\n    with k.block():\n        pass\n".into(),
+        HAND_WRITTEN.to_owned() + "def main():\n    pass\n",
+        HAND_WRITTEN.replace("def main():", "def main(x):"),
+        HAND_WRITTEN.replace("def main():", "x = 1\ndef main():"),
+        HAND_WRITTEN.replace("def worker():", "with k.declare(\"worker\", []):"),
+        "def worker():\n    pass\n".into(),
     ] {
         assert_eq!(
-            crate::compile_generated(&source, Default::default())
+            crate::read(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             C::GeneratedSourceFormat.as_str(),
@@ -414,37 +410,18 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         HAND_WRITTEN.replace("k.int(\"7\")", "k.invoke(helper_missing, [])"),
         HAND_WRITTEN.replace("k.int(\"7\")", "07"),
         HAND_WRITTEN.replace(
-            "            answer",
-            "            answer\n            answer",
+            "        kernel_name_1\n",
+            "        kernel_name_1\n        kernel_name_1\n",
         ),
-        HAND_WRITTEN.replace("    with k.block():", "   with k.block():"),
+        HAND_WRITTEN.replace("    with k.return_():", "   with k.return_():"),
+        HAND_WRITTEN.replace("kernel_name_1", "kernel_name_9"),
     ] {
         assert_eq!(
-            crate::compile_generated(&source, Default::default())
+            crate::read(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             C::InvalidGeneratedSource.as_str(),
             "{source}"
-        );
-    }
-    // Full helper identities are mandatory; malformed and repeated IDs refuse.
-    let mut document = hand_document();
-    for b in [12, 13] {
-        document.manifest.functions.insert(
-            k::FunctionId::from_bytes([b; 32]),
-            k::FunctionName::new("same.label").unwrap(),
-        );
-    }
-    let printed = roundtrip(&document, false);
-    for source in [
-        printed.source.replace(&"0c".repeat(32), "bad"),
-        printed.source.replace(&"0d".repeat(32), &"0c".repeat(32)),
-    ] {
-        assert_eq!(
-            crate::compile_generated(&source, Default::default())
-                .unwrap_err()
-                .code,
-            C::GeneratedSourceFormat.as_str()
         );
     }
 }
@@ -470,7 +447,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::compile_generated(&at_limit.source, limits)
+        crate::read(&at_limit.source, &document, limits)
             .unwrap()
             .canonical_bytes()
             .unwrap(),
@@ -491,7 +468,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Bytes { .. })
     ));
     assert_eq!(
-        crate::compile_generated(&printed.source, short)
+        crate::read(&printed.source, &document, short)
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceBytes.as_str()
@@ -509,7 +486,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::compile_generated(&accepted.source, exact_depth)
+        crate::read(&accepted.source, &document, exact_depth)
             .unwrap()
             .canonical_bytes()
             .unwrap(),
@@ -530,28 +507,22 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Depth { .. })
     ));
     assert_eq!(
-        crate::compile_generated(&printed.source, shallow)
+        crate::read(&printed.source, &document, shallow)
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
     );
     let deep = " ".repeat(300) + "with k.tuple():";
     assert_eq!(
-        crate::compile_generated(&deep, Default::default())
+        crate::read(&deep, &document, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
     );
     let nested_type = "{\"list\":".repeat(360) + "\"any\"" + &"}".repeat(360);
-    let metadata = format!(
-        "{{\"kernel\":1,\"numbers\":\"float\",\"effects\":{{\"deep\":{{\"result\":{nested_type}}}}}}}"
-    );
-    let source = format!(
-        "k.document(\"lash.generated.python\",\"1\",{},{{}},[],[],[])\nwith k.main():\n    with k.block():\n        pass\n",
-        metadata
-    );
+    let source = format!("async def main():\n    await tools.deep(result={nested_type})\n");
     assert_eq!(
-        crate::compile_generated(&source, Default::default())
+        crate::read(&source, &document, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
@@ -1335,21 +1306,25 @@ fn inventory_signature(signature: &k::Signature, variants: &mut BTreeSet<&'stati
 /// G-SOURCE-RESOURCES: alias compression must not permit unbounded decoded-name allocation.
 #[test]
 fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
-    let aliases = serde_json::to_string(&vec![("n", "a".repeat(512))]).unwrap();
-    let quoted = aliases;
-    let mut source = format!(
-        "k.document(\"lash.generated.python\",\"1\",{{\"kernel\":1,\"numbers\":\"float\"}},{{}},[],{quoted},[])\nwith k.main():\n    with k.block():\n"
+    // The base document's long illegal name is renamed `kernel_name_1`.
+    let long: k::Name = "a ".repeat(256).as_str().into();
+    let base = k::Document::new(
+        k::NumberPolicy::Float,
+        vec![k::Stmt::Finish {
+            value: k::Expr::Variable(long),
+        }],
     );
+    let mut source = "def main():\n".to_owned();
     for _ in 0..100 {
-        source.push_str("        with k.finish():\n            n\n");
+        source.push_str("    with k.finish():\n        kernel_name_1\n");
     }
-    source.push_str("        with k.finish():\n            k.unknown()\n");
+    source.push_str("    with k.finish():\n        k.unknown()\n");
     let limits = GeneratedSourceLimits {
         max_bytes: source.len(),
         ..Default::default()
     };
     assert_eq!(
-        crate::compile_generated(&source, limits).unwrap_err().code,
+        crate::read(&source, &base, limits).unwrap_err().code,
         crate::GeneratedSourceCode::GeneratedSourceBytes.as_str()
     );
 }
@@ -1357,9 +1332,10 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
 mod acceptance;
 mod readable;
 
-/// G-SOURCE-ENVELOPE: native literals carry nested optional types exactly.
+/// A result other than `any` keeps its nested optional type exactly; the
+/// manifest stays unprinted.
 #[test]
-fn structured_envelope_and_types_keep_nested_optional_metadata() {
+fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unprinted() {
     let mut document = hand_document();
     let ty = k::Type::Record(k::RecordType {
         fields: vec![k::RecordTypeField {
@@ -1389,7 +1365,10 @@ fn structured_envelope_and_types_keep_nested_optional_metadata() {
         },
     });
     let source = roundtrip(&document, true).source;
-    assert!(source.contains("{\"kernel\":1"), "{source}");
+    assert!(
+        !source.contains("k.") && !source.contains("\"numbers\""),
+        "{source}"
+    );
     assert!(!source.contains("\\\""), "{source}");
     assert!(source.contains("result={\"record\":"), "{source}");
     assert!(
