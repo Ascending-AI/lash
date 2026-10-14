@@ -848,7 +848,8 @@ mod tests {
         }
         overlay.language_observation(&running).unwrap();
         let mut last_durable = None;
-        for occurrence in 0..9 {
+        let retained = lash::tracing::TraceLimits::standard().process_effect_occurrences;
+        for occurrence in 0..=retained {
             let call = lash::ToolCallId::fixture(&format!("call-{occurrence}"));
             overlay
                 .accumulator
@@ -894,11 +895,13 @@ mod tests {
                 call_id: Some(call),
                 replay_key: format!("call-{occurrence}"),
             };
-            assert!(
-                overlay.effect(&durable).iter().all(|event| event.call_only),
-                "a durable completion must not repaint a concurrently running task"
-            );
-            last_durable = Some(durable);
+            if occurrence < retained {
+                assert!(
+                    overlay.effect(&durable).iter().all(|event| event.call_only),
+                    "a durable completion must not repaint a concurrently running task"
+                );
+                last_durable = Some(durable);
+            }
         }
         let replayed = overlay
             .language_observation(&observation(0, TraceNodeFact::Completed { call_id: None }))
@@ -912,11 +915,11 @@ mod tests {
         let failed = lash::ToolCallId::fixture("failed-after-cap");
         overlay
             .accumulator
-            .step_body_started(&body_start(9, failed.clone()))
+            .step_body_started(&body_start(retained + 1, failed.clone()))
             .unwrap();
         let events = overlay
             .language_observation(&observation(
-                9,
+                retained + 1,
                 TraceNodeFact::Failed {
                     call_id: None,
                     failure: lash::tracing::TraceLanguageExecutionFailure::Runtime {

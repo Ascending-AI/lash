@@ -50,6 +50,12 @@ validates a cloned draft without publishing. Generated statements remain
 available to direct edits. Import validates before replacing the document and
 resets site selection; direct edits carry correspondence within a draft.
 
+The TypeScript pane uses Lash's exact readable printer: named async functions,
+awaited tool calls and ordinary expressions. The `k.document(...)` header carries
+structured metadata needed for exact reconstruction; it is not an escaped JSON
+document. Importing an unchanged export preserves the kernel document identity.
+The host does not rewrite the printed source or recover dialect patterns.
+
 Inputs support constants, connected values and canonical expressions. Constants
 can stay inline or become named value nodes. Promoting a constant inserts a
 binding and replaces its use in one transaction. Named values can be renamed;
@@ -184,4 +190,12 @@ remain unavailable. Call-only updates do not overwrite a
 node's aggregate status, and the visual editor merges repeated live/durable
 updates by call ID. This improves continuous live inspection; it does not make
 the retained history complete after a gap or restart. The runtime's existing
-history cap and retention rules still apply.
+history cap and retention rules still apply. With the current runtime, this
+prototype inherits `TraceLimits::process_effect_occurrences`' default of 64
+retained effects per node; hosts can configure up to 4096. Live call inspection
+continues independently of that retained summary.
+
+Upstream MCP progress and notifications are live-only, correlated by call and
+attempt on the session observation feed. These examples use host-owned mocked
+tools, not MCP servers, so they do not emit MCP notifications. Display progress
+here is the mock host's display state; it is not generic tool partial output.
