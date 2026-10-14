@@ -26,19 +26,20 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Identity, NativeCall, NativeError, ObjectId, TaskId, Value, WorkCounter};
+use lash_kernel_doc::{EntityId, Identity, NativeCall, NativeError, TaskId, Value, WorkCounter};
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::stream::{Ran, Running};
-use super::{
-    Control, Cursor, Eval, Halt, Interrupt, KernelMachine, TaskState, bound, fault, raise,
-};
+use super::{Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
 use crate::compile::{Charge, Executable, Form, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
-use crate::heap::{Key, NativeView, Obj, object_bytes, value_bytes, within_depth};
+use crate::heap::within_depth;
 use crate::interface::{Bound, Host};
 use crate::observe::Event;
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::heap::{FieldName, IntRef, LogicalBytes};
+use lash_kernel_state::paged::{ObjectInit, SemanticHeap, TaskStateRecord, TransientRoots};
 
 /// A register: a position in the machine's register stack.
 pub(super) type Reg = usize;
@@ -81,7 +82,8 @@ fn release(value: Value) {
 /// not negative (`K-FORM-006`). `None` is a number that is no position.
 fn position(index: &Value) -> Eval<Option<usize>> {
     match index {
-        Value::Int(integer) => Ok(integer.to_usize()),
+        Value::Int(IntRef::Inline(integer)) => Ok(integer.to_usize()),
+        Value::Int(IntRef::Paged { .. }) => Ok(None),
         Value::Float(float) => {
             let float = float.get();
             Ok(
@@ -90,17 +92,6 @@ fn position(index: &Value) -> Eval<Option<usize>> {
             )
         }
         _ => raise("type_error", "a list is indexed by a number"),
-    }
-}
-
-/// The key a value is, or a raise of `invalid_key` (`K-KEY-001`).
-pub(super) fn key(value: &Value) -> Eval<Key> {
-    match Key::of(value) {
-        Some(key) => Ok(key),
-        None => raise(
-            "invalid_key",
-            "a key is null, a bool, a number, a text, bytes, a timestamp, a ref, or a tuple of these",
-        ),
     }
 }
 
@@ -142,22 +133,24 @@ impl KernelMachine {
     /// when the heap is due and ending the run when what is live does not
     /// leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.memory.saturating_add(bytes) > self.heap.collect_at {
-            self.collect();
-            if self.heap.memory.saturating_add(bytes) > self.bounds.memory {
-                return Err(bound(Bound::Memory, self.bounds.memory));
-            }
-        }
-        self.heap.memory = self.heap.memory.saturating_add(bytes);
-        Ok(())
+        let transient = TransientRoots {
+            registers: &self.regs,
+            pinned: &self.pins.values,
+            native_args: &[],
+            fresh: &self.fresh,
+            reserved: LogicalBytes(0),
+        };
+        self.heap
+            .reserve_logical(LogicalBytes(bytes), &transient)
+            .map_err(|error| self.heap_halt(error))
     }
 
-    /// Allocates an object and keeps it live until the statement ends.
-    pub(super) fn alloc(&mut self, object: Obj) -> Result<ObjectId, Halt> {
-        let bytes = object_bytes(&object);
-        let id = self.heap.insert(object);
+    pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
+        let id = self
+            .heap
+            .allocate_object(object)
+            .map_err(|error| self.heap_halt(error))?;
         self.fresh.push(id);
-        self.reserve(bytes)?;
         Ok(id)
     }
 
@@ -181,15 +174,14 @@ impl KernelMachine {
     /// `out` (`K-FORM-009`).
     pub(super) fn read_field(&mut self, target: Reg, field: &str, out: Reg) -> Eval<()> {
         let value = match &self.regs[target] {
-            Value::Record(record) => self
+            Value::Record(id) => self
                 .heap
-                .record(*record)
-                .and_then(|fields| fields.iter().find(|(name, _)| name == field))
-                .map_or(Value::Absent, |(_, value)| value.clone()),
+                .record_get(*id, FieldName::Static(field))?
+                .unwrap_or(Value::Absent),
             Value::Error(error) => match field {
-                "kind" => Value::text(error.kind.as_str()),
-                "message" => Value::text(error.message.as_str()),
-                "data" => error.data.clone(),
+                "kind" => Value::Text(error.kind.clone()),
+                "message" => Value::Text(error.message.clone()),
+                "data" => self.heap.error_data(error)?,
                 _ => Value::Absent,
             },
             _ => return raise("type_error", "only a record or an error has fields"),
@@ -198,42 +190,57 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Reads what `target` holds at `index` into `out` (`K-FORM-010`).
     pub(super) fn read_index(&mut self, target: Reg, index: Reg, out: Reg) -> Eval<()> {
         let index = &self.regs[index];
-        let element = |items: &[Value]| match position(index)? {
-            Some(position) if position < items.len() => Ok(items[position].clone()),
-            _ => raise(
-                "index_out_of_range",
-                format!("no element there; the length is {}", items.len()),
-            ),
-        };
         let value = match &self.regs[target] {
-            Value::Tuple(items) => element(items)?,
-            Value::List(list) => element(self.heap.list(*list).map_or(&[], Vec::as_slice))?,
-            Value::Record(record) => {
+            Value::Tuple(tuple) => {
+                let element = match position(index)? {
+                    Some(position) => self.heap.tuple_get(tuple, position as u64)?,
+                    None => None,
+                };
+                match element {
+                    Some(value) => value,
+                    None => {
+                        return raise(
+                            "index_out_of_range",
+                            format!("no element there; the length is {}", tuple.summary.len),
+                        );
+                    }
+                }
+            }
+            Value::List(id) => {
+                let element = match position(index)? {
+                    Some(position) => self.heap.list_get(*id, position as u64)?,
+                    None => None,
+                };
+                match element {
+                    Some(value) => value,
+                    None => {
+                        return raise(
+                            "index_out_of_range",
+                            format!("no element there; the length is {}", self.heap.len(*id)?),
+                        );
+                    }
+                }
+            }
+            Value::Record(id) => {
                 let Value::Text(field) = index else {
                     return raise("type_error", "a record index must be text");
                 };
                 self.heap
-                    .record(*record)
-                    .and_then(|fields| fields.iter().find(|(name, _)| name == field.as_ref()))
-                    .map_or(Value::Absent, |(_, value)| value.clone())
+                    .record_get(*id, FieldName::Text(field))?
+                    .unwrap_or(Value::Absent)
             }
-            Value::Map(map) => {
-                let key = key(index)?;
-                match self.heap.table(*map).and_then(|table| table.get(&key)) {
-                    Some(value) => value.clone(),
+            Value::Map(id) => {
+                self.key(index)?;
+                match self.heap.map_get(*id, index)? {
+                    Some(value) => value,
                     None => return raise("key_missing", "the map has no entry under that key"),
                 }
             }
-            Value::Set(set) => {
-                let key = key(index)?;
-                Value::Bool(
-                    self.heap
-                        .table(*set)
-                        .is_some_and(|table| table.contains(&key)),
-                )
+            Value::Set(id) => {
+                self.key(index)?;
+                Value::Bool(self.heap.set_contains(*id, index)?)
             }
             _ => {
                 return raise(
@@ -246,23 +253,33 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Writes the value in `value` to field `field` of the record in
-    /// `target` (`K-FORM-005`).
+    pub(super) fn key(&self, value: &Value) -> Eval<()> {
+        if self.heap.normal_key(value)?.is_some() {
+            Ok(())
+        } else {
+            raise(
+                "invalid_key",
+                "a key is null, a bool, a number, a text, bytes, a timestamp, a ref, or a tuple of these",
+            )
+        }
+    }
+
     pub(super) fn write_field(&mut self, target: Reg, field: &str, value: Reg) -> Eval<()> {
         let Value::Record(record) = self.regs[target] else {
             return raise("type_error", "only a record has fields to assign");
         };
         let value = self.take(value);
-        self.write_record_field(record, field, value)
+        self.heap
+            .record_write(record, FieldName::Static(field), value)?;
+        Ok(())
     }
 
-    /// Writes the value in `value` to what `target` holds at `index`
-    /// (`K-FORM-006`).
     pub(super) fn write_index(&mut self, target: Reg, index: Reg, value: Reg) -> Eval<()> {
         match self.regs[target] {
             Value::List(list) => {
-                let length = self.heap.list(list).map_or(0, Vec::len);
-                let position = position(&self.regs[index])?.filter(|position| *position <= length);
+                let length = self.heap.len(list)?;
+                let position =
+                    position(&self.regs[index])?.filter(|position| *position as u64 <= length);
                 let Some(position) = position else {
                     return raise(
                         "index_out_of_range",
@@ -270,46 +287,32 @@ impl KernelMachine {
                     );
                 };
                 let value = self.take(value);
-                self.reserve(value_bytes(&value))?;
-                if let Some(Obj::List(items)) = self.heap.get_mut(list) {
-                    match items.get_mut(position) {
-                        Some(held) => *held = value,
-                        None => items.push(value),
-                    }
-                }
+                self.heap.list_write(list, position as u64, value)?;
             }
             Value::Record(record) => {
                 let Value::Text(field) = self.take(index) else {
                     return raise("type_error", "a record index must be text");
                 };
                 let value = self.take(value);
-                self.write_record_field(record, &field, value)?;
+                self.heap
+                    .record_write(record, FieldName::Text(&field), value)?;
             }
             Value::Map(map) => {
-                let key = key(&self.regs[index])?;
-                let (index, value) = (self.take(index), self.take(value));
-                self.reserve(value_bytes(&value).saturating_add(value_bytes(&index)))?;
-                if let Some(Obj::Map(table)) = self.heap.get_mut(map) {
-                    table.insert(key, index, value);
-                }
+                self.key(&self.regs[index])?;
+                let key = self.take(index);
+                let value = self.take(value);
+                self.heap.map_write(map, key, value)?;
             }
             Value::Set(set) => {
-                let key = key(&self.regs[index])?;
-                let Value::Bool(member) = self.regs[value] else {
+                self.key(&self.regs[index])?;
+                let Value::Bool(present) = self.regs[value] else {
                     return raise(
                         "type_error",
                         "a set's member is assigned `true` to add it or `false` to remove it",
                     );
                 };
-                let index = self.take(index);
-                self.reserve(value_bytes(&index))?;
-                if let Some(Obj::Set(table)) = self.heap.get_mut(set) {
-                    if member {
-                        table.insert(key, index, Value::Null);
-                    } else {
-                        table.remove(&key);
-                    }
-                }
+                let member = self.take(index);
+                self.heap.set_write(set, member, present)?;
             }
             _ => {
                 return raise(
@@ -321,60 +324,37 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Field and text-index assignment share a record's insertion order.
-    fn write_record_field(&mut self, record: ObjectId, field: &str, value: Value) -> Eval<()> {
-        self.reserve(value_bytes(&value).saturating_add(field.len() as u64))?;
-        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-            match fields.iter_mut().find(|(name, _)| name == field) {
-                Some(held) => held.1 = value,
-                None => fields.push((field.to_string(), value)),
-            }
-        }
-        Ok(())
-    }
-
-    /// Removes field `field` of the record in `target` (`K-FORM-007`).
     pub(super) fn remove_field(&mut self, target: Reg, field: &str) -> Eval<()> {
         let Value::Record(record) = self.regs[target] else {
             return raise("type_error", "only a record has fields to remove");
         };
-        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-            fields.retain(|(name, _)| name != field);
-        }
+        self.heap.record_remove(record, FieldName::Static(field))?;
         Ok(())
     }
 
-    /// Removes what `target` holds at `index` (`K-FORM-007`).
     pub(super) fn remove_index(&mut self, target: Reg, index: Reg) -> Eval<()> {
-        let index = &self.regs[index];
         match self.regs[target] {
             Value::List(list) => {
-                let length = self.heap.list(list).map_or(0, Vec::len);
-                let position = position(index)?.filter(|position| *position < length);
+                let length = self.heap.len(list)?;
+                let position =
+                    position(&self.regs[index])?.filter(|position| (*position as u64) < length);
                 let Some(position) = position else {
                     return raise(
                         "index_out_of_range",
                         format!("a list of {length} has no element there to remove"),
                     );
                 };
-                if let Some(Obj::List(items)) = self.heap.get_mut(list) {
-                    items.remove(position);
-                }
+                self.heap.list_remove(list, position as u64)?;
             }
             Value::Record(record) => {
-                let Value::Text(field) = index else {
+                let Value::Text(field) = &self.regs[index] else {
                     return raise("type_error", "a record index must be text");
                 };
-                let field = Arc::clone(field);
-                if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-                    fields.retain(|(name, _)| name != field.as_ref());
-                }
+                self.heap.record_remove(record, FieldName::Text(field))?;
             }
             Value::Map(table) | Value::Set(table) => {
-                let key = key(index)?;
-                if let Some(Obj::Map(table) | Obj::Set(table)) = self.heap.get_mut(table) {
-                    table.remove(&key);
-                }
+                self.key(&self.regs[index])?;
+                self.heap.table_remove(table, &self.regs[index])?;
             }
             _ => {
                 return raise(
@@ -422,8 +402,10 @@ impl KernelMachine {
         match entry {
             Entry::Frame(awaiting) => self.push_frame(task, exe, call.awaited_by(awaiting))?,
             Entry::Inline => {
-                if self.inline_depth >= self.heap.inline_depth {
-                    return Err(bound(Bound::CallDepth, u64::from(self.heap.inline_depth)).into());
+                if self.inline_depth >= self.limits.inline_depth() {
+                    return Err(
+                        bound(Bound::CallDepth, u64::from(self.limits.inline_depth())).into(),
+                    );
                 }
                 self.push_frame(task, exe, call.inline())
                     .map_err(|halt| halt.in_function(&function.definition.name))?;
@@ -471,7 +453,7 @@ impl KernelMachine {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
                     .heap
-                    .value_of(*object)
+                    .value_of(*object)?
                     .ok_or_else(|| super::error("type_error", "the ref names no object")),
                 _ => Err(super::error("type_error", "`deref` takes a ref")),
             },
@@ -485,13 +467,13 @@ impl KernelMachine {
                     })
                     .map(|(index, _)| Value::Task(TaskId(index as u64)))
                     .collect();
-                Ok(Value::List(self.alloc(Obj::List(unfinished))?))
+                Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
             LibRun::Native(native) => {
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
-                        .filter(|value| within_depth(value, self.heap.value_depth))
+                        .filter(|value| within_depth(value, self.limits.value_depth()))
                     {
                         // What the general call does with its result: keep
                         // it, then charge the formula.
@@ -502,7 +484,7 @@ impl KernelMachine {
                                 Charge::Units(units) => units,
                                 Charge::Plan(plan) => self.in_formula(lib, true, |machine| {
                                     machine.formula(plan, &machine.regs[args..end], Some(&value))
-                                }),
+                                })?,
                             }
                         } else {
                             0
@@ -513,71 +495,58 @@ impl KernelMachine {
                         return Ok(true);
                     }
                 }
-                let limit = function.limit.as_ref().map(|limit| {
-                    self.in_formula(lib, true, |machine| {
-                        machine.formula(limit, &machine.regs[args..end], None)
+                let limit = function
+                    .limit
+                    .as_ref()
+                    .map(|limit| {
+                        self.in_formula(lib, true, |machine| {
+                            machine.formula(limit, &machine.regs[args..end], None)
+                        })
                     })
+                    .transpose()?;
+                let mut counter = WorkCounter::new(limit);
+                let answer = native.call(NativeCall {
+                    args: &self.regs[args..end],
+                    heap: &mut self.heap,
+                    counter: &mut counter,
                 });
-                let mut attempt = 0;
-                loop {
-                    let mut counter = WorkCounter::new(limit);
-                    let mut view = NativeView {
-                        heap: &mut self.heap,
-                        bound: self.bounds.memory,
-                        reserved: 0,
-                    };
-                    let call = NativeCall {
-                        args: &self.regs[args..end],
-                        heap: &mut view,
-                        counter: &mut counter,
-                    };
-                    let answer = native.call(call);
-                    self.observe(Event::GuardWork(counter.spent()));
-                    match answer {
-                        Ok(value) => {
-                            if !within_depth(&value, self.heap.value_depth) {
-                                break Err(super::error(
-                                    "too_deep",
-                                    format!(
-                                        "a value exceeds the configured {}-level value depth",
-                                        self.heap.value_depth
-                                    ),
-                                ));
-                            }
-                            // What the call reserved was room the bound
-                            // had; this accounts the result itself.
+                self.observe(Event::GuardWork(counter.spent()));
+                match answer {
+                    Ok(value) => {
+                        if !within_depth(&value, self.limits.value_depth()) {
+                            Err(super::error(
+                                "too_deep",
+                                format!(
+                                    "a value exceeds the configured {}-level value depth",
+                                    self.limits.value_depth()
+                                ),
+                            ))
+                        } else {
                             self.pin_value(&value)?;
-                            break Ok(value);
-                        }
-                        Err(NativeError::Raised(raised)) => {
-                            break Err(Value::Error(Arc::new(raised)));
-                        }
-                        Err(NativeError::Guard(guard)) => {
-                            let function = Bound::Guard {
-                                function: function.id,
-                            };
-                            return Err(bound(function, guard.limit).into());
-                        }
-                        // A native function is a function of its arguments
-                        // (`K-LIB-006`): once the heap is collected the call
-                        // is made again, and fails only if what is live
-                        // leaves it no room.
-                        Err(NativeError::Memory) if attempt == 0 => {
-                            attempt += 1;
-                            self.observe(Event::NativeRetry);
-                            self.collect();
-                        }
-                        Err(NativeError::Memory) => {
-                            return Err(bound(Bound::Memory, self.bounds.memory).into());
+                            Ok(value)
                         }
                     }
+                    Err(NativeError::Raised(error)) => Err(Value::Error(error)),
+                    Err(NativeError::Guard(guard)) => {
+                        return Err(bound(
+                            Bound::Guard {
+                                function: function.id,
+                            },
+                            guard.limit,
+                        )
+                        .into());
+                    }
+                    Err(NativeError::Memory) => {
+                        return Err(bound(Bound::Memory, self.bounds.memory).into());
+                    }
+                    Err(NativeError::Heap(error)) => return Err(Halt::Heap(error).into()),
                 }
             }
         };
         let evaluates = self.charging && function.native;
         let units = self.in_formula(lib, evaluates, |machine| {
             machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
-        });
+        })?;
         self.charge_call(exe, lib, units)?;
         self.observe(Event::NativeExit);
         match result {
@@ -649,7 +618,7 @@ impl KernelMachine {
         let cursor = match self.take(iterable) {
             Value::List(id) => Cursor::List(id, 0),
             Value::Tuple(items) => Cursor::Tuple(items, 0),
-            Value::Map(id) | Value::Set(id) => Cursor::Table(id, None),
+            value @ (Value::Map(_) | Value::Set(_)) => Cursor::Table(value, None),
             _ => {
                 return raise(
                     "type_error",
@@ -695,25 +664,24 @@ impl KernelMachine {
                 };
                 let element = match cursor {
                     Cursor::List(list, position) => {
-                        let element = self
-                            .heap
-                            .list(*list)
-                            .and_then(|items| items.get(*position))
-                            .cloned();
+                        let element = self.heap.list_get(*list, *position as u64)?;
                         *position += usize::from(element.is_some());
                         element
                     }
                     Cursor::Tuple(items, position) => {
-                        let element = items.get(*position).cloned();
+                        let element = self.heap.tuple_get(items, *position as u64)?;
                         *position += usize::from(element.is_some());
                         element
                     }
                     Cursor::Table(table, last) => {
-                        let next = self
-                            .heap
-                            .table(*table)
-                            .and_then(|table| table.after(*last))
-                            .map(|(sequence, key)| (sequence, key.clone()));
+                        let next = self.heap.table_after(
+                            table.object().ok_or_else(|| {
+                                lash_kernel_doc::heap::HeapFault::Malformed(
+                                    "table cursor has no identity".into(),
+                                )
+                            })?,
+                            *last,
+                        )?;
                         next.map(|(sequence, key)| {
                             *last = Some(sequence);
                             key

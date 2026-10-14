@@ -3,14 +3,15 @@
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
+use lash_kernel_doc::heap::{HeapFault, IntRef, Payload, TextRef};
 use lash_kernel_doc::{
-    Element, Float, Integer, NativeCall, NativeError, NativeHeap, NumberPolicy, NumberToken,
-    Object, ObjectId, Type, Value,
+    Element, EntityId, Float, Integer, NativeCall, NativeError, NativeHeap, NumberPolicy,
+    NumberToken, Object, Type, Value,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
-use super::{Function, arg, definition, raise, room, text_arg};
+use super::{Function, arg, definition, materialized_text, raise, room};
 
 /// Decodes one JSON number without passing integers through a float.
 ///
@@ -49,7 +50,8 @@ pub fn decode_number(
     };
     match selected {
         Type::Int => {
-            exact_integer(token.as_str(), heap).map(|integer| Value::Int(Integer::new(integer)))
+            let integer = exact_integer(token.as_str(), heap)?;
+            Ok(Value::Int(heap.int(Integer::new(integer))?))
         }
         Type::Float => token
             .as_str()
@@ -377,7 +379,7 @@ fn decode(
     match json {
         Json::Null => Ok(Value::Null),
         Json::Bool(value) => Ok(Value::Bool(*value)),
-        Json::Text(text) => Ok(Value::text(text.as_str())),
+        Json::Text(text) => Ok(Value::Text(heap.text(text)?)),
         Json::Number(token) => decode_number(token, ty, policy, heap),
         Json::Array(items) => {
             let values: Result<Vec<_>, _> = items
@@ -394,7 +396,7 @@ fn decode(
                 .collect();
             let values = values?;
             match ty {
-                Type::Tuple(_) => Ok(Value::Tuple(values.into())),
+                Type::Tuple(_) => Ok(Value::Tuple(heap.tuple(values)?)),
                 _ => Ok(Value::List(heap.allocate(Object::List(values))?)),
             }
         }
@@ -413,7 +415,7 @@ fn decode(
                         Type::Map(map) => &map.value,
                         _ => &Type::Any,
                     };
-                    Ok((name.clone(), decode(item, ty, policy, heap)?))
+                    Ok((heap.text(name)?, decode(item, ty, policy, heap)?))
                 })
                 .collect();
             let values = values?;
@@ -422,7 +424,7 @@ fn decode(
                     heap.allocate(Object::Map(
                         values
                             .into_iter()
-                            .map(|(key, value)| (Value::text(key), value))
+                            .map(|(key, value)| (Value::Text(key), value))
                             .collect(),
                     ))?,
                 ))
@@ -528,20 +530,24 @@ impl Out<'_> {
                     return layout.write(negative, digits, i64::from(exponent), self);
                 }
                 Value::Int(number) => {
-                    if let Some(value) = number.to_i64() {
+                    if let IntRef::Inline(integer) = number
+                        && let Some(value) = integer.to_i64()
+                    {
                         return layout.small_integer(value.unsigned_abs(), value < 0, self);
                     }
                     // Reserve decimal scratch before converting arbitrary-precision
                     // integers; three digits per byte bounds their decimal extent.
                     self.heap.reserve(
                         0,
-                        number
-                            .bits()
-                            .div_ceil(8)
-                            .saturating_mul(3)
-                            .saturating_add(1),
+                        (match number {
+                            IntRef::Inline(value) => value.bits(),
+                            IntRef::Paged { summary, .. } => summary.bits,
+                        })
+                        .div_ceil(8)
+                        .saturating_mul(3)
+                        .saturating_add(1),
                     )?;
-                    let text = number.to_string();
+                    let text = integer_text(number, self.heap)?;
                     let digits = text.strip_prefix('-').unwrap_or(&text);
                     let trimmed = digits.trim_end_matches('0');
                     let (digits, exponent) = if trimmed.is_empty() {
@@ -559,7 +565,10 @@ impl Out<'_> {
             }
         }
         match value {
-            Value::Int(number) => self.push(&number.to_string()),
+            Value::Int(number) => {
+                let text = integer_text(number, self.heap)?;
+                self.push(&text)
+            }
             Value::Float(number) => self.push(&number.to_string()),
             _ => unreachable!("the JSON writer selects only numbers"),
         }
@@ -567,6 +576,30 @@ impl Out<'_> {
 
     fn raw_numbers(&self, kind: &str, inherited: bool) -> bool {
         inherited && self.verbatim_kinds & kind_bit(kind) == 0
+    }
+}
+
+fn text_copy(
+    text: &TextRef,
+    heap: &mut dyn NativeHeap,
+) -> Result<std::sync::Arc<str>, NativeError> {
+    match &text.body {
+        Payload::Resident(value) => Ok(value.clone()),
+        Payload::Paged(_) => heap.materialize_text(text),
+    }
+}
+
+fn inline_i64(int: &IntRef) -> Option<i64> {
+    match int {
+        IntRef::Inline(value) => value.to_i64(),
+        IntRef::Paged { .. } => None,
+    }
+}
+
+fn integer_text(int: &IntRef, heap: &mut dyn NativeHeap) -> Result<String, NativeError> {
+    match int {
+        IntRef::Inline(value) => Ok(value.to_string()),
+        IntRef::Paged { .. } => Ok(heap.materialize_int(int)?.to_string()),
     }
 }
 
@@ -582,7 +615,7 @@ fn kind_bit(kind: &str) -> u8 {
 
 fn write(
     value: &Value,
-    active: &mut BTreeSet<ObjectId>,
+    active: &mut BTreeSet<EntityId>,
     depth: usize,
     raw_numbers: bool,
     out: &mut Out<'_>,
@@ -603,10 +636,23 @@ fn write(
         Value::Float(float) if float.get().is_finite() => {
             out.number(value, raw_numbers)?;
         }
-        Value::Text(text) => out.quote(text)?,
+        Value::Text(text) => {
+            let text = text_copy(text, out.heap)?;
+            out.quote(&text)?;
+        }
         Value::Tuple(items) => {
             let raw_numbers = out.raw_numbers("tuple", raw_numbers);
-            write_array(items, active, depth, raw_numbers, out)?;
+            out.push("[")?;
+            for index in 0..items.summary.len {
+                if index != 0 {
+                    out.push(",")?;
+                }
+                let value = out.heap.tuple_get(items, index)?.ok_or_else(|| {
+                    HeapFault::Malformed("tuple descriptor extent has no member".into())
+                })?;
+                write(&value, active, depth + 1, raw_numbers, out)?;
+            }
+            out.push("]")?;
         }
         Value::List(id) | Value::Map(id) | Value::Record(id) => {
             if !active.insert(*id) {
@@ -627,7 +673,7 @@ fn write(
                             key: Value::Text(key),
                             value,
                         },
-                    ) => fields.push((key.to_string(), value.clone())),
+                    ) => fields.push((key.clone(), value.clone())),
                     (Value::Map(_), Element::Entry { .. }) => {
                         error = Some(raise("json_key", "JSON map keys must be text"));
                         return ControlFlow::Break(());
@@ -638,7 +684,7 @@ fn write(
                     }
                 }
                 ControlFlow::Continue(())
-            });
+            })?;
             if let Some(error) = error {
                 return Err(error);
             }
@@ -649,18 +695,29 @@ fn write(
                 let raw_numbers = if matches!(value, Value::Map(_)) {
                     out.raw_numbers("map", raw_numbers)
                 } else {
-                    out.raw_numbers("record", raw_numbers)
-                        && !fields.iter().any(|(name, value)| {
-                            out.verbatim_field.as_deref() == Some(name.as_str())
-                                && matches!(value, Value::Text(_))
-                        })
+                    let mut verbatim = false;
+                    if let Some(field) = &out.verbatim_field {
+                        for (name, value) in &fields {
+                            if matches!(value, Value::Text(_))
+                                && out.heap.equal(
+                                    &Value::Text(name.clone()),
+                                    &Value::text(field.as_str()),
+                                )?
+                            {
+                                verbatim = true;
+                                break;
+                            }
+                        }
+                    }
+                    out.raw_numbers("record", raw_numbers) && !verbatim
                 };
                 out.push("{")?;
                 for (index, (name, value)) in fields.iter().enumerate() {
                     if index != 0 {
                         out.push(",")?;
                     }
-                    out.quote(name)?;
+                    let name = text_copy(name, out.heap)?;
+                    out.quote(&name)?;
                     out.push(":")?;
                     write(value, active, depth + 1, raw_numbers, out)?;
                 }
@@ -676,7 +733,7 @@ fn write(
 
 fn write_array(
     items: &[Value],
-    active: &mut BTreeSet<ObjectId>,
+    active: &mut BTreeSet<EntityId>,
     depth: usize,
     raw_numbers: bool,
     out: &mut Out<'_>,
@@ -743,14 +800,14 @@ pub(super) fn functions() -> Vec<Function> {
 }
 
 fn parse(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let json = read(text_arg(call.args, 0)?, call.heap)?;
-    let numbers = match text_arg(call.args, 1)? {
+    let json = read(&materialized_text(call.args, 0, call.heap)?, call.heap)?;
+    let numbers = match materialized_text(call.args, 1, call.heap)?.as_ref() {
         "int" => Type::Int,
         "float" => Type::Float,
         "number" => Type::Number,
         _ => return Err(raise("type_error", "expected int, float or number")),
     };
-    let policy = match text_arg(call.args, 2)? {
+    let policy = match materialized_text(call.args, 2, call.heap)?.as_ref() {
         "by_spelling" => NumberPolicy::BySpelling,
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
@@ -778,7 +835,7 @@ fn decode_with_numbers(
                 .iter()
                 .map(|(key, item)| {
                     Ok((
-                        key.clone(),
+                        heap.text(key)?,
                         decode_with_numbers(item, numbers, policy, heap)?,
                     ))
                 })
@@ -790,7 +847,8 @@ fn decode_with_numbers(
 }
 
 fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    stringify_json(arg(call.args, 0)?, call.heap).map(Value::text)
+    let text = stringify_json(arg(call.args, 0)?, call.heap)?;
+    Ok(Value::Text(call.heap.text(&text)?))
 }
 
 fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -799,21 +857,25 @@ fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
     };
     let mut verbatim_kinds = 0;
     let mut invalid = false;
+    let mut names = Vec::new();
     call.heap.visit(*kinds, &mut |element| {
         if let Element::Item(Value::Text(name)) = element {
-            verbatim_kinds |= kind_bit(name);
+            names.push(name.clone());
             ControlFlow::Continue(())
         } else {
             invalid = true;
             ControlFlow::Break(())
         }
-    });
+    })?;
+    for name in names {
+        verbatim_kinds |= kind_bit(&text_copy(&name, call.heap)?);
+    }
     if invalid {
         return Err(raise("type_error", "JSON verbatim kinds must be text"));
     }
     let verbatim_field = match arg(call.args, 2)? {
         Value::Absent => None,
-        Value::Text(field) => Some(field.to_string()),
+        Value::Text(field) => Some(text_copy(field, call.heap)?.to_string()),
         _ => {
             return Err(raise(
                 "type_error",
@@ -821,15 +883,16 @@ fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
             ));
         }
     };
+    let layout = DecimalLayout::read(arg(call.args, 3)?, call.heap)?;
     let mut out = Out {
         text: String::new(),
         heap: call.heap,
-        layout: Some(DecimalLayout::read(arg(call.args, 3)?)?),
+        layout: Some(layout),
         verbatim_kinds,
         verbatim_field,
     };
     write(arg(call.args, 0)?, &mut BTreeSet::new(), 0, true, &mut out)?;
-    Ok(Value::text(out.text))
+    Ok(Value::Text(out.heap.text(&out.text)?))
 }
 
 /// Shortest decimal layout is caller policy, not a language in the codec.
@@ -866,24 +929,27 @@ impl DecimalLayout {
         self.write(negative, digits, (scratch.len() - end) as i64, out)
     }
 
-    fn read(value: &Value) -> Result<Self, NativeError> {
+    fn read(value: &Value, heap: &dyn NativeHeap) -> Result<Self, NativeError> {
         let Value::Tuple(items) = value else {
             return Err(raise("type_error", "expected decimal layout tuple"));
         };
+        let values = (0..items.summary.len.min(5))
+            .map(|index| heap.tuple_get(items, index))
+            .collect::<Result<Vec<_>, _>>()?;
         let [
-            Value::Int(from),
-            Value::Int(until),
-            Value::Bool(exponent_plus),
-            Value::Bool(negative_zero),
-        ] = items.as_ref()
+            Some(Value::Int(from)),
+            Some(Value::Int(until)),
+            Some(Value::Bool(exponent_plus)),
+            Some(Value::Bool(negative_zero)),
+        ] = values.as_slice()
         else {
             return Err(raise(
                 "type_error",
                 "expected decimal layout bounds and flags",
             ));
         };
-        let from = from.to_i64().filter(|value| (-324..=309).contains(value));
-        let until = until.to_i64().filter(|value| (-324..=309).contains(value));
+        let from = inline_i64(from).filter(|value| (-324..=309).contains(value));
+        let until = inline_i64(until).filter(|value| (-324..=309).contains(value));
         let (Some(fixed_from), Some(fixed_until)) = (from, until) else {
             return Err(raise(
                 "number_range",

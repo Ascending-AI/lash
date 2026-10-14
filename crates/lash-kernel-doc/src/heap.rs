@@ -160,6 +160,11 @@ pub enum IntRef {
     },
 }
 
+macro_rules! word_integer {
+    ($($ty:ty),*) => { $(impl From<$ty> for IntRef { fn from(value: $ty) -> Self { Self::Inline(match i64::try_from(value) { Ok(word)=>Integer::from(word), Err(_)=>Integer::new(num_bigint::BigInt::from(value)) }) } })* };
+}
+word_integer!(i32, i64, u32, u64);
+
 /// What a tuple's descriptor knows without reading its elements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TupleSummary {
@@ -298,6 +303,12 @@ impl ErrorRef {
         }
     }
 }
+/// A record field name: a compiled constant or a runtime text.
+#[derive(Clone, Copy, Debug)]
+pub enum FieldName<'a> {
+    Static(&'a str),
+    Text(&'a TextRef),
+}
 /// A legal key in its normal form (`K-KEY-002`): two keys are the same key
 /// exactly when their normal forms are equal. A normal form of at most
 /// [`NormalKey::INLINE_MAX`] token bytes is held whole; a longer one is the
@@ -418,7 +429,11 @@ pub trait NativeHeap {
     fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault>;
     fn map_get(&self, map: EntityId, key: &Value) -> Result<Option<Value>, HeapFault>;
     fn set_contains(&self, set: EntityId, member: &Value) -> Result<bool, HeapFault>;
-    fn record_get(&self, record: EntityId, field: &str) -> Result<Option<Value>, HeapFault>;
+    fn record_get(
+        &self,
+        record: EntityId,
+        field: FieldName<'_>,
+    ) -> Result<Option<Value>, HeapFault>;
     /// Visits a list's elements by index, or a map's, set's or record's
     /// contents in insertion order, until the visitor breaks. Each page is
     /// read once per visit; a fault ends the visit with nothing repeated.
@@ -434,9 +449,11 @@ pub trait NativeHeap {
         tuple: &TupleRef,
         visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>,
     ) -> Result<(), HeapFault>;
-    /// Visits the chunks of `range` (bytes of a text or a bytes value) in
-    /// order, until the visitor breaks. A text range cuts on scalar
-    /// boundaries.
+    /// Visits the chunks of `range` in order, until the visitor breaks.
+    /// Text ranges cut on scalar boundaries. Bytes and paged integers yield
+    /// `Chunk::Bytes`; integer ranges address canonical little-endian magnitude
+    /// digits, with the sign retained in the integer descriptor. This read
+    /// creates no guest reservation, including outbound copies (`K-EFF-002`).
     fn payload_visit(
         &self,
         value: &Value,

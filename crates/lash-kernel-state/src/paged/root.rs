@@ -21,7 +21,7 @@
 //! envelope around them is the generic node store's.
 
 use lash_kernel_doc::heap::{EntityId, LogicalBytes, PageId, PageRef, Value};
-use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId};
+use lash_kernel_doc::{DocumentId, JoinMode, Name, Site, TaskId};
 
 use super::census::AccountingCertificate;
 use super::family::FrozenRef;
@@ -148,6 +148,8 @@ pub enum IncomingRecord {
     Value(Value),
     Raise(Value),
     Joined(TaskId),
+    /// A frozen committed outcome waiting for semantic delivery.
+    Outcome(crate::WaitId),
 }
 
 /// How a task ended. Its result counts toward memory only while a handle
@@ -200,11 +202,9 @@ pub enum EnteredRecord {
 /// the record names it by effect identity and never copies its arguments.
 #[derive(Clone, Debug)]
 pub struct WaitRecord {
-    pub wait: u64,
     pub task: TaskId,
-    pub identity: EffectIdentity,
     pub kind: WaitKindRecord,
-    pub state: WaitStateRecord,
+    pub phase: WaitPhase,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,7 +214,11 @@ pub enum WaitKindRecord {
 }
 
 #[derive(Clone, Debug)]
-pub enum WaitStateRecord {
+pub enum WaitPhase {
+    /// Frozen request intent, not yet reported or admitted by a park.
+    Issued {
+        request: FrozenRef,
+    },
     Admitted,
     Committed(CommittedOutcomeRecord),
 }

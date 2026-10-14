@@ -10,9 +10,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    ErrorValue, Formula, FunctionDefinition, FunctionId, FunctionRegistry, Implementation,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Operand, Param, QualifiedName,
-    RegistryError, Signature, Type, Value,
+    Formula, FunctionDefinition, FunctionId, FunctionRegistry, Implementation, KERNEL_VERSION,
+    Name, NativeCall, NativeError, NativeFunction, Operand, Param, QualifiedName, RegistryError,
+    Signature, Type, Value,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,9 +79,11 @@ struct RunByTheMachine;
 
 impl NativeFunction for RunByTheMachine {
     fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
-        Err(NativeError::Raised(ErrorValue::new(
-            "type_error",
-            "this function is implemented by the machine that runs the document",
+        Err(NativeError::Raised(Arc::new(
+            lash_kernel_doc::heap::ErrorRef::new(
+                "type_error",
+                "this function is implemented by the machine that runs the document",
+            ),
         )))
     }
 }

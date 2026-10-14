@@ -29,6 +29,7 @@ pub struct PagedHeap {
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     pub session: Tree<BindingRecord>,
     pub tasks: Tree<super::directory::execution::TaskRecord>,
+    pub joins: Tree<ListJoinRecord>,
     temporary: Vec<Value>,
     pub(super) reserved: u64,
 }
@@ -98,6 +99,7 @@ impl PagedHeap {
             census: None,
             session: Tree::new(false),
             tasks: Tree::new(false),
+            joins: Tree::new(false),
             temporary: Vec::new(),
             reserved: 0,
         })
@@ -472,6 +474,9 @@ impl PagedHeap {
                 };
                 e.kind = kind;
                 e.message = message;
+                if matches!(e.data, Payload::Paged(_)) {
+                    return Ok(Value::Error(Arc::new(e)));
+                }
                 let data = match &e.data {
                     Payload::Resident(v) => self.canonical((**v).clone())?,
                     Payload::Paged(_) => self.error_data(&e)?,
@@ -551,17 +556,12 @@ impl PagedHeap {
             IntRef::Paged { summary, digits } => {
                 let len = summary.bits.div_ceil(8);
                 let mut out = Vec::new();
-                super::payload::visit(
-                    &self.access,
-                    *digits,
-                    binary_summary(len),
-                    false,
-                    0..len,
-                    &mut |b| {
-                        out.extend_from_slice(b);
-                        ControlFlow::Continue(())
-                    },
-                )?;
+                self.payload_visit(&Value::Int(int.clone()), 0..len, &mut |chunk| {
+                    if let Chunk::Bytes(bytes) = chunk {
+                        out.extend_from_slice(bytes);
+                    }
+                    ControlFlow::Continue(())
+                })?;
                 let int = integer_from_digits(summary.negative, &out);
                 if int.bits() != summary.bits || int.is_negative() != summary.negative {
                     return Err(HeapFault::Corrupt {
@@ -598,6 +598,7 @@ impl SemanticHeap for PagedHeap {
             census: None,
             session: Tree::new(false),
             tasks: Tree::new(false),
+            joins: Tree::new(false),
             temporary: Vec::new(),
             reserved: 0,
         }
@@ -631,9 +632,13 @@ impl SemanticHeap for PagedHeap {
             census: None,
             session: Tree::new(false),
             tasks: Tree::new(false),
+            joins: Tree::new(false),
             temporary: Vec::new(),
             reserved: 0,
         })
+    }
+    fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError> {
+        self.canonical(value)
     }
     fn kind(&self, entity: EntityId) -> Result<Option<ObjectKind>, HeapFault> {
         Ok(self.head(entity)?.map(|h| h.kind()))

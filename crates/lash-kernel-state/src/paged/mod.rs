@@ -38,7 +38,7 @@ pub use root::{
     BindingRecord, BoundRecord, CheckpointRoot, CommittedOutcomeRecord, EndedRecord, EndedTask,
     EnteredRecord, FinallyRecord, HeapRoot, IncomingRecord, JoinerRecord, KeyedRoot,
     ListJoinRecord, LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskStateRecord,
-    WaitKindRecord, WaitRecord, WaitStateRecord,
+    WaitKindRecord, WaitPhase, WaitRecord,
 };
 pub use source::{PageAnswer, PageBody, PageKind, PageSource};
 
@@ -58,4 +58,4 @@ mod laws {
     pub mod root;
 }
 
-pub use directory::execution::{FrameRecord, TaskRecord};
+pub use directory::execution::{FrameRecord, IteratedRecord, TaskRecord};

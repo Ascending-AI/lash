@@ -394,13 +394,49 @@ pub mod execution {
     use super::*;
     use lash_kernel_doc::{Name, TaskId, TaskIdentity};
 
+    /// A cursor holding retains identity roots without another Value header.
+    #[derive(Clone)]
+    pub struct IteratedRecord(pub Value);
+    impl TokenCodec for IteratedRecord {
+        fn encode(&self, out: &mut TokenWriter) {
+            self.0.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(Self(Value::decode(input)?))
+        }
+    }
+    impl Cell for IteratedRecord {
+        fn cost(&self) -> u64 {
+            match &self.0 {
+                Value::Tuple(tuple) => tuple.summary.cost.0,
+                _ => 0,
+            }
+        }
+        fn task_edges(&self) -> u64 {
+            self.0.task_edges()
+        }
+        fn decode_cell(
+            input: &mut TokenReader<'_>,
+            family: Option<FamilyId>,
+        ) -> Result<Self, TokenError> {
+            Ok(Self(
+                lash_kernel_doc::heap_values::decode_value_with_family(input, family)?,
+            ))
+        }
+        fn children(&self, out: &mut Vec<PageRef>) {
+            value_children(&self.0, out);
+        }
+        fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            value_grants(&mut self.0, children)
+        }
+    }
     #[derive(Clone)]
     pub struct FrameRecord {
         pub statement: Site,
         pub bindings: Tree<BindingRecord>,
         pub loops: Tree<LoopRecord>,
         pub finally: Tree<FinallyRecord>,
-        pub iterated: Tree<Value>,
+        pub iterated: Tree<IteratedRecord>,
         pub departing: Tree<Value>,
         pub arguments: Option<Tree<Value>>,
     }
@@ -438,6 +474,9 @@ pub mod execution {
         fn cost(&self) -> u64 {
             0
         }
+        fn task_edges(&self) -> u64 {
+            1
+        }
     }
     impl Cell for Name {
         fn cost(&self) -> u64 {
@@ -459,7 +498,35 @@ pub mod execution {
             0
         }
     }
+    impl Cell for WaitRecord {
+        fn cost(&self) -> u64 {
+            0
+        }
+        fn children(&self, out: &mut Vec<PageRef>) {
+            match &self.phase {
+                WaitPhase::Issued { request } => out.push(request.root),
+                WaitPhase::Committed(
+                    CommittedOutcomeRecord::Completed(value)
+                    | CommittedOutcomeRecord::Failed(value),
+                ) => out.push(value.root),
+                _ => {}
+            }
+        }
+        fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            match &mut self.phase {
+                WaitPhase::Issued { request } => grant(&mut request.root, children),
+                WaitPhase::Committed(
+                    CommittedOutcomeRecord::Completed(value)
+                    | CommittedOutcomeRecord::Failed(value),
+                ) => grant(&mut value.root, children),
+                _ => Ok(()),
+            }
+        }
+    }
     impl Cell for ListJoinRecord {
+        fn task_edges(&self) -> u64 {
+            self.members.task_edges()
+        }
         fn cost(&self) -> u64 {
             0
         }
@@ -564,6 +631,11 @@ pub mod execution {
                     TaskStateRecord::Resuming(
                         IncomingRecord::Value(v) | IncomingRecord::Raise(v),
                     ) => value_cost(v),
+                    TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
+                        if self.result_retained =>
+                    {
+                        value_cost(v)
+                    }
                     _ => 0,
                 }
         }
@@ -616,7 +688,7 @@ pub mod execution {
                 bindings: <Tree<BindingRecord>>::decode(input)?,
                 loops: <Tree<LoopRecord>>::decode(input)?,
                 finally: <Tree<FinallyRecord>>::decode(input)?,
-                iterated: <Tree<Value>>::decode(input)?,
+                iterated: <Tree<IteratedRecord>>::decode(input)?,
                 departing: <Tree<Value>>::decode(input)?,
                 arguments: <Option<Tree<Value>>>::decode(input)?,
             })
@@ -878,18 +950,38 @@ impl PagedHeap {
     /// the proposed roots, so dropped bindings cannot cause a false refusal.
     pub fn set_session_root(
         &mut self,
-        bindings: Tree<crate::paged::BindingRecord>,
+        bindings: Tree<BindingRecord>,
     ) -> Result<(), HeapWriteError> {
-        use crate::paged::{PendingReservation, RefinedDecision, ReservationDecision};
         let before = self.session.cost();
-        let after = bindings.cost();
         let old_tasks = self.session.read_task_edges(&self.access)?;
-        let new_tasks = bindings.read_task_edges(&self.access)?;
-        let bindings = bindings.with_task_edges(new_tasks);
+        self.replace_execution_root(before, old_tasks, bindings, |heap, root| {
+            heap.session = root
+        })
+    }
+    pub fn set_task_root(&mut self, tasks: Tree<TaskRecord>) -> Result<(), HeapWriteError> {
+        let before = self.tasks.cost();
+        let old_tasks = self.tasks.read_task_edges(&self.access)?;
+        self.replace_execution_root(before, old_tasks, tasks, |heap, root| heap.tasks = root)
+    }
+    pub fn set_join_root(&mut self, joins: Tree<ListJoinRecord>) -> Result<(), HeapWriteError> {
+        let before = self.joins.cost();
+        let old_tasks = self.joins.read_task_edges(&self.access)?;
+        self.replace_execution_root(before, old_tasks, joins, |heap, root| heap.joins = root)
+    }
+    fn replace_execution_root<T: Cell>(
+        &mut self,
+        before: u64,
+        old_tasks: u64,
+        root: Tree<T>,
+        install: impl FnOnce(&mut Self, Tree<T>),
+    ) -> Result<(), HeapWriteError> {
+        let after = root.cost();
+        let new_tasks = root.read_task_edges(&self.access)?;
+        let root = root.with_task_edges(new_tasks);
         let mut census = self
             .census
             .take()
-            .ok_or_else(|| HeapFault::Malformed("session root has no census".into()))?;
+            .ok_or_else(|| HeapFault::Malformed("persistent root has no census".into()))?;
         let credit = self.reserved.min(after.saturating_sub(before));
         let decision = census.reserve(LogicalBytes(
             after.saturating_sub(before).saturating_sub(credit),
@@ -899,15 +991,13 @@ impl PagedHeap {
                 .changed(LogicalBytes(credit), LogicalBytes(0))
                 .map_err(census_fault)?;
             self.reserved -= credit;
-            self.session = bindings;
+            install(self, root);
             self.population.task_edges = self
                 .population
                 .task_edges
                 .checked_sub(old_tasks)
                 .and_then(|v| v.checked_add(new_tasks))
-                .ok_or_else(|| {
-                    HeapFault::Malformed("binding task-edge population overflow".into())
-                })?;
+                .ok_or_else(|| HeapFault::Malformed("root task-edge population overflow".into()))?;
             self.header = None;
             match decision {
                 ReservationDecision::Granted(_) => census
@@ -946,8 +1036,23 @@ impl PagedHeap {
 
 impl CensusGraph for PagedHeap {
     fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
+        // U prices every retained result. Exact L instead prices only results
+        // reached through handles, in task_result, so remove them here.
+        let mut retained = 0;
+        visit_tree(&self.tasks, &self.access, &mut |task| {
+            if task.result_retained
+                && let TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value)) =
+                    &task.state
+            {
+                retained = checked_sum([retained, value_cost(value)].into_iter())?;
+            }
+            Ok(())
+        })?;
+        let tasks = self.tasks.cost().checked_sub(retained).ok_or_else(|| {
+            HeapFault::Malformed("retained task results exceed the task root cost".into())
+        })?;
         Ok(LogicalBytes(checked_sum(
-            [self.session.cost(), self.tasks.cost()].into_iter(),
+            [self.session.cost(), tasks, self.joins.cost()].into_iter(),
         )?))
     }
     fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
@@ -972,6 +1077,11 @@ impl CensusGraph for PagedHeap {
                 }
             };
         visit_tree(&self.session, &self.access, &mut |b| binding(b, visit))?;
+        visit_tree(&self.joins, &self.access, &mut |join| {
+            visit_tree(&join.members, &self.access, &mut |member| {
+                visit(&Value::Task(*member))
+            })
+        })?;
         visit_tree(&self.tasks, &self.access, &mut |task| {
             match &task.state {
                 TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v)) => {
@@ -983,7 +1093,9 @@ impl CensusGraph for PagedHeap {
             }
             visit_tree(&task.frames, &self.access, &mut |frame| {
                 visit_tree(&frame.bindings, &self.access, &mut |b| binding(b, visit))?;
-                visit_tree(&frame.iterated, &self.access, visit)?;
+                visit_tree(&frame.iterated, &self.access, &mut |cursor| {
+                    visit(&cursor.0)
+                })?;
                 visit_tree(&frame.departing, &self.access, visit)?;
                 if let Some(args) = &frame.arguments {
                     visit_tree(args, &self.access, visit)?;
@@ -1087,6 +1199,7 @@ impl CensusGraph for PagedHeap {
         }
         for task in &unreachable.ended_task_results {
             if let Some(mut row) = self.tasks.get(&ordinal_key(task.0), &self.access)? {
+                let old_edges = row.task_edges();
                 row.state = match row.state {
                     TaskStateRecord::Ended(EndedTask::Returned(_)) => {
                         TaskStateRecord::Ended(EndedTask::Returned(Value::Null))
@@ -1101,6 +1214,14 @@ impl CensusGraph for PagedHeap {
                     }
                 };
                 row.result_retained = false;
+                self.population.task_edges = self
+                    .population
+                    .task_edges
+                    .checked_sub(old_edges)
+                    .and_then(|value| value.checked_add(row.task_edges()))
+                    .ok_or_else(|| {
+                        HeapFault::Malformed("retired task population underflow".into())
+                    })?;
                 self.tasks.write(ordinal_key(task.0), row, &self.access)?;
             }
         }

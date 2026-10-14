@@ -27,6 +27,8 @@ use crate::interface::{
 /// How a new run starts.
 #[derive(Clone, Debug)]
 pub struct CellStart {
+    /// The exact activation owner binding supplied by composition.
+    pub owner: lash_kernel_doc::heap::PageId,
     pub target: Target,
     /// The entry's arguments. Empty for `main`.
     pub args: Vec<Datum>,

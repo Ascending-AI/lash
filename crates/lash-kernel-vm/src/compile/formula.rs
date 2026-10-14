@@ -419,11 +419,13 @@ impl Fast {
             let mut mask = 0usize;
             for (index, (source, _)) in self.shallow.measurements.iter().enumerate() {
                 match value(source) {
-                    Some(Value::Int(integer)) => match integer.to_i64() {
-                        Some(0) => {}
-                        Some(_) => mask |= 1 << index,
-                        None => return Charge::Plan(&self.shallow),
-                    },
+                    Some(Value::Int(lash_kernel_doc::heap::IntRef::Inline(integer))) => {
+                        match integer.to_i64() {
+                            Some(0) => {}
+                            Some(_) => mask |= 1 << index,
+                            None => return Charge::Plan(&self.shallow),
+                        }
+                    }
                     Some(value) if size_one(value) => {}
                     _ => return Charge::Plan(&self.shallow),
                 }

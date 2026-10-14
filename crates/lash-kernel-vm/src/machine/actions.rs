@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorValue, JoinMode, LoopIteration, ObjectId, Site,
+    Datum, EffectIdentity, EffectName, EntityId, ErrorValue, JoinMode, LoopIteration, Site,
     SpawnIdentity, TaskId, TaskIdentity, Type, Value,
 };
 use num_traits::ToPrimitive;
@@ -22,7 +22,7 @@ use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepReq
 
 /// What a call or a `spawn` runs, once its callee is read.
 enum Target {
-    Code(CodeId, Vec<ObjectId>),
+    Code(CodeId, Vec<EntityId>),
     Library(LibId),
 }
 
@@ -223,7 +223,7 @@ impl KernelMachine {
         self.observe_expression();
         match atom {
             Atom::Var(var) => self.read_var(task, exe, var),
-            Atom::Literal(value) => Ok(value.clone()),
+            Atom::Literal(value) => self.literal(value),
         }
     }
 

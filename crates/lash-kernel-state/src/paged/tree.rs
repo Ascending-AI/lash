@@ -35,24 +35,25 @@ pub trait Cell: TokenCodec + Clone {
 }
 
 /// Single-threaded page residency, bounded independently of guest cost.
+#[derive(Clone)]
 pub struct Access<'a> {
-    source: RefCell<SourcePort<'a>>,
-    cache: RefCell<BTreeMap<PageId, PageAnswer>>,
-    bytes: RefCell<usize>,
+    source: Rc<RefCell<SourcePort<'a>>>,
+    cache: Rc<RefCell<BTreeMap<PageId, PageAnswer>>>,
+    bytes: Rc<RefCell<usize>>,
 }
 impl<'a> Access<'a> {
     pub fn new(source: Box<dyn PageSource>) -> Self {
         Self {
-            source: RefCell::new(SourcePort::Owned(source)),
-            cache: RefCell::new(BTreeMap::new()),
-            bytes: RefCell::new(0),
+            source: Rc::new(RefCell::new(SourcePort::Owned(source))),
+            cache: Rc::new(RefCell::new(BTreeMap::new())),
+            bytes: Rc::new(RefCell::new(0)),
         }
     }
     fn borrowed(source: &'a mut dyn PageSource) -> Self {
         Self {
-            source: RefCell::new(SourcePort::Borrowed(source)),
-            cache: RefCell::new(BTreeMap::new()),
-            bytes: RefCell::new(0),
+            source: Rc::new(RefCell::new(SourcePort::Borrowed(source))),
+            cache: Rc::new(RefCell::new(BTreeMap::new())),
+            bytes: Rc::new(RefCell::new(0)),
         }
     }
     pub fn read(&self, page: PageRef) -> Result<PageAnswer, HeapFault> {

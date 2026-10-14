@@ -2,10 +2,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
-use lash_kernel_doc::{Element, ErrorValue, NativeError, NativeHeap, Object, ObjectId, Value};
+use lash_kernel_doc::{Element, EntityId, NativeError, NativeHeap, Object, Value};
 
 use super::{native::snapshot, raise};
 use crate::numbers::KIND_NAMES;
+use lash_kernel_doc::heap::Payload;
 
 pub(super) fn deep(value: &Value, heap: &mut dyn NativeHeap) -> Result<Value, NativeError> {
     Copy {
@@ -17,8 +18,8 @@ pub(super) fn deep(value: &Value, heap: &mut dyn NativeHeap) -> Result<Value, Na
 }
 struct Copy<'a> {
     heap: &'a mut dyn NativeHeap,
-    active: BTreeSet<ObjectId>,
-    copied: BTreeMap<ObjectId, Value>,
+    active: BTreeSet<EntityId>,
+    copied: BTreeMap<EntityId, Value>,
 }
 impl Copy<'_> {
     fn value(&mut self, value: &Value, depth: usize) -> Result<Value, NativeError> {
@@ -32,12 +33,30 @@ impl Copy<'_> {
             ));
         }
         match value {
-            Value::Tuple(items) => Ok(Value::Tuple(self.items(items, depth)?.into())),
-            Value::Error(error) => Ok(Value::Error(std::sync::Arc::new(ErrorValue {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self.value(&error.data, depth + 1)?,
-            }))),
+            Value::Tuple(tuple) => {
+                let mut values = Vec::new();
+                self.heap.tuple_visit(tuple, &mut |v| {
+                    values.push(v.clone());
+                    ControlFlow::Continue(())
+                })?;
+                let values = self.items(&values, depth)?;
+                Ok(Value::Tuple(self.heap.tuple(values)?))
+            }
+            Value::Error(error) => {
+                let mut copied = (**error).clone();
+                copied.family = None;
+                let data = self.heap.error_data(error)?;
+                copied.data = Payload::Resident(std::sync::Arc::new(self.value(&data, depth + 1)?));
+                if let Payload::Resident(data) = &copied.data {
+                    copied.task_edges = lash_kernel_doc::heap_values::task_count(data);
+                    copied.cost = lash_kernel_doc::heap::LogicalBytes(
+                        copied.kind.summary.utf8_bytes
+                            + copied.message.summary.utf8_bytes
+                            + lash_kernel_doc::heap_values::local_cost(data),
+                    );
+                }
+                Ok(Value::Error(std::sync::Arc::new(copied)))
+            }
             Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
                 self.object(value, *id, depth)
             }
@@ -49,7 +68,7 @@ impl Copy<'_> {
     fn items(&mut self, items: &[Value], depth: usize) -> Result<Vec<Value>, NativeError> {
         items.iter().map(|x| self.value(x, depth + 1)).collect()
     }
-    fn object(&mut self, value: &Value, id: ObjectId, depth: usize) -> Result<Value, NativeError> {
+    fn object(&mut self, value: &Value, id: EntityId, depth: usize) -> Result<Value, NativeError> {
         if self.active.contains(&id) {
             return Err(raise(
                 "cyclic_value",
@@ -77,7 +96,6 @@ impl Copy<'_> {
                     .map(|(name, value)| Ok((name.clone(), self.value(value, depth + 1)?)))
                     .collect::<Result<_, NativeError>>()?,
             ),
-            _ => unreachable!(),
         };
         let copy = self.heap.allocate(object)?;
         let copied = match value {
@@ -85,7 +103,7 @@ impl Copy<'_> {
             Value::Map(_) => Value::Map(copy),
             Value::Set(_) => Value::Set(copy),
             Value::Record(_) => Value::Record(copy),
-            _ => unreachable!(),
+            _ => unreachable!("object snapshot selected the four collection kinds"),
         };
         self.active.remove(&id);
         self.copied.insert(id, copied.clone());
@@ -106,7 +124,7 @@ pub(super) fn holds_none(
 ) -> Result<bool, NativeError> {
     enum Visit {
         Value(Value, usize),
-        Leave(ObjectId),
+        Leave(EntityId),
     }
     let mut active = BTreeSet::new();
     let mut read = BTreeSet::new();
@@ -127,12 +145,11 @@ pub(super) fn holds_none(
         // reverse so the first is read first.
         let from = pending.len();
         match &value {
-            Value::Tuple(items) => pending.extend(
-                items
-                    .iter()
-                    .map(|item| Visit::Value(item.clone(), depth + 1)),
-            ),
-            Value::Error(error) => pending.push(Visit::Value(error.data.clone(), depth + 1)),
+            Value::Tuple(tuple) => heap.tuple_visit(tuple, &mut |item| {
+                pending.push(Visit::Value(item.clone(), depth + 1));
+                ControlFlow::Continue(())
+            })?,
+            Value::Error(error) => pending.push(Visit::Value(heap.error_data(error)?, depth + 1)),
             Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
                 if active.contains(id) {
                     return Ok(false);
@@ -156,7 +173,7 @@ pub(super) fn holds_none(
                         }
                     }
                     ControlFlow::Continue(())
-                });
+                })?;
                 pending[from..].reverse();
                 continue;
             }

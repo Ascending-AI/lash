@@ -841,3 +841,154 @@ fn population_summaries_follow_seeded_directory_edits() {
         }
     );
 }
+
+/// K-EFF-002: reading outbound integer digits never reserves guest memory.
+#[test]
+fn outbound_integer_digits_are_read_only_and_keep_their_sign() {
+    let (mut heap, _) = fresh();
+    let integer =
+        lash_kernel_doc::Integer::parse(&format!("-1{}", "0".repeat(1500))).expect("integer");
+    let value = Value::Int(heap.int(integer.clone()).expect("paged integer"));
+    let Value::Int(IntRef::Paged { summary, .. }) = &value else {
+        panic!("paged");
+    };
+    assert!(summary.negative);
+    let before = heap.certificate();
+    let mut digits = Vec::new();
+    heap.payload_visit(&value, 0..summary.bits.div_ceil(8), &mut |chunk| {
+        let Chunk::Bytes(bytes) = chunk else {
+            panic!("integer magnitude bytes");
+        };
+        digits.extend_from_slice(bytes);
+        ControlFlow::Continue(())
+    })
+    .expect("outbound digits");
+    assert_eq!(heap.certificate(), before);
+    assert_eq!(
+        lash_kernel_doc::heap_values::integer_from_digits(summary.negative, &digits),
+        integer
+    );
+}
+
+/// S1/S4: frame bindings contain bounded descriptors; keeping a paged
+/// error's immutable data never reads or rewrites its unchanged payload.
+#[test]
+fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
+    use super::super::tree::{Cell, SealWork, Tree};
+    use lash_kernel_doc::graph_tokens::encode_body;
+    use lash_kernel_doc::{Name, Site, Unit};
+    let (mut heap, pages) = fresh();
+    let mut error = ErrorRef::new(&"kind".repeat(100_000), &"message".repeat(100_000));
+    error.data = Payload::Resident(Arc::new(Value::text("d".repeat(256))));
+    let value = heap
+        .canonical_value(Value::Error(Arc::new(error)))
+        .expect("canonical error");
+    let Value::Error(error) = &value else {
+        panic!("error");
+    };
+    assert!(matches!(error.data, Payload::Paged(_)));
+    let site = Site::new(Unit::Main, vec![0]);
+    let mut frame = FrameRecord::fresh(site.clone());
+    frame
+        .bindings
+        .write(
+            vec![0],
+            BindingRecord {
+                name: Name::new("error"),
+                declared: site,
+                value: BoundRecord::Value(value.clone()),
+            },
+            &heap.access,
+        )
+        .expect("binding");
+    frame
+        .prepare(
+            &heap.access,
+            &mut SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .expect("frame pages");
+    let mut frames = Tree::new(true);
+    frames.write(vec![0], frame, &heap.access).expect("frame");
+    frames
+        .seal(
+            &heap.access,
+            &mut SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .expect("frames");
+    assert!(
+        pages
+            .borrow()
+            .pages
+            .values()
+            .all(|page| page.tokens.len() + 32 * page.children.len() + 32 <= 65_536)
+    );
+    heap.access.clear();
+    pages.borrow_mut().reads = 0;
+    let seals = pages.borrow().seals;
+    let kept = heap.canonical_value(value.clone()).expect("already paged");
+    assert_eq!(pages.borrow().reads, 0);
+    assert_eq!(pages.borrow().seals, seals);
+    assert_eq!(encode_body(&kept), encode_body(&value));
+}
+
+/// K-BND-003 / S7: a retained ended-task result is a holding even though
+/// precise tracing visits it only through a reachable task handle.
+#[test]
+fn an_ended_task_result_counts_toward_fast_reservation() {
+    use super::super::tree::Tree;
+    use lash_kernel_doc::{Name, Site, TaskId, TaskIdentity, Unit};
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(100)).expect("census"),
+    ))
+    .expect("census");
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![int(1)]))
+        .expect("49-byte list");
+    let mut session = Tree::new(false);
+    session
+        .write(
+            vec![0],
+            BindingRecord {
+                name: Name::new("task"),
+                declared: Site::new(Unit::Main, [0]),
+                value: BoundRecord::Value(Value::Task(TaskId(1))),
+            },
+            &heap.access,
+        )
+        .expect("task handle");
+    heap.set_session_root(session)
+        .expect("16-byte handle holding");
+    let mut tasks = Tree::new(false);
+    tasks
+        .write(
+            super::super::directory::ordinal_key(1),
+            TaskRecord {
+                identity: TaskIdentity::Main,
+                state: TaskStateRecord::Ended(EndedTask::Returned(Value::List(list))),
+                result_retained: true,
+                joiners: Tree::new(true),
+                observed: false,
+                passed: false,
+                failed: false,
+                occurrences: Tree::new(false),
+                frames: Tree::new(true),
+            },
+            &heap.access,
+        )
+        .expect("ended task");
+    heap.set_task_root(tasks).expect("16-byte result holding");
+    assert!(
+        matches!(
+            heap.allocate_object(ObjectInit::List(vec![])),
+            Err(HeapWriteError::Memory)
+        ),
+        "49 + 16 + 16 live bytes leave less than a 32-byte object under a 100-byte bound"
+    );
+}

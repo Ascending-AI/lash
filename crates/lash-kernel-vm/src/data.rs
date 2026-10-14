@@ -5,12 +5,14 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, Float, Integer, Name, NumberPolicy, NumberToken, ObjectId, Type, Value,
+    Datum, EntityId, ErrorDatum, Float, Integer, Name, NumberPolicy, NumberToken, Type, Value,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::heap::{Heap, Obj};
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::heap::{Chunk, HeapFault, IntRef, TextRef};
+use std::ops::ControlFlow;
 
 /// A raise the machine makes itself: one of the kinds of `K-ERR-002`.
 #[derive(Debug)]
@@ -36,30 +38,26 @@ pub(crate) fn raised(kind: &'static str, message: impl Into<String>) -> Raised {
     }
 }
 
-/// A value's size (`K-CHG-004`).
-pub(crate) fn size(heap: &Heap, value: &Value) -> u64 {
+/// A value's size (`K-CHG-004`), using descriptor summaries only.
+pub(crate) fn size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
     let extent = match value {
-        Value::Int(integer) => integer.bits().div_ceil(64),
-        Value::Text(text) => text.len() as u64,
-        Value::Bytes(bytes) => bytes.as_slice().len() as u64,
-        Value::Tuple(members) => members.len() as u64,
-        Value::Error(error) => (error.kind.len() + error.message.len()) as u64,
-        Value::List(id) | Value::Set(id) | Value::Record(id) | Value::Map(id) => {
-            match heap.get(*id) {
-                Some(Obj::List(items)) => items.len() as u64,
-                Some(Obj::Set(table)) => table.len() as u64,
-                Some(Obj::Record(fields)) => fields.len() as u64,
-                Some(Obj::Map(table)) => table.len() as u64 * 2,
-                _ => 0,
-            }
-        }
+        Value::Int(IntRef::Inline(i)) => i.bits().div_ceil(64),
+        Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(64),
+        Value::Text(t) => t.summary.utf8_bytes,
+        Value::Bytes(b) => b.len,
+        Value::Tuple(t) => t.summary.len,
+        Value::Error(e) => e
+            .kind
+            .summary
+            .utf8_bytes
+            .saturating_add(e.message.summary.utf8_bytes),
+        Value::List(id) | Value::Set(id) | Value::Record(id) => heap.len(*id)?,
+        Value::Map(id) => heap.len(*id)?.saturating_mul(2),
         _ => 0,
     };
-    extent.saturating_add(1)
+    Ok(extent.saturating_add(1))
 }
 
-/// Whether a value holds no other value, so that its deep size is its
-/// size (`K-CHG-005`).
 pub(crate) fn holds_nothing(value: &Value) -> bool {
     !matches!(
         value,
@@ -72,8 +70,6 @@ pub(crate) fn holds_nothing(value: &Value) -> bool {
     )
 }
 
-/// Whether a value's size is 1 whatever it holds: it has no extent
-/// (`K-CHG-004`).
 pub(crate) fn size_one(value: &Value) -> bool {
     matches!(
         value,
@@ -90,225 +86,269 @@ pub(crate) fn size_one(value: &Value) -> bool {
     )
 }
 
-/// A value's size with everything it holds, a heap object counted the
-/// first time it is reached (`K-CHG-005`).
-pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
-    // A value that holds nothing is its own size: most measured values are.
-    if holds_nothing(value) {
-        return size(heap, value);
-    }
-    let mut total = 0u64;
-    let mut seen = Seen::new();
-    let mut pending = Vec::new();
-    measure(heap, value, &mut total, &mut seen, &mut pending);
-    while let Some(id) = pending.pop() {
-        let mut inner = |value: &Value| measure(heap, value, &mut total, &mut seen, &mut pending);
-        match heap.get(id) {
-            Some(Obj::List(items)) => items.iter().for_each(&mut inner),
-            Some(Obj::Map(table)) => table.iter().for_each(|(key, value)| {
-                inner(key);
-                inner(value);
-            }),
-            Some(Obj::Set(table)) => table.iter().for_each(|(member, _)| inner(member)),
-            Some(Obj::Record(fields)) => fields.iter().for_each(|(_, value)| inner(value)),
+/// A deep charge size counts each entity once (`K-CHG-005`). Immutable
+/// values still count at each holding location, regardless of page sharing.
+pub(crate) fn deep_size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
+    fn measure(
+        heap: &dyn NativeHeap,
+        value: &Value,
+        seen: &mut BTreeSet<EntityId>,
+        pending: &mut Vec<EntityId>,
+    ) -> Result<u64, HeapFault> {
+        match value {
+            Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+                if !seen.insert(*id) {
+                    return Ok(0);
+                }
+                pending.push(*id);
+            }
             _ => {}
         }
+        let mut total = size(heap, value)?;
+        immutable_members(heap, value, &mut |member| {
+            total = total.saturating_add(measure(heap, member, seen, pending)?);
+            Ok(())
+        })?;
+        Ok(total)
     }
-    total
-}
-
-/// How many objects a measurement remembers before it needs a set.
-const FEW: usize = 8;
-
-/// The objects a measurement has reached: the first few in place, the rest
-/// in a set made only when they do not fit, so measuring a small graph
-/// allocates and frees nothing for them.
-struct Seen {
-    few: [ObjectId; FEW],
-    count: usize,
-    rest: Option<BTreeSet<ObjectId>>,
-}
-
-impl Seen {
-    fn new() -> Self {
-        Self {
-            few: [ObjectId(0); FEW],
-            count: 0,
-            rest: None,
-        }
-    }
-
-    /// Adds `id`, and says whether it was new.
-    fn insert(&mut self, id: ObjectId) -> bool {
-        let few = self.count.min(FEW);
-        if self.few[..few].contains(&id) {
-            return false;
-        }
-        if self.count < FEW {
-            self.few[self.count] = id;
-        } else if !self.rest.get_or_insert_default().insert(id) {
-            return false;
-        }
-        self.count += 1;
-        true
-    }
-}
-
-fn measure(
-    heap: &Heap,
-    value: &Value,
-    total: &mut u64,
-    seen: &mut Seen,
-    pending: &mut Vec<ObjectId>,
-) {
-    match value {
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
-            if !seen.insert(*id) {
-                return;
+    let mut seen = BTreeSet::new();
+    let mut pending = Vec::new();
+    let mut total = measure(heap, value, &mut seen, &mut pending)?;
+    while let Some(id) = pending.pop() {
+        let mut fault = None;
+        heap.visit(id, &mut |element| {
+            let mut add = |value| {
+                total = total.saturating_add(measure(heap, value, &mut seen, &mut pending)?);
+                Ok::<_, HeapFault>(())
+            };
+            let result = match element {
+                lash_kernel_doc::Element::Item(v)
+                | lash_kernel_doc::Element::Field { value: v, .. } => add(v),
+                lash_kernel_doc::Element::Entry { key, value } => {
+                    add(key).and_then(|()| add(value))
+                }
+            };
+            match result {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(error) => {
+                    fault = Some(error);
+                    ControlFlow::Break(())
+                }
             }
-            pending.push(*id);
+        })?;
+        if let Some(error) = fault {
+            return Err(error);
         }
-        Value::Tuple(members) => members
-            .iter()
-            .for_each(|member| measure(heap, member, total, seen, pending)),
-        Value::Error(error) => measure(heap, &error.data, total, seen, pending),
+    }
+    Ok(total)
+}
+
+fn immutable_members(
+    heap: &dyn NativeHeap,
+    value: &Value,
+    visitor: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    match value {
+        Value::Tuple(tuple) => {
+            let mut fault = None;
+            heap.tuple_visit(tuple, &mut |member| match visitor(member) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(error) => {
+                    fault = Some(error);
+                    ControlFlow::Break(())
+                }
+            })?;
+            if let Some(error) = fault {
+                return Err(error);
+            }
+        }
+        Value::Error(error) => visitor(&heap.error_data(error)?)?,
         _ => {}
     }
-    *total = total.saturating_add(size(heap, value));
+    Ok(())
 }
 
-/// The sizes of the immutable values nested in a value, down to the heap
-/// objects it holds, each of which counts 1 (`K-CHG-005`).
-pub(crate) fn nested_size(heap: &Heap, value: &Value) -> u64 {
-    // The value in hand is not pushed, nor is a member that holds no
-    // immutable value, so measuring a flat tuple, or a value that is
-    // neither a tuple nor an error, allocates nothing.
+pub(crate) fn nested_size(heap: &dyn NativeHeap, value: &Value) -> Result<u64, HeapFault> {
     let mut total = 0u64;
-    let mut next = Some(value);
-    let mut pending = Vec::new();
-    while let Some(value) = next.take().or_else(|| pending.pop()) {
-        let held = match value {
-            Value::Tuple(members) => &members[..],
-            Value::Error(error) => std::slice::from_ref(&error.data),
-            _ => continue,
+    immutable_members(heap, value, &mut |member| {
+        let amount = match member {
+            Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
+            _ => size(heap, member)?.saturating_add(nested_size(heap, member)?),
         };
-        for member in held {
-            let size = match member {
-                Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
-                Value::Tuple(_) | Value::Error(_) => {
-                    if next.is_none() {
-                        next = Some(member);
-                    } else {
-                        pending.push(member);
-                    }
-                    size(heap, member)
-                }
-                _ => size(heap, member),
-            };
-            total = total.saturating_add(size);
-        }
-    }
-    total
+        total = total.saturating_add(amount);
+        Ok(())
+    })?;
+    Ok(total)
 }
 
-/// A value's magnitude (`K-CHG-006`).
 pub(crate) fn magnitude(value: &Value) -> u64 {
     match value {
-        Value::Int(integer) if !integer.is_negative() => integer.to_u64().unwrap_or(u64::MAX),
-        Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
-            // A float-to-integer cast rounds toward zero and saturates.
-            float.get() as u64
-        }
+        Value::Int(IntRef::Inline(i)) if !i.is_negative() => i.to_u64().unwrap_or(u64::MAX),
+        Value::Int(IntRef::Paged { summary, .. }) if !summary.negative => u64::MAX,
+        Value::Float(f) if f.get().is_finite() && f.get() >= 0.0 => f.get() as u64,
         _ => 0,
     }
 }
 
-/// Copies a value out of the run as a tree (`K-EFF-002`).
-pub(crate) fn copy_out(heap: &Heap, value: &Value) -> Result<Datum, Raised> {
-    copy(heap, value, heap.value_depth, &mut Vec::new())
+/// Boundary copy failure retains the infrastructure/guest distinction.
+#[derive(Debug)]
+pub(crate) enum CopyError {
+    Raised(Raised),
+    Heap(HeapFault),
+}
+impl From<Raised> for CopyError {
+    fn from(error: Raised) -> Self {
+        Self::Raised(error)
+    }
+}
+impl From<HeapFault> for CopyError {
+    fn from(error: HeapFault) -> Self {
+        Self::Heap(error)
+    }
 }
 
+fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String, HeapFault> {
+    let mut out = String::new();
+    heap.payload_visit(
+        &Value::Text(text.clone()),
+        0..text.summary.utf8_bytes,
+        &mut |chunk| {
+            if let Chunk::Text(text) = chunk {
+                out.push_str(text);
+            }
+            ControlFlow::Continue(())
+        },
+    )?;
+    Ok(out)
+}
+
+/// Copies to the host's Datum tree without allocating guest entities or
+/// reserving guest memory (`K-EFF-002`). Reads stop at the first fault.
+pub(crate) fn copy_out(heap: &dyn NativeHeap, value: &Value) -> Result<Datum, CopyError> {
+    copy(heap, value, heap.value_depth_limit(), &mut Vec::new())
+}
 fn copy(
-    heap: &Heap,
+    heap: &dyn NativeHeap,
     value: &Value,
     budget: usize,
-    path: &mut Vec<ObjectId>,
-) -> Result<Datum, Raised> {
+    path: &mut Vec<EntityId>,
+) -> Result<Datum, CopyError> {
     let Some(budget) = budget.checked_sub(1) else {
         return Err(raised(
             "too_deep",
             format!(
                 "a value copied out of the run exceeds the configured {}-level value depth",
-                heap.value_depth
+                heap.value_depth_limit()
             ),
-        ));
-    };
-    let not_data = |what: &str| {
-        Err(raised(
-            "not_data",
-            format!("{what} is not data and cannot leave the run"),
-        ))
+        )
+        .into());
     };
     Ok(match value {
         Value::Null => Datum::Null,
         Value::Absent => Datum::Absent,
-        Value::Bool(flag) => Datum::Bool(*flag),
-        Value::Int(integer) => Datum::Int(integer.clone()),
-        Value::Float(float) => Datum::Float(*float),
-        Value::Text(text) => Datum::Text(text.to_string()),
-        Value::Bytes(bytes) => Datum::Bytes(bytes.clone()),
-        Value::Timestamp(timestamp) => Datum::Timestamp(timestamp.clone()),
-        Value::Function(name) => Datum::Function(name.clone()),
-        Value::Handle(handle) => Datum::Handle(handle.as_ref().clone()),
-        Value::Error(error) => Datum::Error(Box::new(ErrorDatum {
-            kind: error.kind.clone(),
-            message: error.message.clone(),
-            data: copy(heap, &error.data, budget, path)?,
+        Value::Bool(v) => Datum::Bool(*v),
+        Value::Float(v) => Datum::Float(*v),
+        Value::Int(IntRef::Inline(i)) => Datum::Int(i.clone()),
+        Value::Int(int @ IntRef::Paged { summary, .. }) => {
+            let mut bytes = Vec::new();
+            heap.payload_visit(
+                &Value::Int(int.clone()),
+                0..summary.bits.div_ceil(8),
+                &mut |chunk| {
+                    if let Chunk::Bytes(b) = chunk {
+                        bytes.extend_from_slice(b);
+                    }
+                    ControlFlow::Continue(())
+                },
+            )?;
+            Datum::Int(lash_kernel_doc::heap_values::integer_from_digits(
+                summary.negative,
+                &bytes,
+            ))
+        }
+        Value::Text(t) => Datum::Text(text_copy(heap, t)?),
+        Value::Bytes(b) => {
+            let mut bytes = Vec::new();
+            heap.payload_visit(value, 0..b.len, &mut |chunk| {
+                if let Chunk::Bytes(b) = chunk {
+                    bytes.extend_from_slice(b);
+                }
+                ControlFlow::Continue(())
+            })?;
+            Datum::Bytes(lash_kernel_doc::Bytes::new(bytes))
+        }
+        Value::Timestamp(t) => Datum::Timestamp(t.clone()),
+        Value::Function(n) => Datum::Function(n.clone()),
+        Value::Handle(h) => Datum::Handle(h.as_ref().clone()),
+        Value::Error(e) => Datum::Error(Box::new(ErrorDatum {
+            kind: text_copy(heap, &e.kind)?,
+            message: text_copy(heap, &e.message)?,
+            data: copy(heap, &heap.error_data(e)?, budget, path)?,
         })),
-        Value::Tuple(members) => Datum::Tuple(
-            members
-                .iter()
-                .map(|member| copy(heap, member, budget, path))
-                .collect::<Result<_, _>>()?,
-        ),
-        Value::Closure(_) => return not_data("a closure"),
-        Value::Task(_) => return not_data("a task handle"),
-        Value::Ref(_) => return not_data("a ref"),
+        Value::Tuple(t) => {
+            let mut items = Vec::new();
+            for index in 0..t.summary.len {
+                let member = heap
+                    .tuple_get(t, index)?
+                    .ok_or_else(|| HeapFault::Malformed("tuple extent has no member".into()))?;
+                items.push(copy(heap, &member, budget, path)?);
+            }
+            Datum::Tuple(items)
+        }
+        Value::Closure(_) | Value::Task(_) | Value::Ref(_) => {
+            let what = match value {
+                Value::Closure(_) => "a closure",
+                Value::Task(_) => "a task handle",
+                _ => "a ref",
+            };
+            return Err(raised(
+                "not_data",
+                format!("{what} is not data and cannot leave the run"),
+            )
+            .into());
+        }
         Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
             if path.contains(id) {
-                return Err(raised(
-                    "cycle",
-                    "a value that holds itself cannot leave the run",
-                ));
+                return Err(
+                    raised("cycle", "a value that holds itself cannot leave the run").into(),
+                );
             }
             path.push(*id);
-            let mut inner = |value: &Value| copy(heap, value, budget, path);
-            let datum = match heap.get(*id) {
-                Some(Obj::List(items)) => {
-                    Datum::List(items.iter().map(&mut inner).collect::<Result<_, _>>()?)
+            let mut items = Vec::new();
+            let mut entries = Vec::new();
+            let mut fields = Vec::new();
+            let mut error = None;
+            heap.visit(*id, &mut |element| {
+                let result = match element {
+                    lash_kernel_doc::Element::Item(v) => {
+                        copy(heap, v, budget, path).map(|v| items.push(v))
+                    }
+                    lash_kernel_doc::Element::Entry { key, value } => copy(heap, key, budget, path)
+                        .and_then(|k| {
+                            copy(heap, value, budget, path).map(|v| entries.push((k, v)))
+                        }),
+                    lash_kernel_doc::Element::Field { name, value } => text_copy(heap, name)
+                        .map_err(CopyError::from)
+                        .and_then(|n| copy(heap, value, budget, path).map(|v| fields.push((n, v)))),
+                };
+                match result {
+                    Ok(()) => ControlFlow::Continue(()),
+                    Err(e) => {
+                        error = Some(e);
+                        ControlFlow::Break(())
+                    }
                 }
-                Some(Obj::Set(table)) => Datum::Set(
-                    table
-                        .iter()
-                        .map(|(member, _)| inner(member))
-                        .collect::<Result<_, _>>()?,
-                ),
-                Some(Obj::Map(table)) => Datum::Map(
-                    table
-                        .iter()
-                        .map(|(key, value)| Ok((inner(key)?, inner(value)?)))
-                        .collect::<Result<_, Raised>>()?,
-                ),
-                Some(Obj::Record(fields)) => Datum::Record(
-                    fields
-                        .iter()
-                        .map(|(name, value)| Ok((name.clone(), inner(value)?)))
-                        .collect::<Result<_, Raised>>()?,
-                ),
-                _ => Datum::Null,
-            };
+            })?;
+            if let Some(error) = error {
+                return Err(error);
+            }
             path.pop();
-            datum
+            match value {
+                Value::List(_) => Datum::List(items),
+                Value::Set(_) => Datum::Set(items),
+                Value::Map(_) => Datum::Map(entries),
+                _ => Datum::Record(fields),
+            }
         }
     })
 }

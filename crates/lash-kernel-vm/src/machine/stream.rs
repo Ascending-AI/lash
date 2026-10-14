@@ -10,17 +10,20 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{ErrorValue, Float, Name, ObjectId, TaskId, Value};
+use lash_kernel_doc::{EntityId, Float, Name, TaskId, Value};
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
 
-use super::ops::{Entry, Flow, key};
+use super::ops::{Entry, Flow};
 use super::{
     Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound, fault,
     raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
-use crate::heap::{ClosureObj, Obj, Table, value_bytes, within_depth};
+use crate::heap::{value_bytes, within_depth};
 use crate::interface::{Bound, Host};
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::heap::{ErrorRef, Payload};
+use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
 
 /// How a statement's range ends.
 pub(super) enum Ran {
@@ -43,11 +46,13 @@ fn at(base: usize, r: Reg) -> usize {
 
 /// The error a read of a variable no scope binds raises.
 pub(super) fn unbound<T>(name: &Name) -> Eval<T> {
-    Err(Interrupt::Raise(Value::Error(Arc::new(ErrorValue {
-        kind: "unbound_variable".to_owned(),
-        message: format!("no variable `{name}` is bound here"),
-        data: Value::text(name.as_str()),
-    }))))
+    let mut error = ErrorRef::new(
+        "unbound_variable",
+        &format!("no variable `{name}` is bound here"),
+    );
+    error.data = Payload::Resident(Arc::new(Value::text(name.as_str())));
+    error.cost.0 += name.as_str().len() as u64;
+    Err(Interrupt::Raise(Value::Error(Arc::new(error))))
 }
 
 /// The statement a stream runs: its task, executable and ops.
@@ -105,11 +110,11 @@ impl KernelMachine {
                 }
                 Op::ChargeConst { units, dst, c } => {
                     self.charge_nodes(u32::from(units))?;
-                    let value = running.stream.consts[c.ix()].clone();
+                    let value = self.literal(&running.stream.consts[c.ix()])?;
                     self.put(at(base, dst), value);
                 }
                 Op::Const { dst, c } => {
-                    let value = running.stream.consts[c.ix()].clone();
+                    let value = self.literal(&running.stream.consts[c.ix()])?;
                     self.put(at(base, dst), value);
                 }
                 Op::Local { dst, local } => {
@@ -205,29 +210,30 @@ impl KernelMachine {
             }
             Op::MakeList { items } => {
                 let (start, items) = self.members(base, items)?;
-                let list = Value::List(self.alloc(Obj::List(items))?);
+                let list = Value::List(self.alloc(ObjectInit::List(items))?);
                 self.put(start, list);
                 return Ok(None);
             }
             Op::MakeSet { items } => {
                 let (start, items) = self.members(base, items)?;
-                let mut table = Table::default();
-                for member in items {
-                    table.insert(key(&member)?, member, Value::Null);
+                for member in &items {
+                    self.key(member)?;
                 }
-                let set = Value::Set(self.alloc(Obj::Set(table))?);
+                let set = Value::Set(self.alloc(ObjectInit::Set(items))?);
                 self.put(start, set);
                 return Ok(None);
             }
             Op::MakeMap { entries } => {
                 let start = at(base, entries.start);
                 self.charge(u64::from(entries.len / 2))?;
-                let mut table = Table::default();
+                let mut table = Vec::new();
                 for pair in (start..start + entries.len as usize).step_by(2) {
-                    let (written, value) = (self.take(pair), self.take(pair + 1));
-                    table.insert(key(&written)?, written, value);
+                    let written = self.take(pair);
+                    self.key(&written)?;
+                    let value = self.take(pair + 1);
+                    table.push((written, value));
                 }
-                let map = Value::Map(self.alloc(Obj::Map(table))?);
+                let map = Value::Map(self.alloc(ObjectInit::Map(table))?);
                 self.put(start, map);
                 return Ok(None);
             }
@@ -235,10 +241,15 @@ impl KernelMachine {
                 let (start, values) = self.members(base, values)?;
                 let fields = stream.field_lists[fields.ix()]
                     .iter()
-                    .cloned()
+                    .map(|name| {
+                        let Value::Text(text) = Value::text(name.as_str()) else {
+                            unreachable!()
+                        };
+                        text
+                    })
                     .zip(values)
                     .collect();
-                let record = Value::Record(self.alloc(Obj::Record(fields))?);
+                let record = Value::Record(self.alloc(ObjectInit::Record(fields))?);
                 self.put(start, record);
                 return Ok(None);
             }
@@ -411,13 +422,13 @@ impl KernelMachine {
 
     fn make_tuple(&mut self, base: usize, items: RegRange) -> Eval<()> {
         let (start, items) = self.members(base, items)?;
-        let tuple = Value::Tuple(items.into());
-        if !within_depth(&tuple, self.heap.value_depth) {
+        let tuple = Value::Tuple(self.heap.tuple(items)?);
+        if !within_depth(&tuple, self.limits.value_depth()) {
             return raise(
                 "too_deep",
                 format!(
                     "a tuple exceeds the configured {}-level value depth",
-                    self.heap.value_depth
+                    self.limits.value_depth()
                 ),
             );
         }
@@ -444,16 +455,22 @@ impl KernelMachine {
     }
 
     /// A closure of `code` over the cells of the variables it shares.
-    fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<ObjectId> {
+    fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<EntityId> {
         let frame = self.frame(task)?;
         let mut captures = Vec::new();
         for capture in &exe.code(code).captures {
-            match &frame.slots[capture.outer_at as usize] {
-                SlotState::Cell(cell) => captures.push(*cell),
+            match frame.slot(capture.outer_at)? {
+                SlotState::Cell(cell) => captures.push((
+                    exe.code(code).slots[capture.inner as usize].name.clone(),
+                    cell,
+                )),
                 _ => return Err(fault("a captured variable has no cell").into()),
             }
         }
-        Ok(self.alloc(Obj::Closure(ClosureObj { code, captures }))?)
+        let code = exe.code(code);
+        let mut site = code.site.clone();
+        site.path.pop();
+        Ok(self.alloc(ObjectInit::Closure { site, captures })?)
     }
 
     /// `read`: reads through the handle in `handle` with the request in
@@ -494,20 +511,8 @@ impl KernelMachine {
         exe: &Executable,
         local: LocalRef,
     ) -> Eval<Value> {
-        if let Some(SlotState::Value(value)) = self
-            .tasks
-            .get(task.0 as usize)
-            .and_then(|task| task.frames.last())
-            .map(|frame| &frame.slots[local.at as usize])
-        {
-            return Ok(value.clone());
-        }
         self.read_other_local(task, exe, local)
     }
-
-    /// The rest of [`Self::read_local`]: a variable a closure shares, and
-    /// one that is not bound. Apart, so that reading a local stays small.
-    #[inline(never)]
     pub(super) fn read_other_local(
         &mut self,
         task: TaskId,
@@ -515,21 +520,13 @@ impl KernelMachine {
         local: LocalRef,
     ) -> Eval<Value> {
         let frame = self.frame(task)?;
-        match &frame.slots[local.at as usize] {
-            SlotState::Value(value) => Ok(value.clone()),
-            SlotState::Cell(cell) => {
-                let cell = *cell;
-                match self.heap.variable(cell) {
-                    Some(value) => Ok(value.clone()),
-                    None => Err(fault("a shared variable has no cell").into()),
-                }
-            }
-            SlotState::Empty => unbound(&exe.code(frame.code).slots[local.slot as usize].name),
+        let code = frame.code;
+        match frame.slot(local.at)? {
+            SlotState::Value(value) => Ok(value),
+            SlotState::Cell(cell) => Ok(self.heap.variable_get(cell)?),
+            SlotState::Empty => unbound(&exe.code(code).slots[local.slot as usize].name),
         }
     }
-
-    /// Assigns a variable of the running frame (`K-FORM-005`): its bytes
-    /// are reserved first.
     fn write_local(
         &mut self,
         task: TaskId,
@@ -537,19 +534,16 @@ impl KernelMachine {
         local: LocalRef,
         value: Value,
     ) -> Eval<()> {
-        self.reserve(value_bytes(&value))?;
         let frame = self.frame(task)?;
-        match &mut frame.slots[local.at as usize] {
-            SlotState::Value(held) => *held = value,
+        let code = frame.code;
+        match frame.slot(local.at)? {
+            SlotState::Value(_) => {
+                frame.set_slot(local.at, SlotState::Value(value))?;
+            }
             SlotState::Cell(cell) => {
-                let cell = *cell;
-                if let Some(Obj::Variable(held)) = self.heap.get_mut(cell) {
-                    *held = value;
-                }
+                self.heap.variable_write(cell, value)?;
             }
-            SlotState::Empty => {
-                return unbound(&exe.code(frame.code).slots[local.slot as usize].name);
-            }
+            SlotState::Empty => return unbound(&exe.code(code).slots[local.slot as usize].name),
         }
         Ok(())
     }

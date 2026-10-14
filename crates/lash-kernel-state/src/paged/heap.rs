@@ -23,10 +23,10 @@
 
 use std::ops::Range;
 
-pub use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, LogicalBytes, NativeHeap, PageRef, TextRef, TupleRef, Value,
 };
+pub use lash_kernel_doc::heap::{FieldName, NormalKey};
 use lash_kernel_doc::{Name, Site};
 
 use super::census::TransientRoots;
@@ -68,13 +68,6 @@ pub enum ObjectInit {
 pub struct ClosureView {
     pub site: Site,
     pub captures: Vec<(Name, EntityId)>,
-}
-
-/// A record field name: a compiled constant or a runtime text.
-#[derive(Clone, Copy, Debug)]
-pub enum FieldName<'a> {
-    Static(&'a str),
-    Text(&'a TextRef),
 }
 
 /// A loop's position in a map or a set: the insertion sequence of the
@@ -142,6 +135,10 @@ pub trait SemanticHeap: NativeHeap {
     fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self
     where
         Self: Sized;
+
+    /// Places resident immutable descendants in bounded payload pages.
+    /// Existing paged descriptors retain their references without reads.
+    fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError>;
 
     fn kind(&self, entity: EntityId) -> Result<Option<ObjectKind>, HeapFault>;
     /// The value that names `entity`, by its kind; `None` for a variable.

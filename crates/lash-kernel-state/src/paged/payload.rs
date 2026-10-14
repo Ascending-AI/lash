@@ -302,17 +302,22 @@ impl NativeHeap for PagedHeap {
         }
         Ok(self.table_get(set, member)?.is_some())
     }
-    fn record_get(&self, record: EntityId, field: &str) -> Result<Option<Value>, HeapFault> {
+    fn record_get(
+        &self,
+        record: EntityId,
+        field: FieldName<'_>,
+    ) -> Result<Option<Value>, HeapFault> {
         if self.kind(record)? != Some(ObjectKind::Record) {
             return Ok(None);
         }
-        self.table_get(
-            record,
-            &Value::Text(TextRef {
+        let text = match field {
+            FieldName::Static(field) => TextRef {
                 summary: text_summary(field),
                 body: Payload::Resident(Arc::from(field)),
-            }),
-        )
+            },
+            FieldName::Text(text) => text.clone(),
+        };
+        self.table_get(record, &Value::Text(text))
     }
     fn visit(
         &self,
@@ -457,7 +462,42 @@ impl NativeHeap for PagedHeap {
                     &mut |bytes| visitor(Chunk::Bytes(bytes)),
                 ),
             },
-            _ => Err(HeapFault::Malformed("expected text or bytes".into())),
+            Value::Int(IntRef::Paged { summary, digits }) => {
+                let len = summary.bits.div_ceil(8);
+                let mut offset = range.start;
+                let mut invalid = false;
+                super::payload::visit(
+                    &self.access,
+                    *digits,
+                    binary_summary(len),
+                    false,
+                    range,
+                    &mut |bytes| {
+                        offset += bytes.len() as u64;
+                        if offset == len {
+                            let expected = ((summary.bits - 1) % 8 + 1) as u32;
+                            if bytes
+                                .last()
+                                .is_none_or(|last| 8 - last.leading_zeros() != expected)
+                            {
+                                invalid = true;
+                                return ControlFlow::Break(());
+                            }
+                        }
+                        visitor(Chunk::Bytes(bytes))
+                    },
+                )?;
+                if invalid {
+                    return Err(HeapFault::Corrupt {
+                        page: digits.id,
+                        reason: "integer summary mismatch".into(),
+                    });
+                }
+                Ok(())
+            }
+            _ => Err(HeapFault::Malformed(
+                "expected text, bytes or paged integer".into(),
+            )),
         }
     }
     fn text_offset(&self, text: &TextRef, index: u64) -> Result<u64, HeapFault> {

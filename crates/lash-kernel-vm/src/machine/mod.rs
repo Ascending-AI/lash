@@ -7,31 +7,38 @@
 
 mod actions;
 mod exec;
+mod frames;
 mod observing;
 mod ops;
 mod parked;
 mod session;
 mod steps;
 mod stream;
+mod tasks;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, DocumentId, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
+    Datum, DocumentId, EntityId, Identity, JoinMode, Name, TaskId, TaskIdentity, Value,
 };
 use lash_kernel_state::{Baseline, ParkedRun, Saved};
 
 use crate::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
 use crate::data::{Raised, copy_out};
-use crate::heap::{Heap, refs, value_bytes};
+use crate::heap::value_bytes;
 use crate::interface::{
     Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, ExportError, Host, ImportError,
     Machine, MachineError, Meters, Outcome, Park, Program, Request, RunError, Start, StartError,
     Step, WaitId,
 };
 use crate::observe::{Event, GuestPhase, Observer};
+use lash_kernel_doc::heap::{ErrorRef, HeapFault, LogicalBytes, PageId, TupleRef};
+use lash_kernel_state::paged::tree::{Access, Tree};
+use lash_kernel_state::paged::{
+    BindingRecord, BoundRecord, FrameRecord, HeapWriteError, PagedHeap, SemanticHeap, TableCursor,
+};
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
@@ -45,6 +52,8 @@ pub(crate) enum Halt {
     Fault(String),
     /// The host failed a read-bound `perform` (`K-EFF-012`).
     Host(crate::interface::HostFault),
+    Heap(HeapFault),
+    Memory,
 }
 
 impl Halt {
@@ -88,7 +97,48 @@ impl From<Raised> for Interrupt {
 }
 
 pub(crate) fn error(kind: &str, message: impl Into<String>) -> Value {
-    Value::Error(Arc::new(ErrorValue::new(kind, message)))
+    Value::Error(Arc::new(ErrorRef::new(kind, &message.into())))
+}
+
+impl From<HeapFault> for Halt {
+    fn from(error: HeapFault) -> Self {
+        Self::Heap(error)
+    }
+}
+impl From<HeapFault> for Interrupt {
+    fn from(error: HeapFault) -> Self {
+        Self::Halt(error.into())
+    }
+}
+impl From<HeapWriteError> for Interrupt {
+    fn from(error: HeapWriteError) -> Self {
+        match error {
+            HeapWriteError::Raised { kind, message } => Self::Raise(error(kind, message)),
+            HeapWriteError::Memory => Self::Halt(Halt::Memory),
+            HeapWriteError::Fault(error) => Self::Halt(Halt::Heap(error)),
+        }
+    }
+}
+impl From<lash_kernel_doc::NativeError> for Interrupt {
+    fn from(error: lash_kernel_doc::NativeError) -> Self {
+        use lash_kernel_doc::NativeError;
+        match error {
+            NativeError::Raised(error) => Self::Raise(Value::Error(error)),
+            NativeError::Memory => Self::Halt(Halt::Memory),
+            NativeError::Heap(error) => Self::Halt(Halt::Heap(error)),
+            NativeError::Guard(error) => Self::Halt(Halt::Fault(format!(
+                "an immutable constructor returned a guard: {error}"
+            ))),
+        }
+    }
+}
+impl From<crate::data::CopyError> for Interrupt {
+    fn from(error: crate::data::CopyError) -> Self {
+        match error {
+            crate::data::CopyError::Raised(error) => error.into(),
+            crate::data::CopyError::Heap(error) => error.into(),
+        }
+    }
 }
 
 fn raise<T>(kind: &'static str, message: impl Into<String>) -> Eval<T> {
@@ -129,16 +179,16 @@ enum SlotState {
     Empty,
     Value(Value),
     /// A variable a closure shares: the heap cell that holds it.
-    Cell(ObjectId),
+    Cell(EntityId),
 }
 
 /// A loop's position in what it iterates (`K-ITER-002`, `K-ITER-003`).
 #[derive(Clone, Debug)]
 enum Cursor {
-    List(ObjectId, usize),
-    Tuple(Arc<[Value]>, usize),
+    List(EntityId, usize),
+    Tuple(TupleRef, usize),
     /// A map or a set, and the sequence number of the entry last visited.
-    Table(ObjectId, Option<u64>),
+    Table(Value, Option<TableCursor>),
 }
 
 #[derive(Clone, Debug)]
@@ -194,7 +244,9 @@ struct Storage {
 #[derive(Debug)]
 struct Frame {
     code: CodeId,
-    slots: Vec<SlotState>,
+    record: FrameRecord,
+    access: Access<'static>,
+    exe: Arc<Executable>,
     control: Vec<Control>,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
@@ -205,30 +257,61 @@ struct Frame {
     inline: bool,
 }
 
+fn binding_key(site: &lash_kernel_doc::Site, name: &Name) -> Vec<u8> {
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
+    let mut out = TokenWriter::new();
+    out.seq(2);
+    site.encode(&mut out);
+    name.encode(&mut out);
+    out.into_bytes()
+}
+
+impl Frame {
+    fn slot(&self, at: u32) -> Result<SlotState, HeapFault> {
+        let code = self.exe.code(self.code);
+        let info = &code.slots[code.slots_by_at[at as usize] as usize];
+        let key = binding_key(&info.declared, &info.name);
+        Ok(match self.record.bindings.get(&key, &self.access)? {
+            None => SlotState::Empty,
+            Some(BindingRecord {
+                value: BoundRecord::Value(value),
+                ..
+            }) => SlotState::Value(value),
+            Some(BindingRecord {
+                value: BoundRecord::Shared(id),
+                ..
+            }) => SlotState::Cell(id),
+        })
+    }
+    fn set_slot(&mut self, at: u32, state: SlotState) -> Result<(), HeapFault> {
+        let code = self.exe.code(self.code);
+        let info = &code.slots[code.slots_by_at[at as usize] as usize];
+        let key = binding_key(&info.declared, &info.name);
+        let value = match state {
+            SlotState::Empty => {
+                self.record.bindings.remove(&key, &self.access)?;
+                return Ok(());
+            }
+            SlotState::Value(value) => BoundRecord::Value(value),
+            SlotState::Cell(id) => BoundRecord::Shared(id),
+        };
+        self.record.bindings.write(
+            key,
+            BindingRecord {
+                name: info.name.clone(),
+                declared: info.declared.clone(),
+                value,
+            },
+            &self.access,
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Wait {
     Request(WaitId),
     Join(TaskId),
     JoinMany(u64),
-}
-
-#[derive(Debug)]
-enum TaskState {
-    /// Running, or in the ready queue.
-    Ready,
-    Waiting(Wait),
-    Ended(Result<Value, Value>),
-}
-
-/// What a task's pending statement resumes with.
-#[derive(Debug)]
-enum Incoming {
-    Value(Value),
-    Raise(Value),
-    /// The outcome of the wait the task was in.
-    Outcome(Box<Answered>),
-    /// The result of this task, which has ended.
-    Join(TaskId),
 }
 
 /// One waiting join in a task's wake queue (`K-TASK-008`).
@@ -238,32 +321,9 @@ enum Joiner {
     List(u64),
 }
 
-/// A wait whose outcome has been delivered and whose task has not yet run
-/// with it.
-#[derive(Debug)]
-struct Answered {
-    wait: WaitId,
-    request: Request,
-    outcome: Outcome,
-}
-
-#[derive(Debug)]
 struct Task {
-    identity: TaskIdentity,
-    frames: Vec<Frame>,
-    state: TaskState,
-    incoming: Option<Incoming>,
-    /// Every join waiting on this task, in join-start order.
-    joiners: Vec<Joiner>,
-    /// A `join` on the handle raised the task's error.
-    observed: bool,
-    /// The task is or was a member of a list `join` that has returned or
-    /// raised (`K-TASK-016`).
-    passed: bool,
-    /// The task ended in an error.
-    failed: bool,
-    /// How many times the task has run each `spawn`, `perform` and `sleep`.
-    occurrences: BTreeMap<StmtId, u64>,
+    record: lash_kernel_state::paged::TaskRecord,
+    frames: frames::Frames,
 }
 
 #[derive(Debug)]
@@ -292,8 +352,11 @@ pub struct KernelMachine {
     document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
-    heap: Heap,
-    tasks: Vec<Task>,
+    heap: PagedHeap,
+    limits: lash_kernel_doc::KernelDataLimits,
+    release: PageId,
+    owner: PageId,
+    tasks: tasks::Tasks,
     ready: VecDeque<TaskId>,
     current: Option<TaskId>,
     joins: BTreeMap<u64, ListJoin>,
@@ -314,7 +377,7 @@ pub struct KernelMachine {
     session_cell: bool,
     /// What the statement being run holds outside any variable.
     pins: Pins,
-    fresh: Vec<ObjectId>,
+    fresh: Vec<EntityId>,
     charging: bool,
     charged: u64,
     /// The cost table of the kernel version the document states.
@@ -406,12 +469,24 @@ impl Roots {
         refs(value, &mut self.seeds);
     }
 
-    fn object(&mut self, object: ObjectId) {
+    fn object(&mut self, object: EntityId) {
         self.seeds.push(Identity::Object(object));
     }
 
     fn task(&mut self, task: TaskId) {
         self.seeds.push(Identity::Task(task));
+    }
+}
+
+impl KernelMachine {
+    fn heap_halt(&self, error: HeapWriteError) -> Halt {
+        match error {
+            HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
+            HeapWriteError::Fault(error) => Halt::Heap(error),
+            HeapWriteError::Raised { kind, message } => {
+                Halt::Fault(format!("an allocation returned {kind}: {message}"))
+            }
+        }
     }
 }
 

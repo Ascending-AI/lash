@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorValue, Measure, ObjectId, TaskId, Value};
+use lash_kernel_doc::{EntityId, Measure, TaskId, Value};
 use lash_kernel_exec::LocalRef;
 
 use super::ops::Reg;
@@ -13,9 +13,12 @@ use super::{
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
-use crate::heap::{Key, Obj, Table, value_bytes};
+use crate::heap::value_bytes;
 use crate::interface::{Bound, Host, Outcome};
 use crate::observe::Event;
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::heap::{HeapFault, IntRef};
+use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit};
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
@@ -25,7 +28,7 @@ pub(super) struct Call<'a> {
     /// How many arguments there are.
     pub(super) count: usize,
     /// The cells of the variables a closure shares, in its code's order.
-    pub(super) captures: &'a [ObjectId],
+    pub(super) captures: &'a [EntityId],
     /// The library function the code is the body of.
     pub(super) library: Option<LibId>,
     /// The call sits inside an expression and runs to its end there.
@@ -47,7 +50,7 @@ impl<'a> Call<'a> {
         }
     }
 
-    pub(super) fn sharing(mut self, captures: &'a [ObjectId]) -> Self {
+    pub(super) fn sharing(mut self, captures: &'a [EntityId]) -> Self {
         self.captures = captures;
         self
     }
@@ -65,6 +68,24 @@ impl<'a> Call<'a> {
     pub(super) fn awaited_by(mut self, stmt: Option<StmtId>) -> Self {
         self.awaited_by = stmt;
         self
+    }
+}
+
+impl KernelMachine {
+    /// Literals remain admitted code data until the operation reads them.
+    /// Long immutable values enter canonical payload pages at that read.
+    pub(super) fn literal(&mut self, literal: &lash_kernel_doc::Literal) -> Eval<Value> {
+        use lash_kernel_doc::Literal;
+        Ok(match literal {
+            Literal::Null => Value::Null,
+            Literal::Absent => Value::Absent,
+            Literal::Bool(value) => Value::Bool(*value),
+            Literal::Float(value) => Value::Float(*value),
+            Literal::Int(value) => Value::Int(self.heap.int(value.clone())?),
+            Literal::Text(value) => Value::Text(self.heap.text(value)?),
+            Literal::Bytes(value) => Value::Bytes(self.heap.bytes(value.as_slice())?),
+            Literal::Function(name) => Value::Function(name.clone()),
+        })
     }
 }
 
@@ -135,7 +156,7 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         if let Some(Control::Block { block, .. }) = frame.control.pop() {
             for at in &exe.block(block).declares {
-                frame.slots[*at as usize] = SlotState::Empty;
+                frame.set_slot(*at, SlotState::Empty)?;
             }
         }
         Ok(())
@@ -296,7 +317,7 @@ impl KernelMachine {
             let evaluates = self.charging && exe.lib(call.lib).native;
             let units = self.in_formula(call.lib, evaluates, |machine| {
                 machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
-            });
+            })?;
             self.charge_call(exe, call.lib, units)?;
         }
         self.observe(Event::Pop { task });
@@ -339,16 +360,16 @@ impl KernelMachine {
         lib: LibId,
         args: &[Value],
         result: Option<&Value>,
-    ) -> u64 {
+    ) -> Result<u64, Halt> {
         // Inside the body of a function with a native implementation
         // nothing is charged (`K-CHG-007`), so the formula, whose deep sizes
         // walk whole graphs, is not evaluated.
         if !self.charging {
-            return 0;
+            return Ok(0);
         }
         let function = exe.lib(lib);
         if !function.native {
-            return 0;
+            return Ok(0);
         }
         self.formula(&function.charge, args, result)
     }
@@ -367,37 +388,54 @@ impl KernelMachine {
     /// Keeps an ended frame's vectors for the next frame.
     fn recycle(&mut self, frame: Frame) {
         let Frame {
-            mut slots,
             mut control,
             library,
             ..
         } = frame;
-        slots.clear();
         control.clear();
         let mut args = library.map(|call| call.args).unwrap_or_default();
         args.clear();
         self.storage.frames.push(FrameStorage {
-            slots,
+            slots: Vec::new(),
             control,
             args,
         });
     }
 
-    pub(super) fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> u64 {
-        plan.evaluate(|source, measure| {
+    pub(super) fn formula(
+        &self,
+        plan: &Plan,
+        args: &[Value],
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        let mut fault = None;
+        let units = plan.evaluate(|source, measure| {
+            // Formula arithmetic is pure; after the first failed measurement
+            // no subsequent measurement may read the heap.
+            if fault.is_some() {
+                return 0;
+            }
             let value = match source {
                 Source::Arg(index) => args.get(index),
                 Source::Result => result,
                 Source::Nothing => None,
             };
-            match (value, measure) {
-                (None, _) => 0,
+            let amount = match (value, measure) {
+                (None, _) => Ok(0),
                 (Some(value), Measure::Size) => size(&self.heap, value),
                 (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
                 (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
-                (Some(value), Measure::Magnitude) => magnitude(value),
+                (Some(value), Measure::Magnitude) => Ok(magnitude(value)),
+            };
+            match amount {
+                Ok(units) => units,
+                Err(error) => {
+                    fault = Some(error);
+                    0
+                }
             }
-        })
+        });
+        fault.map_or(Ok(units), |error| Err(Halt::Heap(error)))
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
@@ -437,23 +475,22 @@ impl KernelMachine {
         }
         self.reserve(super::FRAME_BYTES.saturating_add(code.slots.len() as u64 * 8))?;
         let FrameStorage {
-            mut slots,
             mut control,
             mut args,
+            ..
         } = self.storage.frames.pop().unwrap_or_default();
-        slots.resize(code.slots.len(), SlotState::Empty);
         control.push(Control::Block {
             block: code.body,
             next: 0,
         });
         let mut frame = Frame {
             code: code_id,
-            slots,
+            record: FrameRecord::fresh(code.site.child(0)),
+            access: self.heap.access.clone(),
+            exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
             library: library.map(|lib| {
-                // Only a native implementation's formula, charged when the
-                // call ends, reads them (`K-CHG-007`).
                 if exe.lib(lib).native {
                     args.extend_from_slice(&self.regs[base..base + given]);
                 }
@@ -462,7 +499,7 @@ impl KernelMachine {
             inline,
         };
         for (capture, cell) in code.captures.iter().zip(captures) {
-            frame.slots[capture.inner_at as usize] = SlotState::Cell(*cell);
+            frame.set_slot(capture.inner_at, SlotState::Cell(*cell))?;
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);
@@ -492,12 +529,12 @@ impl KernelMachine {
         value: Value,
     ) -> Result<(), Halt> {
         let state = if shared {
-            SlotState::Cell(self.alloc(Obj::Variable(value))?)
+            SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {
             self.reserve(value_bytes(&value))?;
             SlotState::Value(value)
         };
-        self.frame(task)?.slots[at as usize] = state;
+        self.frame(task)?.set_slot(at, state)?;
         Ok(())
     }
 
@@ -523,7 +560,7 @@ impl KernelMachine {
     /// Copies a value out of the run, charging its deep size
     /// (`K-EFF-002`, `K-CHG-002`).
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        self.charge(deep_size(&self.heap, value))?;
+        self.charge(deep_size(&self.heap, value)?)?;
         Ok(copy_out(&self.heap, value)?)
     }
 
@@ -596,7 +633,7 @@ impl KernelMachine {
         ty: &lash_kernel_doc::Type,
     ) -> Eval<Value> {
         let decoder = Decoder {
-            max_depth: self.heap.value_depth,
+            max_depth: self.limits.value_depth(),
             policy: self.program.document.manifest.numbers,
             declared: &|name| exe.declared.contains_key(name),
         };
@@ -609,8 +646,10 @@ impl KernelMachine {
                 );
             }
         };
-        let value = self.materialise(&decoded)?;
-        self.charge(deep_size(&self.heap, &value))?;
+        let frozen = self.heap.freeze_datum(&decoded)?;
+        let charge = self.heap.frozen_charge(&frozen)?;
+        let value = self.heap.instantiate(&frozen)?;
+        self.charge(charge)?;
         Ok(value)
     }
 
@@ -633,80 +672,5 @@ impl KernelMachine {
             Ran::Done => Ok(id),
             _ => Err(fault("an action's statement did not complete").into()),
         }
-    }
-
-    /// Builds a decoded datum as a fresh graph (`K-EFF-003`).
-    pub(super) fn materialise(&mut self, datum: &Datum) -> Eval<Value> {
-        let invalid = || -> Halt { fault("a decoded datum holds an undecoded number") };
-        Ok(match datum {
-            Datum::Null => Value::Null,
-            Datum::Absent => Value::Absent,
-            Datum::Bool(flag) => Value::Bool(*flag),
-            Datum::Int(integer) => Value::Int(integer.clone()),
-            Datum::Float(float) => Value::Float(*float),
-            Datum::Number(_) => return Err(invalid().into()),
-            Datum::Text(text) => Value::text(text.as_str()),
-            Datum::Bytes(bytes) => Value::Bytes(bytes.clone()),
-            Datum::Timestamp(timestamp) => Value::Timestamp(timestamp.clone()),
-            Datum::Function(name) => Value::Function(name.clone()),
-            Datum::Handle(handle) => Value::Handle(Arc::new(handle.clone())),
-            Datum::Error(error) => Value::Error(Arc::new(ErrorValue {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self.materialise(&error.data)?,
-            })),
-            Datum::Tuple(items) => {
-                let tuple = Value::Tuple(self.materialise_all(items)?.into());
-                self.pin_value(&tuple)?;
-                tuple
-            }
-            Datum::List(items) => {
-                let items = self.materialise_all(items)?;
-                Value::List(self.alloc(Obj::List(items))?)
-            }
-            Datum::Set(items) => {
-                let mut table = Table::default();
-                for member in self.materialise_all(items)? {
-                    table.insert(result_key(&member)?, member, Value::Null);
-                }
-                Value::Set(self.alloc(Obj::Set(table))?)
-            }
-            Datum::Map(entries) => {
-                let mut table = Table::default();
-                for (entry_key, value) in entries {
-                    let entry_key = self.materialise(entry_key)?;
-                    let value = self.materialise(value)?;
-                    table.insert(result_key(&entry_key)?, entry_key, value);
-                }
-                Value::Map(self.alloc(Obj::Map(table))?)
-            }
-            Datum::Record(fields) => {
-                let mut record: Vec<(String, Value)> = Vec::with_capacity(fields.len());
-                for (name, value) in fields {
-                    let value = self.materialise(value)?;
-                    match record.iter_mut().find(|(field, _)| field == name) {
-                        Some(field) => field.1 = value,
-                        None => record.push((name.clone(), value)),
-                    }
-                }
-                Value::Record(self.alloc(Obj::Record(record))?)
-            }
-        })
-    }
-
-    fn materialise_all(&mut self, items: &[Datum]) -> Eval<Vec<Value>> {
-        items.iter().map(|item| self.materialise(item)).collect()
-    }
-}
-
-/// The key a decoded member is; a result whose key is not a legal key
-/// does not fit (`K-EFF-007`).
-fn result_key(value: &Value) -> Eval<Key> {
-    match Key::of(value) {
-        Some(key) => Ok(key),
-        None => raise(
-            "effect_result",
-            "the result has a key that is not a legal key",
-        ),
     }
 }

@@ -56,6 +56,8 @@ use lash_kernel_doc::{
 /// saved. Replacing the document or library requires a fresh admission.
 #[derive(Clone, Debug)]
 pub struct Program {
+    /// The exact helper release selected by composition.
+    pub release: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
 }

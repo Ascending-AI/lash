@@ -5,9 +5,10 @@
 //! arithmetic and JavaScript coercion live in the dialect's kernel helpers.
 mod calendar;
 
+use lash_kernel_doc::heap::{ErrorRef, FieldName, Payload};
 use lash_kernel_doc::{
-    ErrorValue, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError,
-    NativeFunction, Object, RegistryError, Timestamp, Value, parse_definition,
+    Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction, Object,
+    RegistryError, Timestamp, Value, parse_definition,
 };
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
@@ -69,17 +70,22 @@ enum Op {
     Format,
 }
 fn raise(kind: &str, message: &str) -> NativeError {
-    NativeError::Raised(ErrorValue::new(kind, message))
+    NativeError::Raised(Arc::new(ErrorRef::new(kind, message)))
 }
 fn milliseconds(value: &Value, call: &NativeCall<'_>) -> Result<f64, NativeError> {
     match value {
         Value::Timestamp(time) => (&*time.nanoseconds.as_bigint() / 1_000_000_i64)
             .to_f64()
             .ok_or_else(|| raise("RangeError", "Timestamp out of range")),
-        Value::Record(id)
-            if call.heap.record_get(*id, "brand") == Some(Value::text("date.invalid")) =>
-        {
-            Ok(f64::NAN)
+        Value::Record(id) => {
+            let brand = call.heap.record_get(*id, FieldName::Static("brand"))?;
+            if let Some(brand) = brand
+                && call.heap.equal(&brand, &Value::text("date.invalid"))?
+            {
+                Ok(f64::NAN)
+            } else {
+                Err(raise("type_error", "Date receiver required"))
+            }
         }
         _ => Err(raise("type_error", "Date receiver required")),
     }
@@ -100,7 +106,7 @@ impl NativeFunction for Op {
                     return call
                         .heap
                         .allocate(Object::Record(vec![(
-                            "brand".into(),
+                            text_name("brand"),
                             Value::text("date.invalid"),
                         )]))
                         .map(Value::Record);
@@ -116,7 +122,11 @@ impl NativeFunction for Op {
                 let Value::Text(source) = first else {
                     return Err(raise("type_error", "Expected text"));
                 };
-                match calendar::parse_iso_date(source) {
+                let source = match &source.body {
+                    Payload::Resident(text) => text.clone(),
+                    Payload::Paged(_) => call.heap.materialize_text(source)?,
+                };
+                match calendar::parse_iso_date(&source) {
                     Ok(time) => Ok(Value::Float(Float::new(time))),
                     Err(calendar::IsoDateError::Invalid) => Ok(Value::Float(Float::new(f64::NAN))),
                     Err(calendar::IsoDateError::NonIso) => Err(raise(
@@ -130,6 +140,10 @@ impl NativeFunction for Op {
                 let Some(Value::Text(format)) = call.args.get(1) else {
                     return Err(raise("type_error", "Expected format"));
                 };
+                let format = match &format.body {
+                    Payload::Resident(text) => text.clone(),
+                    Payload::Paged(_) => call.heap.materialize_text(format)?,
+                };
                 let text = match format.as_ref() {
                     "iso" => calendar::to_iso_string(time)
                         .ok_or_else(|| raise("RangeError", "Invalid time value"))?,
@@ -137,8 +151,15 @@ impl NativeFunction for Op {
                     "string" => calendar::date_to_string(time),
                     _ => return Err(raise("type_error", "Unknown date format")),
                 };
-                Ok(Value::text(text))
+                Ok(Value::Text(call.heap.text(&text)?))
             }
         }
     }
+}
+
+fn text_name(name: &str) -> lash_kernel_doc::heap::TextRef {
+    let Value::Text(name) = Value::text(name) else {
+        unreachable!()
+    };
+    name
 }

@@ -3,7 +3,7 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId};
+use lash_kernel_doc::{DocumentId, JoinMode, Name, Site, TaskId};
 
 macro_rules! record {
     ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
@@ -267,6 +267,10 @@ impl TokenCodec for IncomingRecord {
                 out.sum(2, 1);
                 value.encode(out);
             }
+            Self::Outcome(wait) => {
+                out.sum(3, 1);
+                wait.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -283,6 +287,10 @@ impl TokenCodec for IncomingRecord {
             2 => {
                 TokenReader::expect_fields(fields, 1)?;
                 Self::Joined(<TaskId>::decode(input)?)
+            }
+            3 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Self::Outcome(crate::WaitId::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
@@ -358,19 +366,21 @@ record!(FinallyRecord {
 units!(EnteredRecord { Normal = 0, Throw = 1, Return = 2, Break = 3, Continue = 4 });
 
 record!(WaitRecord {
-    wait: u64,
     task: TaskId,
-    identity: EffectIdentity,
     kind: WaitKindRecord,
-    state: WaitStateRecord
+    phase: WaitPhase
 });
 units!(WaitKindRecord { Effect = 0, Sleep = 1 });
-impl TokenCodec for WaitStateRecord {
+impl TokenCodec for WaitPhase {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Admitted => out.sum(0, 0),
+            Self::Issued { request } => {
+                out.sum(0, 1);
+                request.encode(out);
+            }
+            Self::Admitted => out.sum(1, 0),
             Self::Committed(value) => {
-                out.sum(1, 1);
+                out.sum(2, 1);
                 value.encode(out);
             }
         }
@@ -379,10 +389,16 @@ impl TokenCodec for WaitStateRecord {
         let (tag, fields) = input.sum()?;
         Ok(match tag {
             0 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Self::Issued {
+                    request: FrozenRef::decode(input)?,
+                }
+            }
+            1 => {
                 TokenReader::expect_fields(fields, 0)?;
                 Self::Admitted
             }
-            1 => {
+            2 => {
                 TokenReader::expect_fields(fields, 1)?;
                 Self::Committed(<CommittedOutcomeRecord>::decode(input)?)
             }

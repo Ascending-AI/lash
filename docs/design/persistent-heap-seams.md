@@ -913,3 +913,51 @@ deleted. Insertion-sequence entries retain the first guest spelling.
 hp-life completes the lifecycle implementation; hp-heap merges its final head
 and owns the running-Machine adopt, carry and frozen outcome/argument delivery
 call sites. The deleted rename/reach/copy session paths are not rebuilt.
+
+### S1 (amended): descriptor field names
+
+`FieldName<'a> { Static(&'a str), Text(&'a TextRef) }` belongs to `doc::heap`, with
+state re-exporting it. `NativeHeap::record_get` takes this selector. Both forms
+use the same normalization and index; a dynamic field lookup materializes no
+text and reserves no guest memory. Moving an existing declaration onto the
+native/doc seam with its existing algorithm for this purpose is pre-approved.
+
+S4 amendment (hp-heap, approved 328942): `Program.release: PageId` holds the
+release selected by composition; the prepared library has no release identity.
+`CellStart.owner: PageId` holds the activation owner supplied by composition.
+Opening a checkpoint retains its admitted release and owner; sealing copies both
+exact identities into the next checkpoint without inference or placeholders.
+
+S1 amendment (hp-heap, approved 329218): `NativeHeap.payload_visit` also reads
+canonical little-endian magnitude bytes of paged integers, preserving the sign
+in the descriptor and validating the high digit against its bit summary.
+Outbound Datum copy-out uses read-only payload traversal and creates no guest
+reservation (`K-EFF-002`). Native foreign codecs retain explicit materializers.
+
+S4/S7 amendment (hp-heap, approved 329341): `FrameRecord.iterated` is a
+`Tree<IteratedRecord>`. This role wrapper uses the canonical Value codec and
+retains normal identity/task edges. It charges only tuple members for tuple
+cursors and zero for list/map/set identity cursors, preserving K-BND-003's
+existing iterator holding metric without a tuple/identity Value header.
+
+S4 amendment (hp-heap, approved 329496, correcting 329476): `WaitRecord`
+is keyed by wait id and holds `task: TaskId`, `kind: WaitKindRecord`, and
+`phase: WaitPhase`. `WaitPhase` is `Issued { request: FrozenRef }`, `Admitted`,
+or `Committed(CommittedOutcomeRecord)`. Issuing freezes the request once without
+guest entities; seal preserves it without dispatch or admission. Reporting and
+admission are one fused park commit. Delivered frozen outcomes remain committed
+until semantic resume removes the wait. The redundant wait id, identity, and
+`WaitStateRecord` declaration/grammar are deleted; admitted requests remain in
+the external committed admission record. Other transitions are corrupt records.
+
+S4 companion amendment (hp-heap, approved 329563): `IncomingRecord::Outcome(WaitId)`
+names a wait in `WaitPhase::Committed`. Opening a resuming task requires that wait
+and phase; other states or a missing wait are corrupt records. Instantiating and
+installing an outcome and removing its wait are one edit before any seal.
+
+S1 relocation (hp-heap, approved 329783): `SemanticHeap.canonical_value(Value)`
+returns a bounded descriptor through the existing immutable constructor algorithm.
+It creates no entity or holding-cost change; checked publication still owns that
+accounting. Existing paged immutable descendants are retained without reads or
+resealing, including ErrorRef.data. Frame and session bindings call this before
+publishing a resident native-created value.

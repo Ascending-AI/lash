@@ -277,23 +277,17 @@ fn every_record_round_trips_canonically() {
     round(&JoinerRecord::Single(TaskId(7)));
     round(&JoinerRecord::List(8));
     for kind in [WaitKindRecord::Effect, WaitKindRecord::Sleep] {
-        for state in [
-            WaitStateRecord::Admitted,
-            WaitStateRecord::Committed(CommittedOutcomeRecord::Completed(frozen)),
-            WaitStateRecord::Committed(CommittedOutcomeRecord::Failed(frozen)),
-            WaitStateRecord::Committed(CommittedOutcomeRecord::Elapsed),
+        for phase in [
+            WaitPhase::Issued { request: frozen },
+            WaitPhase::Admitted,
+            WaitPhase::Committed(CommittedOutcomeRecord::Completed(frozen)),
+            WaitPhase::Committed(CommittedOutcomeRecord::Failed(frozen)),
+            WaitPhase::Committed(CommittedOutcomeRecord::Elapsed),
         ] {
             round(&WaitRecord {
-                wait: 5,
                 task: TaskId(1),
-                identity: EffectIdentity {
-                    task: TaskIdentity::Main,
-                    site: site.clone(),
-                    occurrence: 3,
-                    loops: vec![],
-                },
                 kind,
-                state,
+                phase,
             });
         }
     }

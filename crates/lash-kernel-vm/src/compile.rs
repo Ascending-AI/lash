@@ -540,6 +540,7 @@ pub(crate) struct Code {
     pub(crate) slots: Vec<SlotInfo>,
     /// Where each slot sits in a frame.
     pub(crate) positions: Vec<u32>,
+    pub(crate) slots_by_at: Vec<u32>,
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
     /// Whether the code's forms are charged: those of the body of a library
@@ -613,7 +614,7 @@ pub(crate) enum Var {
 #[derive(Default)]
 pub(crate) struct Stream {
     pub(crate) ops: Vec<Op>,
-    pub(crate) consts: Vec<Value>,
+    pub(crate) consts: Vec<doc::Literal>,
     pub(crate) names: Vec<Name>,
     pub(crate) fields: Vec<String>,
     pub(crate) field_lists: Vec<Box<[String]>>,
@@ -727,7 +728,7 @@ pub(crate) enum Callee {
 
 pub(crate) enum Atom {
     Var(Var),
-    Literal(Value),
+    Literal(doc::Literal),
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
@@ -1085,12 +1086,17 @@ impl Compiler<'_> {
         if moved || scopes.slots.iter().any(|slot| slot.shared) {
             self.place(body, &placer);
         }
+        let mut slots_by_at = vec![0; positions.len()];
+        for (slot, at) in positions.iter().enumerate() {
+            slots_by_at[*at as usize] = slot as u32;
+        }
         Code {
             site,
             params,
             body,
             slots: scopes.slots,
             positions,
+            slots_by_at,
             captures,
             charged,
         }
@@ -1370,18 +1376,5 @@ impl Placer<'_> {
                 self.var(var);
             }
         }
-    }
-}
-
-fn literal_value(literal: &doc::Literal) -> Value {
-    match literal {
-        doc::Literal::Null => Value::Null,
-        doc::Literal::Absent => Value::Absent,
-        doc::Literal::Bool(flag) => Value::Bool(*flag),
-        doc::Literal::Int(integer) => Value::Int(integer.clone()),
-        doc::Literal::Float(float) => Value::Float(*float),
-        doc::Literal::Text(text) => Value::text(text.as_str()),
-        doc::Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
-        doc::Literal::Function(name) => Value::Function(name.clone()),
     }
 }
