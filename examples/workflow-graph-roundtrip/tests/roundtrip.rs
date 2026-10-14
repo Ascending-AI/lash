@@ -266,3 +266,62 @@ async fn each_edit_response_maps_its_immediate_base() {
         previous = response["workflow"].clone();
     }
 }
+
+/// Named entry inputs are sent to the canonical process launch; the settled
+/// result and tool call evidence must agree with that exact invocation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn named_inputs_reach_effects_and_the_final_workflow_output() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let workflow = answer(
+        client
+            .post(format!("{base}/workflow/select"))
+            .json(&json!({"id":"deep-research"}))
+            .send()
+            .await
+            .expect("select"),
+    )
+    .await;
+    assert_eq!(workflow["dataflow"]["bindings"][0]["type"], "text");
+    assert!(workflow["dataflow"]["returns"][0]["type"]["record"].is_object());
+    let refused = client
+        .post(format!("{base}/run"))
+        .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
+        .send()
+        .await
+        .expect("stale request");
+    assert_eq!(refused.status(), reqwest::StatusCode::CONFLICT);
+    let response = client
+        .post(format!("{base}/run"))
+        .json(&json!({"version":workflow["version"],"inputs":{"topic":"Typed dataflow research"}}))
+        .send()
+        .await
+        .expect("run");
+    assert!(response.status().is_success());
+    let body = response.text().await.expect("SSE body");
+    assert!(!body.contains("event: run_error"), "{body}");
+    let events: Vec<RunEvent> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|json| serde_json::from_str(json).expect("run event"))
+        .collect();
+    let last = events.last().expect("terminal event");
+    assert_eq!(last.status, RunStatus::Succeeded);
+    assert_eq!(
+        last.output.as_ref().expect("returned report")["title"],
+        "Typed dataflow research"
+    );
+    assert!(
+        events
+            .iter()
+            .filter_map(|event| event.call.as_ref())
+            .any(|call| call.input["topic"] == "Typed dataflow research")
+    );
+    assert_eq!(
+        workflow["dataflow"]["parameters"]
+            .as_array()
+            .expect("parameters")
+            .len(),
+        1
+    );
+}

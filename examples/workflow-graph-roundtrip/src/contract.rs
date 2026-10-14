@@ -35,6 +35,7 @@ pub struct WorkflowView {
     pub statements: Vec<StatementView>,
     /// Canonical blocks the host can explicitly select, including empty bodies.
     pub scopes: Vec<ScopeView>,
+    pub dataflow: crate::dataflow::Dataflow,
     /// The sites of the document a run can report an occurrence at.
     pub execution_sites: Vec<ExecutionSiteView>,
     /// The document as the TypeScript printer spells it: a read-only lens.
@@ -183,6 +184,8 @@ pub struct RunEvent {
     pub call_id: Option<lash::ToolCallId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<CallData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -245,4 +248,12 @@ impl ErrorResponse {
     pub(crate) fn invalid(code: &str, message: impl std::fmt::Display) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, Value::Null)
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunRequest {
+    pub version: Option<u64>,
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, Value>,
 }

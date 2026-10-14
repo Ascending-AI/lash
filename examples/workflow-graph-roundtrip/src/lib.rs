@@ -9,6 +9,7 @@ use lash::sync::MutexExt;
 pub mod authoring_prototype;
 mod catalog;
 mod contract;
+pub mod dataflow;
 mod display;
 mod prototype_host;
 mod runtime;
@@ -123,6 +124,10 @@ impl SavedWorkflow {
             scopes: derived
                 .as_ref()
                 .map(|view| scopes(view.graph(), &self.entry))
+                .unwrap_or_default(),
+            dataflow: derived
+                .as_ref()
+                .map(|view| dataflow::project(&document, view.graph(), &self.entry))
                 .unwrap_or_default(),
             execution_sites,
             source,
@@ -473,7 +478,14 @@ pub async fn serve_addr(addr: SocketAddr, state: AppState) -> std::io::Result<()
 )]
 async fn run_workflow(
     State(state): State<AppState>,
+    body: axum::body::Bytes,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ErrorResponse> {
+    let request: contract::RunRequest = if body.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|error| ErrorResponse::invalid("invalid_run_request", error))?
+    };
     let (tx, rx) = mpsc::channel::<Result<RunEvent, runtime::RunError>>(64);
     let key = uuid::Uuid::new_v4().to_string();
     let (version, started) = {
@@ -483,7 +495,15 @@ async fn run_workflow(
             .published
             .as_ref()
             .map_err(|refusal| ErrorResponse::invalid("run_preparation", refusal))?;
-        let started = state.commands.start(published.start_request(&key)).await;
+        if let Some(version) = request.version
+            && version != saved.version
+        {
+            return Err(ErrorResponse::version_conflict(version, saved.version));
+        }
+        let started = state
+            .commands
+            .start(published.start_request(&key, request.inputs))
+            .await;
         (saved.version, started)
     };
     let started = started.map_err(|error| ErrorResponse::invalid("run_preparation", error))?;

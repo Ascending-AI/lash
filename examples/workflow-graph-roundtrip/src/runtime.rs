@@ -62,11 +62,15 @@ pub(crate) struct Published {
 }
 
 impl Published {
-    pub(crate) fn start_request(&self, key: &str) -> ProcessStartRequest {
+    pub(crate) fn start_request(
+        &self,
+        key: &str,
+        inputs: serde_json::Map<String, serde_json::Value>,
+    ) -> ProcessStartRequest {
         ProcessStartRequest::definition(
             self.definition.id.clone(),
             Some(self.definition.signature.clone()),
-            Default::default(),
+            inputs,
             self.launch.clone(),
             ProcessOriginator::host(),
             Lifetime::Detached,
@@ -342,6 +346,7 @@ impl Overlay {
             approval_key: None,
             call_id: None,
             call: None,
+            output: None,
         }
     }
 
@@ -413,12 +418,16 @@ impl Overlay {
                 }
                 events.extend(self.changed());
                 events.extend(self.deliver_display()?);
-                events.push(self.event(
+                let mut event = self.event(
                     None,
                     status,
                     DisplayDelta::default(),
                     (status == RunStatus::Failed).then(|| format!("{outcome:?}")),
-                ));
+                );
+                if let lash::process::ProcessTerminal::Settled { output } = outcome {
+                    event.output = Some(output.value_for_projection());
+                }
+                events.push(event);
             }
             _ => {}
         }
@@ -529,6 +538,13 @@ impl Overlay {
                         .map(|outcome| format!("{outcome:?}")),
                 ),
             );
+        }
+        if terminal
+            && let Some(lash::process::ProcessTerminal::Settled { output }) =
+                view.process.terminal()
+            && let Some(event) = events.last_mut()
+        {
+            event.output = Some(output.value_for_projection());
         }
         Ok((events, terminal))
     }
