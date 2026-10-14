@@ -203,6 +203,7 @@ mod codemode_inventory {
     use lash::formats::KERNEL_DOCUMENT_SCHEMA_VERSION as _;
     use lash::process::KernelProcessDefinition as _;
     use lash::tools::LlmToolsPluginFactory as _;
+    use lash::vm::DialectRefusal as _;
     use lash::vm::HostBoundary as _;
     use lash::vm::KernelProcessPluginFactory as _;
     use lash::vm::WorkerService as _;
@@ -217,9 +218,9 @@ mod rlm_inventory {
     // The code-mode dialect seam (ADR 0096).
     use lash::rlm::CellDialect as _;
     use lash::rlm::CellTags as _;
+    use lash::rlm::DialectPromptRefusal as _;
     use lash::rlm::DialectPromptVocabulary as _;
     use lash::rlm::DialectPrompts as _;
-    use lash::rlm::DialectRefusal as _;
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::ExtraKeys as _;

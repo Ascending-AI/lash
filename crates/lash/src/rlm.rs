@@ -98,9 +98,9 @@ pub use lash_protocol_rlm::{
 /// [`CellDialect::typescript`] and [`CellDialect::python`] are the shipped
 /// ones.
 pub use lash_protocol_rlm::{
-    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
-    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
-    ResolvedToolBinding, TypescriptPrompts,
+    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts,
+    DialectRefusal as DialectPromptRefusal, DialectRefusalKind, ExecutionSection,
+    ExecutionSectionRequest, PythonPrompts, ResolvedToolBinding, TypescriptPrompts,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`], a durable session extension the
