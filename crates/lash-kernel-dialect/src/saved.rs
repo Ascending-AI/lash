@@ -687,7 +687,7 @@ fn captured_value(
     Ok(None)
 }
 enum Held {
-    Data(FrozenRef, Value),
+    Data(FrozenRef, Box<Value>),
     Helper(EntityId),
 }
 struct Helper {
@@ -781,7 +781,8 @@ impl<'a> Frozen<'a, '_> {
                     ));
                 }
                 None => {
-                    self.bound.insert(free.clone(), Held::Data(frozen, value));
+                    self.bound
+                        .insert(free.clone(), Held::Data(frozen, Box::new(value)));
                 }
             }
         }
@@ -917,12 +918,15 @@ fn reads_name(closure: &lash_kernel_doc::Closure, name: &Name) -> bool {
     reads.block(&closure.body, &mut closure.params.clone());
     reads.free.contains(name)
 }
+/// The qualifying functions and the typed refusals of the other bindings.
+pub type SavedBindings = (BTreeMap<Name, Kept>, BTreeMap<Name, NotSaved>);
+
 /// Qualifies closures against semantic names and freezes their captures once.
 pub fn save(
     heap: &mut PagedHeap,
     left: Left<'_>,
     held: &BTreeSet<Name>,
-) -> Result<(BTreeMap<Name, Kept>, BTreeMap<Name, NotSaved>), HeapFault> {
+) -> Result<SavedBindings, HeapFault> {
     let mut named = BTreeMap::new();
     for (name, value) in left.bindings {
         if let Some(id) = closure_held(heap, value, left.values.tag())? {
@@ -1142,7 +1146,7 @@ pub fn closure_of<'a>(
         .map(|n| (n.clone(), n.clone()))
         .collect::<Vec<_>>();
     while let Some((by, name)) = pending.pop() {
-        let function = functions.get(&name).ok_or_else(|| Unusable::Missing {
+        let function = functions.get(&name).ok_or(Unusable::Missing {
             function: by,
             needs: name,
         })?;

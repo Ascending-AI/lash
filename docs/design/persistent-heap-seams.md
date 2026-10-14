@@ -333,6 +333,13 @@ Laws:
   - `every_charge_is_the_same_on_the_paged_heap`, the KIR charge-bound
     differential re-run under even, odd and body layouts
 
+- **Ownership amended (2026-10-14, owner message 328022).** hp-heap owns
+  the running Machine's CellStart `adopt`, terminal `carry`, and frozen
+  outcome `freeze_datum`/`frozen_charge`/`instantiate` call sites alongside
+  its running-Machine rewrite. hp-life completes S8 lifecycle, frozen
+  saved functions and their layer laws; no VM callsite handoff is needed.
+  The integrator owns prepared saved-capture loading and composed reproof.
+
 ### S2 Identities
 
 Declaration: `crates/lash-kernel-doc/src/heap.rs`, with `FamilyId`,

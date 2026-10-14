@@ -9,6 +9,23 @@ use lash_kernel_state::paged::{PageSource, SessionRoot};
 use std::sync::Arc;
 
 mod graph;
+/// A descriptor refused before any session root is adopted.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SessionOpenError {
+    #[error("the session dialect is {found}, expected {expected}")]
+    Dialect { expected: String, found: String },
+    #[error("the session number policy is {found:?}, expected {expected:?}")]
+    Numbers {
+        expected: NumberPolicy,
+        found: NumberPolicy,
+    },
+    #[error("the session kernel is {found}, expected {expected}")]
+    Kernel { expected: u32, found: u32 },
+    #[error(transparent)]
+    Heap(#[from] HeapFault),
+}
+
 /// The reserved history projection binding.
 pub(crate) const HISTORY_BINDING: &str = "history";
 
@@ -52,15 +69,25 @@ impl CodeModeExecutionState {
         dialect: &str,
         numbers: NumberPolicy,
         source: &mut dyn PageSource,
-    ) -> Result<Self, HeapFault> {
+    ) -> Result<Self, SessionOpenError> {
         let descriptor = graph::read(source, page)?;
-        if descriptor.dialect != dialect
-            || descriptor.numbers != numbers
-            || descriptor.kernel != KERNEL_VERSION
-        {
-            return Err(HeapFault::Malformed(
-                "session dialect, number policy or kernel mismatch".into(),
-            ));
+        if descriptor.dialect != dialect {
+            return Err(SessionOpenError::Dialect {
+                expected: dialect.into(),
+                found: descriptor.dialect,
+            });
+        }
+        if descriptor.numbers != numbers {
+            return Err(SessionOpenError::Numbers {
+                expected: numbers,
+                found: descriptor.numbers,
+            });
+        }
+        if descriptor.kernel != KERNEL_VERSION {
+            return Err(SessionOpenError::Kernel {
+                expected: KERNEL_VERSION,
+                found: descriptor.kernel,
+            });
         }
         Ok(Self {
             dialect: descriptor.dialect.into(),
