@@ -37,6 +37,20 @@ pub(crate) const DEFAULT_WORKFLOW: &str = "onboarding";
 
 const BUILT_IN_WORKFLOWS: &[BuiltInWorkflow] = &[
     BuiltInWorkflow {
+        id: "deep-research",
+        name: "Deep research brief",
+        description: "Search mocked sources, map their evidence into a cited research brief, and display the result.",
+        entry: "deep_research",
+        text: documents::DEEP_RESEARCH,
+    },
+    BuiltInWorkflow {
+        id: "weekly-kpis",
+        name: "Weekly business KPIs",
+        description: "Fetch two mocked reporting periods, compare revenue and activation metrics, and display the report.",
+        entry: "weekly_kpis",
+        text: documents::WEEKLY_KPIS,
+    },
+    BuiltInWorkflow {
         id: "blank",
         name: "Blank workflow",
         description: "An empty starter you build up with edits.",

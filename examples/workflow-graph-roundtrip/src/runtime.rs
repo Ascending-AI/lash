@@ -6,7 +6,7 @@ use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
 use lash::workflow::document::{Document, Name, Site};
-use lash::workflow::edit::{Correspondence, Draft};
+use lash::workflow::edit::Draft;
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowEnvironment,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
@@ -75,11 +75,9 @@ impl Published {
     }
 }
 
-/// A draft lash admitted: what it published, and where each node of the
-/// draft's base is in the admitted document.
+/// A draft Lash admitted and pinned for execution.
 pub(crate) struct Publication {
     pub(crate) published: Published,
-    pub(crate) correspondence: Correspondence,
 }
 
 /// What this host offers a workflow document: its effects with their
@@ -151,7 +149,6 @@ pub(crate) async fn publish(
                         launch: EngineLaunch::new(env_ref, settings),
                         pin: pin.clone(),
                     },
-                    correspondence: publication.correspondence,
                 })
             }
             WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
@@ -184,7 +181,17 @@ pub(crate) async fn observe(
     let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
-        for event in events {
+        for mut event in events {
+            if let Some(call_id) = &event.call_id {
+                event.call = core
+                    .processes()
+                    .tool_call(&overlay.process, call_id)
+                    .await?
+                    .map(|record| crate::contract::CallData {
+                        input: record.args,
+                        output: record.output.value_for_projection(),
+                    });
+            }
             if sender.send(Ok(event)).await.is_err() {
                 return Ok(());
             }
@@ -333,6 +340,8 @@ impl Overlay {
             display: self.display.clone(),
             error,
             approval_key: None,
+            call_id: None,
+            call: None,
         }
     }
 
@@ -431,12 +440,14 @@ impl Overlay {
                 RunStatus::Failed
             }
         };
-        vec![self.event(
+        let mut event = self.event(
             Some(occurrence.at.site.clone()),
             status,
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
-        )]
+        );
+        event.call_id = occurrence.call_id.clone();
+        vec![event]
     }
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {

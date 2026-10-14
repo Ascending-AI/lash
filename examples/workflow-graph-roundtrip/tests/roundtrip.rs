@@ -233,3 +233,36 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         ["Approved", "Loop item", "Loop item"]
     );
 }
+
+#[tokio::test]
+async fn each_edit_response_maps_its_immediate_base() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let mut previous = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("read"),
+    )
+    .await;
+    for number in 0..2 {
+        let first = &previous["statements"][0];
+        let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
+            "version": previous["version"],
+            "edits": [{"insert_statement": {
+                "at": {"block": first["block"], "before": first["site"]},
+                "statement": {"let": {"name": format!("correspondence_probe_{number}"), "value": {"expr": {"literal": "null"}}}}
+            }}]
+        })).send().await.expect("edit")).await;
+        assert_eq!(
+            response["correspondence"]["base"], previous["identity"],
+            "the response must map from this request's document, not the originally opened document"
+        );
+        assert_eq!(
+            response["correspondence"]["result"],
+            response["workflow"]["identity"]
+        );
+        previous = response["workflow"].clone();
+    }
+}

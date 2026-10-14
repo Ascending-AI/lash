@@ -31,6 +31,7 @@ use lash::workflow::document::{
     Action, Document, FunctionRegistry, Name, Node, Place, Rhs, Site, Stmt, Unit, print_document,
 };
 use lash::workflow::edit::{Draft, Location, Transaction};
+use lash::workflow::graph::{ExprNode, Graph, NodeKind, StmtNode};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -38,9 +39,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse, EnvironmentView,
-    ErrorBody, ErrorDetail, ErrorResponse, ExecutionSiteView, OpenWorkflowRequest, RunEvent,
-    RunStatus, StatementView, WorkflowView,
+    CallData, DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse,
+    EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse, ExecutionSiteView, OpenWorkflowRequest,
+    RunEvent, RunStatus, ScopeView, StatementView, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 
@@ -119,12 +120,41 @@ impl SavedWorkflow {
                 .map(|refusal| refusal.to_string()),
             text: print_document(&document),
             statements: statements(&document, &self.entry),
+            scopes: derived
+                .as_ref()
+                .map(|view| scopes(view.graph(), &self.entry))
+                .unwrap_or_default(),
             execution_sites,
             source,
             source_unavailable,
             document,
         }
     }
+}
+
+fn scopes(graph: &Graph, entry: &Name) -> Vec<ScopeView> {
+    graph
+        .scopes()
+        .iter()
+        .filter_map(|scope| {
+            let block = graph.node(scope.block);
+            if block.site.unit != Unit::Function(entry.clone()) {
+                return None;
+            }
+            let label = match block.parent.map(|id| &graph.node(id).kind) {
+                None => "Entry",
+                Some(NodeKind::Expr(ExprNode::Closure { .. })) => "Function body",
+                Some(NodeKind::Stmt(StmtNode::If { .. })) => "Branch",
+                Some(NodeKind::Stmt(StmtNode::For { .. } | StmtNode::While { .. })) => "Loop body",
+                Some(NodeKind::Stmt(StmtNode::Try { .. })) => "Try block",
+                _ => "Block",
+            };
+            Some(ScopeView {
+                block: block.site.clone(),
+                label: label.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// The statements of entry `entry` in document order, nested blocks after
@@ -419,14 +449,12 @@ async fn edit_workflow(
                 serde_json::json!({ "diagnostics": diagnostics }),
             )
         })?;
-    let (saved, publication) = state.install(draft, current.entry).await;
+    let (saved, _) = state.install(draft, current.entry).await;
     Ok(Json(EditWorkflowResponse {
         workflow: saved.view(environment.functions()),
         // The published document is the draft's, so the transaction's
         // correspondence is also where each node is in the definition.
-        correspondence: publication.map_or(applied.correspondence, |publication| {
-            publication.correspondence
-        }),
+        correspondence: applied.correspondence,
     }))
 }
 

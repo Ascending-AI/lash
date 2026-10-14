@@ -1,7 +1,17 @@
+import {
+  actionOf,
+  recordInput as canonicalRecordInput,
+  literal,
+  conditionValue,
+  project as projectScope,
+  startPosition as scopeStart,
+  appendPosition,
+} from "./authoring-projection.mjs";
 const $ = (id) => document.getElementById(id);
 const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
   templates = [],
+  calls = new Map(),
   selected,
   steps = [],
   plan,
@@ -15,6 +25,8 @@ const presets = {
   "display.set_status": { key: "workflow", value: "Ready" },
   "gmail.list_recent": { count: 3 },
   "web.search": { query: "workflow authoring" },
+  "research.search": { topic: "AI support agents", max_sources: 3 },
+  "metrics.fetch": { workspace: "Acme", period: "current" },
 };
 async function call(path, body) {
   const response = await fetch(
@@ -83,8 +95,10 @@ function show(next, correspondence) {
   $("node-panel").hidden = true;
   $("node-form").replaceChildren();
   const old = selected?.site;
+  const previousScope = activeScope;
   workflow = next;
   statuses = new Map();
+  calls = new Map();
   statementNodes = new Map(
     next.statements.map((item) => [key(item.site), item.statement]),
   );
@@ -108,6 +122,16 @@ function show(next, correspondence) {
   $("direct").value = "[]";
   $("run-status").textContent = "Not started";
   $("run-output").textContent = "Run this revision to see its results.";
+  const mappedScope =
+    previousScope &&
+    correspondence?.entries?.find(
+      (item) => key(item.from) === key(previousScope),
+    )?.to;
+  activeScope =
+    next.scopes.find(
+      (scope) => mappedScope && key(scope.block) === key(mappedScope),
+    )?.block ?? next.scopes[0]?.block;
+  renderScopes();
   renderCanvas();
   renderPlacement();
   renderSelection();
@@ -318,11 +342,13 @@ $("load").onclick = () =>
       throw Error("Apply or clear pending changes before loading an example.");
     const template = templates.find((t) => t.id === $("template").value);
     if (!template) throw Error("Choose an example.");
-    const next = await call("/prototype/source", {
-      version: workflow.version,
-      source: template.source,
-      entry: template.entry,
-    });
+    const next = template.canonical
+      ? await call("/workflow/select", { id: template.id })
+      : await call("/prototype/source", {
+          version: workflow.version,
+          source: template.source,
+          entry: template.entry,
+        });
     selected = undefined;
     show(next);
     plan = undefined;
@@ -344,6 +370,8 @@ async function run() {
   running = true;
   controls();
   statuses = new Map();
+  calls = new Map();
+  if (selected) renderCallData(selected);
   renderCanvas();
   $("run-output").replaceChildren();
   $("run-status").textContent = "Running";
@@ -355,7 +383,30 @@ async function run() {
       return;
     }
     if (event.site) statuses.set(key(event.site), event.status);
-    else {
+    if (event.site && event.callId) {
+      const site = key(event.site);
+      const occurrences = calls.get(site) ?? new Map();
+      occurrences.set(event.callId, event);
+      calls.set(site, occurrences);
+      const node = visualNodes.find(
+        (node) => node.s?.action && key(node.s.action) === site,
+      );
+      if (node) {
+        const button = el(
+          "button",
+          "trace-link",
+          `${node.info.name} · ${event.status} · View data`,
+        );
+        button.onclick = () => {
+          $("execution").close();
+          openNode(node);
+        };
+        $("run-output").append(button);
+      }
+      if (selected?.action && key(selected.action) === site)
+        renderCallData(selected);
+    }
+    if (!event.site) {
       $("run-status").textContent = event.status;
       if (event.status === "succeeded" || event.status === "failed")
         sawTerminal = true;
@@ -427,6 +478,7 @@ async function run() {
     output(errorText(error), true);
   } finally {
     running = false;
+    if (selected) renderCallData(selected);
     $("approve").hidden = true;
     controls();
   }
@@ -454,6 +506,30 @@ const icons = {
   ),
 };
 const catalog = {
+  "research.search": {
+    name: "Find sources",
+    app: "Research",
+    icon: "web",
+    fields: [
+      ["topic", "Research topic", "text"],
+      ["max_sources", "Maximum sources", "number", { min: 1, max: 3 }],
+    ],
+  },
+  "research.synthesize": {
+    name: "Write brief",
+    app: "Research",
+    icon: "message",
+  },
+  "metrics.fetch": {
+    name: "Get metrics",
+    app: "Analytics",
+    icon: "status",
+    fields: [
+      ["workspace", "Workspace", "text"],
+      ["period", "Period", "select", { options: ["current", "previous"] }],
+    ],
+  },
+  "metrics.report": { name: "Compare KPIs", app: "Analytics", icon: "branch" },
   "display.show_message": {
     name: "Show message",
     app: "Display",
@@ -490,7 +566,8 @@ let zoom = 1,
   graphWidth = 1200,
   graphHeight = 700,
   visualNodes = [],
-  insertAt;
+  insertAt,
+  activeScope;
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -502,51 +579,22 @@ function icon(name) {
   node.innerHTML = icons[name] ?? icons.message;
   return node;
 }
-function actionOf(s) {
-  const v = s.statement;
-  return v.let?.value?.action ?? v.assign?.value?.action ?? v.do?.action;
-}
-function below(child, parent) {
-  return (
-    JSON.stringify(child.unit) === JSON.stringify(parent.unit) &&
-    (parent.path ?? []).every((n, i) => child.path?.[i] === n) &&
-    (child.path ?? []).length > (parent.path ?? []).length
-  );
-}
 function recordInput(s) {
-  let value = actionOf(s)?.perform?.args?.[0],
-    context = s;
-  const seen = new Set();
-  while (value?.variable && !seen.has(value.variable)) {
-    seen.add(value.variable);
-    const index = workflow.statements.indexOf(context);
-    const binding = workflow.statements
-      .slice(0, index)
-      .reverse()
-      .find(
-        (t) =>
-          t.statement.let?.name === value.variable &&
-          (key(t.block) === key(context.block) || below(context.site, t.block)),
-      );
-    if (!binding) return;
-    context = binding;
-    const source = binding.statement.let.value;
-    if (source.expr?.record)
-      return { statement: binding, record: source.expr.record };
-    const call = source.action?.call;
-    if (
-      call &&
-      workflow.document.manifest.functions?.[call.callee?.library] ===
-        "ts.boundary"
-    )
-      value = call.args[0];
-    else value = source.expr;
-  }
+  return canonicalRecordInput(workflow, s);
 }
-function literal(value) {
-  if (value?.literal && typeof value.literal === "object")
-    return Object.values(value.literal)[0];
-  return undefined;
+function renderScopes() {
+  $("scope").replaceChildren(
+    ...workflow.scopes.map((scope, index) => {
+      const option = el(
+        "option",
+        null,
+        scope.label === "Entry" ? "Workflow entry" : `${scope.label} ${index}`,
+      );
+      option.value = String(index);
+      option.selected = key(scope.block) === key(activeScope);
+      return option;
+    }),
+  );
 }
 function model(s) {
   const perform = actionOf(s)?.perform;
@@ -568,37 +616,39 @@ function model(s) {
       subtitle: preview || info.name,
     };
   }
+  if (s.statement.if)
+    return {
+      s,
+      info: { name: "Condition", app: "Flow", icon: "branch" },
+      title: "If · Choose a path",
+      subtitle: "True or false",
+    };
+  const action = actionOf(s);
+  const kind =
+    typeof action === "string" ? action : Object.keys(action ?? s.statement)[0];
+  const names = {
+    call: "Call function",
+    spawn: "Start task",
+    try: "Try / catch",
+    for: "For each",
+    while: "While",
+    join: "Wait for task",
+    join_many: "Wait for tasks",
+    cancel: "Cancel task",
+    sleep: "Wait",
+    yield: "Yield",
+  };
+  const name = names[kind] ?? kind;
   return {
     s,
-    branch: true,
-    info: { name: "Condition", app: "Flow", icon: "branch" },
-    title: "If · Send notification",
-    subtitle: "Choose a path",
-    children: [[], []],
+    info: { name, app: "Flow", icon: "status" },
+    title: name,
+    subtitle: "Select to inspect",
+    generic: true,
   };
 }
 function project() {
-  const actions = workflow.statements.filter((s) => actionOf(s)?.perform);
-  const visible = workflow.statements.filter(
-    (s) =>
-      actions.includes(s) ||
-      (s.statement.if && actions.some((t) => below(t.site, s.site))),
-  );
-  const models = visible.map(model),
-    roots = [];
-  for (const node of models) {
-    const parents = models.filter(
-      (p) => p.branch && below(node.s.site, p.s.site),
-    );
-    const parent = parents.sort(
-      (a, b) => b.s.site.path.length - a.s.site.path.length,
-    )[0];
-    if (parent) {
-      const branch = node.s.site.path[parent.s.site.path.length];
-      parent.children[branch === 2 ? 1 : 0].push(node);
-    } else roots.push(node);
-  }
-  return roots;
+  return activeScope ? projectScope(workflow, activeScope, model) : [];
 }
 function positionAfter(s) {
   const index = workflow.statements.indexOf(s);
@@ -608,14 +658,7 @@ function positionAfter(s) {
   return { block: s.block, ...(next ? { before: next.site } : {}) };
 }
 function startPosition() {
-  const root = workflow.statements[0];
-  const closure = root?.statement.let?.value?.expr?.closure;
-  const first = closure
-    ? workflow.statements.find(
-        (s) => s.depth === root.depth + 1 && below(s.site, root.site),
-      )
-    : root;
-  return first ? { block: first.block, before: first.site } : undefined;
+  return activeScope ? scopeStart(workflow, activeScope) : undefined;
 }
 function wire(from, to, label) {
   const ns = "http://www.w3.org/2000/svg";
@@ -748,8 +791,10 @@ function renderCanvas() {
     {
       start: true,
       info: { icon: "start" },
-      title: "Manual trigger",
-      subtitle: "When you click Run workflow",
+      title: activeScope?.path?.length ? "Block entry" : "Manual trigger",
+      subtitle: activeScope?.path?.length
+        ? "Inspecting a nested block"
+        : "When you click Run workflow",
     },
     110,
     center,
@@ -761,9 +806,10 @@ function renderCanvas() {
   $("scene").style.height = graphHeight + "px";
   $("node-count").textContent =
     `${visualNodes.length} steps · Click a step to configure it`;
-  document.querySelector("h1").textContent = roots.some((n) => n.branch)
-    ? "Notification workflow"
-    : "Inbox workflow";
+  document.querySelector("h1").textContent = workflow.entry.replaceAll(
+    "_",
+    " ",
+  );
 }
 function panel(title) {
   $("node-panel").hidden = false;
@@ -781,17 +827,28 @@ function identity(parent, info) {
 }
 function fields(parent, info, values) {
   const inputs = {};
-  for (const [name, label, type] of info.fields ?? []) {
+  for (const [name, label, type, config = {}] of info.fields ?? []) {
     const id = "field-" + name;
     const caption = el("label", null, label);
     caption.htmlFor = id;
-    const input = el(type === "text" && name === "text" ? "textarea" : "input");
+    const input = el(
+      type === "select"
+        ? "select"
+        : type === "text" && name === "text"
+          ? "textarea"
+          : "input",
+    );
+    for (const value of config.options ?? []) {
+      const option = el("option", null, value);
+      option.value = value;
+      input.append(option);
+    }
     input.id = id;
     if (input.tagName === "INPUT") input.type = type;
     input.value = values[name] ?? "";
     if (type === "number") {
-      input.min = "1";
-      input.max = "100";
+      input.min = String(config.min ?? 1);
+      input.max = String(config.max ?? 100);
     }
     parent.append(caption, input);
     inputs[name] = input;
@@ -801,8 +858,14 @@ function fields(parent, info, values) {
       Object.entries(inputs).map(([name, input]) => {
         if (input.type === "number") {
           const value = Number(input.value);
-          if (!Number.isInteger(value) || value < 1 || value > 100)
-            throw Error("Choose a number between 1 and 100.");
+          if (
+            !Number.isInteger(value) ||
+            value < Number(input.min) ||
+            value > Number(input.max)
+          )
+            throw Error(
+              `Choose a number between ${input.min} and ${input.max}.`,
+            );
           return [name, value];
         }
         return [name, input.value];
@@ -836,6 +899,7 @@ function openCatalog(at) {
     el("p", "help", "Choose an action to connect to your workflow."),
   );
   for (const [effect, info] of Object.entries(catalog)) {
+    if (!info.fields) continue;
     const button = el("button", "catalog-item");
     button.append(icon(info.icon));
     const text = el("span");
@@ -881,15 +945,151 @@ function newNode(effect) {
     el("p", "help", "Uses a mock connection. No external requests."),
   );
 }
+function expressionLabel(value) {
+  if (value?.literal === "null") return "null";
+  const fixed = literal(value);
+  if (fixed !== undefined) return JSON.stringify(fixed);
+  if (value?.variable) return value.variable;
+  const field = value?.member?.field;
+  if (field) return `${expressionLabel(field.target)}.${field.field}`;
+  const index = value?.member?.index;
+  if (index)
+    return `${expressionLabel(index.target)}[${expressionLabel(index.index)}]`;
+  return "Computed expression · inspect in Advanced";
+}
+function renderMappings(container, statement) {
+  const section = el("section", "input-mappings");
+  section.append(el("h3", null, "Input mappings"));
+  const input = recordInput(statement);
+  const entries =
+    input?.record ??
+    actionOf(statement).perform.args.map((value, i) => ({
+      field: `Input ${i + 1}`,
+      value,
+    }));
+  for (const { field, value } of entries) {
+    const row = el("div", "mapping-row");
+    row.append(
+      el("span", "mapping-key", field),
+      el("span", "mapping-value", expressionLabel(value)),
+    );
+    section.append(row);
+  }
+  const binding = statement.statement.let?.name;
+  if (binding) section.append(el("p", "help", `Output saved as ${binding}`));
+  container.append(section);
+}
+function dataTree(value, depth = 0) {
+  if (value === null || typeof value !== "object")
+    return el("span", "data-value", value === null ? "null" : String(value));
+  const group = el("div", "data-tree");
+  const entries = Object.entries(value);
+  if (!entries.length)
+    return el(
+      "span",
+      "data-value",
+      Array.isArray(value) ? "Empty list" : "Empty object",
+    );
+  for (const [name, child] of entries) {
+    const row = el("div", "data-row");
+    if (child !== null && typeof child === "object") {
+      const details = el("details");
+      details.open = depth < 1;
+      details.append(
+        el(
+          "summary",
+          null,
+          `${name} · ${Array.isArray(child) ? `${child.length} items` : "Object"}`,
+        ),
+        dataTree(child, depth + 1),
+      );
+      row.append(details);
+    } else row.append(el("span", "data-key", name), dataTree(child, depth + 1));
+    group.append(row);
+  }
+  return group;
+}
+function renderCallData(statement) {
+  const container = $("call-data");
+  if (!container) return;
+  container.replaceChildren(el("h3", null, "Execution data"));
+  const records = [
+    ...(calls.get(key(statement.action ?? statement.site))?.values() ?? []),
+  ];
+  if (!records.length) {
+    container.append(
+      el(
+        "p",
+        "help",
+        running
+          ? "Waiting for this step to settle…"
+          : "Run this workflow to inspect its inputs and outputs.",
+      ),
+    );
+    return;
+  }
+  const select = el("select");
+  select.setAttribute("aria-label", "Step occurrence");
+  records.forEach((record, index) => {
+    const option = el("option", null, `Call ${index + 1} · ${record.status}`);
+    option.value = String(index);
+    select.append(option);
+  });
+  select.value = String(records.length - 1);
+  const body = el("div");
+  function showRecord() {
+    const record = records[Number(select.value)];
+    body.replaceChildren(el("p", "help", `Call ${record.callId}`));
+    if (!record.call) {
+      body.append(el("p", "help", "This call's data is no longer available."));
+      return;
+    }
+    body.append(
+      el("h4", null, "Input"),
+      dataTree(record.call.input),
+      el("h4", null, record.status === "failed" ? "Failure" : "Output"),
+      dataTree(record.call.output),
+    );
+  }
+  select.onchange = showRecord;
+  container.append(select, body);
+  showRecord();
+}
 function openNode(node) {
-  if (busy || running) return;
+  if (busy) return;
   selected = node.s;
   renderPlacement();
   renderSelection();
   const container = panel("STEP SETTINGS");
   identity(container, node.info);
+  if (actionOf(node.s)?.perform) {
+    renderMappings(container, node.s);
+    const data = el("section", "call-data");
+    data.id = "call-data";
+    container.append(data);
+    renderCallData(node.s);
+  }
+  if (node.generic) {
+    container.append(
+      el(
+        "p",
+        "field-note",
+        "This is a canonical action or control block. Its inputs and behavior are available in Advanced. Nested blocks can be selected from the scope menu.",
+      ),
+    );
+    const open = el("button", "wide", "Open in Advanced");
+    open.onclick = () => {
+      $("advanced").showModal();
+      $("replace").click();
+      $("direct-details").open = true;
+    };
+    container.append(open);
+    renderCanvas();
+    controls();
+    return;
+  }
   if (node.branch) {
-    const label = el("label", null, "Take the notification path");
+    const label = el("label", null, "Condition value");
     label.htmlFor = "branch-value";
     const select = el("select");
     select.id = "branch-value";
@@ -901,14 +1101,7 @@ function openNode(node) {
       o.value = value;
       select.append(o);
     }
-    let condition = node.s.statement.if.condition;
-    const binding =
-      condition.variable &&
-      workflow.statements.find(
-        (s) => s.statement.let?.name === condition.variable,
-      );
-    const value =
-      literal(condition) ?? literal(binding?.statement.let?.value?.expr);
+    const value = conditionValue(workflow, node.s);
     if (typeof value !== "boolean") {
       container.append(
         el(
@@ -1017,6 +1210,13 @@ function fit() {
   viewport.scrollTop = 0;
 }
 function setupVisual() {
+  $("scope").onchange = () => {
+    activeScope = workflow.scopes[Number($("scope").value)].block;
+    $("node-panel").hidden = true;
+    renderCanvas();
+    controls();
+    fit();
+  };
   window.addEventListener("resize", fit);
   $("close-panel").onclick = () => {
     $("node-panel").hidden = true;
@@ -1038,8 +1238,9 @@ function setupVisual() {
     fit();
   };
   $("add-step").onclick = () => {
-    const last = project().at(-1);
-    openCatalog(last ? positionAfter(last.s) : startPosition());
+    openCatalog(
+      activeScope ? appendPosition(workflow, activeScope) : undefined,
+    );
   };
   $("zoom-in").onclick = () => setZoom(zoom + 0.1);
   $("zoom-out").onclick = () => setZoom(zoom - 0.1);
@@ -1083,7 +1284,16 @@ controls();
 renderQueue();
 await action(async () => {
   show(await call("/workflow"));
-  templates = await call("/prototype/templates");
+  const [canonical, sourceTemplates] = await Promise.all([
+    call("/workflows"),
+    call("/prototype/templates"),
+  ]);
+  templates = [
+    ...canonical
+      .filter((t) => ["deep-research", "weekly-kpis"].includes(t.id))
+      .map((t) => ({ ...t, canonical: true })),
+    ...sourceTemplates,
+  ];
   $("template").replaceChildren(
     ...templates.map((template) => {
       const option = document.createElement("option");

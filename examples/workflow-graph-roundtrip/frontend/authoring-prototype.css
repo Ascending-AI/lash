@@ -708,3 +708,82 @@ dialog::backdrop {
     font-size: 18px;
   }
 }
+
+#scope {
+  width: auto;
+  max-width: 210px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+@media (max-width: 760px) {
+  #scope {
+    max-width: 120px;
+  }
+  .viewbar {
+    gap: 12px;
+  }
+  .mock {
+    display: none;
+  }
+}
+
+.input-mappings,
+.call-data {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  margin: 18px 0;
+}
+.input-mappings h3,
+.call-data h3 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.call-data h4 {
+  font-size: 12px;
+  margin: 18px 0 8px;
+  color: #63746f;
+}
+.mapping-row,
+.data-row {
+  font-size: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid #edf1ee;
+  overflow-wrap: anywhere;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  gap: 8px;
+}
+.mapping-value {
+  color: #406f60;
+}
+.mapping-key,
+.data-key {
+  font-weight: 600;
+}
+.data-key {
+  display: inline-block;
+  margin-right: 12px;
+  color: #56645f;
+}
+.data-tree .data-tree {
+  padding-left: 12px;
+  border-left: 2px solid #e8eeea;
+  margin-top: 6px;
+}
+.data-tree summary {
+  cursor: pointer;
+  color: #406f60;
+}
+.call-data .help {
+  overflow-wrap: anywhere;
+}
+.trace-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 8px 0;
+  font-size: 12px;
+  color: #406f60;
+}

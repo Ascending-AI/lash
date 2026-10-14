@@ -33,6 +33,8 @@ pub struct WorkflowView {
     pub text: String,
     /// The entry's statements in document order, each with its site.
     pub statements: Vec<StatementView>,
+    /// Canonical blocks the host can explicitly select, including empty bodies.
+    pub scopes: Vec<ScopeView>,
     /// The sites of the document a run can report an occurrence at.
     pub execution_sites: Vec<ExecutionSiteView>,
     /// The document as the TypeScript printer spells it: a read-only lens.
@@ -40,6 +42,13 @@ pub struct WorkflowView {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_unavailable: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopeView {
+    pub block: Site,
+    pub label: String,
 }
 
 /// One statement of the entry: where it is and how this host words it.
@@ -142,6 +151,14 @@ pub enum RunStatus {
     Failed,
 }
 
+/// Host presentation of a retained tool call. Absence is unavailable evidence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallData {
+    pub input: Value,
+    pub output: Value,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunEvent {
@@ -162,6 +179,10 @@ pub struct RunEvent {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<lash::ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<CallData>,
 }
 
 #[derive(Clone, Debug, Serialize)]

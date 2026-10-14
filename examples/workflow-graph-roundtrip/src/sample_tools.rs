@@ -20,9 +20,45 @@ enum SampleOperationKind {
     AgentsSpawn,
     SlackRecent,
     GithubRecent,
+    ResearchSearch,
+    ResearchSynthesize,
+    MetricsFetch,
+    MetricsReport,
 }
 
 pub(crate) const OPERATIONS: &[SampleOperation] = &[
+    SampleOperation {
+        kind: SampleOperationKind::ResearchSearch,
+        module: "research",
+        resource_type: "MockResearch",
+        operation: "search",
+        host_operation: "research.search",
+        label: "Find research sources",
+    },
+    SampleOperation {
+        kind: SampleOperationKind::ResearchSynthesize,
+        module: "research",
+        resource_type: "MockResearch",
+        operation: "synthesize",
+        host_operation: "research.synthesize",
+        label: "Write cited research brief",
+    },
+    SampleOperation {
+        kind: SampleOperationKind::MetricsFetch,
+        module: "metrics",
+        resource_type: "MockMetrics",
+        operation: "fetch",
+        host_operation: "metrics.fetch",
+        label: "Fetch business metrics",
+    },
+    SampleOperation {
+        kind: SampleOperationKind::MetricsReport,
+        module: "metrics",
+        resource_type: "MockMetrics",
+        operation: "report",
+        host_operation: "metrics.report",
+        label: "Compare reporting periods",
+    },
     SampleOperation {
         kind: SampleOperationKind::GmailListRecent,
         module: "gmail",
@@ -76,6 +112,22 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
 impl SampleOperation {
     pub(crate) fn input_schema(self) -> JsonValue {
         match self.kind {
+            SampleOperationKind::ResearchSearch => object_schema(
+                json!({"topic": {"type": "string"}, "max_sources": {"type": "integer", "minimum": 1, "maximum": 3}}),
+                &["topic", "max_sources"],
+            ),
+            SampleOperationKind::ResearchSynthesize => object_schema(
+                json!({"topic": {"type": "string"}, "sources": research_sources_schema()}),
+                &["topic", "sources"],
+            ),
+            SampleOperationKind::MetricsFetch => object_schema(
+                json!({"workspace": {"type": "string"}, "period": {"type": "string", "enum": ["current", "previous"]}}),
+                &["workspace", "period"],
+            ),
+            SampleOperationKind::MetricsReport => object_schema(
+                json!({"workspace": {"type": "string"}, "current": metrics_snapshot_schema(), "previous": metrics_snapshot_schema()}),
+                &["workspace", "current", "previous"],
+            ),
             SampleOperationKind::GmailListRecent => object_schema(
                 json!({
                     "count": { "type": "number" }
@@ -136,6 +188,34 @@ impl SampleOperation {
 
     pub(crate) fn output_schema(self) -> JsonValue {
         match self.kind {
+            SampleOperationKind::ResearchSearch => object_schema(
+                json!({"topic": {"type": "string"}, "sources": research_sources_schema()}),
+                &["topic", "sources"],
+            ),
+            SampleOperationKind::ResearchSynthesize => object_schema(
+                json!({
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "source_count": {"type": "integer"},
+                    "citations": array_schema(json!({"source_id": {"type": "string"}, "url": {"type": "string"}}), &["source_id", "url"])
+                }),
+                &["title", "summary", "source_count", "citations"],
+            ),
+            SampleOperationKind::MetricsFetch => metrics_snapshot_schema(),
+            SampleOperationKind::MetricsReport => object_schema(
+                json!({
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "period": {"type": "string"},
+                    "metrics": array_schema(json!({
+                        "name": {"type": "string"},
+                        "current": {"type": "number"},
+                        "previous": {"type": "number"},
+                        "change_pct": {"type": ["number", "null"]}
+                    }), &["name", "current", "previous", "change_pct"])
+                }),
+                &["title", "summary", "period", "metrics"],
+            ),
             SampleOperationKind::GmailListRecent => array_schema(
                 json!({
                     "sender": { "type": "string" },
@@ -221,6 +301,10 @@ pub(crate) fn apply_tool(name: &str, args: &JsonValue) -> Result<JsonValue, Stri
         SampleOperationKind::AgentsSpawn => spawn_agent(args),
         SampleOperationKind::SlackRecent => recent_slack(args),
         SampleOperationKind::GithubRecent => recent_github(args),
+        SampleOperationKind::ResearchSearch => research_search(args),
+        SampleOperationKind::ResearchSynthesize => research_synthesize(args),
+        SampleOperationKind::MetricsFetch => metrics_fetch(args),
+        SampleOperationKind::MetricsReport => metrics_report(args),
     }
 }
 
@@ -414,4 +498,214 @@ fn record_arg<'a>(args: &'a Record, key: &str) -> Result<&'a Record, String> {
     args.get(key)
         .and_then(JsonValue::as_object)
         .ok_or_else(|| format!("missing record argument `{key}`"))
+}
+
+fn research_sources_schema() -> JsonValue {
+    array_schema(
+        json!({
+            "id": {"type": "string"},
+            "title": {"type": "string"},
+            "url": {"type": "string"},
+            "excerpt": {"type": "string"}
+        }),
+        &["id", "title", "url", "excerpt"],
+    )
+}
+
+fn metrics_snapshot_schema() -> JsonValue {
+    object_schema(
+        json!({
+            "workspace": {"type": "string"},
+            "period": {"type": "string"},
+            "start": {"type": "string"},
+            "end": {"type": "string"},
+            "revenue": {"type": "number"},
+            "active_accounts": {"type": "number"},
+            "new_trials": {"type": "number"},
+            "paid_conversions": {"type": "number"}
+        }),
+        &[
+            "workspace",
+            "period",
+            "start",
+            "end",
+            "revenue",
+            "active_accounts",
+            "new_trials",
+            "paid_conversions",
+        ],
+    )
+}
+
+fn research_search(args: &Record) -> Result<JsonValue, String> {
+    let topic = string_arg(args, "topic")?;
+    let count = number_arg(args, "max_sources")?;
+    if !(1.0..=3.0).contains(&count) || count.fract() != 0.0 {
+        return Err("`max_sources` must be an integer between 1 and 3".to_owned());
+    }
+    let mut sources = vec![
+        json!({
+            "id": "customer-interviews",
+            "title": format!("Customer interviews: {topic}"),
+            "url": "https://research.example.com/customer-interviews",
+            "excerpt": "In 12 mocked interviews, 8 customers delayed setup because the first useful outcome was unclear."
+        }),
+        json!({
+            "id": "activation-study",
+            "title": format!("Activation cohort study: {topic}"),
+            "url": "https://research.example.com/activation-cohorts",
+            "excerpt": "The mocked cohort completing a guided checklist activated at 64%, compared with 41% without it. This is observational, not proof of causation."
+        }),
+        json!({
+            "id": "support-review",
+            "title": format!("Support review: {topic}"),
+            "url": "https://research.example.com/support-review",
+            "excerpt": "Of 45 mocked setup tickets, 19 involved connecting the first data source and 11 involved inviting teammates."
+        }),
+    ];
+    sources.truncate(count as usize);
+    Ok(json!({"topic": topic, "sources": sources}))
+}
+
+fn research_synthesize(args: &Record) -> Result<JsonValue, String> {
+    let topic = string_arg(args, "topic")?;
+    let sources = args
+        .get("sources")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| "`sources` must be an array".to_owned())?;
+    let mut citations = Vec::with_capacity(sources.len());
+    let mut paragraphs = vec![format!("Mock research brief: {topic}")];
+    for source in sources {
+        let source = source
+            .as_object()
+            .ok_or_else(|| "each source must be a record".to_owned())?;
+        let id = string_arg(source, "id")?;
+        let title = string_arg(source, "title")?;
+        let excerpt = string_arg(source, "excerpt")?;
+        let url = string_arg(source, "url")?;
+        paragraphs.push(format!("{title}\n{excerpt} [{id}]"));
+        citations.push(json!({"source_id": id, "url": url}));
+    }
+    paragraphs.push("Next step: validate these findings with customer evidence before changing the onboarding flow. All sources and findings in this demo are mocked.".to_owned());
+    Ok(json!({
+        "title": topic,
+        "summary": paragraphs.join("\n\n"),
+        "source_count": citations.len(),
+        "citations": citations
+    }))
+}
+
+fn metrics_fetch(args: &Record) -> Result<JsonValue, String> {
+    let workspace = string_arg(args, "workspace")?;
+    let period = string_arg(args, "period")?;
+    let (start, end, revenue, active_accounts, new_trials, paid_conversions) = match period.as_str()
+    {
+        "current" => ("2026-10-05", "2026-10-11", 48_600, 1_284, 360, 72),
+        "previous" => ("2026-09-28", "2026-10-04", 45_000, 1_200, 320, 56),
+        _ => return Err("`period` must be `current` or `previous`".to_owned()),
+    };
+    Ok(json!({
+        "workspace": workspace,
+        "period": period,
+        "start": start,
+        "end": end,
+        "revenue": revenue,
+        "active_accounts": active_accounts,
+        "new_trials": new_trials,
+        "paid_conversions": paid_conversions
+    }))
+}
+
+fn metrics_report(args: &Record) -> Result<JsonValue, String> {
+    let workspace = string_arg(args, "workspace")?;
+    let current = record_arg(args, "current")?;
+    let previous = record_arg(args, "previous")?;
+    let period = format!(
+        "{} to {}",
+        string_arg(current, "start")?,
+        string_arg(current, "end")?
+    );
+    let title = format!("{workspace}: weekly KPIs");
+    let mut lines = vec![format!("{title}\n{period} · mocked data")];
+    let mut metrics = Vec::new();
+    for (key, label) in [
+        ("revenue", "Revenue (USD)"),
+        ("active_accounts", "Active accounts"),
+        ("new_trials", "New trials"),
+        ("paid_conversions", "Paid conversions"),
+    ] {
+        let now = number_arg(current, key)?;
+        let before = number_arg(previous, key)?;
+        let change = if before == 0.0 {
+            None
+        } else {
+            Some(((now - before) / before * 1_000.0).round() / 10.0)
+        };
+        let comparison = change.map_or_else(
+            || "no prior baseline".to_owned(),
+            |change| format!("{change:+.1}%"),
+        );
+        lines.push(format!("{label}: {now} vs {before} ({comparison})"));
+        metrics.push(json!({
+            "name": key,
+            "current": now,
+            "previous": before,
+            "change_pct": change
+        }));
+    }
+    Ok(json!({"title": title, "period": period, "summary": lines.join("\n"), "metrics": metrics}))
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test module: invalid fixtures fail the law"
+)]
+mod tests {
+    use super::apply_tool;
+    use serde_json::json;
+
+    #[test]
+    fn mock_reports_use_the_supplied_evidence_and_metrics() {
+        let research = apply_tool(
+            "research_synthesize",
+            &json!({
+                "topic": "Changed question",
+                "sources": [{"id": "one", "title": "Supplied source", "url": "https://example.com/one", "excerpt": "Only this finding was supplied."}]
+            }),
+        ).expect("valid research input");
+        assert_eq!(research["title"], "Changed question");
+        assert_eq!(research["source_count"], 1);
+        assert_eq!(
+            research["citations"],
+            json!([{"source_id": "one", "url": "https://example.com/one"}])
+        );
+        assert!(
+            research["summary"]
+                .as_str()
+                .expect("summary")
+                .contains("Only this finding was supplied.")
+        );
+
+        let mut current = apply_tool(
+            "metrics_fetch",
+            &json!({"workspace": "Test", "period": "current"}),
+        )
+        .expect("current snapshot");
+        let previous = apply_tool(
+            "metrics_fetch",
+            &json!({"workspace": "Test", "period": "previous"}),
+        )
+        .expect("previous snapshot");
+        current["revenue"] = json!(22_500);
+        let report = apply_tool(
+            "metrics_report",
+            &json!({"workspace": "Test", "current": current, "previous": previous}),
+        )
+        .expect("report");
+        assert_eq!(
+            report["metrics"][0],
+            json!({"name": "revenue", "current": 22500.0, "previous": 45000.0, "change_pct": -50.0})
+        );
+    }
 }
