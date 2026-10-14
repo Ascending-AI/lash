@@ -641,3 +641,30 @@ packages = ["lash-rmcp"]
 kinds = ["unit-test", "test"]
 tags = ["manual"]
 reason = "vendored SDK upstream suite; run explicitly when merging an upstream release"
+
+# Runtime fixtures are resources of their owning SDK test, including feature variants.
+[[rule]]
+packages = ["lash-rmcp"]
+kinds = ["test"]
+targets = ["test_deserialization"]
+data = ["//third-party/vendored/lash-rmcp:deserialization_fixtures"]
+
+[[rule]]
+packages = ["lash-rmcp"]
+kinds = ["test"]
+targets = ["test_list_tools_result"]
+data = ["//third-party/vendored/lash-rmcp:list_tools_fixtures"]
+
+[[rule]]
+packages = ["lash-rmcp"]
+kinds = ["test"]
+targets = ["test_message_schema"]
+data = ["//third-party/vendored/lash-rmcp:message_schema_fixtures"]
+
+[filegroups.lash-rmcp]
+deserialization_fixtures = { srcs = ["tests/test_deserialization/tool_list_result.json"] }
+list_tools_fixtures = { srcs = ["tests/test_list_tools_result/list_tools_result.json"] }
+message_schema_fixtures = { srcs = [
+    "tests/test_message_schema/client_json_rpc_message_schema.json",
+    "tests/test_message_schema/server_json_rpc_message_schema.json",
+] }

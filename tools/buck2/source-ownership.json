@@ -183,6 +183,18 @@
   "third-party/vendored/lash-rmcp": {
     "compile_data": [
       "README.md"
-    ]
+    ],
+    "test_data": {
+      "test_deserialization": [
+        "tests/test_deserialization/tool_list_result.json"
+      ],
+      "test_list_tools_result": [
+        "tests/test_list_tools_result/list_tools_result.json"
+      ],
+      "test_message_schema": [
+        "tests/test_message_schema/client_json_rpc_message_schema.json",
+        "tests/test_message_schema/server_json_rpc_message_schema.json"
+      ]
+    }
   }
 }

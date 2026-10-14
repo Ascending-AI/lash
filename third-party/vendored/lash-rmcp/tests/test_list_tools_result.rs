@@ -30,7 +30,9 @@ fn add(Parameters(AddRequest { a, b }): Parameters<AddRequest>) -> Json<AddResul
 
 #[test]
 fn list_tools_result_matches_expected_json() {
-    let expected_json = std::fs::read("tests/test_list_tools_result/list_tools_result.json")
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/test_list_tools_result/list_tools_result.json");
+    let expected_json = std::fs::read(fixture)
         .expect("missing expected list tools result JSON fixture");
     let expected: serde_json::Value =
         serde_json::from_slice(&expected_json).expect("invalid expected JSON fixture");

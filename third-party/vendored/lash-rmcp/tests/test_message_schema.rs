@@ -3,7 +3,9 @@ mod tests {
     use schemars::generate::SchemaSettings;
 
     fn compare_schemas(name: &str, actual: &str, expected_file: &str) {
-        let expected = match std::fs::read_to_string(expected_file) {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let expected_path = manifest_dir.join(expected_file);
+        let expected = match std::fs::read_to_string(&expected_path) {
             Ok(content) => content,
             Err(e) => {
                 panic!(
@@ -25,7 +27,8 @@ mod tests {
 
         // Write current schema to file for comparison
         let current_file = expected_file.replace(".json", "_current.json");
-        std::fs::write(&current_file, actual).expect("Failed to write current schema");
+        std::fs::write(manifest_dir.join(&current_file), actual)
+            .expect("Failed to write current schema");
 
         println!("{} schema differs from expected", name);
         println!("Expected: {}", expected_file);
@@ -38,7 +41,7 @@ mod tests {
         // UPDATE_SCHEMA=1 cargo test -p rmcp --test test_message_schema --features="server client schemars"
         if std::env::var("UPDATE_SCHEMA").is_ok() {
             println!("UPDATE_SCHEMA is set, updating expected file");
-            std::fs::write(expected_file, actual).expect("Failed to update expected schema file");
+            std::fs::write(&expected_path, actual).expect("Failed to update expected schema file");
             println!("Updated {}", expected_file);
         } else {
             println!("Set UPDATE_SCHEMA=1 to auto-update expected schemas");

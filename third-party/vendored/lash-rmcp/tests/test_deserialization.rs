@@ -1,7 +1,9 @@
 use rmcp::model::{JsonRpcResponse, ServerJsonRpcMessage, ServerResult};
 #[test]
 fn test_tool_list_result() {
-    let json = std::fs::read("tests/test_deserialization/tool_list_result.json").unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/test_deserialization/tool_list_result.json");
+    let json = std::fs::read(fixture).unwrap();
     let result: ServerJsonRpcMessage = serde_json::from_slice(&json).unwrap();
     println!("{result:#?}");
 
@@ -273,7 +275,7 @@ mod untagged_server_result {
 }
 
 /// Regression tests for decimal float fields under serde_json's
-/// `arbitrary_precision` feature, which rmcp's dev-dependencies enable.
+/// `arbitrary_precision` feature, which a consumer may enable.
 ///
 /// With the feature, serde replays a decimal it buffered for an untagged enum
 /// as serde_json's private number map. A plain `f32`/`f64` field rejected that
@@ -289,13 +291,6 @@ mod arbitrary_precision {
     /// Decodes a server message the way a client does (`RxJsonRpcMessage<RoleClient>`).
     fn from_server(text: &str) -> ServerJsonRpcMessage {
         serde_json::from_str(text).unwrap()
-    }
-
-    #[test]
-    fn feature_is_enabled() {
-        // Only the feature keeps the number as written; without it this reads `0.6`.
-        let value: serde_json::Value = serde_json::from_str("0.60").unwrap();
-        assert_eq!(value.to_string(), "0.60");
     }
 
     #[test]

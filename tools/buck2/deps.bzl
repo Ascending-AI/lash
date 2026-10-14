@@ -1276,7 +1276,6 @@ PACKAGE_DEPS = {
             "hyper_util": "//third-party/rust:p0157",
             "rstest": "//third-party/rust:p0286",
             "schemars": "//third-party/rust:p0309",
-            "serde_json": "//third-party/rust:p0322",
             "tokio": "//third-party/rust:p0381",
             "tower_service": "//third-party/rust:p0397",
             "tracing_subscriber": "//third-party/rust:p0402",

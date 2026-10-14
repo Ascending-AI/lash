@@ -79,6 +79,9 @@ pub mod pool;
 mod service_lifecycle;
 mod stdio_transport;
 
+/// The MCP SDK types named by plugin signatures, available without a separate dependency.
+pub use rmcp as sdk;
+
 pub use config::{
     McpCallPolicy, McpDataLimits, McpDiagnosticsPolicy, McpServerConfig, McpShutdownPolicy,
     McpStdioTransport, McpStreamableHttpTransport, McpTransport, ReconnectAttempts,

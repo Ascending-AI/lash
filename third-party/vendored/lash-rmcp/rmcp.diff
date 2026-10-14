@@ -1,27 +1,66 @@
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -15,2 +15,2 @@
+@@ -12,20 +12,20 @@
+ [package]
+ edition = "2024"
+ rust-version = "1.88"
 -name = "rmcp"
 -version = "3.5.1"
 +name = "lash-rmcp"
 +version.workspace = true
-@@ -23 +23 @@
+ build = "build.rs"
+ autolib = false
+ autobins = false
+ autoexamples = false
+ autotests = false
+ autobenches = false
 -description = "Rust SDK for Model Context Protocol"
 +description = "Lash-owned Rust SDK for Model Context Protocol, based on rmcp 3.5.1"
-@@ -25 +25 @@
+ homepage = "https://github.com/modelcontextprotocol/rust-sdk"
 -documentation = "https://docs.rs/rmcp"
 +documentation = "https://docs.rs/lash-rmcp"
-@@ -28 +28 @@
+ readme = "README.md"
+ license = "Apache-2.0"
 -repository = "https://github.com/modelcontextprotocol/rust-sdk/"
 +repository = "https://github.com/Ascending-AI/lash"
+
+ [package.metadata.docs.rs]
+ features = [
+@@ -824,6 +824,9 @@
+
+ [dependencies.serde_json]
+ version = "1.0"
++# Keep the workspace's JSON number representation for both the SDK and its tests.
++# Enabling arbitrary_precision here also changes Lash's stored MessagePack and
++# canonical definition identities through Cargo feature unification.
+
+ [dependencies.sha2]
+ version = "0.11"
+@@ -908,10 +911,6 @@
+ version = "1.1.0"
+ features = ["chrono04"]
+
+-[dev-dependencies.serde_json]
+-version = "1.0"
+-features = ["arbitrary_precision"]
+-
+ [dev-dependencies.tokio]
+ version = "1"
+ features = [
 --- a/README.md
 +++ b/README.md
-@@ -71 +71 @@
+@@ -68,4 +68,4 @@
+
+ ## License
+
 -This project is licensed under the terms specified in the repository's [LICENSE](../../LICENSE) file.
 +This project is licensed under the terms specified in the repository's [LICENSE](LICENSE) file.
 --- a/src/transport/common/mcp_headers.rs
 +++ b/src/transport/common/mcp_headers.rs
-@@ -102,2 +102,19 @@
+@@ -99,78 +99,128 @@
+         )
+ }
+
 -/// Top-level properties carrying an `x-mcp-header` annotation, as `(property, header)` pairs.
 -fn param_header_annotations(input_schema: &JsonObject) -> Vec<(String, String)> {
 +/// Properties-chain annotations, as `(argument path, header)` pairs.
@@ -43,7 +82,7 @@
 +            }
 +        }
 +    }
-@@ -105,9 +122 @@
+     let mut out = Vec::new();
 -    if let Some(Value::Object(props)) = input_schema.get("properties") {
 -        for (prop, schema) in props {
 -            if let Some(Value::String(header)) = schema.get("x-mcp-header")
@@ -54,7 +93,9 @@
 -        }
 -    }
 +    collect(input_schema, &mut Vec::new(), &mut out);
-@@ -117,5 +126,9 @@
+     out
+ }
+
 -/// Validates the `x-mcp-header` annotations in a tool input schema.
 -///
 -/// Annotations must be non-empty RFC 9110 tokens, case-insensitively unique,
@@ -69,7 +110,8 @@
 +/// Validates annotations reached solely through `properties`, rejecting all others.
 +/// Names must be non-empty RFC 9110 tokens, case-insensitively unique across
 +/// the schema, and attached to primitive (`string`/`integer`/`boolean`) properties.
-@@ -124,28 +137,17 @@
+ #[cfg(feature = "client-side-sse")]
+ pub(crate) fn validate_param_header_annotations(input_schema: &JsonObject) -> Result<(), String> {
 -    let Some(Value::Object(props)) = input_schema.get("properties") else {
 -        return Ok(());
 -    };
@@ -115,11 +157,12 @@
 +                return Err(format!("property `{prop}`: x-mcp-header must not be empty"));
 +            }
 +            if !header.chars().all(is_tchar) {
-@@ -153,2 +155 @@
+                 return Err(format!(
 -                    "property `{prop}`: x-mcp-header requires a primitive type \
 -                     (string/integer/boolean), got {other:?}"
 +                    "property `{prop}`: x-mcp-header `{header}` is not a valid HTTP token"
-@@ -157,6 +158,47 @@
+                 ));
+             }
 -        }
 -    }
 -    Ok(())
@@ -173,7 +216,7 @@
 +}
 +
 +/// Annotations below any other keyword are not statically reachable.
-@@ -164,4 +206,4 @@
+ #[cfg(feature = "client-side-sse")]
 -fn reject_nested_annotations(schema: &Value, path: &str) -> Result<(), String> {
 -    if let Some(Value::Object(nested)) = schema.get("properties") {
 -        for (key, value) in nested {
@@ -182,10 +225,11 @@
 +    match value {
 +        Value::Object(object) => {
 +            if object.contains_key("x-mcp-header") {
-@@ -169 +211 @@
+                 return Err(format!(
 -                    "property `{path}.{key}`: x-mcp-header is not supported on nested properties"
 +                    "schema `{path}`: x-mcp-header is not reachable solely through properties"
-@@ -172,2 +214,10 @@
+                 ));
+             }
 -            reject_nested_annotations(value, &format!("{path}.{key}"))?;
 -        }
 +            for (key, child) in object {
@@ -198,22 +242,46 @@
 +            }
 +        }
 +        _ => {}
-@@ -243,2 +293,2 @@
+     }
+     Ok(())
+ }
+@@ -240,8 +290,8 @@
+         && let (Some(schema), Some(arguments)) =
+             (tool_schema, params.and_then(|p| p.get("arguments")))
+     {
 -        for (prop, header) in param_header_annotations(schema) {
 -            let Some(arg) = arguments.get(&prop) else {
 +        for (path, header) in param_header_annotations(schema) {
 +            let Some(arg) = argument_at_path(arguments, &path) else {
-@@ -300 +350 @@
+                 continue;
+             };
+             let Some(encoded) = primitive_to_string(arg).map(|s| encode_header_value(&s)) else {
+@@ -297,10 +347,11 @@
+         && let Some(schema) = tool_schema
+     {
+         let arguments = params.and_then(|p| p.get("arguments"));
 -        for (prop, header) in param_header_annotations(schema) {
 +        for (path, header) in param_header_annotations(schema) {
-@@ -303 +353,2 @@
+             let full = format!("{HEADER_MCP_PARAM_PREFIX}{header}");
+             let header_value = header_str(headers, &full)?;
 -            let arg = arguments.and_then(|a| a.get(&prop));
 +            let prop = path.join(".");
 +            let arg = arguments.and_then(|a| argument_at_path(a, &path));
-@@ -540 +591 @@
+             let body_value = arg.filter(|v| !v.is_null()).and_then(primitive_to_string);
+
+             match (header_value, body_value) {
+@@ -537,13 +588,92 @@
+         }
+
+         #[test]
 -        fn rejects_nested_annotation() {
 +        fn accepts_nested_properties_annotation() {
-@@ -546,0 +598,79 @@
+             let schema = schema_with(json!({
+                 "outer": {
+                     "type": "object",
+                     "properties": { "inner": { "type": "string", "x-mcp-header": "Inner" } }
+                 }
+             }));
 +            assert!(validate_param_header_annotations(&schema).is_ok());
 +        }
 +
@@ -293,7 +361,13 @@
 +            let schema = schema_with(
 +                json!({"region":{"type":"string", "x-mcp-header":"Region"}, "location":{"properties":{"region":{"type":"string", "x-mcp-header":"rEgIoN"}}}}),
 +            );
-@@ -591,0 +722,60 @@
+             assert!(validate_param_header_annotations(&schema).is_err());
+         }
+     }
+@@ -589,6 +719,66 @@
+                     .map(String::as_str),
+                 Some("us-west1")
+             );
 +        }
 +    }
 +
@@ -354,3 +428,87 @@
 +                unexpected.insert("Mcp-Param-Region", HeaderValue::from_static("unexpected"));
 +                assert!(validate_request_headers(&unexpected, &request, Some(&schema)).is_err());
 +            }
+         }
+     }
+
+--- a/tests/test_deserialization.rs
++++ b/tests/test_deserialization.rs
+@@ -1,7 +1,9 @@
+ use rmcp::model::{JsonRpcResponse, ServerJsonRpcMessage, ServerResult};
+ #[test]
+ fn test_tool_list_result() {
+-    let json = std::fs::read("tests/test_deserialization/tool_list_result.json").unwrap();
++    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
++        .join("tests/test_deserialization/tool_list_result.json");
++    let json = std::fs::read(fixture).unwrap();
+     let result: ServerJsonRpcMessage = serde_json::from_slice(&json).unwrap();
+     println!("{result:#?}");
+
+@@ -273,7 +275,7 @@
+ }
+
+ /// Regression tests for decimal float fields under serde_json's
+-/// `arbitrary_precision` feature, which rmcp's dev-dependencies enable.
++/// `arbitrary_precision` feature, which a consumer may enable.
+ ///
+ /// With the feature, serde replays a decimal it buffered for an untagged enum
+ /// as serde_json's private number map. A plain `f32`/`f64` field rejected that
+@@ -292,13 +294,6 @@
+     }
+
+     #[test]
+-    fn feature_is_enabled() {
+-        // Only the feature keeps the number as written; without it this reads `0.6`.
+-        let value: serde_json::Value = serde_json::from_str("0.60").unwrap();
+-        assert_eq!(value.to_string(), "0.60");
+-    }
+-
+-    #[test]
+     fn call_tool_result_with_fractional_priority() {
+         let message = from_server(
+             r#"{"jsonrpc":"2.0","id":1,"result":{"content":[
+--- a/tests/test_list_tools_result.rs
++++ b/tests/test_list_tools_result.rs
+@@ -30,7 +30,9 @@
+
+ #[test]
+ fn list_tools_result_matches_expected_json() {
+-    let expected_json = std::fs::read("tests/test_list_tools_result/list_tools_result.json")
++    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
++        .join("tests/test_list_tools_result/list_tools_result.json");
++    let expected_json = std::fs::read(fixture)
+         .expect("missing expected list tools result JSON fixture");
+     let expected: serde_json::Value =
+         serde_json::from_slice(&expected_json).expect("invalid expected JSON fixture");
+--- a/tests/test_message_schema.rs
++++ b/tests/test_message_schema.rs
+@@ -3,7 +3,9 @@
+     use schemars::generate::SchemaSettings;
+
+     fn compare_schemas(name: &str, actual: &str, expected_file: &str) {
+-        let expected = match std::fs::read_to_string(expected_file) {
++        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
++        let expected_path = manifest_dir.join(expected_file);
++        let expected = match std::fs::read_to_string(&expected_path) {
+             Ok(content) => content,
+             Err(e) => {
+                 panic!(
+@@ -25,7 +27,8 @@
+
+         // Write current schema to file for comparison
+         let current_file = expected_file.replace(".json", "_current.json");
+-        std::fs::write(&current_file, actual).expect("Failed to write current schema");
++        std::fs::write(manifest_dir.join(&current_file), actual)
++            .expect("Failed to write current schema");
+
+         println!("{} schema differs from expected", name);
+         println!("Expected: {}", expected_file);
+@@ -38,7 +41,7 @@
+         // UPDATE_SCHEMA=1 cargo test -p rmcp --test test_message_schema --features="server client schemars"
+         if std::env::var("UPDATE_SCHEMA").is_ok() {
+             println!("UPDATE_SCHEMA is set, updating expected file");
+-            std::fs::write(expected_file, actual).expect("Failed to update expected schema file");
++            std::fs::write(&expected_path, actual).expect("Failed to update expected schema file");
+             println!("Updated {}", expected_file);
+         } else {
+             println!("Set UPDATE_SCHEMA=1 to auto-update expected schemas");

@@ -824,6 +824,9 @@ features = [
 
 [dependencies.serde_json]
 version = "1.0"
+# Keep the workspace's JSON number representation for both the SDK and its tests.
+# Enabling arbitrary_precision here also changes Lash's stored MessagePack and
+# canonical definition identities through Cargo feature unification.
 
 [dependencies.sha2]
 version = "0.11"
@@ -907,10 +910,6 @@ version = "0.27.0"
 [dev-dependencies.schemars]
 version = "1.1.0"
 features = ["chrono04"]
-
-[dev-dependencies.serde_json]
-version = "1.0"
-features = ["arbitrary_precision"]
 
 [dev-dependencies.tokio]
 version = "1"
