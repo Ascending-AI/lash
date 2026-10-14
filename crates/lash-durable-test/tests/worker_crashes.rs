@@ -182,9 +182,33 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     });
     let calls = Arc::new(AtomicUsize::new(0));
     let runs = Arc::new(AtomicUsize::new(0));
+    let derivations = Arc::new(AtomicUsize::new(0));
+    let plugin = Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial("worker-receipt"),
+        lash::plugins::PluginSpec::new().with_assistant_response(
+            lash::hook_key!("count-derivations"),
+            None,
+            Arc::new({
+                let derivations = Arc::clone(&derivations);
+                let killer = Arc::clone(&killer);
+                move |ctx| {
+                    if killer.armed.load(Ordering::SeqCst) {
+                        derivations.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Box::pin(async move {
+                        Ok(lash::plugins::AssistantResponseTransform {
+                            response: ctx.response,
+                            events: Vec::new(),
+                        })
+                    })
+                }
+            }),
+        ),
+    ));
     let Some(world) = World::with_model(tier, Vec::new(), model(&killer, &calls), |backend| {
         lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers.clone()))
             .tools(lash::tool_provider_key!("tools"), count(&runs))
+            .plugin(plugin.clone())
     })
     .await
     else {
@@ -226,6 +250,11 @@ async fn setup_crash_case(tier: Tier, request: Request) {
         "the model never sees a recorded host failure from the crash"
     );
     assert_eq!(runs.load(Ordering::SeqCst), 1, "the cell's tool runs once");
+    assert_eq!(
+        derivations.load(Ordering::SeqCst),
+        2,
+        "the worker retry derives the paid receipt again, with no model.done fallback"
+    );
     assert!(
         output.result.errors.is_empty(),
         "no cell failures: {:?}",

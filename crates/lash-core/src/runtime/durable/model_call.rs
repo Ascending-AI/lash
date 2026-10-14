@@ -86,6 +86,39 @@ pub struct ModelAnswer {
 }
 
 impl ModelAnswer {
+    /// A scripted, non-streaming provider outcome with no callbacks. The
+    /// drive holds it until the phase runner acknowledges `model.answer`.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn for_test(
+        attempt: u32,
+        result: Result<crate::llm::types::LlmResponse, LlmCallError>,
+    ) -> Self {
+        Self {
+            attempt,
+            result,
+            text_streamed: false,
+            call_record: None,
+            stream: crate::runtime::LlmStreamRecord {
+                reasoning_published: Vec::new(),
+                capsule: crate::runtime::AssistantStreamCapsule::new(Vec::new(), Vec::new()),
+                response_plan: Default::default(),
+            },
+        }
+    }
+
+    /// Derive a scripted receipt with no callbacks into the machine's
+    /// response, after the phase runner acknowledged it.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn into_response_for_test(self, id: EffectId) -> crate::facade_support::Response {
+        crate::facade_support::Response::LlmComplete {
+            id,
+            result: self.result,
+            text_streamed: self.text_streamed,
+        }
+    }
+
     /// The callbacks the receipt owes until it is derived (S7): its
     /// response plan's, in recorded order, and the stream callbacks the
     /// derivation finishes its stream with. Its PhaseRoot records them, so a

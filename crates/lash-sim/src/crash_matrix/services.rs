@@ -16,9 +16,9 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::SessionHead;
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
-    PreparedCall, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
-    TurnRow, TurnServices, request_turn_cancel,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelAnswer, ModelCallAttempt, ModelPin,
+    OpenTurn, PreparedCall, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
+    TurnRestore, TurnRow, TurnServices, request_turn_cancel,
 };
 use lash_core::sansio::{ChatContextProjector, PendingToolCall, PendingWork, ProtocolDriverHandle};
 use lash_core::{
@@ -401,12 +401,18 @@ impl SimServices {
         Self { world, slow }
     }
 
-    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
+    fn drive(
+        &self,
+        row: &TurnRow,
+        machine: TurnMachine,
+        owed: Option<ModelAnswer>,
+    ) -> Box<dyn TurnDrive> {
         Box::new(SimDrive {
             services: self.clone(),
             session: row.session.clone(),
             run: row.run.clone(),
             machine,
+            owed,
         })
     }
 }
@@ -438,7 +444,7 @@ impl TurnServices for SimServices {
             Vec::new(),
             0,
         );
-        Ok(self.drive(row, machine))
+        Ok(self.drive(row, machine, None))
     }
 
     async fn resume(
@@ -454,7 +460,7 @@ impl TurnServices for SimServices {
             .restore(machine_config(&row.session, &row.run))
             .await?;
         Ok(OpenTurn {
-            drive: self.drive(&restored.row, restored.machine),
+            drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,
             row: restored.row,
         })
@@ -564,6 +570,7 @@ struct SimDrive {
     session: SessionId,
     run: TurnId,
     machine: TurnMachine,
+    owed: Option<ModelAnswer>,
 }
 
 impl SimDrive {
@@ -577,6 +584,25 @@ impl SimDrive {
 impl TurnDrive for SimDrive {
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
+    }
+
+    fn owed_answer(&self) -> Option<&ModelAnswer> {
+        self.owed.as_ref()
+    }
+
+    async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
+        let answer = self
+            .owed
+            .take()
+            .ok_or_else(|| TurnError::Exec(format!("model call {id:?} owes no derivation")))?;
+        self.machine
+            .handle_response(answer.into_response_for_test(id));
+        Ok(())
+    }
+
+    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+        self.owed = None;
+        Ok(())
     }
 
     fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
@@ -641,10 +667,10 @@ impl TurnDrive for SimDrive {
     async fn model_call(
         &mut self,
         _cx: &ActorContext,
-        id: EffectId,
+        _id: EffectId,
         request: Arc<LlmRequest>,
         _admitted: &lash_sansio::llm::types::AdmittedSend,
-        _attempt: ModelCallAttempt,
+        attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
         let rendered =
             serde_json::to_string(&*request).map_err(|error| TurnError::Exec(error.to_string()))?;
@@ -691,15 +717,14 @@ impl TurnDrive for SimDrive {
                 response_meta: None,
             }]
         };
-        self.machine.handle_response(Response::LlmComplete {
-            id,
-            result: Ok(LlmResponse {
+        self.owed = Some(ModelAnswer::for_test(
+            attempt.ordinal,
+            Ok(LlmResponse {
                 parts,
                 response_metadata: Default::default(),
                 ..LlmResponse::default()
             }),
-            text_streamed: false,
-        });
+        ));
         Ok(())
     }
 

@@ -58,7 +58,16 @@ pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
     ),
     (
         CommitLabel::MODEL_ANSWER,
-        Coverage::Cases(&[Case::Cell, Case::CellKilled, Case::Prompt, Case::Pressure]),
+        Coverage::Cases(&[
+            Case::Turn,
+            Case::Round,
+            Case::Cancel,
+            Case::Effects,
+            Case::Cell,
+            Case::CellKilled,
+            Case::Prompt,
+            Case::Pressure,
+        ]),
     ),
     (
         CommitLabel::ROUND_PRESENT_MODEL_START,

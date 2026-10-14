@@ -637,25 +637,11 @@ pub async fn run_phases(
                 };
                 match ran {
                     Some(ran) => {
-                        let exit = match ran {
-                            Ok(exit) => exit,
-                            Err(error) => {
-                                // The cell failed its attempt before any
-                                // commit held the response: a worker lost
-                                // at lowering or start, a host fault before
-                                // its first park. The response commits on
-                                // its own as `model.done` first, so the
-                                // retried attempt re-delivers the cell
-                                // rather than deriving it again from the
-                                // call's receipt (FIG-6038). A refused
-                                // commit leaves the attempt's own failure
-                                // to answer.
-                                if let Some(response) = unconsumed {
-                                    drop(response.commit_alone(cx).await);
-                                }
-                                return Err(error);
-                            }
-                        };
+                        // A worker failure before the cell's first save
+                        // leaves `model.answer` as the durable phase. Its
+                        // retry derives the paid receipt again, without
+                        // sending the provider call (FIG-6238).
+                        let exit = ran?;
                         if exit == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });
                         }

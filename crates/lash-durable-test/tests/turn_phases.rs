@@ -89,6 +89,10 @@ mod parks;
 #[path = "turn_phases/slots.rs"]
 mod slots;
 
+#[path = "turn_phases/model_receipts.rs"]
+mod model_receipts;
+use model_receipts::{admission_laws, compositions_of, cut_laws, material_laws};
+
 use matrix::MatrixTestExt as _;
 
 use std::sync::{Arc, Mutex};
@@ -97,8 +101,8 @@ use std::time::Duration;
 use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
-    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
-    ParkedTurnState, PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason,
+    AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelAnswer, ModelCallAttempt, ModelPin,
+    OpenTurn, ParkedTurnState, PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason,
     TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
     TurnServices, UnfinishedPhase, request_turn_cancel,
 };
@@ -483,7 +487,7 @@ impl TurnServices for L3Services {
             Vec::new(),
             0,
         );
-        Ok(self.drive(row, machine))
+        Ok(self.drive(row, machine, None))
     }
 
     async fn resume(
@@ -496,7 +500,7 @@ impl TurnServices for L3Services {
             .restore(machine_config(&row.session, &row.run))
             .await?;
         Ok(OpenTurn {
-            drive: self.drive(&restored.row, restored.machine),
+            drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,
             row: restored.row,
         })
@@ -515,11 +519,17 @@ impl TurnServices for L3Services {
 }
 
 impl L3Services {
-    fn drive(&self, row: &TurnRow, machine: TurnMachine) -> Box<dyn TurnDrive> {
+    fn drive(
+        &self,
+        row: &TurnRow,
+        machine: TurnMachine,
+        owed: Option<ModelAnswer>,
+    ) -> Box<dyn TurnDrive> {
         Box::new(L3Drive {
             services: self.clone(),
             run: row.run.clone(),
             machine,
+            owed,
         })
     }
 
@@ -536,12 +546,32 @@ struct L3Drive {
     services: L3Services,
     run: TurnId,
     machine: TurnMachine,
+    owed: Option<ModelAnswer>,
 }
 
 #[async_trait::async_trait]
 impl TurnDrive for L3Drive {
     fn machine(&mut self) -> &mut TurnMachine {
         &mut self.machine
+    }
+
+    fn owed_answer(&self) -> Option<&ModelAnswer> {
+        self.owed.as_ref()
+    }
+
+    async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
+        let answer = self
+            .owed
+            .take()
+            .ok_or_else(|| TurnError::Exec(format!("model call {id:?} owes no derivation")))?;
+        self.machine
+            .handle_response(answer.into_response_for_test(id));
+        Ok(())
+    }
+
+    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+        self.owed = None;
+        Ok(())
     }
 
     fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
@@ -625,7 +655,7 @@ impl TurnDrive for L3Drive {
     async fn model_call(
         &mut self,
         cx: &ActorContext,
-        id: EffectId,
+        _id: EffectId,
         request: Arc<LlmRequest>,
         send: &lash_sansio::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
@@ -782,7 +812,7 @@ impl TurnDrive for L3Drive {
                 cancel.cancelled().await;
                 let failure = stop_error.lock_recover().clone();
                 if let Some(error) = failure {
-                    self.model_unsent(id, error);
+                    self.owed = Some(ModelAnswer::for_test(attempt, Err(error)));
                 }
                 return Ok(());
             }
@@ -799,7 +829,7 @@ impl TurnDrive for L3Drive {
                 cancel.cancelled().await;
                 let failure = stop_error.lock_recover().clone();
                 if let Some(error) = failure {
-                    self.model_unsent(id, error);
+                    self.owed = Some(ModelAnswer::for_test(attempt, Err(error)));
                 }
                 return Ok(());
             }
@@ -824,9 +854,9 @@ impl TurnDrive for L3Drive {
             _ => {}
         }
         let text = if second { "done" } else { AGAIN };
-        self.machine.handle_response(Response::LlmComplete {
-            id,
-            result: Ok(LlmResponse {
+        self.owed = Some(ModelAnswer::for_test(
+            attempt,
+            Ok(LlmResponse {
                 parts: vec![LlmOutputPart::Text {
                     text: text.to_owned(),
                     response_meta: None,
@@ -834,8 +864,7 @@ impl TurnDrive for L3Drive {
                 response_metadata: Default::default(),
                 ..LlmResponse::default()
             }),
-            text_streamed: false,
-        });
+        ));
         Ok(())
     }
 
@@ -1435,206 +1464,6 @@ async fn withdraw_or_cancel_laws(
     violations
 }
 
-/// Admission at `model.start` (FIG-5255), in every cell.
-///
-/// - IDENTITY: the turn's first call is call 1 and its second call 2, and
-///   every attempt of a call carries that call's one composition.
-/// - FENCE and CUT-ACK: every attempt the model receives is of an admitted
-///   call: the turn's row, read as the attempt is sent, pins that call and
-///   stores the composition the attempt carries.
-/// - WIRE-SLOTS (FIG-5259, FIG-5445): every attempt sends the template the
-///   call's admission stored, so a resend on a second owner, whose renderer
-///   and provider builder would produce other bytes, sends the admitted
-///   literals and slots; a call with no slot sends exactly its admitted
-///   bytes, and a slot is filled by one value its codec made from that
-///   attempt's own delivery ([`slots::fill_laws`]). Two attempts of one call
-///   differ only inside their slots.
-fn admission_laws(seen: &Seen) -> Vec<String> {
-    let mut violations = Vec::new();
-    for call in &seen.calls {
-        let ordinal = if call.second { 2 } else { 1 };
-        match &call.stored {
-            None => violations.push(format!(
-                "WIRE-SLOTS: attempt {} of call {ordinal} was sent with no stored admission",
-                call.attempt
-            )),
-            Some(stored) => {
-                if call.sent_template.as_ref() != Some(&**stored) {
-                    violations.push(format!(
-                        "WIRE-SLOTS: attempt {} of call {ordinal} sent template {:?} while its \
-                         admission stored {}",
-                        call.attempt,
-                        call.sent_template
-                            .as_ref()
-                            .map(RecordedRequestTemplate::redacted),
-                        stored.redacted()
-                    ));
-                }
-                if stored.slots().next().is_none() && call.sent != stored.redacted() {
-                    violations.push(format!(
-                        "WIRE: attempt {} of call {ordinal} sent {} while its admission stored {}",
-                        call.attempt,
-                        call.sent,
-                        stored.redacted()
-                    ));
-                }
-                violations.extend(slots::fill_laws(ordinal, call, stored));
-            }
-        }
-        match call.composed {
-            Some(composed) if composed.call == ordinal => {}
-            other => violations.push(format!(
-                "IDENTITY: attempt {} of call {ordinal} carried composition {other:?}",
-                call.attempt
-            )),
-        }
-        if call.admitted != Some((ordinal, true)) {
-            violations.push(format!(
-                "FENCE: attempt {} of call {ordinal} was sent while the rows admitted {:?}",
-                call.attempt, call.admitted
-            ));
-        }
-    }
-    for ordinal in [1, 2] {
-        let mut sent = seen
-            .calls
-            .iter()
-            .filter(|call| {
-                call.composed
-                    .is_some_and(|composed| composed.call == ordinal)
-            })
-            .filter_map(|call| call.composed);
-        if let Some(first) = sent.next()
-            && sent.any(|other| other != first)
-        {
-            violations.push(format!(
-                "IDENTITY: call {ordinal} was sent with two compositions: {:?}",
-                seen.calls
-            ));
-        }
-        let mut templates = seen
-            .calls
-            .iter()
-            .filter(|call| u32::from(call.second) + 1 == ordinal)
-            .map(|call| &call.sent_template);
-        if let Some(first) = templates.next()
-            && templates.any(|other| other != first)
-        {
-            violations.push(format!(
-                "WIRE-SLOTS: call {ordinal} was sent with two templates: {:?}",
-                seen.calls
-            ));
-        }
-    }
-    violations
-}
-
-/// MATERIAL (FIG-5259): an admitted call whose stored admission is gone is
-/// never sent again, and nothing rebuilds it: it settles unsent as
-/// `admitted_request_unavailable`, and the turn ends with that failure.
-fn material_laws(seen: &Seen) -> Vec<String> {
-    let mut violations = Vec::new();
-    if !seen.material_lost {
-        violations.push("MATERIAL: no send lost its call's admission".to_owned());
-    }
-    if seen.calls.len() != 1 {
-        violations.push(format!(
-            "MATERIAL: the call was sent {} times after its admission was lost: {:?}",
-            seen.calls.len(),
-            seen.calls
-        ));
-    }
-    let failed = seen
-        .told
-        .iter()
-        .any(|told| told.contains("admitted_request_unavailable"));
-    if !failed {
-        violations.push(format!(
-            "MATERIAL: the turn did not end with admitted_request_unavailable: {:?}",
-            seen.told
-        ));
-    }
-    violations
-}
-
-/// How often call `call` composed its prompt.
-fn compositions_of(seen: &Seen, call: u32) -> usize {
-    seen.compositions
-        .iter()
-        .filter(|composition| composition.call == call)
-        .count()
-}
-
-/// The laws of one cut: a node killed after `model.start` committed, and
-/// how often a call cut at its `model.start` composed (FIG-5255).
-fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
-    let mut violations = Vec::new();
-    if matches!(
-        mode,
-        Mode::Plain | Mode::Slots | Mode::AdapterSlots | Mode::SlotHold
-    ) && cut.point.label == CommitLabel::MODEL_START
-    {
-        // Uncut up to its cut, a plain turn's nth `model.start` admits its
-        // nth call. A crash after admission resends the admitted call and
-        // composes nothing; one before it composes the call again.
-        let call = u32::try_from(cut.point.nth).unwrap();
-        let expected = match cut.fault {
-            Fault::CommitThenAbort | Fault::AckHidden => Some(1),
-            Fault::FailBefore | Fault::Abort => Some(2),
-            _ => None,
-        };
-        let composed = compositions_of(seen, call);
-        if let Some(expected) = expected
-            && composed != expected
-        {
-            violations.push(format!(
-                "admission: call {call} cut at model.start under {:?} composed {composed} times, \
-                 not {expected}",
-                cut.fault
-            ));
-        }
-    }
-    let killed_after_pin =
-        cut.point.label == CommitLabel::MODEL_START && matches!(cut.fault, Fault::CommitThenAbort);
-    if !killed_after_pin {
-        return violations;
-    }
-    let max_attempt = seen
-        .calls
-        .iter()
-        .map(|call| call.attempt)
-        .max()
-        .unwrap_or(0);
-    match mode {
-        Mode::Plain | Mode::Slots | Mode::AdapterSlots | Mode::SlotHold => {
-            if max_attempt != 2 {
-                violations.push(format!(
-                    "re-send: a call pinned by a killed node was not re-sent as attempt 2: {:?}",
-                    seen.calls
-                ));
-            }
-        }
-        Mode::ShortDeadline => {
-            if max_attempt > 1 {
-                violations.push(format!(
-                    "L-C1: a call whose pinned deadline passed was sent again: {:?}",
-                    seen.calls
-                ));
-            }
-        }
-        Mode::CancelWhileStreaming
-        | Mode::AfterStepWhileStreaming
-        | Mode::HeadMovesUnderTheTurn
-        | Mode::QueuedCancel
-        | Mode::CancelAtAdmission
-        | Mode::MaterialLost
-        | Mode::MaterialStale
-        | Mode::CollidingCommit
-        | Mode::OutsideWriterRange => {}
-    }
-    violations
-}
-
 /// FIG-5207: the turn's head commit over the head its owner cached is
 /// refused once the head moved; the owner evicts the head, reloads it, and
 /// the turn commits over the moved head. No commit over the stale head
@@ -1764,6 +1593,7 @@ async fn prove_on(matrix: Matrix, mode: Mode, labels: &[CommitLabel], dialect: D
 const PLAIN: &[CommitLabel] = &[
     CommitLabel::TURN_ADMIT,
     CommitLabel::MODEL_START,
+    CommitLabel::MODEL_ANSWER,
     CommitLabel::TURN_COMMIT,
 ];
 const SHORT_DEADLINE: &[CommitLabel] = &[CommitLabel::MODEL_START];

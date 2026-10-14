@@ -189,8 +189,8 @@ pub struct ModelCallAttempt {
 
 /// One turn an owner runs: its machine and the in-memory work around it. The
 /// phase runner polls the machine through it, commits at the turn's labels
-/// and hands each effect to the method that answers it; every method answers
-/// the machine itself.
+/// and hands each effect to the method that answers it. A model call holds
+/// its receipt until the phase runner commits it, then derives its answer.
 #[async_trait::async_trait]
 pub trait TurnDrive: Send {
     /// The turn's machine.
@@ -213,9 +213,7 @@ pub trait TurnDrive: Send {
     /// [`model_call`](Self::model_call) returned it, which `model.answer`
     /// commits before anything derives from it, or the receipt a restore at
     /// `model.answer` found. `None` once a derivation answered the machine.
-    fn owed_answer(&self) -> Option<&ModelAnswer> {
-        None
-    }
+    fn owed_answer(&self) -> Option<&ModelAnswer>;
 
     /// Derive the machine's model call `id` from
     /// [`owed_answer`](Self::owed_answer), a committed receipt: finish its
@@ -225,11 +223,7 @@ pub trait TurnDrive: Send {
     /// # Errors
     ///
     /// [`TurnError`] when the derivation aborts the turn.
-    async fn derive_answer(&mut self, _cx: &ActorContext, id: EffectId) -> Result<(), TurnError> {
-        Err(TurnError::Exec(format!(
-            "model call {id:?} owes no derivation"
-        )))
-    }
+    async fn derive_answer(&mut self, cx: &ActorContext, id: EffectId) -> Result<(), TurnError>;
 
     /// Settle the machine's model call `id`, which an immediate cancel
     /// stopped, with [`owed_answer`](Self::owed_answer) uncommitted and
