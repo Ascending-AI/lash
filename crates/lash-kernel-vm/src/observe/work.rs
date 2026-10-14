@@ -290,12 +290,6 @@ impl Counting {
         }
     }
 
-    pub(crate) fn native_retry(&mut self) {
-        if let Some(counts) = self.open_native() {
-            counts.retries += 1;
-        }
-    }
-
     pub(crate) fn guard_work(&mut self, units: u64) {
         if let Some(counts) = self.open_native() {
             counts.guard_work += units;

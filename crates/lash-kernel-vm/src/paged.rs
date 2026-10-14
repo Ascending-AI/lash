@@ -1,11 +1,8 @@
 //! The machine's face after the persistent-heap cutover (FIG-6195, seams S1
 //! and S4 of `docs/design/persistent-heap-seams.md`).
 //!
-//! Declarations only, called by nothing yet. At the cutover (layer hp-heap,
-//! FIG-6188, with the integrator, FIG-6193) [`Machine`], [`MachineError`],
-//! [`OpenError`], [`SealError`], [`CellStart`] and [`Finished`] replace
-//! `interface::Machine` and its whole-state `export`/`import`, `Parked`,
-//! `Bindings` and `ExportError`/`ImportError`, which are deleted.
+//! The paged KernelMachine implements this interface. Its checkpoint root
+//! names persistent task, frame, queue, wait, binding and function tables.
 //!
 //! The machine executes directly on a [`SemanticHeap`]: a run opens a
 //! sealed [`CheckpointRoot`] and faults in only the pages its next steps

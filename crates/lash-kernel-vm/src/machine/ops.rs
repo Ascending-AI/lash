@@ -9,7 +9,7 @@
 //!   register;
 //! - `Ok(Flow::Step)`: it ended the task's step where it left the task: it
 //!   entered a block, a loop or a frame, or the task waits;
-//! - `Err(Interrupt::Raise(_))`: it raised;
+//! - `Err(Interrupt::raised(_))`: it raised;
 //! - `Err(Interrupt::Halt(_))`: it ended the run.
 //!
 //! An operation that cannot step returns [`Eval`] instead. The registers
@@ -23,8 +23,6 @@
 //! entry of every library call, inside an expression or in a frame), and
 //! the loop's iteration step, here, and action dispatch,
 //! [`KernelMachine::act`].
-
-use std::sync::Arc;
 
 use lash_kernel_doc::{EntityId, Identity, NativeCall, NativeError, TaskId, Value, WorkCounter};
 use num_traits::ToPrimitive;
@@ -555,7 +553,7 @@ impl KernelMachine {
                 self.put(out, value);
                 Ok(true)
             }
-            Err(value) => Err(Interrupt::Raise(value)),
+            Err(value) => Err(Interrupt::raised(value)),
         }
     }
 
@@ -601,7 +599,7 @@ impl KernelMachine {
                 self.pin(out).map_err(|halt| halt.in_function(name))?;
                 Ok(())
             }
-            Err(value) => Err(Interrupt::Raise(value)),
+            Err(value) => Err(Interrupt::raised(value)),
         }
     }
 

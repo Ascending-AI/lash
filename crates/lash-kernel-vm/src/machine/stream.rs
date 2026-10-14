@@ -52,7 +52,7 @@ pub(super) fn unbound<T>(name: &Name) -> Eval<T> {
     );
     error.data = Payload::Resident(Arc::new(Value::text(name.as_str())));
     error.cost.0 += name.as_str().len() as u64;
-    Err(Interrupt::Raise(Value::Error(Arc::new(error))))
+    Err(Interrupt::raised(Value::Error(Arc::new(error))))
 }
 
 /// The statement a stream runs: its task, executable and ops.
@@ -350,7 +350,7 @@ impl KernelMachine {
                 }
                 Ran::Depart(Completion::Return(value))
             }
-            Op::Throw { src } => return Err(Interrupt::Raise(self.take(at(base, src)))),
+            Op::Throw { src } => return Err(Interrupt::raised(self.take(at(base, src)))),
             Op::Print { src } => {
                 let value = self.take(at(base, src));
                 let datum = self.copy_out(&value)?;
@@ -500,7 +500,7 @@ impl KernelMachine {
             Ok(answer) => self.decode(exe, &answer, &lash_kernel_doc::Type::Any)?,
             Err(error) => {
                 let datum = lash_kernel_doc::Datum::Error(Box::new(error));
-                return Err(Interrupt::Raise(self.decode(
+                return Err(Interrupt::raised(self.decode(
                     exe,
                     &datum,
                     &lash_kernel_doc::Type::Any,

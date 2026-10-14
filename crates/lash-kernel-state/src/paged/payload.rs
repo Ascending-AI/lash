@@ -218,7 +218,7 @@ pub fn visit(
             "payload range is out of bounds".into(),
         ));
     }
-    walk(access, &Part { summary, page }, text, range, visitor)?;
+    let _ = walk(access, &Part { summary, page }, text, range, visitor)?;
     Ok(())
 }
 pub fn offset(
@@ -418,7 +418,7 @@ impl NativeHeap for PagedHeap {
                                 "text range cuts a scalar or exceeds length".into(),
                             )
                         })?;
-                    visitor(Chunk::Text(slice));
+                    let _ = visitor(Chunk::Text(slice));
                     Ok(())
                 }
                 Payload::Paged(p) => {
@@ -439,7 +439,7 @@ impl NativeHeap for PagedHeap {
                     let slice = bytes
                         .get(range.start as usize..range.end as usize)
                         .ok_or_else(|| HeapFault::Malformed("bytes range exceeds length".into()))?;
-                    visitor(Chunk::Bytes(slice));
+                    let _ = visitor(Chunk::Bytes(slice));
                     Ok(())
                 }
                 Payload::Paged(p) => super::payload::visit(

@@ -26,14 +26,20 @@ impl<T: Cell> Stage for RefCell<Node<T>> {
             bytes: u64::MAX,
         });
         tree.seal(access, &mut work)?;
-        branch = tree.root.expect("nonempty staged tree");
+        branch = tree
+            .root
+            .ok_or_else(|| HeapFault::Malformed("nonempty staged tree lost its root".into()))?;
         let Link::Sealed(page) = branch.link else {
             unreachable!()
         };
         *self.borrow_mut() = Node::Staged(
             page,
-            branch.encoded_bytes.expect("sealed bytes"),
-            branch.is_leaf.expect("sealed kind"),
+            branch
+                .encoded_bytes
+                .ok_or_else(|| HeapFault::Malformed("staged tree has no byte summary".into()))?,
+            branch
+                .is_leaf
+                .ok_or_else(|| HeapFault::Malformed("staged tree has no node kind".into()))?,
         );
         Ok(())
     }

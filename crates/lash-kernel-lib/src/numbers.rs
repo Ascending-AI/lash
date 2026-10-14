@@ -543,7 +543,12 @@ fn plain(
                     numbers
                 }
             };
-            op.call(&numbers)?.inline().expect("math returns a float")
+            {
+                let Some(value) = op.call(&numbers)?.inline() else {
+                    unreachable!("math returns a float")
+                };
+                value
+            }
         }
         Operation::Eq => {
             let equal = match heap {
@@ -600,7 +605,7 @@ fn plain(
                 let integer = match value {
                     IntRef::Inline(i) => i.clone(),
                     _ => {
-                        let Some(heap) = heap.as_deref_mut() else {
+                        let Some(heap) = heap else {
                             return Ok(None);
                         };
                         heap.materialize_int(value)?
@@ -672,7 +677,7 @@ fn plain(
             let text = match &text.body {
                 Payload::Resident(text) => Arc::clone(text),
                 _ => {
-                    let Some(heap) = heap.as_deref_mut() else {
+                    let Some(heap) = heap else {
                         return Ok(None);
                     };
                     heap.materialize_text(text)?
@@ -773,7 +778,7 @@ fn parse_float(text: &str) -> Result<f64, NativeError> {
             "expected decimal digits with optional sign, point and exponent",
         )
     };
-    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(&text);
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
     let parts: Vec<&str> = unsigned.split(['e', 'E']).collect();
     if parts.len() > 2 {
         return Err(invalid());

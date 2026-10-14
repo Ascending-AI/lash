@@ -51,6 +51,9 @@ impl ObjectHead {
             Body::Variable(_) => ObjectKind::Variable,
         }
     }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     pub fn len(&self) -> u64 {
         match &self.body {
             Body::List { rows, .. } => rows.len(),
@@ -368,7 +371,7 @@ pub fn ordinal_key(ordinal: u64) -> Vec<u8> {
 /// image rebuilt at park. Only changed paths become editable.
 pub mod execution {
     use super::*;
-    use lash_kernel_doc::{Name, TaskId, TaskIdentity};
+    use lash_kernel_doc::{Name, TaskId};
 
     /// A cursor holding retains identity roots without another Value header.
     #[derive(Clone)]
@@ -902,12 +905,12 @@ impl PagedHeap {
             runs.passed(&ordinal_key(start), &self.access)?
                 .saturating_sub(1),
             &self.access,
-        )? {
-            if !previous.live && previous.start + previous.len == start {
-                start = previous.start;
-                len += previous.len;
-                runs.remove(&key, &self.access)?;
-            }
+        )? && !previous.live
+            && previous.start + previous.len == start
+        {
+            start = previous.start;
+            len += previous.len;
+            runs.remove(&key, &self.access)?;
         }
         let tail = entity.ordinal + 1;
         let end = run
@@ -926,11 +929,11 @@ impl PagedHeap {
             )?;
         } else if let Some((key, next)) =
             runs.after(Some(&ordinal_key(entity.ordinal)), &self.access)?
+            && !next.live
+            && next.start == tail
         {
-            if !next.live && next.start == tail {
-                len += next.len;
-                runs.remove(&key, &self.access)?;
-            }
+            len += next.len;
+            runs.remove(&key, &self.access)?;
         }
         runs.write(
             ordinal_key(start),

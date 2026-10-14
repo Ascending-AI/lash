@@ -132,7 +132,9 @@ impl<T: Cell> Tree<T> {
                     if tokens.len() > INLINE_TREE_BYTES {
                         // Keep prepared children even if the next page exceeds
                         // this seal budget; retry never discards staged work.
-                        let root = self.root.as_mut().expect("nonempty tree");
+                        let root = self.root.as_mut().ok_or_else(|| {
+                            HeapFault::Malformed("nonempty inline tree lost its root".into())
+                        })?;
                         let node = Node::Leaf(rows);
                         let page = Rc::new(RefCell::new(node));
                         access.track(&page, &page.borrow(), self.sequence);
@@ -143,7 +145,9 @@ impl<T: Cell> Tree<T> {
                     }
                     children.sort_by_key(|p| p.id);
                     children.dedup_by_key(|p| p.id);
-                    let root = self.root.as_mut().expect("nonempty tree");
+                    let root = self.root.as_mut().ok_or_else(|| {
+                        HeapFault::Malformed("nonempty inline tree lost its root".into())
+                    })?;
                     root.link = Link::Inline {
                         tokens: tokens.into(),
                         children,

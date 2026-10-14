@@ -2,8 +2,8 @@
 use super::frames::Frames;
 use super::{Task, Wait};
 use crate::compile::Executable;
+use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::{TaskId, TaskIdentity};
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
@@ -187,11 +187,16 @@ impl Tasks {
         visitor: &mut dyn FnMut(TaskId, &TaskRecord) -> bool,
     ) -> Result<(), HeapFault> {
         self.roots()?;
+        let mut malformed = None;
         self.rows.visit(&self.access, &mut |key, record| {
-            let index =
-                u64::from_be_bytes(key.try_into().expect("task keys are canonical ordinals"));
+            let Ok(bytes) = key.try_into() else {
+                malformed = Some(HeapFault::Malformed("task key is not an ordinal".into()));
+                return false;
+            };
+            let index = u64::from_be_bytes(bytes);
             visitor(TaskId(index), record)
-        })
+        })?;
+        malformed.map_or(Ok(()), Err)
     }
     /// At a complete statement the canonical records are authoritative.
     /// Retire derived frames so the cache cannot grow with task history.
@@ -217,7 +222,10 @@ impl Tasks {
                 "all derived task frames are pinned".into(),
             ));
         };
-        let mut task = self.cache.remove(&index).expect("selected cached task");
+        let mut task = self
+            .cache
+            .remove(&index)
+            .ok_or_else(|| HeapFault::Malformed("selected cached task is absent".into()))?;
         task.frames.flush()?;
         task.record.frames = task.frames.rows.clone();
         let key = ordinal_key(index);

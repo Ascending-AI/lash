@@ -175,3 +175,24 @@ fn paged_json_preserves_unicode_numbers_and_first_key_positions() {
         ])
     );
 }
+
+/// K-LFMT-004: every out-of-range radix has the same error, even when its
+/// magnitude is paged and there is no room to materialize it.
+#[test]
+fn a_paged_radix_keeps_the_range_error_before_reading_the_number() {
+    for negative in [false, true] {
+        let mut heap = heap();
+        let magnitude = num_bigint::BigInt::from(10_u32).pow(1000);
+        let radix = Integer::new(if negative { -magnitude } else { magnitude });
+        let input = args(&mut heap, vec![Datum::Absent, Datum::Int(radix)]);
+        hold_with_extra(&mut heap, &input, 0);
+        let Err(NativeError::Raised(error)) = call(&mut heap, "format.radix", &input) else {
+            panic!("radix range error")
+        };
+        assert_eq!(crate::testsupport::text(&heap, &error.kind), "number_range");
+        assert_eq!(
+            crate::testsupport::text(&heap, &error.message),
+            "radix must be between 2 and 36"
+        );
+    }
+}

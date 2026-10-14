@@ -190,10 +190,10 @@ fn map_iteration_survives_removal_and_reinsertion_across_seal() {
     let heap = reopen(&mut heap, &pages);
     let mut fields = Vec::new();
     heap.visit(record, &mut |e| {
-        if let Element::Field { name, .. } = e {
-            if let Payload::Resident(s) = &name.body {
-                fields.push(s.to_string());
-            }
+        if let Element::Field { name, .. } = e
+            && let Payload::Resident(s) = &name.body
+        {
+            fields.push(s.to_string());
         }
         ControlFlow::Continue(())
     })
@@ -846,7 +846,7 @@ fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
 #[test]
 fn an_ended_task_result_counts_toward_fast_reservation() {
     use super::super::tree::Tree;
-    use lash_kernel_doc::{Name, Site, TaskId, TaskIdentity, Unit};
+    use lash_kernel_doc::{Name, Site, TaskId, Unit};
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
         Census::restore(heap.certificate(), LogicalBytes(100)).expect("census"),

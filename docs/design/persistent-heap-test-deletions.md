@@ -96,3 +96,8 @@ version refusals and all recorded observations retain their original oracles.
 | `crates/lash-dialect-typescript/src/tests/machine.rs::numeric_entry_saved_functions_accept_later_unknown_calls` | `saved::laws` uses frozen capture bundles; `numeric_recursive_calls_admit_once_and_account_real_work` pins generic numeric entry behavior; old SavedFunction JSON grammar removed |
 
 | `crates/lash-dialect-typescript/src/tests/positional.rs::a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly` | `a_paged_positional_stack_resumes_with_a_new_layout` reads the S4 frame tree's 62-frame summary and resumes in Layout(17); old flat JSON roundtrip assertion deleted |
+
+| `crates/lash-vm-releases/src/tests.rs::native_corpus_heap_obeys_kernel_key_equality` | `native_replay_uses_the_paged_heaps_normal_keys` certifies numeric/tuple aliases with actual NativeHeap::normal_key and map/set reads; old ProbeHeap removed |
+
+| `lash-kernel-doc::graph_codec::tests::value_and_datum_variants_carry_their_pinned_numbers` (flat Value portion) | Datum discriminants remain in `datum_variants_carry_their_pinned_numbers`; semantic descriptors use the canonical heap/root laws in `paged::laws::heap` and `paged::laws::root`. |
+| `lash-kernel-doc::graph_codec::tests::documents_and_definitions_read_back_exactly` (flat Object portion) | Documents, definitions and annotations remain; map order survives seal/open in `paged::laws::heap::map_iteration_survives_removal_and_reinsertion_across_seal`. |

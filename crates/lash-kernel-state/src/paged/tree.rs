@@ -275,6 +275,9 @@ impl<T: Cell> Tree<T> {
     pub fn len(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.len)
     }
+    pub fn is_empty(&self) -> bool {
+        self.root.as_ref().is_none_or(|root| root.summary.len == 0)
+    }
     pub fn cost(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.cost)
     }
@@ -705,7 +708,7 @@ impl<T: Cell> Tree<T> {
             .root
             .as_mut()
             .map_or(Ok(None), |r| edit(r, key, access, self.sequence))?;
-        if self.len() == 0 {
+        if self.is_empty() {
             self.root = None;
         }
         access.stage_pressure()?;

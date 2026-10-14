@@ -506,6 +506,35 @@ fn a_missing_native_or_helper_refuses_resume() {
 mod corpus;
 #[path = "build/inputs.rs"]
 mod inputs;
+
+/// K-KEY-001: Any signature edges must not bypass the production set
+/// constructor and record Absent or mutable members as legal sets.
+#[test]
+fn generated_set_edges_are_constructible_by_the_real_heap() {
+    let refused = std::panic::catch_unwind(|| {
+        inputs::RecordedObjects::default().object(probe::fixtures::RecordedObject::Set(vec![
+            probe::fixtures::RecordedValue::Absent,
+        ]));
+    });
+    assert!(
+        refused.is_err(),
+        "the generator must refuse an illegal set member"
+    );
+    for signature in [
+        "set.keys(xs: Set(Any)) -> List(Any)",
+        "set.contains(xs: Set(Any), key: Any) -> Bool",
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {signature}\nkernel 1\ncharge 1\nnative\n"
+        ))
+        .unwrap();
+        let cases = inputs::generate(&definition, &[]);
+        assert!(!cases.is_empty());
+        for case in cases {
+            probe::fixtures::Replay::load(&case).unwrap();
+        }
+    }
+}
 #[path = "build/probe.rs"]
 mod probe;
 #[expect(
@@ -557,9 +586,7 @@ fn native_corpus_observes_negative_zero() {
 /// compatible anchors, and refuses a changed value, error, guard or reservation.
 #[test]
 fn native_corpus_certifies_answers_and_keeps_compatible_anchors() {
-    use lash_kernel_doc::{
-        ErrorValue, Float, NativeCall, NativeError, NativeFunction, Object, Value,
-    };
+    use lash_kernel_doc::{Float, NativeCall, NativeError, NativeFunction, Object, Value};
     struct Native(u8);
     impl NativeFunction for Native {
         fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -573,9 +600,8 @@ fn native_corpus_certifies_answers_and_keeps_compatible_anchors() {
                 call.heap.reserve(1, 0)?;
             }
             if self.0 == 4 {
-                return Err(NativeError::Raised(ErrorValue::new(
-                    "changed_error",
-                    "edge",
+                return Err(NativeError::Raised(std::sync::Arc::new(
+                    lash_kernel_doc::heap::ErrorRef::new("changed_error", "edge"),
                 )));
             }
             let value = if self.0 == 1 && value.get() == 0.0 && value.get().is_sign_negative() {
@@ -723,25 +749,44 @@ fn native_fingerprint_covers_the_prepared_entry() {
     assert!(error.contains("prepared_difference"), "{error}");
 }
 
-/// FIG-6182 / K-KEY-002: the certification heap must answer with the kernel's
-/// key equality, including numeric aliases and aliases nested inside tuples.
+/// K-KEY-002: release replay uses the actual paged heap's normal form.
 #[test]
-fn native_corpus_heap_obeys_kernel_key_equality() {
+fn native_replay_uses_the_paged_heaps_normal_keys() {
     use lash_kernel_doc::{Float, Integer, NativeHeap, Object, Value};
-    let integer = |value: i64| Value::Int(Integer::from(value));
+    let integer =
+        |heap: &mut dyn NativeHeap, value: i64| Value::Int(heap.int(Integer::from(value)).unwrap());
     let float = |value| Value::Float(Float::new(value));
-    let mut heap = probe::ProbeHeap::default();
-    let map = heap.object(Object::Map(vec![(integer(1), Value::Bool(true))]));
-    assert_eq!(heap.map_get(map, &float(1.0)), Some(Value::Bool(true)));
-    let zero = heap.object(Object::Set(vec![integer(0)]));
-    assert!(heap.set_contains(zero, &float(-0.0)));
-    let tuple = heap.object(Object::Set(vec![Value::Tuple(
-        vec![integer(1), float(f64::NAN)].into(),
-    )]));
-    assert!(heap.set_contains(
-        tuple,
-        &Value::Tuple(vec![float(1.0), float(f64::NAN)].into())
+    let mut heap = probe::fixtures::fresh().unwrap();
+    let one = integer(&mut heap, 1);
+    let map = heap
+        .allocate(Object::Map(vec![(one.clone(), Value::Bool(true))]))
+        .unwrap();
+    assert!(matches!(
+        heap.map_get(map, &float(1.0)).unwrap(),
+        Some(Value::Bool(true))
     ));
-    let boundary = heap.object(Object::Set(vec![integer(i64::MAX)]));
-    assert!(!heap.set_contains(boundary, &float(i64::MAX as f64)));
+    assert_eq!(
+        heap.normal_key(&one).unwrap(),
+        heap.normal_key(&float(1.0)).unwrap()
+    );
+    let zero = integer(&mut heap, 0);
+    let zero = heap.allocate(Object::Set(vec![zero])).unwrap();
+    assert!(heap.set_contains(zero, &float(-0.0)).unwrap());
+    let first = heap.tuple(vec![one, float(f64::NAN)]).unwrap();
+    let tuple = heap
+        .allocate(Object::Set(vec![Value::Tuple(first.clone())]))
+        .unwrap();
+    let queried = heap.tuple(vec![float(1.0), float(f64::NAN)]).unwrap();
+    assert_eq!(
+        heap.normal_key(&Value::Tuple(first)).unwrap(),
+        heap.normal_key(&Value::Tuple(queried.clone())).unwrap()
+    );
+    assert!(heap.set_contains(tuple, &Value::Tuple(queried)).unwrap());
+    let max = integer(&mut heap, i64::MAX);
+    let boundary = heap.allocate(Object::Set(vec![max])).unwrap();
+    assert!(
+        !heap
+            .set_contains(boundary, &float(i64::MAX as f64))
+            .unwrap()
+    );
 }

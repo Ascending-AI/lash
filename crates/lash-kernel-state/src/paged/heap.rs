@@ -49,6 +49,10 @@ pub enum ObjectKind {
 /// `lash_kernel_doc::heap::Object`, the machine may allocate closures and
 /// variables.
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one transient constructor carries its bounded semantic site by value; retained closure records use paged trees"
+)]
 pub enum ObjectInit {
     List(Vec<Value>),
     Map(Vec<(Value, Value)>),
@@ -190,12 +194,6 @@ pub trait SemanticHeap: NativeHeap {
         field: FieldName<'_>,
     ) -> Result<(), HeapWriteError>;
     fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError>;
-
-    /// Guest equality of two values (`K-VAL` equality rules); can read
-    /// pages.
-
-    /// A legal key's normal form, or `None` when `value` is not a legal key
-    /// (`K-KEY-001`).
 
     /// Every heap entity and task `value` names, through tuples and errors.
     fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault>;

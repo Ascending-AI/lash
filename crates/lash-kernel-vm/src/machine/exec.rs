@@ -14,10 +14,10 @@ use super::{
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
 use crate::heap::value_bytes;
-use crate::interface::{Bound, Host, Outcome};
+use crate::interface::{Bound, Host};
 use crate::observe::Event;
 use lash_kernel_doc::NativeHeap;
-use lash_kernel_doc::heap::{HeapFault, IntRef};
+use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit, SemanticHeap};
 
 /// A function about to run in a new frame.
@@ -271,7 +271,7 @@ impl KernelMachine {
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
                             Ok(_) => Completion::Normal,
-                            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+                            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
                             Err(Interrupt::Halt(halt)) => return Err(halt),
                         };
                     }
@@ -350,7 +350,7 @@ impl KernelMachine {
                         self.take_edge_of(task, exe, stmt)?;
                         None
                     }
-                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
+                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(*value)),
                     Err(Interrupt::Halt(halt)) => return Err(halt),
                 }
             }
@@ -395,11 +395,7 @@ impl KernelMachine {
 
     /// Keeps an ended frame's vectors for the next frame.
     fn recycle(&mut self, frame: Frame) {
-        let Frame {
-            mut control,
-            library,
-            ..
-        } = frame;
+        let Frame { mut control, .. } = frame;
         control.clear();
         self.storage.frames.push(FrameStorage { control });
     }
@@ -417,10 +413,10 @@ impl KernelMachine {
         self.formula_source(
             &exe.lib(lib).charge,
             |index| {
-                Ok(args.get(
+                args.get(
                     &lash_kernel_state::paged::directory::ordinal_key(index as u64),
                     &self.heap.access,
-                )?)
+                )
             },
             result,
         )
@@ -487,11 +483,11 @@ impl KernelMachine {
         call: Call<'_>,
     ) -> Eval<()> {
         let Call {
+            library,
             code: code_id,
             args: base,
             count: given,
             captures,
-            library,
             inline,
             awaited_by,
         } = call;
@@ -629,7 +625,7 @@ impl KernelMachine {
     ) -> Eval<Value> {
         match incoming {
             Incoming::Value(value) => Ok(value),
-            Incoming::Raise(value) => Err(Interrupt::Raise(value)),
+            Incoming::Raise(value) => Err(Interrupt::raised(value)),
             Incoming::Joined(joined) => self.join_result(joined),
             Incoming::Outcome(wait) => self.resume_outcome(task, exe, wait),
         }
@@ -664,7 +660,7 @@ impl KernelMachine {
         // therefore publish together at the statement's safe point.
         self.waits.remove(&key, &self.heap.access)?;
         if failed {
-            Err(Interrupt::Raise(value))
+            Err(Interrupt::raised(value))
         } else {
             Ok(value)
         }
@@ -680,7 +676,7 @@ impl KernelMachine {
             TaskState::Ended(super::EndedTask::Raised(value)) => {
                 let value = value.clone();
                 joined.observed = true;
-                Err(Interrupt::Raise(value))
+                Err(Interrupt::raised(value))
             }
             _ => Err(fault("a join resumed before its task ended").into()),
         }

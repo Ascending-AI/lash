@@ -39,6 +39,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
+lash-kernel-state = { workspace = true }
 lash-core-store = { workspace = true }
 thiserror = { workspace = true }
 blake3 = { workspace = true }
@@ -55,5 +56,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-state = { workspace = true }
 lash-kernel-lib = { workspace = true }
 blake3 = { workspace = true }

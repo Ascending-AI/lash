@@ -47,6 +47,159 @@ fn a_parked_kir_frame_resumes_from_its_sealed_record() {
     assert_eq!(result(embedder.run_to_end(&[])), int(7));
 }
 
+/// S4/K-SES-001: Main retains session function pins, Entry starts without
+/// a session, and both retain their target kind through a cold continuation.
+#[test]
+fn main_and_entry_keep_their_distinct_checkpoint_roots() {
+    use crate::{CellStart, EffectModes, KernelMachine, Target};
+    use lash_kernel_doc::{Datum, Name};
+    use tree::{SealWork, Tree};
+    for entry in [false, true] {
+        let mut embedder = Embedder::new(
+            "entry f(x: Int) -> Any fn f(x) { let v = perform echo(x) as Any return v } main { let v = perform echo(7) as Any return v }",
+        );
+        let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
+        heap.set_census(Box::new(
+            Census::restore(heap.certificate(), LogicalBytes(1 << 30)).unwrap(),
+        ))
+        .unwrap();
+        // The VM preserves host-validated immutable pins without interpreting
+        // their payload. Use a real frozen page and the canonical function table.
+        let pin = heap.freeze_datum(&Datum::Null).unwrap().root;
+        let mut functions = Tree::new(false);
+        functions
+            .write(b"host pin".to_vec(), pin, &heap.access)
+            .unwrap();
+        functions
+            .seal(
+                &heap.access,
+                &mut SealWork::new(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                }),
+            )
+            .unwrap();
+        let functions = KeyedRoot {
+            page: functions.page(),
+            len: functions.len(),
+            cost: LogicalBytes(functions.cost()),
+        };
+        let session = heap
+            .carry(CarryRoots {
+                bindings: KeyedRoot {
+                    page: None,
+                    len: 0,
+                    cost: LogicalBytes(0),
+                },
+                functions,
+            })
+            .unwrap();
+        let certificate = heap.certificate();
+        let (program, _) = embedder.program(true);
+        embedder.machine = KernelMachine::start(
+            program,
+            Setup::default().bounds,
+            CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: if entry {
+                    Target::Entry(Name::new("f"))
+                } else {
+                    Target::Main
+                },
+                args: if entry {
+                    vec![Datum::Int(7.into())]
+                } else {
+                    Vec::new()
+                },
+                session: if entry { None } else { Some(session) },
+                modes: EffectModes::recorded(),
+            },
+            Box::new(embedder.source.clone()),
+            Box::new(
+                Census::restore(certificate, LogicalBytes(Setup::default().bounds.memory)).unwrap(),
+            ),
+        )
+        .unwrap();
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        let root = reopen(&mut embedder);
+        assert_eq!(
+            root.functions,
+            if entry {
+                KeyedRoot {
+                    page: None,
+                    len: 0,
+                    cost: LogicalBytes(0),
+                }
+            } else {
+                functions
+            }
+        );
+        assert_eq!(
+            root.target,
+            if entry {
+                CellTargetKind::Entry
+            } else {
+                CellTargetKind::Main
+            }
+        );
+        embedder.deliver("echo");
+        let crate::End::Finished(finished) = embedder.run_to_end(&[]) else {
+            panic!("finish")
+        };
+        assert_eq!(finished.result, int(7));
+        if entry {
+            assert!(finished.carry.is_none());
+        } else {
+            assert_eq!(finished.carry.unwrap().functions, functions);
+        }
+    }
+}
+
+/// S4/D-SEAL: exhaustion returns no candidate, preserves the prior root,
+/// and leaves the working continuation sealable and resumable.
+#[test]
+fn an_exhausted_seal_budget_preserves_both_continuations() {
+    let mut embedder = Embedder::new(
+        "main { let xs = [1] let v = perform echo(7) as Any set xs[0] = v return xs[0] }",
+    );
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let prior = reopen(&mut embedder);
+    let bytes = encode_body(&prior);
+    embedder.deliver("echo");
+    assert!(
+        embedder
+            .machine
+            .seal(SealBudget { pages: 0, bytes: 0 })
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(encode_body(&prior), bytes);
+    let (program, _) = embedder.program(true);
+    let old_heap =
+        PagedHeap::open_header(prior.heap, Box::new(embedder.source.clone()), EditEpoch(2))
+            .unwrap();
+    let mut old = crate::KernelMachine::open(
+        program,
+        Setup::default().bounds,
+        &prior,
+        Vec::new(),
+        Box::new(embedder.source.clone()),
+        Box::new(
+            Census::restore(
+                old_heap.certificate(),
+                LogicalBytes(Setup::default().bounds.memory),
+            )
+            .unwrap(),
+        ),
+    )
+    .unwrap();
+    assert!(
+        matches!(old.run(&mut embedder.world,u64::MAX).unwrap(),Step::Parked(ref park) if park.requests.is_empty())
+    );
+    reopen(&mut embedder);
+    assert_eq!(result(embedder.run_to_end(&[])), int(7));
+}
+
 /// K-MACH-007, issued-phase amendment: a slice may freeze an issued intent
 /// while another task is ready. Neither seal nor reopen reports that intent.
 #[test]
@@ -100,6 +253,65 @@ fn a_committed_outcome_survives_seal_before_semantic_resume() {
         lash_kernel_doc::Datum::List(vec![int(1), int(2)])
     );
     assert_eq!(embedder.machine.wait_count(), 0);
+}
+
+/// S4 committed phase: a delivery queued behind other runnable work stays
+/// frozen until its own statement resumes, in both warm and cold branches.
+#[test]
+fn a_committed_delivery_waits_behind_other_ready_work() {
+    for cold in [false, true] {
+        let mut embedder = Embedder::new(
+            "fn work(tag) { let v = perform echo(tag) as Any return v } main { let a = spawn call work(\"a\") let b = spawn call work(\"b\") let handles = [a, b] let values = join all handles return values }",
+        );
+        assert!(matches!(embedder.run(), Step::Parked(ref park) if park.requests.len()==2));
+        embedder.deliver("a");
+        embedder.deliver("b");
+        assert!(matches!(
+            embedder.machine.run(&mut embedder.world, 1).unwrap(),
+            Step::Slice
+        ));
+        let sealed = embedder
+            .machine
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(sealed.root.waits.len, 1);
+        let heap = PagedHeap::open_header(
+            sealed.root.heap,
+            Box::new(embedder.source.clone()),
+            EditEpoch(2),
+        )
+        .unwrap();
+        let waits = tree::Tree::<WaitRecord>::open(
+            sealed.root.waits.page,
+            1,
+            sealed.root.waits.cost,
+            false,
+        );
+        waits
+            .visit(&heap.access, &mut |_, wait| {
+                assert!(matches!(
+                    wait.phase,
+                    WaitPhase::Committed(CommittedOutcomeRecord::Completed(_))
+                ));
+                true
+            })
+            .unwrap();
+        if cold {
+            reopen(&mut embedder);
+        }
+        assert_eq!(
+            result(embedder.run_to_end(&[])),
+            lash_kernel_doc::Datum::List(vec![
+                super::embedder::text("a"),
+                super::embedder::text("b")
+            ])
+        );
+        assert_eq!(embedder.machine.wait_count(), 0);
+    }
 }
 
 /// K-EFF-005/009: rejected Completed data has no inbound charge. A host

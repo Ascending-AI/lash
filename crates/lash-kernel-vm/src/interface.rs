@@ -39,7 +39,7 @@
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -345,7 +345,7 @@ impl Default for Park {
 /// How a run ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum End {
-    Finished(Finished),
+    Finished(Box<Finished>),
     Failed(Datum),
     Error(RunError),
     Cancelled,

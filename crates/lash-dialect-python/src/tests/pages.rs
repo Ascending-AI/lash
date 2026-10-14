@@ -200,7 +200,7 @@ pub(crate) fn start(
             owner: OWNER,
             target: Target::Main,
             args: Vec::new(),
-            session: session.root.clone(),
+            session: session.root,
             modes: Default::default(),
         },
         Box::new(session.source.clone()),

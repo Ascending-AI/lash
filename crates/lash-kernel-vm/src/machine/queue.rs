@@ -13,9 +13,6 @@ impl<T: Cell> Queue<T> {
     pub(super) fn is_empty(&self) -> bool {
         self.rows.len() == 0
     }
-    pub(super) fn len(&self) -> u64 {
-        self.rows.len()
-    }
     fn key(&self, front: bool) -> Result<Vec<u8>, HeapFault> {
         let edge = if front {
             0

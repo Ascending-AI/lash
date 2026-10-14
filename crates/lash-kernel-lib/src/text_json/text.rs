@@ -801,11 +801,11 @@ pub(super) fn padded(
         .ok_or(NativeError::Memory)?;
     let mut out = text_buffer(heap, size)?;
     if !start {
-        out.push_str(&text);
+        out.push_str(text);
     }
     out.extend(fill.chars().cycle().take(needed));
     if start {
-        out.push_str(&text);
+        out.push_str(text);
     }
     Ok(Value::text(out))
 }

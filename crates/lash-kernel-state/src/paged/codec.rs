@@ -3,7 +3,7 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{DocumentId, JoinMode, Name, Site, TaskId};
+use lash_kernel_doc::{DocumentId, JoinMode, TaskId};
 
 macro_rules! record {
     ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {

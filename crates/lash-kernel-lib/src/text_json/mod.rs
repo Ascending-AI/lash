@@ -147,19 +147,6 @@ fn text_descriptor(
         _ => Err(raise("type_error", "expected text")),
     }
 }
-fn integer_arg(
-    args: &[Value],
-    index: usize,
-) -> Result<std::borrow::Cow<'_, num_bigint::BigInt>, NativeError> {
-    match integer_value(args, index)? {
-        lash_kernel_doc::heap::IntRef::Inline(i) => Ok(i.as_bigint()),
-        _ => Err(raise(
-            "number_range",
-            "integer is outside the machine-sized range",
-        )),
-    }
-}
-
 fn integer_value(
     args: &[Value],
     index: usize,

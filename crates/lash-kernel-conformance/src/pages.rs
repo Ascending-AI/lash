@@ -1,3 +1,7 @@
+#![allow(
+    clippy::unwrap_used,
+    reason = "scripted conformance fixture construction uses admitted pages; a refusal is a defect in the fixture"
+)]
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{Datum, Name, Value};
@@ -209,7 +213,7 @@ pub(crate) fn with_source(
     source: &Source,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
     let session = Session {
-        root: start.session.clone(),
+        root: start.session,
         source: source.clone(),
     };
     lash_kernel_vm::KernelMachine::start_with_layout(

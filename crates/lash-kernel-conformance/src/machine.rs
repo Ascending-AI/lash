@@ -55,6 +55,7 @@ pub(crate) struct Park<'a, M> {
     pub(crate) program: &'a mut Program,
     pub(crate) bounds: lash_kernel_vm::Bounds,
     pub(crate) source: &'a crate::pages::Source,
+    #[cfg(test)]
     pub(crate) requests: &'a [Request],
 }
 
@@ -195,6 +196,7 @@ pub(crate) fn run_case<M: Machine>(
                     program: &mut program,
                     bounds,
                     source: &source,
+                    #[cfg(test)]
                     requests: &park.requests,
                 })?;
                 let batch = batches.next().ok_or_else(|| {

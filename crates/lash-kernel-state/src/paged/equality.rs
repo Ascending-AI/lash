@@ -2,7 +2,7 @@
 use super::directory::{Body, Entry};
 use super::heap_impl::{bytes_same, required_value, text_same};
 use super::tree::Tree;
-use super::{ObjectKind, PagedHeap, SemanticHeap};
+use super::{ObjectKind, PagedHeap};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::integral_float;
 use std::collections::BTreeSet;

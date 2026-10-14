@@ -314,7 +314,7 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        session: values.root.clone(),
+        session: values.root,
         owner: super::pages::OWNER,
         modes: Default::default(),
     };

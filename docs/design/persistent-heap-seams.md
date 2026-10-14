@@ -1114,3 +1114,20 @@ S4 metadata residency: admitted-name reuse retains the input Name Arc to guard
 pointer identity; diagnostic-name reuse keys the payload page and its complete
 TextSummary. Both tables draw from the same 64 MiB clean allowance. Site matching
 uses bounded unit descriptors and semantic path cells, without sealing pages.
+
+S5 amendment (hp-heap, approved 339533): `End::Finished(Box<Finished>)`.
+Only terminal Rust layout changes: the bounded SessionRoot remains in
+`Finished.carry` with the same fields/codecs. One allocation per finished run
+keeps every `Step` from retaining 384 bytes. Guest results, carry and charges
+are unchanged.
+
+Final hp-heap measurements (real S7 census, FIG-6188): fanout 32; 64
+cells/rows per leaf; 8192 target bytes; 4096 payload bytes; 256-byte inline
+immutable/small-body threshold. A point update in a 100k-element list sealed
+6 pages and 5105 bytes; its cold lookup read 5 pages. A point update among
+100k small objects sealed 5 pages and 6896 bytes; its cold lookup read 4
+pages. A 16 MiB text length loaded no payload pages. Counts include the
+changed directory path and heap header. Full paths:
+`paged::laws::heap::{a_point_write_in_a_huge_list_seals_one_leaf_path,
+a_tiny_update_among_many_objects_seals_one_directory_path,
+a_text_length_read_touches_no_payload_page}`.

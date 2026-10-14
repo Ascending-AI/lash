@@ -981,6 +981,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318",
@@ -988,7 +989,8 @@ PACKAGE_DEPS = {
         },
         "dev": {
             "blake3": "//third-party/rust:p0032",
-            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",

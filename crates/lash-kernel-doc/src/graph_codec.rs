@@ -627,7 +627,7 @@ pub mod heap_values {
     use super::{invalid, nested, variant};
     use crate::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
     use crate::heap::*;
-    use crate::{Float, Integer, Name, TaskId, Timestamp};
+    use crate::{Float, Integer, TaskId, Timestamp};
     use num_bigint::{BigInt, Sign};
     use num_traits::FromPrimitive;
     use sha2::{Digest, Sha256};

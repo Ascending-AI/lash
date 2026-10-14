@@ -11,7 +11,7 @@ use lash_kernel_doc::{
 };
 use lash_kernel_vm::observe::{GuestSymbols, WorkReport};
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Layout, Machine, Meters, PreparedLibrary, Program, Step,
+    Bounds, End, Host, Layout, Machine, Meters, PreparedLibrary, Program, Step,
     register_machine_functions,
 };
 

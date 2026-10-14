@@ -2,8 +2,7 @@
 //! Only the top frame is decoded for execution. Bindings stay in their
 //! declaring-site tree; syncing a frame updates bounded control records.
 use super::{Completion, Control, Cursor, Frame, LibraryCall, TryPhase};
-use crate::compile::{CodeId, Executable, Form};
-use lash_kernel_doc::graph_tokens::TokenCodec;
+use crate::compile::{Executable, Form};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_state::paged::directory::ordinal_key;

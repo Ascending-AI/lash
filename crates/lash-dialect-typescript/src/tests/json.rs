@@ -654,7 +654,7 @@ fn smith_values() -> Vec<Datum> {
             target: Target::Main,
             args: Vec::new(),
             owner: super::pages::OWNER,
-            session: session.root.clone(),
+            session: session.root,
             modes: Default::default(),
         };
         let program = Program {

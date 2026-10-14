@@ -5,16 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, EntityId, JoinMode, LoopIteration, Site, SpawnIdentity,
-    TaskId, TaskIdentity, Type, Value,
+    Datum, EffectIdentity, EffectName, EntityId, JoinMode, Site, TaskId, Type, Value,
 };
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::ops::{Entry, Flow, Reg, Status};
 use super::{
-    Control, Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, Task, TaskState,
-    Wait, bound, error, fault, raise,
+    Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, Task, TaskState, Wait, bound,
+    error, fault, raise,
 };
 use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, StmtId};
 use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
@@ -186,7 +185,7 @@ impl KernelMachine {
                 match self.decide(*mode, &tasks, None)? {
                     Some(decision) => {
                         self.pass(&tasks)?;
-                        self.put(out, decision.map_err(Interrupt::Raise)?);
+                        self.put(out, decision.map_err(Interrupt::raised)?);
                         Ok(Flow::Done)
                     }
                     None => {
@@ -229,7 +228,7 @@ impl KernelMachine {
                     return raise("type_error", "`cancel` takes a task handle");
                 };
                 if target == task {
-                    return Err(Interrupt::Raise(cancelled()));
+                    return Err(Interrupt::raised(cancelled()));
                 }
                 self.cancel(target)?;
                 self.put(out, Value::Null);
@@ -365,7 +364,7 @@ impl KernelMachine {
             Ok(Ok(answer)) => self.decode(exe, &answer, result),
             Ok(Err(error)) => {
                 let datum = Datum::Error(Box::new(error));
-                Err(Interrupt::Raise(self.decode(exe, &datum, &Type::Any)?))
+                Err(Interrupt::raised(self.decode(exe, &datum, &Type::Any)?))
             }
             Err(fault) => Err(Halt::Host(fault).into()),
         }
@@ -555,7 +554,7 @@ impl KernelMachine {
             return Err(bound(Bound::LiveTasks, limit).into());
         }
         let occurrence = self.occurrence(task, site)?;
-        let parent = self.task(task)?.identity.clone();
+        let parent = self.task(task)?.identity;
         let child = TaskId(self.tasks.len() as u64);
         self.tasks.push(Task::fresh(
             lash_kernel_state::paged::TaskIdentityRef::spawn(
@@ -588,7 +587,7 @@ impl KernelMachine {
             }
             // What the new task raises before it has a frame is its error.
             Err(Interrupt::Raise(value)) => {
-                self.end_task(child, Err(value))?;
+                self.end_task(child, Err(*value))?;
                 self.put(args, handle);
                 return Ok(Flow::Done);
             }
@@ -756,15 +755,12 @@ impl KernelMachine {
         };
         match wait {
             Wait::Request(wait) => {
-                if let Some(pending) = self.waits.remove(&ordinal_key(wait.0), &self.heap.access)? {
-                    if !matches!(pending.phase, WaitPhase::Issued { .. }) {
-                        self.withdrawn.push_back(wait.0)?;
-                        self.withdrawn_ever.write(
-                            ordinal_key(wait.0),
-                            wait.0,
-                            &self.heap.access,
-                        )?;
-                    }
+                if let Some(pending) = self.waits.remove(&ordinal_key(wait.0), &self.heap.access)?
+                    && !matches!(pending.phase, WaitPhase::Issued { .. })
+                {
+                    self.withdrawn.push_back(wait.0)?;
+                    self.withdrawn_ever
+                        .write(ordinal_key(wait.0), wait.0, &self.heap.access)?;
                 }
             }
             Wait::Join(joined) => self.remove_joiner(joined, Joiner::Single(target))?,

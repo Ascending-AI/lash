@@ -65856,6 +65856,7 @@
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-lib",
+        "lash-kernel-state",
         "lash-kernel-vm",
         "serde",
         "serde_json",

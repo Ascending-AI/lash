@@ -28,7 +28,7 @@ use std::sync::Arc;
 use lash_kernel_doc as doc;
 use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, NativeFunction,
-    PreparedNative, Site, Type, Unit, Value,
+    PreparedNative, Site, Type, Unit,
 };
 use lash_kernel_exec::{
     BoundaryKind, KirError, LocalRef, Op, OpRange, StepEdge, StmtRanges, Tables as StreamTables,
@@ -97,7 +97,6 @@ struct Tables {
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
-    block_at: BTreeMap<Site, BlockId>,
 }
 
 impl Tables {
@@ -491,11 +490,6 @@ impl Executable {
         self.tables_of(&site.unit)?.code_at.get(site).copied()
     }
 
-    /// The block whose site is `site`.
-    pub(crate) fn block_at(&self, site: &Site) -> Option<BlockId> {
-        self.tables_of(&site.unit)?.block_at.get(site).copied()
-    }
-
     /// How many codes, library functions and statements the executable
     /// numbers.
     pub(crate) fn code_count(&self) -> usize {
@@ -538,8 +532,6 @@ pub(crate) struct Code {
     pub(crate) params: Vec<Local>,
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
-    /// Where each slot sits in a frame.
-    pub(crate) positions: Vec<u32>,
     pub(crate) slots_by_at: Vec<u32>,
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
@@ -943,12 +935,6 @@ impl<'a> Compiler<'a> {
             .enumerate()
             .map(|(index, code)| (code.site.clone(), CodeId(base.codes + index as u32)))
             .collect();
-        let block_at = self
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| (block.site.clone(), BlockId(base.blocks + index as u32)))
-            .collect();
         let edges = step_edges(&codes, &self.blocks, &self.stmts, base);
         Tables {
             codes,
@@ -957,7 +943,6 @@ impl<'a> Compiler<'a> {
             stream: self.stream,
             edges,
             code_at,
-            block_at,
         }
     }
 }
@@ -1096,7 +1081,6 @@ impl Compiler<'_> {
             params,
             body,
             slots: scopes.slots,
-            positions,
             slots_by_at,
             captures,
             charged,

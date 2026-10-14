@@ -6,15 +6,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_kernel_doc::EffectIdentity;
-use lash_kernel_doc::graph_tokens::{ChildRef, TokenError, decode_body, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
     NativeError, NativeFunction, NumberToken, Object, PreparedNative, Site, Timestamp, Unit, Value,
     parse_definition, parse_document,
 };
-use lash_kernel_state::AdmittedRequest;
 use lash_kernel_state::paged::*;
 use num_traits::ToPrimitive;
 use std::cell::RefCell;
@@ -359,7 +356,6 @@ pub(crate) struct Embedder {
     pub(crate) world: World,
     pub(crate) library: Library,
     document: Arc<Document>,
-    bounds: Bounds,
     /// Every request the machine handed out, in order.
     pub(crate) requests: Vec<Request>,
     /// The requests handed out and not yet answered.
@@ -439,7 +435,6 @@ impl Embedder {
             world: World::default(),
             library,
             document,
-            bounds: setup.bounds,
             requests: Vec::new(),
             pending: Vec::new(),
             withdrawn: Vec::new(),
@@ -458,52 +453,6 @@ impl Embedder {
             library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
         (program, library)
-    }
-
-    pub(crate) fn relay(&mut self, layout: Layout, native_twice: bool) {
-        let sealed = self
-            .machine
-            .seal(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .unwrap()
-            .unwrap();
-        let certificate = self.machine.accounting();
-        let (program, library) = self.program(native_twice);
-        self.machine = KernelMachine::open_with_layout(
-            program,
-            self.bounds,
-            &sealed.root,
-            Vec::new(),
-            Box::new(self.source.clone()),
-            Box::new(Census::restore(certificate, LogicalBytes(self.bounds.memory)).unwrap()),
-            layout,
-        )
-        .unwrap();
-        self.library = library;
-    }
-
-    /// Every request the machine handed out, as an admission holds it.
-    pub(crate) fn admissions(&self) -> BTreeMap<EffectIdentity, AdmittedRequest> {
-        self.requests
-            .iter()
-            .map(|request| match request {
-                Request::Effect(effect) => (
-                    effect.identity.clone(),
-                    AdmittedRequest::Effect {
-                        effect: effect.effect.clone(),
-                        args: effect.args.clone(),
-                    },
-                ),
-                Request::Sleep(sleep) => (
-                    sleep.identity.clone(),
-                    AdmittedRequest::Sleep {
-                        duration: sleep.duration.into(),
-                    },
-                ),
-            })
-            .collect()
     }
 
     /// Runs the machine once and keeps what a park hands out.

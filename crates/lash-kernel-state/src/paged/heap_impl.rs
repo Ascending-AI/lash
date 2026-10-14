@@ -10,7 +10,6 @@ use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integer_from_digits, integral_float, key_digest, text_summary};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 

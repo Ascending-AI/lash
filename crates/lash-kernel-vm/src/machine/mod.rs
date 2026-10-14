@@ -17,12 +17,9 @@ mod steps;
 mod stream;
 mod tasks;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, DocumentId, EntityId, Identity, JoinMode, Name, TaskId, TaskIdentity, Value,
-};
+use lash_kernel_doc::{Datum, DocumentId, EntityId, Name, TaskId, Value};
 
 use crate::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
@@ -30,7 +27,7 @@ use crate::data::{Raised, copy_out};
 use crate::heap::value_bytes;
 use crate::interface::{
     Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, Host, Machine, MachineError,
-    Meters, Outcome, Park, Program, Request, RunError, StartError, Step, WaitId,
+    Meters, Outcome, Park, Program, RunError, StartError, Step, WaitId,
 };
 use crate::observe::{Event, GuestPhase, Observer};
 use lash_kernel_doc::heap::{ErrorRef, HeapFault, LogicalBytes, PageId, TupleRef};
@@ -72,11 +69,14 @@ impl Halt {
 /// Why a statement did not complete.
 #[derive(Debug)]
 pub(crate) enum Interrupt {
-    Raise(Value),
+    Raise(Box<Value>),
     Halt(Halt),
 }
 
 impl Interrupt {
+    fn raised(value: Value) -> Self {
+        Self::Raise(Box::new(value))
+    }
     fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
         match self {
             Self::Halt(halt) => Self::Halt(halt.in_function(function)),
@@ -95,7 +95,7 @@ impl From<Halt> for Interrupt {
 
 impl From<Raised> for Interrupt {
     fn from(raised: Raised) -> Self {
-        Self::Raise(error(raised.kind, raised.message))
+        Self::raised(error(raised.kind, raised.message))
     }
 }
 
@@ -117,7 +117,7 @@ impl From<HeapWriteError> for Interrupt {
     fn from(error: HeapWriteError) -> Self {
         match error {
             HeapWriteError::Raised { kind, message } => {
-                Self::Raise(super::machine::error(kind, message))
+                Self::raised(super::machine::error(kind, message))
             }
             HeapWriteError::Memory => Self::Halt(Halt::Memory),
             HeapWriteError::Fault(error) => Self::Halt(Halt::Heap(error)),
@@ -128,7 +128,7 @@ impl From<lash_kernel_doc::NativeError> for Interrupt {
     fn from(error: lash_kernel_doc::NativeError) -> Self {
         use lash_kernel_doc::NativeError;
         match error {
-            NativeError::Raised(error) => Self::Raise(Value::Error(error)),
+            NativeError::Raised(error) => Self::raised(Value::Error(error)),
             NativeError::Memory => Self::Halt(Halt::Memory),
             NativeError::Heap(error) => Self::Halt(Halt::Heap(error)),
             NativeError::Guard(error) => Self::Halt(Halt::Fault(format!(
@@ -147,7 +147,7 @@ impl From<crate::data::CopyError> for Interrupt {
 }
 
 fn raise<T>(kind: &'static str, message: impl Into<String>) -> Eval<T> {
-    Err(Interrupt::Raise(error(kind, message)))
+    Err(Interrupt::raised(error(kind, message)))
 }
 
 fn fault(problem: &str) -> Halt {
@@ -263,7 +263,7 @@ impl Frame {
         let code = self.exe.code(self.code);
         let info = &code.slots[code.slots_by_at[at as usize] as usize];
         let key = &info.key;
-        Ok(match self.record.bindings.get(&key, &self.access)? {
+        Ok(match self.record.bindings.get(key, &self.access)? {
             None => SlotState::Empty,
             Some(BindingRecord {
                 value: BoundRecord::Value(value),
@@ -281,7 +281,7 @@ impl Frame {
         let key = &info.key;
         let value = match state {
             SlotState::Empty => {
-                self.record.bindings.remove(&key, &self.access)?;
+                self.record.bindings.remove(key, &self.access)?;
                 return Ok(());
             }
             SlotState::Value(value) => BoundRecord::Value(value),
@@ -583,7 +583,7 @@ impl KernelMachine {
             // Most statements complete normally: nothing departs.
             Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
-            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
             Err(Interrupt::Halt(halt)) => return Err(halt),
         };
         self.complete(task, host, exe, completion)
@@ -677,10 +677,10 @@ impl KernelMachine {
             if id != TaskId::MAIN && ender != Some(id) && !task.passed {
                 match task.state {
                     TaskState::Ended(_) if task.failed && !task.observed => {
-                        unobserved.push(task.identity.clone())
+                        unobserved.push(task.identity)
                     }
                     TaskState::Ended(_) => (),
-                    _ => unfinished.push(task.identity.clone()),
+                    _ => unfinished.push(task.identity),
                 }
             }
             true
@@ -701,13 +701,13 @@ impl KernelMachine {
         }
         Ok(match ending {
             Ending::Returned(value) => match copy_out(&self.heap, &value) {
-                Ok(result) => End::Finished(self.finished(result, false)?),
+                Ok(result) => End::Finished(Box::new(self.finished(result, false)?)),
                 Err(crate::data::CopyError::Raised(raised)) => {
                     End::Error(RunError::Uncaught(raised.into_datum()))
                 }
                 Err(crate::data::CopyError::Heap(fault)) => return Err(fault.into()),
             },
-            Ending::Finished(result) => End::Finished(self.finished(result, true)?),
+            Ending::Finished(result) => End::Finished(Box::new(self.finished(result, true)?)),
             Ending::Failed(reason) => End::Failed(reason),
         })
     }
@@ -716,7 +716,7 @@ impl KernelMachine {
         if host.cancel_requested() {
             return Ok(self.finish_with(End::Cancelled));
         }
-        if self.waits.len() == 0 {
+        if self.waits.is_empty() {
             let mut waiting = Vec::new();
             self.tasks
                 .visit(&mut |_, task| {

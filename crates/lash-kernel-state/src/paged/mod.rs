@@ -58,6 +58,8 @@ pub use metadata::{NameRef, SiteRef, TaskIdentityRef};
 pub mod payload;
 pub use heap_impl::PagedHeap;
 
+pub use directory::execution::{FrameRecord, IteratedRecord, TaskRecord};
+
 #[cfg(test)]
 mod laws {
     pub mod heap;
@@ -66,5 +68,3 @@ mod laws {
     mod metadata;
     pub mod root;
 }
-
-pub use directory::execution::{FrameRecord, IteratedRecord, TaskRecord};

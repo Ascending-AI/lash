@@ -71,7 +71,7 @@ fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) 
         CellStart {
             target: Target::Main,
             args: Vec::new(),
-            session: session.root.clone(),
+            session: session.root,
             owner: crate::pages::OWNER,
             modes: Default::default(),
         },

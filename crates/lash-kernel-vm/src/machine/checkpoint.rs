@@ -207,15 +207,19 @@ impl Machine for KernelMachine {
         {
             return Ok(None);
         }
+        let document = match self.document {
+            Some(document) => document,
+            None => {
+                let document = self.exe.identity().map_err(|error| SealError::Fault {
+                    problem: error.to_string(),
+                })?;
+                self.document = Some(document);
+                document
+            }
+        };
         let root = CheckpointRoot {
             kernel: self.program.document.manifest.kernel,
-            document: self
-                .program
-                .document
-                .identity()
-                .map_err(|error| SealError::Fault {
-                    problem: error.to_string(),
-                })?,
+            document,
             release: self.release,
             owner: self.owner,
             target: if self.session_cell {

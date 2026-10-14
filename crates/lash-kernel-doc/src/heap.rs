@@ -20,7 +20,6 @@
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
-use crate::name::Name;
 use crate::number::{Float, Integer};
 use crate::value::{Handle, TaskId, Timestamp};
 

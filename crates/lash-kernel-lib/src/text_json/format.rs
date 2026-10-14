@@ -4,8 +4,7 @@ use lash_kernel_doc::{Formula, NativeCall, NativeError, NativeHeap, Type, Value}
 use num_traits::ToPrimitive;
 
 use super::{
-    Function, arg, count_arg, definition, integer_arg, integer_value, materialized_text, raise,
-    text_buffer,
+    Function, arg, count_arg, definition, integer_value, materialized_text, raise, text_buffer,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -163,10 +162,18 @@ fn precise(
 }
 
 fn radix(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let radix = integer_arg(call.args, 1)?
-        .to_u32()
-        .filter(|r| (2..=36).contains(r))
-        .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
+    let integer = integer_value(call.args, 1)?;
+    let radix = match integer {
+        lash_kernel_doc::heap::IntRef::Inline(value) => value.to_u32(),
+        lash_kernel_doc::heap::IntRef::Paged { summary, .. }
+            if summary.negative || summary.bits > 6 =>
+        {
+            None
+        }
+        _ => call.heap.materialize_int(integer)?.to_u32(),
+    }
+    .filter(|r| (2..=36).contains(r))
+    .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
     let integer = integer_value(call.args, 0)?;
     crate::numbers::integer_text(call.heap, integer, radix)
 }

@@ -1,12 +1,10 @@
 //! The forms, strict operations, the effect boundary, host reads, charges
 //! and sessions: one case per rule, in kernel text.
 
-use std::collections::BTreeMap;
-
 use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Timestamp};
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
-use crate::{CellStart, End, KernelMachine, Machine, StartError, Step, Target};
+use crate::{CellStart, End, Machine, Step, Target};
 
 fn list<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::List(items.to_vec())

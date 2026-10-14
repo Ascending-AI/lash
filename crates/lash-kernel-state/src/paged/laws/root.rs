@@ -53,6 +53,47 @@ fn a_checkpoint_root_fits_its_root_bound() {
         body
     );
 }
+
+/// S4/S7/K-BND-003: identity cursors add no Value header; tuple cursors
+/// retain their members. The frame's fixed 64-byte offset survives the codec.
+#[test]
+fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
+    use lash_kernel_doc::{Object, Site, Unit};
+    use tree::{Cell, SealWork, Tree};
+    let (mut heap, _) = super::heap::fresh();
+    let list = Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap());
+    let map = Value::Map(heap.allocate(Object::Map(Vec::new())).unwrap());
+    let tuple = Value::Tuple(heap.tuple(vec![Value::Null, Value::Bool(true)]).unwrap());
+    for (value, expected) in [(list, 64), (map, 64), (tuple, 96)] {
+        let mut frame =
+            FrameRecord::fresh(SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap());
+        frame
+            .iterated
+            .write(
+                directory::ordinal_key(0),
+                IteratedRecord(value),
+                &heap.access,
+            )
+            .unwrap();
+        assert_eq!(frame.cost(), expected);
+        frame
+            .prepare(
+                &heap.access,
+                &mut SealWork::new(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                }),
+            )
+            .unwrap();
+        let reopened: FrameRecord = decode_body(&encode_body(&frame)).unwrap();
+        assert_eq!(reopened.cost(), expected);
+        let mut frames = Tree::new(true);
+        frames
+            .write(directory::ordinal_key(0), reopened, &heap.access)
+            .unwrap();
+        assert_eq!(frames.cost(), expected);
+    }
+}
 #[test]
 fn a_kernel_whole_root_is_refused() {
     // A whole root is a many-field struct, while the heap-header is a
@@ -133,7 +174,7 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
 #[test]
 fn every_record_round_trips_canonically() {
     use lash_kernel_doc::graph_tokens::TokenCodec;
-    use lash_kernel_doc::{EffectIdentity, JoinMode, Name, Site, TaskId, TaskIdentity, Unit};
+    use lash_kernel_doc::{JoinMode, Name, Site, TaskId, Unit};
     use tree::{Cell, SealWork, Tree};
     fn round<T: TokenCodec>(value: &T) {
         let tokens = encode_body(value);

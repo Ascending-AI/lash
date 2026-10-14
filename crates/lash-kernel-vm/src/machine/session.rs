@@ -1,7 +1,6 @@
 //! Starting and carrying a cell preserve the paged identity directory.
 use super::*;
 use crate::interface::{CellStart, Finished, Target};
-use lash_kernel_doc::graph_tokens::{TokenCodec, encode_body};
 use lash_kernel_state::paged::{AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, PageSource};
 
 pub(super) fn empty_root() -> KeyedRoot {
@@ -140,7 +139,7 @@ pub(super) fn start(
     machine.regs = args;
     machine
         .push_frame(TaskId::MAIN, &exe, exec::Call::new(code, 0, count))
-        .map_err(|error| start_interrupt("the start", error.into()))?;
+        .map_err(|error| start_interrupt("the start", error))?;
     machine.regs.clear();
     machine
         .publish_roots()

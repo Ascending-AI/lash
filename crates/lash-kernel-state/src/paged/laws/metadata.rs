@@ -1,6 +1,6 @@
 //! Bounded S1/S4 metadata and exact diagnostic projections.
 use super::super::directory::ordinal_key;
-use super::super::tree::{Cell, SealWork, Tree};
+use super::super::tree::{SealWork, Tree};
 use super::super::*;
 use super::heap::{fresh, seal};
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};

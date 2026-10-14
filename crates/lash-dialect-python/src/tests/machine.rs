@@ -437,7 +437,7 @@ fn run_cell(
     });
     let carried = match &end {
         End::Finished(finished) => Some(Session {
-            root: finished.carry.clone(),
+            root: finished.carry,
             source: session.source.clone(),
         }),
         _ => None,

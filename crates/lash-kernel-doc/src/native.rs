@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::canonical::EncodeError;
 use crate::document::DecodeError;
 use crate::function::FunctionDefinition;
-use crate::heap::{NativeFunction, PreparedNative};
+use crate::heap::NativeFunction;
 use crate::name::{FunctionId, FunctionName};
 use crate::validate::{Invalid, validate_definition};
 

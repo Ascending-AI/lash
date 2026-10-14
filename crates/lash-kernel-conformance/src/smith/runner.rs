@@ -162,7 +162,7 @@ fn observe<M: Machine>(
         owner: crate::pages::OWNER,
         target: Target::Main,
         args: Vec::new(),
-        session: session.root.clone(),
+        session: session.root,
         modes: Default::default(),
     };
     let mut machine = match M::start(
