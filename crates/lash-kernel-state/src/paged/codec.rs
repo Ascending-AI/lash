@@ -3,7 +3,7 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId, TaskIdentity};
+use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId};
 
 macro_rules! record {
     ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
@@ -72,7 +72,7 @@ record!(DataOnlyCertificate {
     task_edges: u64
 });
 record!(SessionRoot {
-    heap: HeapRoot,
+    heap: PageRef,
     bindings: KeyedRoot,
     functions: KeyedRoot,
     certificate: DataOnlyCertificate

@@ -21,7 +21,7 @@
 //! envelope around them is the generic node store's.
 
 use lash_kernel_doc::heap::{EntityId, LogicalBytes, PageId, PageRef, Value};
-use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId, TaskIdentity};
+use lash_kernel_doc::{DocumentId, EffectIdentity, JoinMode, Name, Site, TaskId};
 
 use super::census::AccountingCertificate;
 use super::family::FrozenRef;
@@ -103,7 +103,7 @@ pub struct CheckpointRoot {
     pub owner: PageId,
     pub status: RootStatus,
     pub heap: PageRef,
-    /// [`TaskRecord`]s by task number; `main` is task 0.
+    /// [`TaskRecord`](super::TaskRecord)s by task number; `main` is task 0.
     pub tasks: KeyedRoot,
     /// Task numbers in the order they run (`K-TASK-003`).
     pub ready: SequenceRoot,

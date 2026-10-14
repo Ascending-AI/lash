@@ -1,44 +1,70 @@
-//! Structural equality, datum identity, and lexicographic order.
-
+//! Fallible structural equality, datum identity and lexicographic order.
+use crate::numeric::{Numeric, number_cmp, scalar_cmp};
+use crate::raised;
+use lash_kernel_doc::heap::{Chunk, HeapFault, Payload};
+use lash_kernel_doc::{EntityId, NativeError, NativeHeap, Value, ValueKind};
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::ops::ControlFlow;
 
-use lash_kernel_doc::{Element, NativeError, NativeHeap, ObjectId, Value, ValueKind};
+type Pair = (ValueKind, EntityId, EntityId);
 
-use crate::keys::key_equal;
-use crate::numeric::number_cmp;
-use crate::raised;
-
-type Pair = (ValueKind, ObjectId, ObjectId);
-
-/// Heap-independent equality; structural pairs belong to the general walk.
-#[inline]
+/// A prepared comparison reads only operands held in its descriptors.
 pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
-    match (a, b) {
-        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
-            Some(matches!(number_cmp(a, b), Ok(Some(Ordering::Equal))))
-        }
+    if matches!(
+        (a, b),
+        (
+            Value::Int(_) | Value::Float(_),
+            Value::Int(_) | Value::Float(_)
+        )
+    ) {
+        return Some(
+            scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?).ok()?
+                == Some(Ordering::Equal),
+        );
+    }
+    Some(match (a, b) {
+        (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => true,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Text(a), Value::Text(b)) => match (&a.body, &b.body) {
+            (Payload::Resident(a), Payload::Resident(b)) => a == b,
+            _ => return None,
+        },
+        (Value::Bytes(a), Value::Bytes(b)) => match (&a.body, &b.body) {
+            (Payload::Resident(a), Payload::Resident(b)) => a == b,
+            _ => return None,
+        },
+        (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
+        (Value::Task(a), Value::Task(b)) => a == b,
+        (Value::Ref(a), Value::Ref(b)) => a == b,
+        (Value::Function(a), Value::Function(b)) => a == b,
+        (Value::Handle(a), Value::Handle(b)) => a == b,
+        (Value::Closure(a), Value::Closure(b)) => a == b,
         (Value::Tuple(_), Value::Tuple(_))
         | (Value::Error(_), Value::Error(_))
         | (Value::List(_), Value::List(_))
         | (Value::Map(_), Value::Map(_))
         | (Value::Set(_), Value::Set(_))
-        | (Value::Record(_), Value::Record(_)) => None,
-        _ => Some(a == b),
-    }
+        | (Value::Record(_), Value::Record(_)) => return None,
+        _ => false,
+    })
 }
 
-/// Heap-independent order, sharing the general walk's scalar semantics.
-#[inline]
 pub(crate) fn scalar_compare(
     a: &Value,
     b: &Value,
 ) -> Option<Result<Option<Ordering>, NativeError>> {
     Some(match (a, b) {
-        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => number_cmp(a, b),
-        (Value::Text(a), Value::Text(b)) => Ok(Some(a.cmp(b))),
-        (Value::Bytes(a), Value::Bytes(b)) => Ok(Some(a.cmp(b))),
+        (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
+            scalar_cmp(&Numeric::resident(a)?, &Numeric::resident(b)?)
+        }
+        (Value::Text(a), Value::Text(b)) => match (&a.body, &b.body) {
+            (Payload::Resident(a), Payload::Resident(b)) => Ok(Some(a.cmp(b))),
+            _ => return None,
+        },
+        (Value::Bytes(a), Value::Bytes(b)) => match (&a.body, &b.body) {
+            (Payload::Resident(a), Payload::Resident(b)) => Ok(Some(a.cmp(b))),
+            _ => return None,
+        },
         (Value::Timestamp(a), Value::Timestamp(b)) => Ok(Some(a.cmp(b))),
         (Value::Bool(a), Value::Bool(b)) => Ok(Some(a.cmp(b))),
         (Value::Tuple(_), Value::Tuple(_)) | (Value::List(_), Value::List(_)) => return None,
@@ -46,202 +72,203 @@ pub(crate) fn scalar_compare(
     })
 }
 
-/// Structural equality (`K-VAL-020..026`), including cyclic objects.
-/// It has no guest error. Numeric NaNs are unequal, even inside one object.
-pub fn equal(a: &Value, b: &Value, heap: &dyn NativeHeap) -> bool {
-    if let Some(equal) = scalar_equal(a, b) {
-        return equal;
-    }
-    // The pair in hand is not pushed, so that comparing two values that
-    // hold nothing allocates nothing.
-    let mut next = Some((a.clone(), b.clone()));
-    let mut pending = Vec::new();
-    let mut seen = HashSet::new();
-    while let Some((a, b)) = next.take().or_else(|| pending.pop()) {
-        if let Some(equal) = scalar_equal(&a, &b) {
-            if !equal {
-                return false;
+pub fn equal(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFault> {
+    heap.equal(a, b)
+}
+
+pub(crate) fn scalar_same(a: &Value, b: &Value) -> Option<bool> {
+    Some(match (a, b) {
+        (Value::Float(a), Value::Float(b)) => a.get().to_bits() == b.get().to_bits(),
+        (Value::List(a), Value::List(b))
+        | (Value::Map(a), Value::Map(b))
+        | (Value::Set(a), Value::Set(b))
+        | (Value::Record(a), Value::Record(b))
+        | (Value::Closure(a), Value::Closure(b)) => a == b,
+        _ if a.kind() != b.kind() => false,
+        _ => scalar_equal(a, b)?,
+    })
+}
+
+pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFault> {
+    let mut pending = vec![(a.clone(), b.clone())];
+    while let Some((a, b)) = pending.pop() {
+        if let Some(same) = scalar_same(&a, &b) {
+            if !same {
+                return Ok(false);
             }
             continue;
         }
-        let kind = a.kind();
         match (&a, &b) {
             (Value::Tuple(a), Value::Tuple(b)) => {
-                if a.len() != b.len() {
-                    return false;
+                if a.summary.len != b.summary.len {
+                    return Ok(false);
                 }
-                pending.extend(a.iter().cloned().zip(b.iter().cloned()));
+                for index in 0..a.summary.len {
+                    pending.push((
+                        required(heap.tuple_get(a, index)?)?,
+                        required(heap.tuple_get(b, index)?)?,
+                    ));
+                }
             }
             (Value::Error(a), Value::Error(b)) => {
-                if a.kind != b.kind || a.message != b.message {
-                    return false;
+                if !heap.equal(&Value::Text(a.kind.clone()), &Value::Text(b.kind.clone()))?
+                    || !heap.equal(
+                        &Value::Text(a.message.clone()),
+                        &Value::Text(b.message.clone()),
+                    )?
+                {
+                    return Ok(false);
                 }
-                pending.push((a.data.clone(), b.data.clone()));
+                pending.push((heap.error_data(a)?, heap.error_data(b)?));
             }
-            (Value::List(a), Value::List(b))
-            | (Value::Map(a), Value::Map(b))
-            | (Value::Set(a), Value::Set(b))
-            | (Value::Record(a), Value::Record(b)) => {
-                if !seen.insert((kind, *a, *b)) {
-                    continue;
-                }
-                let a = elements(heap, *a);
-                let b = elements(heap, *b);
-                if a.len() != b.len() {
-                    return false;
-                }
-                for (index, element) in a.iter().enumerate() {
-                    match element {
-                        OwnedElement::Item(value) if kind == ValueKind::Set => {
-                            if !b.iter().any(|other| matches!(other,OwnedElement::Item(other) if key_equal(value,other))) { return false; }
-                        }
-                        OwnedElement::Item(value) => {
-                            let OwnedElement::Item(other) = &b[index] else { return false; };
-                            pending.push((value.clone(),other.clone()));
-                        }
-                        OwnedElement::Entry(key,value) => {
-                            let Some(other) = b.iter().find_map(|other| match other {
-                                OwnedElement::Entry(other_key,other_value) if key_equal(key,other_key) => Some(other_value),
-                                _ => None,
-                            }) else { return false; };
-                            pending.push((value.clone(),other.clone()));
-                        }
-                        OwnedElement::Field(name,value) => {
-                            let Some(other) = b.iter().find_map(|other| match other {
-                                OwnedElement::Field(other_name,other_value) if name == other_name => Some(other_value),
-                                _ => None,
-                            }) else { return false; };
-                            pending.push((value.clone(),other.clone()));
-                        }
-                    }
+            (Value::Int(_), Value::Int(_))
+            | (Value::Text(_), Value::Text(_))
+            | (Value::Bytes(_), Value::Bytes(_)) => {
+                if !heap.equal(&a, &b)? {
+                    return Ok(false);
                 }
             }
-            _ => {
-                if a != b {
-                    return false;
-                }
-            }
+            _ => return Ok(false),
         }
     }
-    true
+    Ok(true)
+}
+fn required(value: Option<Value>) -> Result<Value, HeapFault> {
+    value.ok_or_else(|| HeapFault::Malformed("an admitted sequence member is absent".into()))
 }
 
-#[derive(Clone)]
-enum OwnedElement {
-    Item(Value),
-    Entry(Value, Value),
-    Field(String, Value),
-}
-
-fn elements(heap: &dyn NativeHeap, object: ObjectId) -> Vec<OwnedElement> {
-    let mut values = Vec::new();
-    heap.visit(object, &mut |element| {
-        values.push(match element {
-            Element::Item(value) => OwnedElement::Item(value.clone()),
-            Element::Entry { key, value } => OwnedElement::Entry(key.clone(), value.clone()),
-            Element::Field { name, value } => OwnedElement::Field(name.to_owned(), value.clone()),
-        });
-        ControlFlow::Continue(())
-    });
-    values
-}
-
-/// Identity (`K-VAL-027`): immutable members retain their kinds and float bits.
-pub fn same(a: &Value, b: &Value) -> bool {
-    let mut next = Some((a, b));
-    let mut pending = Vec::new();
-    while let Some((a, b)) = next.take().or_else(|| pending.pop()) {
-        match (a, b) {
-            (Value::Tuple(a), Value::Tuple(b)) => {
-                if a.len() != b.len() {
-                    return false;
-                }
-                pending.extend(a.iter().zip(b.iter()));
-            }
-            (Value::Error(a), Value::Error(b)) => {
-                if a.kind != b.kind || a.message != b.message {
-                    return false;
-                }
-                pending.push((&a.data, &b.data));
-            }
-            _ => {
-                if a != b {
-                    return false;
-                }
-            }
-        }
-    }
-    true
-}
-
-/// Mathematical/lexicographic order (`K-VAL-029/030/033`). `None` means NaN
-/// is unordered; unsupported pairings raise `type_error`. A sequence's equal
-/// prefix is skipped, and the shorter sequence comes first. Repeated active
-/// cyclic list pairs count as equal, just as for structural equality.
+/// Each sequence advances one member at a time. It never snapshots a list
+/// or loads the pages of later members before the equal prefix needs them.
 pub fn compare(
     a: &Value,
     b: &Value,
-    heap: &dyn NativeHeap,
+    heap: &mut dyn NativeHeap,
 ) -> Result<Option<Ordering>, NativeError> {
     enum Step {
-        Values(Value, Value),
-        Member(Value, Value),
-        Length(usize, usize),
+        Values(Value, Value, bool),
+        Members(Value, Value, u64, u64, u64),
         Leave(Pair),
     }
-    let mut next = Some(Step::Values(a.clone(), b.clone()));
-    let mut pending = Vec::new();
+    let mut pending = vec![Step::Values(a.clone(), b.clone(), false)];
     let mut active = HashSet::new();
-    while let Some(step) = next.take().or_else(|| pending.pop()) {
-        let (a, b) = match step {
-            Step::Length(a, b) => {
-                let order = a.cmp(&b);
-                if order != Ordering::Equal {
-                    return Ok(Some(order));
-                }
-                continue;
-            }
+    while let Some(step) = pending.pop() {
+        let (a, b, member) = match step {
             Step::Leave(pair) => {
                 active.remove(&pair);
                 continue;
             }
-            Step::Member(a, b) if equal(&a, &b, heap) => continue,
-            Step::Values(a, b) | Step::Member(a, b) => (a, b),
-        };
-        if let Some(order) = scalar_compare(&a, &b) {
-            let order = order?;
-            if order != Some(Ordering::Equal) {
-                return Ok(order);
-            }
-            continue;
-        }
-        match (&a, &b) {
-            (Value::Tuple(a), Value::Tuple(b)) => {
-                pending.push(Step::Length(a.len(), b.len()));
-                for (a, b) in a.iter().zip(b.iter()).rev() {
-                    pending.push(Step::Member(a.clone(), b.clone()));
+            Step::Members(a, b, index, a_len, b_len) => {
+                if index == a_len.min(b_len) {
+                    let order = a_len.cmp(&b_len);
+                    if order != Ordering::Equal {
+                        return Ok(Some(order));
+                    }
+                    continue;
                 }
+                let get = |value: &Value, heap: &dyn NativeHeap| match value {
+                    Value::Tuple(t) => heap.tuple_get(t, index),
+                    Value::List(id) => heap.list_get(*id, index),
+                    _ => Err(HeapFault::Malformed(
+                        "ordering cursor has another kind".into(),
+                    )),
+                };
+                let left = required(get(&a, heap)?)?;
+                let right = required(get(&b, heap)?)?;
+                pending.push(Step::Members(a, b, index + 1, a_len, b_len));
+                pending.push(Step::Values(left, right, true));
                 continue;
             }
-            (Value::List(a), Value::List(b)) => {
-                let pair = (ValueKind::List, *a, *b);
+            Step::Values(a, b, member) => (a, b, member),
+        };
+        if member && heap.equal(&a, &b)? {
+            continue;
+        }
+        let order = match (&a, &b) {
+            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
+                number_cmp(&a, &b, heap)?
+            }
+            (Value::Text(a), Value::Text(b)) => Some(payload_order(
+                &Value::Text(a.clone()),
+                &Value::Text(b.clone()),
+                heap,
+            )?),
+            (Value::Bytes(a), Value::Bytes(b)) => Some(payload_order(
+                &Value::Bytes(a.clone()),
+                &Value::Bytes(b.clone()),
+                heap,
+            )?),
+            (Value::Timestamp(a), Value::Timestamp(b)) => Some(a.cmp(b)),
+            (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
+            (Value::Tuple(a_tuple), Value::Tuple(b_tuple)) => {
+                let lengths = (a_tuple.summary.len, b_tuple.summary.len);
+                pending.push(Step::Members(a, b, 0, lengths.0, lengths.1));
+                continue;
+            }
+            (Value::List(a_id), Value::List(b_id)) => {
+                let pair = (ValueKind::List, *a_id, *b_id);
                 if !active.insert(pair) {
                     continue;
                 }
+                let lengths = (heap.len(*a_id)?, heap.len(*b_id)?);
                 pending.push(Step::Leave(pair));
-                let a_len = heap.len(*a);
-                let b_len = heap.len(*b);
-                pending.push(Step::Length(a_len, b_len));
-                for index in (0..a_len.min(b_len)).rev() {
-                    if let (Some(a), Some(b)) = (heap.list_get(*a, index), heap.list_get(*b, index))
-                    {
-                        pending.push(Step::Member(a, b));
-                    }
-                }
+                pending.push(Step::Members(a, b, 0, lengths.0, lengths.1));
                 continue;
             }
             _ => return Err(raised("type_error", "values have no shared ordering")),
+        };
+        if order != Some(Ordering::Equal) {
+            return Ok(order);
         }
     }
     Ok(Some(Ordering::Equal))
+}
+
+/// UTF-8 lexicographic order agrees with scalar order. Compare only the
+/// prefix required, with at most one bounded chunk from either payload.
+pub(crate) fn payload_order(
+    a: &Value,
+    b: &Value,
+    heap: &dyn NativeHeap,
+) -> Result<Ordering, HeapFault> {
+    let length = |v: &Value| match v {
+        Value::Text(t) => t.summary.utf8_bytes,
+        Value::Bytes(b) => b.len,
+        _ => 0,
+    };
+    let (a_len, b_len) = (length(a), length(b));
+    let chunk = |value: &Value, offset: u64, len: u64| -> Result<Vec<u8>, HeapFault> {
+        let mut bytes = Vec::new();
+        heap.payload_visit(value, offset..len, &mut |chunk| {
+            let data = match chunk {
+                Chunk::Text(text) => {
+                    let mut end = text.len().min(4096);
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    &text.as_bytes()[..end]
+                }
+                Chunk::Bytes(bytes) => &bytes[..bytes.len().min(4096)],
+            };
+            bytes.extend_from_slice(data);
+            std::ops::ControlFlow::Break(())
+        })?;
+        if bytes.is_empty() && offset != len {
+            return Err(HeapFault::Malformed(
+                "payload ended before its descriptor length".into(),
+            ));
+        }
+        Ok(bytes)
+    };
+    let mut offset = 0;
+    while offset < a_len.min(b_len) {
+        let left = chunk(a, offset, a_len)?;
+        let right = chunk(b, offset, b_len)?;
+        let count = left.len().min(right.len());
+        let order = left[..count].cmp(&right[..count]);
+        if order != Ordering::Equal {
+            return Ok(order);
+        }
+        offset += count as u64;
+    }
+    Ok(a_len.cmp(&b_len))
 }

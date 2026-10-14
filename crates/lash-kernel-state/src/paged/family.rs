@@ -21,7 +21,7 @@ use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, LogicalBytes, PageRef, Value};
 
 use super::heap::HeapWriteError;
-use super::root::{HeapRoot, KeyedRoot};
+use super::root::KeyedRoot;
 
 /// What a frozen value's root page states, checked when the value entered
 /// the trusted domain.
@@ -67,7 +67,7 @@ pub struct FamilyRecord {
 /// on (kind [`PageKind::SESSION_ROOT`](super::PageKind::SESSION_ROOT)).
 #[derive(Clone, Copy, Debug)]
 pub struct SessionRoot {
-    pub heap: HeapRoot,
+    pub heap: PageRef,
     /// Carried bindings: name to value.
     pub bindings: KeyedRoot,
     /// Saved functions: name to its function bundle node.

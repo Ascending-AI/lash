@@ -140,7 +140,8 @@ fn every_record_round_trips_canonically() {
             tokens
         );
     }
-    let (heap, _) = super::heap::fresh();
+    let (mut heap, _) = super::heap::fresh();
+    super::heap::seal(&mut heap);
     let site = Site::new(Unit::Main, [0]);
     let value = Value::Null;
     round(&empty());
@@ -173,7 +174,7 @@ fn every_record_round_trips_canonically() {
         membership: empty(),
     });
     round(&SessionRoot {
-        heap: heap.heap_root(),
+        heap: heap.sealed_root().expect("sealed header"),
         bindings: empty(),
         functions: empty(),
         certificate: heap.data_only_certificate(),

@@ -266,6 +266,9 @@ pub fn offset(
 }
 
 impl NativeHeap for PagedHeap {
+    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault> {
+        self.normalize_value(value)
+    }
     fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
         self.equal_values(a, b)
     }

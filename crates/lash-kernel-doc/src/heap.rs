@@ -235,6 +235,85 @@ pub enum Value {
     Ref(Identity),
 }
 
+impl Value {
+    pub fn kind(&self) -> crate::ValueKind {
+        use crate::ValueKind;
+        match self {
+            Self::Null => ValueKind::Null,
+            Self::Absent => ValueKind::Absent,
+            Self::Bool(_) => ValueKind::Bool,
+            Self::Int(_) => ValueKind::Int,
+            Self::Float(_) => ValueKind::Float,
+            Self::Text(_) => ValueKind::Text,
+            Self::Bytes(_) => ValueKind::Bytes,
+            Self::Timestamp(_) => ValueKind::Timestamp,
+            Self::Tuple(_) => ValueKind::Tuple,
+            Self::List(_) => ValueKind::List,
+            Self::Map(_) => ValueKind::Map,
+            Self::Set(_) => ValueKind::Set,
+            Self::Record(_) => ValueKind::Record,
+            Self::Closure(_) => ValueKind::Closure,
+            Self::Error(_) => ValueKind::Error,
+            Self::Task(_) => ValueKind::Task,
+            Self::Function(_) => ValueKind::Function,
+            Self::Handle(_) => ValueKind::Handle,
+            Self::Ref(_) => ValueKind::Ref,
+        }
+    }
+    pub fn object(&self) -> Option<EntityId> {
+        match self {
+            Self::List(id)
+            | Self::Map(id)
+            | Self::Set(id)
+            | Self::Record(id)
+            | Self::Closure(id) => Some(*id),
+            _ => None,
+        }
+    }
+    /// A value being built in this activation. Publication canonicalizes a
+    /// long resident payload into pages before sealing any containing record.
+    pub fn text(text: impl Into<Arc<str>>) -> Self {
+        let text = text.into();
+        Self::Text(TextRef {
+            summary: crate::heap_values::text_summary(&text),
+            body: Payload::Resident(text),
+        })
+    }
+}
+impl ErrorRef {
+    pub fn new(kind: &str, message: &str) -> Self {
+        let text = |s: &str| TextRef {
+            summary: crate::heap_values::text_summary(s),
+            body: Payload::Resident(Arc::from(s)),
+        };
+        Self {
+            family: None,
+            task_edges: 0,
+            kind: text(kind),
+            message: text(message),
+            data: Payload::Resident(Arc::new(Value::Null)),
+            depth: 1,
+            cost: LogicalBytes((kind.len() + message.len()) as u64 + 16),
+            has_edges: false,
+        }
+    }
+}
+/// A legal key in its normal form (`K-KEY-002`): two keys are the same key
+/// exactly when their normal forms are equal. A normal form of at most
+/// [`NormalKey::INLINE_MAX`] token bytes is held whole; a longer one is the
+/// domain-separated SHA-256 of its full normalized tokens (`D-KEY`). Its
+/// order is the lookup index's internal order and is never guest-visible.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NormalKey {
+    Inline(Vec<u8>),
+    Digest([u8; 32]),
+}
+
+impl NormalKey {
+    /// The longest normal form held whole.
+    pub const INLINE_MAX: usize = 256;
+}
+
 /// What a native allocates: a fresh list, map, set or record.
 #[derive(Clone, Debug)]
 pub enum Object {
@@ -331,6 +410,7 @@ pub enum NativeError {
 ///
 /// Implemented by the paged heap (layer hp-heap, FIG-6188).
 pub trait NativeHeap {
+    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;
     fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
     fn data_depth_limit(&self) -> usize;
     fn value_depth_limit(&self) -> usize;

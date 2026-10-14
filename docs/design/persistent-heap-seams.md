@@ -883,3 +883,18 @@ its fresh target; it does not retain a reference solely because the overwritten
 body held it. Infrastructure failures still resume from the committed root.
 Resident immutable descriptors validate local cost, depth and edge aggregates
 against their canonical members before their summaries may serve as oracles.
+
+### S1 (amended): native key normalization
+
+`NormalKey` belongs to `lash_kernel_doc::heap`, with the state layer re-exporting
+it. `NativeHeap` owns `normal_key(&Value) -> Result<Option<NormalKey>, HeapFault>`;
+`SemanticHeap` inherits it. First-party natives and certification heaps share
+the heap's normalization path, using its bounded tokens/digest as their host
+index key. The Value-backed library Key and its infallible hash/equality are
+deleted. Insertion-sequence entries retain the first guest spelling.
+
+### Ownership amendment (2026-10-14): lifecycle call sites
+
+hp-life completes the lifecycle implementation; hp-heap merges its final head
+and owns the running-Machine adopt, carry and frozen outcome/argument delivery
+call sites. The deleted rename/reach/copy session paths are not rebuilt.

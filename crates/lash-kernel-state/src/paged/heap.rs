@@ -23,6 +23,7 @@
 
 use std::ops::Range;
 
+pub use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, LogicalBytes, NativeHeap, PageRef, TextRef, TupleRef, Value,
 };
@@ -74,22 +75,6 @@ pub struct ClosureView {
 pub enum FieldName<'a> {
     Static(&'a str),
     Text(&'a TextRef),
-}
-
-/// A legal key in its normal form (`K-KEY-002`): two keys are the same key
-/// exactly when their normal forms are equal. A normal form of at most
-/// [`NormalKey::INLINE_MAX`] token bytes is held whole; a longer one is the
-/// domain-separated SHA-256 of its full normalized tokens (`D-KEY`). Its
-/// order is the lookup index's internal order and is never guest-visible.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum NormalKey {
-    Inline(Vec<u8>),
-    Digest([u8; 32]),
-}
-
-impl NormalKey {
-    /// The longest normal form held whole.
-    pub const INLINE_MAX: usize = 256;
 }
 
 /// A loop's position in a map or a set: the insertion sequence of the
@@ -214,7 +199,7 @@ pub trait SemanticHeap: NativeHeap {
 
     /// A legal key's normal form, or `None` when `value` is not a legal key
     /// (`K-KEY-001`).
-    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;
+
     /// Every heap entity and task `value` names, through tuples and errors.
     fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault>;
     /// The logical cost of `value` where it is held (the local metric).

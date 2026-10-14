@@ -95,5 +95,7 @@ pub fn register_collections(
 }
 
 fn raise(kind: &str, message: &str) -> lash_kernel_doc::NativeError {
-    lash_kernel_doc::NativeError::Raised(lash_kernel_doc::ErrorValue::new(kind, message))
+    lash_kernel_doc::NativeError::Raised(std::sync::Arc::new(lash_kernel_doc::heap::ErrorRef::new(
+        kind, message,
+    )))
 }

@@ -8,14 +8,12 @@
 
 mod arithmetic;
 mod comparison;
-mod keys;
 mod math;
 mod numbers;
 mod numeric;
 mod text_json;
 
 pub use comparison::{compare, equal, same};
-pub use keys::Key;
 pub use numbers::{numbers, register_numbers};
 pub use numeric::{float_to_integer, integer_to_float};
 pub use text_json::{decode_number, parse_json, register_text_json, stringify_json, text_json};
@@ -24,7 +22,9 @@ pub use text_json::{decode_number, parse_json, register_text_json, stringify_jso
 mod tests;
 
 pub(crate) fn raised(kind: &str, message: &str) -> lash_kernel_doc::NativeError {
-    lash_kernel_doc::NativeError::Raised(lash_kernel_doc::ErrorValue::new(kind, message))
+    lash_kernel_doc::NativeError::Raised(std::sync::Arc::new(lash_kernel_doc::heap::ErrorRef::new(
+        kind, message,
+    )))
 }
 
 #[cfg(test)]

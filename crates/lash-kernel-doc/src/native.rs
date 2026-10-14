@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -14,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use crate::canonical::EncodeError;
 use crate::document::DecodeError;
 use crate::function::FunctionDefinition;
+use crate::heap::{NativeFunction, PreparedNative};
 use crate::name::{FunctionId, FunctionName};
 use crate::validate::{Invalid, validate_definition};
-use crate::value::{ErrorValue, Object, ObjectId, Value};
 
 /// The counter a native function is handed: it counts the function's guard
 /// unit and refuses the unit that passes the limit.
@@ -62,132 +61,6 @@ impl WorkCounter {
     pub fn limit(&self) -> Option<u64> {
         self.limit
     }
-}
-
-/// How a native call ends without a value.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
-pub enum NativeError {
-    /// The function raises this error value: one of its declared kinds, or
-    /// a kernel kind.
-    #[error("{}: {}", .0.kind, .0.message)]
-    Raised(ErrorValue),
-    #[error(transparent)]
-    Guard(#[from] GuardExceeded),
-    /// The heap refused an allocation: the run's memory bound.
-    #[error("the run's memory bound refused an allocation")]
-    Memory,
-}
-
-/// One element of a heap object, as [`NativeHeap::visit`] yields it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Element<'a> {
-    /// A list element or a set member.
-    Item(&'a Value),
-    /// A map entry.
-    Entry { key: &'a Value, value: &'a Value },
-    /// A record field.
-    Field { name: &'a str, value: &'a Value },
-}
-
-/// What a native function sees of the run's heap: it reads the objects its
-/// arguments name, reserves the room its result needs and allocates the
-/// objects of its result. It cannot change an object that exists
-/// (`K-LIB-007`).
-///
-/// An identity the heap does not hold, or one of another kind than the
-/// method asks for, reads as empty.
-pub trait NativeHeap {
-    /// Host-selected recursive JSON conversion budget, at most 64 levels.
-    fn data_depth_limit(&self) -> usize {
-        64
-    }
-    /// Recursive collection value/key budget, at most 128 levels.
-    fn value_depth_limit(&self) -> usize {
-        128
-    }
-    /// How many elements a list, entries a map, members a set or fields a
-    /// record has.
-    fn len(&self, object: ObjectId) -> usize;
-    fn list_get(&self, list: ObjectId, index: usize) -> Option<Value>;
-    /// The value under a key equal to `key` (`K-KEY-002`).
-    fn map_get(&self, map: ObjectId, key: &Value) -> Option<Value>;
-    fn set_contains(&self, set: ObjectId, member: &Value) -> bool;
-    fn record_get(&self, record: ObjectId, field: &str) -> Option<Value>;
-    /// Visits a list's elements by index, or a map's, set's or record's
-    /// contents in insertion order, until the visitor breaks.
-    fn visit(&self, object: ObjectId, visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>);
-    /// Allocates a fresh list, map, set or record. A closure or a variable
-    /// is refused, as is a map key or set member that is not a legal key,
-    /// with a [`NativeError::Raised`] of kind `type_error`.
-    fn allocate(&mut self, object: Object) -> Result<ObjectId, NativeError>;
-    /// Reserves room for what the call is about to hold, as its result or
-    /// as a temporary, out of what the run's memory bound leaves: `values`
-    /// values (the elements of a list, the pieces a search keeps) and
-    /// `bytes` bytes of text, bytes or integer digits. The heap prices
-    /// them; how memory is counted is its own (`K-BND-003`). A refusal is
-    /// [`NativeError::Memory`]; the function returns it and allocates
-    /// nothing.
-    ///
-    /// A function whose result or temporary can outgrow its arguments by
-    /// more than a small fixed multiple (it follows a count, a product of
-    /// two sizes or structure that is shared, or it holds many times the
-    /// bytes it reads, as a parse tree or an integer's digits do) reserves
-    /// the size before it allocates it. Reservations add up over the call
-    /// and end with it, and [`NativeHeap::allocate`] draws on them.
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
-}
-
-/// One call of a native function: its arguments, the heap they live in and
-/// its work counter. That is all it sees.
-pub struct NativeCall<'a> {
-    /// One value per parameter of the signature; an omitted optional
-    /// argument is [`Value::Absent`].
-    pub args: &'a [Value],
-    pub heap: &'a mut dyn NativeHeap,
-    pub counter: &'a mut WorkCounter,
-}
-
-/// A native implementation of a library function.
-///
-/// It is a function of its arguments: it does no I/O, reads no clock, keeps
-/// no state a second call could observe, and calls no guest code. Called
-/// again with equal arguments it returns an equal result, raises the same
-/// error, or passes its guard at the same count (`K-LIB-006`).
-///
-/// Failure mode: a call runs to its end inside one machine step, and the
-/// machine accounts its result only when it returns. Nothing stops it in
-/// between: no deadline, no cancel, no charge, and a guard counts work, not
-/// bytes. An implementation that builds a large result or temporary before
-/// it calls [`NativeHeap::reserve`] is stopped only by the worker's
-/// address-space ceiling, which ends the worker as a crash instead of the
-/// run with its typed memory bound. So the size is computed from the
-/// arguments and reserved first; what is reserved is the bound's to refuse.
-pub trait NativeFunction: Send + Sync {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError>;
-
-    /// Prepares a heap-independent entry once for a library's executable.
-    /// Its admission is part of the entry: an answer must equal `call` for
-    /// the same arguments (K-LIB-006). `None` leaves errors, heap reads,
-    /// reservations and counted work to the general call. Guarded calls
-    /// always use the general call. K-LIB-011 fingerprints both entries.
-    fn prepare(&self) -> Option<PreparedNative> {
-        None
-    }
-}
-
-/// A native's certified, heap-independent operation and its entry.
-///
-/// The implementation owns admission and semantics; the VM only transports
-/// operands and charges the registered definition. A returned value counts
-/// no work, reserves no room and allocates no heap object. `None` delegates
-/// to the general call, including its error and refusal ordering.
-#[derive(Clone, Copy, Debug)]
-pub struct PreparedNative {
-    /// A plain entry, specialized by the implementation at preparation.
-    pub entry: fn(&[Value]) -> Option<Value>,
-    /// The operation and operand domain this entry implements. It is a
-    /// description for release certification, never a VM dispatch key.
-    pub operation: &'static str,
 }
 
 /// Where a library function's definition is looked up by identity.

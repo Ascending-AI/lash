@@ -881,78 +881,6 @@ impl SemanticHeap for PagedHeap {
             },
         )
     }
-    fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault> {
-        fn tokens(
-            heap: &PagedHeap,
-            value: &Value,
-            out: &mut TokenWriter,
-        ) -> Result<bool, HeapFault> {
-            match value {
-                Value::Null => out.sum(0, 0),
-                Value::Bool(b) => {
-                    out.sum(1, 1);
-                    b.encode(out);
-                }
-                Value::Int(i) => {
-                    out.sum(2, 1);
-                    heap.copy_int(i)?.encode(out);
-                }
-                Value::Float(f) => {
-                    if let Some(i) = integral_float(f.get()) {
-                        out.sum(2, 1);
-                        i.encode(out);
-                    } else {
-                        out.sum(3, 1);
-                        f.encode(out);
-                    }
-                }
-                Value::Text(t) => {
-                    out.sum(4, 1);
-                    out.text(&heap.copy_text(t)?);
-                }
-                Value::Bytes(b) => {
-                    out.sum(5, 1);
-                    out.bytes(&heap.copy_bytes(b)?);
-                }
-                Value::Timestamp(t) => {
-                    out.sum(6, 1);
-                    t.encode(out);
-                }
-                Value::Ref(i) => {
-                    out.sum(7, 1);
-                    i.encode(out);
-                }
-                Value::Function(n) => {
-                    out.sum(8, 1);
-                    n.encode(out);
-                }
-                Value::Tuple(t) => {
-                    out.sum(9, 1);
-                    out.seq(t.summary.len);
-                    for i in 0..t.summary.len {
-                        let v = heap.tuple_get(t, i)?.ok_or_else(|| {
-                            HeapFault::Malformed("tuple key element missing".into())
-                        })?;
-                        if !tokens(heap, &v, out)? {
-                            return Ok(false);
-                        }
-                    }
-                }
-                _ => return Ok(false),
-            }
-            Ok(true)
-        }
-        let mut out = TokenWriter::new();
-        if !tokens(self, value, &mut out)? {
-            return Ok(None);
-        }
-        let bytes = out.into_bytes();
-        Ok(Some(if bytes.len() <= NormalKey::INLINE_MAX {
-            NormalKey::Inline(bytes)
-        } else {
-            NormalKey::Digest(key_digest(&bytes))
-        }))
-    }
     fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault> {
         match value {
             Value::List(id)
@@ -1329,5 +1257,80 @@ impl PagedHeap {
             }
         }
         Ok(true)
+    }
+}
+
+impl PagedHeap {
+    pub(super) fn normalize_value(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault> {
+        fn tokens(
+            heap: &PagedHeap,
+            value: &Value,
+            out: &mut TokenWriter,
+        ) -> Result<bool, HeapFault> {
+            match value {
+                Value::Null => out.sum(0, 0),
+                Value::Bool(b) => {
+                    out.sum(1, 1);
+                    b.encode(out);
+                }
+                Value::Int(i) => {
+                    out.sum(2, 1);
+                    heap.copy_int(i)?.encode(out);
+                }
+                Value::Float(f) => {
+                    if let Some(i) = integral_float(f.get()) {
+                        out.sum(2, 1);
+                        i.encode(out);
+                    } else {
+                        out.sum(3, 1);
+                        f.encode(out);
+                    }
+                }
+                Value::Text(t) => {
+                    out.sum(4, 1);
+                    out.text(&heap.copy_text(t)?);
+                }
+                Value::Bytes(b) => {
+                    out.sum(5, 1);
+                    out.bytes(&heap.copy_bytes(b)?);
+                }
+                Value::Timestamp(t) => {
+                    out.sum(6, 1);
+                    t.encode(out);
+                }
+                Value::Ref(i) => {
+                    out.sum(7, 1);
+                    i.encode(out);
+                }
+                Value::Function(n) => {
+                    out.sum(8, 1);
+                    n.encode(out);
+                }
+                Value::Tuple(t) => {
+                    out.sum(9, 1);
+                    out.seq(t.summary.len);
+                    for i in 0..t.summary.len {
+                        let v = heap.tuple_get(t, i)?.ok_or_else(|| {
+                            HeapFault::Malformed("tuple key element missing".into())
+                        })?;
+                        if !tokens(heap, &v, out)? {
+                            return Ok(false);
+                        }
+                    }
+                }
+                _ => return Ok(false),
+            }
+            Ok(true)
+        }
+        let mut out = TokenWriter::new();
+        if !tokens(self, value, &mut out)? {
+            return Ok(None);
+        }
+        let bytes = out.into_bytes();
+        Ok(Some(if bytes.len() <= NormalKey::INLINE_MAX {
+            NormalKey::Inline(bytes)
+        } else {
+            NormalKey::Digest(key_digest(&bytes))
+        }))
     }
 }

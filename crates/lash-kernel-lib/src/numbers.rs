@@ -5,10 +5,9 @@ use std::cmp::Ordering;
 use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::{
-    ErrorValue, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity,
-    Implementation, Integer, KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction,
-    NativeHeap, Operand, Param, PreparedNative, QualifiedName, RegistryError, Signature, Type,
-    Value, ValueKind,
+    Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity, Implementation, Integer,
+    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, NativeHeap, Operand, Param,
+    PreparedNative, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -16,7 +15,8 @@ use num_traits::ToPrimitive;
 use crate::arithmetic::{self, Binary, Unary};
 use crate::comparison::{compare, equal, same};
 use crate::math::Math;
-use crate::numeric::{float_to_integer, integer_to_float};
+use crate::numeric::{Numeric, float_to_integer, integer_to_float};
+use lash_kernel_doc::heap::{IntRef, Payload};
 
 mod prepared;
 use crate::raised;
@@ -429,7 +429,10 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 impl NativeFunction for NumericFunction {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         self.admit(call.args)?;
-        if let Some(result) = plain(self.operation, call.args, Some(&*call.heap))? {
+        if let Operation::Binary(op) = self.operation {
+            return arithmetic::binary(op, &call.args[0], &call.args[1], call.counter, call.heap);
+        }
+        if let Some(result) = plain(self.operation, call.args, Some(&mut *call.heap))? {
             return Ok(result);
         }
         let a = &call.args[0];
@@ -498,16 +501,53 @@ impl NumericFunction {
 fn plain(
     operation: Operation,
     args: &[Value],
-    heap: Option<&dyn NativeHeap>,
+    mut heap: Option<&mut dyn NativeHeap>,
 ) -> Result<Option<Value>, NativeError> {
     let a = &args[0];
     Ok(Some(match operation {
-        Operation::Binary(op) => return arithmetic::plain(op, a, &args[1]),
-        Operation::Unary(op) => arithmetic::unary(op, a)?,
-        Operation::Math(op) => op.call(args)?,
+        Operation::Binary(op) => {
+            let Some(left) = Numeric::resident(a) else {
+                return Ok(None);
+            };
+            let Some(right) = Numeric::resident(&args[1]) else {
+                return Ok(None);
+            };
+            return Ok(arithmetic::plain(op, &left, &right)?.and_then(Numeric::inline));
+        }
+        Operation::Unary(op) => match heap.as_deref_mut() {
+            Some(heap) => arithmetic::unary(op, a, heap)?,
+            None => {
+                let Some(value) = Numeric::resident(a) else {
+                    return Ok(None);
+                };
+                let Some(result) = arithmetic::scalar_unary(op, &value)?.inline() else {
+                    return Ok(None);
+                };
+                result
+            }
+        },
+        Operation::Math(op) => {
+            let numbers = match heap.as_deref_mut() {
+                Some(heap) => args
+                    .iter()
+                    .map(|v| Numeric::read(v, heap))
+                    .collect::<Result<Vec<_>, _>>()?,
+                None => {
+                    let Some(numbers) = args
+                        .iter()
+                        .map(Numeric::resident)
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        return Ok(None);
+                    };
+                    numbers
+                }
+            };
+            op.call(&numbers)?.inline().expect("math returns a float")
+        }
         Operation::Eq => {
             let equal = match heap {
-                Some(heap) => equal(a, &args[1], heap),
+                Some(heap) => equal(a, &args[1], heap)?,
                 None => match crate::comparison::scalar_equal(a, &args[1]) {
                     Some(equal) => equal,
                     None => return Ok(None),
@@ -515,7 +555,15 @@ fn plain(
             };
             Value::Bool(equal)
         }
-        Operation::Same => Value::Bool(same(a, &args[1])),
+        Operation::Same => Value::Bool(match heap.as_deref_mut() {
+            Some(heap) => same(a, &args[1], heap)?,
+            None => {
+                let Some(same) = crate::comparison::scalar_same(a, &args[1]) else {
+                    return Ok(None);
+                };
+                same
+            }
+        }),
         Operation::Lt | Operation::Le | Operation::Gt | Operation::Ge | Operation::Compare => {
             let order = match heap {
                 Some(heap) => compare(a, &args[1], heap)?,
@@ -525,12 +573,12 @@ fn plain(
                 },
             };
             match operation {
-                Operation::Compare => Value::Int(Integer::from(match order {
+                Operation::Compare => Value::Int(IntRef::Inline(Integer::from(match order {
                     Some(Ordering::Less) => -1,
                     Some(Ordering::Equal) => 0,
                     Some(Ordering::Greater) => 1,
                     None => return Err(raised("unordered", "NaN has no ordering")),
-                })),
+                }))),
                 Operation::Lt => Value::Bool(order == Some(Ordering::Less)),
                 Operation::Le => {
                     Value::Bool(matches!(order, Some(Ordering::Less | Ordering::Equal)))
@@ -548,12 +596,23 @@ fn plain(
             ),
         }),
         Operation::ToFloat => match a {
-            Value::Int(value) => Value::Float(integer_to_float(value)?),
+            Value::Int(value) => {
+                let integer = match value {
+                    IntRef::Inline(i) => i.clone(),
+                    _ => {
+                        let Some(heap) = heap.as_deref_mut() else {
+                            return Ok(None);
+                        };
+                        heap.materialize_int(value)?
+                    }
+                };
+                Value::Float(integer_to_float(&integer)?)
+            }
             Value::Float(_) => a.clone(),
             _ => return Err(raised("type_error", "expected a number")),
         },
         Operation::ToInt => match a {
-            Value::Float(value) => Value::Int(float_to_integer(*value)?),
+            Value::Float(value) => Value::Int(IntRef::Inline(float_to_integer(*value)?)),
             Value::Int(_) => a.clone(),
             _ => return Err(raised("type_error", "expected a number")),
         },
@@ -572,7 +631,16 @@ fn plain(
             let Value::Text(text) = a else {
                 return Err(raised("type_error", "expected text"));
             };
-            let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+            let text = match &text.body {
+                Payload::Resident(text) => Arc::clone(text),
+                _ => {
+                    let Some(heap) = heap.as_deref_mut() else {
+                        return Ok(None);
+                    };
+                    heap.materialize_text(text)?
+                }
+            };
+            let digits = text.strip_prefix(['+', '-']).unwrap_or(&text);
             if digits.is_empty()
                 || !digits
                     .bytes()
@@ -583,15 +651,34 @@ fn plain(
                     "expected signed radix digits without whitespace or separators",
                 ));
             }
-            BigInt::parse_bytes(text.as_bytes(), radix)
-                .map(|value| Value::Int(Integer::new(value)))
-                .ok_or_else(|| raised("number_parse", "invalid integer text"))?
+            let integer = Integer::new(
+                BigInt::parse_bytes(text.as_bytes(), radix)
+                    .ok_or_else(|| raised("number_parse", "invalid integer text"))?,
+            );
+            match heap.as_deref_mut() {
+                Some(heap) => Value::Int(heap.int(integer)?),
+                None => {
+                    let Some(value) = Numeric::Int(integer).inline() else {
+                        return Ok(None);
+                    };
+                    value
+                }
+            }
         }
         Operation::FloatParse => {
             let Value::Text(text) = a else {
                 return Err(raised("type_error", "expected text"));
             };
-            Value::Float(Float::new(parse_float(text)?))
+            let text = match &text.body {
+                Payload::Resident(text) => Arc::clone(text),
+                _ => {
+                    let Some(heap) = heap.as_deref_mut() else {
+                        return Ok(None);
+                    };
+                    heap.materialize_text(text)?
+                }
+            };
+            Value::Float(Float::new(parse_float(&text)?))
         }
     }))
 }
@@ -633,7 +720,7 @@ const _: () = {
 fn kind_name(kind: ValueKind) -> Value {
     static NAMES: LazyLock<[Arc<str>; 19]> =
         LazyLock::new(|| KIND_NAMES.map(|(_, name)| Arc::from(name)));
-    Value::Text(Arc::clone(&NAMES[kind as usize]))
+    Value::text(Arc::clone(&NAMES[kind as usize]))
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the
@@ -642,22 +729,33 @@ fn kind_name(kind: ValueKind) -> Value {
 /// is [`NativeError::Memory`].
 pub(crate) fn integer_text(
     heap: &mut dyn NativeHeap,
-    integer: &Integer,
+    integer: &IntRef,
     radix: u32,
 ) -> Result<Value, NativeError> {
     // An integer below 2^bits has at most bits / log2(radix) + 1 digits;
     // one more digit absorbs the float's rounding, and one is the sign.
-    let digits = (integer.bits() as f64 / f64::from(radix).log2()) as u64 + 3;
+    let bits = match integer {
+        IntRef::Inline(i) => i.bits(),
+        IntRef::Paged { summary, .. } => summary.bits,
+    };
+    let digits = (bits as f64 / f64::from(radix).log2()) as u64 + 3;
     heap.reserve(0, digits.saturating_mul(2))?;
-    Ok(Value::text(integer.as_bigint().to_str_radix(radix)))
+    let integer = match integer {
+        IntRef::Inline(i) => i.clone(),
+        _ => heap.materialize_int(integer)?,
+    };
+    Ok(Value::Text(
+        heap.text(&integer.as_bigint().to_str_radix(radix))?,
+    ))
 }
 
 fn radix(value: &Value) -> Result<u32, NativeError> {
     match value {
-        Value::Int(value) => value
+        Value::Int(IntRef::Inline(value)) => value
             .to_u32()
             .filter(|value| (2..=36).contains(value))
             .ok_or_else(|| raised("number_range", "radix must be between 2 and 36")),
+        Value::Int(_) => Err(raised("number_range", "radix must be between 2 and 36")),
         _ => Err(raised("type_error", "radix must be an integer")),
     }
 }
@@ -675,7 +773,7 @@ fn parse_float(text: &str) -> Result<f64, NativeError> {
             "expected decimal digits with optional sign, point and exponent",
         )
     };
-    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(&text);
     let parts: Vec<&str> = unsigned.split(['e', 'E']).collect();
     if parts.len() > 2 {
         return Err(invalid());
@@ -702,9 +800,8 @@ fn parse_float(text: &str) -> Result<f64, NativeError> {
     }
     let value: f64 = text.parse().map_err(|_| invalid())?;
     if value.is_infinite() {
-        return Err(NativeError::Raised(ErrorValue::new(
-            "number_range",
-            "decimal text rounds to infinity",
+        return Err(NativeError::Raised(Arc::new(
+            lash_kernel_doc::heap::ErrorRef::new("number_range", "decimal text rounds to infinity"),
         )));
     }
     Ok(value)
