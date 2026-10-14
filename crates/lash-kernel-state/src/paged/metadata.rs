@@ -39,6 +39,9 @@ pub struct NameRef {
 }
 impl NameRef {
     pub fn new(name: &Name, access: &Access<'_>) -> Result<Self, HeapFault> {
+        if let Some(value) = access.metadata_name(name) {
+            return Ok(value);
+        }
         let text = name.as_str();
         let body = if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(text))
@@ -51,7 +54,7 @@ impl NameRef {
         }
         let key = OnceLock::new();
         let _ = key.set(metadata_key(name));
-        Ok(Self {
+        let value = Self {
             text: TextRef {
                 normal: Default::default(),
                 summary: text_summary(text),
@@ -59,7 +62,9 @@ impl NameRef {
             },
             cached: Arc::new(cached),
             key: Arc::new(key),
-        })
+        };
+        access.retain_metadata_name(name, &value);
+        Ok(value)
     }
     pub fn resolve(&self, access: &Access<'_>) -> Result<Name, HeapFault> {
         if let Some(name) = self.cached.get() {
@@ -68,6 +73,9 @@ impl NameRef {
         let name = match &self.text.body {
             Payload::Resident(text) => Name::new(text.to_string()),
             Payload::Paged(page) => {
+                if let Some(name) = access.projected_name(*page, self.text.summary) {
+                    return Ok(name);
+                }
                 let mut bytes = Vec::new();
                 visit(
                     access,
@@ -87,6 +95,8 @@ impl NameRef {
         };
         if name.as_str().len() <= IMMUTABLE_INLINE_MAX as usize {
             let _ = self.cached.set(name.clone());
+        } else if let Payload::Paged(page) = self.text.body {
+            access.retain_projected_name(page, self.text.summary, &name);
         }
         Ok(name)
     }
@@ -97,6 +107,16 @@ impl NameRef {
         let key = metadata_key(&self.resolve(access)?);
         let _ = self.key.set(key.clone());
         Ok(key)
+    }
+    fn matches(&self, name: &Name, access: &Access<'_>) -> Result<bool, HeapFault> {
+        if let Some(value) = access.metadata_name(name) {
+            return Ok(self.same_version(&value));
+        }
+        let same = self.resolve(access)? == *name;
+        if same {
+            access.retain_metadata_name(name, self);
+        }
+        Ok(same)
     }
     pub fn same_version(&self, other: &Self) -> bool {
         if self.text.summary != other.text.summary {
@@ -259,7 +279,29 @@ impl SiteRef {
         Ok(site)
     }
     pub fn matches(&self, site: &Site, access: &Access<'_>) -> Result<bool, HeapFault> {
-        Ok(self.resolve(access)?.as_ref() == site)
+        if let Some(cached) = self.cached.get() {
+            return Ok(cached.as_ref() == site);
+        }
+        let same_unit = match (&self.unit, &site.unit) {
+            (UnitRef::Main, Unit::Main) => true,
+            (UnitRef::Library(a), Unit::Library(b)) => a == b,
+            (UnitRef::Function(a), Unit::Function(b)) => a.matches(b, access)?,
+            _ => false,
+        };
+        if !same_unit || self.path.len() != site.path.len() as u64 {
+            return Ok(false);
+        }
+        for (index, step) in site.path.iter().enumerate() {
+            if self
+                .path
+                .rank_get(index as u64, access)?
+                .map(|(_, step)| step)
+                != Some(*step)
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
     pub fn same_version(&self, other: &Self) -> bool {
         let unit_same = match (&self.unit, &other.unit) {

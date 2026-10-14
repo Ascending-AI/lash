@@ -1,5 +1,7 @@
 //! Decoded cells retain bounded normal-form caches across repeated reads.
+use super::super::NameRef;
 use super::*;
+use lash_kernel_doc::Name;
 use std::any::{Any, TypeId};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -17,6 +19,8 @@ struct Decoded {
 pub(super) struct DecodedResidency {
     nodes: BTreeMap<CacheKey, Decoded>,
     pub(super) bytes: usize,
+    names: BTreeMap<(usize, usize), (Name, NameRef)>,
+    projected_names: BTreeMap<(PageId, u64, u64, u64), Name>,
 }
 impl Access<'_> {
     pub(super) fn decoded_node<T: Cell>(
@@ -94,6 +98,73 @@ impl Access<'_> {
             },
         );
         Ok(node)
+    }
+    pub(crate) fn metadata_name(&self, name: &Name) -> Option<NameRef> {
+        self.decoded
+            .borrow()
+            .names
+            .get(&(name.as_str().as_ptr() as usize, name.as_str().len()))
+            .map(|(_, value)| value.clone())
+    }
+    pub(crate) fn retain_metadata_name(&self, name: &Name, value: &NameRef) {
+        let weight = name.as_str().len()
+            + encode_body(value).len() * 16
+            + std::mem::size_of::<NameRef>()
+            + 512;
+        if weight > 64 << 20 {
+            return;
+        }
+        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
+            self.clear();
+        }
+        let mut cache = self.decoded.borrow_mut();
+        cache.bytes += weight;
+        // Retain the input Arc so pointer reuse cannot alias a later name.
+        cache.names.insert(
+            (name.as_str().as_ptr() as usize, name.as_str().len()),
+            (name.clone(), value.clone()),
+        );
+    }
+    pub(crate) fn projected_name(
+        &self,
+        page: PageRef,
+        summary: lash_kernel_doc::heap::TextSummary,
+    ) -> Option<Name> {
+        self.decoded
+            .borrow()
+            .projected_names
+            .get(&(
+                page.id,
+                summary.utf8_bytes,
+                summary.chars,
+                summary.utf16_units,
+            ))
+            .cloned()
+    }
+    pub(crate) fn retain_projected_name(
+        &self,
+        page: PageRef,
+        summary: lash_kernel_doc::heap::TextSummary,
+        name: &Name,
+    ) {
+        let weight = name.as_str().len() + std::mem::size_of::<Name>() + 128;
+        if weight > 64 << 20 {
+            return;
+        }
+        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
+            self.clear();
+        }
+        let mut cache = self.decoded.borrow_mut();
+        cache.bytes += weight;
+        cache.projected_names.insert(
+            (
+                page.id,
+                summary.utf8_bytes,
+                summary.chars,
+                summary.utf16_units,
+            ),
+            name.clone(),
+        );
     }
     #[cfg(test)]
     pub(crate) fn clean_bytes(&self) -> usize {

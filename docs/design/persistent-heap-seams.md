@@ -1109,3 +1109,8 @@ root intact. Clean token and decoded-node residency share one 64 MiB allowance.
 Decoded-node keys include cell type, family context and tree kind; inline keys
 retain their token Arc so pointer reuse cannot alias cached bodies. Long names
 and sites remain descriptors, with only bounded metadata and normal-form caches.
+
+S4 metadata residency: admitted-name reuse retains the input Name Arc to guard
+pointer identity; diagnostic-name reuse keys the payload page and its complete
+TextSummary. Both tables draw from the same 64 MiB clean allowance. Site matching
+uses bounded unit descriptors and semantic path cells, without sealing pages.

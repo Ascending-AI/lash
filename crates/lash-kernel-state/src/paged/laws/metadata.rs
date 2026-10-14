@@ -195,3 +195,50 @@ fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
             .all(|page| page.tokens.len() + page.children.len() * 32 + 32 <= 65_536)
     );
 }
+
+/// D-CAP/S4: admitted metadata names share descriptors, and diagnostic
+/// projection shares equal payloads without retaining an unbounded cache.
+#[test]
+fn repeated_long_metadata_names_share_storage_and_diagnostic_text() {
+    let (heap, pages) = fresh();
+    let name = Name::new("n".repeat(1 << 20));
+    let first = NameRef::new(&name, &heap.access).unwrap();
+    let before = pages.borrow().seals;
+    for _ in 0..1000 {
+        let site =
+            SiteRef::new(&Site::new(Unit::Function(name.clone()), [0]), &heap.access).unwrap();
+        assert!(
+            site.matches(&Site::new(Unit::Function(name.clone()), [0]), &heap.access)
+                .unwrap()
+        );
+        assert!(first.same_version(&NameRef::new(&name, &heap.access).unwrap()));
+        assert!(heap.access.clean_bytes() <= 64 << 20);
+    }
+    assert_eq!(pages.borrow().seals, before);
+    let a = first.resolve(&heap.access).unwrap();
+    let b = first.resolve(&heap.access).unwrap();
+    assert_eq!(
+        a.as_str().as_ptr(),
+        b.as_str().as_ptr(),
+        "one diagnostic text allocation"
+    );
+    assert_eq!(a, name);
+}
+
+/// S1 fault law: a decoded-name cache must retain the descriptor's summary
+/// validation, even when the referenced payload was previously read.
+#[test]
+fn a_cached_metadata_name_does_not_hide_a_bad_payload_summary() {
+    let (heap, _) = fresh();
+    let first = NameRef::new(&Name::new("n".repeat(1 << 20)), &heap.access).unwrap();
+    first.resolve(&heap.access).unwrap();
+    let mut text: TextRef = decode_body(&encode_body(&first)).unwrap();
+    text.summary.utf8_bytes += 1;
+    text.summary.utf16_units += 1;
+    text.summary.chars += 1;
+    let bad: NameRef = decode_body(&encode_body(&text)).unwrap();
+    assert!(matches!(
+        bad.resolve(&heap.access),
+        Err(HeapFault::Corrupt { .. })
+    ));
+}
