@@ -515,6 +515,7 @@ PACKAGE_DEPS = {
     "lash-internal-plugin-mcp": {
         "build": {},
         "dev": {
+            "axum": "//third-party/rust:p0024",
             "lash": "//crates/lash:lash",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",

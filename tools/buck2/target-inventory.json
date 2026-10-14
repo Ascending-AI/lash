@@ -66431,6 +66431,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "axum",
         "base64",
         "blake3",
         "chrono",
@@ -69930,6 +69931,17 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test": 300,
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": 300
   },
+  "third_party_path_patches": [
+    {
+      "directory": "third-party/patched/rmcp",
+      "library": "//third-party/rust:p0280",
+      "package": "rmcp",
+      "tests": [
+        "//third-party/rust:rmcp_header_laws"
+      ],
+      "version": "3.5.1"
+    }
+  ],
   "workspace_build_targets": [
     "//crates/lash-conformance:lash-conformance[static]",
     "//crates/lash-conformance:lash-conformance__unit_test",

@@ -74,7 +74,7 @@ class ProductionFileSizeGuardTests(unittest.TestCase):
             "crates/x/src/nested/test.rs", "crates/x/src/parser_tests.rs",
             "crates/x/language/support.rs",
         )
-        excluded = (".git", ".claude", "target", ".tgt", "vendor", "vendored", "generated", "crates/lash-regress")
+        excluded = (".git", ".claude", "target", ".tgt", "vendor", "vendored", "generated", "third-party", "crates/lash-regress")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for relative in test_paths:

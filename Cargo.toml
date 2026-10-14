@@ -1,6 +1,6 @@
 [workspace]
 # Local gate scratch packages (including Miri's sysroot) are standalone.
-exclude = ["fuzz", ".kiln"]
+exclude = ["fuzz", ".kiln", "third-party/patched/rmcp"]
 members = [
     "crates/lash-render",
     "crates/lash-sansio",
@@ -405,3 +405,6 @@ debug = "line-tables-only"
 
 [profile.judged.package."*"]
 opt-level = 2
+
+[patch.crates-io]
+rmcp = { path = "third-party/patched/rmcp" }

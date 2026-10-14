@@ -57,7 +57,8 @@ tokio-util = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-rmcp = { workspace = true, features = ["server"] }
+axum = "0.8"
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 lash = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }

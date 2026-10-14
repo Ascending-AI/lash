@@ -2364,6 +2364,7 @@ name = "lash-internal-plugin-mcp"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "axum",
  "base64 0.23.1",
  "blake3",
  "chrono",
@@ -4144,8 +4145,6 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5023804cbe0304cbe06197ac16e645a0a0d0ffa2953bf735c15c2fa0213350"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

@@ -38,6 +38,55 @@ class GitSources(unittest.TestCase):
             + 'default-features = false\nfeatures = ["enabled"]\n',
         )
 
+    def test_path_patch_keeps_identity_features_and_stays_outside_workspace(self):
+        package = {
+            "id": "path+rmcp", "name": "rmcp", "version": "3.5.1", "source": None,
+            "manifest_path": str(sync.SYNTHETIC / "patched/rmcp/Cargo.toml"),
+        }
+        canonical = {
+            "workspace_members": [], "packages": [package],
+            "resolve": {"nodes": [{"id": package["id"], "features": ["client", "server"]}]},
+        }
+        with patch.object(sync, "EXTRA_LOCKED_CRATES", {}):
+            manifest = tomllib.loads(sync.synthetic_manifest(canonical))
+        self.assertEqual(manifest["workspace"]["exclude"], ["patched/rmcp"])
+        self.assertEqual(manifest["dependencies"]["p0000"], {
+            "package": "rmcp", "version": "=3.5.1", "path": "patched/rmcp",
+            "default-features": False, "features": ["client", "server"],
+        })
+        package["manifest_path"] = str(sync.SYNTHETIC / "unreviewed/rmcp/Cargo.toml")
+        with self.assertRaisesRegex(ValueError, "reviewed patch"):
+            sync.synthetic_manifest(canonical)
+
+    def test_path_patch_projects_sources_and_buildscript_in_archive_layout(self):
+        prefix = "third-party/patched/example"
+        package = {"name": "example", "version": "1.2.3", "source": None,
+                   "manifest_path": str(sync.ROOT / prefix / "Cargo.toml")}
+        library = (
+            'third_party_rust_library(\n    name = "example-1",\n'
+            f'    srcs = ["{prefix}/src/lib.rs"],\n'
+            f'    crate_root = "{prefix}/src/lib.rs",\n'
+            f'    env = {{"CARGO_PKG_NAME": "example", "CARGO_MANIFEST_DIR": "{prefix}"}},\n)\n'
+        )
+        binary = library.replace("third_party_rust_library", "third_party_rust_binary").replace("src/lib.rs", "build.rs")
+        unrelated = 'third_party_rust_library(\n    name = "other-1",\n)\n'
+        buildscript = (
+            'third_party_buildscript_run(\n    package_name = "example",\n'
+            f'    local_manifest_dir = "{prefix}",\n)\n'
+        )
+        rendered, outputs = sync.patched_path_rules(library + binary + buildscript + unrelated, {"packages": [package]})
+        self.assertEqual(rendered.count('srcs = ["//third-party/patched/example:crate_sources"]'), 2)
+        self.assertIn('crate_root = "example-1.2.3.crate/src/lib.rs"', rendered)
+        self.assertIn('crate_root = "example-1.2.3.crate/build.rs"', rendered)
+        self.assertIn('"CARGO_MANIFEST_DIR": "example-1.2.3.crate"', rendered)
+        self.assertIn('manifest_dir = "//third-party/patched/example:crate_sources"', rendered)
+        self.assertNotIn("local_manifest_dir", rendered)
+        self.assertIn(unrelated, rendered)
+        sources = outputs[sync.ROOT / prefix / "BUCK"]
+        self.assertIn('out = "example-1.2.3.crate"', sources)
+        self.assertIn('glob(["**"]', sources)
+        self.assertNotIn("http_archive", rendered)
+
     def test_git_packages_keep_the_repository_and_full_revision(self):
         revision = "0123456789abcdef0123456789abcdef01234567"
         repository = "https://example.com/owner/library"

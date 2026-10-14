@@ -1,0 +1,376 @@
+--- a/src/transport/common/mcp_headers.rs
++++ b/src/transport/common/mcp_headers.rs
+@@ -99,78 +99,128 @@
+         )
+ }
+ 
+-/// Top-level properties carrying an `x-mcp-header` annotation, as `(property, header)` pairs.
+-fn param_header_annotations(input_schema: &JsonObject) -> Vec<(String, String)> {
++/// Properties-chain annotations, as `(argument path, header)` pairs.
++fn param_header_annotations(input_schema: &JsonObject) -> Vec<(Vec<String>, String)> {
++    fn collect(schema: &JsonObject, path: &mut Vec<String>, out: &mut Vec<(Vec<String>, String)>) {
++        if !path.is_empty()
++            && let Some(Value::String(header)) = schema.get("x-mcp-header")
++            && !header.is_empty()
++        {
++            out.push((path.clone(), header.clone()));
++        }
++        if let Some(Value::Object(properties)) = schema.get("properties") {
++            for (name, child) in properties {
++                if let Value::Object(child) = child {
++                    path.push(name.clone());
++                    collect(child, path, out);
++                    path.pop();
++                }
++            }
++        }
++    }
+     let mut out = Vec::new();
+-    if let Some(Value::Object(props)) = input_schema.get("properties") {
+-        for (prop, schema) in props {
+-            if let Some(Value::String(header)) = schema.get("x-mcp-header")
+-                && !header.is_empty()
+-            {
+-                out.push((prop.clone(), header.clone()));
+-            }
+-        }
+-    }
++    collect(input_schema, &mut Vec::new(), &mut out);
+     out
+ }
+ 
+-/// Validates the `x-mcp-header` annotations in a tool input schema.
+-///
+-/// Annotations must be non-empty RFC 9110 tokens, case-insensitively unique,
+-/// applied only to top-level primitive (`string`/`integer`/`boolean`) properties.
+-/// Returns the offending reason on the first violation.
++/// Reads an exact object-property path; absent or non-object ancestors omit the value.
++fn argument_at_path<'a>(arguments: &'a Value, path: &[String]) -> Option<&'a Value> {
++    path.iter()
++        .try_fold(arguments, |value, key| value.as_object()?.get(key))
++}
++
++/// Validates annotations reached solely through `properties`, rejecting all others.
++/// Names must be non-empty RFC 9110 tokens, case-insensitively unique across
++/// the schema, and attached to primitive (`string`/`integer`/`boolean`) properties.
+ #[cfg(feature = "client-side-sse")]
+ pub(crate) fn validate_param_header_annotations(input_schema: &JsonObject) -> Result<(), String> {
+-    let Some(Value::Object(props)) = input_schema.get("properties") else {
+-        return Ok(());
+-    };
+-    let mut seen = std::collections::HashSet::new();
+-    for (prop, schema) in props {
+-        reject_nested_annotations(schema, prop)?;
+-        let Some(raw) = schema.get("x-mcp-header") else {
+-            continue;
+-        };
+-        let Value::String(header) = raw else {
+-            return Err(format!("property `{prop}`: x-mcp-header must be a string"));
+-        };
+-        if header.is_empty() {
+-            return Err(format!("property `{prop}`: x-mcp-header must not be empty"));
+-        }
+-        if !header.chars().all(is_tchar) {
+-            return Err(format!(
+-                "property `{prop}`: x-mcp-header `{header}` is not a valid HTTP token"
+-            ));
+-        }
+-        if !seen.insert(header.to_ascii_lowercase()) {
+-            return Err(format!(
+-                "property `{prop}`: duplicate x-mcp-header `{header}` (case-insensitive)"
+-            ));
+-        }
+-        match schema.get("type").and_then(Value::as_str) {
+-            Some("string" | "integer" | "boolean") => {}
+-            other => {
++    fn validate(
++        schema: &JsonObject,
++        path: &mut Vec<String>,
++        seen: &mut std::collections::HashSet<String>,
++    ) -> Result<(), String> {
++        let prop = path.join(".");
++        if let Some(raw) = schema.get("x-mcp-header") {
++            if path.is_empty() {
++                return Err("x-mcp-header must annotate a properties-chain property".to_owned());
++            }
++            let Value::String(header) = raw else {
++                return Err(format!("property `{prop}`: x-mcp-header must be a string"));
++            };
++            if header.is_empty() {
++                return Err(format!("property `{prop}`: x-mcp-header must not be empty"));
++            }
++            if !header.chars().all(is_tchar) {
+                 return Err(format!(
+-                    "property `{prop}`: x-mcp-header requires a primitive type \
+-                     (string/integer/boolean), got {other:?}"
++                    "property `{prop}`: x-mcp-header `{header}` is not a valid HTTP token"
+                 ));
+             }
+-        }
+-    }
+-    Ok(())
+-}
+-
+-/// Rejects `x-mcp-header` on nested properties (only top-level promotion is supported).
++            if !seen.insert(header.to_ascii_lowercase()) {
++                return Err(format!(
++                    "property `{prop}`: duplicate x-mcp-header `{header}` (case-insensitive)"
++                ));
++            }
++            match schema.get("type").and_then(Value::as_str) {
++                Some("string" | "integer" | "boolean") => {}
++                other => {
++                    return Err(format!(
++                        "property `{prop}`: x-mcp-header requires a primitive type \
++                         (string/integer/boolean), got {other:?}"
++                    ));
++                }
++            }
++        }
++        for (keyword, value) in schema {
++            if keyword == "properties" {
++                if let Value::Object(properties) = value {
++                    for (name, child) in properties {
++                        if let Value::Object(child) = child {
++                            path.push(name.clone());
++                            validate(child, path, seen)?;
++                            path.pop();
++                        } else {
++                            reject_unreachable_annotations(
++                                child,
++                                &format!("{prop}.properties.{name}"),
++                            )?;
++                        }
++                    }
++                } else {
++                    reject_unreachable_annotations(value, &format!("{prop}.properties"))?;
++                }
++            } else if keyword != "x-mcp-header" {
++                reject_unreachable_annotations(value, &format!("{prop}.{keyword}"))?;
++            }
++        }
++        Ok(())
++    }
++    validate(
++        input_schema,
++        &mut Vec::new(),
++        &mut std::collections::HashSet::new(),
++    )
++}
++
++/// Annotations below any other keyword are not statically reachable.
+ #[cfg(feature = "client-side-sse")]
+-fn reject_nested_annotations(schema: &Value, path: &str) -> Result<(), String> {
+-    if let Some(Value::Object(nested)) = schema.get("properties") {
+-        for (key, value) in nested {
+-            if value.get("x-mcp-header").is_some() {
++fn reject_unreachable_annotations(value: &Value, path: &str) -> Result<(), String> {
++    match value {
++        Value::Object(object) => {
++            if object.contains_key("x-mcp-header") {
+                 return Err(format!(
+-                    "property `{path}.{key}`: x-mcp-header is not supported on nested properties"
++                    "schema `{path}`: x-mcp-header is not reachable solely through properties"
+                 ));
+             }
+-            reject_nested_annotations(value, &format!("{path}.{key}"))?;
+-        }
++            for (key, child) in object {
++                reject_unreachable_annotations(child, &format!("{path}.{key}"))?;
++            }
++        }
++        Value::Array(array) => {
++            for (index, child) in array.iter().enumerate() {
++                reject_unreachable_annotations(child, &format!("{path}[{index}]"))?;
++            }
++        }
++        _ => {}
+     }
+     Ok(())
+ }
+@@ -240,8 +290,8 @@
+         && let (Some(schema), Some(arguments)) =
+             (tool_schema, params.and_then(|p| p.get("arguments")))
+     {
+-        for (prop, header) in param_header_annotations(schema) {
+-            let Some(arg) = arguments.get(&prop) else {
++        for (path, header) in param_header_annotations(schema) {
++            let Some(arg) = argument_at_path(arguments, &path) else {
+                 continue;
+             };
+             let Some(encoded) = primitive_to_string(arg).map(|s| encode_header_value(&s)) else {
+@@ -297,10 +347,11 @@
+         && let Some(schema) = tool_schema
+     {
+         let arguments = params.and_then(|p| p.get("arguments"));
+-        for (prop, header) in param_header_annotations(schema) {
++        for (path, header) in param_header_annotations(schema) {
+             let full = format!("{HEADER_MCP_PARAM_PREFIX}{header}");
+             let header_value = header_str(headers, &full)?;
+-            let arg = arguments.and_then(|a| a.get(&prop));
++            let prop = path.join(".");
++            let arg = arguments.and_then(|a| argument_at_path(a, &path));
+             let body_value = arg.filter(|v| !v.is_null()).and_then(primitive_to_string);
+ 
+             match (header_value, body_value) {
+@@ -537,13 +588,92 @@
+         }
+ 
+         #[test]
+-        fn rejects_nested_annotation() {
++        fn accepts_nested_properties_annotation() {
+             let schema = schema_with(json!({
+                 "outer": {
+                     "type": "object",
+                     "properties": { "inner": { "type": "string", "x-mcp-header": "Inner" } }
+                 }
+             }));
++            assert!(validate_param_header_annotations(&schema).is_ok());
++        }
++
++        #[test]
++        fn rejects_annotations_below_every_other_keyword() {
++            let annotation = json!({"type":"string", "x-mcp-header":"Region"});
++            for keyword in [
++                "items",
++                "prefixItems",
++                "additionalProperties",
++                "patternProperties",
++                "oneOf",
++                "anyOf",
++                "allOf",
++                "not",
++                "if",
++                "then",
++                "else",
++                "$ref",
++                "$defs",
++                "unknown",
++            ] {
++                for value in [
++                    annotation.clone(),
++                    json!([annotation.clone()]),
++                    json!({"properties":{"region":annotation.clone()}}),
++                ] {
++                    for nested in [false, true] {
++                        let mut schema = json!({"type":"object"});
++                        schema[keyword] = value.clone();
++                        if nested {
++                            schema = json!({"type":"object", "properties":{"location":schema}});
++                        }
++                        assert!(
++                            validate_param_header_annotations(schema.as_object().unwrap()).is_err(),
++                            "{schema}"
++                        );
++                    }
++                }
++            }
++            assert!(
++                validate_param_header_annotations(
++                    json!({"type":"string", "x-mcp-header":"Root"})
++                        .as_object()
++                        .unwrap()
++                )
++                .is_err()
++            );
++        }
++
++        #[test]
++        fn validates_nested_names_types_and_global_uniqueness() {
++            for invalid in [
++                json!(null),
++                json!(42),
++                json!(""),
++                json!("bad:name"),
++                json!("bad\r\nname"),
++            ] {
++                let schema = schema_with(
++                    json!({"location":{"properties":{"region":{"type":"string", "x-mcp-header":invalid}}}}),
++                );
++                assert!(validate_param_header_annotations(&schema).is_err());
++            }
++            for invalid in [
++                json!("number"),
++                json!("object"),
++                json!("array"),
++                json!(["string", "null"]),
++                json!(null),
++            ] {
++                let schema = schema_with(
++                    json!({"location":{"properties":{"region":{"type":invalid, "x-mcp-header":"Region"}}}}),
++                );
++                assert!(validate_param_header_annotations(&schema).is_err());
++            }
++            let schema = schema_with(
++                json!({"region":{"type":"string", "x-mcp-header":"Region"}, "location":{"properties":{"region":{"type":"string", "x-mcp-header":"rEgIoN"}}}}),
++            );
+             assert!(validate_param_header_annotations(&schema).is_err());
+         }
+     }
+@@ -589,6 +719,66 @@
+                     .map(String::as_str),
+                 Some("us-west1")
+             );
++        }
++    }
++
++    #[test]
++    fn nested_headers_follow_exact_paths_and_server_validation_agrees() {
++        let schema = schema_with(json!({
++            "location/~": {"properties": {
++                "region": {"type":"string", "x-mcp-header":"Region"},
++                "count": {"type":"integer", "x-mcp-header":"Count"},
++                "flag": {"type":"boolean", "x-mcp-header":"Flag"}
++            }}
++        }));
++        assert!(validate_param_header_annotations(&schema).is_ok());
++        assert!(
++            param_header_annotations(&schema)
++                .iter()
++                .any(|(path, header)| path == &["location/~", "region"] && header == "Region")
++        );
++        for arguments in [
++            json!({"location/~":{"region":"café", "count":9007199254740991_i64, "flag":false}}),
++            json!({"location/~":{"region":" padded\r\n", "count":-9007199254740991_i64, "flag":true}}),
++            json!({"region":"wrong-level"}),
++            json!({"location/~":{}}),
++            json!({"location/~":null}),
++            json!({"location/~":[]}),
++        ] {
++            let request =
++                json!({"method":"tools/call", "params":{"name":"deploy", "arguments":arguments}});
++            let headers: HeaderMap = standard_request_headers(&request, Some(&schema))
++                .into_iter()
++                .collect();
++            assert!(validate_request_headers(&headers, &request, Some(&schema)).is_ok());
++            if let Some(region) = arguments
++                .get("location/~")
++                .and_then(|value| value.get("region"))
++            {
++                assert_eq!(
++                    headers["Mcp-Param-Region"],
++                    encode_header_value(region.as_str().unwrap())
++                );
++                assert_eq!(
++                    headers["Mcp-Param-Count"],
++                    arguments["location/~"]["count"].to_string()
++                );
++                assert_eq!(
++                    headers["Mcp-Param-Flag"],
++                    arguments["location/~"]["flag"].to_string()
++                );
++                let mut missing = headers.clone();
++                missing.remove("Mcp-Param-Region");
++                assert!(validate_request_headers(&missing, &request, Some(&schema)).is_err());
++                let mut mismatched = headers.clone();
++                mismatched.insert("Mcp-Param-Region", HeaderValue::from_static("wrong"));
++                assert!(validate_request_headers(&mismatched, &request, Some(&schema)).is_err());
++            } else {
++                assert!(!headers.contains_key("Mcp-Param-Region"));
++                let mut unexpected = headers.clone();
++                unexpected.insert("Mcp-Param-Region", HeaderValue::from_static("unexpected"));
++                assert!(validate_request_headers(&unexpected, &request, Some(&schema)).is_err());
++            }
+         }
+     }
+ 

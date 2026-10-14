@@ -16145,17 +16145,9 @@ alias(
     visibility = ["PUBLIC"],
 )
 
-third_party_http_archive(
-    name = "rmcp-3.5.1.crate",
-    sha256 = "ab5023804cbe0304cbe06197ac16e645a0a0d0ffa2953bf735c15c2fa0213350",
-    strip_prefix = "rmcp-3.5.1",
-    urls = ["https://static.crates.io/crates/rmcp/3.5.1/download"],
-    visibility = [],
-)
-
 third_party_rust_library(
     name = "rmcp-3",
-    srcs = [":rmcp-3.5.1.crate"],
+    srcs = ["//third-party/patched/rmcp:crate_sources"],
     crate = "rmcp",
     crate_root = "rmcp-3.5.1.crate/src/lib.rs",
     edition = "2024",
@@ -16235,7 +16227,7 @@ third_party_rust_library(
 
 third_party_rust_binary(
     name = "rmcp-3-build-script-build",
-    srcs = [":rmcp-3.5.1.crate"],
+    srcs = ["//third-party/patched/rmcp:crate_sources"],
     crate = "build_script_build",
     crate_root = "rmcp-3.5.1.crate/build.rs",
     edition = "2024",
@@ -16320,6 +16312,7 @@ third_party_buildscript_run(
         "transport-worker",
         "uuid",
     ],
+    manifest_dir = "//third-party/patched/rmcp:crate_sources",
     platform = {
         "linux-x86_64": dict(),
     },
@@ -28319,4 +28312,15 @@ third_party_buildscript_run(
     rustc_link_lib = True,
     rustc_link_search = True,
     version = "1.0.23",
+)
+
+load("@root//tools/buck2:third_party.bzl", "third_party_header_laws")
+
+third_party_header_laws(
+    name = "rmcp_header_laws",
+    srcs = [
+        "//tools/buck2:rmcp_header_laws.rs",
+        "//third-party/patched/rmcp:crate_sources",
+    ],
+    deps = [":http-1", ":base64-0.23", ":serde_json-1"],
 )

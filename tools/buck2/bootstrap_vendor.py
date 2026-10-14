@@ -49,7 +49,7 @@ def expected_directories() -> set[str]:
     return {
         f"{package['name']}-{package['version']}"
         for package in lock["package"]
-        if package["name"] != "lash-buck2-third-party"
+        if package.get("source")
     }
 
 

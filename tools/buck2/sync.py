@@ -320,6 +320,10 @@ def synthetic_manifest(canonical: dict) -> str:
         (package for package in canonical["packages"] if package["id"] not in members),
         key=lambda package: (package["name"], package["version"], package["id"]),
     )
+    patch_directories = sorted(
+        pathlib.Path(package["manifest_path"]).parent.relative_to(SYNTHETIC).as_posix()
+        for package in packages if not package.get("source")
+    )
     lines = [
         GENERATED_HEADER,
         "[package]\n",
@@ -328,7 +332,9 @@ def synthetic_manifest(canonical: dict) -> str:
         'edition = "2024"\n',
         'publish = false\n\n',
         "[workspace]\n",
-        'resolver = "2"\n\n',
+        'resolver = "2"\n',
+        *(["exclude = " + json.dumps(patch_directories) + "\n"] if patch_directories else []),
+        "\n",
     ]
     seen_names: set[str] = set()
     for index, package in enumerate(packages):
@@ -337,7 +343,13 @@ def synthetic_manifest(canonical: dict) -> str:
         features = sorted(nodes[package["id"]]["features"])
         source_lines = []
         source = package.get("source") or ""
-        if source.startswith("git+"):
+        if not source:
+            directory = pathlib.Path(package["manifest_path"]).resolve().parent
+            relative = directory.relative_to(SYNTHETIC).as_posix()
+            if not relative.startswith("patched/"):
+                raise ValueError(f"external path dependency is not a reviewed patch: {directory}")
+            source_lines = [f"path = {toml_string(relative)}\n"]
+        elif source.startswith("git+"):
             repository, _, revision = source.removeprefix("git+").rpartition("#")
             if not repository or not re.fullmatch(r"[0-9a-f]{40}", revision):
                 raise ValueError(f"missing full resolved git revision: {source}")
@@ -574,6 +586,65 @@ def vendored_git_rules(content: str, resolved: dict) -> tuple[str, dict]:
 
     rendered = re.sub(r"git_fetch\(\n(.*?)\n\)\n", replace, content, flags=re.S)
     return rendered, {"sources": sources}
+
+
+def patched_path_rules(content: str, resolved: dict) -> tuple[str, dict[pathlib.Path, str]]:
+    """Project reviewed path packages as source trees in Reindeer's archive layout.
+
+    Reindeer emits repository-relative strings for path packages, but its BUCK
+    file lives in third-party/rust. Cross-package filegroups preserve module and
+    build-script paths without making local source copies or changing the prelude.
+    """
+    outputs = {}
+    for package in resolved["packages"]:
+        if package.get("source") or package["name"] == "lash-buck2-third-party":
+            continue
+        directory = pathlib.Path(package["manifest_path"]).parent.relative_to(ROOT)
+        if not directory.as_posix().startswith("third-party/patched/"):
+            raise ValueError(f"unreviewed external path package: {directory}")
+        prefix = directory.as_posix() + "/"
+        archive = f"{package['name']}-{package['version']}.crate"
+        label = f"//{directory.as_posix()}:crate_sources"
+        outputs[ROOT / directory / "BUCK"] = GENERATED_HEADER + (
+            "filegroup(\n"
+            '    name = "crate_sources",\n'
+            '    srcs = {path: path for path in glob(["**"], exclude = ["BUCK", "LASH_PATCH.md"])},\n'
+            f"    out = {toml_string(archive)},\n"
+            '    copy = False,\n'
+            '    visibility = ["PUBLIC"],\n'
+            ")\n"
+        )
+
+        def replace(match: re.Match[str]) -> str:
+            rule, block = match.group(1), match.group(2)
+            if (f'"CARGO_PKG_NAME": "{package["name"]}"' not in block
+                    and f'package_name = "{package["name"]}"' not in block):
+                return match.group(0)
+            block = block.replace(
+                f"local_manifest_dir = {toml_string(directory.as_posix())}",
+                f"manifest_dir = {toml_string(label)}",
+            )
+            block = re.sub(r"    srcs = \[.*?\],\n", f"    srcs = [{toml_string(label)}],\n", block, flags=re.S)
+            block = block.replace(prefix, archive + "/").replace(
+                toml_string(directory.as_posix()), toml_string(archive)
+            )
+            return rule + "(\n" + block + "\n)\n"
+
+        content = re.sub(r"(third_party_rust_library|third_party_rust_binary|third_party_buildscript_run)\(\n(.*?)\n\)\n", replace, content, flags=re.S)
+    if any(package["name"] == "rmcp" and not package.get("source") for package in resolved["packages"]):
+        content += """
+load("@root//tools/buck2:third_party.bzl", "third_party_header_laws")
+
+third_party_header_laws(
+    name = "rmcp_header_laws",
+    srcs = [
+        "//tools/buck2:rmcp_header_laws.rs",
+        "//third-party/patched/rmcp:crate_sources",
+    ],
+    deps = [":http-1", ":base64-0.23", ":serde_json-1"],
+)
+"""
+    return content, outputs
 
 
 def materialize_git_sources() -> None:
@@ -1295,10 +1366,20 @@ ui_fixtures_test(
 
 
 def generate_lock(manifest_text: str, source_text: str) -> str:
-    with tempfile.TemporaryDirectory(prefix="lash-buck2-lock-") as directory:
+    scratch = ROOT / ".kiln" / "buck2-lock"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="lock-", dir=scratch) as directory:
         root = pathlib.Path(directory)
         (root / "src").mkdir()
-        (root / "Cargo.toml").write_text(manifest_text)
+        # Resolve the synthetic manifest's relative patch paths from its own
+        # directory, even while computing the lock in an isolated scratch crate.
+        scratch_manifest = re.sub(
+            r'^path = "([^"\n]+)"$',
+            lambda match: "path = " + toml_string(str(SYNTHETIC / match.group(1))),
+            manifest_text,
+            flags=re.M,
+        )
+        (root / "Cargo.toml").write_text(scratch_manifest)
         (root / "src/lib.rs").write_text(source_text)
         run([cargo(), "generate-lockfile", "--offline", "--manifest-path", str(root / "Cargo.toml")])
         return (root / "Cargo.lock").read_text()
@@ -1388,6 +1469,8 @@ def main() -> int:
         enable_buildscript_link_directives(buckify_stdout(), buildscript_link_opt_outs()),
         derived,
     )
+    third_party_buck, patch_outputs = patched_path_rules(third_party_buck, derived)
+    outputs.update(patch_outputs)
     third_party_buck, git_sources = vendored_git_rules(third_party_buck, derived)
     outputs[SYNTHETIC / "rust/git-sources.json"] = json.dumps(git_sources, indent=2) + "\n"
     targets = parse_third_party_targets(third_party_buck)
@@ -1395,6 +1478,19 @@ def main() -> int:
     outputs[BUCK2 / "deps.bzl"] = deps_bzl(dependency_table(canonical, targets))
     outputs[BUCK2 / "profile.bzl"] = profile_bzl(canonical)
     outputs.update(model_outputs(canonical, targets))
+    inventory = json.loads(outputs[BUCK2 / "target-inventory.json"])
+    inventory["third_party_path_patches"] = [
+        {
+            "package": package["name"],
+            "version": package["version"],
+            "directory": pathlib.Path(package["manifest_path"]).parent.relative_to(ROOT).as_posix(),
+            "library": targets[(package["name"], package["version"])],
+            "tests": ["//third-party/rust:rmcp_header_laws"] if package["name"] == "rmcp" else [],
+        }
+        for package in derived["packages"]
+        if not package.get("source") and package["name"] != "lash-buck2-third-party"
+    ]
+    outputs[BUCK2 / "target-inventory.json"] = json.dumps(inventory, indent=2, sort_keys=True) + "\n"
     failures = generate_model.reconcile_lane_units(
         canonical, json.loads(outputs[BUCK2 / "target-inventory.json"])["feature_lane_units"]
     )

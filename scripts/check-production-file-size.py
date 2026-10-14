@@ -9,6 +9,8 @@ import sys
 
 
 EXCLUDED = (
+    # This tree holds vendored or generated upstream source, not lash-authored code.
+    "*/third-party",
     "*/.git", "*/.claude", "*/target", "*/.tgt", "*/vendor", "*/buck-out",
     "*/crates/lash-regress", "*/vendored", "*/generated",
 )

@@ -7,6 +7,7 @@ publish = false
 
 [workspace]
 resolver = "2"
+exclude = ["patched/rmcp"]
 
 [dependencies.p0000]
 package = "adler2"
@@ -1691,6 +1692,7 @@ features = ["alloc", "default", "dev_urandom_fallback", "wasm32_unknown_unknown_
 [dependencies.p0280]
 package = "rmcp"
 version = "=3.5.1"
+path = "patched/rmcp"
 default-features = false
 features = ["__reqwest", "base64", "client", "client-side-sse", "elicitation", "macros", "reqwest", "schemars", "server", "server-side-http", "tower", "transport-async-rw", "transport-io", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-streamable-http-server", "transport-streamable-http-server-session", "transport-worker", "uuid"]
 

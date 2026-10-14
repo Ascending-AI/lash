@@ -6,6 +6,7 @@ load("@prelude//utils:selects.bzl", "selects")
 load(":exec_sizes.bzl", "HELPER_BUDGET")
 load(":platforms.bzl", "LOCAL_HELPER_CONSTRAINT", "pool_constraint")
 load(":profile.bzl", "THIRD_PARTY_OPT_LEVELS")
+load(":test_rules.bzl", "lash_test_wrapper")
 
 _DEFAULT_CPU = "1"
 _DEFAULT_MEMORY_KB = "524288"
@@ -137,4 +138,31 @@ def third_party_rust_prebuilt_cxx_library(name, platform = {}, **kwargs):
         name = name,
         target_compatible_with = compatible,
         **kwargs
+    )
+
+
+def third_party_header_laws(name, srcs, deps):
+    """Run a patched SDK header module's own unit laws on the developer tier."""
+    binary = name + "__rust_test"
+    native.rust_test(
+        name = binary,
+        srcs = srcs,
+        crate = "rmcp_header_laws",
+        crate_root = "rmcp_header_laws.rs",
+        edition = "2024",
+        env = {"CARGO_CRATE_NAME": "rmcp_header_laws", "CARGO_PKG_NAME": "rmcp"},
+        features = ["client-side-sse", "server-side-http"],
+        deps = deps,
+        labels = ["lash.internal_test_binary"],
+        **_resource_kwargs({})
+    )
+    lash_test_wrapper(
+        name = name,
+        test = ":" + binary,
+        args = [],
+        env = {},
+        cpu = 1,
+        memory_kb = 524288,
+        timeout_seconds = 60,
+        tags = ["manual"],
     )

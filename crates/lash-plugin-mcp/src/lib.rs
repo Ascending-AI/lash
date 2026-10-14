@@ -10,15 +10,11 @@
 //!   It is also how SSE-capable servers are reached: the current MCP HTTP
 //!   transport negotiates SSE responses itself.
 //!
-//! rmcp 3.5.1 filters valid nested `x-mcp-header` annotations out of HTTP
-//! tool catalogs before Lash receives them, so those tools are unavailable.
-//! The 2026-07-28 Streamable HTTP specification permits nested paths reached
-//! solely through `properties` (`basic/transports/streamable-http.mdx:388-398`),
-//! but rmcp rejects them in `src/transport/common/mcp_headers.rs:155-163` and
-//! only extracts top-level values at `:102-114`. Its HTTP worker filters the
-//! list at `src/transport/streamable_http_client.rs:93-118`, emitting a warning
-//! without exposing a structured rejection to Lash. This needs an upstream
-//! SDK fix; hosts cannot recover a missing tool through a catalog diagnostic.
+//! Lash carries a patch to rmcp 3.5.1 for nested `x-mcp-header` annotations
+//! reached solely through `properties`, including exact-path HTTP header mirroring.
+//! See <https://github.com/modelcontextprotocol/rust-sdk/issues/1354>.
+//! Remove the patch and its `[patch.crates-io]` entry once a released rmcp
+//! contains the fix.
 //!
 //! Stdio receives retain partial lines across cancellation by the SDK service
 //! loop. Framing and message compatibility use the SDK codec.
@@ -127,3 +123,6 @@ pub fn mcp_tool_names(
 
 #[cfg(test)]
 mod client_depth_tests;
+
+#[cfg(test)]
+mod header_path_tests;
