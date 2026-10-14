@@ -40,7 +40,7 @@ const fn counted(name: &'static str, unit: &'static str, meaning: &'static str) 
 }
 
 /// Every metric a turn record may carry, in receipt order.
-pub const METRICS: [MetricDef; 19] = [
+pub const METRICS: [MetricDef; 20] = [
     counted(
         "sql_statements",
         "statements",
@@ -62,6 +62,11 @@ pub const METRICS: [MetricDef; 19] = [
         "sql_rows_written",
         "rows",
         "rows inserted, updated or deleted (SQLite total_changes)",
+    ),
+    counted(
+        "sql_bytes_written",
+        "bytes",
+        "bytes of the values bound to writing statements, independent of page layout",
     ),
     counted(
         "store_bytes_written",
@@ -267,6 +272,7 @@ impl Meter {
             reading.insert("sql_transactions", verb("begin"));
             reading.insert("sql_rows_read", work.sql_rows_read as f64);
             reading.insert("sql_rows_written", work.sql_rows_written as f64);
+            reading.insert("sql_bytes_written", work.sql_bytes_written as f64);
             reading.insert(
                 "store_bytes_written",
                 (work.store_pages_written * page_size) as f64,

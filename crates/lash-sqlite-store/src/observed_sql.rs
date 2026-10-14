@@ -194,6 +194,18 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, affected.max(0) as u64, 0, 0);
                 }
                 #[cfg(feature = "perf-witness")]
+                if lash_core_execution::perf_witness::collecting()
+                    && ffi::sqlite3_stmt_readonly(statement) == 0
+                    && ffi::sqlite3_bind_parameter_count(statement) > 0
+                {
+                    let expanded = ffi::sqlite3_expanded_sql(statement);
+                    if !expanded.is_null() {
+                        let bytes = bound_value_bytes(&sql, CStr::from_ptr(expanded).to_bytes());
+                        ffi::sqlite3_free(expanded.cast());
+                        lash_core_execution::perf_witness::record_sql_bytes_written(bytes);
+                    }
+                }
+                #[cfg(feature = "perf-witness")]
                 if lash_core_execution::perf_witness::sql_receipts_enabled() {
                     let expanded = ffi::sqlite3_expanded_sql(statement);
                     let bytes = if expanded.is_null() {
@@ -219,55 +231,125 @@ unsafe extern "C" fn trace(
 /// comments. Expanded SQL changes only these spans; its delta gives actual
 /// bound SQL literal bytes, including quoting/hex expansion and repeated uses.
 fn placeholder_bytes(sql: &str) -> usize {
-    let bytes = sql.as_bytes();
-    let mut index = 0;
+    placeholders(sql).map(|span| span.len()).sum()
+}
+
+/// The bytes of the values bound to `sql`, read from its `expanded` text:
+/// a text's own bytes (not its quoting), a blob's bytes (not its hex
+/// spelling), eight for a number and none for NULL. Every use of a repeated
+/// parameter counts. Unlike WAL pages, this does not depend on where the
+/// rows land in the B-trees, so the same writes count the same every run.
+#[cfg(feature = "perf-witness")]
+fn bound_value_bytes(sql: &str, expanded: &[u8]) -> u64 {
     let mut total = 0;
-    while index < bytes.len() {
-        let start = index;
-        match bytes[index] {
-            b'\'' | b'"' | b'`' | b'[' => {
-                let quote = if bytes[index] == b'[' {
-                    b']'
-                } else {
-                    bytes[index]
-                };
-                index += 1;
-                while index < bytes.len() {
-                    if bytes[index] == quote {
+    // Expanded text is the original with each placeholder spelled as its
+    // literal, so text between placeholders is identical in both.
+    let mut original = 0;
+    let mut at = 0;
+    for span in placeholders(sql) {
+        at += span.start - original;
+        original = span.end;
+        let Some(rest) = expanded.get(at..) else {
+            break;
+        };
+        let (spelled, value) = literal(rest);
+        at += spelled;
+        total += value;
+    }
+    total
+}
+
+/// The spelling length and value bytes of the SQL literal `text` starts
+/// with, as `sqlite3_expanded_sql` writes it.
+#[cfg(feature = "perf-witness")]
+fn literal(text: &[u8]) -> (usize, u64) {
+    match text {
+        [b'x', b'\'', hex @ ..] => {
+            let digits = hex.iter().take_while(|byte| **byte != b'\'').count();
+            (digits + 3, (digits / 2) as u64)
+        }
+        [b'\'', ..] => {
+            let mut index = 1;
+            let mut value = 0;
+            while index < text.len() {
+                if text[index] == b'\'' {
+                    if text.get(index + 1) != Some(&b'\'') {
                         index += 1;
-                        if bytes.get(index) != Some(&quote) {
-                            break;
-                        }
+                        break;
                     }
                     index += 1;
                 }
-            }
-            b'-' if bytes.get(index + 1) == Some(&b'-') => {
-                while index < bytes.len() && bytes[index] != b'\n' {
-                    index += 1;
-                }
-            }
-            b'/' if bytes.get(index + 1) == Some(&b'*') => {
-                index += 2;
-                while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
-                    index += 1;
-                }
-                index = (index + 2).min(bytes.len());
-            }
-            b'?' | b':' | b'@' | b'$' => {
+                value += 1;
                 index += 1;
-                while bytes
-                    .get(index)
-                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                {
-                    index += 1;
-                }
-                total += index - start;
             }
-            _ => index += 1,
+            (index, value)
+        }
+        [b'N', b'U', b'L', b'L', ..] => (4, 0),
+        _ => {
+            let spelled = text
+                .iter()
+                .take_while(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-')
+                })
+                .count();
+            (spelled, 8)
         }
     }
-    total
+}
+
+/// The byte spans of `sql`'s parameter placeholders, skipping quoted text
+/// and comments.
+fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+    let bytes = sql.as_bytes();
+    let mut index = 0;
+    std::iter::from_fn(move || {
+        while index < bytes.len() {
+            let start = index;
+            match bytes[index] {
+                b'\'' | b'"' | b'`' | b'[' => {
+                    let quote = if bytes[index] == b'[' {
+                        b']'
+                    } else {
+                        bytes[index]
+                    };
+                    index += 1;
+                    while index < bytes.len() {
+                        if bytes[index] == quote {
+                            index += 1;
+                            if bytes.get(index) != Some(&quote) {
+                                break;
+                            }
+                        }
+                        index += 1;
+                    }
+                }
+                b'-' if bytes.get(index + 1) == Some(&b'-') => {
+                    while index < bytes.len() && bytes[index] != b'\n' {
+                        index += 1;
+                    }
+                }
+                b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                    index += 2;
+                    while index + 1 < bytes.len() && &bytes[index..index + 2] != b"*/" {
+                        index += 1;
+                    }
+                    index = (index + 2).min(bytes.len());
+                }
+                b'?' | b':' | b'@' | b'$' => {
+                    index += 1;
+                    while bytes
+                        .get(index)
+                        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    {
+                        index += 1;
+                    }
+                    return Some(start..index);
+                }
+                _ => index += 1,
+            }
+        }
+        None
+    })
 }
 
 #[cfg(test)]
@@ -318,6 +400,34 @@ mod tests {
             );
             eprintln!("SQL_PAYLOAD {}", serde_json::to_string(&receipt).unwrap());
         }
+    }
+
+    /// SQL-BYTES-WRITTEN: a write counts the bytes of the values it binds,
+    /// not their SQL spelling: a text without its quoting, a blob without its
+    /// hex, eight per number, none for NULL, and every use of a repeated
+    /// parameter; placeholders inside comments and quoted text are not
+    /// parameters. The replay gate's depth slopes bind this count because it
+    /// does not move with B-tree page layout (FIG-6280).
+    #[cfg(feature = "perf-witness")]
+    #[test]
+    fn bound_value_bytes_count_values_not_their_spelling() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute("CREATE TABLE sample (a, b, c, d, e, f)", [])
+            .unwrap();
+        let sql = "INSERT INTO sample VALUES (?1, :blob, ?3, -- ?9\n ?4, '?', ?1)";
+        let mut statement = connection.prepare(sql).unwrap();
+        statement.raw_bind_parameter(1, "it's é").unwrap();
+        statement
+            .raw_bind_parameter(2, &[0_u8, 1, 2, 3, 4][..])
+            .unwrap();
+        statement.raw_bind_parameter(3, -12.5_f64).unwrap();
+        statement
+            .raw_bind_parameter(4, rusqlite::types::Null)
+            .unwrap();
+        let expanded = statement.expanded_sql().unwrap();
+        // 7 text bytes twice, 5 blob bytes, one number, NULL.
+        assert_eq!(bound_value_bytes(sql, expanded.as_bytes()), 7 * 2 + 5 + 8);
     }
 
     /// GRAPH-INSTALL-WORK: count successful store insertions, including

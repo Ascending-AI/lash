@@ -517,7 +517,7 @@ mod tests {
                 sessions: 1,
                 setup: false,
                 metrics: BTreeMap::from([(
-                    "store_bytes_written".to_owned(),
+                    "sql_bytes_written".to_owned(),
                     40_000.0 + bytes_per_prior_turn * depth as f64,
                 )]),
             })
@@ -554,7 +554,7 @@ mod tests {
                 relative: 0.25,
                 absolute: BTreeMap::new(),
                 depth_slope: BTreeMap::from([(
-                    "store_bytes_written".to_owned(),
+                    "sql_bytes_written".to_owned(),
                     SlopeTolerance {
                         relative: 0.05,
                         absolute: 64.0,
@@ -563,7 +563,7 @@ mod tests {
             },
             budgets: vec![Budget {
                 workload: "*".to_owned(),
-                metric: "store_bytes_written".to_owned(),
+                metric: "sql_bytes_written".to_owned(),
                 check: Check::HistorySlope,
                 max: 64.0,
                 why: "a turn writes what it adds, not its history".to_owned(),
@@ -571,7 +571,7 @@ mod tests {
             known_breaches: known
                 .then(|| KnownBreach {
                     workload: "chat-short".to_owned(),
-                    metric: "store_bytes_written".to_owned(),
+                    metric: "sql_bytes_written".to_owned(),
                     check: Check::HistorySlope,
                     owner: "FIG-5931".to_owned(),
                     why: "terminal window copy".to_owned(),
@@ -663,7 +663,7 @@ mod tests {
         let unknown = evaluate(&copying, &budgets(false), &baseline);
         assert!(!unknown.passed());
         assert!(
-            unknown.violations[0].contains("HistorySlope of `store_bytes_written` is 774"),
+            unknown.violations[0].contains("HistorySlope of `sql_bytes_written` is 774"),
             "{unknown:?}"
         );
         let twice = evaluate(&receipt(2.0 * 774.0), &budgets(true), &baseline);
@@ -671,7 +671,7 @@ mod tests {
             twice
                 .violations
                 .iter()
-                .any(|violation| violation.contains("depth slope of `store_bytes_written` rose")),
+                .any(|violation| violation.contains("depth slope of `sql_bytes_written` rose")),
             "{twice:?}"
         );
         let known = evaluate(&copying, &budgets(true), &baseline);

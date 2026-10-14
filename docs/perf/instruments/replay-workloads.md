@@ -91,6 +91,7 @@ divide by sessions, so every statistic is per session turn:
 | `sql_statements`, `sql_selects`, `sql_writes`, `sql_transactions` | statements | the SQLite perf witness (every store connection's statement trace) |
 | `sql_rows_read` | rows | result rows the trace saw |
 | `sql_rows_written` | rows | SQLite `total_changes` across each connection call |
+| `sql_bytes_written` | bytes | the values bound to statements that write: a text's or blob's own bytes, eight per number |
 | `store_bytes_written` | bytes | pages written to the WAL (`SQLITE_DBSTATUS_CACHE_WRITE`) times the page size |
 | `graph_nodes_written` | nodes | net growth of `graph_nodes` rows, read on a side connection |
 | `graph_nodes_decoded` | nodes | the store's `decoded_graph_node_bodies` counter |
@@ -99,6 +100,14 @@ divide by sessions, so every statistic is per session turn:
 | `worker_executions`, `workers_killed` | count | the pool; the crash fixture |
 | `model_calls` | calls | the scripted provider |
 | `host_cpu_ms`, `worker_cpu_ms`, `wall_ms` | ms | `/proc/self/stat`; the pool's charged CPU; the round's wall clock |
+
+`store_bytes_written` is the physical cost, and it moves by a few percent
+between runs of one commit: rows keyed by content hashes that hold run ids
+and timestamps land on different B-tree pages each run, so the same writes
+dirty a different number of pages. `sql_bytes_written` counts what the
+store asked to write and gives the same value every run (to a few bytes of
+id and timestamp spelling), so the gate's byte-slope budgets bind it
+(FIG-6280).
 
 A metric the backend cannot count is absent, never zero. PostgreSQL rounds
 carry no SQL, WAL or decode counts (its stores count none of them per

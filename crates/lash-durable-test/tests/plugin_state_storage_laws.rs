@@ -806,7 +806,25 @@ impl Scenario for Storage {
 
 /// Cut both turns of `shape` on `tier` at every labelled write under every
 /// fault.
-async fn prove(shape: Shape, tier: Tier) {
+/// The crash faults a law cuts with, split by whether the cut write lands:
+/// each half is its own law, so the two run in separate test actions.
+/// Together they are fail-before, abort, zombie, commit-then-abort and
+/// ack-hidden; one matrix of all five held one action for about 180
+/// CPU-seconds on PostgreSQL, past its bound on a loaded pool (FIG-6280).
+fn faults(committed: bool) -> Vec<Fault> {
+    [
+        Fault::FailBefore,
+        Fault::AckHidden,
+        Fault::Zombie,
+        Fault::Abort,
+        Fault::CommitThenAbort,
+    ]
+    .into_iter()
+    .filter(|fault| fault.commits() == committed)
+    .collect()
+}
+
+async fn prove(shape: Shape, tier: Tier, committed: bool) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -819,13 +837,7 @@ async fn prove(shape: Shape, tier: Tier) {
         }
     };
     let report = Matrix::new()
-        .faults(&[
-            Fault::FailBefore,
-            Fault::AckHidden,
-            Fault::Zombie,
-            Fault::Abort,
-            Fault::CommitThenAbort,
-        ])
+        .faults(&faults(committed))
         .horizon(Duration::from_secs(600))
         .run_test(|| Storage::new(shape, dialect, postgres_url.clone()))
         .await;
@@ -871,18 +883,33 @@ async fn prove(shape: Shape, tier: Tier) {
 
 /// A 28 KB namespace that never changes after its seeding turn is written
 /// by no commit of a later turn whose sibling namespace changes at every
-/// phase, and every accepted change survives any cut exactly once.
-async fn an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut(tier: Tier) {
-    prove(Shape::Step, tier).await;
+/// phase, and every accepted change survives exactly once any cut that
+/// loses its write: fail-before, abort or zombie.
+async fn an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_lost_write(
+    tier: Tier,
+) {
+    prove(Shape::Step, tier, false).await;
+}
+
+/// The same law under every cut whose write commits unseen:
+/// commit-then-abort or ack-hidden.
+async fn an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit(
+    tier: Tier,
+) {
+    prove(Shape::Step, tier, true).await;
 }
 
 /// The same law over code cells, whose quiet points prune each call's
-/// records once it settled: the pruned call's change is still committed
-/// once, never by replaying its commands.
-async fn a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_namespace(
-    tier: Tier,
-) {
-    prove(Shape::Cell, tier).await;
+/// records once it settled, under every cut that loses its write: the
+/// pruned call's change is still committed once, never by replaying its
+/// commands.
+async fn a_cells_pruned_calls_keep_their_changes_across_every_lost_write(tier: Tier) {
+    prove(Shape::Cell, tier, false).await;
+}
+
+/// The code-cell law under every cut whose write commits unseen.
+async fn a_cells_pruned_calls_keep_their_changes_across_every_unseen_commit(tier: Tier) {
+    prove(Shape::Cell, tier, true).await;
 }
 
 /// FIG-5517: even when both claim loops have just polled the released,
@@ -1364,8 +1391,10 @@ async fn phases_stage_only_their_new_items(tier: Tier) {
 tiered_laws!(
     current_thread:
     a_run_reverting_to_base_clears_its_overlay_body,
-    an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut,
-    a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_namespace,
+    an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_lost_write,
+    an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit,
+    a_cells_pruned_calls_keep_their_changes_across_every_lost_write,
+    a_cells_pruned_calls_keep_their_changes_across_every_unseen_commit,
     a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,
     a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it,
     phases_stage_only_their_new_items,

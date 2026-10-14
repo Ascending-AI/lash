@@ -41,6 +41,7 @@ static SQL_RECEIPTS: LazyLock<Mutex<Vec<SqlStatementReceipt>>> =
 static SQL_RECEIPTS_ENABLED: AtomicBool = AtomicBool::new(false);
 static SQL_ROWS_READ: AtomicU64 = AtomicU64::new(0);
 static SQL_ROWS_WRITTEN: AtomicU64 = AtomicU64::new(0);
+static SQL_BYTES_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static STORE_PAGES_WRITTEN: AtomicU64 = AtomicU64::new(0);
 
 /// Statement text and expanded byte length, without retaining bound values.
@@ -167,6 +168,9 @@ pub struct Snapshot {
     /// Rows SQL statements inserted, updated or deleted (SQLite's
     /// `total_changes` difference across each connection call).
     pub sql_rows_written: u64,
+    /// Bytes of the values bound to statements that write the database: what
+    /// the store asked to write, independent of page layout.
+    pub sql_bytes_written: u64,
     /// Database pages the store's connections wrote to the WAL (SQLite's
     /// `DBSTATUS_CACHE_WRITE`); bytes are pages times the page size.
     pub store_pages_written: u64,
@@ -216,6 +220,7 @@ impl Collector {
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
         SQL_ROWS_READ.store(0, Ordering::Relaxed);
         SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
+        SQL_BYTES_WRITTEN.store(0, Ordering::Relaxed);
         STORE_PAGES_WRITTEN.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
@@ -252,6 +257,7 @@ impl Collector {
                 .clone(),
             sql_rows_read: SQL_ROWS_READ.load(Ordering::Relaxed),
             sql_rows_written: SQL_ROWS_WRITTEN.load(Ordering::Relaxed),
+            sql_bytes_written: SQL_BYTES_WRITTEN.load(Ordering::Relaxed),
             store_pages_written: STORE_PAGES_WRITTEN.load(Ordering::Relaxed),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
@@ -351,6 +357,22 @@ pub fn record_sql_writes(rows: u64, pages: u64) {
     }
     SQL_ROWS_WRITTEN.fetch_add(rows, Ordering::Relaxed);
     STORE_PAGES_WRITTEN.fetch_add(pages, Ordering::Relaxed);
+}
+
+/// Whether a collector is counting: lets a caller skip measuring work that no
+/// collector would record.
+#[inline]
+pub fn collecting() -> bool {
+    COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE
+}
+
+/// Record the bytes of the values bound to one statement that writes.
+#[inline]
+pub fn record_sql_bytes_written(bytes: u64) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
+        return;
+    }
+    SQL_BYTES_WRITTEN.fetch_add(bytes, Ordering::Relaxed);
 }
 
 pub fn sql_receipts_enabled() -> bool {

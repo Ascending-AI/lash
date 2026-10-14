@@ -59,6 +59,10 @@
         "relative": 0.5,
         "absolute": 32768
       },
+      "ts-codemode/allocations": {
+        "relative": 0.05,
+        "absolute": 50
+      },
       "py-codemode/allocations": {
         "relative": 0.05,
         "absolute": 50
@@ -72,28 +76,28 @@
   "budgets": [
     {
       "workload": "chat-short",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "history_slope",
       "max": 512,
       "why": "a turn writes what it adds, not a copy of its history"
     },
     {
       "workload": "ts-codemode",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "history_slope",
       "max": 512,
       "why": "a turn writes what it adds, not a copy of its history"
     },
     {
       "workload": "py-codemode",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "history_slope",
       "max": 512,
       "why": "a turn writes what it adds, not a copy of its history"
     },
     {
       "workload": "chat-long-compacting",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "frame_slope",
       "max": 512,
       "why": "a turn writes what it adds, not a copy of its history or its frame"
@@ -227,32 +231,18 @@
   ],
   "known_breaches": [
     {
-      "workload": "chat-short",
-      "metric": "store_bytes_written",
-      "check": "history_slope",
-      "owner": "FIG-5946",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
-    },
-    {
       "workload": "ts-codemode",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "history_slope",
       "owner": "FIG-5946",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
+      "why": "each model call stores its prompt's open transcript chunk in prompt_texts, and until that chunk seals it grows by every turn's items (about 550 bytes per prior turn over these 12 turns); bodies the store already holds are not resent and settled calls release theirs (FIG-5946)"
     },
     {
       "workload": "py-codemode",
-      "metric": "store_bytes_written",
+      "metric": "sql_bytes_written",
       "check": "history_slope",
       "owner": "FIG-5946",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
-    },
-    {
-      "workload": "chat-long-compacting",
-      "metric": "store_bytes_written",
-      "check": "frame_slope",
-      "owner": "FIG-5946",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
+      "why": "each model call stores its prompt's open transcript chunk in prompt_texts, and until that chunk seals it grows by every turn's items (about 550 bytes per prior turn over these 12 turns); bodies the store already holds are not resent and settled calls release theirs (FIG-5946)"
     },
     {
       "workload": "chat-short",
