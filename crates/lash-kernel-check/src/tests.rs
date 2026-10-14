@@ -1001,3 +1001,85 @@ fn records_that_differ_only_in_optional_fields_share_a_value() {
     );
     admit(&doc, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
+
+/// FIG-6255: admission checks document units, never revalidates or identifies registered code.
+#[test]
+fn admission_reuses_registered_library_validation_identity_and_graphs() {
+    let library = library();
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    for function in [library.neg, library.twice, library.outer] {
+        registry
+            .register(library.catalog[&function].clone(), None)
+            .unwrap();
+    }
+    let document = document(&format!(
+        "kernel 1\nuse helper.outer = @{}\nuse helper.twice = @{}\nnumbers float\nmain {{ let x = invoke helper.outer(1) }}\n",
+        library.outer, library.twice,
+    ));
+    crate::admit::LIBRARY_WORK.with(|work| work.set((0, 0, 0)));
+    let admitted = admit(&document, &Environment::new(&registry)).unwrap();
+    assert_eq!(
+        crate::admit::LIBRARY_WORK.with(std::cell::Cell::get),
+        (0, 0, 2)
+    );
+    crate::admit::LIBRARY_WORK.with(|work| work.set((0, 0, 0)));
+    assert_eq!(
+        crate::derive_view(&document, &registry).unwrap(),
+        admitted.graph
+    );
+    derive_definition(
+        registry.get(&library.outer).unwrap().definition.as_ref(),
+        &registry,
+    )
+    .unwrap();
+    assert_eq!(
+        crate::admit::LIBRARY_WORK.with(std::cell::Cell::get),
+        (0, 0, 0)
+    );
+    assert_eq!(
+        admit(&document, &Environment::new(&library.catalog)).unwrap(),
+        admitted
+    );
+}
+
+/// FIG-6255, K-FORM-003: cached library faults keep their sites and order,
+/// including in a registry clone and in the structural view.
+#[test]
+fn cached_library_refusals_keep_the_uncached_errors_and_view() {
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    let mut catalog = BTreeMap::new();
+    let bad = parse_definition(
+        "function helper.leak(x: Any) -> Any\nkernel 1\ncharge 1\nbody { print z\nreturn y }\n",
+    )
+    .unwrap();
+    let function = registry.register(bad.clone(), None).unwrap();
+    catalog.insert(function, bad);
+    let document = document(&format!(
+        "kernel 1\nnumbers float\nuse helper.leak = @{function}\nmain {{ let x = invoke helper.leak(1) }}\n",
+    ));
+    let expected = admit(&document, &Environment::new(&catalog)).unwrap_err();
+    assert_eq!(expected.errors.len(), 2);
+    assert_eq!(
+        admit(&document, &Environment::new(&registry)).unwrap_err(),
+        expected
+    );
+    let cloned = registry.clone();
+    crate::admit::LIBRARY_WORK.with(|work| work.set((0, 0, 0)));
+    assert_eq!(
+        admit(&document, &Environment::new(&cloned)).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        crate::derive_view(&document, &cloned).unwrap(),
+        crate::derive_view(&document, &catalog).unwrap()
+    );
+    assert_eq!(
+        derive_definition(cloned.get(&function).unwrap().definition.as_ref(), &cloned).unwrap_err(),
+        expected
+    );
+    // The uncached structural view above is the only validation/identity/graph work.
+    assert_eq!(
+        crate::admit::LIBRARY_WORK.with(std::cell::Cell::get),
+        (1, 1, 1)
+    );
+}

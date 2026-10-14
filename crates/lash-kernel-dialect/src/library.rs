@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{
     EncodeError, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
+    RegisteredFunction,
 };
 
 /// One function per name: the choice of identities a front end lowers
@@ -34,6 +35,7 @@ pub enum LibraryError {
 pub struct NamedLibrary {
     by_name: BTreeMap<FunctionName, FunctionId>,
     definitions: BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    registered: BTreeMap<FunctionId, RegisteredFunction>,
 }
 
 impl NamedLibrary {
@@ -47,6 +49,7 @@ impl NamedLibrary {
         let mut library = Self::new();
         for (function, registered) in registry.iter() {
             library.insert_identified(*function, Arc::clone(&registered.definition))?;
+            library.registered.insert(*function, registered.clone());
         }
         Ok(library)
     }
@@ -64,6 +67,7 @@ impl NamedLibrary {
     ) -> Result<Self, LibraryError> {
         let mut library = Self::new();
         for (function, registered) in registry.iter() {
+            library.registered.insert(*function, registered.clone());
             if named(function) {
                 library.insert_identified(*function, Arc::clone(&registered.definition))?;
             } else {
@@ -108,6 +112,16 @@ impl NamedLibrary {
 }
 
 impl FunctionCatalog for NamedLibrary {
+    fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
+        self.registered.get(function)
+    }
+
+    fn registration(&self, definition: &FunctionDefinition) -> Option<&RegisteredFunction> {
+        self.registered
+            .values()
+            .find(|registered| std::ptr::eq(registered.definition.as_ref(), definition))
+    }
+
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
         self.definitions.get(function).map(Arc::as_ref)
     }

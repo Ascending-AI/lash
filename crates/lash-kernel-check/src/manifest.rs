@@ -54,9 +54,12 @@ fn scan(block: &Block, effects: &mut BTreeSet<EffectName>, functions: &mut BTree
 
 /// A function reached, and the function whose body reached it; `None` when
 /// the document's own code calls it.
-type Reached = BTreeMap<FunctionId, Option<FunctionId>>;
+pub(crate) type Reached = BTreeMap<FunctionId, Option<FunctionId>>;
 
-fn reach(document: &Document, catalog: &dyn FunctionCatalog) -> (BTreeSet<EffectName>, Reached) {
+pub(crate) fn reach(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+) -> (BTreeSet<EffectName>, Reached) {
     let mut effects = BTreeSet::new();
     let mut direct = BTreeSet::new();
     scan(&document.main, &mut effects, &mut direct);
@@ -66,6 +69,15 @@ fn reach(document: &Document, catalog: &dyn FunctionCatalog) -> (BTreeSet<Effect
     let mut reached: Reached = direct.iter().map(|function| (*function, None)).collect();
     let mut pending: Vec<FunctionId> = direct.into_iter().collect();
     while let Some(function) = pending.pop() {
+        if let Some(registered) = catalog.registered(&function) {
+            for callee in registered.callees() {
+                if let std::collections::btree_map::Entry::Vacant(entry) = reached.entry(*callee) {
+                    entry.insert(Some(function));
+                    pending.push(*callee);
+                }
+            }
+            continue;
+        }
         let Some(body) = catalog
             .definition(&function)
             .and_then(|definition| definition.body())
@@ -121,33 +133,39 @@ pub fn requirements(document: &Document, catalog: &dyn FunctionCatalog) -> Requi
 pub(crate) fn missing_functions(
     document: &Document,
     catalog: &dyn FunctionCatalog,
+    reached: &Reached,
 ) -> Vec<Refused> {
-    let derived = requirements(document, catalog);
-    let named: BTreeMap<&FunctionId, &FunctionName> = derived
-        .functions
-        .iter()
-        .chain(&document.manifest.functions)
-        .collect();
-    named
+    let mut missing = BTreeMap::new();
+    for (function, through) in reached {
+        if catalog.definition(function).is_none()
+            && let Some(name) = name_of(function, through.as_ref(), document, catalog)
+        {
+            missing.insert(*function, name);
+        }
+    }
+    // A manifest's spelling wins when both it and a caller name an absent
+    // function, as in the combined requirements/manifest map.
+    for (function, name) in &document.manifest.functions {
+        if catalog.definition(function).is_none() {
+            missing.insert(*function, name.clone());
+        }
+    }
+    missing
         .into_iter()
-        .filter(|(function, _)| catalog.definition(function).is_none())
-        .map(|(function, name)| {
-            refused(
-                None,
-                RefusalReason::MissingFunction {
-                    function: *function,
-                    name: name.clone(),
-                },
-            )
-        })
+        .map(|(function, name)| refused(None, RefusalReason::MissingFunction { function, name }))
         .collect()
 }
 
 /// Checks the manifest the document carries against the one its code
 /// derives. A function the document's own code calls without listing is
 /// structural validation's to refuse; this names the rest.
-pub(crate) fn check(document: &Document, catalog: &dyn FunctionCatalog, errors: &mut Vec<Refused>) {
-    let (effects, reached) = reach(document, catalog);
+pub(crate) fn check(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    effects: &BTreeSet<EffectName>,
+    reached: &Reached,
+    errors: &mut Vec<Refused>,
+) {
     for effect in document.manifest.effects.keys() {
         if !effects.contains(effect) {
             errors.push(refused(
@@ -181,7 +199,7 @@ pub(crate) fn check(document: &Document, catalog: &dyn FunctionCatalog, errors: 
             ));
         }
     }
-    for (function, through) in &reached {
+    for (function, through) in reached {
         let Some(through) = through else {
             continue;
         };

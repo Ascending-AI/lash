@@ -33,6 +33,11 @@ path = "src/bin/durable_substrate.rs"
 test = true
 
 [[bin]]
+name = "admission"
+path = "src/bin/admission.rs"
+test = false
+
+[[bin]]
 name = "growturn"
 path = "src/bin/growturn.rs"
 test = false
@@ -47,6 +52,10 @@ required-features = ["default"]
 workspace = true
 
 [dependencies]
+lash-kernel-doc.workspace = true
+lash-kernel-check.workspace = true
+lash-kernel-dialect.workspace = true
+lash-vm-library = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-sansio = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }
 lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }

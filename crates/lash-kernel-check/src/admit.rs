@@ -79,8 +79,10 @@ pub fn derive_definition(
     catalog: &dyn FunctionCatalog,
 ) -> Result<Graph, Refusal> {
     let mut errors = Vec::new();
-    match library(definition, catalog, &mut errors) {
-        Some(graph) if errors.is_empty() => Ok(graph),
+    let checked = library(definition, catalog, catalog.registration(definition));
+    errors.extend(checked.errors.iter().cloned());
+    match &checked.graph {
+        Some(graph) if errors.is_empty() => Ok(graph.clone()),
         _ => Err(Refusal { errors }),
     }
 }
@@ -147,7 +149,8 @@ fn check(
 ) -> Option<Graph> {
     // The statement rule reads the definitions of the functions a statement
     // names, so a missing definition is named before anything else is read.
-    let missing = manifest::missing_functions(document, catalog);
+    let (effects, reached) = manifest::reach(document, catalog);
+    let missing = manifest::missing_functions(document, catalog, &reached);
     if !missing.is_empty() {
         errors.extend(missing);
         return None;
@@ -158,12 +161,13 @@ fn check(
     }
     // The statement rule and the scope rule hold of every body the document
     // reaches, as they do of the document (`K-STMT-003`).
-    for function in manifest::requirements(document, catalog).functions.keys() {
+    for function in reached.keys() {
         if let Some(definition) = catalog.definition(function) {
-            library(definition, catalog, errors);
+            let checked = library(definition, catalog, catalog.registered(function));
+            errors.extend(checked.errors.iter().cloned());
         }
     }
-    manifest::check(document, catalog, errors);
+    manifest::check(document, catalog, &effects, &reached, errors);
 
     let mut linker = Linker::new();
     linker.unit(Unit::Main, &[], &document.main, None);
@@ -189,20 +193,76 @@ fn check(
     Some(graph)
 }
 
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static LIBRARY_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
+struct CheckedLibrary {
+    graph: Option<Graph>,
+    errors: Vec<Refused>,
+}
+
 fn library(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    registered: Option<&lash_kernel_doc::RegisteredFunction>,
+) -> std::sync::Arc<CheckedLibrary> {
+    if let Some(registered) = registered {
+        return registered.derive(|| {
+            let mut errors = Vec::new();
+            let graph = library_graph(definition, registered.identity(), catalog, &mut errors);
+            CheckedLibrary {
+                graph: Some(graph),
+                errors,
+            }
+        });
+    }
+    let mut errors = Vec::new();
+    let graph = unregistered_library(definition, catalog, &mut errors);
+    std::sync::Arc::new(CheckedLibrary { graph, errors })
+}
+
+fn unregistered_library(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
     errors: &mut Vec<Refused>,
 ) -> Option<Graph> {
+    #[cfg(test)]
+    LIBRARY_WORK.with(|work| {
+        let (v, i, g) = work.get();
+        work.set((v + 1, i, g));
+    });
     if let Err(invalid) = validate_definition(definition, catalog) {
         errors.push(invalid.into());
         return None;
     }
-    let Some(body) = definition.body() else {
+    if definition.body().is_none() {
         return Some(Graph::empty());
-    };
-    // Validation has taken the identity already, to name the body's sites.
+    }
+    #[cfg(test)]
+    LIBRARY_WORK.with(|work| {
+        let (v, i, g) = work.get();
+        work.set((v, i + 1, g));
+    });
     let function = definition.identity().ok()?;
+    Some(library_graph(definition, function, catalog, errors))
+}
+
+fn library_graph(
+    definition: &FunctionDefinition,
+    function: lash_kernel_doc::FunctionId,
+    catalog: &dyn FunctionCatalog,
+    errors: &mut Vec<Refused>,
+) -> Graph {
+    let Some(body) = definition.body() else {
+        return Graph::empty();
+    };
+    #[cfg(test)]
+    LIBRARY_WORK.with(|work| {
+        let (v, i, g) = work.get();
+        work.set((v, i, g + 1));
+    });
     let params: Vec<Name> = definition
         .signature
         .params
@@ -227,5 +287,5 @@ fn library(
     }
     .run();
     flow::derive(&mut graph, catalog);
-    Some(graph)
+    graph
 }

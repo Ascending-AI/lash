@@ -180,9 +180,16 @@ impl Formula {
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static IDENTITY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl FunctionDefinition {
     /// The function's identity (`K-ID-002`).
     pub fn identity(&self) -> Result<FunctionId, EncodeError> {
+        #[cfg(test)]
+        IDENTITY_CALLS.with(|calls| calls.set(calls.get() + 1));
         let canonical = canonical_bytes(self)?;
         Ok(FunctionId::from_bytes(digest_bytes(
             "lash-kernel-function",

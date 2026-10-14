@@ -4,10 +4,11 @@
 //! the embedder registers each implementation beside its definition in a
 //! [`FunctionRegistry`] at startup and hands the registry to the machine.
 
-use std::collections::BTreeMap;
+use std::any::{Any, TypeId};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::ControlFlow;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ use crate::canonical::EncodeError;
 use crate::document::DecodeError;
 use crate::function::FunctionDefinition;
 use crate::name::{FunctionId, FunctionName};
-use crate::validate::{Invalid, validate_definition};
+use crate::validate::{Invalid, validate_identified_definition};
 use crate::value::{ErrorValue, Object, ObjectId, Value};
 
 /// The counter a native function is handed: it counts the function's guard
@@ -220,6 +221,17 @@ pub struct PreparedNative {
 /// Where a library function's definition is looked up by identity.
 pub trait FunctionCatalog: Send + Sync {
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition>;
+
+    /// Registration's immutable facts, when this catalog holds registered code.
+    fn registered(&self, _function: &FunctionId) -> Option<&RegisteredFunction> {
+        None
+    }
+
+    /// Finds registration facts without identifying the definition again.
+    /// Only the exact immutable definition held by the catalog may use them.
+    fn registration(&self, _definition: &FunctionDefinition) -> Option<&RegisteredFunction> {
+        None
+    }
 }
 
 impl FunctionCatalog for BTreeMap<FunctionId, FunctionDefinition> {
@@ -234,6 +246,82 @@ pub struct RegisteredFunction {
     pub definition: Arc<FunctionDefinition>,
     /// The native implementation, when the embedder supplied one.
     pub native: Option<Arc<dyn NativeFunction>>,
+    function: FunctionId,
+    callees: Arc<OnceLock<BTreeSet<FunctionId>>>,
+    // Consumers own their derived types. Erasure keeps the document vocabulary
+    // independent of the checker while registry clones share each result.
+    derived: Arc<Mutex<DerivedFacts>>,
+}
+
+type DerivedFacts = BTreeMap<TypeId, Arc<dyn Any + Send + Sync>>;
+
+impl RegisteredFunction {
+    fn new(
+        function: FunctionId,
+        definition: FunctionDefinition,
+        native: Option<Arc<dyn NativeFunction>>,
+    ) -> Self {
+        Self {
+            definition: Arc::new(definition),
+            native,
+            function,
+            callees: Arc::default(),
+            derived: Arc::default(),
+        }
+    }
+
+    pub fn identity(&self) -> FunctionId {
+        self.function
+    }
+
+    /// The functions the body actually calls or spawns, including nested expressions.
+    pub fn callees(&self) -> &BTreeSet<FunctionId> {
+        self.callees.get_or_init(|| {
+            let mut callees = BTreeSet::new();
+            if let Some(body) = self.definition.body() {
+                let mut pending = vec![crate::Node::Block(&body.block)];
+                while let Some(node) = pending.pop() {
+                    match node {
+                        crate::Node::Expr(crate::Expr::Call { function, .. })
+                        | crate::Node::Action(
+                            crate::Action::Call {
+                                callee: crate::Callee::Library(function),
+                                ..
+                            }
+                            | crate::Action::Spawn {
+                                callee: crate::Callee::Library(function),
+                                ..
+                            },
+                        ) => {
+                            callees.insert(*function);
+                        }
+                        _ => {}
+                    }
+                    pending.extend(node.children());
+                }
+            }
+            callees
+        })
+    }
+
+    /// Computes a consumer's facts once, against the immutable definitions
+    /// registration resolved. Results (including refusals) survive registry clones.
+    pub fn derive<T: Any + Send + Sync>(&self, derive: impl FnOnce() -> T) -> Arc<T> {
+        let mut derived = self
+            .derived
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let result = Arc::clone(
+            derived
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| Arc::new(derive())),
+        );
+        // Each key is inserted only with its own concrete type.
+        match result.downcast::<T>() {
+            Ok(result) => result,
+            Err(_) => unreachable!("derived facts keep their concrete type"),
+        }
+    }
 }
 
 impl fmt::Debug for RegisteredFunction {
@@ -313,10 +401,12 @@ impl FunctionRegistry {
         native: Option<Arc<dyn NativeFunction>>,
     ) -> Result<FunctionId, RegistryError> {
         let name = definition.name.clone();
-        validate_definition(&definition, self).map_err(|source| RegistryError::Invalid {
-            name: name.clone(),
-            source,
-        })?;
+        let identity =
+            validate_identified_definition(&definition, self, crate::KernelDataLimits::standard())
+                .map_err(|source| RegistryError::Invalid {
+                    name: name.clone(),
+                    source,
+                })?;
         match (
             definition.has_native(),
             definition.body().is_some(),
@@ -328,16 +418,16 @@ impl FunctionRegistry {
             }
             _ => {}
         }
-        let function = definition.identity()?;
+        let function = match identity {
+            Some(function) => function,
+            None => definition.identity()?,
+        };
         if self.functions.contains_key(&function) {
             return Err(RegistryError::AlreadyRegistered { name, function });
         }
         self.functions.insert(
             function,
-            RegisteredFunction {
-                definition: Arc::new(definition),
-                native,
-            },
+            RegisteredFunction::new(function, definition, native),
         );
         Ok(function)
     }
@@ -407,10 +497,7 @@ impl FunctionRegistry {
             }
             self.functions.insert(
                 function,
-                RegisteredFunction {
-                    definition: Arc::new(definition),
-                    native: None,
-                },
+                RegisteredFunction::new(function, definition, None),
             );
         }
         Ok(())
@@ -497,6 +584,16 @@ struct ValidatedFunction {
 }
 
 impl FunctionCatalog for FunctionRegistry {
+    fn registered(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
+        self.get(function)
+    }
+
+    fn registration(&self, definition: &FunctionDefinition) -> Option<&RegisteredFunction> {
+        self.functions
+            .values()
+            .find(|registered| std::ptr::eq(registered.definition.as_ref(), definition))
+    }
+
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
         self.functions
             .get(function)

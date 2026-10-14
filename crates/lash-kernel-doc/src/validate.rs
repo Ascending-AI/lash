@@ -283,6 +283,15 @@ pub fn validate_definition_with_limits(
     catalog: &dyn FunctionCatalog,
     limits: crate::KernelDataLimits,
 ) -> Result<(), Invalid> {
+    validate_identified_definition(definition, catalog, limits).map(|_| ())
+}
+
+/// Registration keeps the identity validation used to name a body's sites.
+pub(crate) fn validate_identified_definition(
+    definition: &FunctionDefinition,
+    catalog: &dyn FunctionCatalog,
+    limits: crate::KernelDataLimits,
+) -> Result<Option<crate::FunctionId>, Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
             None,
@@ -332,7 +341,7 @@ pub fn validate_definition_with_limits(
         }
     }
     let Some(body) = definition.body() else {
-        return Ok(());
+        return Ok(None);
     };
     // The site names the body by the definition's own identity, which a
     // definition that cannot be encoded does not have.
@@ -351,7 +360,8 @@ pub fn validate_definition_with_limits(
         catalog,
         native_body: matches!(definition.implementation, Implementation::Both(_)),
     };
-    scope.check_unit(&body.block, Site::new(Unit::Library(function), []))
+    scope.check_unit(&body.block, Site::new(Unit::Library(function), []))?;
+    Ok(Some(function))
 }
 
 /// Validates an annotation layer against the document it claims to

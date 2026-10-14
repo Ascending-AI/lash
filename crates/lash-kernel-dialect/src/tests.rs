@@ -81,3 +81,39 @@ fn a_name_is_defined_once() {
     let error = define_functions(HELPERS, &mut library).unwrap_err();
     assert!(matches!(error, SourceError::Library(_)), "{error}");
 }
+
+/// FIG-6255: name resolution retains registration facts, sharing derivation
+/// with the worker's registry rather than identifying and checking helpers again.
+#[test]
+fn named_libraries_share_registered_definition_facts() {
+    use lash_kernel_doc::{FunctionCatalog, FunctionRegistry, parse_definition};
+    let mut registry = FunctionRegistry::declarations();
+    let function = registry
+        .register(
+            parse_definition("function helper() -> Int\nkernel 1\ncharge 1\nbody { return 1 }\n")
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+    let first = NamedLibrary::from_registry(&registry).unwrap();
+    let resolving = NamedLibrary::resolving(&registry, |_| true).unwrap();
+    let calls = std::cell::Cell::new(0);
+    let derive = || {
+        calls.set(calls.get() + 1);
+        42usize
+    };
+    let registered = registry.get(&function).unwrap();
+    let result = registered.derive(derive);
+    for library in [&first, &resolving] {
+        let held = library.registered(&function).unwrap();
+        assert_eq!(held.identity(), function);
+        assert!(std::sync::Arc::ptr_eq(&held.derive(derive), &result));
+        assert!(std::ptr::eq(
+            library
+                .registration(library.definition(&function).unwrap())
+                .unwrap(),
+            held
+        ));
+    }
+    assert_eq!(calls.get(), 1);
+}

@@ -724,3 +724,18 @@ fn a_native_version_is_part_of_the_identity_and_only_a_native_states_one() {
         Err(InvalidReason::NativeVersionZero)
     ));
 }
+
+/// FIG-6255: registration takes a body's identity once, including validation's sites.
+#[test]
+fn registration_identifies_each_immutable_definition_once() {
+    let definition = crate::parse_definition(
+        "function helper() -> Int\nkernel 1\ncharge 1\nbody { return 1 }\n",
+    )
+    .unwrap();
+    let before = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
+    crate::FunctionRegistry::declarations()
+        .register(definition, None)
+        .unwrap();
+    let after = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
+    assert_eq!(after - before, 1);
+}

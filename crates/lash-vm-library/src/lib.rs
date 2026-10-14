@@ -236,17 +236,23 @@ fn assemble_releases(lines: Vec<HeldReleases>) -> Result<Standard, LibraryError>
                         ));
                     }
                     for released in &release.functions {
-                        if released.definition.identity().map_err(LibraryError::new)?
-                            != released.function
-                        {
+                        if let Some(registered) = surveyed.get(&released.function) {
+                            // An already identified immutable definition verifies
+                            // a duplicate release entry without hashing it again.
+                            if registered.definition.as_ref() != &released.definition {
+                                return Err(LibraryError::new(
+                                    "a retiring helper identity differs from its definition",
+                                ));
+                            }
+                            continue;
+                        }
+                        let function = surveyed
+                            .register(released.definition.clone(), None)
+                            .map_err(LibraryError::new)?;
+                        if function != released.function {
                             return Err(LibraryError::new(
                                 "a retiring helper identity differs from its definition",
                             ));
-                        }
-                        if surveyed.get(&released.function).is_none() {
-                            surveyed
-                                .register(released.definition.clone(), None)
-                                .map_err(LibraryError::new)?;
                         }
                     }
                     merge(&mut retiring, index)?;

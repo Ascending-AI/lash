@@ -15,7 +15,8 @@
 //!   provides, and refuses it with a typed [`Refusal`] that names everything
 //!   missing or mismatched (`K-ADM`).
 //!
-//! Nothing here is stored: every fact is recomputed from the document. The
+//! Nothing here is stored: document facts are derived afresh, and immutable
+//! registered library facts are shared across admissions. The
 //! crate depends on `lash-kernel-doc` and on no other lash crate.
 
 mod admit;
