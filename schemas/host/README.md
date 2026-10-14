@@ -29,17 +29,13 @@ target runs all of them:
 | `kernel-function` | kernel `FunctionDefinition` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
 | `kernel-edit-transaction` | kernel edit `Transaction` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-correspondence` | kernel edit `Correspondence` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
-| `kernel-parked-run` | kernel `ParkedRun` | `KERNEL_VERSION` | `crates/lash-kernel-state/src/bin/parked_schema_generator.rs` |
-| `kernel-parked-header` | parked-run `Header` | `KERNEL_VERSION` | `crates/lash-kernel-state/src/bin/parked_schema_generator.rs` |
-| `kernel-parked-fragment` | parked-run `Fragment` | `KERNEL_VERSION` | `crates/lash-kernel-state/src/bin/parked_schema_generator.rs` |
 
 The runtime registers and validates the process-event payload schemas. The
 three kernel documents are the stored forms of `lash-kernel-doc`
 ([kernel semantics](../../docs/kernel/semantics.md), `K-DOC-004`), and the
-two kernel edit documents are the data of `lash-kernel-edit` (`K-EDIT-010`). The three
-parked-run documents are a parked run whole and the parts it is saved in, a
-header and one fragment per root
-([parked state](../../docs/kernel/parked-state.md)). These
+two kernel edit documents are the data of `lash-kernel-edit` (`K-EDIT-010`). A parked
+run has no JSON document: it is the persistent heap's checkpoint pages
+([kernel design](../../docs/kernel/design.md), section 6). These
 documents describe their owners' stored or projection contracts. Lash
 ships no engine wire protocol; hosts own transport DTOs and compatibility
 ([ADR 0136](../../docs/adr/0136-hosts-own-their-wire-contracts.md)).

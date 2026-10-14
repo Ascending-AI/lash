@@ -26,7 +26,7 @@ use crate::{images, sim};
 const HORIZON_MS: u64 = 600_000;
 
 /// The kernel process: a sequential mint makes it the first registered.
-fn process() -> ProcessId {
+pub fn process() -> ProcessId {
     ProcessIdMint::sequential_id_for_testing(1)
 }
 

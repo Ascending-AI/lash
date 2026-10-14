@@ -16,6 +16,7 @@ use lash_core::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, ProcessInfraError,
     SettledOutput, StepName, StepRequest,
 };
+use lash_core_store::checkpoint_graph::{GraphRefusal, NodeKind};
 use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
@@ -78,14 +79,33 @@ pub(crate) fn decode(
                 state_format(writes)
             ))
         })?;
-    let decoded: KernelEngineState =
-        serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))?;
+    let decoded: KernelEngineState = serde_json::from_slice(&state.bytes).map_err(|error| {
+        infra(
+            pre_heap(&state.bytes).map_or_else(|| error.to_string(), |refusal| refusal.to_string()),
+        )
+    })?;
     if decoded.parked.map(|parked| parked.root) != state.pages {
         return Err(infra(
             "the state names another run page than the process's root holds",
         ));
     }
     Ok((decoded, written))
+}
+
+/// The refusal of a state that parks its run in the whole-state shape the
+/// persistent heap retired (FIG-6193): such a state names its run by the
+/// sealed KernelWhole graph itself, as base64 text, where this build names
+/// a page. Asked only of a state that did not decode, so a state of this
+/// build is read once; the old shape is named, never read.
+fn pre_heap(bytes: &[u8]) -> Option<GraphRefusal> {
+    const KERNEL_WHOLE: NodeKind = NodeKind(16);
+    let state: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    state.get("parked")?.is_string().then_some(())?;
+    Some(GraphRefusal::RetiredFormat {
+        node: None,
+        kind: KERNEL_WHOLE.0,
+        format: KERNEL_WHOLE.retired_format()?,
+    })
 }
 
 /// The transition for `event` over `state`, of an engine that writes
@@ -437,7 +457,7 @@ fn run(
     state.runs += 1;
     let input = KernelRunInput {
         payload: state.payload.clone(),
-        parked: state.parked.clone(),
+        parked: state.parked,
         admissions: state.admissions.values().cloned().collect(),
         deliver: std::mem::take(&mut state.settled),
     };

@@ -22,6 +22,14 @@ pub enum GraphRefusal {
     BadMagic,
     #[error("node kind {0} is not supported here")]
     UnsupportedKind(u32),
+    /// A node of a kind the persistent heap retired (FIG-6193): a pre-heap
+    /// image's `format`, refused before its body is read, never misread.
+    #[error("node kind {kind} is a retired {format} image, which this build does not read")]
+    RetiredFormat {
+        node: Option<NodeId>,
+        kind: u32,
+        format: &'static str,
+    },
     #[error("node kind {kind} has no variant {variant}")]
     UnsupportedVariant { kind: u32, variant: u32 },
     #[error("non-canonical node {node:?}: {reason}")]

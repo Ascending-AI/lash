@@ -161,9 +161,27 @@ impl NodeKind {
     /// A number in it past [`SEMANTIC_REGISTRY`] is a later format's.
     pub const SEMANTIC: RangeInclusive<u32> = 1000..=1999;
 
+    /// The whole-image kinds the persistent heap replaced (FIG-6193), with
+    /// the format each held. Their numbers are never reused, and a node of
+    /// one is refused, naming its format, before anything reads its body:
+    /// this build has no reader for a pre-heap image.
+    pub const RETIRED: &[(Self, &str)] = &[
+        (Self(16), "KernelWhole"),
+        (Self(27), "TerminalWhole"),
+        (Self(29), "SessionExecution"),
+    ];
+
+    /// The format a retired kind held, when this is one.
+    #[must_use]
+    pub fn retired_format(self) -> Option<&'static str> {
+        Self::RETIRED
+            .iter()
+            .find(|(kind, _)| *kind == self)
+            .map(|(_, format)| *format)
+    }
+
     /// This kind's registry row, when this build registers it. Retired
-    /// numbers (16, 27 and 29: the whole-image kinds the persistent heap
-    /// replaced, FIG-6193) have none and are never reused.
+    /// numbers ([`Self::RETIRED`]) have none.
     #[must_use]
     pub fn spec(self) -> Option<&'static KindSpec> {
         let table = if Self::SEMANTIC.contains(&self.0) {

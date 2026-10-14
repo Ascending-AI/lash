@@ -21,7 +21,7 @@ pub const MAGIC: [u8; 4] = *b"LASH";
 pub const MAX_NODE_BYTES: u64 = 65_536;
 
 /// The largest complete envelope of a root kind (ExecRoot, HostRoot, CellEnd,
-/// KernelWhole, SessionExecution, PhaseRoot, SessionManifest, WholeStream).
+/// PhaseRoot, SessionManifest, WholeStream, CheckpointRoot).
 pub const MAX_ROOT_BYTES: u64 = 4_096;
 
 /// A text or bytes token, its tag and length included, of at most this many
@@ -549,7 +549,7 @@ pub fn immutable_catalog_heads() -> &'static [NodeId] {
 /// # Errors
 ///
 /// [`GraphRefusal::BadMagic`], [`GraphRefusal::UnsupportedKind`] for kind 0,
-/// [`GraphRefusal::Truncated`], [`GraphRefusal::TrailingBytes`],
+/// [`GraphRefusal::RetiredFormat`] for a retired kind, [`GraphRefusal::Truncated`], [`GraphRefusal::TrailingBytes`],
 /// [`GraphRefusal::LengthOverflow`], or [`GraphRefusal::NonCanonical`].
 pub fn parse_envelope(
     bytes: &[u8],
@@ -583,6 +583,9 @@ fn parse_framed(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>, 
     let kind = u32::try_from(kind).map_err(|_| GraphRefusal::LengthOverflow)?;
     if kind == 0 {
         return Err(GraphRefusal::UnsupportedKind(0));
+    }
+    if let Some(format) = NodeKind(kind).retired_format() {
+        return Err(GraphRefusal::RetiredFormat { node, kind, format });
     }
     let count = get_varint(bytes, &mut pos).map_err(refuse)?;
     let table_len = usize::try_from(count)
