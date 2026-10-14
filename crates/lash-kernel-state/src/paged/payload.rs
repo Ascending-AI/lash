@@ -1,9 +1,10 @@
 //! Canonical greedy immutable payload trees (D-IMM). Byte, scalar and
 //! UTF-16 lengths travel on links, so rank selection skips whole subtrees.
 use super::PageKind;
+use super::directory::tuple_tree;
 use super::directory::{Body, ordinal_key, value_cost};
 use super::heap_impl::{
-    PagedHeap, binary_summary, census_fault, native_raised, native_write, tuple_tree, value_depth,
+    PagedHeap, binary_summary, census_fault, native_raised, native_write, value_depth,
 };
 use super::tree::{Access, SealWork, Tree, checked_sum, grant};
 use super::{ObjectInit, ObjectKind, SealBudget, SemanticHeap};
@@ -35,7 +36,7 @@ impl TokenCodec for Part {
         })
     }
 }
-pub fn build(access: &Access, bytes: &[u8], text: bool) -> Result<PageRef, HeapFault> {
+pub fn build(access: &Access<'_>, bytes: &[u8], text: bool) -> Result<PageRef, HeapFault> {
     let mut parts = Vec::new();
     let mut start = 0;
     while start < bytes.len() {
@@ -111,7 +112,7 @@ fn add(parts: impl Iterator<Item = TextSummary>) -> Result<TextSummary, HeapFaul
     }
     Ok(sum)
 }
-fn read(access: &Access, part: &Part, text: bool) -> Result<Node, HeapFault> {
+fn read(access: &Access<'_>, part: &Part, text: bool) -> Result<Node, HeapFault> {
     let answer = access.read(part.page)?;
     let bad = |reason: String| HeapFault::Corrupt {
         page: part.page.id,
@@ -161,7 +162,7 @@ enum Node {
     Index(Vec<Part>),
 }
 pub fn visit(
-    access: &Access,
+    access: &Access<'_>,
     page: PageRef,
     summary: TextSummary,
     text: bool,
@@ -169,7 +170,7 @@ pub fn visit(
     visitor: &mut dyn FnMut(&[u8]) -> ControlFlow<()>,
 ) -> Result<(), HeapFault> {
     fn walk(
-        access: &Access,
+        access: &Access<'_>,
         part: &Part,
         text: bool,
         range: Range<u64>,
@@ -221,7 +222,7 @@ pub fn visit(
     Ok(())
 }
 pub fn offset(
-    access: &Access,
+    access: &Access<'_>,
     page: PageRef,
     summary: TextSummary,
     mut index: u64,
@@ -345,6 +346,28 @@ impl NativeHeap for PagedHeap {
             _ => (),
         }
         Ok(())
+    }
+    fn error_data(&self, error: &ErrorRef) -> Result<Value, HeapFault> {
+        match &error.data {
+            Payload::Resident(value) => Ok((**value).clone()),
+            Payload::Paged(page) => {
+                let cost = error
+                    .cost
+                    .0
+                    .checked_sub(error.kind.summary.utf8_bytes)
+                    .and_then(|v| v.checked_sub(error.message.summary.utf8_bytes))
+                    .ok_or_else(|| HeapFault::Malformed("error cost summary mismatch".into()))?;
+                let tree = Tree::<Value>::open(Some(*page), 1, LogicalBytes(cost), true)
+                    .with_task_edges(error.task_edges);
+                let tree = match error.family {
+                    Some(family) => tree.in_family(family),
+                    None => tree,
+                };
+                tree.rank_get(0, &self.access)?
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| HeapFault::Malformed("error data page is empty".into()))
+            }
+        }
     }
     fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<Value>, HeapFault> {
         if index >= tuple.summary.len {
@@ -508,14 +531,13 @@ impl NativeHeap for PagedHeap {
                 "tuple nesting exceeds the value depth bound",
             ));
         }
-        let mut edges = Vec::new();
-        for v in &values {
-            self.edges_of(v, &mut edges)?;
-        }
+        let has_edges = values.iter().any(super::directory::value_has_edges);
+        let task_edges = checked_sum(values.iter().map(lash_kernel_doc::heap_values::task_count))?;
         let summary = TupleSummary {
+            task_edges,
             len: values.len() as u64,
             cost: LogicalBytes(checked_sum(values.iter().map(value_cost))?),
-            has_edges: !edges.is_empty(),
+            has_edges,
             depth,
         };
         let body = if encode_body(&values).len() <= IMMUTABLE_INLINE_MAX as usize {

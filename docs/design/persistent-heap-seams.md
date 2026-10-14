@@ -837,3 +837,29 @@ symbol together with every caller in its own files.
   wrong once implemented: for example, `SemanticHeap::open` as a trait
   constructor, or reads through `&self` with interior residency. Such a
   change is a seam ruling, not a local edit.
+
+### S1/S4/S8 (amended): descriptor summaries and lifecycle attachment
+
+Tuple and error descriptors retain inherited family context at every immutable
+nesting depth. Errors store their data as a bounded resident value or a one-cell
+sequence tree; their depth, local cost, identity-edge flag and task-edge count
+are descriptor metadata. Reading error data is fallible. Tuple and tree summaries
+carry exact task-edge counts, validated against each loaded canonical page.
+Closure captures are name-keyed variable identities in ascending name order.
+
+The heap header persists the conservative `DataOnlyCertificate`; allocation,
+replacement, session-root attachment and sweeping maintain it. A direct task
+binding contributes even when the directory is empty. Machine open, like start,
+receives the admitted `Box<dyn AllocationCensus>`. Lifecycle installs an admitted
+`Tree<BindingRecord>` through `PagedHeap::set_session_root`, with one holding-cost
+change and no rewriting of its leaves. Precision sees the proposed binding root.
+
+### S8 (amended): membership owns its live aggregate
+
+Family membership carries its own live-ordinal aggregate, alongside subtree
+length and cost. Membership edits recompute it from canonical runs; loaded pages
+validate their aggregate locally. Sweeping a live ordinal decrements it once;
+sweeping a dead ordinal changes nothing. When it reaches zero the same heap edit
+removes the family row, frozen base reference and conservative population
+contribution. An empty family registers no row. The family allocator remains
+monotonic, and pressure enumeration includes untouched live family members.

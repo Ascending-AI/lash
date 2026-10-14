@@ -1,20 +1,22 @@
 //! The identity-addressed paged semantic heap. Collection edits update one
 //! bounded path and replace its directory head; no mutable container escapes.
-use super::directory::{Body, Entry, ObjectHead, Ordinal, entity_key, ordinal_key, value_cost};
+use super::directory::{
+    Body, Entry, ObjectHead, Ordinal, entity_key, ordinal_key, value_cost, value_has_edges,
+};
 use super::source::INLINE_BODY_MAX;
 use super::tree::{Access, Cell, SealWork, Tree, checked_sum};
 use super::*;
+use lash_kernel_doc::Integer;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integer_from_digits, integral_float, key_digest, text_summary};
-use lash_kernel_doc::{Integer, TaskId};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
 pub struct PagedHeap {
-    pub access: Access,
+    pub access: Access<'static>,
     pub directory: Tree<ObjectHead>,
     pub families: Tree<FamilyRecord>,
     next_ordinal: u64,
@@ -22,6 +24,7 @@ pub struct PagedHeap {
     epoch: EditEpoch,
     pub(super) header: Option<PageRef>,
     pub(super) accounting: AccountingCertificate,
+    pub(super) population: DataOnlyCertificate,
     family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     pub session: Tree<BindingRecord>,
@@ -90,6 +93,7 @@ impl PagedHeap {
             epoch,
             header: Some(page),
             accounting: root.accounting,
+            population: root.population,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -107,6 +111,9 @@ impl PagedHeap {
         }
         self.census = Some(census);
         Ok(())
+    }
+    pub fn data_only_certificate(&self) -> DataOnlyCertificate {
+        self.population
     }
     pub fn certificate(&self) -> AccountingCertificate {
         self.accounting
@@ -137,6 +144,12 @@ impl PagedHeap {
         self.header = None;
         Ok(())
     }
+    pub(super) fn statement_roots(&self) -> &[Value] {
+        &self.temporary
+    }
+    pub(super) fn outstanding_reserved(&self) -> u64 {
+        self.reserved
+    }
     pub fn epoch(&self) -> EditEpoch {
         self.epoch
     }
@@ -147,6 +160,7 @@ impl PagedHeap {
             next_ordinal: self.next_ordinal,
             next_family: self.next_family,
             accounting: self.accounting,
+            population: self.population,
         }
     }
     pub(super) fn head(&self, entity: EntityId) -> Result<Option<ObjectHead>, HeapFault> {
@@ -157,7 +171,13 @@ impl PagedHeap {
             else {
                 return Ok(None);
             };
-            if entity.ordinal >= family.extent || !self.family_member(&family, entity.ordinal)? {
+            if entity.ordinal >= family.extent {
+                return Err(HeapFault::Corrupt {
+                    page: family.base.root.id,
+                    reason: "relative occurrence is outside its family extent".into(),
+                });
+            }
+            if !self.family_member(&family, entity.ordinal)? {
                 return Ok(None);
             }
         }
@@ -173,7 +193,13 @@ impl PagedHeap {
         else {
             return Ok(None);
         };
-        if entity.ordinal >= family.extent || !self.family_member(&family, entity.ordinal)? {
+        if entity.ordinal >= family.extent {
+            return Err(HeapFault::Corrupt {
+                page: family.base.root.id,
+                reason: "relative occurrence is outside its family extent".into(),
+            });
+        }
+        if !self.family_member(&family, entity.ordinal)? {
             return Ok(None);
         }
         let mut base = self.family_base.borrow_mut();
@@ -241,6 +267,23 @@ impl PagedHeap {
                 self.accounting.entities += 1;
             }
         }
+        let old = self.directory.get(&entity_key(entity), &self.access)?;
+        let old_closures = old
+            .as_ref()
+            .is_some_and(|h| h.kind() == ObjectKind::Closure) as u64;
+        let old_tasks = old.as_ref().map_or(0, Cell::task_edges);
+        self.population.closure_entities = self
+            .population
+            .closure_entities
+            .checked_sub(old_closures)
+            .and_then(|v| v.checked_add((head.kind() == ObjectKind::Closure) as u64))
+            .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
+        self.population.task_edges = self
+            .population
+            .task_edges
+            .checked_sub(old_tasks)
+            .and_then(|v| v.checked_add(head.task_edges()))
+            .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
         self.directory
             .write(entity_key(entity), head, &self.access)?;
         self.header = None;
@@ -275,9 +318,15 @@ impl PagedHeap {
             )?,
             ObjectInit::Variable(value) => Body::Variable(value),
             ObjectInit::Closure { site, captures } => {
-                let mut rows = Tree::new(true);
-                for (i, id) in captures.into_iter().enumerate() {
-                    rows.write(ordinal_key(i as u64), id, &self.access)?;
+                let mut rows = Tree::new(false);
+                for (name, id) in captures {
+                    let key = name.as_str().as_bytes().to_vec();
+                    if rows.get(&key, &self.access)?.is_some() {
+                        return Err(HeapFault::Malformed(
+                            "duplicate closure capture name".into(),
+                        ));
+                    }
+                    rows.write(key, (name, id), &self.access)?;
                 }
                 Body::Closure {
                     site,
@@ -356,17 +405,42 @@ impl PagedHeap {
                 };
                 e.kind = kind;
                 e.message = message;
-                e.data = Arc::new(self.canonical((*e.data).clone())?);
-                e.cost = LogicalBytes(
-                    e.kind
-                        .summary
-                        .utf8_bytes
-                        .saturating_add(e.message.summary.utf8_bytes)
-                        .saturating_add(value_cost(&e.data)),
-                );
-                let mut edges = Vec::new();
-                self.edges_of(&e.data, &mut edges)?;
-                e.has_edges = !edges.is_empty();
+                let data = match &e.data {
+                    Payload::Resident(v) => self.canonical((**v).clone())?,
+                    Payload::Paged(_) => self.error_data(&e)?,
+                };
+                e.depth = value_depth(&data) + 1;
+                e.task_edges = lash_kernel_doc::heap_values::task_count(&data);
+                e.family = None;
+                if e.depth > 128 {
+                    return Err(raised("depth", "error nesting exceeds K-VAL-034"));
+                }
+                e.cost = LogicalBytes(checked_sum(
+                    [
+                        e.kind.summary.utf8_bytes,
+                        e.message.summary.utf8_bytes,
+                        value_cost(&data),
+                    ]
+                    .into_iter(),
+                )?);
+                e.has_edges = value_has_edges(&data);
+                e.data = if encode_body(&data).len() <= IMMUTABLE_INLINE_MAX as usize {
+                    Payload::Resident(Arc::new(data))
+                } else {
+                    let mut tree = Tree::new(true);
+                    tree.write(ordinal_key(0), data, &self.access)?;
+                    tree.seal(
+                        &self.access,
+                        &mut SealWork::new(SealBudget {
+                            pages: u64::MAX,
+                            bytes: u64::MAX,
+                        }),
+                    )?;
+                    Payload::Paged(
+                        tree.page()
+                            .ok_or_else(|| HeapFault::Malformed("error data has no page".into()))?,
+                    )
+                };
                 Value::Error(Arc::new(e))
             }
             other => other,
@@ -443,6 +517,10 @@ impl SemanticHeap for PagedHeap {
             next_family: 1,
             epoch,
             header: None,
+            population: DataOnlyCertificate {
+                closure_entities: 0,
+                task_edges: 0,
+            },
             accounting: AccountingCertificate {
                 metric: AccountingMetric::LocalCostV1,
                 upper: LogicalBytes(0),
@@ -481,6 +559,7 @@ impl SemanticHeap for PagedHeap {
             epoch,
             header: None,
             accounting: root.accounting,
+            population: root.population,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -515,7 +594,7 @@ impl SemanticHeap for PagedHeap {
             Some(Body::Closure { site, captures }) => {
                 let mut values = Vec::new();
                 captures.visit(&self.access, &mut |_, id| {
-                    values.push(*id);
+                    values.push(id.clone());
                     true
                 })?;
                 Ok(ClosureView {
@@ -603,9 +682,11 @@ impl SemanticHeap for PagedHeap {
                 }
             }
             ObjectInit::Variable(v) => values.push(v.clone()),
-            ObjectInit::Closure { captures, .. } => {
-                values.extend(captures.iter().map(|id| Value::Ref(Identity::Object(*id))))
-            }
+            ObjectInit::Closure { captures, .. } => values.extend(
+                captures
+                    .iter()
+                    .map(|(_, id)| Value::Ref(Identity::Object(*id))),
+            ),
         }
         let head = self.make_head(init)?;
         self.admit(head.cost(), &values)?;
@@ -876,7 +957,7 @@ impl SemanticHeap for PagedHeap {
                     {
                         return Ok(false);
                     }
-                    pending.push(((*a.data).clone(), (*b.data).clone()));
+                    pending.push((self.error_data(a)?, self.error_data(b)?));
                 }
                 (Value::List(a), Value::List(b)) => {
                     if !seen.insert((0, *a, *b)) {
@@ -945,7 +1026,7 @@ impl SemanticHeap for PagedHeap {
                     self.edges_of(&required_value(self.tuple_get(t, i)?)?, out)?;
                 }
             }
-            Value::Error(e) if e.has_edges => self.edges_of(&e.data, out)?,
+            Value::Error(e) if e.has_edges => self.edges_of(&self.error_data(e)?, out)?,
             _ => (),
         }
         Ok(())
@@ -1138,7 +1219,7 @@ pub(super) fn binary_summary(len: u64) -> TextSummary {
 pub(super) fn value_depth(value: &Value) -> u32 {
     match value {
         Value::Tuple(t) => t.summary.depth,
-        Value::Error(e) => 1 + value_depth(&e.data),
+        Value::Error(e) => e.depth,
         _ => 0,
     }
 }
@@ -1179,7 +1260,10 @@ pub(super) fn native_raised(kind: &str, message: &str) -> NativeError {
             summary: text_summary(message),
             body: Payload::Resident(Arc::from(message)),
         },
-        data: Arc::new(Value::Null),
+        family: None,
+        task_edges: 0,
+        data: Payload::Resident(Arc::new(Value::Null)),
+        depth: 1,
         cost: LogicalBytes((kind.len() + message.len()) as u64 + 16),
         has_edges: false,
     }))
@@ -1222,274 +1306,4 @@ pub(super) fn census_fault(error: CensusFault) -> HeapFault {
         CensusFault::Heap(error) => error,
         CensusFault::Malformed(message) => HeapFault::Malformed(message),
     }
-}
-
-impl CensusGraph for PagedHeap {
-    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(checked_sum(
-            [self.session.cost(), self.tasks.cost()].into_iter(),
-        )?))
-    }
-    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
-        Ok(self.cost_of(value))
-    }
-    fn value_edges(
-        &mut self,
-        value: &Value,
-        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<(), HeapFault> {
-        self.stream_edges(value, out)
-    }
-    fn persistent_roots(
-        &mut self,
-        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
-    ) -> Result<(), HeapFault> {
-        let binding =
-            |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
-                match &binding.value {
-                    BoundRecord::Value(v) => visit(v),
-                    BoundRecord::Shared(id) => visit(&Value::Ref(Identity::Object(*id))),
-                }
-            };
-        visit_tree(&self.session, &self.access, &mut |b| binding(b, visit))?;
-        visit_tree(&self.tasks, &self.access, &mut |task| {
-            match &task.state {
-                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v)) => {
-                    visit(v)?
-                }
-                TaskStateRecord::Resuming(IncomingRecord::Joined(t))
-                | TaskStateRecord::Joining(t) => visit(&Value::Task(*t))?,
-                _ => (),
-            }
-            visit_tree(&task.frames, &self.access, &mut |frame| {
-                visit_tree(&frame.bindings, &self.access, &mut |b| binding(b, visit))?;
-                visit_tree(&frame.iterated, &self.access, visit)?;
-                visit_tree(&frame.departing, &self.access, visit)?;
-                if let Some(args) = &frame.arguments {
-                    visit_tree(args, &self.access, visit)?;
-                }
-                Ok(())
-            })
-        })
-    }
-    fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
-        Ok(self.head(entity)?.map(|head| EntityCost {
-            local: LogicalBytes(head.cost()),
-            has_edges: true,
-        }))
-    }
-    fn entity_edges(
-        &mut self,
-        entity: EntityId,
-        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<(), HeapFault> {
-        let Some(head) = self.head(entity)? else {
-            return Ok(());
-        };
-        let mut error = None;
-        match head.body {
-            Body::Variable(v) => return self.stream_edges(&v, out),
-            Body::Closure { captures, .. } => captures.visit(
-                &self.access,
-                &mut |_, id| match out(Identity::Object(*id)) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        error = Some(e);
-                        false
-                    }
-                },
-            )?,
-            Body::List {
-                inline: Some(v), ..
-            } => {
-                for v in &v {
-                    self.stream_edges(v, out)?;
-                }
-            }
-            Body::List { rows, .. } => {
-                rows.visit(&self.access, &mut |_, v| match self.stream_edges(v, out) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        error = Some(e);
-                        false
-                    }
-                })?
-            }
-            Body::Table { rows, .. } => rows.visit(&self.access, &mut |_, e| match self
-                .stream_edges(&e.key, out)
-                .and_then(|()| self.stream_edges(&e.value, out))
-            {
-                Ok(()) => true,
-                Err(e) => {
-                    error = Some(e);
-                    false
-                }
-            })?,
-        }
-        error.map_or(Ok(()), Err)
-    }
-    fn task_result(
-        &mut self,
-        task: TaskId,
-        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<LogicalBytes, HeapFault> {
-        let Some(task) = self.tasks.get(&ordinal_key(task.0), &self.access)? else {
-            return Ok(LogicalBytes(0));
-        };
-        let value = match &task.state {
-            TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
-                if task.result_retained =>
-            {
-                v
-            }
-            _ => return Ok(LogicalBytes(0)),
-        };
-        self.stream_edges(value, out)?;
-        Ok(self.cost_of(value))
-    }
-    fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault> {
-        for entity in &unreachable.entities {
-            if entity.family != FamilyId::PRIMARY {
-                self.sweep_family_member(*entity)?;
-            }
-            self.directory.remove(&entity_key(*entity), &self.access)?;
-        }
-        for task in &unreachable.ended_task_results {
-            if let Some(mut row) = self.tasks.get(&ordinal_key(task.0), &self.access)? {
-                row.state = match row.state {
-                    TaskStateRecord::Ended(EndedTask::Returned(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Returned(Value::Null))
-                    }
-                    TaskStateRecord::Ended(EndedTask::Raised(_)) => {
-                        TaskStateRecord::Ended(EndedTask::Raised(Value::Null))
-                    }
-                    _ => {
-                        return Err(HeapFault::Malformed(
-                            "sweep named a running task result".into(),
-                        ));
-                    }
-                };
-                row.result_retained = false;
-                self.tasks.write(ordinal_key(task.0), row, &self.access)?;
-            }
-        }
-        self.header = None;
-        Ok(())
-    }
-    fn census_after(
-        &mut self,
-        after: Option<EntityId>,
-        limit: usize,
-    ) -> Result<Vec<EntityId>, HeapFault> {
-        let mut key = after.map(entity_key);
-        let mut entities = Vec::new();
-        while entities.len() < limit {
-            let Some((next, _)) = self.directory.after(key.as_deref(), &self.access)? else {
-                break;
-            };
-            if next.len() != 16 {
-                return Err(HeapFault::Malformed(
-                    "directory identity key is not 16 bytes".into(),
-                ));
-            }
-            entities.push(EntityId {
-                family: FamilyId(u64::from_be_bytes(
-                    next[..8]
-                        .try_into()
-                        .map_err(|_| HeapFault::Malformed("identity family malformed".into()))?,
-                )),
-                ordinal: u64::from_be_bytes(
-                    next[8..]
-                        .try_into()
-                        .map_err(|_| HeapFault::Malformed("identity ordinal malformed".into()))?,
-                ),
-            });
-            key = Some(next);
-        }
-        Ok(entities)
-    }
-    fn ended_tasks_after(
-        &mut self,
-        after: Option<TaskId>,
-        limit: usize,
-    ) -> Result<Vec<TaskId>, HeapFault> {
-        let mut key = after.map(|t| ordinal_key(t.0));
-        let mut tasks = Vec::new();
-        while tasks.len() < limit {
-            let Some((next, row)) = self.tasks.after(key.as_deref(), &self.access)? else {
-                break;
-            };
-            if !matches!(row.state, TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_)) if row.result_retained)
-            {
-                key = Some(next);
-                continue;
-            }
-            tasks.push(TaskId(u64::from_be_bytes(
-                next.as_slice()
-                    .try_into()
-                    .map_err(|_| HeapFault::Malformed("task identity key is not 8 bytes".into()))?,
-            )));
-            key = Some(next);
-        }
-        Ok(tasks)
-    }
-}
-impl PagedHeap {
-    /// Streams nested immutable edges in place, stopping on the first visitor
-    /// failure. Scalar payloads are never loaded by a trace.
-    pub fn stream_edges(
-        &self,
-        value: &Value,
-        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
-    ) -> Result<(), HeapFault> {
-        match value {
-            Value::List(id)
-            | Value::Map(id)
-            | Value::Set(id)
-            | Value::Record(id)
-            | Value::Closure(id) => out(Identity::Object(*id))?,
-            Value::Task(id) => out(Identity::Task(*id))?,
-            Value::Ref(id) => out(*id)?,
-            Value::Tuple(t) if t.summary.has_edges => {
-                let mut error = None;
-                self.tuple_visit(t, &mut |v| match self.stream_edges(v, out) {
-                    Ok(()) => ControlFlow::Continue(()),
-                    Err(e) => {
-                        error = Some(e);
-                        ControlFlow::Break(())
-                    }
-                })?;
-                if let Some(e) = error {
-                    return Err(e);
-                }
-            }
-            Value::Error(e) if e.has_edges => self.stream_edges(&e.data, out)?,
-            _ => (),
-        }
-        Ok(())
-    }
-}
-
-pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<Value> {
-    let tree = Tree::<Value>::open(Some(page), tuple.summary.len, tuple.summary.cost, true);
-    match tuple.family {
-        Some(family) => tree.in_family(family),
-        None => tree,
-    }
-}
-
-fn visit_tree<T: Cell>(
-    tree: &Tree<T>,
-    access: &Access,
-    visit: &mut dyn FnMut(&T) -> Result<(), HeapFault>,
-) -> Result<(), HeapFault> {
-    let mut error = None;
-    tree.visit(access, &mut |_, v| match visit(v) {
-        Ok(()) => true,
-        Err(e) => {
-            error = Some(e);
-            false
-        }
-    })?;
-    error.map_or(Ok(()), Err)
 }

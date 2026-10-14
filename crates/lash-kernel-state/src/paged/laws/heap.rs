@@ -329,10 +329,17 @@ impl AllocationCensus for TestCensus {
         use std::collections::BTreeSet;
         let mut cost = graph.root_cost()?.0;
         let mut queue = Vec::new();
+        let mut persistent = Vec::new();
         graph.persistent_roots(&mut |v| {
-            raw_edges(v, &mut queue);
+            persistent.push(v.clone());
             Ok(())
         })?;
+        for v in persistent {
+            graph.value_edges(&v, &mut |i| {
+                queue.push(i);
+                Ok(())
+            })?;
+        }
         for v in roots
             .registers
             .iter()
@@ -417,23 +424,200 @@ impl AllocationCensus for TestCensus {
         )
     }
 }
-fn raw_edges(value: &Value, out: &mut Vec<Identity>) {
-    match value {
-        Value::List(id)
-        | Value::Map(id)
-        | Value::Set(id)
-        | Value::Record(id)
-        | Value::Closure(id) => out.push(Identity::Object(*id)),
-        Value::Task(t) => out.push(Identity::Task(*t)),
-        Value::Ref(i) => out.push(*i),
-        Value::Tuple(t) => {
-            if let Payload::Resident(v) = &t.body {
-                for v in v.iter() {
-                    raw_edges(v, out);
-                }
-            }
-        }
-        Value::Error(e) => raw_edges(&e.data, out),
-        _ => (),
+fn frozen(entities: u64, data_only: bool) -> FrozenRef {
+    FrozenRef {
+        root: PageRef {
+            id: PageId([19; 32]),
+            grant: PageGrant::NONE,
+        },
+        summary: FrozenSummary {
+            entities,
+            cost: LogicalBytes(entities * 32),
+            data_only,
+        },
     }
+}
+#[test]
+fn the_last_swept_member_retires_its_family_base() {
+    let (mut heap, pages) = fresh();
+    let family = heap.register_family(frozen(3, false)).expect("family");
+    assert_eq!(heap.census_after(None, 2).expect("first batch").len(), 2);
+    for ordinal in 0..3 {
+        heap.sweep(&SweepSet {
+            entities: vec![EntityId { family, ordinal }],
+            ended_task_results: vec![],
+        })
+        .expect("sweep");
+    }
+    assert_eq!(heap.families.len(), 0);
+    assert!(heap.census_after(None, 10).expect("census").is_empty());
+    assert_eq!(
+        heap.data_only_certificate(),
+        DataOnlyCertificate {
+            closure_entities: 0,
+            task_edges: 0
+        }
+    );
+    let mut heap = reopen(&mut heap, &pages);
+    assert!(
+        heap.census_after(None, 10)
+            .expect("reopened census")
+            .is_empty()
+    );
+    let next = heap.register_family(frozen(0, true)).expect("empty family");
+    assert!(next.0 > family.0);
+    assert_eq!(heap.families.len(), 0);
+}
+#[test]
+fn sweeping_a_dead_member_preserves_the_membership_count() {
+    let (mut heap, pages) = fresh();
+    let family = heap.register_family(frozen(3, true)).expect("family");
+    let dead = SweepSet {
+        entities: vec![EntityId { family, ordinal: 1 }],
+        ended_task_results: vec![],
+    };
+    heap.sweep(&dead).expect("first sweep");
+    let mut heap = reopen(&mut heap, &pages);
+    heap.sweep(&dead).expect("repeated sweep");
+    assert_eq!(
+        heap.census_after(None, 10).expect("census"),
+        vec![
+            EntityId { family, ordinal: 0 },
+            EntityId { family, ordinal: 2 }
+        ]
+    );
+    heap.sweep(&SweepSet {
+        entities: vec![EntityId { family, ordinal: 0 }],
+        ended_task_results: vec![],
+    })
+    .expect("sweep");
+    assert_eq!(heap.families.len(), 1);
+    heap.sweep(&SweepSet {
+        entities: vec![EntityId { family, ordinal: 2 }],
+        ended_task_results: vec![],
+    })
+    .expect("sweep last");
+    assert_eq!(heap.families.len(), 0);
+}
+#[test]
+fn a_direct_task_binding_prevents_the_data_only_certificate() {
+    let (mut heap, _) = fresh();
+    let mut bindings = tree::Tree::new(false);
+    let name = lash_kernel_doc::Name::from("task");
+    bindings
+        .write(
+            b"task".to_vec(),
+            BindingRecord {
+                name,
+                declared: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+                value: BoundRecord::Value(Value::Task(lash_kernel_doc::TaskId(7))),
+            },
+            &heap.access,
+        )
+        .expect("binding");
+    heap.set_session_root(bindings).expect("session");
+    assert_eq!(heap.data_only_certificate().task_edges, 1);
+    heap.set_session_root(tree::Tree::new(false))
+        .expect("drop session");
+    assert_eq!(heap.data_only_certificate().task_edges, 0);
+    assert_eq!(heap.certificate().upper, LogicalBytes(0));
+}
+
+#[test]
+fn relative_references_in_error_data_inherit_the_page_family() {
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
+    let (mut heap, _) = fresh();
+    let mut out = TokenWriter::new();
+    out.seq(1);
+    out.seq(2);
+    out.bytes(&0u64.to_be_bytes());
+    out.sum(8, 1);
+    out.seq(3);
+    TupleSummary {
+        len: 1,
+        depth: 2,
+        cost: LogicalBytes(22),
+        has_edges: true,
+        task_edges: 0,
+    }
+    .encode(&mut out);
+    Option::<FamilyId>::None.encode(&mut out);
+    out.sum(0, 1);
+    out.seq(1);
+    out.sum(14, 1);
+    out.seq(8);
+    heap.text("err").expect("kind").encode(&mut out);
+    heap.text("msg").expect("message").encode(&mut out);
+    out.sum(0, 1);
+    lash_kernel_doc::heap_values::encode_relative(0, 0, &mut out);
+    1u32.encode(&mut out);
+    LogicalBytes(22).encode(&mut out);
+    true.encode(&mut out);
+    Option::<FamilyId>::None.encode(&mut out);
+    0u64.encode(&mut out);
+    let page = heap
+        .access
+        .seal(PageKind::SEQUENCE_LEAF, out.into_bytes(), vec![])
+        .expect("relative leaf");
+    let tree = tree::Tree::<Value>::open(Some(page), 1, LogicalBytes(38), true);
+    assert!(
+        tree.rank_get(0, &heap.access).is_err(),
+        "relative references require context"
+    );
+    for family in [FamilyId(3), FamilyId(4)] {
+        let Some((_, Value::Tuple(tuple))) = tree
+            .clone()
+            .in_family(family)
+            .rank_get(0, &heap.access)
+            .expect("tuple")
+        else {
+            panic!("tuple");
+        };
+        let Some(Value::Error(error)) = heap.tuple_get(&tuple, 0).expect("error") else {
+            panic!("error");
+        };
+        assert!(
+            matches!(heap.error_data(&error).expect("data"), Value::List(id) if id == EntityId { family, ordinal: 0 })
+        );
+    }
+}
+
+#[test]
+fn errors_at_the_depth_limit_have_bounded_descendants() {
+    let (mut heap, pages) = fresh();
+    let kind = heap.text(&"k".repeat(256)).expect("kind");
+    let message = heap.text(&"m".repeat(256)).expect("message");
+    let mut value = Value::Null;
+    for depth in 1..=128 {
+        value = Value::Error(Arc::new(ErrorRef {
+            family: None,
+            task_edges: 0,
+            kind: kind.clone(),
+            message: message.clone(),
+            data: Payload::Resident(Arc::new(value)),
+            depth,
+            cost: LogicalBytes(0),
+            has_edges: false,
+        }));
+    }
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![value]))
+        .expect("deep error");
+    let heap = reopen(&mut heap, &pages);
+    let mut value = heap.list_get(list, 0).expect("get").expect("value");
+    for depth in (1..=128).rev() {
+        let Value::Error(error) = value else {
+            panic!("error at {depth}");
+        };
+        assert_eq!(error.depth, depth);
+        value = heap.error_data(&error).expect("data");
+    }
+    assert!(matches!(value, Value::Null));
+    assert!(
+        pages
+            .borrow()
+            .pages
+            .values()
+            .all(|p| p.tokens.len() + 32 * p.children.len() + 32 <= 65_536)
+    );
 }

@@ -163,6 +163,8 @@ pub enum IntRef {
 /// What a tuple's descriptor knows without reading its elements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TupleSummary {
+    /// Exact task-valued edges at immutable nesting depth.
+    pub task_edges: u64,
     pub len: u64,
     /// The logical cost of the elements where the tuple is held.
     pub cost: LogicalBytes,
@@ -186,9 +188,13 @@ pub struct TupleRef {
 /// other immutable value.
 #[derive(Clone, Debug)]
 pub struct ErrorRef {
+    pub family: Option<FamilyId>,
+    pub task_edges: u64,
     pub kind: TextRef,
     pub message: TextRef,
-    pub data: Arc<Value>,
+    pub data: Payload<Value>,
+    /// Authenticated tuple/error nesting depth.
+    pub depth: u32,
     pub cost: LogicalBytes,
     pub has_edges: bool,
 }
@@ -340,6 +346,7 @@ pub trait NativeHeap {
         object: EntityId,
         visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault>;
+    fn error_data(&self, error: &ErrorRef) -> Result<Value, HeapFault>;
     fn tuple_get(&self, tuple: &TupleRef, index: u64) -> Result<Option<Value>, HeapFault>;
     fn tuple_visit(
         &self,

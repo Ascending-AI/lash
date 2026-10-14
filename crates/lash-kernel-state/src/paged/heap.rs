@@ -23,10 +23,10 @@
 
 use std::ops::Range;
 
-use lash_kernel_doc::Site;
 use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, LogicalBytes, NativeHeap, PageRef, TextRef, TupleRef, Value,
 };
+use lash_kernel_doc::{Name, Site};
 
 use super::census::TransientRoots;
 use super::root::HeapRoot;
@@ -57,7 +57,7 @@ pub enum ObjectInit {
         /// The site of the closure expression: a semantic coordinate, never
         /// a compiled code index.
         site: Site,
-        captures: Vec<EntityId>,
+        captures: Vec<(Name, EntityId)>,
     },
     Variable(Value),
 }
@@ -66,7 +66,7 @@ pub enum ObjectInit {
 #[derive(Clone, Debug)]
 pub struct ClosureView {
     pub site: Site,
-    pub captures: Vec<EntityId>,
+    pub captures: Vec<(Name, EntityId)>,
 }
 
 /// A record field name: a compiled constant or a runtime text.
