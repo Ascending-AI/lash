@@ -5,12 +5,12 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::document::{Document, EffectIdentity, Name, Site};
 use lash::workflow::edit::Draft;
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowEnvironment,
-    WorkflowExecutionOverlayAccumulator, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
-    WorkflowOverlayTerminal, WorkflowPublish,
+    WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact, WorkflowOverlayOccurrence,
+    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
@@ -596,28 +596,41 @@ impl Overlay {
         Ok((events, terminal))
     }
 
+    fn observed_call(&self, at: &EffectIdentity) -> Option<lash::ToolCallId> {
+        self.accumulator
+            .snapshot()?
+            .history
+            .into_iter()
+            .find_map(|event| match event.fact {
+                WorkflowOverlayFact::StepBodyStarted { step } if step.at == *at => {
+                    Some(step.call_id)
+                }
+                _ => None,
+            })
+    }
+
     fn language_observation(
         &mut self,
         observation: &LanguageExecutionObservation,
     ) -> Result<Vec<RunEvent>, RunError> {
-        // The engine resumes the VM with a settled step's recorded output.
-        // NodeCompleted identifies that logical call even after the bounded
-        // effect summary stops carrying individual loop occurrences.
+        // VM terminals may omit the call id. The admitted body's exact
+        // occurrence supplies it while that observation remains retained.
         self.accumulator.observe(observation)?;
         let mut events = self.changed();
         if let TraceLanguageExecutionPayload::Node { at, fact } = &observation.execution.payload {
             let call = match fact {
-                TraceNodeFact::Completed {
-                    call_id: Some(call),
-                } => {
-                    self.completed_calls
-                        .insert(call.to_string(), at.site.clone());
-                    Some((call, RunStatus::Succeeded, None))
-                }
-                TraceNodeFact::Failed {
-                    call_id: Some(call),
-                    failure,
-                } => Some((call, RunStatus::Failed, Some(failure.message().to_owned()))),
+                TraceNodeFact::Completed { call_id } => call_id
+                    .clone()
+                    .or_else(|| self.observed_call(at))
+                    .map(|call| {
+                        self.completed_calls
+                            .insert(call.to_string(), at.site.clone());
+                        (call, RunStatus::Succeeded, None)
+                    }),
+                TraceNodeFact::Failed { call_id, failure } => call_id
+                    .clone()
+                    .or_else(|| self.observed_call(at))
+                    .map(|call| (call, RunStatus::Failed, Some(failure.message().to_owned()))),
                 _ => None,
             };
             if let Some((call, status, error)) = call {
@@ -627,7 +640,7 @@ impl Overlay {
                     DisplayDelta::default(),
                     error,
                 );
-                event.call_id = Some(call.clone());
+                event.call_id = Some(call);
                 event.call_only = true;
                 events.push(event);
             }
@@ -767,6 +780,23 @@ mod tests {
         }
     }
 
+    fn body_start(occurrence: u64, call_id: lash::ToolCallId) -> StepBodyStartedObservation {
+        StepBodyStartedObservation {
+            observed_at_ms: occurrence * 10,
+            step: lash::tracing::StepBodyStarted {
+                process_id: lash::ProcessId::fixture("adapter"),
+                at: EffectIdentity {
+                    task: TaskIdentity::Main,
+                    site: Site::new(Unit::Main, [0]),
+                    occurrence,
+                    loops: Vec::new(),
+                },
+                call_id,
+                attempt: 1,
+            },
+        }
+    }
+
     #[test]
     fn a_process_success_does_not_invent_a_missing_occurrence_outcome() {
         let mut overlay = overlay();
@@ -820,12 +850,20 @@ mod tests {
         let mut last_durable = None;
         for occurrence in 0..9 {
             let call = lash::ToolCallId::fixture(&format!("call-{occurrence}"));
+            overlay
+                .accumulator
+                .step_body_started(&body_start(occurrence, call.clone()))
+                .unwrap();
+            let other_call = lash::ToolCallId::fixture(&format!("other-task-{occurrence}"));
+            let mut concurrent = body_start(occurrence, other_call);
+            if let TraceLanguageExecutionPayload::Node { at, .. } = &running.execution.payload {
+                concurrent.step.at.task = at.task.clone();
+            }
+            overlay.accumulator.step_body_started(&concurrent).unwrap();
             let events = overlay
                 .language_observation(&observation(
                     occurrence,
-                    TraceNodeFact::Completed {
-                        call_id: Some(call.clone()),
-                    },
+                    TraceNodeFact::Completed { call_id: None },
                 ))
                 .unwrap();
             let event = events
@@ -862,12 +900,25 @@ mod tests {
             );
             last_durable = Some(durable);
         }
+        let replayed = overlay
+            .language_observation(&observation(0, TraceNodeFact::Completed { call_id: None }))
+            .unwrap();
+        assert!(
+            replayed
+                .iter()
+                .any(|event| event.call_id.as_ref() == Some(&lash::ToolCallId::fixture("call-0"))),
+            "a retained older occurrence uses its own body binding, not the latest call"
+        );
         let failed = lash::ToolCallId::fixture("failed-after-cap");
+        overlay
+            .accumulator
+            .step_body_started(&body_start(9, failed.clone()))
+            .unwrap();
         let events = overlay
             .language_observation(&observation(
                 9,
                 TraceNodeFact::Failed {
-                    call_id: Some(failed.clone()),
+                    call_id: None,
                     failure: lash::tracing::TraceLanguageExecutionFailure::Runtime {
                         code: "fixture".into(),
                         message: "failed".into(),
@@ -893,6 +944,14 @@ mod tests {
                 .iter()
                 .all(|event| event.call_only),
             "a durable success cannot replace another task's failed or incomplete aggregate"
+        );
+        overlay.reset_after_gap();
+        let unbound = overlay
+            .language_observation(&observation(0, TraceNodeFact::Completed { call_id: None }))
+            .unwrap();
+        assert!(
+            unbound.iter().all(|event| event.call_id.is_none()),
+            "a gap retires call bindings with their provisional observations"
         );
     }
 }
