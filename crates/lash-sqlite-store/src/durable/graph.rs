@@ -107,9 +107,9 @@ CREATE TABLE IF NOT EXISTS root_leases (
 CREATE INDEX IF NOT EXISTS idx_root_leases_root_ref ON root_leases (root_ref);
 CREATE INDEX IF NOT EXISTS idx_root_leases_expiry ON root_leases (expires_at_ms);
 
--- The durable retirement frontier (FIG-6191, D-RET): a retired root, or a
--- node under one a bounded step has not peeled yet. A root of the catalog
--- until its step removes it; `closure` 0 peels the node alone.
+-- A retirement hold (FIG-6191, D-RET): a root a publication retired or a
+-- lease released. A root of the catalog until a step takes it; `closure` 0
+-- peels the node alone.
 CREATE TABLE IF NOT EXISTS retirement_holds (
     root_ref TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
@@ -117,6 +117,18 @@ CREATE TABLE IF NOT EXISTS retirement_holds (
 );
 CREATE INDEX IF NOT EXISTS idx_retirement_holds_queue
     ON retirement_holds (queued_at_ms, root_ref);
+
+-- A retirement step's unfinished frontier (FIG-6193): a node under a
+-- retired root, or a reaped lease's root, that a bounded step has not peeled
+-- yet. Only retirement steps write or take it: no root of the catalog and no
+-- foreign key; a node gone meanwhile is passed over.
+CREATE TABLE IF NOT EXISTS retirement_frontier (
+    node_ref TEXT PRIMARY KEY,
+    closure INTEGER NOT NULL CONSTRAINT ck_retirement_frontier_closure CHECK (closure IN (0, 1)),
+    queued_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_retirement_frontier_queue
+    ON retirement_frontier (queued_at_ms, node_ref);
 
 -- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
 -- that certified the pages it changed, written with the root. Not a root

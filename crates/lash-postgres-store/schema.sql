@@ -1166,9 +1166,9 @@ CREATE TABLE IF NOT EXISTS lash_root_leases (
 CREATE INDEX IF NOT EXISTS idx_lash_root_leases_root_ref ON lash_root_leases (root_ref);
 CREATE INDEX IF NOT EXISTS idx_lash_root_leases_expiry ON lash_root_leases (expires_at_ms, lease_id);
 
--- The durable retirement frontier (FIG-6191, D-RET): a retired root, or a
--- node under one a bounded step has not peeled yet. A root of the catalog
--- until its step removes it; a hold without `closure` peels the node alone.
+-- A retirement hold (FIG-6191, D-RET): a root a publication retired or a
+-- lease released. A root of the catalog until a step takes it; a hold
+-- without `closure` peels the node alone.
 CREATE TABLE IF NOT EXISTS lash_retirement_holds (
     root_ref TEXT PRIMARY KEY REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     closure BOOLEAN NOT NULL,
@@ -1176,6 +1176,19 @@ CREATE TABLE IF NOT EXISTS lash_retirement_holds (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_retirement_holds_queue
     ON lash_retirement_holds (queued_at_ms, root_ref);
+
+-- A retirement step's unfinished frontier (FIG-6193): a node under a
+-- retired root, or a reaped lease's root, that a bounded step has not peeled
+-- yet. Only retirement steps, one at a time, write or take it, so a step
+-- never waits on another transaction for it: no root of the catalog and no
+-- foreign key; a node gone meanwhile is passed over.
+CREATE TABLE IF NOT EXISTS lash_retirement_frontier (
+    node_ref TEXT PRIMARY KEY,
+    closure BOOLEAN NOT NULL,
+    queued_at_ms BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lash_retirement_frontier_queue
+    ON lash_retirement_frontier (queued_at_ms, node_ref);
 
 -- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
 -- that certified the pages it changed, written with the root. Not a root
@@ -1267,6 +1280,7 @@ DECLARE
     v_state TEXT := 'owned';
     v_retired TEXT[] := '{}';
     v_phase_ends TEXT[] := '{}';
+    v_held TEXT[];
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{}';
@@ -1287,9 +1301,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 012582136e52999c); a call
+    -- Generated from this build's statements (registry 4fe93e2c6204ed52); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '012582136e52999c'
+    IF p_registry IS DISTINCT FROM '4fe93e2c6204ed52'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2482,20 +2496,18 @@ BEGIN
     END LOOP;
     -- Hold what the steps retired for the bounded retirement steps
     -- (FIG-6191, D-RET): each retired root's closure, and an ended turn's
-    -- PhaseRoot alone.
-    IF cardinality(v_retired) > 0 THEN
+    -- PhaseRoot alone, every node locked before any hold row (FIG-6193).
+    IF cardinality(v_retired) > 0 OR cardinality(v_phase_ends) > 0 THEN
+        SELECT ARRAY(SELECT hash FROM lash_blobs
+             WHERE hash = ANY((v_retired)::text[]) OR hash = ANY((v_phase_ends)::text[])
+             ORDER BY hash FOR KEY SHARE)
+        INTO v_held;
         INSERT INTO lash_retirement_holds AS held (root_ref, closure, queued_at_ms)
-             SELECT node.hash, (TRUE)::boolean, (v_now)::bigint
-             FROM (SELECT hash FROM lash_blobs WHERE hash = ANY((v_retired)::text[])
-                   ORDER BY hash FOR KEY SHARE) AS node
-             ORDER BY node.hash
-             ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure;
-    END IF;
-    IF cardinality(v_phase_ends) > 0 THEN
-        INSERT INTO lash_retirement_holds AS held (root_ref, closure, queued_at_ms)
-             SELECT node.hash, (FALSE)::boolean, (v_now)::bigint
-             FROM (SELECT hash FROM lash_blobs WHERE hash = ANY((v_phase_ends)::text[])
-                   ORDER BY hash FOR KEY SHARE) AS node
+             SELECT node.hash, bool_or(node.closure), (v_now)::bigint
+             FROM (SELECT UNNEST((v_retired)::text[]) AS hash, TRUE AS closure
+                   UNION ALL SELECT UNNEST((v_phase_ends)::text[]), FALSE) AS node
+             WHERE node.hash = ANY((v_held)::text[])
+             GROUP BY node.hash
              ORDER BY node.hash
              ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure;
     END IF;

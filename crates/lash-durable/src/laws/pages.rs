@@ -35,17 +35,25 @@ use crate::{ActorKey, DomainWrite, DurableError, Epoch, NodeLease};
 mod generated;
 #[path = "pages_owners.rs"]
 mod owners;
+#[path = "pages_races.rs"]
+mod races;
 pub use generated::GeneratedManifest;
 use generated::Recipe;
 pub use owners::{
     a_host_read_never_descends_into_a_heap_page,
     a_pruned_step_outcome_frees_exactly_its_unshared_pages, a_step_outcome_owns_its_candidate,
 };
+pub use races::{PageLockProbe, publications_and_retirement_on_two_nodes_never_deadlock};
 
 /// One dialect's page store and the raw access the laws need.
 #[async_trait::async_trait]
 pub trait PageTier: Send + Sync {
     fn pages(&self) -> &dyn PageStore;
+    /// Another node's store over the same database; a tier with one store
+    /// answers it again.
+    fn peer(&self) -> &dyn PageStore {
+        self.pages()
+    }
     /// Every stored blob.
     async fn stored(&self) -> BTreeSet<NodeId>;
     /// Every root the catalog names, one per row.

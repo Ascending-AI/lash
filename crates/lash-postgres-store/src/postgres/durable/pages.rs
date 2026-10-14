@@ -3,7 +3,38 @@
 //! semantic admission it publishes, and the bounded retirement steps that
 //! peel retired roots off the publication path.
 //!
-//! # Locks
+//! # Lock order
+//!
+//! One global order for every transaction that takes these locks
+//! (FIG-6193); each class is taken in ascending digest order:
+//!
+//! 1. the retirement advisory key (steps only), or the owner's fence row;
+//! 2. blob rows a writer names or installs: key-share locks and inserts, a
+//!    candidate's batch at a time, then the children its edges name;
+//! 3. the root catalog's owning rows the commit's domain writes change, and
+//!    the semantic admission row;
+//! 4. retirement holds ([`hold`]): one statement key-share locks every node
+//!    the transaction holds, then one statement inserts or widens every
+//!    hold row, so a holder waits on a peel lock only before it owns any
+//!    hold row;
+//! 5. a step's peel locks: blob rows `FOR UPDATE SKIP LOCKED`;
+//! 6. the step's own frontier rows (`retirement_frontier`).
+//!
+//! A step takes the advisory key, the only lock it ever waits for. It then
+//! takes expired leases and the oldest hold `FOR UPDATE SKIP LOCKED` (4),
+//! peel locks (5) and frontier rows (6), and none of those waits: SKIP
+//! LOCKED passes over what another transaction holds, and only steps,
+//! one at a time, touch the frontier, which carries no foreign key and is
+//! no root of the catalog. A step therefore never waits for a publication,
+//! a lease release or an inline peel, so no lock cycle runs through it: a
+//! publication that meets a hold row a step took, or a node a step
+//! peel-locked, waits for a transaction that waits on nothing. Before this
+//! order a step put what was left of its frontier back as hold rows after
+//! peeling, and could wait on a publication's uncommitted hold row while
+//! that publication waited on the hold row the step had taken: a deadlock
+//! PostgreSQL broke by aborting one of them
+//! (`publications_and_retirement_on_two_nodes_never_deadlock` choreographs
+//! it).
 //!
 //! A lease takes its actor row `FOR SHARE`, the fence a claim's epoch bump
 //! waits behind. A candidate install key-share locks every node it names
@@ -18,10 +49,12 @@
 //! A commit that retires a root holds it ([`hold`]): a row of the root
 //! catalog, inserted after the hold key-share locks the node. Retirement
 //! steps run one at a time under a transaction advisory lock: a step reaps
-//! expired leases and holds their roots, then takes the oldest holds
-//! `FOR UPDATE SKIP LOCKED`, peels under them level by level in digest
-//! order until its node budget is spent, holds every candidate its peel
-//! skipped and the frontier it did not reach, all in one transaction.
+//! expired leases into its frontier, then continues its frontier, oldest
+//! first, before it takes the oldest hold. It peels level by level in
+//! digest order until its node budget is spent, and puts every node its
+//! peel skipped and the frontier it did not reach back on the frontier,
+//! all in one transaction. A frontier node gone meanwhile (an inline peel
+//! or the orphan audit took it) is passed over.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -53,20 +86,38 @@ lash_store_sql::statements! {
     /// Page statements only PostgreSQL issues: the array binding of a node
     /// list, its boolean holds and the row locks a lease and a step take.
     pub(crate) struct PagePostgresStatements @ "durable_pages_postgres" {
-        /// Hold every stored node of `?1`, its closure when `?2` or the
-        /// node alone, queued at `?3`, each key-share locked first in
-        /// digest order: one a peel deletes meanwhile is not held. A node
-        /// already held keeps the wider hold and its place in the queue.
+        /// Key-share lock every stored node of `?1` and `?2`, in digest
+        /// order, and answer them: what a hold may name, locked against a
+        /// peel before any hold row is written.
+        hold_lock = "SELECT ARRAY(SELECT hash FROM blobs
+             WHERE hash = ANY(?1::text[]) OR hash = ANY(?2::text[])
+             ORDER BY hash FOR KEY SHARE)";
+
+        /// Hold every node of `?4` (locked by [`Self::hold_lock`]) that
+        /// `?1` names as a closure or `?2` as a node alone, queued at `?3`,
+        /// in digest order. A node already held keeps the wider hold and
+        /// its place in the queue.
         hold = "INSERT INTO retirement_holds AS held (root_ref, closure, queued_at_ms)
-             SELECT node.hash, ?2::boolean, ?3::bigint
-             FROM (SELECT hash FROM blobs WHERE hash = ANY(?1::text[])
-                   ORDER BY hash FOR KEY SHARE) AS node
+             SELECT node.hash, bool_or(node.closure), ?3::bigint
+             FROM (SELECT UNNEST(?1::text[]) AS hash, TRUE AS closure
+                   UNION ALL SELECT UNNEST(?2::text[]), FALSE) AS node
+             WHERE node.hash = ANY(?4::text[])
+             GROUP BY node.hash
              ORDER BY node.hash
              ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure";
 
         /// The oldest hold no other transaction holds, locked for its step.
         hold_next = "SELECT root_ref FROM retirement_holds
              ORDER BY queued_at_ms, root_ref LIMIT 1 FOR UPDATE SKIP LOCKED";
+
+        /// Put every node of `?1` on the step's frontier, its closure when
+        /// `?2`, queued at `?3`. A node already there keeps the wider
+        /// peel and its place in the queue.
+        frontier_put = "INSERT INTO retirement_frontier AS queued (node_ref, closure, queued_at_ms)
+             SELECT node.hash, ?2::boolean, ?3::bigint
+             FROM UNNEST(?1::text[]) AS node(hash)
+             ORDER BY node.hash
+             ON CONFLICT (node_ref) DO UPDATE SET closure = queued.closure OR excluded.closure";
 
         /// Up to `?2` leases expired by `?1` no other transaction holds,
         /// oldest first.
@@ -83,6 +134,13 @@ lash_store_sql::statements! {
         /// in digest order: a candidate's children, held against a peel.
         lock_children = "SELECT hash, encoding FROM blobs WHERE hash = ANY(?1::text[])
              ORDER BY hash FOR KEY SHARE";
+
+        /// Lock for its delete every blob of a step's level `?1` that no
+        /// other transaction holds, in digest order, beside every blob of
+        /// `?1` still stored: the step's peel lock, which never waits.
+        peel_claim = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[])
+                 ORDER BY hash FOR UPDATE SKIP LOCKED),
+             ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[]))";
 
         /// Every edge of parents `?1` to children `?2` (raw digests) not
         /// stored yet: a supplied node another commit installed already has
@@ -108,9 +166,9 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     }
 });
 
-/// The hold statement the one-call commit runs.
-pub(super) fn hold() -> &'static Rendered {
-    &SQL.postgres.hold
+/// The hold statements the one-call commit runs: the lock, then the rows.
+pub(super) fn hold_statements() -> (&'static Rendered, &'static Rendered) {
+    (&SQL.postgres.hold_lock, &SQL.postgres.hold)
 }
 
 /// A lease's acquisition, renewal and release.
@@ -137,23 +195,34 @@ const FRONTIER_CAP: usize = 4096;
 #[cfg(any(test, feature = "testing"))]
 static CANDIDATE_PEAK_BUFFERED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Holds every stored node of `roots`, the closure under each when
-/// `closure`, queued at `now`: the publication's half of D-RET, and where a
-/// retirement step leaves what it did not reach.
-async fn hold_nodes(
+/// Holds every stored node of `closures`, the closure under each, and of
+/// `alone`, each node alone, queued at `now`: the publication's half of
+/// D-RET, and where a lease release leaves its root. Every node is
+/// key-share locked before any hold row is written (lock order 4).
+async fn hold(
     tx: &mut PgConnection,
-    roots: &BTreeSet<String>,
-    closure: bool,
+    closures: &BTreeSet<String>,
+    alone: &BTreeSet<String>,
     now: DurableInstant,
 ) -> Result<(), sqlx::Error> {
-    if roots.is_empty() {
+    if closures.is_empty() && alone.is_empty() {
         return Ok(());
     }
-    let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+    let closures: Vec<&str> = closures.iter().map(String::as_str).collect();
+    let alone: Vec<&str> = alone.iter().map(String::as_str).collect();
+    let locked: Vec<String> = crate::observed_sql::query_scalar(SQL.postgres.hold_lock.sql())
+        .bind(&closures)
+        .bind(&alone)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    if locked.is_empty() {
+        return Ok(());
+    }
     crate::observed_sql::query(SQL.postgres.hold.sql())
-        .bind(&roots)
-        .bind(closure)
+        .bind(&closures)
+        .bind(&alone)
         .bind(now.0)
+        .bind(&locked)
         .execute(crate::observed_sql::executor(tx))
         .await?;
     Ok(())
@@ -167,8 +236,29 @@ pub(crate) async fn hold_retired(
     now: DurableInstant,
 ) -> Result<(), sqlx::Error> {
     let (closures, phase_ends) = retired.into_parts();
-    hold_nodes(tx, &closures, true, now).await?;
-    hold_nodes(tx, &phase_ends, false, now).await
+    hold(tx, &closures, &phase_ends, now).await
+}
+
+/// Puts `nodes` on the step's frontier, the closure under each when
+/// `closure`, queued at `now`. Only a step, under the advisory key, writes
+/// the frontier, so this never waits (lock order 6).
+async fn frontier_put(
+    tx: &mut PgConnection,
+    nodes: &BTreeSet<String>,
+    closure: bool,
+    now: DurableInstant,
+) -> Result<(), sqlx::Error> {
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    let nodes: Vec<&str> = nodes.iter().map(String::as_str).collect();
+    crate::observed_sql::query(SQL.postgres.frontier_put.sql())
+        .bind(&nodes)
+        .bind(closure)
+        .bind(now.0)
+        .execute(crate::observed_sql::executor(tx))
+        .await?;
+    Ok(())
 }
 
 /// Records `admission` with its root, in the publishing transaction.
@@ -383,21 +473,21 @@ async fn fence(
 
 /// One level of a step's peel: locks what of `level` no other transaction
 /// holds, then deletes every locked node nothing names or reaches. Answers
-/// how many it deleted, the children their edges reached, and the nodes it
-/// could not lock.
+/// how many it deleted, the children their edges reached, and the stored
+/// nodes it could not lock; a node gone already is neither.
 async fn peel(
     tx: &mut PgConnection,
     level: &BTreeSet<String>,
 ) -> Result<(u64, BTreeSet<String>, BTreeSet<String>), sqlx::Error> {
     let wanted: Vec<&str> = level.iter().map(String::as_str).collect();
-    let locked: Vec<String> = crate::observed_sql::query_scalar(graph::peel_lock().sql())
-        .bind(&wanted)
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    let skipped: BTreeSet<String> = level
-        .iter()
+    let (locked, stored): (Vec<String>, Vec<String>) =
+        crate::observed_sql::query_as(SQL.postgres.peel_claim.sql())
+            .bind(&wanted)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await?;
+    let skipped: BTreeSet<String> = stored
+        .into_iter()
         .filter(|node| !locked.contains(node))
-        .cloned()
         .collect();
     if locked.is_empty() {
         return Ok((0, BTreeSet::new(), skipped));
@@ -414,7 +504,32 @@ async fn peel(
     ))
 }
 
+/// The next node a step peels from: its own frontier first, oldest first,
+/// then the oldest hold no other transaction holds. Answers the node and
+/// whether its closure is peeled.
+async fn next_retired(tx: &mut PgConnection) -> Result<Option<(String, bool)>, sqlx::Error> {
+    let continued: Option<(String, bool)> =
+        crate::observed_sql::query_as(SQL.pages.frontier_take.sql())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await?;
+    if continued.is_some() {
+        return Ok(continued);
+    }
+    let root: Option<String> = crate::observed_sql::query_scalar(SQL.postgres.hold_next.sql())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let closure: bool = crate::observed_sql::query_scalar(SQL.pages.hold_take.sql())
+        .bind(&root)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    Ok(Some((root, closure)))
+}
+
 /// One retirement step in the caller's transaction (see the module docs).
+/// After the advisory key it waits on nothing.
 async fn retire_step_in(
     tx: &mut PgConnection,
     budget: RetirementBudget,
@@ -447,7 +562,7 @@ async fn retire_step_in(
             progress.leases_reaped += 1;
         }
     }
-    hold_nodes(tx, &reaped, true, now).await?;
+    frontier_put(tx, &reaped, true, now).await?;
     let mut remaining = limit;
     // A step examines at most a few times its deletion budget: a frontier
     // something else still names costs reads, not deletions.
@@ -458,31 +573,21 @@ async fn retire_step_in(
     let mut skipped = BTreeSet::new();
     while remaining > 0 && examinable > 0 {
         if frontier.is_empty() {
-            // The next oldest hold: a closure joins the frontier, an ended
-            // phase's root is peeled alone.
-            let root: Option<String> =
-                crate::observed_sql::query_scalar(SQL.postgres.hold_next.sql())
-                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                    .await?;
-            let Some(root) = root else {
+            // The next retired node: a closure joins the frontier, an
+            // ended phase's root is peeled alone.
+            let Some((node, closure)) = next_retired(tx).await? else {
                 break;
             };
-            let closure: bool = crate::observed_sql::query_scalar(SQL.pages.hold_take.sql())
-                .bind(&root)
-                .fetch_one(crate::observed_sql::executor(&mut *tx))
-                .await?;
             progress.holds_advanced += 1;
             if !closure {
                 examinable -= 1;
-                let (gone, _, missed) = peel(tx, &BTreeSet::from([root])).await?;
+                let (gone, _, missed) = peel(tx, &BTreeSet::from([node])).await?;
                 progress.nodes_deleted += gone;
                 remaining = remaining.saturating_sub(gone);
-                if !missed.is_empty() {
-                    hold_nodes(tx, &missed, false, now).await?;
-                }
+                frontier_put(tx, &missed, false, now).await?;
                 continue;
             }
-            frontier.insert(root);
+            frontier.insert(node);
         }
         // The next nodes in digest order, within the budget.
         let take = usize::try_from(remaining.min(examinable))
@@ -500,12 +605,12 @@ async fn retire_step_in(
         frontier.extend(children);
         if let Some(first_excess) = frontier.iter().nth(FRONTIER_CAP).cloned() {
             let excess = frontier.split_off(&first_excess);
-            hold_nodes(tx, &excess, true, now).await?;
+            frontier_put(tx, &excess, true, now).await?;
         }
     }
     // What another transaction held is retired by a later step.
     frontier.extend(skipped);
-    hold_nodes(tx, &frontier, true, now).await?;
+    frontier_put(tx, &frontier, true, now).await?;
     Ok(progress)
 }
 
@@ -625,7 +730,7 @@ impl PageStore for PostgresDurableStore {
                         .map_err(sqlx_failure)?;
                 // What only the lease kept is peeled by a later step.
                 if let Some(root) = root {
-                    hold_nodes(tx, &BTreeSet::from([root]), true, now)
+                    hold(tx, &BTreeSet::from([root]), &BTreeSet::new(), now)
                         .await
                         .map_err(sqlx_failure)?;
                 }

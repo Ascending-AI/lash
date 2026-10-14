@@ -17,6 +17,8 @@ struct Tier {
     _root: Option<tempfile::TempDir>,
     _set: SqliteStoreSet,
     store: SqliteDurableStore,
+    /// A second node's store set and store over the same file.
+    peer: Option<(SqliteStoreSet, SqliteDurableStore)>,
     clock: Arc<TestClock>,
 }
 
@@ -44,8 +46,20 @@ async fn tier(file: bool) -> Tier {
         _root: root,
         _set: set,
         store,
+        peer: None,
         clock,
     }
+}
+
+/// [`tier`] with a second node over the file, when it is one.
+async fn two_node_tier(file: bool) -> Tier {
+    let mut tier = tier(file).await;
+    if let Some(root) = tier._root.as_ref().map(|root| root.path().to_owned()) {
+        let set = open_set(Some(&root), &tier.clock).await;
+        let store = set.durable_store();
+        tier.peer = Some((set, store));
+    }
+    tier
 }
 
 /// Runs retirement steps until nothing is held: how many nodes they
@@ -297,6 +311,10 @@ impl PageTier for Tier {
         &self.store
     }
 
+    fn peer(&self) -> &dyn PageStore {
+        self.peer.as_ref().map_or(&self.store, |(_, store)| store)
+    }
+
     async fn stored(&self) -> BTreeSet<NodeId> {
         self.texts("SELECT hash FROM blobs")
             .await
@@ -385,6 +403,28 @@ page_law!(an_expired_lease_reads_nothing);
 page_law!(the_lost_receipt_resolves_by_commit_identity);
 page_law!(publication_keeps_global_digest_lock_order);
 page_law!(an_ownership_transfer_fences_the_old_activation);
+
+/// D-RET, D-LEASE under load (FIG-6193): a memory store races itself; a
+/// file has a second node.
+mod publications_and_retirement_on_two_nodes_never_deadlock {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory() {
+        let tier = two_node_tier(false).await;
+        pages::publications_and_retirement_on_two_nodes_never_deadlock(&tier, None, 48)
+            .await
+            .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file() {
+        let tier = two_node_tier(true).await;
+        pages::publications_and_retirement_on_two_nodes_never_deadlock(&tier, None, 48)
+            .await
+            .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+}
 
 /// D-RET over retired leaves, with a restart between steps.
 mod retirement_advances_in_bounded_steps_and_reclaims_everything_unowned {

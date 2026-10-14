@@ -7,17 +7,19 @@
 //!
 //! Every write here runs in [`SqliteConnection::write_flow`](crate::conn::SqliteConnection::write_flow),
 //! behind the database's one writer: a retirement step never interleaves
-//! with an install, a lease or another step. A lease's fence is the actor
-//! row read under that writer. A page read is one read transaction that
-//! checks its lease and reads the bytes on one snapshot.
+//! with an install, a lease or another step, so no lock order is needed
+//! here (PostgreSQL's is in its `durable/pages.rs`). A lease's fence is the
+//! actor row read under that writer. A page read is one read transaction
+//! that checks its lease and reads the bytes on one snapshot.
 //!
 //! # Retirement
 //!
-//! A commit that retires a root holds it ([`hold`]); a step takes the
-//! oldest holds one at a time, peels under each level by level in digest
-//! order until its node budget is spent, and holds the frontier it did not
-//! reach, in one transaction. Expired leases are reaped first: their roots are held, so
-//! what only they kept is peeled by a later step.
+//! A commit that retires a root holds it ([`hold`]); a step continues its
+//! own frontier (`retirement_frontier`), oldest first, before it takes the
+//! oldest hold, peels level by level in digest order until its node budget
+//! is spent, and puts the frontier it did not reach back on it, in one
+//! transaction. Expired leases are reaped first: their roots join the
+//! frontier, so what only they kept is peeled by a later step.
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -58,6 +60,13 @@ lash_store_sql::statements! {
         /// The oldest hold.
         hold_next = "SELECT root_ref FROM retirement_holds
              ORDER BY queued_at_ms, root_ref LIMIT 1";
+
+        /// Put every node of JSON `?1` on the steps' frontier, its closure
+        /// when `?2` is 1 or the node alone when 0, queued at `?3`. A node
+        /// already there keeps the wider peel and its place in the queue.
+        frontier_put = "INSERT INTO retirement_frontier (node_ref, closure, queued_at_ms)
+             SELECT value, ?2, ?3 FROM json_each(?1) WHERE true
+             ON CONFLICT (node_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Up to `?2` leases expired by `?1`, oldest first.
         leases_expired = "SELECT lease_id FROM root_leases WHERE expires_at_ms <= ?1
@@ -122,8 +131,7 @@ pub(crate) static CANDIDATE_PEAK_BUFFERED: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 /// Holds every stored node of `roots`, the closure under each when
-/// `closure`, queued at `now`: the publication's half of D-RET, and where a
-/// retirement step leaves the frontier it did not reach.
+/// `closure`, queued at `now`: the publication's half of D-RET.
 pub(super) fn hold(
     tx: &Connection,
     roots: &BTreeSet<String>,
@@ -390,7 +398,7 @@ fn retire_step_in(
             progress.leases_reaped += 1;
         }
     }
-    hold(tx, &reaped, true, now)?;
+    frontier_put(tx, &reaped, true, now)?;
     let mut remaining = usize::try_from(limit).unwrap_or(usize::MAX);
     // A step examines at most a few times its deletion budget: a frontier
     // something else still names costs reads, not deletions.
@@ -398,18 +406,11 @@ fn retire_step_in(
     let mut frontier = BTreeSet::new();
     while remaining > 0 && examinable > 0 {
         if frontier.is_empty() {
-            // The next oldest hold: a closure joins the frontier, an ended
-            // phase's root is peeled alone.
-            let Some(root) = tx
-                .prepare_cached(SQL.sqlite.hold_next.sql())?
-                .query_row([], |row| row.get::<_, String>(0))
-                .optional()?
-            else {
+            // The next retired node: a closure joins the frontier, an
+            // ended phase's root is peeled alone.
+            let Some((root, closure)) = next_retired(tx)? else {
                 break;
             };
-            let closure: bool = tx
-                .prepare_cached(SQL.pages.hold_take.sql())?
-                .query_row([&root], |row| row.get(0))?;
             progress.holds_advanced += 1;
             if !closure {
                 examinable -= 1;
@@ -433,11 +434,56 @@ fn retire_step_in(
         frontier.extend(children);
         if let Some(first_excess) = frontier.iter().nth(FRONTIER_CAP).cloned() {
             let excess = frontier.split_off(&first_excess);
-            hold(tx, &excess, true, now)?;
+            frontier_put(tx, &excess, true, now)?;
         }
     }
-    hold(tx, &frontier, true, now)?;
+    frontier_put(tx, &frontier, true, now)?;
     Ok(progress)
+}
+
+/// Puts `nodes` on the steps' frontier, the closure under each when
+/// `closure`, queued at `now`.
+fn frontier_put(
+    tx: &Connection,
+    nodes: &BTreeSet<String>,
+    closure: bool,
+    now: DurableInstant,
+) -> rusqlite::Result<()> {
+    let nodes: Vec<&String> = nodes.iter().collect();
+    for chunk in nodes.chunks(HOLD_BATCH) {
+        cached_execute(
+            tx,
+            SQL.sqlite.frontier_put.sql(),
+            rusqlite::params![graph::json_array(&chunk), i64::from(closure), now.0],
+        )?;
+    }
+    Ok(())
+}
+
+/// The next node a step peels from: its own frontier first, oldest first,
+/// then the oldest hold. Answers the node and whether its closure is
+/// peeled.
+fn next_retired(tx: &Connection) -> rusqlite::Result<Option<(String, bool)>> {
+    let continued = tx
+        .prepare_cached(SQL.pages.frontier_take.sql())?
+        .query_row([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
+        .optional()?;
+    if continued.is_some() {
+        return Ok(continued);
+    }
+    let Some(root) = tx
+        .prepare_cached(SQL.sqlite.hold_next.sql())?
+        .query_row([], |row| row.get::<_, String>(0))
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let closure: bool = tx
+        .prepare_cached(SQL.pages.hold_take.sql())?
+        .query_row([&root], |row| row.get(0))?;
+    Ok(Some((root, closure)))
 }
 
 impl SqliteDurableStore {

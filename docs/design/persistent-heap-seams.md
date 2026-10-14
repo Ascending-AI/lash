@@ -139,11 +139,18 @@ open that two lanes would otherwise settle differently.
 - **D-RET.** Replacing or retiring a root no longer peels synchronously in
   the publication transaction. The transaction moves the old root to a
   retirement hold, a new root source in the catalog. Each bounded step takes
-  one hold, deletes in digest order the nodes under it that no owner, lease
-  or inbound edge keeps, and installs holds on their surviving children, all
-  in one transaction. Steps run under the shared graph gate and use row
-  locks, so they never stop publication. Hosts apply backpressure from
-  `retirement_backlog` and staging usage.
+  its own frontier's nodes and then holds, deletes in digest order the nodes
+  under them that no owner, lease or inbound edge keeps, and puts their
+  surviving children on the frontier (`retirement_frontier`, written only by
+  steps, no catalog root), all in one transaction. On PostgreSQL every path
+  takes these locks in one global order (FIG-6193, in
+  `lash-postgres-store/src/postgres/durable/pages.rs`): the advisory key or
+  owner fence, then blob key-shares and inserts, catalog owning rows and the
+  admission, then hold rows (every held node locked before the first hold
+  row), then peel locks (`SKIP LOCKED`), then frontier rows. A step waits on
+  nothing after its advisory key, so it is never part of a lock cycle and
+  never stops publication. Hosts apply backpressure from
+  `retirement_backlog` (holds and frontier) and staging usage.
 - **D-ADM.** One semantic admission is recorded per published root, keyed by
   the root, in the publishing transaction:
   `(root, kernel, page_format, validator, commit)`. The validator string
@@ -584,10 +591,10 @@ the receipt confirms the commit.
 
 New catalog sources are `RootSource::ReadLease` and
 `RootSource::RetirementHold`. New tables (`root_leases`,
-`retirement_holds`, `semantic_admissions`) go straight into both 1.0
-baselines. Normal activation stops using `DurableReads::hydrate` for heap
-roots; hydrate stays the generic reader of host roots (§7); the
-integrator deletes it.
+`retirement_holds`, `retirement_frontier`, `semantic_admissions`) go
+straight into both 1.0 baselines. Normal activation stops using
+`DurableReads::hydrate` for heap roots; hydrate stays the generic reader of
+host roots (§7); the integrator deletes it.
 
 Errors: `DurableError::OwnershipLost` for a stale epoch; the graph refusals
 `RevisionConflict`, `RootRetired`, `MissingNode`, `ContentConflict` and

@@ -33,19 +33,34 @@ struct Tier {
     _storage: crate::PostgresStorage,
     pool: PgPool,
     store: PostgresDurableStore,
+    /// A second node's storage and store over the same database.
+    peer: Option<(crate::PostgresStorage, PostgresDurableStore)>,
+    config: crate::PostgresHostConfig,
     clock: Arc<TestClock>,
 }
 
 async fn tier() -> Option<Tier> {
+    tier_with(crate::testing::fixture_config(), false).await
+}
+
+/// A tier under `config`, with a second node when `peer`.
+async fn tier_with(config: crate::PostgresHostConfig, peer: bool) -> Option<Tier> {
     let database_url = crate::postgres_test_support::database_url()?;
     let database = IsolatedDatabase::create(&database_url).await;
     let clock = Arc::new(TestClock::new(1_000_000));
-    let (storage, store) = open(&database, &clock).await;
+    let (storage, store) = open(&database, &clock, &config).await;
+    let peer = if peer {
+        Some(open(&database, &clock, &config).await)
+    } else {
+        None
+    };
     Some(Tier {
         pool: storage.pool().clone(),
         _database: database,
         _storage: storage,
         store,
+        peer,
+        config,
         clock,
     })
 }
@@ -53,8 +68,9 @@ async fn tier() -> Option<Tier> {
 async fn open(
     database: &IsolatedDatabase,
     clock: &Arc<TestClock>,
+    config: &crate::PostgresHostConfig,
 ) -> (crate::PostgresStorage, PostgresDurableStore) {
-    let storage = crate::testing::connect(database.url())
+    let storage = crate::testing::connect_with(database.url(), config)
         .await
         .expect("open the isolated store");
     let store = storage
@@ -283,13 +299,13 @@ impl LockHold for Held {
     }
 }
 
-#[async_trait::async_trait]
-impl ServerProbe for Tier {
-    async fn hold(&self, hash: &str) -> Box<dyn LockHold> {
+impl Tier {
+    /// Locks blob `hash` in `mode` in a transaction of its own.
+    async fn lock_blob(&self, hash: &str, mode: &str) -> Box<dyn LockHold> {
         let mut tx = self.pool.begin().await.expect("a lock holder");
-        let locked: Option<(String, i32)> = sqlx::query_as(
-            "SELECT hash, pg_backend_pid() FROM lash_blobs WHERE hash = $1 FOR KEY SHARE",
-        )
+        let locked: Option<(String, i32)> = sqlx::query_as(&format!(
+            "SELECT hash, pg_backend_pid() FROM lash_blobs WHERE hash = $1 FOR {mode}"
+        ))
         .bind(hash)
         .fetch_optional(&mut *tx)
         .await
@@ -300,6 +316,40 @@ impl ServerProbe for Tier {
             pool: self.pool.clone(),
             pid,
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl pages::PageLockProbe for Tier {
+    async fn peel_hold(&self, hash: &str) -> Box<dyn LockHold> {
+        self.lock_blob(hash, "UPDATE").await
+    }
+
+    async fn name_hold(&self, hash: &str) -> Box<dyn LockHold> {
+        self.lock_blob(hash, "KEY SHARE").await
+    }
+
+    async fn wait_for_lock_waiters(&self, count: usize) {
+        loop {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity
+                 WHERE datname = current_database() AND wait_event_type = 'Lock'",
+            )
+            .fetch_one(&self.pool)
+            .await
+            .expect("observe the lock waiters");
+            if usize::try_from(waiting).unwrap_or(usize::MAX) >= count {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ServerProbe for Tier {
+    async fn hold(&self, hash: &str) -> Box<dyn LockHold> {
+        self.lock_blob(hash, "KEY SHARE").await
     }
 
     async fn hydration_round_trips(
@@ -351,6 +401,10 @@ impl PageTier for Tier {
         &self.store
     }
 
+    fn peer(&self) -> &dyn PageStore {
+        self.peer.as_ref().map_or(&self.store, |(_, store)| store)
+    }
+
     async fn stored(&self) -> BTreeSet<NodeId> {
         GraphTier::blobs(self)
             .await
@@ -398,7 +452,7 @@ impl PageTier for Tier {
     }
 
     async fn reopen(&mut self) {
-        let (storage, store) = open(&self._database, &self.clock).await;
+        let (storage, store) = open(&self._database, &self.clock, &self.config).await;
         self.pool = storage.pool().clone();
         self._storage = storage;
         self.store = store;
@@ -440,6 +494,25 @@ page_law!(an_expired_lease_reads_nothing);
 page_law!(the_lost_receipt_resolves_by_commit_identity);
 page_law!(publication_keeps_global_digest_lock_order);
 page_law!(an_ownership_transfer_fences_the_old_activation);
+
+/// D-RET, D-LEASE under load (FIG-6193): two nodes whose durable writes
+/// are never retried, so a deadlock or a lock timeout fails the write that
+/// met it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn publications_and_retirement_on_two_nodes_never_deadlock() {
+    let mut config = crate::testing::fixture_config();
+    config.retry.durable = crate::host::RetryPolicy {
+        attempts: 1,
+        ..config.retry.durable
+    };
+    let Some(tier) = tier_with(config, true).await else {
+        eprintln!("skipping the two-node race: database URL is not set");
+        return;
+    };
+    pages::publications_and_retirement_on_two_nodes_never_deadlock(&tier, Some(&tier), 64)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
 
 /// D-RET over retired leaves, with a reconnect between steps.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

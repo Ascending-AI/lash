@@ -964,7 +964,7 @@ rule.
 | `retirement.every` | 1 s | How long the node's retirement task waits between sweeps once it caught up. |
 | `retirement.batch_nodes` | 256 (at most 4 096) | The most page nodes one retirement step, one transaction, deletes. |
 | `retirement.steps_per_sweep` | 16 (at most 256) | The most steps one sweep runs. |
-| `retirement.backlog_limit` | 10 000 holds (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
+| `retirement.backlog_limit` | 10 000 holds and frontier nodes (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
 
 Counts must be at least 1 (`Zero`), durations at least 1 ms
 (`BelowResolution`), retirement values at most their hard maxima
@@ -983,8 +983,14 @@ it. Each node runs a
 retirement task beside its lease renewal. A sweep runs up to
 `steps_per_sweep` bounded steps, each one transaction that deletes at most
 `batch_nodes` unreachable pages and reaps expired root leases, and stops
-early once a step finds nothing to do. Steps take row locks under the shared
-graph gate, so they never stop publication. When the store's
+early once a step finds nothing to do. What a step does not reach waits on
+its own frontier for the next one. On PostgreSQL steps run one at a time
+under an advisory key; after it a step waits on nothing: it passes over
+rows another transaction holds (`SKIP LOCKED`) and writes only its own
+frontier. Publications and lease releases lock every node they hold before
+they write a hold row. So a step never deadlocks with a publication and
+never stops one; at most a publication waits for a step's transaction to
+end. When the store's
 `retirement_backlog` is above `backlog_limit`, the node takes no new actors
 (its running actors carry on) and sweeps back to back until the backlog is
 under the limit again. A failed step is retried at the next sweep.

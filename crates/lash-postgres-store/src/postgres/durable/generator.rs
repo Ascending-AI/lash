@@ -298,8 +298,12 @@ pub(crate) fn function_ddl() -> String {
            WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted)))",
         ],
     ));
-    let hold_closures = inline(pages::hold().sql(), &["v_retired", "TRUE", "v_now"]);
-    let hold_phase_ends = inline(pages::hold().sql(), &["v_phase_ends", "FALSE", "v_now"]);
+    let (hold_lock, hold) = pages::hold_statements();
+    let hold_lock = inline(hold_lock.sql(), &["v_retired", "v_phase_ends"]);
+    let hold = inline(
+        hold.sql(),
+        &["v_retired", "v_phase_ends", "v_now", "v_held"],
+    );
     let installed_bytes = inline(
         executor.installed_bytes.sql(),
         &["p_digests", "p_contents", "v_inserted"],
@@ -382,6 +386,7 @@ DECLARE
     v_state TEXT := 'owned';
     v_retired TEXT[] := '{{}}';
     v_phase_ends TEXT[] := '{{}}';
+    v_held TEXT[];
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{{}}';
@@ -523,12 +528,11 @@ BEGIN
     END LOOP;
     -- Hold what the steps retired for the bounded retirement steps
     -- (FIG-6191, D-RET): each retired root's closure, and an ended turn's
-    -- PhaseRoot alone.
-    IF cardinality(v_retired) > 0 THEN
-        {hold_closures};
-    END IF;
-    IF cardinality(v_phase_ends) > 0 THEN
-        {hold_phase_ends};
+    -- PhaseRoot alone, every node locked before any hold row (FIG-6193).
+    IF cardinality(v_retired) > 0 OR cardinality(v_phase_ends) > 0 THEN
+        {hold_lock}
+        INTO v_held;
+        {hold};
     END IF;
     IF p_formats IS NOT NULL THEN
         {stamp_formats};

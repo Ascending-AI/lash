@@ -19,7 +19,8 @@
 //! root row, no edge to it) or reached only from such nodes. A transaction
 //! that retires a root holds it (`lash_retirement_holds`, a root of the
 //! catalog), and bounded retirement steps peel it later
-//! (`super::pages`): each level's candidates no other transaction holds
+//! (`super::pages`, whose docs hold the one lock order of holds, peels and
+//! steps): each level's candidates no other transaction holds
 //! are locked `FOR UPDATE SKIP LOCKED` in digest order, then one statement
 //! deletes every locked candidate no root names and no edge reaches and
 //! returns the children their edges reached, the next level. A peel never
@@ -393,11 +394,13 @@ pub(super) fn stored_nodes() -> &'static Rendered {
     &SQL.postgres.stored_nodes
 }
 
-/// A peel level's lock, and its delete.
+/// A peel level's lock, which the generated functions inline.
+#[cfg(test)]
 pub(super) fn peel_lock() -> &'static Rendered {
     &SQL.postgres.peel_lock
 }
 
+/// A peel level's delete.
 pub(super) fn peel_level() -> &'static Rendered {
     &SQL.postgres.peel_level
 }

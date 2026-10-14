@@ -3,7 +3,9 @@
 //!
 //! A root lease (`root_leases`) and a retirement hold (`retirement_holds`)
 //! are rows of the root catalog: while one stands, nothing its root reaches
-//! is peeled. A semantic admission (`semantic_admissions`) records which
+//! is peeled. A retirement step's unfinished frontier
+//! (`retirement_frontier`) is the steps' own: no root of the catalog, and
+//! no reference a node must outlive. A semantic admission (`semantic_admissions`) records which
 //! validator certified a checkpoint root; it is no root owner and goes
 //! with its root. This file and `pages.rs` in each dialect's durable module
 //! issue their SQL.
@@ -12,8 +14,11 @@
 /// reads on demand.
 pub const LEASES_TABLE: &str = "root_leases";
 
-/// `retirement_holds`: the durable retirement frontier.
+/// `retirement_holds`: what publications and lease releases retired.
 pub const HOLDS_TABLE: &str = "retirement_holds";
+
+/// `retirement_frontier`: what retirement steps have yet to peel.
+pub const FRONTIER_TABLE: &str = "retirement_frontier";
 
 /// `semantic_admissions`: a checkpoint root's validator, by root.
 pub const ADMISSIONS_TABLE: &str = "semantic_admissions";
@@ -47,8 +52,19 @@ crate::statements! {
         /// Remove the hold on `?1`; answers whether it held a closure.
         hold_take = "DELETE FROM retirement_holds WHERE root_ref = ?1 RETURNING closure";
 
-        /// How many holds stand and when the oldest was queued.
-        backlog = "SELECT count(*), min(queued_at_ms) FROM retirement_holds";
+        /// Take the oldest node of the steps' frontier; answers it and
+        /// whether its closure is peeled.
+        frontier_take = "DELETE FROM retirement_frontier
+             WHERE node_ref = (SELECT node_ref FROM retirement_frontier
+                 ORDER BY queued_at_ms, node_ref LIMIT 1)
+             RETURNING node_ref, closure";
+
+        /// How many holds and frontier nodes wait and when the oldest was
+        /// queued.
+        backlog = "SELECT count(*), min(queued.queued_at_ms) FROM (
+                 SELECT queued_at_ms FROM retirement_holds
+                 UNION ALL SELECT queued_at_ms FROM retirement_frontier
+             ) AS queued";
 
         /// Record root `?1`'s semantic admission: kernel `?2`, page format
         /// `?3`, validator `?4`, by commit `?5`. A later publication of the

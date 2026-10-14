@@ -15,7 +15,10 @@
 //!   admissions and the [`SemanticAdmission`] in the same fenced
 //!   transaction;
 //! - retiring an old root moves it to a durable retirement hold in the
-//!   publication transaction; bounded background steps peel it later.
+//!   publication transaction; bounded background steps peel it later,
+//!   keeping what they did not reach on a frontier of their own. A step
+//!   waits on no publication, lease or peel (the PostgreSQL lock order,
+//!   FIG-6193).
 
 use std::sync::Arc;
 
@@ -131,8 +134,8 @@ pub struct RetirementBudget {
 /// What one retirement step did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RetirementProgress {
-    /// Holds the step removed (each replaced by holds on its children that
-    /// it did not delete).
+    /// Holds and frontier nodes the step took (each replaced by frontier
+    /// nodes for its children that it did not delete).
     pub holds_advanced: u64,
     pub nodes_deleted: u64,
     /// Expired root leases the step removed.
@@ -142,6 +145,7 @@ pub struct RetirementProgress {
 /// The retirement backlog, for host admission and backpressure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RetirementBacklog {
+    /// Holds and frontier nodes waiting for a step.
     pub holds: u64,
     pub oldest_at: Option<DurableInstant>,
 }
@@ -200,9 +204,10 @@ pub trait PageStore: DurableStore {
         exec: &ExecKey,
     ) -> Result<Option<(NodeId, CommitId)>, DurableError>;
 
-    /// One bounded retirement step: takes one hold, deletes the nodes under
-    /// it that no root owner, lease or inbound edge keeps, and installs
-    /// holds on their children, atomically.
+    /// One bounded retirement step: takes frontier nodes and holds, deletes
+    /// the nodes under them that no root owner, lease or inbound edge
+    /// keeps, and puts their children on the frontier, atomically. It
+    /// waits on no publication, lease or other peel.
     async fn retire_step(
         &self,
         budget: RetirementBudget,

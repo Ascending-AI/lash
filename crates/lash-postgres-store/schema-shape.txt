@@ -384,6 +384,11 @@ table lash_release_stamp
   column singleton boolean not-null default
   column written_at_epoch_ms bigint not-null
   primary-key (singleton)
+table lash_retirement_frontier
+  column closure boolean not-null
+  column node_ref text not-null
+  column queued_at_ms bigint not-null
+  primary-key (node_ref)
 table lash_retirement_holds
   column closure boolean not-null
   column queued_at_ms bigint not-null
