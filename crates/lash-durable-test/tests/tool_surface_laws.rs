@@ -834,11 +834,9 @@ async fn a_recorded_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
     core.shutdown().await.expect("the core shuts down");
 }
 
-/// A cell provider that serves its retained match by id, including when
-/// the tool is deferred and absent from its advertisement.
+/// The catalogue provider used by the cell drift laws.
 struct CellSurface {
     surface: Arc<Surface>,
-    deferred: bool,
 }
 
 #[async_trait::async_trait]
@@ -847,29 +845,12 @@ impl lash_core::ToolProvider for CellSurface {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
-        Ok({
-            if self.deferred {
-                Vec::new()
-            } else {
-                self.surface
-                    .tools
-                    .iter()
-                    .map(|tool| cell_definition(tool).manifest())
-                    .collect()
-            }
-        })
-    }
-
-    fn resolve_manifest_by_id(
-        &self,
-        id: &ToolId,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
-        self.surface
+        Ok(self
+            .surface
             .tools
             .iter()
-            .find(|tool| tool.id == id.as_str())
             .map(|tool| cell_definition(tool).manifest())
+            .collect())
     }
 
     fn resolve_contract(
@@ -892,71 +873,10 @@ fn cell_definition(tool: &Spec) -> lash_core::ToolDefinition {
         .with_tool_binding(lash_core::ToolBinding::new(["tools"], tool.name))
 }
 
-#[derive(Default)]
-struct CellResolver {
-    resolved: std::sync::atomic::AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for CellResolver {
-    fn tool_manifests(
-        &self,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
-        Ok(Vec::new())
-    }
-
-    fn resolve_contract(
-        &self,
-        _name: &str,
-        _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
-        None
-    }
-
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::err_fmt("the resolver executes no tool").into()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::tools::DeferredToolProvider for CellResolver {
-    async fn resolve(
-        &self,
-        _cx: &lash::tools::DeferredResolveContext<'_>,
-        paths: &[&str],
-    ) -> std::collections::BTreeMap<String, lash::tools::DeferredOutcome> {
-        self.resolved
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        paths
-            .iter()
-            .map(|path| {
-                (
-                    (*path).to_owned(),
-                    if *path == "tools.surface_held" {
-                        lash::tools::DeferredOutcome::Resolved {
-                            provider: lash::plugins::ToolProviderHandle::new(
-                                lash::plugins::RegistryKind::Session,
-                                SURFACE,
-                                lash::tool_provider_key!("tools"),
-                            ),
-                            definition: cell_definition(&held()),
-                            binding: None,
-                        }
-                    } else {
-                        lash::tools::DeferredOutcome::Unavailable { note: None }
-                    },
-                )
-            })
-            .collect()
-    }
-}
-
 impl Deployment {
     fn boot_cell(
         &self,
         surface: &Arc<Surface>,
-        resolver: Option<&Arc<CellResolver>>,
         prepared: Option<Arc<tokio::sync::Notify>>,
     ) -> lash::LashCore {
         let model = lash_core::testing::TestProvider::builder()
@@ -986,16 +906,9 @@ impl Deployment {
         );
         let tools = Arc::new(CellSurface {
             surface: Arc::clone(surface),
-            deferred: resolver.is_some(),
         });
-        let mut spec = lash::plugins::PluginSpec::new()
+        let spec = lash::plugins::PluginSpec::new()
             .with_tool_provider(lash::tool_provider_key!("tools"), tools);
-        if let Some(resolver) = resolver {
-            spec = spec.with_deferred_provider(
-                lash::tool_provider_key!("deferred"),
-                Arc::clone(resolver) as _,
-            );
-        }
         lash::LashCore::rlm_builder(self.backend.clone(), factory)
             .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
                 lash::plugins::PluginDeclaration::initial(SURFACE),
@@ -1042,24 +955,22 @@ async fn cell_starts(deployment: &Deployment, name: &str) -> usize {
 }
 
 /// SURFACE-CHANGE-OUTCOME (law 9, cell arm; S5, §5a, R-3): an open
-/// catalog call or retained deferred match parks on a build that retyped
-/// its tool, before another x_start and without entering the new provider.
+/// catalog call parks on a build that retyped its tool, before another
+/// x_start and without entering the new provider. Deferred grants retain
+/// their resolved definition instead (FIG-6217).
 async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
-    for (deferred, admitted) in [(false, false), (false, true), (true, true)] {
+    for admitted in [false, true] {
         let Some(deployment) = Deployment::new(tier).await else {
             return;
         };
-        let name = if deferred {
-            "changed-deferred-cell"
-        } else if admitted {
+        let name = if admitted {
             "changed-catalog-cell"
         } else {
             "changed-new-cell"
         };
-        let resolver = deferred.then(|| Arc::new(CellResolver::default()));
         let original = Surface::new(vec![held()]);
         let prepared = (!admitted).then(|| Arc::new(tokio::sync::Notify::new()));
-        let core = deployment.boot_cell(&original, resolver.as_ref(), prepared.clone());
+        let core = deployment.boot_cell(&original, prepared.clone());
         let session = create(&core, name).await;
         let handle = session
             .send(lash::TurnInput::text("call the held tool"))
@@ -1075,7 +986,7 @@ async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier)
                         original.entered.notified().await;
                     }
                 } => (),
-                outcome = handle.outcome() => panic!("the original call must start, deferred={deferred}: {outcome:?}"),
+                outcome = handle.outcome() => panic!("the original call must start, admitted={admitted}: {outcome:?}"),
             }
         }).await.expect("the original call starts");
         drop(session);
@@ -1088,7 +999,7 @@ async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier)
         );
 
         let changed = Surface::answering(vec![held().retyped()]);
-        let core = deployment.boot_cell(&changed, resolver.as_ref(), None);
+        let core = deployment.boot_cell(&changed, None);
         let session = core
             .session(session_id(name))
             .durable()
@@ -1105,7 +1016,7 @@ async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier)
         .expect("read the cell outcome");
         assert!(
             matches!(outcome, lash::SendOutcome::Parked { .. }),
-            "a changed cell tool must park, deferred={deferred}: {outcome:?}"
+            "a changed cell tool must park, admitted={admitted}: {outcome:?}"
         );
         let park = session
             .park_reason()
@@ -1126,13 +1037,6 @@ async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier)
             starts,
             "drift precedes any new x_start"
         );
-        if let Some(resolver) = resolver {
-            assert_eq!(
-                resolver.resolved.load(std::sync::atomic::Ordering::SeqCst),
-                1,
-                "the deferred match is retained, never resolved again"
-            );
-        }
         core.shutdown().await.expect("the changed node stops");
     }
 }

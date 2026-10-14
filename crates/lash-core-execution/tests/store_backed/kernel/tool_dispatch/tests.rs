@@ -438,3 +438,250 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         Some(crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"))
     );
 }
+
+/// FIG-6217: a deferred-only provider owns its recorded definition and
+/// binding; catalogue membership cannot refuse its granted cell call.
+#[tokio::test]
+async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_registration() {
+    use crate::DeferredToolProvider as _;
+    use crate::runtime::actor::round::{self, MemberBodies as _};
+    use crate::tool_dispatch::{CellCall, CellMember, CellMembers};
+    use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+
+    #[derive(Default)]
+    struct DeferredOnly {
+        executed: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ToolProvider for DeferredOnly {
+        fn tool_manifests(
+            &self,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Result<Vec<crate::ToolManifest>, crate::PluginError> {
+            Ok(Vec::new())
+        }
+
+        fn resolve_contract(
+            &self,
+            _name: &str,
+            _config: &crate::plugin::OwnerConfigView,
+        ) -> Option<Arc<crate::ToolContract>> {
+            None
+        }
+
+        fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
+            &[crate::FormatVersion::ONE]
+        }
+
+        async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+            assert_eq!(
+                call.context.tool_execution_binding(),
+                Some(&granted_binding())
+            );
+            self.executed.fetch_add(1, Ordering::SeqCst);
+            ToolOutcome::ok(json!("sent")).into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::DeferredToolProvider for DeferredOnly {
+        async fn resolve(
+            &self,
+            _cx: &crate::DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> std::collections::BTreeMap<String, crate::DeferredOutcome> {
+            paths
+                .iter()
+                .map(|path| {
+                    (
+                        (*path).to_owned(),
+                        crate::DeferredOutcome::Resolved {
+                            provider: crate::testing::test_tools_provider(),
+                            definition: named_beta_tool("send_email"),
+                            binding: Some(granted_binding()),
+                        },
+                    )
+                })
+                .collect()
+        }
+    }
+
+    let stores = crate::support::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores.clone());
+    let database = backend.durable().clone();
+    let actor = ActorKey::session("test-session").unwrap();
+    let formats = FormatSet::new("deferred-cell-law");
+    let mut mail = MailTx::new();
+    mail.create_actor(actor.clone(), formats.clone());
+    database
+        .commit_mail(mail, CommitLabel::new("law.create"))
+        .await
+        .unwrap();
+    let node = database
+        .register_node(&NodeSpec {
+            node: NodeId::new("deferred-cell-law"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let claims = database.claim(&node, 1).await.unwrap();
+    assert_eq!(claims.len(), 1);
+    let controller = crate::ActorContext::new(
+        backend.clone(),
+        actor,
+        claims[0].epoch,
+        crate::AdmittedScope::runtime_operation("deferred-cell-law"),
+        tokio_util::sync::CancellationToken::new(),
+        Arc::new(lash_durable::NoProbe),
+    );
+    let provider = Arc::new(DeferredOnly::default());
+    let deferred_key = crate::plugin::ToolProviderHandle::new(
+        crate::plugin::RegistryKind::Session,
+        "test_tools",
+        crate::tool_provider_key!("deferred"),
+    );
+    let context = crate::testing::TestExecutionContextBuilder::new(
+        crate::testing::TestExecutionPorts::of(&backend),
+    )
+    .provider(provider.clone())
+    .deferred_provider(deferred_key.clone(), provider.clone())
+    .shared_effect_controller(controller.clone())
+    .build()
+    .into_runtime();
+    let capabilities = Default::default();
+    let owner = crate::ExecutionOwner::SessionFrame {
+        session_id: crate::SessionId::from("test-session"),
+        agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
+    };
+    let config = crate::plugin::OwnerConfigView::default();
+    let resolved = provider
+        .resolve(
+            &crate::DeferredResolveContext::new(
+                &deferred_key,
+                &owner,
+                None,
+                &capabilities,
+                &config,
+            ),
+            &["tools.send_email"],
+        )
+        .await;
+    let matched = crate::DeferredMatch {
+        requested: "tools.send_email".to_owned(),
+        outcome: resolved["tools.send_email"].clone(),
+    };
+    let (provider_key, definition, binding) = matched.resolved().unwrap();
+    let grant =
+        crate::ToolExecutionGrant::from_definition(provider_key.clone(), definition.clone())
+            .with_execution_binding(binding.cloned());
+    let member = CellMember::Tool(CellCall {
+        id: crate::ToolCallId::fixture("deferred-cell"),
+        tool_id: definition.manifest.id.clone(),
+        args: json!({ "value": "email" }),
+        execution_grant: Some(Box::new(grant)),
+        issuing_language_node_id: None,
+    });
+    let opener = crate::EffectOpener::turn("test-session", "test-turn");
+    let members = CellMembers::new(&context, opener.clone()).unwrap();
+    members
+        .require_capable(&member)
+        .expect("a recorded deferred match must not park as catalogue drift");
+    let pin = members.pin(&member, controller.now().0 as u64);
+    let pending = crate::sansio::PendingToolCall {
+        call_id: member.id().clone(),
+        provider_call_id: None,
+        tool_name: "send_email".to_owned(),
+        args: json!({ "value": "email" }),
+        replay: None,
+    };
+    let draft = round::call_draft(&opener, &pending, pin).unwrap();
+    let ledger_owner = lash_durable::domain::OwnerKey::Turn(
+        crate::SessionId::from("test-session"),
+        crate::TurnId::parse("test-turn").unwrap(),
+    );
+    let mut tx = controller.begin().await.unwrap();
+    let admitted = round::admit(&mut tx, &ledger_owner, round::RunSeq(1), vec![draft]).unwrap();
+    controller
+        .commit(tx, CommitLabel::new("law.admit"))
+        .await
+        .unwrap();
+    members.register(member.clone());
+    let outcome = members.body(&admitted[0])(tokio_util::sync::CancellationToken::new()).await;
+    assert!(
+        matches!(outcome.output, round::SettledOutput::Completed(_)),
+        "{outcome:?}"
+    );
+    let reply = members.reply(&member, &outcome.output);
+    assert!(reply.output.is_success(), "{reply:?}");
+    assert_eq!(reply.output.value_for_projection(), json!("sent"));
+    assert_eq!(provider.executed.load(Ordering::SeqCst), 1);
+    let mut tx = controller.begin().await.unwrap();
+    round::settle(&mut tx, &admitted[0], outcome.output, Vec::new()).unwrap();
+    controller
+        .commit(tx, CommitLabel::new("law.settle"))
+        .await
+        .unwrap();
+
+    // Binding readability is a node capability, checked again when a
+    // retained cell member is restored, before its next admission.
+    let mut unreadable = member.clone();
+    let CellMember::Tool(call) = &mut unreadable;
+    call.execution_grant
+        .as_mut()
+        .unwrap()
+        .binding
+        .as_mut()
+        .unwrap()
+        .format = crate::FormatVersion::new(2).unwrap();
+    let error = members
+        .require_capable(&unreadable)
+        .expect_err("an unreadable binding parks");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::ExecutionBindingUnreadable
+    );
+
+    // The same retained match on a node without the recorded deferred
+    // registration still refuses before another body can run.
+    let surface = crate::RecordedSurface::new(Vec::new(), Some(deferred_key)).unwrap();
+    let registry = crate::ToolRegistry::from_tool_provider(
+        crate::testing::test_tools_provider(),
+        provider.clone(),
+    )
+    .unwrap();
+    let missing = crate::testing::TestExecutionContextBuilder::new(
+        crate::testing::TestExecutionPorts::of(&backend),
+    )
+    .provider(provider.clone())
+    .routes(crate::SurfaceTools::of_surface(
+        &surface,
+        Arc::new(registry),
+    ))
+    .build()
+    .into_runtime();
+    let missing = CellMembers::new(&missing, opener.clone()).unwrap();
+    let error = missing
+        .require_capable(&member)
+        .expect_err("a missing deferred registration parks");
+    assert_eq!(error.code, crate::RuntimeErrorCode::LashVmCellBindingDrift);
+    assert!(error.message.contains("missing from"), "{error:?}");
+
+    // The deferred registration alone cannot serve a grant that names an
+    // execution provider absent from this node.
+    let mut unserved = member.clone();
+    let CellMember::Tool(call) = &mut unserved;
+    call.execution_grant.as_mut().unwrap().provider = crate::plugin::ToolProviderHandle::new(
+        crate::plugin::RegistryKind::Session,
+        "absent",
+        crate::tool_provider_key!("tools"),
+    );
+    let error = members
+        .require_capable(&unserved)
+        .expect_err("a missing execution provider parks");
+    assert_eq!(error.code, crate::RuntimeErrorCode::LashVmCellBindingDrift);
+    assert!(error.message.contains("missing from"), "{error:?}");
+    assert_eq!(provider.executed.load(Ordering::SeqCst), 1);
+}

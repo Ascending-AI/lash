@@ -400,18 +400,9 @@ impl CellMembers {
         let CellMember::Tool(call) = member;
         let context = &self.tools.context;
         let dispatch = context.dispatch();
-        let drift = match call.execution_grant.as_deref() {
-            Some(grant) => dispatch.routes.drift_match(
-                &grant.provider,
-                &crate::ToolDefinition {
-                    manifest: grant.manifest().clone(),
-                    contract: grant.contract().clone(),
-                },
-                &dispatch.config,
-            ),
-            None => dispatch.routes.drift(&call.tool_id, &dispatch.config),
-        };
-        if let Some(drift) = drift {
+        if let Some(grant) = call.execution_grant.as_deref() {
+            dispatch.routes.require_deferred_grant(grant, &call.id)?;
+        } else if let Some(drift) = dispatch.routes.drift(&call.tool_id, &dispatch.config) {
             return Err(drift.refusal(&call.id));
         }
         let Some(definition) =

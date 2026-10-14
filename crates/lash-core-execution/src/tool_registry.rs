@@ -242,8 +242,9 @@ fn served_definition(
 /// serves on this node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolSurfaceDriftKind {
-    /// The recorded provider does not serve the tool here: it is not
-    /// registered, or it does not advertise the tool under the run's config.
+    /// The recorded provider is not registered here, a catalogue tool is
+    /// absent under the run's config, or a deferred grant's recorded
+    /// deferred provider or binding codec is not registered here.
     Missing,
     /// The provider serves the tool with another dispatch surface.
     Changed,
@@ -266,7 +267,8 @@ impl ToolSurfaceDriftKind {
 /// or new examples are not drift, since the prompt is served from the
 /// recorded surface. A node executes a recorded match only if it serves the
 /// exact retained surface; outcomes may differ between two builds while
-/// they coexist.
+/// they coexist. A deferred grant retains its resolved definition and is
+/// judged only for registered providers and a readable binding.
 #[derive(Clone, Debug)]
 pub struct ToolSurfaceDrift {
     pub kind: ToolSurfaceDriftKind,
@@ -386,7 +388,7 @@ impl SurfaceTools {
     /// it did; `None` for an undrifted tool or one no entry offers.
     pub fn drift(&self, tool: &ToolId, config: &OwnerConfigView) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
-        self.drift_match(&entry.provider, &entry.definition, config)
+        self.drift_entry(entry, config)
     }
 
     /// Where a read of `tool` goes on this node under `config`: the
@@ -412,7 +414,7 @@ impl SurfaceTools {
             .routes
             .get(tool)
             .ok_or_else(|| refused("names no tool of the run's surface".to_owned()))?;
-        if let Some(drift) = self.drift_match(&entry.provider, &entry.definition, config) {
+        if let Some(drift) = self.drift_entry(entry, config) {
             return Err(refused(format!(
                 "names a tool {} what this node's provider serves since the run's tool surface \
                  was recorded",
@@ -432,18 +434,54 @@ impl SurfaceTools {
         ))
     }
 
-    /// Judges a retained match, including a deferred match outside the
-    /// surface, against the definition its recorded provider serves here.
-    pub(crate) fn drift_match(
+    /// A catalogue entry is judged against its provider's current
+    /// catalogue. Deferred grants never take this path.
+    fn drift_entry(
         &self,
-        provider: &ProviderKey,
-        recorded: &ToolDefinition,
+        entry: &SurfaceEntry,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
         let served = self
             .registry
-            .served(provider, &recorded.manifest.id, config);
-        ToolSurfaceDrift::judge(recorded, served.as_ref())
+            .served(&entry.provider, &entry.definition.manifest.id, config);
+        ToolSurfaceDrift::judge(&entry.definition, served.as_ref())
+    }
+
+    /// A deferred grant's committed definition is its authority, never a
+    /// second catalogue lookup. Only registration and binding readability
+    /// can make this node unable to run it, including on cell restoration.
+    pub(crate) fn require_deferred_grant(
+        &self,
+        grant: &crate::ToolExecutionGrant,
+        call: &crate::ToolCallId,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let missing = || {
+            ToolSurfaceDrift {
+                kind: ToolSurfaceDriftKind::Missing,
+                recorded: ToolDefinition {
+                    manifest: grant.manifest().clone(),
+                    contract: grant.contract().clone(),
+                },
+            }
+            .refusal(call)
+        };
+        if !self.registry.serves(&grant.provider)
+            || !matches!(self.deferred_provider(), Ok(Some(_)))
+        {
+            return Err(missing());
+        }
+        if let Some(binding) = &grant.binding {
+            let codec = self.registry.provider(&binding.codec).ok_or_else(missing)?;
+            binding
+                .check_readable(codec.readable_binding_formats())
+                .map_err(|source| {
+                    crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::ExecutionBindingUnreadable,
+                        source.to_string(),
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     fn by_name(&self, name: &str) -> Option<&SurfaceEntry> {
