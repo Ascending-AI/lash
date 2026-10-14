@@ -225,7 +225,11 @@ header overhead. Run with a fresh evidence directory:
 Stdout is a text table, including least-squares slopes of log count against log
 H (the growth exponent). JSONL retains every park interval, including all three
 reset intervals. The committed [before table](../../../fixtures/heap-baseline.txt)
-names the main SHA measured with this instrumentation patch. These are counts;
+names the main SHA measured with the whole-state runtime; the
+[paged table](../../../fixtures/heap-baseline-paged.txt) is the persistent
+heap's (FIG-6193), measured with `kiln run --config=optimized` at H = 100,
+1000 and 5000. At H = 10,000 the objects-update sample does not finish within
+the sample limit (FIG-6198 owns that). These are counts;
 wall time is diagnostic, with no threshold. The fixture is historical evidence,
 not a golden count oracle, and does not replace `kernel-baseline.json` or the
 advisory `duration-trend-history.jsonl`.
@@ -240,8 +244,7 @@ only length; the source/document itself stays small. Dropping removes one bindin
 separate H-element list. The next-cell case carries the seeded state into a cell
 that only awaits the gate. The reset case does the same one-entry operation
 three times, with worker reset/release required in each interval. D and W are
-fixed semantic changes/accesses; today's whole-state implementation still
-processes H internally. This is a worker reset, not a claim that the helper's
+fixed semantic changes/accesses. This is a worker reset, not a claim that the helper's
 immutable preparation cache is cold or that its PID changed.
 
 The existing performance witness owns the counters. The shared
@@ -249,9 +252,7 @@ The existing performance witness owns the counters. The shared
 owner park per measured interval (`committed_parks` in JSONL); every store call
 is forwarded unchanged. `vm_steps` counts actual
 machine statement steps without allocating or locking in the VM loop.
-`checkpoint_values`, `resume_values` and `carry_values` count object headers and
-entries converted by the existing whole-state paths (collection cardinalities,
-no additional scan). Graph encode counts every envelope actually produced,
+Graph encode counts every envelope actually produced,
 before staging deduplication; graph decode counts every decoder envelope read,
 including repeated reads and canonical checks. Decode's canonical verification
 may itself encode, so encoded counts include that real work. Immutable encoding
@@ -275,22 +276,25 @@ allocator overhead, immutable caches and RSS. Keep `/usr/bin/time`'s independent
 peak RSS beside the table. Neither a buffer counter nor SQL bytes alone proves
 that traversal is bounded.
 
-`pages_loaded`, `pages_sealed`, `spool_bytes` and `retirement_batches` are named
-nullable slots, printed as `n/a`. FIG-6193 replaces their unavailable values
-with page instrumentation and makes D/W scaling an asserting law.
+Page counters: `pages_loaded` counts pages the released worker's page port
+read from its parent, `pages_sealed` the pages it sealed into the parent's
+staging, `spool_bytes` the bytes the parent wrote to its activations' spools,
+and `retirement_batches` the store's bounded retirement steps (the node's
+retirement task runs them in the background, so they land in whichever
+interval they run in).
 
-Add `--heap-walk checkpoint`, `--heap-walk resume` or `--heap-walk carry` to
-inject a deliberate retained-graph walk at the corresponding seam. The hook
-visits object entries and immutable payload bytes, preserves values and charge,
-and reports `probe_units`. It requires the testing worker build, and is disabled
-unless requested. The harness law runs all scenarios at the two smallest H
-on fresh SQLite memory stores, reusing workers with the same probe configuration,
-then verifies an H-proportional injected count at each of the three locations.
-Every interval still requires worker release/reset and exactly one owner park;
-the command-line baseline keeps fresh file databases and worker pools per sample:
+The counted laws assert, over each scenario's measured interval at two or more
+H, that a count's growth exponent stays at most 0.25: a park's sealed pages and
+spooled bytes at a fixed change (list, objects, drop, resets), the pages a
+cold resume loads at a fixed working set (list, objects, resets), the pages a
+string length read loads, and the pages a no-op next cell loads and seals.
+Counts only, never wall time. Every interval still requires worker
+release/reset and exactly one owner park; the command-line run asserts the
+laws over its populations, and the harness law runs all six scenarios at
+H = 100 and 2,000 on fresh SQLite memory stores:
 
 ```sh
 kiln test //crates/lash-perf:durable-substrate__bin__unit_test \
-  --test_arg=heap::tests::six_scenarios_count_released_worker_work_and_see_heap_walks \
+  --test_arg=heap::tests::six_scenarios_obey_the_paged_heaps_counted_laws \
   --test_arg=--exact
 ```
