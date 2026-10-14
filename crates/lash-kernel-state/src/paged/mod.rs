@@ -16,6 +16,7 @@
 
 pub mod census;
 pub mod family;
+pub mod family_impl;
 pub mod heap;
 pub mod root;
 pub mod source;
@@ -52,5 +53,7 @@ pub use heap_impl::PagedHeap;
 #[cfg(test)]
 mod laws {
     pub mod heap;
+    #[path = "../family_impl/laws.rs"]
+    mod lifecycle;
     pub mod root;
 }

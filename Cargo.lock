@@ -2469,6 +2469,7 @@ dependencies = [
  "lash-dialect-typescript",
  "lash-internal-core",
  "lash-internal-core-store",
+ "lash-internal-durable",
  "lash-internal-render",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
@@ -2877,6 +2878,7 @@ name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "serde",
  "serde_json",
  "thiserror",

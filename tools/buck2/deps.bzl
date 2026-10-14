@@ -644,6 +644,7 @@ PACKAGE_DEPS = {
             "async_trait": "//third-party/rust:p0016",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
@@ -1095,6 +1096,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318",
             "thiserror": "//third-party/rust:p0371"

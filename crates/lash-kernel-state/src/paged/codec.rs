@@ -71,7 +71,7 @@ record!(DataOnlyCertificate {
     task_edges: u64
 });
 record!(SessionRoot {
-    heap: HeapRoot,
+    heap: PageRef,
     bindings: KeyedRoot,
     functions: KeyedRoot,
     certificate: DataOnlyCertificate
