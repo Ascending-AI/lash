@@ -116,7 +116,10 @@ pub struct ObservationWorkLimits {
     /// Delivered event identities one process feed remembers, to drop a
     /// redelivery.
     pub process_dedup_ids: usize,
-    /// Durable event pages one process observation snapshot may read.
+    /// Durable event pages one process observation snapshot may read at the
+    /// standard occurrence retention (64 per node). Larger configured or
+    /// recorded cuts multiply this by ceil(cut / 64). One indexed omission
+    /// lookup is reserved independently, even when this budget is zero.
     pub process_effect_fold_pages: usize,
     /// Events per durable page that read asks for.
     pub process_effect_fold_page_size: std::num::NonZeroUsize,

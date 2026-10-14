@@ -111,6 +111,18 @@ impl Fixture {
     /// The process's snapshot under `limits`, through a feed source nothing
     /// publishes to.
     async fn read_view(&self, limits: lash_trace::ObservationWorkLimits) -> ProcessReadView {
+        self.read_view_with_retention(
+            limits,
+            lash_trace::TraceLimits::standard().process_effect_occurrences,
+        )
+        .await
+    }
+
+    async fn read_view_with_retention(
+        &self,
+        limits: lash_trace::ObservationWorkLimits,
+        cap: u64,
+    ) -> ProcessReadView {
         let replay = Arc::new(lash_core::InMemoryProcessReplayStore::new(
             lash_core::InMemoryProcessReplayStoreConfig::standard(),
         ));
@@ -136,6 +148,7 @@ impl Fixture {
                 changes: lash_core::runtime::ProcessChangeHub::new(),
             },
         )
+        .with_effect_retention(cap)
         .snapshot()
         .await
         .expect("snapshot")
@@ -299,4 +312,208 @@ async fn snapshot_effect_evidence_is_bounded_by_the_work_limits_and_says_so() {
         }
     );
     assert_eq!(view.effects.observed_through.as_u64(), 2);
+}
+
+/// FIG-6266: the read side must accommodate the supported per-node retention.
+#[tokio::test]
+async fn maximum_retention_four_nodes_of_5000_has_complete_effect_evidence() {
+    let fixture = Fixture::new("maximum-effect-retention").await;
+    let cap = lash_trace::MAX_PROCESS_EFFECT_OCCURRENCES;
+    lash_trace::TraceLimits {
+        process_effect_occurrences: cap,
+        ..Default::default()
+    }
+    .validate()
+    .expect("the documented maximum is admitted");
+    let omissions = fixture.commit_effect_occurrences(4, 5000, cap).await;
+    let ProcessReadView::Retained(live) = fixture
+        .read_view_with_retention(lash_trace::ObservationWorkLimits::standard(), cap)
+        .await
+    else {
+        panic!("retained running process");
+    };
+    assert_eq!(live.effects.coverage, ProcessEffectCoverage::Complete);
+    assert_eq!(live.effects.report.nodes().len(), 4);
+    for node in live.effects.report.nodes() {
+        assert_eq!(node.occurrences.len() as u64, cap);
+        assert_eq!(node.omitted.total(), 0, "no terminal omission record yet");
+    }
+    fixture.complete_effect_history(omissions).await;
+    // A replacement host can select a lower cut without making the old
+    // process's recorded terminal fold unreadable.
+    let ProcessReadView::Retained(view) = fixture
+        .read_view(lash_trace::ObservationWorkLimits::standard())
+        .await
+    else {
+        panic!("retained process");
+    };
+    assert_eq!(view.effects.coverage, ProcessEffectCoverage::Complete);
+    assert_eq!(
+        view.effects.observed_through.as_u64(),
+        fixture.high_water().await
+    );
+    assert_eq!(view.effects.report.nodes().len(), 4);
+    for node in view.effects.report.nodes() {
+        assert_eq!(node.occurrences.len() as u64, cap);
+        assert_eq!(node.omitted.success, 5000 - cap);
+    }
+}
+
+/// FIG-6266: omission counts have priority over any occurrence acquisition budget.
+#[tokio::test]
+async fn effect_omissions_survive_zero_and_tiny_acquisition_budgets() {
+    let fixture = Fixture::new("omission-priority").await;
+    let omissions = fixture.commit_effect_occurrences(2, 10, 4).await;
+    fixture.complete_effect_history(omissions).await;
+    // Observer audit events may follow a terminal; the omission is not always
+    // one of the last two events of the snapshot.
+    for n in 0..4 {
+        fixture
+            .registry
+            .add_observer(
+                &lash_sansio::SessionId::fixture(format!("late-observer-{n}")),
+                &fixture.process_id,
+                lash_core::ProcessObserverBy::host(format!("late-observer-{n}")),
+            )
+            .await
+            .expect("late observer");
+    }
+    for (pages, page_size) in [(0, 1), (0, 256), (1, 1), (1, 2), (2, 2)] {
+        let ProcessReadView::Retained(view) = fixture
+            .read_view(lash_trace::ObservationWorkLimits {
+                process_effect_fold_pages: pages,
+                process_effect_fold_page_size: std::num::NonZeroUsize::new(page_size).unwrap(),
+                ..Default::default()
+            })
+            .await
+        else {
+            panic!("retained process");
+        };
+        assert_eq!(
+            view.effects.report.nodes().len(),
+            2,
+            "budget {pages} × {page_size}"
+        );
+        for node in view.effects.report.nodes() {
+            assert_eq!(node.omitted.success, 6, "budget {pages} × {page_size}");
+        }
+        assert_eq!(
+            view.effects.coverage,
+            ProcessEffectCoverage::Incomplete {
+                reason: ProcessEffectGapReason::AcquisitionBudgetExhausted,
+            }
+        );
+        assert_eq!(
+            view.effects.observed_through.as_u64(),
+            (pages * page_size) as u64
+        );
+    }
+    let before_terminal = crate::process_feed::fold_effects(
+        fixture.registry.as_ref(),
+        &fixture.process_id,
+        1,
+        crate::process_feed::EffectFoldBudget::of(lash_trace::ObservationWorkLimits {
+            process_effect_fold_pages: 0,
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap()
+    .ok()
+    .expect("retained earlier revision");
+    assert_eq!(
+        before_terminal.report.nodes().len(),
+        0,
+        "no future omission leaks into an earlier revision"
+    );
+    let key = format!("process:{}:effect-omissions", fixture.process_id);
+    let ProcessEventReadOutcome::Retained(Some(omission)) = fixture
+        .registry
+        .event_by_replay_key(&fixture.process_id, &key, fixture.high_water().await)
+        .await
+        .unwrap()
+    else {
+        panic!("retained omission");
+    };
+    fixture
+        .registry
+        .release_process_events(&fixture.process_id, omission.sequence)
+        .await
+        .expect("release the omission explicitly");
+    let ProcessReadView::Retained(view) = fixture.read_view(Default::default()).await else {
+        panic!("retained process");
+    };
+    assert_eq!(
+        view.effects.report.nodes().len(),
+        0,
+        "released omission counts are not resurrected"
+    );
+    assert_eq!(
+        view.effects.coverage,
+        ProcessEffectCoverage::Incomplete {
+            reason: ProcessEffectGapReason::HistoryReleased,
+        }
+    );
+}
+
+impl Fixture {
+    /// The durable history of `nodes` nodes settling `count` successful
+    /// occurrences apiece, under the run's recorded `cap`.
+    async fn commit_effect_occurrences(
+        &self,
+        nodes: u64,
+        count: u64,
+        cap: u64,
+    ) -> lash_core::ProcessEffectOmissions {
+        let mut pending = Vec::new();
+        let mut omitted = std::collections::BTreeMap::new();
+        for node in 0..nodes {
+            let node_name = format!("node-{node}");
+            for occurrence in 0..count.min(cap) {
+                pending.push(
+                    lash_core::ProcessEffectOccurrence::new(
+                        lash_sansio::effect_identity_fixture(&node_name, occurrence),
+                        "tools.echo",
+                        lash_core::ProcessEffectOutcomeClass::Success,
+                        None,
+                        format!("history-effect:{node}:{occurrence}"),
+                        lash_core::FleetFormat::current(),
+                    )
+                    .append_request(),
+                );
+            }
+            omitted.insert(
+                lash_sansio::effect_identity_fixture(&node_name, 0)
+                    .site
+                    .to_string(),
+                lash_core::ProcessEffectOmittedCounts {
+                    success: count - count.min(cap),
+                    failure: 0,
+                    cancelled: 0,
+                },
+            );
+        }
+        self.registry
+            .append_events(&self.process_id, pending, &self.authority)
+            .await
+            .expect("commit retained occurrences");
+        lash_core::ProcessEffectOmissions::new(omitted, cap, lash_core::FleetFormat::current())
+    }
+
+    async fn complete_effect_history(&self, omissions: lash_core::ProcessEffectOmissions) {
+        self.registry
+            .complete_process_with_prelude(
+                &self.process_id,
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::Value::Null),
+                ),
+                vec![
+                    omissions
+                        .append_request(format!("process:{}:effect-omissions", self.process_id)),
+                ],
+                lash_core::ProcessCompletionAuthority::workflow_key(self.process_id.to_string()),
+            )
+            .await
+            .expect("commit the terminal effect history");
+    }
 }

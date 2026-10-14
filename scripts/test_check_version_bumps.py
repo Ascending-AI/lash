@@ -1128,6 +1128,42 @@ DDL_STAMPS = {
 }
 
 
+class ProcessEventVocabularyScope(unittest.TestCase):
+    def test_process_event_vocabulary_guards_its_ceiling_not_unrelated_trace_limits(self) -> None:
+        # FIG-6266: diagnostic and observation capacities are not event vocabulary.
+        view = gate.WorktreeView(gate.ROOT)
+        surface = gate.Surface(
+            "PROCESS_EVENT_VOCABULARY_VERSION",
+            "crates/lash-core-execution/src/runtime/process/effect_summary.rs",
+            "migrate",
+            True,
+        )
+        declaration = gate.declaration_in(view.content(surface.constant_path), surface)
+        self.assertIsNotNone(declaration)
+        path = "crates/lash-trace/src/limits.rs"
+        guards = [guard for guard in declaration.guards if path in guard.paths]
+        self.assertTrue(guards, "the wire ceiling must remain guarded")
+
+        def signature(tree):
+            return gate.comparable(
+                entry
+                for guard in guards
+                for entry in gate.guard_signature(tree, guard, enforce_presence=True)
+            )
+
+        original = signature(view)
+        source = view.content(path)
+        for before, after, changes_vocabulary in [
+            ("pub held_observations: usize,", "pub held_observations: u64,", False),
+            ("MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;",
+             "MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4095;", True),
+        ]:
+            with self.subTest(change=before):
+                self.assertIn(before, source)
+                changed = PlantedView(view, {path: source.replace(before, after, 1)})
+                self.assertEqual(changes_vocabulary, signature(changed) != original)
+
+
 class RealRepository(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

@@ -234,8 +234,17 @@ event sequence, which is the revision of this contract (`ProcessSequence`).
   or started after a released prefix. It is never every call the process
   made. The read budget is the core's
   `ObservationWorkLimits::process_effect_fold_pages` pages of
-  `process_effect_fold_page_size` events (64 pages of 256 in the standard
-  preset), stated with `LashCoreBuilder::observation_work_limits`.
+  `process_effect_fold_page_size` events at the standard retention of 64 per
+  node (64 pages of 256 in the standard preset), stated with
+  `LashCoreBuilder::observation_work_limits`. Larger configured retention or
+  a larger cut pinned in the terminal omission record multiplies the page
+  budget by `ceil(cut / 64)`; retention 4096 therefore allows 4096 standard
+  pages. Arbitrarily large histories can still exhaust that finite budget.
+  One indexed read of the omission record is reserved independently of the
+  occurrence budget, including a zero-page budget. It uses the snapshot's
+  sequence bound, respects history release, and keeps omission counts even
+  when occurrence acquisition is incomplete. `observed_through` remains the
+  forward scan's contiguous frontier when that scan exhausts its budget.
 - `Retired` is a pruned process's tombstone, and `Unknown` an id no row or
   tombstone names. Neither is an empty process at sequence zero.
 

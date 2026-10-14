@@ -74,6 +74,7 @@ use crate::support::{Arc, EmbedError, Result, RuntimeErrorCode};
 pub(crate) struct EffectFoldBudget {
     pub(crate) pages: usize,
     pub(crate) page_size: NonZeroUsize,
+    occurrence_cap: u64,
 }
 
 impl EffectFoldBudget {
@@ -81,7 +82,21 @@ impl EffectFoldBudget {
         Self {
             pages: limits.process_effect_fold_pages,
             page_size: limits.process_effect_fold_page_size,
+            occurrence_cap: lash_trace::TraceLimits::standard().process_effect_occurrences,
         }
+    }
+
+    fn pages_for(self, recorded_cap: u64) -> usize {
+        // Preserve the standard work per node when the host retains more
+        // occurrences; a recorded terminal cut also survives host reconfiguration.
+        let base = lash_trace::TraceLimits::standard().process_effect_occurrences;
+        let scale = self
+            .occurrence_cap
+            .max(recorded_cap)
+            .max(base)
+            .div_ceil(base);
+        self.pages
+            .saturating_mul(usize::try_from(scale).unwrap_or(usize::MAX))
     }
 }
 
@@ -107,10 +122,50 @@ pub(crate) async fn fold_effects(
     let mut report = ProcessEffectReport::default();
     let mut coverage = ProcessEffectCoverage::Complete;
     let mut incomplete = |reason| coverage = ProcessEffectCoverage::Incomplete { reason };
+    // An omission record is one indexed read regardless of the occurrence
+    // budget. Its upper bound is the same row revision as the forward fold,
+    // even if a terminal commits after the snapshot's row was read.
+    let mut recorded_cap = 0;
+    match registry
+        .event_by_replay_key(
+            process_id,
+            &format!("process:{process_id}:effect-omissions"),
+            through,
+        )
+        .await?
+    {
+        ProcessEventReadOutcome::Retained(Some(event)) => {
+            if let lash_core::ProcessLifecycleFact::EffectOmissions(omissions) = &event.fact {
+                if report.fold_event(&event.fact, fleet_format).is_ok() {
+                    recorded_cap = omissions.occurrence_cap;
+                } else {
+                    incomplete(ProcessEffectGapReason::Undecodable);
+                }
+            } else {
+                incomplete(ProcessEffectGapReason::Undecodable);
+            }
+        }
+        ProcessEventReadOutcome::Retained(None) => {}
+        ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Released {
+            ..
+        }) => {
+            incomplete(ProcessEffectGapReason::HistoryReleased);
+        }
+        ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+            terminal_label,
+            pruned_at_ms,
+        }) => {
+            return Ok(Err(Pruned {
+                terminal_label,
+                pruned_at_ms,
+            }));
+        }
+    }
+    let page_budget = budget.pages_for(recorded_cap);
     let mut after = 0;
     let mut pages = 0;
     'pages: while after < through {
-        if pages >= budget.pages {
+        if pages >= page_budget {
             incomplete(ProcessEffectGapReason::AcquisitionBudgetExhausted);
             return Ok(Ok(ProcessEffectEvidence {
                 report,
@@ -217,6 +272,13 @@ impl ProcessFeedSource {
             effect_budget: EffectFoldBudget::of(work_limits),
             reconcile,
         }
+    }
+
+    /// Size occurrence acquisition for the host's configured retention. The
+    /// terminal omission record may name a larger cut pinned by an older host.
+    pub(crate) fn with_effect_retention(mut self, occurrence_cap: u64) -> Self {
+        self.effect_budget.occurrence_cap = occurrence_cap;
+        self
     }
 
     /// The durable sequence of the process, or `None` when no process is

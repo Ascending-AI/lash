@@ -174,6 +174,18 @@ impl ProcessEventLog for EffectSummaryAppendFaults {
             .await
     }
 
+    async fn event_by_replay_key(
+        &self,
+        process_id: &crate::ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<crate::ProcessEventReadOutcome<Option<crate::ProcessEvent>>, crate::PluginError>
+    {
+        self.inner
+            .event_by_replay_key(process_id, replay_key, through_sequence)
+            .await
+    }
+
     async fn event_page_after(
         &self,
         process_id: &ProcessId,

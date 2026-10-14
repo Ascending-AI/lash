@@ -533,6 +533,68 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         Ok(receipts)
     }
 
+    async fn event_by_replay_key(
+        &self,
+        process_id: &ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<lash_core_execution::ProcessEventReadOutcome<Option<ProcessEvent>>, PluginError>
+    {
+        use lash_core_execution::{ProcessEventHistoryRetention, ProcessEventReadOutcome};
+        let through_sequence = i64::try_from(through_sequence).map_err(|_| {
+            PluginError::Session("process event sequence exceeds the SQL cursor range".into())
+        })?;
+        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+            .await
+            .map_err(plugin_sqlx_error)?;
+        match require_process_tx(&mut tx, process_id).await {
+            Ok(_) => {}
+            Err(PluginError::ProcessNoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            }) => {
+                crate::observed_sql::control("ROLLBACK", tx.rollback())
+                    .await
+                    .map_err(plugin_sqlx_error)?;
+                return Ok(ProcessEventReadOutcome::NoLongerRetained(
+                    ProcessEventHistoryRetention::Pruned {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+        let released_through = event_release::released_through_tx(&mut tx, process_id).await?;
+        let row = crate::observed_sql::query(process_sql().event.read_by_replay_key.sql())
+            .bind(process_id.as_str())
+            .bind(replay_key)
+            .bind(through_sequence)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let outcome = match row {
+            None => ProcessEventReadOutcome::Retained(None),
+            Some(row) => {
+                let sequence = plugin_u64_from_sql("ProcessEvent", "sequence", row.get(0))?;
+                if sequence <= released_through {
+                    ProcessEventReadOutcome::NoLongerRetained(
+                        ProcessEventHistoryRetention::Released { released_through },
+                    )
+                } else {
+                    ProcessEventReadOutcome::Retained(Some(ProcessEvent::decode(
+                        &row.get::<String, _>(1),
+                        self.fence.fleet(),
+                    )?))
+                }
+            }
+        };
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(plugin_sqlx_error)?;
+        Ok(outcome)
+    }
+
     async fn event_page_after(
         &self,
         process_id: &ProcessId,

@@ -394,6 +394,69 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn event_by_replay_key(
+        &self,
+        process_id: &ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<
+        lash_core_execution::ProcessEventReadOutcome<Option<ProcessEvent>>,
+        lash_core_execution::PluginError,
+    > {
+        use lash_core_execution::{ProcessEventHistoryRetention, ProcessEventReadOutcome};
+        let process_id = process_id.clone();
+        let replay_key = replay_key.to_owned();
+        let through_sequence = i64::try_from(through_sequence).map_err(|_| {
+            lash_core_execution::PluginError::Session(
+                "process event sequence exceeds the SQL cursor range".into(),
+            )
+        })?;
+        let fleet_format = self.conn.fleet();
+        self.conn
+            .read(move |conn| {
+                Ok((|| {
+                    match Self::require_process_conn(conn, &process_id) {
+                        Ok(_) => {}
+                        Err(lash_core_execution::PluginError::ProcessNoLongerRetained {
+                            terminal_label,
+                            pruned_at_ms,
+                        }) => {
+                            return Ok(ProcessEventReadOutcome::NoLongerRetained(
+                                ProcessEventHistoryRetention::Pruned {
+                                    terminal_label,
+                                    pruned_at_ms,
+                                },
+                            ));
+                        }
+                        Err(error) => return Err(error),
+                    }
+                    let released_through = Self::released_through_conn(conn, &process_id)?;
+                    let row: Option<(i64, String)> = conn
+                        .query_row(
+                            process_sql().event.read_by_replay_key.sql(),
+                            params![process_id.as_str(), replay_key, through_sequence],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()
+                        .map_err(process_sqlite_error)?;
+                    let Some((sequence, json)) = row else {
+                        return Ok(ProcessEventReadOutcome::Retained(None));
+                    };
+                    let sequence = plugin_u64_from_sql("ProcessEvent", "sequence", sequence)?;
+                    if sequence <= released_through {
+                        return Ok(ProcessEventReadOutcome::NoLongerRetained(
+                            ProcessEventHistoryRetention::Released { released_through },
+                        ));
+                    }
+                    Ok(ProcessEventReadOutcome::Retained(Some(
+                        ProcessEvent::decode(&json, fleet_format)?,
+                    )))
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn event_page_after(
         &self,
         process_id: &ProcessId,

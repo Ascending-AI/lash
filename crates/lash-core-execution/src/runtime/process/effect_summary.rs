@@ -24,7 +24,7 @@ use super::events::ProcessEventAppendRequest;
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
-///     items(path = "crates/lash-trace/src/limits.rs", MAX_PROCESS_EFFECT_OCCURRENCES, TraceLimits),
+///     items(path = "crates/lash-trace/src/limits.rs", MAX_PROCESS_EFFECT_OCCURRENCES),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"

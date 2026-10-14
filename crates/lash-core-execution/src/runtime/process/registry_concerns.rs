@@ -398,6 +398,19 @@ pub trait ProcessEventLog: ProcessQuery {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError>;
 
+    /// Read one event by its append replay key, at or below `through_sequence`.
+    ///
+    /// Missing keys answer `Retained(None)`. A released event answers the
+    /// typed release horizon and a pruned process answers `Pruned`; neither
+    /// is a missing key. This indexed lookup reserves bounded acquisition
+    /// for an omission record independently of the occurrence-page budget.
+    async fn event_by_replay_key(
+        &self,
+        process_id: &ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<ProcessEventReadOutcome<Option<ProcessEvent>>, PluginError>;
+
     /// Read at most `limit` events of one process, strictly after
     /// `after_sequence`.
     ///

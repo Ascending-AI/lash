@@ -106,6 +106,14 @@ impl Processes {
                     publisher: Arc::clone(&self.core.language_observation_publisher),
                     changes: self.core.process_emissions().clone(),
                 },
+            )
+            .with_effect_retention(
+                self.core
+                    .env
+                    .core
+                    .tracing
+                    .limits()
+                    .process_effect_occurrences,
             ),
         }
     }

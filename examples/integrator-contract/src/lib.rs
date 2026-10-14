@@ -633,6 +633,14 @@ impl ProcessEventLog for Integrator {
     ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
         unreachable!("external signature witness")
     }
+    async fn event_by_replay_key(
+        &self,
+        process_id: &ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<ProcessEventReadOutcome<Option<ProcessEvent>>, PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn event_page_after(
         &self,
         process_id: &ProcessId,

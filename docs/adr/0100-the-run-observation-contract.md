@@ -79,7 +79,12 @@ The snapshot combines a live overlay at its publication boundary with status and
 an effect-summary fold through one durable high-water mark. Acquisition is
 bounded and uses Full payloads with typed retention outcomes. Live completeness
 and durable completeness are separate. Missing observations stay unknown.
-Durable publication follows the commit through the process sink.
+Durable publication follows the commit through the process sink. The
+occurrence-page budget scales with configured retention, or a larger cut
+pinned in the terminal omission record. One indexed omission lookup is
+reserved outside that budget, bounded by the snapshot sequence and subject
+to the same retention outcomes, so an acquisition cut never hides retained
+omission counts.
 
 Evidence: `crates/lash-core/src/runtime/observation/process_replay.rs`,
 `crates/lash/src/process_feed.rs`, and

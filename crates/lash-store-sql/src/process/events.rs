@@ -26,6 +26,12 @@ crate::statements! {
                  FROM process_events
                  WHERE process_id = ?1 AND idempotency_key = ?2";
 
+        /// One indexed event under process `?1` and replay key `?2`, bounded
+        /// by the snapshot sequence `?3`. The caller checks its sequence
+        /// against the release horizon before decoding the payload.
+        read_by_replay_key = "SELECT sequence, event_json FROM process_events
+                 WHERE process_id = ?1 AND idempotency_key = ?2 AND sequence <= ?3";
+
         /// The highest sequence process `?1` has recorded, or `NULL` when it
         /// has recorded none.
         select_max_sequence = "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1";

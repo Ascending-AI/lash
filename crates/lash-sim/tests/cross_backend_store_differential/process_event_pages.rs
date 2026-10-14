@@ -501,6 +501,48 @@ pub(super) async fn compare_bounded_process_event_pages(
                 .expect("complete with the terminal batch, then recover it");
         }
     }
+    let mut keyed_reads = Vec::new();
+    for registry in [
+        &sqlite as &dyn lash_core::ProcessRegistry,
+        &postgres_registry as &dyn lash_core::ProcessRegistry,
+    ] {
+        let through = registry
+            .get_process(&effect_id)
+            .await
+            .expect("effect row")
+            .expect("retained")
+            .last_event_sequence;
+        let read = registry
+            .event_by_replay_key(&effect_id, "fixture-effect:omissions", through)
+            .await
+            .expect("indexed omission read");
+        let lash_core::ProcessEventReadOutcome::Retained(Some(event)) = read else {
+            panic!("the omission record is retained");
+        };
+        assert_eq!(
+            event.fact,
+            lash_core::ProcessLifecycleFact::EffectOmissions(omissions.clone())
+        );
+        assert_eq!(
+            registry
+                .event_by_replay_key(&effect_id, "fixture-effect:omissions", event.sequence - 1)
+                .await
+                .expect("bounded omission read"),
+            lash_core::ProcessEventReadOutcome::Retained(None)
+        );
+        assert_eq!(
+            registry
+                .event_by_replay_key(&effect_id, "missing-effect-key", through)
+                .await
+                .expect("absent key"),
+            lash_core::ProcessEventReadOutcome::Retained(None)
+        );
+        keyed_reads.push((event.sequence, event.fact));
+    }
+    assert_eq!(
+        keyed_reads[0], keyed_reads[1],
+        "indexed omission reads diverged"
+    );
     let logs = {
         let mut logs = Vec::new();
         for registry in [
@@ -555,6 +597,27 @@ pub(super) async fn compare_bounded_process_event_pages(
         node.occurrences[6].outcome_class,
         lash_core::ProcessEffectOutcomeClass::Failure
     );
+    for registry in [
+        &sqlite as &dyn lash_core::ProcessRegistry,
+        &postgres_registry as &dyn lash_core::ProcessRegistry,
+    ] {
+        let horizon = keyed_reads[0].0;
+        registry
+            .release_process_events(&effect_id, horizon)
+            .await
+            .expect("release omission record");
+        assert_eq!(
+            registry
+                .event_by_replay_key(&effect_id, "fixture-effect:omissions", horizon)
+                .await
+                .expect("released omission read"),
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(
+                lash_core::ProcessEventHistoryRetention::Released {
+                    released_through: horizon
+                }
+            )
+        );
+    }
     let (_, sqlite_releases) = release_observations(&sqlite).await;
     let (postgres_release_id, postgres_releases) = release_observations(&postgres_registry).await;
     assert_eq!(

@@ -521,6 +521,19 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
 
     // `event_page` keeps the trait's provided body, which reads through
     // `event_page_after`: a by-id read sees the same fault.
+    async fn event_by_replay_key(
+        &self,
+        process_id: &crate::ProcessId,
+        replay_key: &str,
+        through_sequence: u64,
+    ) -> Result<crate::ProcessEventReadOutcome<Option<crate::ProcessEvent>>, crate::PluginError>
+    {
+        self.take_events_read_fault()?;
+        self.inner
+            .event_by_replay_key(process_id, replay_key, through_sequence)
+            .await
+    }
+
     async fn event_page_after(
         &self,
         process_id: &crate::ProcessId,
