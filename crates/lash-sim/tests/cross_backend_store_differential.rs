@@ -1438,7 +1438,9 @@ impl BackendRunner {
         let surface_answer = self.surface.answer.clone();
         let after = self.residue_digest().await;
         let changed_tables = before.changed_tables(&after);
-        let refusal_mutated = store_error.is_some().then_some(!changed_tables.is_empty());
+        let refusal_mutated = store_error
+            .is_some()
+            .then(|| before.refusal_mutated(&after));
         (
             StepObservation {
                 store_error,
@@ -1715,8 +1717,12 @@ async fn runners_for_case_with_clock(
     let memory_lifecycle: lash::Backend =
         lash_conformance::backend_over(sqlite_memory_stores.clone());
     let sqlite_lifecycle: lash::Backend = lash_conformance::backend_over(sqlite_backend);
+    // The durable engine reads the differential clock, as SQLite's does,
+    // rather than the database's: a live core's node heartbeat then rewrites
+    // the instant it holds instead of moving a store-wide row under a
+    // refused step (FIG-6275).
     let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(Arc::new(
-        lash_postgres_store::PostgresStoreSet::with_clock(
+        lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
             postgres,
             lash_sqlite_store::SqliteStoreSet::open(
                 (sqlite_case_root.join("postgres-attachments")).join("attachments.db"),

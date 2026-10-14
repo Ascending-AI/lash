@@ -27,7 +27,9 @@
 //! table is read whole. Adding a table therefore needs no edit to this file.
 //! Whole-table reads are sound because every case runs sequentially under the
 //! shared database's advisory lock, so no other writer moves a store-wide row
-//! between a step's two digests.
+//! between a step's two digests. The harness's own lifecycle cores run beside
+//! the steps, and every backend's durable engine reads the frozen differential
+//! clock, so their heartbeats rewrite the instant already stored.
 
 use std::collections::BTreeSet;
 
@@ -53,6 +55,13 @@ impl ResidueDigest {
         }
         changed.sort_unstable();
         changed
+    }
+
+    /// Whether a refused step mutated the session: the verdict the backends
+    /// are compared on. Store-wide rows are not comparable across backends
+    /// (see the module docs), so they cannot flip it.
+    pub(super) fn refusal_mutated(&self, after: &Self) -> bool {
+        !self.changed_session_tables(after).is_empty()
     }
 
     /// The session's logical tables whose rows differ between `self`
@@ -352,6 +361,44 @@ async fn residue_digest_covers_a_planted_sqlite_table() {
             "planted_session_rows".to_string(),
             "planted_store_rows".to_string()
         ],
+    );
+}
+
+/// A refused step is judged mutated by the session's own rows alone: a
+/// store-wide row that moves meanwhile (a node heartbeat, a feed clock) is
+/// not the refusal's residue to compare across backends (FIG-6275).
+#[tokio::test]
+async fn a_refusal_is_judged_mutated_by_its_session_rows_alone() {
+    let root = tempfile::tempdir().expect("create the planted-table root");
+    lash_sqlite_store::SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open a fresh SQLite store set");
+    let connection =
+        rusqlite::Connection::open(root.path().join("lash.db")).expect("open the durable core");
+    connection
+        .execute_batch(
+            "CREATE TABLE planted_session_rows (session_id TEXT NOT NULL, value TEXT NOT NULL);
+             CREATE TABLE planted_store_rows (value TEXT NOT NULL);",
+        )
+        .expect("plant two tables");
+    let session = SessionId::from("planted-session");
+    let before = sqlite_connection_residue_digest(&connection, &session);
+    connection
+        .execute_batch("INSERT INTO planted_store_rows VALUES ('heartbeat');")
+        .expect("move a store-wide row");
+    assert!(
+        !before.refusal_mutated(&sqlite_connection_residue_digest(&connection, &session)),
+        "a store-wide row is not the refused step's mutation"
+    );
+    connection
+        .execute_batch("INSERT INTO planted_session_rows VALUES ('planted-session', 'leak');")
+        .expect("move a session row");
+    assert!(
+        before.refusal_mutated(&sqlite_connection_residue_digest(&connection, &session)),
+        "a session row is the refused step's mutation"
     );
 }
 
