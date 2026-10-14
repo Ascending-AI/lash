@@ -132,6 +132,7 @@ pub trait Machine: Sized {
         root: &CheckpointRoot,
         admissions: Vec<AdmittedWait>,
         source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
     ) -> Result<Self, OpenError>;
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;

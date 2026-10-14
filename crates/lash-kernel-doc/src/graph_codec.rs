@@ -852,11 +852,11 @@ pub mod heap_values {
     });
     record!(TupleSummary {
         len: u64,
+        task_edges: u64,
         cost: LogicalBytes,
         has_edges: bool,
         depth: u32
     });
-    record!(ErrorRef { kind: TextRef, message: TextRef, data: Arc<Value>, cost: LogicalBytes, has_edges: bool });
 
     impl TokenCodec for PageId {
         fn encode(&self, out: &mut TokenWriter) {
@@ -1011,6 +1011,81 @@ pub mod heap_values {
             )
         }
     }
+    impl TokenCodec for Payload<Value> {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Resident(v) => {
+                    out.sum(0, 1);
+                    v.encode(out);
+                }
+                Self::Paged(p) => {
+                    out.sum(1, 1);
+                    p.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => Self::Resident(Arc::new(Value::decode(input)?)),
+                _ => Self::Paged(PageRef::decode(input)?),
+            })
+        }
+    }
+    impl TokenCodec for ErrorRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(8);
+            self.kind.encode(out);
+            self.message.encode(out);
+            self.data.encode(out);
+            self.depth.encode(out);
+            self.cost.encode(out);
+            self.has_edges.encode(out);
+            self.family.encode(out);
+            self.task_edges.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_error(input, None)
+        }
+    }
+    fn decode_error(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<ErrorRef, TokenError> {
+        input.expect_struct(8)?;
+        let kind = TextRef::decode(input)?;
+        let message = TextRef::decode(input)?;
+        let data = match variant(input, |v| (v <= 1).then_some(1))? {
+            0 => Payload::Resident(Arc::new(decode_value_with_family(input, family)?)),
+            _ => Payload::Paged(PageRef::decode(input)?),
+        };
+        let depth = u32::decode(input)?;
+        if depth == 0 || depth > 128 {
+            return Err(invalid("error depth exceeds K-VAL-034"));
+        }
+        let cost = LogicalBytes::decode(input)?;
+        let has_edges = bool::decode(input)?;
+        let declared = Option::<FamilyId>::decode(input)?;
+        if family.is_some() && declared.is_some() && family != declared {
+            return Err(invalid("error family context mismatch"));
+        }
+        let family = declared.or(family);
+        let task_edges = u64::decode(input)?;
+        if let Payload::Resident(value) = &data {
+            if task_count(value) != task_edges {
+                return Err(invalid("error task-edge summary mismatch"));
+            }
+        }
+        Ok(ErrorRef {
+            kind,
+            message,
+            data,
+            depth,
+            cost,
+            has_edges,
+            family,
+            task_edges,
+        })
+    }
     impl TokenCodec for TupleRef {
         fn encode(&self, out: &mut TokenWriter) {
             out.seq(3);
@@ -1054,6 +1129,13 @@ pub mod heap_values {
                 let mut values = Vec::new();
                 for _ in 0..count {
                     values.push(decode_value_with_family(input, family)?);
+                }
+                let count = values.iter().try_fold(0u64, |n, v| {
+                    n.checked_add(task_count(v))
+                        .ok_or_else(|| invalid("tuple task-edge overflow"))
+                })?;
+                if count != summary.task_edges {
+                    return Err(invalid("tuple task-edge summary mismatch"));
                 }
                 Payload::Resident(Arc::from(values))
             }
@@ -1142,7 +1224,7 @@ pub mod heap_values {
                     11 => Value::Set(absolute_entity(input, family)?),
                     12 => Value::Record(absolute_entity(input, family)?),
                     13 => Value::Closure(absolute_entity(input, family)?),
-                    14 => Value::Error(Arc::decode(input)?),
+                    14 => Value::Error(Arc::new(decode_error(input, family)?)),
                     15 => Value::Task(TaskId::decode(input)?),
                     16 => Value::Function(Name::decode(input)?),
                     17 => Value::Handle(Arc::decode(input)?),
@@ -1177,6 +1259,14 @@ pub mod heap_values {
         })
     }
 
+    pub fn task_count(value: &Value) -> u64 {
+        match value {
+            Value::Task(_) | Value::Ref(Identity::Task(_)) => 1,
+            Value::Tuple(t) => t.summary.task_edges,
+            Value::Error(e) => e.task_edges,
+            _ => 0,
+        }
+    }
     pub fn text_summary(text: &str) -> TextSummary {
         TextSummary {
             utf8_bytes: text.len() as u64,

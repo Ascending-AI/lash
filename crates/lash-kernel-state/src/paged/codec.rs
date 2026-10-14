@@ -44,7 +44,8 @@ record!(HeapRoot {
     families: KeyedRoot,
     next_ordinal: u64,
     next_family: u64,
-    accounting: AccountingCertificate
+    accounting: AccountingCertificate,
+    population: DataOnlyCertificate
 });
 record!(FrozenSummary {
     entities: u64,

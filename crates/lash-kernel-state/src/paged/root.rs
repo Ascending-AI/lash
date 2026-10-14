@@ -60,6 +60,7 @@ pub struct HeapRoot {
     pub next_family: u64,
     /// The census's persisted accounting (S7).
     pub accounting: AccountingCertificate,
+    pub population: super::DataOnlyCertificate,
 }
 
 /// Whether the execution is parked or ended.

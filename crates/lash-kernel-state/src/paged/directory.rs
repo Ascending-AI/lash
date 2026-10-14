@@ -1,14 +1,16 @@
 //! Object descriptors packed directly into directory leaves. Identity
 //! edges are semantic data, never storage graph child references.
 use super::heap_impl::{PagedHeap, census_fault, keyed};
-use super::tree::{Access, Cell, SealWork, Tree, grant};
+use super::tree::{Access, Cell, SealWork, Tree, checked_sum, grant};
+use super::*;
 use super::{
-    FamilyRecord, FrozenRef, HeapWriteError, MembershipRun, ObjectKind, SealBudget, SemanticHeap,
-    TransientRoots,
+    FamilyRecord, FrozenRef, HeapWriteError, MembershipRun, ObjectKind, SealBudget, TransientRoots,
 };
 use lash_kernel_doc::Site;
+use lash_kernel_doc::TaskId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -26,7 +28,7 @@ pub enum Body {
     },
     Closure {
         site: Site,
-        captures: Tree<EntityId>,
+        captures: Tree<(lash_kernel_doc::Name, EntityId)>,
     },
     Variable(Value),
 }
@@ -79,6 +81,9 @@ impl Cell for Value {
     fn cost(&self) -> u64 {
         value_cost(self)
     }
+    fn task_edges(&self) -> u64 {
+        lash_kernel_doc::heap_values::task_count(self)
+    }
     fn decode_cell(
         input: &mut TokenReader<'_>,
         family: Option<FamilyId>,
@@ -90,6 +95,11 @@ impl Cell for Value {
     }
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         value_grants(self, children)
+    }
+}
+impl Cell for (lash_kernel_doc::Name, EntityId) {
+    fn cost(&self) -> u64 {
+        8
     }
 }
 impl Cell for EntityId {
@@ -111,6 +121,11 @@ impl TokenCodec for Ordinal {
     }
 }
 impl Cell for Entry {
+    fn task_edges(&self) -> u64 {
+        self.key
+            .task_edges()
+            .saturating_add(self.value.task_edges())
+    }
     fn decode_cell(
         input: &mut TokenReader<'_>,
         family: Option<FamilyId>,
@@ -148,6 +163,17 @@ impl TokenCodec for Entry {
     }
 }
 impl Cell for ObjectHead {
+    fn task_edges(&self) -> u64 {
+        match &self.body {
+            Body::List {
+                inline: Some(v), ..
+            } => v.iter().map(Cell::task_edges).sum(),
+            Body::List { rows, .. } => rows.task_edges(),
+            Body::Table { rows, .. } => rows.task_edges(),
+            Body::Variable(v) => v.task_edges(),
+            Body::Closure { .. } => 0,
+        }
+    }
     fn cost(&self) -> u64 {
         32u64.saturating_add(match &self.body {
             Body::List { inline, rows, .. } => inline
@@ -163,7 +189,7 @@ impl Cell for ObjectHead {
             Body::Variable(value) => value_cost(value),
         })
     }
-    fn prepare(&mut self, access: &Access, work: &mut SealWork) -> Result<bool, HeapFault> {
+    fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
         match &mut self.body {
             Body::List { rows, .. } => rows.seal(access, work),
             Body::Table { lookup, rows, .. } => {
@@ -321,7 +347,10 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
         Value::Error(e) => {
             value_children(&Value::Text(e.kind.clone()), out);
             value_children(&Value::Text(e.message.clone()), out);
-            value_children(&e.data, out);
+            match &e.data {
+                Payload::Resident(v) => value_children(v, out),
+                Payload::Paged(p) => out.push(*p),
+            }
         }
         _ => (),
     }
@@ -353,7 +382,10 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
             let e = Arc::make_mut(e);
             text_grants(&mut e.kind, children)?;
             text_grants(&mut e.message, children)?;
-            value_grants(Arc::make_mut(&mut e.data), children)?;
+            match &mut e.data {
+                Payload::Resident(v) => value_grants(Arc::make_mut(v), children)?,
+                Payload::Paged(p) => grant(p, children)?,
+            }
         }
         _ => (),
     }
@@ -370,7 +402,6 @@ pub fn ordinal_key(ordinal: u64) -> Vec<u8> {
 /// image rebuilt at park. Only changed paths become editable.
 pub mod execution {
     use super::*;
-    use crate::paged::*;
     use lash_kernel_doc::{Name, TaskId, TaskIdentity};
 
     #[derive(Clone)]
@@ -439,6 +470,12 @@ pub mod execution {
         }
     }
     impl Cell for BindingRecord {
+        fn task_edges(&self) -> u64 {
+            match &self.value {
+                BoundRecord::Value(v) => v.task_edges(),
+                _ => 0,
+            }
+        }
         fn cost(&self) -> u64 {
             match &self.value {
                 BoundRecord::Value(v) => value_cost(v),
@@ -458,13 +495,19 @@ pub mod execution {
         }
     }
     impl Cell for FramePage {
+        fn task_edges(&self) -> u64 {
+            self.bindings.task_edges()
+                + self.iterated.task_edges()
+                + self.departing.task_edges()
+                + self.arguments.as_ref().map_or(0, Tree::task_edges)
+        }
         fn cost(&self) -> u64 {
             64 + self.bindings.cost()
                 + self.iterated.cost()
                 + self.departing.cost()
                 + self.arguments.as_ref().map_or(0, Tree::cost)
         }
-        fn prepare(&mut self, access: &Access, work: &mut SealWork) -> Result<bool, HeapFault> {
+        fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.bindings.seal(access, work)?
                 && self.loops.seal(access, work)?
                 && self.finally.seal(access, work)?
@@ -498,6 +541,19 @@ pub mod execution {
         }
     }
     impl Cell for TaskPage {
+        fn task_edges(&self) -> u64 {
+            self.frames.task_edges()
+                + match &self.state {
+                    TaskStateRecord::Resuming(
+                        IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                    )
+                    | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
+                        v.task_edges()
+                    }
+                    _ => 0,
+                }
+        }
+
         fn cost(&self) -> u64 {
             self.frames.cost()
                 + match &self.state {
@@ -507,7 +563,7 @@ pub mod execution {
                     _ => 0,
                 }
         }
-        fn prepare(&mut self, access: &Access, work: &mut SealWork) -> Result<bool, HeapFault> {
+        fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.joiners.seal(access, work)?
                 && self.occurrences.seal(access, work)?
                 && self.frames.seal(access, work)?)
@@ -594,6 +650,9 @@ pub mod execution {
 }
 
 impl Cell for MembershipRun {
+    fn live_members(&self) -> u64 {
+        if self.live { self.len } else { 0 }
+    }
     fn cost(&self) -> u64 {
         0
     }
@@ -623,17 +682,11 @@ impl PagedHeap {
     }
     /// Reserves a fresh occurrence namespace without constructing any body.
     pub fn register_family(&mut self, frozen: FrozenRef) -> Result<FamilyId, HeapWriteError> {
-        self.reserve_logical(
-            frozen.summary.cost,
-            &TransientRoots {
-                registers: &[],
-                pinned: &[],
-                native_args: &[],
-                fresh: &[],
-                reserved: LogicalBytes(0),
-            },
-        )?;
         let family = self.next_family()?;
+        if frozen.summary.entities == 0 {
+            return Ok(family);
+        }
+        self.admit(frozen.summary.cost.0, &[])?;
         let mut membership = Tree::new(false);
         if frozen.summary.entities != 0 {
             membership.write(
@@ -677,6 +730,18 @@ impl PagedHeap {
                 .checked_add(frozen.summary.entities)
                 .ok_or_else(|| HeapFault::Malformed("family population overflow".into()))?;
         }
+        if !frozen.summary.data_only {
+            self.population.closure_entities = self
+                .population
+                .closure_entities
+                .checked_add(1)
+                .ok_or_else(|| HeapFault::Malformed("family population overflow".into()))?;
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_add(1)
+                .ok_or_else(|| HeapFault::Malformed("family population overflow".into()))?;
+        }
         self.families
             .write(ordinal_key(family.0), record, &self.access)?;
         self.header = None;
@@ -687,7 +752,7 @@ impl PagedHeap {
             .families
             .get(&ordinal_key(entity.family.0), &self.access)?
         else {
-            return Err(HeapFault::Malformed("sweep named an absent family".into()));
+            return Ok(());
         };
         let mut runs = Tree::<MembershipRun>::open(
             family.membership.page,
@@ -695,6 +760,7 @@ impl PagedHeap {
             family.membership.cost,
             false,
         );
+        let live_before = runs.live_members(&self.access)?;
         let rank = runs.passed(&ordinal_key(entity.ordinal), &self.access)?;
         let Some((key, run)) = rank
             .checked_sub(1)
@@ -704,7 +770,10 @@ impl PagedHeap {
         else {
             return Err(HeapFault::Malformed("family membership has a hole".into()));
         };
-        if !run.live || entity.ordinal - run.start >= run.len {
+        if entity.ordinal < run.start || entity.ordinal - run.start >= run.len {
+            return Err(HeapFault::Malformed("family membership has a hole".into()));
+        }
+        if !run.live {
             return Ok(());
         }
         runs.remove(&key, &self.access)?;
@@ -765,6 +834,32 @@ impl PagedHeap {
             },
             &self.access,
         )?;
+        if runs.live_members(&self.access)?
+            != live_before
+                .checked_sub(1)
+                .ok_or_else(|| HeapFault::Malformed("membership count underflow".into()))?
+        {
+            return Err(HeapFault::Malformed(
+                "membership edit changed the wrong count".into(),
+            ));
+        }
+        if live_before == 1 {
+            self.families
+                .remove(&ordinal_key(entity.family.0), &self.access)?;
+            if !family.base.summary.data_only {
+                self.population.closure_entities = self
+                    .population
+                    .closure_entities
+                    .checked_sub(1)
+                    .ok_or_else(|| HeapFault::Malformed("family population underflow".into()))?;
+                self.population.task_edges =
+                    self.population.task_edges.checked_sub(1).ok_or_else(|| {
+                        HeapFault::Malformed("family task population underflow".into())
+                    })?;
+            }
+            self.header = None;
+            return Ok(());
+        }
         runs.seal(
             &self.access,
             &mut SealWork::new(SealBudget {
@@ -777,4 +872,406 @@ impl PagedHeap {
             .write(ordinal_key(entity.family.0), family, &self.access)?;
         Ok(())
     }
+}
+
+impl PagedHeap {
+    /// Installs an authenticated binding tree in place. A precision check sees
+    /// the proposed roots, so dropped bindings cannot cause a false refusal.
+    pub fn set_session_root(
+        &mut self,
+        bindings: Tree<crate::paged::BindingRecord>,
+    ) -> Result<(), HeapWriteError> {
+        use crate::paged::{PendingReservation, RefinedDecision, ReservationDecision};
+        let before = self.session.cost();
+        let after = bindings.cost();
+        let old_tasks = self.session.read_task_edges(&self.access)?;
+        let new_tasks = bindings.read_task_edges(&self.access)?;
+        let bindings = bindings.with_task_edges(new_tasks);
+        let mut census = self
+            .census
+            .take()
+            .ok_or_else(|| HeapFault::Malformed("session root has no census".into()))?;
+        let decision = census.reserve(LogicalBytes(after.saturating_sub(before)));
+        self.session = bindings;
+        self.population.task_edges = self
+            .population
+            .task_edges
+            .checked_sub(old_tasks)
+            .and_then(|v| v.checked_add(new_tasks))
+            .ok_or_else(|| HeapFault::Malformed("binding task-edge population overflow".into()))?;
+        self.header = None;
+        let result = match decision {
+            ReservationDecision::Granted(_) => census
+                .changed(LogicalBytes(before), LogicalBytes(after))
+                .map_err(census_fault)
+                .map_err(HeapWriteError::from),
+            ReservationDecision::NeedsPrecision(_) => {
+                let registers = self.statement_roots().to_vec();
+                let reserved = self.outstanding_reserved();
+                match census.refine(
+                    self,
+                    &TransientRoots {
+                        registers: &registers,
+                        pinned: &[],
+                        native_args: &[],
+                        fresh: &[],
+                        reserved: LogicalBytes(reserved),
+                    },
+                    PendingReservation {
+                        bytes: LogicalBytes(0),
+                        overflowed: false,
+                    },
+                ) {
+                    Ok(RefinedDecision::Granted(_)) => Ok(()),
+                    Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
+                    Err(error) => Err(census_fault(error).into()),
+                }
+            }
+        };
+        self.accounting = census.certificate();
+        self.census = Some(census);
+        result
+    }
+}
+
+impl CensusGraph for PagedHeap {
+    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
+        Ok(LogicalBytes(checked_sum(
+            [self.session.cost(), self.tasks.cost()].into_iter(),
+        )?))
+    }
+    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
+        Ok(LogicalBytes(value_cost(value)))
+    }
+    fn value_edges(
+        &mut self,
+        value: &Value,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        self.stream_edges(value, out)
+    }
+    fn persistent_roots(
+        &mut self,
+        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        let binding =
+            |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
+                match &binding.value {
+                    BoundRecord::Value(v) => visit(v),
+                    BoundRecord::Shared(id) => visit(&Value::Ref(Identity::Object(*id))),
+                }
+            };
+        visit_tree(&self.session, &self.access, &mut |b| binding(b, visit))?;
+        visit_tree(&self.tasks, &self.access, &mut |task| {
+            match &task.state {
+                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v)) => {
+                    visit(v)?
+                }
+                TaskStateRecord::Resuming(IncomingRecord::Joined(t))
+                | TaskStateRecord::Joining(t) => visit(&Value::Task(*t))?,
+                _ => (),
+            }
+            visit_tree(&task.frames, &self.access, &mut |frame| {
+                visit_tree(&frame.bindings, &self.access, &mut |b| binding(b, visit))?;
+                visit_tree(&frame.iterated, &self.access, visit)?;
+                visit_tree(&frame.departing, &self.access, visit)?;
+                if let Some(args) = &frame.arguments {
+                    visit_tree(args, &self.access, visit)?;
+                }
+                Ok(())
+            })
+        })
+    }
+    fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
+        Ok(self.head(entity)?.map(|head| EntityCost {
+            local: LogicalBytes(head.cost()),
+            has_edges: true,
+        }))
+    }
+    fn entity_edges(
+        &mut self,
+        entity: EntityId,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        let Some(head) = self.head(entity)? else {
+            return Ok(());
+        };
+        let mut error = None;
+        match head.body {
+            Body::Variable(v) => return self.stream_edges(&v, out),
+            Body::Closure { captures, .. } => captures.visit(
+                &self.access,
+                &mut |_, id| match out(Identity::Object(id.1)) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        error = Some(e);
+                        false
+                    }
+                },
+            )?,
+            Body::List {
+                inline: Some(v), ..
+            } => {
+                for v in &v {
+                    self.stream_edges(v, out)?;
+                }
+            }
+            Body::List { rows, .. } => {
+                rows.visit(&self.access, &mut |_, v| match self.stream_edges(v, out) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        error = Some(e);
+                        false
+                    }
+                })?
+            }
+            Body::Table { rows, .. } => rows.visit(&self.access, &mut |_, e| match self
+                .stream_edges(&e.key, out)
+                .and_then(|()| self.stream_edges(&e.value, out))
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    error = Some(e);
+                    false
+                }
+            })?,
+        }
+        error.map_or(Ok(()), Err)
+    }
+    fn task_result(
+        &mut self,
+        task: TaskId,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<LogicalBytes, HeapFault> {
+        let Some(task) = self.tasks.get(&ordinal_key(task.0), &self.access)? else {
+            return Ok(LogicalBytes(0));
+        };
+        let value = match &task.state {
+            TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
+                if task.result_retained =>
+            {
+                v
+            }
+            _ => return Ok(LogicalBytes(0)),
+        };
+        self.stream_edges(value, out)?;
+        Ok(LogicalBytes(value_cost(value)))
+    }
+    fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault> {
+        for entity in &unreachable.entities {
+            if entity.family != FamilyId::PRIMARY {
+                self.sweep_family_member(*entity)?;
+            }
+            if let Some(head) = self.directory.remove(&entity_key(*entity), &self.access)? {
+                self.population.closure_entities = self
+                    .population
+                    .closure_entities
+                    .checked_sub((head.kind() == ObjectKind::Closure) as u64)
+                    .ok_or_else(|| HeapFault::Malformed("sweep population underflow".into()))?;
+                self.population.task_edges = self
+                    .population
+                    .task_edges
+                    .checked_sub(head.task_edges())
+                    .ok_or_else(|| HeapFault::Malformed("sweep task-edge underflow".into()))?;
+            }
+        }
+        for task in &unreachable.ended_task_results {
+            if let Some(mut row) = self.tasks.get(&ordinal_key(task.0), &self.access)? {
+                row.state = match row.state {
+                    TaskStateRecord::Ended(EndedTask::Returned(_)) => {
+                        TaskStateRecord::Ended(EndedTask::Returned(Value::Null))
+                    }
+                    TaskStateRecord::Ended(EndedTask::Raised(_)) => {
+                        TaskStateRecord::Ended(EndedTask::Raised(Value::Null))
+                    }
+                    _ => {
+                        return Err(HeapFault::Malformed(
+                            "sweep named a running task result".into(),
+                        ));
+                    }
+                };
+                row.result_retained = false;
+                self.tasks.write(ordinal_key(task.0), row, &self.access)?;
+            }
+        }
+        self.header = None;
+        Ok(())
+    }
+    fn census_after(
+        &mut self,
+        after: Option<EntityId>,
+        limit: usize,
+    ) -> Result<Vec<EntityId>, HeapFault> {
+        let mut entities = Vec::new();
+        if after.is_none_or(|id| id.family == FamilyId::PRIMARY) {
+            let mut key = after.map(entity_key);
+            while entities.len() < limit {
+                let Some((next, head)) = self.directory.after(key.as_deref(), &self.access)? else {
+                    break;
+                };
+                if head.family != FamilyId::PRIMARY {
+                    break;
+                }
+                let ordinal = u64::from_be_bytes(
+                    next.get(8..)
+                        .ok_or_else(|| HeapFault::Malformed("identity key malformed".into()))?
+                        .try_into()
+                        .map_err(|_| HeapFault::Malformed("identity key malformed".into()))?,
+                );
+                entities.push(EntityId {
+                    family: FamilyId::PRIMARY,
+                    ordinal,
+                });
+                key = Some(next);
+            }
+        }
+        let mut key = after
+            .and_then(|id| id.family.0.checked_sub(1))
+            .map(ordinal_key);
+        while entities.len() < limit {
+            let Some((next, family)) = self.families.after(key.as_deref(), &self.access)? else {
+                break;
+            };
+            let runs = Tree::<MembershipRun>::open(
+                family.membership.page,
+                family.membership.len,
+                family.membership.cost,
+                false,
+            );
+            let first = after
+                .filter(|id| id.family == family.family)
+                .and_then(|id| id.ordinal.checked_add(1))
+                .unwrap_or(0);
+            let mut rank = runs
+                .passed(&ordinal_key(first), &self.access)?
+                .saturating_sub(1);
+            while entities.len() < limit {
+                let Some((_, run)) = runs.rank_get(rank, &self.access)? else {
+                    break;
+                };
+                let end = run
+                    .start
+                    .checked_add(run.len)
+                    .ok_or_else(|| HeapFault::Malformed("family run extent overflow".into()))?;
+                if end > family.extent {
+                    return Err(HeapFault::Corrupt {
+                        page: family.base.root.id,
+                        reason: "membership exceeds family extent".into(),
+                    });
+                }
+                if run.live {
+                    let count = (end.saturating_sub(run.start.max(first)))
+                        .min((limit - entities.len()) as u64);
+                    for ordinal in run.start.max(first)..run.start.max(first) + count {
+                        entities.push(EntityId {
+                            family: family.family,
+                            ordinal,
+                        });
+                    }
+                }
+                rank += 1;
+            }
+            key = Some(next);
+        }
+        Ok(entities)
+    }
+    fn ended_tasks_after(
+        &mut self,
+        after: Option<TaskId>,
+        limit: usize,
+    ) -> Result<Vec<TaskId>, HeapFault> {
+        let mut key = after.map(|t| ordinal_key(t.0));
+        let mut tasks = Vec::new();
+        while tasks.len() < limit {
+            let Some((next, row)) = self.tasks.after(key.as_deref(), &self.access)? else {
+                break;
+            };
+            if !matches!(row.state, TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_)) if row.result_retained)
+            {
+                key = Some(next);
+                continue;
+            }
+            tasks.push(TaskId(u64::from_be_bytes(
+                next.as_slice()
+                    .try_into()
+                    .map_err(|_| HeapFault::Malformed("task identity key is not 8 bytes".into()))?,
+            )));
+            key = Some(next);
+        }
+        Ok(tasks)
+    }
+}
+impl PagedHeap {
+    /// Streams nested immutable edges in place, stopping on the first visitor
+    /// failure. Scalar payloads are never loaded by a trace.
+    pub fn stream_edges(
+        &self,
+        value: &Value,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        match value {
+            Value::List(id)
+            | Value::Map(id)
+            | Value::Set(id)
+            | Value::Record(id)
+            | Value::Closure(id) => out(Identity::Object(*id))?,
+            Value::Task(id) => out(Identity::Task(*id))?,
+            Value::Ref(id) => out(*id)?,
+            Value::Tuple(t) if t.summary.has_edges => {
+                let mut error = None;
+                self.tuple_visit(t, &mut |v| match self.stream_edges(v, out) {
+                    Ok(()) => ControlFlow::Continue(()),
+                    Err(e) => {
+                        error = Some(e);
+                        ControlFlow::Break(())
+                    }
+                })?;
+                if let Some(e) = error {
+                    return Err(e);
+                }
+            }
+            Value::Error(e) if e.has_edges => self.stream_edges(&self.error_data(e)?, out)?,
+            _ => (),
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn tuple_tree(tuple: &TupleRef, page: PageRef) -> Tree<Value> {
+    let tree = Tree::<Value>::open(Some(page), tuple.summary.len, tuple.summary.cost, true)
+        .with_task_edges(tuple.summary.task_edges);
+    match tuple.family {
+        Some(family) => tree.in_family(family),
+        None => tree,
+    }
+}
+
+fn visit_tree<T: Cell>(
+    tree: &Tree<T>,
+    access: &Access<'_>,
+    visit: &mut dyn FnMut(&T) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    let mut error = None;
+    tree.visit(access, &mut |_, v| match visit(v) {
+        Ok(()) => true,
+        Err(e) => {
+            error = Some(e);
+            false
+        }
+    })?;
+    error.map_or(Ok(()), Err)
+}
+
+pub(super) fn value_has_edges(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::List(_)
+            | Value::Map(_)
+            | Value::Set(_)
+            | Value::Record(_)
+            | Value::Closure(_)
+            | Value::Task(_)
+            | Value::Ref(_)
+    ) || matches!(value, Value::Tuple(t) if t.summary.has_edges)
+        || matches!(value, Value::Error(e) if e.has_edges)
 }

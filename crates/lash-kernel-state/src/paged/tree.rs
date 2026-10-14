@@ -13,13 +13,19 @@ use std::rc::Rc;
 /// Cells maintain their child links and accounting before publication.
 pub trait Cell: TokenCodec + Clone {
     fn cost(&self) -> u64;
+    fn task_edges(&self) -> u64 {
+        0
+    }
+    fn live_members(&self) -> u64 {
+        0
+    }
     fn decode_cell(
         input: &mut TokenReader<'_>,
         _family: Option<FamilyId>,
     ) -> Result<Self, TokenError> {
         Self::decode(input)
     }
-    fn prepare(&mut self, _access: &Access, _budget: &mut SealWork) -> Result<bool, HeapFault> {
+    fn prepare(&mut self, _access: &Access<'_>, _budget: &mut SealWork) -> Result<bool, HeapFault> {
         Ok(true)
     }
     fn grants(&mut self, _children: &[PageRef]) -> Result<(), HeapFault> {
@@ -29,15 +35,22 @@ pub trait Cell: TokenCodec + Clone {
 }
 
 /// Single-threaded page residency, bounded independently of guest cost.
-pub struct Access {
-    source: RefCell<Box<dyn PageSource>>,
+pub struct Access<'a> {
+    source: RefCell<SourcePort<'a>>,
     cache: RefCell<BTreeMap<PageId, PageAnswer>>,
     bytes: RefCell<usize>,
 }
-impl Access {
+impl<'a> Access<'a> {
     pub fn new(source: Box<dyn PageSource>) -> Self {
         Self {
-            source: RefCell::new(source),
+            source: RefCell::new(SourcePort::Owned(source)),
+            cache: RefCell::new(BTreeMap::new()),
+            bytes: RefCell::new(0),
+        }
+    }
+    fn borrowed(source: &'a mut dyn PageSource) -> Self {
+        Self {
+            source: RefCell::new(SourcePort::Borrowed(source)),
             cache: RefCell::new(BTreeMap::new()),
             bytes: RefCell::new(0),
         }
@@ -91,7 +104,7 @@ impl Access {
         &self,
         f: impl FnOnce(&mut dyn PageSource) -> Result<T, HeapFault>,
     ) -> Result<T, HeapFault> {
-        f(&mut **self.source.borrow_mut())
+        f(&mut *self.source.borrow_mut())
     }
     pub fn clear(&self) {
         self.cache.borrow_mut().clear();
@@ -116,18 +129,24 @@ pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> 
 struct Summary {
     len: u64,
     cost: u64,
+    tasks: u64,
+    members: u64,
 }
 impl TokenCodec for Summary {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(4);
         out.unsigned(self.len);
         out.unsigned(self.cost);
+        out.unsigned(self.tasks);
+        out.unsigned(self.members);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(4)?;
         Ok(Self {
             len: input.unsigned()?,
             cost: input.unsigned()?,
+            tasks: input.unsigned()?,
+            members: input.unsigned()?,
         })
     }
 }
@@ -141,6 +160,8 @@ struct Branch<T: Cell> {
     family: Option<FamilyId>,
     first: Key,
     summary: Summary,
+    tasks_known: bool,
+    members_known: bool,
     link: Link<T>,
 }
 #[derive(Clone)]
@@ -162,6 +183,16 @@ impl<T: Cell> Default for Tree<T> {
     }
 }
 impl<T: Cell> Tree<T> {
+    /// Reads through a synchronous borrowed port with the same validation and
+    /// bounded residency used by an activation's owned port.
+    pub fn get_from_source(
+        &self,
+        key: &[u8],
+        source: &mut dyn PageSource,
+    ) -> Result<Option<T>, HeapFault> {
+        self.get(key, &Access::borrowed(source))
+    }
+
     pub fn new(sequence: bool) -> Self {
         Self {
             root: None,
@@ -172,8 +203,15 @@ impl<T: Cell> Tree<T> {
         Self {
             root: page.map(|p| Branch {
                 family: None,
+                tasks_known: false,
+                members_known: false,
                 first: Key(Vec::new()),
-                summary: Summary { len, cost: cost.0 },
+                summary: Summary {
+                    len,
+                    cost: cost.0,
+                    tasks: 0,
+                    members: 0,
+                },
                 link: Link::Sealed(p),
             }),
             sequence,
@@ -190,6 +228,43 @@ impl<T: Cell> Tree<T> {
     }
     pub fn cost(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.cost)
+    }
+    pub fn task_edges(&self) -> u64 {
+        self.root.as_ref().map_or(0, |r| r.summary.tasks)
+    }
+    pub fn read_task_edges(&self, access: &Access<'_>) -> Result<u64, HeapFault> {
+        let Some(root) = &self.root else {
+            return Ok(0);
+        };
+        if root.tasks_known {
+            return Ok(root.summary.tasks);
+        }
+        match Self::load(root, access, self.sequence)? {
+            Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.task_edges())),
+            Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.tasks)),
+        }
+    }
+    pub fn with_task_edges(mut self, tasks: u64) -> Self {
+        if let Some(r) = &mut self.root {
+            r.summary.tasks = tasks;
+            r.tasks_known = true;
+        }
+        self
+    }
+    /// The membership aggregate lives in the tree. Bare keyed roots recover
+    /// it from one bounded root page, never by walking the run leaves.
+    pub fn live_members(&self, access: &Access<'_>) -> Result<u64, HeapFault> {
+        let Some(root) = &self.root else {
+            return Ok(0);
+        };
+        if root.members_known {
+            return Ok(root.summary.members);
+        }
+        let node = Self::load(root, access, self.sequence)?;
+        match node {
+            Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.live_members())),
+            Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.members)),
+        }
     }
     pub fn page(&self) -> Option<PageRef> {
         self.root.as_ref().and_then(|r| match r.link {
@@ -210,7 +285,7 @@ impl<T: Cell> Tree<T> {
         }
         Ok(())
     }
-    fn load(branch: &Branch<T>, access: &Access, sequence: bool) -> Result<Node<T>, HeapFault> {
+    fn load(branch: &Branch<T>, access: &Access<'_>, sequence: bool) -> Result<Node<T>, HeapFault> {
         match &branch.link {
             Link::Dirty(n) => Ok(n.borrow().clone()),
             Link::Sealed(p) => {
@@ -254,6 +329,8 @@ impl<T: Cell> Tree<T> {
                     Node::Index(
                         rows.into_iter()
                             .map(|(first, (summary, (family, page)))| Branch {
+                                tasks_known: true,
+                                members_known: true,
                                 family: family.or(branch.family),
                                 first,
                                 summary,
@@ -293,6 +370,24 @@ impl<T: Cell> Tree<T> {
                         )
                     }
                 };
+                let tasks = match &node {
+                    Node::Leaf(rows) => {
+                        checked_sum(rows.iter().map(|(_, cell)| cell.task_edges()))?
+                    }
+                    Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.tasks))?,
+                };
+                let members = match &node {
+                    Node::Leaf(rows) => {
+                        checked_sum(rows.iter().map(|(_, cell)| cell.live_members()))?
+                    }
+                    Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.members))?,
+                };
+                if branch.members_known && members != branch.summary.members {
+                    return Err(corrupt(*p, "membership aggregate mismatch"));
+                }
+                if branch.tasks_known && tasks != branch.summary.tasks {
+                    return Err(corrupt(*p, "task-edge aggregate mismatch"));
+                }
                 if len != branch.summary.len || cost != branch.summary.cost {
                     return Err(corrupt(*p, "tree aggregate mismatch"));
                 }
@@ -300,7 +395,7 @@ impl<T: Cell> Tree<T> {
             }
         }
     }
-    pub fn get(&self, key: &[u8], access: &Access) -> Result<Option<T>, HeapFault> {
+    pub fn get(&self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         let Some(mut branch) = self.root.clone() else {
             return Ok(None);
         };
@@ -324,7 +419,7 @@ impl<T: Cell> Tree<T> {
     pub fn rank_get(
         &self,
         mut rank: u64,
-        access: &Access,
+        access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
         if rank >= self.len() {
             return Ok(None);
@@ -358,12 +453,12 @@ impl<T: Cell> Tree<T> {
     pub fn after(
         &self,
         key: Option<&[u8]>,
-        access: &Access,
+        access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: Option<&[u8]>,
-            access: &Access,
+            access: &Access<'_>,
             sequence: bool,
         ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
             match Tree::load(branch, access, sequence)? {
@@ -389,11 +484,11 @@ impl<T: Cell> Tree<T> {
             .as_ref()
             .map_or(Ok(None), |r| walk(r, key, access, self.sequence))
     }
-    pub fn passed(&self, key: &[u8], access: &Access) -> Result<u64, HeapFault> {
+    pub fn passed(&self, key: &[u8], access: &Access<'_>) -> Result<u64, HeapFault> {
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: &[u8],
-            access: &Access,
+            access: &Access<'_>,
             seq: bool,
         ) -> Result<u64, HeapFault> {
             match Tree::load(branch, access, seq)? {
@@ -411,12 +506,12 @@ impl<T: Cell> Tree<T> {
             .as_ref()
             .map_or(Ok(0), |r| walk(r, key, access, self.sequence))
     }
-    pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access) -> Result<(), HeapFault> {
+    pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access<'_>) -> Result<(), HeapFault> {
         fn edit<T: Cell>(
             branch: &mut Branch<T>,
             key: Key,
             value: T,
-            access: &Access,
+            access: &Access<'_>,
             seq: bool,
         ) -> Result<Option<Branch<T>>, HeapFault> {
             let page = make_dirty(branch, access, seq)?;
@@ -466,11 +561,11 @@ impl<T: Cell> Tree<T> {
         }
         Ok(())
     }
-    pub fn remove(&mut self, key: &[u8], access: &Access) -> Result<Option<T>, HeapFault> {
+    pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         fn edit<T: Cell>(
             branch: &mut Branch<T>,
             key: &[u8],
-            access: &Access,
+            access: &Access<'_>,
             seq: bool,
         ) -> Result<Option<T>, HeapFault> {
             let page = make_dirty(branch, access, seq)?;
@@ -505,12 +600,12 @@ impl<T: Cell> Tree<T> {
     }
     pub fn visit(
         &self,
-        access: &Access,
+        access: &Access<'_>,
         visitor: &mut dyn FnMut(&[u8], &T) -> bool,
     ) -> Result<(), HeapFault> {
         fn walk<T: Cell>(
             branch: &Branch<T>,
-            access: &Access,
+            access: &Access<'_>,
             seq: bool,
             visitor: &mut dyn FnMut(&[u8], &T) -> bool,
         ) -> Result<bool, HeapFault> {
@@ -537,10 +632,10 @@ impl<T: Cell> Tree<T> {
         }
         Ok(())
     }
-    pub fn seal(&mut self, access: &Access, work: &mut SealWork) -> Result<bool, HeapFault> {
+    pub fn seal(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
         fn walk<T: Cell>(
             branch: &mut Branch<T>,
-            access: &Access,
+            access: &Access<'_>,
             work: &mut SealWork,
             seq: bool,
         ) -> Result<bool, HeapFault> {
@@ -605,7 +700,7 @@ impl<T: Cell> Tree<T> {
 }
 fn make_dirty<T: Cell>(
     branch: &mut Branch<T>,
-    access: &Access,
+    access: &Access<'_>,
     seq: bool,
 ) -> Result<Rc<RefCell<Node<T>>>, HeapFault> {
     if let Link::Sealed(_) = branch.link {
@@ -621,6 +716,8 @@ fn make_dirty<T: Cell>(
 fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
     let mut branch = Branch {
         family: None,
+        tasks_known: true,
+        members_known: true,
         first: Key(Vec::new()),
         summary: Summary::default(),
         link: Link::Dirty(Rc::new(RefCell::new(node.clone()))),
@@ -629,6 +726,8 @@ fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
     Ok(branch)
 }
 fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFault> {
+    branch.tasks_known = true;
+    branch.members_known = true;
     branch.summary = match node {
         Node::Leaf(rows) => {
             branch.first = rows
@@ -637,6 +736,8 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
             Summary {
                 len: rows.len() as u64,
                 cost: checked_sum(rows.iter().map(|r| r.1.cost()))?,
+                tasks: checked_sum(rows.iter().map(|r| r.1.task_edges()))?,
+                members: checked_sum(rows.iter().map(|r| r.1.live_members()))?,
             }
         }
         Node::Index(rows) => {
@@ -646,6 +747,8 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
             Summary {
                 len: checked_sum(rows.iter().map(|r| r.summary.len))?,
                 cost: checked_sum(rows.iter().map(|r| r.summary.cost))?,
+                tasks: checked_sum(rows.iter().map(|r| r.summary.tasks))?,
+                members: checked_sum(rows.iter().map(|r| r.summary.members))?,
             }
         }
     };
@@ -718,7 +821,7 @@ impl TokenCodec for Key {
 
 impl<T: Cell> TokenCodec for Tree<T> {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(7);
         self.sequence.encode(out);
         self.root.as_ref().and_then(|r| r.family).encode(out);
         // Dirty links use a fixed-size placeholder only for packing estimates.
@@ -733,21 +836,49 @@ impl<T: Cell> TokenCodec for Tree<T> {
         page.encode(out);
         self.len().encode(out);
         self.cost().encode(out);
+        self.task_edges().encode(out);
+        self.root
+            .as_ref()
+            .map_or(0, |r| r.summary.members)
+            .encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(7)?;
         let sequence = bool::decode(input)?;
         let family = Option::<FamilyId>::decode(input)?;
         let page = Option::<PageRef>::decode(input)?;
         let len = u64::decode(input)?;
         let cost = u64::decode(input)?;
+        let tasks = u64::decode(input)?;
+        let members = u64::decode(input)?;
         if page.is_some() != (len != 0) || (len == 0 && cost != 0) {
             return Err(TokenError::Invalid("tree root length mismatch".into()));
         }
-        let mut tree = Self::open(page, len, LogicalBytes(cost), sequence);
+        let mut tree = Self::open(page, len, LogicalBytes(cost), sequence).with_task_edges(tasks);
         if let Some(root) = &mut tree.root {
             root.family = family;
+            root.summary.members = members;
+            root.members_known = true;
         }
         Ok(tree)
+    }
+}
+
+enum SourcePort<'a> {
+    Owned(Box<dyn PageSource>),
+    Borrowed(&'a mut dyn PageSource),
+}
+impl PageSource for SourcePort<'_> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        match self {
+            Self::Owned(source) => source.read(pages),
+            Self::Borrowed(source) => source.read(pages),
+        }
+    }
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        match self {
+            Self::Owned(source) => source.seal(page),
+            Self::Borrowed(source) => source.seal(page),
+        }
     }
 }
