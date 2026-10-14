@@ -15,11 +15,16 @@
 //! - [`family`] (S8): frozen values, lazy identity families and cell carry.
 
 pub mod census;
+pub mod census_impl;
 pub mod family;
 pub mod family_impl;
 pub mod heap;
 pub mod root;
 pub mod source;
+
+#[cfg(test)]
+#[path = "laws/census.rs"]
+mod census_laws;
 
 pub use census::{
     AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,

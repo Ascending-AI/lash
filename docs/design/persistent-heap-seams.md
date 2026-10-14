@@ -961,3 +961,49 @@ It creates no entity or holding-cost change; checked publication still owns that
 accounting. Existing paged immutable descendants are retained without reads or
 resealing, including ErrorRef.data. Frame and session bindings call this before
 publishing a resident native-created value.
+## S7 (amended, 2026-10-14)
+
+The orchestrator approved these additions for exact accounting:
+
+- `CensusGraph::root_cost(&mut self) -> Result<LogicalBytes, HeapFault>`
+  supplies persistent root/control holding costs, excluding entity referents
+  and ended-task results.
+- `value_cost(&mut self, &Value) -> Result<LogicalBytes, HeapFault>` supplies
+  each transient holding location's LocalCostV1 cost.
+- `value_edges(&mut self, &Value, &mut dyn FnMut(Identity) -> Result<(), HeapFault>) -> Result<(), HeapFault>`
+  reads nested tuple/error identity summaries, including paged tuples,
+  without assembling scalar payload bytes.
+- `sweep(&mut self, &SweepSet) -> Result<(), HeapFault>` replaces the
+  entity-only input. `SweepSet { entities: Vec<EntityId>,
+  ended_task_results: Vec<TaskId> }` retires exactly the proved-unreachable
+  entity memberships and ended-result payload references together. Task
+  obligation metadata remains. A reached result is never discarded.
+- `ended_tasks_after(&mut self, Option<TaskId>, usize) -> Result<Vec<TaskId>, HeapFault>`
+  enumerates retained ended-result payloads, unique and ascending.
+
+hp-memory defines the additions; hp-heap implements the real graph and
+paged-tuple summary access. Sweep installs in bounded batches only after
+marking completes. A sweep failure ends the activation without a guest
+verdict or certificate publication; that activation must be discarded.
+
+Trace state stays resident and bounded. There is no scratch writer, spill
+mechanism or scratch page kind. The concrete census exposes a host-configurable
+`trace_memory_budget`: default 8 MiB, hard maximum 64 MiB. Compressed identity
+bitmaps and a block work-list retain pending edges without expanding an
+identity queue or recursing through the heap. Exceeding the memory budget is
+`HostResource::TraceBudget`, never a guest bound. A configurable host-work
+limit similarly returns `HostResource::HostWork`. Neither limit changes a
+completed exact decision. The earlier ownership-table mention of mark spill
+is superseded by this ruling.
+
+`AllocationCensus::added(&mut self, cost: LogicalBytes, entities: u64)`
+replaces the one-entity signature. Its checked minimum is
+`entities * MIN_ENTITY_COST <= cost`; multiplication overflow is a fault.
+Ordinary allocation passes 1, and lazy instantiation passes the validated
+`FrozenSummary`'s cost/count in one operation without constructing entities.
+
+All identity visitors in `value_edges`, `entity_edges` and `task_result`
+return `Result<(), HeapFault>`. A visitor error stops summary traversal
+immediately and propagates unchanged, matching `persistent_roots`. The
+census can therefore end traversal at its host-work or memory limit without
+loading the rest of a large edge summary.
