@@ -221,13 +221,27 @@ fn closure_held(
         _ => Ok(token_closure(heap, value, tag)?.map(|(id, _)| id)),
     }
 }
+fn function_name(heap: &PagedHeap, name: &TextRef) -> Result<Name, HeapFault> {
+    let mut text = String::new();
+    heap.payload_visit(
+        &Value::Text(name.clone()),
+        0..name.summary.utf8_bytes,
+        &mut |chunk| {
+            if let Chunk::Text(chunk) = chunk {
+                text.push_str(chunk);
+            }
+            ControlFlow::Continue(())
+        },
+    )?;
+    Ok(Name::new(text))
+}
 pub fn function_reference(
     heap: &PagedHeap,
     value: &Value,
     values: &FunctionValues,
 ) -> Result<Option<Name>, HeapFault> {
     if let Value::Function(name) = value {
-        return Ok(Some(name.clone()));
+        return function_name(heap, name).map(Some);
     }
     let (Some(tag), Value::Tuple(t)) = (values.tag(), value) else {
         return Ok(None);
@@ -249,7 +263,13 @@ pub fn function_reference(
         }
     });
     let first = names.next();
-    Ok(if names.next().is_none() { first } else { None })
+    if names.next().is_some() {
+        return Ok(None);
+    }
+    first
+        .as_ref()
+        .map(|name| function_name(heap, name))
+        .transpose()
 }
 pub fn token_of(
     heap: &mut PagedHeap,
@@ -655,10 +675,12 @@ fn closure_at<'a>(body: &'a [Stmt], site: &Site) -> Option<&'a lash_kernel_doc::
     }
 }
 fn closure_code<'a>(
+    heap: &PagedHeap,
     left: &Left<'a>,
     object: &ClosureView,
 ) -> Result<&'a lash_kernel_doc::Closure, SaveError> {
-    let body = match &object.site.unit {
+    let site = object.site.resolve(&heap.access)?;
+    let body = match &site.unit {
         Unit::Main => &left.document.main,
         Unit::Function(name) => {
             &left
@@ -670,7 +692,7 @@ fn closure_code<'a>(
         }
         Unit::Library(_) => return Err(NotSaved::MadeByLibrary.into()),
     };
-    closure_at(body, &object.site).ok_or_else(|| unreadable("its site is not a closure expression"))
+    closure_at(body, &site).ok_or_else(|| unreadable("its site is not a closure expression"))
 }
 fn captured_value(
     heap: &PagedHeap,
@@ -678,10 +700,13 @@ fn captured_value(
     object: &ClosureView,
     free: &Name,
 ) -> Result<Option<Value>, SaveError> {
-    if let Some((_, cell)) = object.captures.iter().find(|(name, _)| name == free) {
-        return heap.variable_get(*cell).map(Some).map_err(Into::into);
+    if let Some((_, cell)) = object.captures.get(
+        &lash_kernel_state::paged::metadata::metadata_key(free),
+        &heap.access,
+    )? {
+        return heap.variable_get(cell).map(Some).map_err(Into::into);
     }
-    if object.site.unit == Unit::Main {
+    if object.site.resolve(&heap.access)?.unit == Unit::Main {
         return Ok(left.bindings.get(free).cloned());
     }
     Ok(None)
@@ -708,7 +733,7 @@ struct Frozen<'a, 'h> {
 }
 impl<'a> Frozen<'a, '_> {
     fn absorb(&mut self, object: &ClosureView) -> Result<&'a lash_kernel_doc::Closure, SaveError> {
-        let closure = closure_code(self.left, object)?;
+        let closure = closure_code(self.heap, self.left, object)?;
         let mut reads = Reads::default();
         reads.block(&closure.body, &mut closure.params.clone());
         self.reads.effects.extend(reads.effects);
@@ -902,6 +927,7 @@ fn save_closure(
         },
     );
     frozen.owners.remove(name);
+    let site = object.site.resolve(&frozen.heap.access)?;
     Ok(SavedFunction {
         name: name.clone(),
         document,
@@ -909,7 +935,7 @@ fn save_closure(
         release: left.release,
         helper_owners: frozen.owners,
         references: frozen.references,
-        written: left.annotations.and_then(|a| written(a, &object.site)),
+        written: left.annotations.and_then(|a| written(a, &site)),
         token: None,
     })
 }
@@ -936,7 +962,7 @@ pub fn save(
     let mut helper_owners: BTreeMap<EntityId, BTreeSet<Name>> = BTreeMap::new();
     for (id, owner) in &named {
         let object = heap.closure(*id)?;
-        let closure = match closure_code(&left, &object) {
+        let closure = match closure_code(heap, &left, &object) {
             Ok(c) => c,
             Err(SaveError::Refused(_)) => continue,
             Err(SaveError::Heap(e)) => return Err(e),
@@ -1103,7 +1129,7 @@ impl SavedFunction {
         names
     }
     pub fn value(&self, heap: &mut PagedHeap) -> Result<Value, HeapWriteError> {
-        let function = Value::Function(self.name.clone());
+        let function = Value::Function(heap.text(self.name.as_str()).map_err(native_write)?);
         let Some(token) = &self.token else {
             return Ok(function);
         };

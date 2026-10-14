@@ -1,7 +1,10 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body, encode_body};
 use lash_kernel_doc::heap_values::key_digest;
-use lash_kernel_state::paged::{EditEpoch, ObjectInit, PageAnswer, PageBody, PageSource};
+use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::paged::{
+    AllocationCensus, EditEpoch, NameRef, ObjectInit, PageAnswer, PageBody, PageSource, SiteRef,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 #[derive(Default)]
@@ -48,8 +51,10 @@ fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     let pages = Rc::new(RefCell::new(Pages::default()));
     {
         let mut heap = PagedHeap::fresh(Box::new(Source(Rc::clone(&pages))), EditEpoch(1));
-        heap.set_census(Box::new(LawCensus(heap.certificate())))
-            .expect("census");
+        heap.set_census(Box::new(
+            Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+        ))
+        .expect("census");
         (heap, pages)
     }
 }
@@ -212,14 +217,20 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
     };
     let first = heap
         .allocate_object(ObjectInit::Closure {
-            site: site.clone(),
-            captures: vec![(Name::new("z"), z), (Name::new("a"), a)],
+            site: SiteRef::new(&site, &heap.access).unwrap(),
+            captures: vec![
+                (NameRef::new(&Name::new("z"), &heap.access).unwrap(), z),
+                (NameRef::new(&Name::new("a"), &heap.access).unwrap(), a),
+            ],
         })
         .expect("closure");
     let second = heap
         .allocate_object(ObjectInit::Closure {
-            site,
-            captures: vec![(Name::new("a"), a), (Name::new("z"), z)],
+            site: SiteRef::new(&site, &heap.access).unwrap(),
+            captures: vec![
+                (NameRef::new(&Name::new("a"), &heap.access).unwrap(), a),
+                (NameRef::new(&Name::new("z"), &heap.access).unwrap(), z),
+            ],
         })
         .expect("recompiled closure");
     let mut frozen = Vec::new();
@@ -284,58 +295,4 @@ fn a_bundle_is_its_functions_closure_and_is_refused_unless_its_members_agree() {
     let mut bad = document.expect("doc");
     bad.functions.clear();
     assert!(Bundle::assemble::<BundleError>(body, |_| Ok(bad.clone())).is_err());
-}
-
-struct LawCensus(lash_kernel_state::paged::AccountingCertificate);
-impl lash_kernel_state::paged::AllocationCensus for LawCensus {
-    fn restore(
-        c: lash_kernel_state::paged::AccountingCertificate,
-        _: LogicalBytes,
-    ) -> Result<Self, lash_kernel_state::paged::CensusFault> {
-        Ok(Self(c))
-    }
-    fn certificate(&self) -> lash_kernel_state::paged::AccountingCertificate {
-        self.0
-    }
-    fn added(
-        &mut self,
-        cost: LogicalBytes,
-        entities: u64,
-    ) -> Result<(), lash_kernel_state::paged::CensusFault> {
-        self.changed(LogicalBytes(0), cost)?;
-        self.0.entities = self
-            .0
-            .entities
-            .checked_add(entities)
-            .expect("test entity count");
-        Ok(())
-    }
-    fn changed(
-        &mut self,
-        before: LogicalBytes,
-        after: LogicalBytes,
-    ) -> Result<(), lash_kernel_state::paged::CensusFault> {
-        self.0.upper.0 = self
-            .0
-            .upper
-            .0
-            .checked_sub(before.0)
-            .and_then(|v| v.checked_add(after.0))
-            .expect("test cost");
-        Ok(())
-    }
-    fn reserve(&mut self, bytes: LogicalBytes) -> lash_kernel_state::paged::ReservationDecision {
-        lash_kernel_state::paged::ReservationDecision::Granted(
-            lash_kernel_state::paged::LogicalPermit { bytes },
-        )
-    }
-    fn refine(
-        &mut self,
-        _: &mut dyn lash_kernel_state::paged::CensusGraph,
-        _: &lash_kernel_state::paged::TransientRoots<'_>,
-        _: lash_kernel_state::paged::PendingReservation,
-    ) -> Result<lash_kernel_state::paged::RefinedDecision, lash_kernel_state::paged::CensusFault>
-    {
-        unreachable!("unbounded lifecycle law census")
-    }
 }
