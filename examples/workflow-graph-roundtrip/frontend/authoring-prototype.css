@@ -991,3 +991,11 @@ dialog::backdrop {
   color: #9d769c;
   font-size: 10px;
 }
+
+.result .end-output {
+  margin-left: 12px;
+  padding: 5px 9px;
+  font-size: 11px;
+  color: inherit;
+  border-color: currentColor;
+}

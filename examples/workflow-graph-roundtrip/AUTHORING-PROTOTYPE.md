@@ -19,7 +19,7 @@ are deterministic mocks. No model or external email service is called.
 
 The default screen is a visual workflow editor: app action tiles on a dotted
 canvas, named and typed ports, true/false paths, and explicit workflow input and
-output nodes. Blue connections carry values; dashed gray connections show execution
+Return or Finish steps. Blue connections carry values; dashed gray connections show execution
 order. Click an output port and then an input port to connect them, or select a
 source in the input inspector. Click a tile to edit its fields, or a connection's
 **+** to choose another action. Adding,
@@ -70,6 +70,22 @@ parameters. Running always invokes the entry.
 Add-step forms support the mocked Gmail, web search, message and status actions.
 The helper chooses a fresh result binding for each visual insertion. A rejected
 edit preserves the saved document and reports the error in the current panel.
+
+Return and Finish are actual terminal statements. Return exits the current
+function after enclosing `finally` blocks run; a `finally` can override its
+result. Finish ends the whole invocation and skips `finally` blocks. Each has
+execution order entering it and a typed `result` input, with no outgoing
+execution connection. The editor does not invent a terminal tile for a block
+without an explicit terminal statement.
+
+Click a named output port and choose **End here with this output**, or use the
+same shortcut in the step inspector. Choose Finish or Return. The transaction
+inserts the selected statement immediately after the producer, or replaces an
+immediately following Return or Finish. Later statements remain in the document
+but are unreachable on that path. Deleting the terminal step restores the path.
+Editing an existing terminal's result mapping changes only its value; it does
+not move termination earlier or skip intervening effects. The shortcut emits
+ordinary canonical edits and adds no kernel or dialect behavior.
 
 ## API experiment
 
@@ -130,8 +146,8 @@ Each action shows named inputs and result ports. Record outputs also expose
 fields as connection sources. Click an input to edit its constant, select an
 available source or use the canonical expression editor. **Execution data** shows
 each retained call's input and output, with separate occurrences for repeated
-calls. Execution log links open the relevant node. The workflow Output inspector
-shows the actual terminal result. A function Output node never borrows the
+calls. Execution log links open the relevant node. The entry Return or Finish inspector
+shows the actual terminal result. A nested function Return never borrows the
 workflow's terminal result. Data resets when the document changes or a new run
 begins; this prototype does not persist a run-history browser.
 

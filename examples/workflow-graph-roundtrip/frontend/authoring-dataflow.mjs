@@ -303,6 +303,11 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
         inputs,
         outputs,
         wholeInputs,
+        terminal: returned
+          ? s.statement.finish
+            ? "finish"
+            : "return"
+          : undefined,
         workflowOutput: returned ? !returned.callable?.path?.length : false,
       };
       if (s.statement.if) {
@@ -442,4 +447,38 @@ function inputSteps(workflow, port, value) {
 
 export function planInputEdit(workflow, port, value) {
   return inputSteps(workflow, port, value).map((step) => step.direct);
+}
+
+// The source remains a normal step. Termination is a separate canonical statement.
+export function planEndAfter(workflow, node, source, operation) {
+  if (!["return", "finish"].includes(operation))
+    throw Error("Choose Return or Finish.");
+  if (
+    !node.s ||
+    !node.outputs.some(
+      (port) =>
+        port.binding === source.binding &&
+        !port.discarded &&
+        !port.stored &&
+        JSON.stringify(port.expression) === JSON.stringify(source.expression),
+    )
+  )
+    throw Error("Choose a named output from this step.");
+  const siblings = statementsIn(workflow, node.s.block);
+  const index = siblings.findIndex(
+    (s) => siteKey(s.site) === siteKey(node.s.site),
+  );
+  if (index < 0) throw Error("The source step is no longer in this document.");
+  const next = siblings[index + 1];
+  const statement = { [operation]: { value: source.expression } };
+  if (next?.statement.return || next?.statement.finish)
+    return [{ replace_statement: { statement: next.site, with: statement } }];
+  return [
+    {
+      insert_statement: {
+        at: { block: node.s.block, ...(next ? { before: next.site } : {}) },
+        statement,
+      },
+    },
+  ];
 }

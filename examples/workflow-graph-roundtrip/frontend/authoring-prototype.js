@@ -2,6 +2,7 @@ import {
   buildDataflow,
   availableName,
   planInputEdit,
+  planEndAfter,
   encodeValue as expression,
   sourceOptions,
   typeName,
@@ -688,12 +689,17 @@ function project() {
       if (node.kind === "output")
         Object.assign(details, {
           info: {
-            name: node.workflowOutput ? "Workflow Output" : "Function Output",
+            name: node.terminal === "finish" ? "Finish" : "Return",
             app: "Result",
             icon: "message",
           },
-          title: node.workflowOutput ? "Workflow Output" : "Function Output",
-          subtitle: "Returned to the caller",
+          title: node.terminal === "finish" ? "Finish" : "Return",
+          subtitle:
+            node.terminal === "finish"
+              ? "End the whole invocation"
+              : node.workflowOutput
+                ? "Return the workflow result"
+                : "Return to the caller",
           generic: false,
         });
       if (node.kind === "write")
@@ -820,9 +826,16 @@ function drawNode(node, x, y) {
         } else if (port.discarded || port.stored) openNode(node);
         else {
           connecting = port;
+          $("node-panel").hidden = true;
           report(
             `Connect ${port.name}: choose an input port, or press Escape to cancel.`,
           );
+          if (node.s) {
+            const end = el("button", "end-output", "End here with this output");
+            end.disabled = busy || running;
+            end.onclick = () => openEndStep(node, port);
+            $("result").append(end);
+          }
           document
             .querySelectorAll(".data-port.output")
             .forEach((p) => p.classList.remove("chosen"));
@@ -1006,23 +1019,7 @@ function renderCanvas() {
     startPosition(),
     "Add step after Workflow Input",
   );
-  const ends = layout(roots, 370, center, [start]);
-  if (ends.length && rootScope) {
-    const x = Math.max(...ends.map((p) => p.x)) + 300;
-    const end = drawNode(
-      {
-        kind: "output",
-        info: { name: "Workflow Output", app: "Result", icon: "message" },
-        title: "Workflow Output",
-        subtitle: "No explicit return",
-        inputs: [],
-        outputs: [],
-      },
-      x,
-      center,
-    );
-    ends.forEach((prior) => controlWire(prior, end));
-  }
+  layout(roots, 370, center, [start]);
   dataWires();
   graphWidth = Math.max(900, ...visualNodes.map((n) => n.x + cardWidth + 70));
   graphHeight = Math.max(
@@ -1420,7 +1417,9 @@ function connectPort(port, source) {
 function openPort(node, port) {
   if (busy) return;
   selected = node.s;
-  const container = panel("EDIT INPUT");
+  const container = panel(
+    node.kind === "output" ? "RESULT MAPPING" : "EDIT INPUT",
+  );
   identity(container, node.info);
   container.append(el("h3", null, `${port.name} · ${typeName(port.type)}`));
   const modeLabel = el("label", null, "Value source");
@@ -1620,6 +1619,61 @@ function openPort(node, port) {
   controls();
 }
 
+function openEndStep(node, source) {
+  if (busy || running) return;
+  connecting = undefined;
+  report("");
+  document
+    .querySelectorAll(".data-port.chosen")
+    .forEach((port) => port.classList.remove("chosen"));
+  selected = node.s;
+  const container = panel("END HERE");
+  identity(container, node.info);
+  container.append(el("h3", null, `${source.name} · ${typeName(source.type)}`));
+  const label = el("label", null, "End behavior");
+  label.htmlFor = "end-operation";
+  const select = el("select");
+  select.id = "end-operation";
+  for (const [value, text] of [
+    ["finish", "Finish the whole invocation"],
+    ["return", "Return from this function"],
+  ]) {
+    const option = el("option", null, text);
+    option.value = value;
+    select.append(option);
+  }
+  const explanation = el("p", "help");
+  const update = () => {
+    explanation.textContent =
+      select.value === "finish"
+        ? "Insert Finish immediately after this step. Later steps will not run. Inside a nested function, this also ends its caller's invocation. Finish skips finally blocks."
+        : "Insert Return immediately after this step. Ordinary later steps in this function will not run. Enclosing finally blocks still run and can change the result; a nested function's caller can continue.";
+  };
+  select.onchange = update;
+  update();
+  const save = el("button", "primary save-node", "End here with this output");
+  save.onclick = () =>
+    action(() =>
+      applyVisual(
+        planEndAfter(workflow, node, source, select.value).map((direct) => ({
+          direct,
+        })),
+      ),
+    );
+  container.append(
+    label,
+    select,
+    explanation,
+    el(
+      "p",
+      "help",
+      "An immediately following Return or Finish is replaced. Other later statements stay in the document; deleting the terminal step makes them reachable again.",
+    ),
+    save,
+  );
+  controls();
+}
+
 function renderInvocationOutput() {
   const container = $("invocation-output");
   if (!container) return;
@@ -1645,7 +1699,7 @@ function openNode(node) {
     node.kind === "input"
       ? "WORKFLOW INPUTS"
       : node.kind === "output"
-        ? "WORKFLOW OUTPUT"
+        ? "TERMINAL STEP"
         : "NODE SETTINGS",
   );
   identity(container, node.info);
@@ -1686,6 +1740,35 @@ function openNode(node) {
           "This node writes mutable state. Later reads use the variable’s value at that point in execution.",
         ),
       );
+    if (node.kind === "output") {
+      container.append(
+        el(
+          "p",
+          "help",
+          node.terminal === "finish"
+            ? "Finish ends the whole invocation with this value, even inside a nested function. No later step runs."
+            : node.workflowOutput
+              ? "Return exits the entry function after enclosing finally blocks run. A finally block can change the result. Editing the result mapping leaves this step in place."
+              : "Return exits this function after enclosing finally blocks run. A finally block can change the result. The caller can continue. Editing the result mapping leaves this step in place.",
+        ),
+      );
+    }
+    const returnable = node.outputs.filter(
+      (port) => port.binding !== undefined && !port.discarded && !port.stored,
+    );
+    if (node.s && returnable.length) {
+      container.append(el("h3", null, "End with an output"));
+      for (const port of returnable) {
+        const end = el(
+          "button",
+          "mapping-button",
+          `${port.name} · End here with this output`,
+        );
+        end.setAttribute("aria-label", `End here with ${port.name}`);
+        end.onclick = () => openEndStep(node, port);
+        container.append(end);
+      }
+    }
     if (node.kind === "output" && !node.workflowOutput)
       container.append(
         el(
@@ -1770,7 +1853,7 @@ function openNode(node) {
       };
       container.append(advanced);
     }
-    if (node.s && node.kind !== "output") {
+    if (node.s) {
       const remove = el("button", "danger save-node", "Delete node");
       remove.onclick = () =>
         action(() =>
