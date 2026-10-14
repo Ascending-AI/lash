@@ -52,7 +52,8 @@ function show(next, correspondence) {
   selected = next.statements.find(stmt => key(stmt.site) === key((correspondence ? mapped : old) ?? {unit:'main'})) ?? next.statements[0];
   $('revision').textContent = `Revision ${next.version} / ${next.entry}`;
   $('admission').textContent = next.definition ? 'Ready to run' : `Not admitted: ${next.notAdmitted}`;
-  $('source').value = next.source ?? ''; $('entry').value = next.entry;
+  $('source').value = next.source ?? ''; $('source').scrollTop=0; $('source').scrollLeft=0; $('entry').value = next.entry;
+  $('direct').value='[]'; $('run-status').textContent='Not started'; $('run-output').textContent='Run this revision to see its results.';
   renderCanvas(); renderPlacement(); renderSelection(); renderPane(); controls();
 }
 function renderCanvas() {
