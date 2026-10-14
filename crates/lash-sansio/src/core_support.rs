@@ -530,3 +530,9 @@ pub fn fold_part_kind<T>(kind: crate::PartKind, variants: [T; 9]) -> T {
         crate::PartKind::Reasoning => reasoning,
     }
 }
+
+/// Bridge logical identities to the store's retained turn-key vocabulary internally.
+pub trait RunIdCoreSupport {
+    fn from_turn_id(value: crate::TurnId) -> Self;
+    fn turn_id(&self) -> &crate::TurnId;
+}

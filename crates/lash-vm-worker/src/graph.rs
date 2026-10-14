@@ -192,7 +192,7 @@ pub fn import_whole_state(
         .admit(&whole.release, &required, |function| {
             registry
                 .get(function)
-                .map(|registered| registered.native.is_some())
+                .map(|registered| registered.native().is_some())
         })
         .map_err(|refusal| match refusal {
             ReleaseRefusal::ReleaseMismatch { pinned } => KernelRestoreRefusal::ReleaseMismatch {

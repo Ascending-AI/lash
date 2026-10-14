@@ -239,7 +239,7 @@ fn run(
     let mut registry = FunctionRegistry::new();
     let functions = register(&mut registry, engine).unwrap();
     let registered = registry.get(&functions.get(operation)).unwrap();
-    let definition = registered.definition.as_ref();
+    let definition = registered.definition().as_ref();
 
     let mut heap = Heap::default();
     let args = arguments(&mut heap);
@@ -253,7 +253,7 @@ fn run(
             (Limit::Stated, None) => None,
         };
     let mut counter = WorkCounter::new(limit);
-    let result = registered.native.as_ref().unwrap().call(NativeCall {
+    let result = registered.native().unwrap().call(NativeCall {
         args: &args,
         heap: &mut heap,
         counter: &mut counter,

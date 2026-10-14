@@ -66,6 +66,10 @@ fn facade_compile_time_contracts() {
 }
 
 fn register_facade_contracts(t: &trybuild::TestCases) {
+    t.compile_fail("tests/ui/postgres_host_requires_connection.rs");
+    t.compile_fail("tests/ui/registered_function_is_immutable.rs");
+    t.compile_fail("tests/ui/runtime_session_service_is_sealed.rs");
+
     t.compile_fail("tests/ui/turn_hooks_hold_only_session_reads.rs");
     t.compile_fail("tests/ui/turn_context_has_no_prompt_or_drain_state.rs");
     // FIG-5260: one prompt route; only the runtime composes a call's prompt.

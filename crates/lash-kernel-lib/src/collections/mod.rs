@@ -53,11 +53,11 @@ pub fn register_collections(
     for name in ["num.add", "num.sub", "num.lt", "eq", "tasks.unfinished"] {
         let Some((id, function)) = registry
             .iter()
-            .find(|(_, function)| function.definition.name.as_str() == name)
+            .find(|(_, function)| function.definition().name.as_str() == name)
         else {
             return Err(CollectionError::Missing(name));
         };
-        if function.native.is_none() {
+        if function.native().is_none() {
             return Err(CollectionError::Missing(name));
         }
         uses.push_str(&format!("use {name} = @{id}\n"));

@@ -43,7 +43,7 @@ fn program() -> &'static Program {
             .chain(methods.iter().flat_map(|name| [name.to_string(), format!("{name}_generic")]))
             .collect();
         for name in &names {
-            let (id, _) = registry.iter().find(|(_, f)| f.definition.name.as_str() == name)
+            let (id, _) = registry.iter().find(|(_, f)| f.definition().name.as_str() == name)
                 .unwrap_or_else(|| panic!("{name} is registered"));
             source.push_str(&format!("use {name} = @{id}\n"));
         }
@@ -70,7 +70,7 @@ fn program() -> &'static Program {
         }
         source.push_str("main {}\n");
         // Coercion traps raise typed errors in guest code.
-        let (id, _) = registry.iter().find(|(_, f)| f.definition.name.as_str() == "error.new").unwrap();
+        let (id, _) = registry.iter().find(|(_, f)| f.definition().name.as_str() == "error.new").unwrap();
         source = source.replacen("numbers float\n", &format!("numbers float\nuse error.new = @{id}\n"), 1);
         let mut document = parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{source}"));
         document.manifest.functions = lash_kernel_check::requirements(&document, registry.as_ref()).functions;

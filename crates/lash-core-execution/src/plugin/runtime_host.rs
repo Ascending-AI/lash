@@ -5,31 +5,12 @@ use serde::{Deserialize, Serialize};
 use super::*;
 
 #[async_trait::async_trait]
-pub trait SessionStateService: Send + Sync {
+pub trait SessionStateService: SessionReadService {
     async fn turn_scope(
         &self,
         _session_id: &SessionId,
         _turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError>;
-
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
-
-    async fn snapshot_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError>;
-
-    async fn tool_catalog(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError>;
-
-    async fn shared_tool_catalog(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<std::sync::Arc<Vec<serde_json::Value>>, PluginError> {
-        Ok(std::sync::Arc::new(self.tool_catalog(session_id).await?))
-    }
 }
 
 /// Session initialisation service (ADR 0089).
@@ -40,7 +21,7 @@ pub trait SessionStateService: Send + Sync {
 /// opening it through the ordinary open path, and a process's
 /// `SessionTurn` input is initialized and executed inside the process run.
 #[async_trait::async_trait]
-pub trait SessionLifecycleService: Send + Sync {
+pub trait SessionLifecycleService: crate::core_internal::RuntimeService + Send + Sync {
     async fn create_session(
         &self,
         _request: SessionCreateRequest,
@@ -48,7 +29,7 @@ pub trait SessionLifecycleService: Send + Sync {
 }
 
 #[async_trait::async_trait]
-pub trait SessionGraphService: Send + Sync {
+pub trait SessionGraphService: crate::core_internal::RuntimeService + Send + Sync {
     async fn append_session_nodes(
         &self,
         _session_id: &SessionId,

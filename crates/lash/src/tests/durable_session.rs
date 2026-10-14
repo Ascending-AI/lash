@@ -750,7 +750,9 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         .await
         .expect("accepted");
     let cancelled = durable
-        .cancel(crate::CancelTarget::Run(turn("separate-handle")))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((turn("separate-handle")).as_str()).unwrap(),
+        ))
         .await
         .expect("cancel");
     assert!(
@@ -1080,7 +1082,9 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
         "the grantless core lists the pending input it never granted tools for"
     );
     let cancelled = durable
-        .cancel(crate::CancelTarget::Run(turn("fig-3353-pending")))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((turn("fig-3353-pending")).as_str()).unwrap(),
+        ))
         .await
         .expect("cancel");
     assert!(

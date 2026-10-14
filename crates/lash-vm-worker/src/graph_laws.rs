@@ -328,7 +328,7 @@ fn a_resume_refuses_a_wrong_release_a_missing_native_or_a_missing_admission() {
     let mut declarations = FunctionRegistry::declarations();
     let natives: BTreeSet<_> = registry
         .iter()
-        .filter(|(_, registered)| registered.native.is_some())
+        .filter(|(_, registered)| registered.native().is_some())
         .map(|(id, _)| *id)
         .collect();
     // Each function after those its body calls: register in passes until
@@ -338,7 +338,7 @@ fn a_resume_refuses_a_wrong_release_a_missing_native_or_a_missing_admission() {
         let before = pending.len();
         pending.retain(|(_, registered)| {
             declarations
-                .register((*registered.definition).clone(), None)
+                .register(registered.definition().as_ref().clone(), None)
                 .is_err()
         });
         if pending.is_empty() || pending.len() == before {

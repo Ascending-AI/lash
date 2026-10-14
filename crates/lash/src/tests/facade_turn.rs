@@ -31,7 +31,9 @@ async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
         .await
         .expect("queued");
     let receipt = session
-        .cancel(crate::CancelTarget::Run(run))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((run).as_str()).unwrap(),
+        ))
         .await
         .expect("cancel");
     assert!(
@@ -127,7 +129,7 @@ async fn a_turns_model_call_carries_its_typed_turn_run_and_attempt() {
     assert_eq!(
         scope.turn,
         Some(crate::provider::LlmTurnScope {
-            run: crate::RunId::from(turn.clone()),
+            run: crate::RunId::parse(turn.as_str()).unwrap(),
             turn_id: turn,
         })
     );
@@ -769,7 +771,7 @@ async fn cancelling_an_unknown_or_completed_run_answers_unknown_or_revoked() {
         .expect("created");
     assert!(matches!(
         session
-            .run(crate::TurnId::from("absent").into())
+            .run(crate::RunId::parse("absent").unwrap())
             .cancel()
             .await
             .expect("unknown"),
@@ -832,10 +834,10 @@ async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown
         session_id,
         operation_id: batch.batch_id.to_string(),
     };
-    let handle = session.run(operation.run_id().into());
+    let handle = session.run(crate::RunId::parse(operation.run_id().as_str()).unwrap());
     let receipt = handle.cancel().await.expect("withdraw task");
     assert!(
-        matches!(receipt, crate::CancelReceipt::Withdrawn { ref run, input: None } if *run == operation.run_id()),
+        matches!(receipt, crate::CancelReceipt::Withdrawn { ref run, input: None } if run.as_str() == operation.run_id().as_str()),
         "{receipt:?}"
     );
     assert!(
@@ -856,7 +858,7 @@ async fn cancelling_a_queued_operation_answers_withdrawn_and_repeats_are_unknown
     };
     assert!(matches!(
         session
-            .run(missing.run_id().into())
+            .run(crate::RunId::parse(missing.run_id().as_str()).unwrap())
             .cancel()
             .await
             .expect("missing task"),
@@ -966,7 +968,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         .expect("terminal");
     assert!(matches!(
         session
-            .run(operation.run_id().into())
+            .run(crate::RunId::parse(operation.run_id().as_str()).unwrap())
             .cancel()
             .await
             .expect("settled task cancel"),

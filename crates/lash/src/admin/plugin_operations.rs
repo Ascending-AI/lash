@@ -4,6 +4,7 @@ use super::host_commands::{SubmittedCommand, unsettled_command_error};
 use super::{AdminContext, AdminMutation, SessionCommandAdmin};
 use crate::support::{EmbedError, LashRuntime, Result, SessionError};
 use lash_sansio::SessionId;
+use lash_sansio::core_support::RunIdCoreSupport;
 
 /// A task's decoded operation failure or a facade refusal. The complete
 /// failure envelope retains classification, provenance and unknown data.
@@ -76,7 +77,7 @@ impl PluginOperations {
         };
         Ok(crate::send::run(
             self.context.target.clone(),
-            operation.run_id(),
+            crate::RunId::from_turn_id(operation.run_id()),
         ))
     }
 

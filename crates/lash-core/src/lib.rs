@@ -806,6 +806,7 @@ pub mod core_internal {
         EngineProcessRuntime, ProcessRuntimePorts, ProcessStepTools, RuntimeSessionServices,
         SessionTurnRuntime,
     };
+    pub use lash_core_execution::core_internal::RuntimeService;
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
         attach_process_invocation_correlation, clear_process_invocation_correlation,

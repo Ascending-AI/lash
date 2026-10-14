@@ -182,6 +182,8 @@ mod tests {
 
     struct NoopPromptManager;
 
+    impl lash_core::testing::RuntimeService for NoopPromptManager {}
+
     #[async_trait::async_trait]
     impl lash_core::plugin::SessionReadService for NoopPromptManager {
         async fn snapshot_current(

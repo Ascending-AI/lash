@@ -1,0 +1,17 @@
+use lash::plugins::{PluginError, SessionGraphService};
+use lash::plugins::{AppendSessionNodesOutcome, AppendSessionNodesRequest};
+
+struct HostService;
+
+#[lash::async_trait]
+impl SessionGraphService for HostService {
+    async fn append_session_nodes(
+        &self,
+        _: &lash::SessionId,
+        _: AppendSessionNodesRequest,
+    ) -> Result<AppendSessionNodesOutcome, PluginError> {
+        Err(PluginError::Session(String::new()))
+    }
+}
+
+fn main() {}

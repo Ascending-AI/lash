@@ -131,7 +131,7 @@ pub(crate) fn document(
     let mut text = workflow.text.to_owned();
     for (function, registered) in environment.functions().iter() {
         text = text.replace(
-            &format!("@{{{}}}", registered.definition.name),
+            &format!("@{{{}}}", registered.definition().name),
             &format!("@{function}"),
         );
     }

@@ -205,11 +205,11 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
         .iter()
         .find(|(_, registered)| {
             matches!(
-                registered.definition.implementation,
+                registered.definition().implementation,
                 k::Implementation::Native
             )
         })
-        .map(|(_, registered)| registered.definition.as_ref().clone())
+        .map(|(_, registered)| registered.definition().as_ref().clone())
         .expect("native definition");
     let mut registry = k::FunctionRegistry::declarations();
     registry

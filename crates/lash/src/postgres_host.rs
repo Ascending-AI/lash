@@ -21,19 +21,15 @@ use crate::postgres_process_replay::{PostgresProcessReplayError, PostgresProcess
 ///
 /// Build the durable backend from it with
 /// [`DurableBackendBuilder::postgres`](crate::durable::DurableBackendBuilder::postgres),
-/// which takes the durable settings from `effective_config.node` and from
+/// which takes the durable settings from [`PostgresHost::effective_config`] and from
 /// nowhere else.
 pub struct PostgresHost {
     /// The storage every store port of the database shares.
-    pub storage: PostgresStorage,
+    storage: PostgresStorage,
     /// The live replay store, when `live_replay` is configured.
-    pub live_replay: Option<Arc<PostgresLiveReplayStore>>,
+    live_replay: Option<Arc<PostgresLiveReplayStore>>,
     /// The process replay store, when `process_replay` is configured.
-    pub process_replay: Option<Arc<PostgresProcessReplayStore>>,
-    /// The validated configuration the storage runs under.
-    pub effective_config: PostgresHostConfig,
-    /// Each role pool's state.
-    pub pool_metrics: PostgresPoolMetrics,
+    process_replay: Option<Arc<PostgresProcessReplayStore>>,
 }
 
 impl std::fmt::Debug for PostgresHost {
@@ -42,7 +38,7 @@ impl std::fmt::Debug for PostgresHost {
             .field("catalog", &self.storage.catalog_id())
             .field("live_replay", &self.live_replay.is_some())
             .field("process_replay", &self.process_replay.is_some())
-            .field("pool_metrics", &self.pool_metrics)
+            .field("pool_metrics", &self.storage.pool_metrics())
             .finish_non_exhaustive()
     }
 }
@@ -64,19 +60,45 @@ pub enum PostgresHostConnectError {
 }
 
 impl PostgresHost {
-    /// Validate `config`, check its deployment budget against the server,
-    /// open the storage's role pools and, when configured, the live replay
-    /// and process replay stores, all through `endpoints`.
+    /// The connected storage shared by every database store port.
+    pub fn storage(&self) -> &PostgresStorage {
+        &self.storage
+    }
+
+    /// Live replay over this host's connection policy, when configured.
+    pub fn live_replay(&self) -> Option<&Arc<PostgresLiveReplayStore>> {
+        self.live_replay.as_ref()
+    }
+
+    /// Process replay over this host's connection policy, when configured.
+    pub fn process_replay(&self) -> Option<&Arc<PostgresProcessReplayStore>> {
+        self.process_replay.as_ref()
+    }
+
+    /// The validated policy in effect on the connected storage.
+    pub fn effective_config(&self) -> &PostgresHostConfig {
+        self.storage.effective_config()
+    }
+
+    /// Each connected role pool's state.
+    pub fn pool_metrics(&self) -> PostgresPoolMetrics {
+        self.storage.pool_metrics()
+    }
+
+    /// Build the host over `storage` a caller already connected — through
+    /// [`PostgresStorage::connect`] or [`PostgresStorage::from_pool_set`]
+    /// over pools the caller built itself — opening the live replay and
+    /// process replay stores the storage's effective configuration selects,
+    /// through `endpoints`.
     ///
     /// # Errors
     ///
     /// [`PostgresHostConnectError`] naming what refused.
-    pub async fn connect(
+    pub async fn from_storage(
+        storage: PostgresStorage,
         endpoints: &PostgresEndpoints,
-        config: &PostgresHostConfig,
-        observer: StoreObserver,
     ) -> Result<Self, PostgresHostConnectError> {
-        let storage = PostgresStorage::connect(endpoints, config, observer).await?;
+        let config = storage.effective_config();
         let live_replay = match config.live_replay {
             Some(_) => Some(Arc::new(
                 PostgresLiveReplayStore::connect(endpoints, config).await?,
@@ -90,11 +112,28 @@ impl PostgresHost {
             None => None,
         };
         Ok(Self {
-            effective_config: storage.effective_config().clone(),
-            pool_metrics: storage.pool_metrics(),
             storage,
             live_replay,
             process_replay,
         })
+    }
+
+    /// Validate `config`, check its deployment budget against the server,
+    /// open the storage's role pools and, when configured, the live replay
+    /// and process replay stores, all through `endpoints`.
+    ///
+    /// # Errors
+    ///
+    /// [`PostgresHostConnectError`] naming what refused.
+    pub async fn connect(
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
+        observer: StoreObserver,
+    ) -> Result<Self, PostgresHostConnectError> {
+        Self::from_storage(
+            PostgresStorage::connect(endpoints, config, observer).await?,
+            endpoints,
+        )
+        .await
     }
 }

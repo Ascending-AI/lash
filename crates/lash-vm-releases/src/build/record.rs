@@ -34,7 +34,7 @@ impl Corpus {
         let mut index = self.releases.get(&key).cloned().unwrap_or_default();
         for (function, registered) in registry
             .iter()
-            .filter(|(_, registered)| registered.native.is_some())
+            .filter(|(_, registered)| registered.native().is_some())
         {
             if !index.contains_key(function) {
                 let previous = self
@@ -46,10 +46,10 @@ impl Corpus {
                     id
                 } else {
                     let prepared = registered
-                        .native
+                        .native()
                         .as_ref()
                         .and_then(|native| native.prepare());
-                    let cases = inputs::generate(&registered.definition, &[])
+                    let cases = inputs::generate(registered.definition(), &[])
                         .iter()
                         .map(|input| Case {
                             args: self.intern(&input.args),
@@ -81,14 +81,14 @@ impl Corpus {
         self.certify(registry, dialect, release)?;
         for (function, registered) in registry
             .iter()
-            .filter(|(_, registered)| registered.native.is_some())
+            .filter(|(_, registered)| registered.native().is_some())
         {
             self.append_inputs(
                 registry,
                 dialect,
                 release,
                 function,
-                &inputs::generate(&registered.definition, &[]),
+                &inputs::generate(registered.definition(), &[]),
             )?;
         }
         Ok(())
@@ -128,7 +128,7 @@ impl Corpus {
             })
             .collect();
         let prepared = registered
-            .native
+            .native()
             .as_ref()
             .and_then(|native| native.prepare());
         for input in inputs {

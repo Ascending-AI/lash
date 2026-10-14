@@ -1,5 +1,6 @@
 //! Derivation and admission: the two things a caller asks of the checker.
 
+use lash_kernel_doc::core_support::RegisteredFunctionCoreSupport;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{

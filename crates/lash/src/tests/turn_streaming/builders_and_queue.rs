@@ -39,7 +39,9 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
     };
     assert_eq!(turn_id, expected_turn_id);
     let crate::CancelReceipt::Cancelled { receipt, .. } = session
-        .cancel(crate::CancelTarget::Run(turn_id.clone()))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((turn_id.clone()).as_str()).unwrap(),
+        ))
         .request_id("turn-started-cancel-request")
         .origin("pull-stream-host")
         .reason("cancel from first activity")
@@ -239,7 +241,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         [application]
             if application.input_id == admission.input_id
                 && application.source_key.as_deref() == Some("gap-source")
-                && application.turn_id == run
+                && application.turn_id.as_str() == run.as_str()
                 && application.checkpoint.is_none()
                 && committed
                     .messages()

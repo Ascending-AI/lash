@@ -554,8 +554,10 @@ mod tests {
         }
     }
 
+    impl lash_core::testing::RuntimeService for DirectCompletionManager {}
+
     #[async_trait]
-    impl SessionStateService for DirectCompletionManager {
+    impl lash_core::plugin::SessionReadService for DirectCompletionManager {
         async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
@@ -566,13 +568,17 @@ mod tests {
         ) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
+
         async fn tool_catalog(
             &self,
             _session_id: &SessionId,
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
+    }
 
+    #[async_trait]
+    impl SessionStateService for DirectCompletionManager {
         async fn turn_scope(
             &self,
             _session_id: &lash_core::SessionId,

@@ -195,7 +195,9 @@ async fn escalating_a_deferred_stop_aborts_the_cell_sleep() -> Result<()> {
     tokio::time::sleep(STOP_AFTER).await;
     let escalated = outcome(
         session
-            .cancel(crate::CancelTarget::Run(run))
+            .cancel(crate::CancelTarget::Run(
+                crate::RunId::parse((run).as_str()).unwrap(),
+            ))
             .request_id("abort-second")
             .mode(TurnCancelMode::Immediate)
             .await?,

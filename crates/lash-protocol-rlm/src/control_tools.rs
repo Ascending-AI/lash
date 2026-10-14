@@ -362,8 +362,10 @@ mod tests {
         }
     }
 
+    impl lash_core::testing::RuntimeService for BatonManager {}
+
     #[async_trait]
-    impl SessionStateService for BatonManager {
+    impl lash_core::plugin::SessionReadService for BatonManager {
         async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
@@ -374,13 +376,17 @@ mod tests {
         ) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }
+
         async fn tool_catalog(
             &self,
             _session_id: &SessionId,
         ) -> Result<Vec<serde_json::Value>, PluginError> {
             Ok(Vec::new())
         }
+    }
 
+    #[async_trait]
+    impl SessionStateService for BatonManager {
         async fn turn_scope(
             &self,
             _session_id: &lash_core::SessionId,

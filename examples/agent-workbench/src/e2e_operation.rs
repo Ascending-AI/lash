@@ -231,7 +231,7 @@ async fn follow(
         .await
         .map_err(error)?;
     let result = session
-        .run(run.clone().into())
+        .run(lash::RunId::parse(run.as_str()).map_err(AppError::internal)?)
         .result()
         .await
         .map_err(error)?;

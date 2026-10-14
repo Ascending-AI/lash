@@ -243,9 +243,9 @@ impl FunctionCatalog for BTreeMap<FunctionId, FunctionDefinition> {
 /// A function as an embedder registered it.
 #[derive(Clone)]
 pub struct RegisteredFunction {
-    pub definition: Arc<FunctionDefinition>,
+    definition: Arc<FunctionDefinition>,
     /// The native implementation, when the embedder supplied one.
-    pub native: Option<Arc<dyn NativeFunction>>,
+    native: Option<Arc<dyn NativeFunction>>,
     function: FunctionId,
     callees: Arc<OnceLock<BTreeSet<FunctionId>>>,
     // Consumers own their derived types. Erasure keeps the document vocabulary
@@ -268,6 +268,16 @@ impl RegisteredFunction {
             callees: Arc::default(),
             derived: Arc::default(),
         }
+    }
+
+    /// The immutable definition whose identity and derived facts were registered.
+    pub fn definition(&self) -> &Arc<FunctionDefinition> {
+        &self.definition
+    }
+
+    /// The registered native implementation, when one was supplied.
+    pub fn native(&self) -> Option<&Arc<dyn NativeFunction>> {
+        self.native.as_ref()
     }
 
     pub fn identity(&self) -> FunctionId {
@@ -303,10 +313,18 @@ impl RegisteredFunction {
             callees
         })
     }
+}
 
+/// Internal memoization shared by admission consumers, outside the host vocabulary.
+pub trait RegisteredFunctionCoreSupport {
+    fn derive<T: Any + Send + Sync>(&self, derive: impl FnOnce() -> T) -> Arc<T>;
+}
+
+#[doc(hidden)]
+impl RegisteredFunctionCoreSupport for RegisteredFunction {
     /// Computes a consumer's facts once, against the immutable definitions
     /// registration resolved. Results (including refusals) survive registry clones.
-    pub fn derive<T: Any + Send + Sync>(&self, derive: impl FnOnce() -> T) -> Arc<T> {
+    fn derive<T: Any + Send + Sync>(&self, derive: impl FnOnce() -> T) -> Arc<T> {
         let mut derived = self
             .derived
             .lock()

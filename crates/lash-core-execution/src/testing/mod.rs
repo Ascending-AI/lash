@@ -42,6 +42,9 @@ pub mod prompt;
 pub mod sansio_transcript;
 pub mod sql_work;
 pub mod tool_fixtures;
+/// Opt in to implementing runtime service substitutes in tests.
+pub use crate::core_internal::RuntimeService;
+
 pub use component_fixtures::{component_env, native_format_two_component};
 pub use durable_hooks::DurableCommitHook;
 

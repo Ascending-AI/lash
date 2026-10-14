@@ -935,7 +935,7 @@ fn k_fn_007_every_strict_function_checks_every_operand_kind() {
     let mut registry = FunctionRegistry::new();
     register_numbers(&mut registry).unwrap();
     for (_, registered) in registry.iter() {
-        let definition = &registered.definition;
+        let definition = registered.definition();
         // Catalogue evidence also supplies exact identities to independent readers.
         println!("DEFINITION {}", definition.to_json().unwrap());
         let mut args: Vec<Value> = definition
@@ -957,7 +957,7 @@ fn k_fn_007_every_strict_function_checks_every_operand_kind() {
             args[index] = Value::Null;
             let mut heap = Heap::default();
             let mut counter = WorkCounter::new(None);
-            let result = registered.native.as_ref().unwrap().call(NativeCall {
+            let result = registered.native().unwrap().call(NativeCall {
                 args: &args,
                 heap: &mut heap,
                 counter: &mut counter,

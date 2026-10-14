@@ -833,6 +833,9 @@ pub(crate) use tool_provider::ToolContext;
 
 #[doc(hidden)]
 pub mod core_internal {
+    /// Implemented by runtime capability adapters; host substitutes require `testing`.
+    pub trait RuntimeService {}
+
     pub use crate::direct_completion_client::{
         DirectCompletionService, DirectExecutionPosition, runtime_direct_completion_client,
     };

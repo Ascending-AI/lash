@@ -48,7 +48,7 @@ impl NamedLibrary {
     pub fn from_registry(registry: &FunctionRegistry) -> Result<Self, LibraryError> {
         let mut library = Self::new();
         for (function, registered) in registry.iter() {
-            library.insert_identified(*function, Arc::clone(&registered.definition))?;
+            library.insert_identified(*function, Arc::clone(registered.definition()))?;
             library.registered.insert(*function, registered.clone());
         }
         Ok(library)
@@ -69,11 +69,11 @@ impl NamedLibrary {
         for (function, registered) in registry.iter() {
             library.registered.insert(*function, registered.clone());
             if named(function) {
-                library.insert_identified(*function, Arc::clone(&registered.definition))?;
+                library.insert_identified(*function, Arc::clone(registered.definition()))?;
             } else {
                 library
                     .definitions
-                    .insert(*function, Arc::clone(&registered.definition));
+                    .insert(*function, Arc::clone(registered.definition()));
             }
         }
         Ok(library)
@@ -119,7 +119,7 @@ impl FunctionCatalog for NamedLibrary {
     fn registration(&self, definition: &FunctionDefinition) -> Option<&RegisteredFunction> {
         self.registered
             .values()
-            .find(|registered| std::ptr::eq(registered.definition.as_ref(), definition))
+            .find(|registered| std::ptr::eq(registered.definition().as_ref(), definition))
     }
 
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {

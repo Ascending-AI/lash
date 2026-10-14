@@ -227,7 +227,7 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
             Some(Unit::Library(function)) => {
                 let label = registry
                     .get(&function)
-                    .map_or_else(|| function.to_string(), |f| f.definition.name.to_string());
+                    .map_or_else(|| function.to_string(), |f| f.definition().name.to_string());
                 if label.starts_with("ts.") {
                     split.helpers += spent;
                     split.helper_time += took;

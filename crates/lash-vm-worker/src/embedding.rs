@@ -740,7 +740,7 @@ pub(crate) mod tests {
         for version in lash_kernel_doc::KernelVersion::ALL {
             let held = registry
                 .iter()
-                .filter(|(_, function)| function.definition.kernel == version.number())
+                .filter(|(_, function)| function.definition().kernel == version.number())
                 .count();
             assert_eq!(
                 held,
@@ -777,7 +777,10 @@ pub(crate) mod tests {
                 registry
                     .iter()
                     .map(|(function, registered)| {
-                        (*function, FunctionDefinition::clone(&registered.definition))
+                        (
+                            *function,
+                            FunctionDefinition::clone(registered.definition()),
+                        )
                     })
                     .collect()
             };

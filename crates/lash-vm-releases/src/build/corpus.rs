@@ -103,12 +103,12 @@ impl Corpus {
             .ok_or_else(|| format!("helper release {key} has no native corpus"))?;
         for (function, registered) in registry
             .iter()
-            .filter(|(_, registered)| registered.native.is_some())
+            .filter(|(_, registered)| registered.native().is_some())
         {
             if !pinned.contains_key(function) {
                 return Err(format!(
                     "helper release {key}: native `{}` ({function}) has no recorded corpus; record its new identity with the native_corpus example before building the release",
-                    registered.definition.name
+                    registered.definition().name
                 ));
             }
         }
@@ -138,19 +138,16 @@ impl Corpus {
             .ok_or_else(|| format!("helper release {key} has no native corpus"))?;
         let mut fingerprints = BTreeMap::new();
         for (function, id) in pinned {
-            let registered = registry.get(function).filter(|registered| registered.native.is_some())
+            let registered = registry.get(function).filter(|registered| registered.native().is_some())
                 .ok_or_else(|| format!("helper release {key}: recorded native {function} has no retained implementation"))?;
             let record: NativeRecord = self.read(id)?;
             if record.cases.is_empty() || record.cases.len() > MAX_CASES {
                 return Err(format!(
                     "native `{}` has an empty or oversized corpus",
-                    registered.definition.name
+                    registered.definition().name
                 ));
             }
-            let prepared = registered
-                .native
-                .as_ref()
-                .and_then(|native| native.prepare());
+            let prepared = registered.native().and_then(|native| native.prepare());
             for case in &record.cases {
                 let input = self.input(case)?;
                 let old: Answer = self.read(&case.answer)?;
@@ -158,7 +155,7 @@ impl Corpus {
                 if old != new {
                     return Err(format!(
                         "helper release {key}: native `{}` ({function}), input {} (permanent seed {}), work={} room={}: old {}; new {}. Fix the regression or state a new native version and retain the old implementation for parked runs.",
-                        registered.definition.name,
+                        registered.definition().name,
                         serde_json::to_string(&input).expect("input JSON"),
                         case.args,
                         input.work,

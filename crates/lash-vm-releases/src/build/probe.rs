@@ -46,7 +46,7 @@ pub(crate) fn answer(
     input: &Input,
     prepared: Option<PreparedNative>,
 ) -> Answer {
-    let native = registered.native.as_ref().expect("a registered native");
+    let native = registered.native().expect("a registered native");
     let mut heap = ProbeHeap {
         objects: input.objects.clone(),
         room: input.room,
@@ -86,13 +86,13 @@ pub(crate) fn answer(
         }
     };
     let charge = registered
-        .definition
+        .definition()
         .charge
         .evaluate(&mut |operand, measure| {
             let value = match operand {
                 Operand::Result => &result,
                 Operand::Param(name) => registered
-                    .definition
+                    .definition()
                     .signature
                     .params
                     .iter()

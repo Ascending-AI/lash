@@ -186,7 +186,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
             let registered = registry
                 .get(&function)
                 .unwrap_or_else(|| panic!("{name}: missing function {function}"));
-            let definition = &registered.definition;
+            let definition = registered.definition();
             let mut heap = Heap::default();
             let args: Vec<Value> = case["args"]
                 .as_array()
@@ -199,7 +199,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 .as_ref()
                 .map(|guard| guard.limit.evaluate(&mut |_, _| 0));
             let mut counter = WorkCounter::new(limit);
-            let result = registered.native.as_ref().unwrap().call(NativeCall {
+            let result = registered.native().unwrap().call(NativeCall {
                 args: &args,
                 heap: &mut heap,
                 counter: &mut counter,
@@ -259,7 +259,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 "{name} work"
             );
             let mut warm_counter = WorkCounter::new(limit);
-            let warm = registered.native.as_ref().unwrap().call(NativeCall {
+            let warm = registered.native().unwrap().call(NativeCall {
                 args: &args,
                 heap: &mut heap,
                 counter: &mut warm_counter,
@@ -277,7 +277,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
     // named case derives the answer from the object allocated as its input.
     let (id, reference) = registry
         .iter()
-        .find(|(_, function)| function.definition.name.as_str() == "ref")
+        .find(|(_, function)| function.definition().name.as_str() == "ref")
         .unwrap();
     let mut heap = Heap::default();
     let object = heap.allocate(Object::List(vec![])).unwrap();
@@ -285,8 +285,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
         let mut counter = WorkCounter::new(None);
         assert_eq!(
             reference
-                .native
-                .as_ref()
+                .native()
                 .unwrap()
                 .call(NativeCall {
                     args: &[Value::List(object)],
@@ -304,7 +303,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
     let missing: Vec<_> = registry
         .iter()
         .filter(|(id, _)| !exercised.contains(id))
-        .map(|(_, function)| function.definition.name.as_str())
+        .map(|(_, function)| function.definition().name.as_str())
         .collect();
     assert_eq!(
         exercised.len(),

@@ -189,10 +189,10 @@ impl Fleet {
                         Arc::new(lash_core::attachments::UnavailableAttachmentStore),
                     )
                     .build()?;
-                    let process = host.process_replay.clone().context("process replay")?;
-                    let live = host.live_replay.clone().context("live replay")?;
+                    let process = host.process_replay().cloned().context("process replay")?;
+                    let live = host.live_replay().cloned().context("live replay")?;
                     let stores = Arc::new(lash::postgres::PostgresStoreSet::new(
-                        &host.storage,
+                        host.storage(),
                         Arc::new(lash_core::attachments::UnavailableAttachmentStore),
                     ));
                     fleet.hosts.push(host);
@@ -270,7 +270,7 @@ impl Fleet {
             node.core.shutdown().await?;
         }
         for host in self.hosts {
-            host.storage.pool().close().await;
+            host.storage().pool().close().await;
         }
         Ok(())
     }
@@ -298,9 +298,9 @@ async fn postgres_host(url: &str, run: &str) -> Result<lash::postgres::PostgresH
         Default::default(),
     )
     .await?;
-    crate::perf_support::require_durable_postgres(host.storage.pool()).await?;
+    crate::perf_support::require_durable_postgres(host.storage().pool()).await?;
     let version: String = sqlx::query_scalar("SHOW server_version_num")
-        .fetch_one(host.storage.pool())
+        .fetch_one(host.storage().pool())
         .await?;
     ensure!(
         version.parse::<u32>()? / 10000 == 18,

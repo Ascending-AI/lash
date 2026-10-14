@@ -119,7 +119,7 @@ pub fn migrate_registry(
 ) -> Result<usize, MigrateRegistryError> {
     let written: Vec<FunctionId> = registry
         .iter()
-        .filter(|(_, function)| function.definition.kernel == migration.from.number())
+        .filter(|(_, function)| function.definition().kernel == migration.from.number())
         .map(|(id, _)| *id)
         .collect();
     let redeclared = crate::rewrite::redeclare(migration.definition, written, &*registry)?;
@@ -129,7 +129,7 @@ pub fn migrate_registry(
     for function in redeclared {
         let native = registry
             .get(&function.from)
-            .and_then(|registered| registered.native.clone());
+            .and_then(|registered| registered.native().cloned());
         match registry.register(function.definition, native) {
             Ok(_) | Err(RegistryError::AlreadyRegistered { .. }) => {}
             Err(error) => return Err(error.into()),

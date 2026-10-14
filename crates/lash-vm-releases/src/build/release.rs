@@ -137,7 +137,7 @@ pub(crate) fn keep(
                 // A native that answers otherwise under the identity a run
                 // pinned would change that run: the build fails, whatever
                 // the release (`K-LIB-011`).
-                if registered.native.is_some()
+                if registered.native().is_some()
                     && released.fingerprint.as_ref() != fingerprints.get(&function)
                 {
                     return differs(format!(
@@ -247,7 +247,7 @@ fn list(
     let Some(registered) = registry.get(&function) else {
         return;
     };
-    if let Some(body) = registered.definition.body() {
+    if let Some(body) = registered.definition().body() {
         for called in body.functions.keys() {
             list(*called, registry, fingerprints, listed, functions);
         }
@@ -255,7 +255,7 @@ fn list(
     listed.insert(function);
     functions.push(ReleasedFunction {
         function,
-        definition: FunctionDefinition::clone(&registered.definition),
+        definition: FunctionDefinition::clone(registered.definition()),
         fingerprint: fingerprints.get(&function).cloned(),
     });
 }

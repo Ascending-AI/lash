@@ -1,0 +1,26 @@
+error[E0277]: the trait bound `HostService: RuntimeService` is not satisfied
+ --> tests/ui/runtime_session_service_is_sealed.rs:7:30
+  |
+7 | impl SessionGraphService for HostService {
+  |                              ^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `RuntimeService` is not implemented for `HostService`
+ --> tests/ui/runtime_session_service_is_sealed.rs:4:1
+  |
+4 | struct HostService;
+  | ^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `RuntimeService`
+ --> $WORKSPACE/crates/lash-core-execution/src/plugin/service_bindings.rs
+  |
+  | impl crate::core_internal::RuntimeService for ServiceBindings {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ServiceBindings`
+  |
+ ::: $WORKSPACE/crates/lash-core-execution/src/testing/session_services.rs
+  |
+  | impl crate::core_internal::RuntimeService for MockSessionManager {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `MockSessionManager`
+note: required by a bound in `SessionGraphService`
+ --> $WORKSPACE/crates/lash-core-execution/src/plugin/runtime_host.rs
+  |
+  | pub trait SessionGraphService: crate::core_internal::RuntimeService + Send + Sync {
+  |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionGraphService`

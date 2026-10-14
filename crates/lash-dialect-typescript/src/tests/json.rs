@@ -187,7 +187,7 @@ fn program() -> &'static Program {
         for name in names {
             let (id, _) = registry
                 .iter()
-                .find(|(_, function)| function.definition.name.as_str() == name)
+                .find(|(_, function)| function.definition().name.as_str() == name)
                 .unwrap_or_else(|| panic!("{name} is registered"));
             text.push_str(&format!("use {name} = @{id}\n"));
         }

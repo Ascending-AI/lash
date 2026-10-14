@@ -12,6 +12,7 @@
 //! answer, so a later call answers the same retained outcome.
 
 use lash_core::ActorContext;
+use lash_sansio::core_support::RunIdCoreSupport;
 mod batch;
 mod cancel;
 mod follow;
@@ -544,13 +545,13 @@ pub enum SendOutcome {
     /// An explicitly completed host task, read from its operation receipt.
     #[non_exhaustive]
     OperationSettled {
-        run: TurnId,
+        run: crate::RunId,
         outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
     #[non_exhaustive]
     Settled {
-        run: TurnId,
+        run: crate::RunId,
         output: Box<TurnOutput>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -570,7 +571,7 @@ pub enum SendOutcome {
     /// refusal the same way, with no `run`.
     #[non_exhaustive]
     Refused {
-        run: Option<TurnId>,
+        run: Option<crate::RunId>,
         refusal: Box<lash_core::RuntimeError>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -646,7 +647,7 @@ pub struct StalledDelivery {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParkedTurn {
     pub session_id: SessionId,
-    pub run: TurnId,
+    pub run: crate::RunId,
     /// Why the session parked, as its actor recorded it: a recorded model
     /// no deployment serves names its key
     /// ([`SessionParkReason::profile_key`](crate::SessionParkReason::profile_key)).
@@ -677,7 +678,7 @@ impl SendOutcome {
         }
     }
 
-    pub fn run(&self) -> Option<&TurnId> {
+    pub fn run(&self) -> Option<&crate::RunId> {
         match self {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
@@ -1011,13 +1012,14 @@ impl SendHandle {
     /// The run this input is bound to, once a run has taken it: the run
     /// that executes it, which under a merging drain or a steer is not the
     /// input's own. `None` until then, and for a withdrawn input.
-    pub async fn run(&self) -> Result<Option<TurnId>> {
+    pub async fn run(&self) -> Result<Option<crate::RunId>> {
         let context = self.target.context().await?;
         context
             .parts
             .store
             .run_binding(&self.receipt.input_id)
             .await
+            .map(|run| run.map(crate::RunId::from_turn_id))
             .map_err(EmbedError::Store)
     }
 }
@@ -1060,10 +1062,7 @@ impl<Output, Error> RunHandle<Output, Error> {
 
     /// Request cancellation of this logical owner. Dropping a follower never cancels it.
     pub fn cancel(&self) -> CancelBuilder {
-        CancelBuilder::new(
-            self.target.clone(),
-            CancelTarget::Run(self.run.clone().into()),
-        )
+        CancelBuilder::new(self.target.clone(), CancelTarget::Run(self.run.clone()))
     }
 
     /// Live activity of the run from the moment this handle was made; no
@@ -1071,7 +1070,7 @@ impl<Output, Error> RunHandle<Output, Error> {
     pub fn events(&self) -> TurnEvents {
         spawn_events(
             self.target.clone(),
-            Subject::Run(self.run.clone().into()),
+            Subject::Run(self.run.turn_id().clone()),
             self.cursor.clone(),
             Arc::clone(&self.shared),
         )
@@ -1081,7 +1080,7 @@ impl<Output, Error> RunHandle<Output, Error> {
     pub async fn outcome(self) -> Result<SendOutcome> {
         settle(
             &self.target,
-            &Subject::Run(self.run.clone().into()),
+            &Subject::Run(self.run.turn_id().clone()),
             &self.cursor,
             &self.shared,
             Tap::Quiet,
@@ -1230,11 +1229,11 @@ pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
 }
 
 /// A handle on `run`; its cursor is the observation's current position.
-pub(crate) fn run(target: SendTarget, run: TurnId) -> RunHandle {
+pub(crate) fn run(target: SendTarget, run: crate::RunId) -> RunHandle {
     let cursor = target.current_cursor();
     RunHandle {
         target,
-        run: run.into(),
+        run,
         cursor,
         shared: Arc::new(HandleShared::pending()),
         operation_name: None,
@@ -1287,7 +1286,7 @@ impl Stream for TurnEvents {
 pub enum CancelTarget {
     /// A logical run, including the run a queued input will open. The same
     /// atomic request withdraws that input or cancels its admitted run.
-    Run(TurnId),
+    Run(crate::RunId),
 }
 
 /// Builder for one cancel (ADR 0039).
@@ -1303,7 +1302,7 @@ impl CancelBuilder {
         let CancelTarget::Run(run) = cancel;
         Self {
             target,
-            subject: Subject::Run(run),
+            subject: Subject::Run(run.turn_id().clone()),
             request: cancel::CancelRequestSpec::default(),
         }
     }
@@ -1367,7 +1366,7 @@ pub enum CancelReceipt {
     /// task's command is withdrawn only while no run entered it; the cancel
     /// of an entered task is [`Cancelled`](Self::Cancelled) (FIG-5343).
     Withdrawn {
-        run: TurnId,
+        run: crate::RunId,
         /// The withdrawn input, or `None` for an operation task command.
         input: Option<InputId>,
     },
@@ -1376,7 +1375,7 @@ pub enum CancelReceipt {
     /// conflicts. This records cancellation intent, not proof execution has
     /// stopped; await the run's outcome for its terminal.
     Cancelled {
-        run: TurnId,
+        run: crate::RunId,
         receipt: Box<TurnCancelReceipt>,
     },
     /// No queued input or open run accepts this request: the id is unknown,

@@ -180,8 +180,8 @@ async fn settled_outcomes_do_not_load_session_windows() -> Result<()> {
     for outcome in [
         session.attach(input.clone()).outcome().await?,
         session.durable().attach(input).outcome().await?,
-        session.run(run.clone().into()).outcome().await?,
-        session.durable().run(run.clone().into()).outcome().await?,
+        session.run(run.clone()).outcome().await?,
+        session.durable().run(run.clone()).outcome().await?,
     ] {
         assert_eq!(
             outcome
@@ -197,7 +197,7 @@ async fn settled_outcomes_do_not_load_session_windows() -> Result<()> {
     );
     let ended = session
         .durable()
-        .read_run(&run.into())
+        .read_run(&run)
         .await?
         .expect("terminal window");
     assert_eq!(
@@ -914,7 +914,7 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     assert_eq!(third.status(), crate::TurnStatus::Answered);
     assert_eq!(
         third.run().cloned(),
-        Some(lash_core::TurnId::from("second-run"))
+        Some(crate::RunId::parse("second-run").unwrap())
     );
     let third = third.output().expect("an answered input has a report");
     // One turn applied both inputs, each as its own user row (FIG-5288), so
@@ -1119,7 +1119,7 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
     let follow_on = session.attach_id(follow_on_run.clone());
     let receipt = follow_on.cancel().origin("send-handle-law").await?;
     assert!(
-        matches!(&receipt, crate::CancelReceipt::Cancelled { run, .. } if *run == follow_on_run),
+        matches!(&receipt, crate::CancelReceipt::Cancelled { run, .. } if run.as_str() == follow_on_run.as_str()),
         "the cancel reaches the follow-on run: {receipt:?}"
     );
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), follow_on.outcome())
@@ -1699,17 +1699,18 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let input_id = first.input_id().clone();
     assert_eq!(
         first.outcome().await?.run().cloned(),
-        Some(host_id.parse().unwrap())
+        Some(crate::RunId::parse(host_id).unwrap())
     );
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        session
-            .run(lash_core::TurnId::fixture(host_id.to_string()).into())
-            .outcome(),
+        session.run(crate::RunId::parse(host_id).unwrap()).outcome(),
     )
     .await
     .expect("the exact host run settles")?;
-    assert_eq!(durable.run().cloned(), Some(host_id.parse().unwrap()));
+    assert_eq!(
+        durable.run().cloned(),
+        Some(crate::RunId::parse(host_id).unwrap())
+    );
     assert_eq!(durable.status(), crate::TurnStatus::Answered);
     let retry = session
         .send(input)
@@ -1719,7 +1720,10 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
         .await
         .expect("the settled host id answers its retry")?;
-    assert_eq!(retried.run().cloned(), Some(host_id.parse().unwrap()));
+    assert_eq!(
+        retried.run().cloned(),
+        Some(crate::RunId::parse(host_id).unwrap())
+    );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     assert!(
         matches!(

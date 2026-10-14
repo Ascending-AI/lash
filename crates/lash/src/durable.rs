@@ -76,7 +76,7 @@ impl DurableBackendBuilder {
 
     /// A builder of the durable backend over `host`'s PostgreSQL store set,
     /// writing attachment bytes to `attachments`, under the durable
-    /// settings of `host.effective_config.node`: the one place a PostgreSQL
+    /// settings of `host.effective_config().node`: the one place a PostgreSQL
     /// host's durable settings live.
     #[cfg(feature = "postgres")]
     pub fn postgres(
@@ -84,10 +84,10 @@ impl DurableBackendBuilder {
         attachments: Arc<dyn crate::persistence::AttachmentStore>,
     ) -> Self {
         Self {
-            settings: host.effective_config.node,
+            settings: host.effective_config().node,
             host_settings: true,
             ..Self::new(Arc::new(crate::postgres::PostgresStoreSet::new(
-                &host.storage,
+                host.storage(),
                 attachments,
             )))
         }

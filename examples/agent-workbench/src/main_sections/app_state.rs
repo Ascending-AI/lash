@@ -231,7 +231,9 @@ impl AppState {
                 .await
                 .map_err(AppError::runtime)?;
             let cancel = session
-                .cancel(lash::CancelTarget::Run(address.turn_id.clone()))
+                .cancel(lash::CancelTarget::Run(
+                    lash::RunId::parse(address.turn_id.as_str()).map_err(AppError::internal)?,
+                ))
                 .request_id(request_id.clone())
                 .origin("user")
                 .reason(mode.reason())

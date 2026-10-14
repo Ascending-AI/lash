@@ -20,18 +20,23 @@ let host = PostgresHost::connect(&endpoints, &config, observer).await?;
 let backend = lash::durable::DurableBackendBuilder::postgres(&host, attachments)
     .process_engine(engine)
     .build()?;
-// host.live_replay: Some(store) when `live_replay` is configured.
-// host.process_replay: Some(store) when `process_replay` is configured.
-// host.pool_metrics.snapshot(): each role pool's size, idle and maximum.
+// host.live_replay(): Some(store) when `live_replay` is configured.
+// host.process_replay(): Some(store) when `process_replay` is configured.
+// host.pool_metrics().snapshot(): each role pool's size, idle and maximum.
 ```
 
 - `PostgresHost::connect(endpoints, config, observer)` validates the
   configuration, checks the declared deployment budget against the server,
   opens the storage's role pools and, when `live_replay` or `process_replay`
-  is set, that replay store. It returns `{ storage, live_replay,
-  process_replay, effective_config, pool_metrics }`.
+  is set, that replay store. Its accessors are `storage()`,
+  `live_replay()`, `process_replay()`, `effective_config()` and
+  `pool_metrics()`.
+- `PostgresHost::from_storage(storage, endpoints)` builds the host over
+  storage already connected — for instance `PostgresStorage::from_pool_set`
+  over pools the host built itself — opening whichever replay stores the
+  storage's effective configuration selects.
 - `DurableBackendBuilder::postgres(&host, attachments)` builds the durable
-  backend under `host.effective_config.node`. The durable settings live in
+  backend under `host.effective_config().node`. The durable settings live in
   that one place: calling `.config(...)` on this builder is refused at build
   with `DurableBuildError::SettingsOwnedByHost`.
 - `PostgresStorage::connect(endpoints, config, observer)` opens the storage
@@ -267,7 +272,7 @@ Absent by default: no replay pool or listener opens.
 ### `process_replay`
 
 Absent by default: no process replay pool or listener opens. With it,
-`host.process_replay` is the `ProcessReplayStore` every replica shares
+`host.process_replay()` is the `ProcessReplayStore` every replica shares
 (`LashCoreBuilder::process_replay_store`): provisional process observation
 published on one replica reaches observers on the others. Without it each
 OS process keeps its own in-memory store, and a follower converges on the
@@ -429,7 +434,7 @@ which no longer exists. At its next lash pin:
    transaction mode): set `topology: "transaction_pool"`, give the session
    endpoint, and keep its backend-default check for reads outside a
    transaction; the guard prelude bounds every transaction.
-3. Replace the single-pool metric closure with `host.pool_metrics.snapshot()`,
+3. Replace the single-pool metric closure with `host.pool_metrics().snapshot()`,
    one series per role.
 4. Declare `deployment` with the product and application pools as
    `other_host_connections` (`apps/lash-runtime` opens them beside storage),

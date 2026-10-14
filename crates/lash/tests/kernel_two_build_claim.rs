@@ -1033,7 +1033,7 @@ fn released_for_each() -> String {
         .iter()
         .find(|function| {
             functions.get(function).is_some_and(|registered| {
-                registered.definition.name.to_string() == "ts.array.forEach"
+                registered.definition().name.to_string() == "ts.array.forEach"
             })
         })
         .expect("helper release 1.0 writes ts.array.forEach")

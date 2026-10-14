@@ -606,11 +606,8 @@ impl ServiceBindings {
         Ok(())
     }
     pub fn with_session_state(mut self, service: Arc<dyn SessionStateService>) -> Self {
-        let service = Arc::new(SessionStateServiceBindings(service));
-        self.turn_scope = Some(service.clone());
-        self.snapshot_current = Some(service.clone());
-        self.snapshot_session = Some(service.clone());
-        self.tool_catalog = Some(service.clone());
+        self = self.with_session_reads(service.clone());
+        self.turn_scope = Some(Arc::new(SessionStateServiceBindings(service)));
         self
     }
     pub fn with_session_reads(mut self, service: Arc<dyn SessionReadService>) -> Self {
@@ -666,30 +663,8 @@ impl TurnScopePort for SessionStateServiceBindings {
         self.0.turn_scope(_session_id, _turn_id).await
     }
 }
-#[async_trait::async_trait]
-impl CurrentSessionSnapshotPort for SessionStateServiceBindings {
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        self.0.snapshot_current().await
-    }
-}
-#[async_trait::async_trait]
-impl NamedSessionSnapshotPort for SessionStateServiceBindings {
-    async fn snapshot_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError> {
-        self.0.snapshot_session(_session_id).await
-    }
-}
-#[async_trait::async_trait]
-impl RecordedToolCatalogPort for SessionStateServiceBindings {
-    async fn tool_catalog(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        self.0.tool_catalog(_session_id).await
-    }
-}
+impl crate::core_internal::RuntimeService for ServiceBindings {}
+
 #[async_trait::async_trait]
 impl SessionStateService for ServiceBindings {
     async fn turn_scope(
@@ -704,39 +679,6 @@ impl SessionStateService for ServiceBindings {
             })
         })?;
         service.turn_scope(_session_id, _turn_id).await
-    }
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        let service = self.snapshot_current.as_ref().ok_or_else(|| {
-            PluginError::Preflight(PreflightIssue::MissingService {
-                owner: "invocation".into(),
-                service: ServiceKind::CurrentSessionSnapshot,
-            })
-        })?;
-        service.snapshot_current().await
-    }
-    async fn snapshot_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError> {
-        let service = self.snapshot_session.as_ref().ok_or_else(|| {
-            PluginError::Preflight(PreflightIssue::MissingService {
-                owner: "invocation".into(),
-                service: ServiceKind::NamedSessionSnapshot,
-            })
-        })?;
-        service.snapshot_session(_session_id).await
-    }
-    async fn tool_catalog(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        let service = self.tool_catalog.as_ref().ok_or_else(|| {
-            PluginError::Preflight(PreflightIssue::MissingService {
-                owner: "invocation".into(),
-                service: ServiceKind::RecordedToolCatalog,
-            })
-        })?;
-        service.tool_catalog(_session_id).await
     }
 }
 struct SessionReadServiceBindings(Arc<dyn SessionReadService>);

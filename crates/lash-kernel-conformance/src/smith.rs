@@ -60,7 +60,7 @@ fn library() -> &'static Library {
         let mut header =
             String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
         for (id, function) in registry.iter() {
-            header.push_str(&format!("use {} = @{id}\n", function.definition.name));
+            header.push_str(&format!("use {} = @{id}\n", function.definition().name));
         }
         let registry = Arc::new(registry);
         Library {

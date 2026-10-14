@@ -83,3 +83,9 @@ pub use value::{
     ObjectId, TaskId, Timestamp, Value, ValueKind,
 };
 pub use version::KernelVersion;
+
+/// Internal registration facts shared by the checker and library assembly.
+#[doc(hidden)]
+pub mod core_support {
+    pub use crate::native::RegisteredFunctionCoreSupport;
+}

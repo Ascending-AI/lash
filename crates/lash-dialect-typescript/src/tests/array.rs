@@ -818,7 +818,7 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
     let registry = super::machine::registry();
     let mut source = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
     for (id, function) in registry.iter() {
-        source.push_str(&format!("use {} = @{id}\n", function.definition.name));
+        source.push_str(&format!("use {} = @{id}\n", function.definition().name));
     }
     let prefix = if generic { "generic_" } else { "" };
     source.push_str(&format!(

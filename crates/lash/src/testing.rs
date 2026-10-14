@@ -5,6 +5,9 @@ pub use lash_core::facade_support::frame_node_id;
 /// [`LashCoreBuilder::trace_sink`](crate::LashCoreBuilder::trace_sink)
 /// and reads the typed records the core emitted.
 pub use lash_core::testing::RecordingTraceSink;
+
+/// Opt in to implementing runtime service substitutes in tests.
+pub use lash_core::testing::RuntimeService;
 /// Prompt composition over a cut a test states, outside any model call: the
 /// runtime builds a call's cut and composes it only at the call's admission
 /// (ADR 0133).

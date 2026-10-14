@@ -154,10 +154,12 @@ fn assemble_releases(lines: Vec<HeldReleases>) -> Result<Standard, LibraryError>
                     building.release
                 ))
             })?;
-            if let Some(other) = line_names.insert(registered.definition.name.clone(), *function) {
+            if let Some(other) = line_names.insert(registered.definition().name.clone(), *function)
+            {
                 return Err(LibraryError::new(format!(
                     "helper release {} writes `{}` as {other} and {function}",
-                    building.release, registered.definition.name
+                    building.release,
+                    registered.definition().name
                 )));
             }
         }
@@ -239,7 +241,7 @@ fn assemble_releases(lines: Vec<HeldReleases>) -> Result<Standard, LibraryError>
                         if let Some(registered) = surveyed.get(&released.function) {
                             // An already identified immutable definition verifies
                             // a duplicate release entry without hashing it again.
-                            if registered.definition.as_ref() != &released.definition {
+                            if registered.definition().as_ref() != &released.definition {
                                 return Err(LibraryError::new(
                                     "a retiring helper identity differs from its definition",
                                 ));
@@ -389,7 +391,7 @@ fn retired_helpers_in(
             let counterpart = standard
                 .surveyed
                 .get(function)
-                .and_then(|registered| standard.names.get(&registered.definition.name).copied());
+                .and_then(|registered| standard.names.get(&registered.definition().name).copied());
             (*function, counterpart)
         })
         .collect();

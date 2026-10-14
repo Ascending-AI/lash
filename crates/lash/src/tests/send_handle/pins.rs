@@ -265,7 +265,10 @@ async fn current_turn_pins_the_running_turn_out_of_band() -> Result<()> {
         .await?
         .expect("the held turn is the unfinished run");
     assert_eq!(turn, lash_core::TurnId::from("held-run"));
-    assert_eq!(running.run().await?, Some(turn.clone()));
+    assert_eq!(
+        running.run().await?,
+        Some(crate::RunId::parse(turn.as_str()).unwrap())
+    );
     let target = Target::Turn(turn);
     session.pin(target.clone()).await?;
     session.pin(target.clone()).await?;
@@ -342,7 +345,7 @@ async fn a_merged_inputs_pin_resolves_to_the_run_that_applied_it() -> Result<()>
     second.output().await?;
     assert_eq!(
         session.attach(third_input.clone()).run().await?,
-        Some(lash_core::TurnId::from("second-run")),
+        Some(crate::RunId::parse("second-run").unwrap()),
         "the merged input is bound to the run that applied it"
     );
     let merged = published(&fixture, "pin-merged").await?;

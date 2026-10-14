@@ -685,6 +685,8 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
         events: std::sync::Mutex<Vec<lash_trace::TraceEvent>>,
     }
 
+    impl crate::core_internal::RuntimeService for RecordingSessionGraph {}
+
     #[async_trait::async_trait]
     impl crate::plugin::SessionGraphService for RecordingSessionGraph {
         async fn emit_trace_event(

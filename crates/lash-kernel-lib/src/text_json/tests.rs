@@ -89,9 +89,9 @@ fn call(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, NativeErro
     register_text_json(&mut registry).unwrap();
     let (_, registered) = registry
         .iter()
-        .find(|(_, function)| function.definition.name.as_str() == name)
+        .find(|(_, function)| function.definition().name.as_str() == name)
         .unwrap();
-    registered.native.as_ref().unwrap().call(NativeCall {
+    registered.native().unwrap().call(NativeCall {
         args,
         heap,
         counter: &mut WorkCounter::new(None),
@@ -948,11 +948,11 @@ fn k_ljson_008_direct_render_bounds_and_preserves_decimal_policy() {
     register_text_json(&mut registry).unwrap();
     let (_, function) = registry
         .iter()
-        .find(|(_, function)| function.definition.name.as_str() == "json.render")
+        .find(|(_, function)| function.definition().name.as_str() == "json.render")
         .unwrap();
     let result_size = 1 + u64::try_from(text.len()).unwrap();
     let charge = function
-        .definition
+        .definition()
         .charge
         .evaluate(&mut |operand, _| match operand {
             lash_kernel_doc::Operand::Result => result_size,
@@ -1103,7 +1103,7 @@ fn k_lfmt_003_shortest_digits_are_bounded_charged_and_reserved() {
     register_text_json(&mut registry).unwrap();
     let (_, registered) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "format.decimal_parts")
+        .find(|(_, f)| f.definition().name.as_str() == "format.decimal_parts")
         .unwrap();
     let mut bits = 1_u64;
     for _ in 0..4096 {
@@ -1156,7 +1156,7 @@ fn k_lfmt_003_shortest_digits_are_bounded_charged_and_reserved() {
         }
         let result_size = deep(&dump(&heap, &value));
         let charged = registered
-            .definition
+            .definition()
             .charge
             .evaluate(&mut |operand, _| match operand {
                 Operand::Param(_) => 1,
@@ -1740,13 +1740,13 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         };
         let (id, registered) = registry
             .iter()
-            .find(|(_, f)| f.definition.name.as_str() == name)
+            .find(|(_, f)| f.definition().name.as_str() == name)
             .unwrap();
         exercised.insert(*id);
         let mut heap = Heap::default();
         let values: Vec<_> = args.iter().map(|arg| load(&mut heap, arg)).collect();
         let mut counter = WorkCounter::new(None);
-        let actual = registered.native.as_ref().unwrap().call(NativeCall {
+        let actual = registered.native().unwrap().call(NativeCall {
             args: &values,
             heap: &mut heap,
             counter: &mut counter,
@@ -1775,7 +1775,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         };
         let param = |name: &lash_kernel_doc::Name| {
             registered
-                .definition
+                .definition()
                 .signature
                 .params
                 .iter()
@@ -1783,7 +1783,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                 .and_then(|index| args.get(index))
         };
         let charged = registered
-            .definition
+            .definition()
             .charge
             .evaluate(&mut |operand, measure| match (operand, measure) {
                 (Operand::Result, Measure::Magnitude) => result_magnitude,
@@ -1829,7 +1829,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         // A second call on the same implementation and heap must agree, and
         // neither call may change any input object (K-LIB-006, K-LIB-007).
         let mut warm_counter = WorkCounter::new(None);
-        let warm = registered.native.as_ref().unwrap().call(NativeCall {
+        let warm = registered.native().unwrap().call(NativeCall {
             args: &values,
             heap: &mut heap,
             counter: &mut warm_counter,
@@ -2019,7 +2019,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     register_text_json(&mut registry).unwrap();
     let (_, function) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "json.classify")
+        .find(|(_, f)| f.definition().name.as_str() == "json.classify")
         .unwrap();
     for (value, encoded) in [
         (Value::Null, 3),
@@ -2046,7 +2046,7 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         .unwrap();
         assert_eq!(result, int(encoded));
         let charge = function
-            .definition
+            .definition()
             .charge
             .evaluate(&mut |operand, measure| {
                 assert_eq!(*operand, lash_kernel_doc::Operand::Result);
@@ -2088,7 +2088,7 @@ fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
     register_text_json(&mut registry).unwrap();
     let (_, function) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "text.join_or_index")
+        .find(|(_, f)| f.definition().name.as_str() == "text.join_or_index")
         .expect("the neutral join admission native");
     for pieces in [vec![], vec![""], vec!["", "😀", "é", ""], vec!["x"; 32]] {
         for separator in ["", "|", "😀"] {
@@ -2099,7 +2099,7 @@ fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
             assert_eq!(result, s(&expected));
             assert_eq!(heap.1.reserved, 2 * expected.len() as u64);
             let charge = function
-                .definition
+                .definition()
                 .charge
                 .evaluate(&mut |operand, measure| {
                     assert_eq!(

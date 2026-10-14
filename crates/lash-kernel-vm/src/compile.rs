@@ -238,9 +238,9 @@ impl PreparedLibrary {
             .collect();
         let mut units: Vec<(FunctionId, &FunctionDefinition)> = library
             .iter()
-            .filter(|(_, registered)| machine_function(&registered.definition).is_none())
-            .filter(|(_, registered)| registered.definition.body().is_some())
-            .map(|(function, registered)| (*function, registered.definition.as_ref()))
+            .filter(|(_, registered)| machine_function(registered.definition()).is_none())
+            .filter(|(_, registered)| registered.definition().body().is_some())
+            .map(|(function, registered)| (*function, registered.definition().as_ref()))
             .collect();
         shuffler.shuffle(layout, &mut units);
 
@@ -282,10 +282,10 @@ impl PreparedLibrary {
         let libs = library
             .iter()
             .map(|(function, registered)| {
-                let definition = Arc::clone(&registered.definition);
+                let definition = Arc::clone(registered.definition());
                 let run = if let Some(machine) = machine_function(&definition) {
                     LibRun::Machine(machine)
-                } else if let Some(native) = &registered.native {
+                } else if let Some(native) = registered.native() {
                     LibRun::Native(Arc::clone(native))
                 } else {
                     // A function with no native registered has a body, and
@@ -339,8 +339,8 @@ impl PreparedLibrary {
 fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
     let mut callers: BTreeMap<FunctionId, Vec<FunctionId>> = BTreeMap::new();
     for (function, registered) in registry.iter() {
-        if registered.native.is_none()
-            && let Some(body) = registered.definition.body()
+        if registered.native().is_none()
+            && let Some(body) = registered.definition().body()
         {
             for callee in body.functions.keys() {
                 callers.entry(*callee).or_default().push(*function);
@@ -527,7 +527,7 @@ impl Executable {
             .0
             .registry
             .get(function)
-            .map(|registered| &registered.definition.name)
+            .map(|registered| &registered.definition().name)
     }
 }
 

@@ -234,7 +234,7 @@ async fn seed(backend: &Backend, source: &str) {
         let library = lash_vm_runtime::standard_functions().expect("the shipped library");
         let (id, _) = library
             .iter()
-            .find(|(_, entry)| entry.definition.name.to_string() == "num.add")
+            .find(|(_, entry)| entry.definition().name.to_string() == "num.add")
             .expect("num.add is shipped");
         source.push_str(&format!("\nuse num.add = @{id}\n"));
     }

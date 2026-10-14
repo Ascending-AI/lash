@@ -25,18 +25,6 @@ fn host_owned_trace_records_supply_fresh_identity_and_timestamp() {
 }
 
 #[test]
-fn run_identity_validates_and_retains_operation_spelling() {
-    assert!(crate::RunId::parse(" ").is_err());
-    let id = crate::RunId::parse("shift-operation:task-17").unwrap();
-    assert_eq!(id.as_str(), "shift-operation:task-17");
-    assert_eq!(
-        serde_json::to_value(&id).unwrap(),
-        serde_json::json!("shift-operation:task-17")
-    );
-    assert_eq!(crate::RunId::from(crate::TurnId::from(id.clone())), id);
-}
-
-#[test]
 fn process_tool_definition_selects_each_capability_contract() {
     use crate::process_controls::{ProcessControlTool as Tool, process_tool_definition};
     for (tool, name) in [

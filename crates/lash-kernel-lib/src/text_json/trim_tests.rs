@@ -9,7 +9,7 @@ fn k_ltxt_011_trim_set_bounds_scan_copy_and_reserves_output() {
     register_text_json(&mut registry).unwrap();
     let (_, registered) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "text.trim_set")
+        .find(|(_, f)| f.definition().name.as_str() == "text.trim_set")
         .unwrap();
     for source in [
         "",
@@ -41,7 +41,7 @@ fn k_ltxt_011_trim_set_bounds_scan_copy_and_reserves_output() {
                 assert_eq!(heap.1.reserved, 2 * expected.len() as u64);
                 let charged =
                     registered
-                        .definition
+                        .definition()
                         .charge
                         .evaluate(&mut |operand, _| match operand {
                             Operand::Result => 1 + expected.len() as u64,

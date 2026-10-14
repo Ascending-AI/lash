@@ -567,7 +567,7 @@ fn session_id(name: &str) -> lash::SessionId {
 /// The node that served `name`'s open turn is gone: the turn is open in its
 /// tools phase with no turn deadline and no end, and no boot owns the
 /// session. Park it as FIG-6289's ordinal miss did, and answer its run.
-async fn wedge(world: &World, name: &str) -> lash::TurnId {
+async fn wedge(world: &World, name: &str) -> lash::RunId {
     let durable = Arc::clone(world.backend.durable());
     let session = session_id(name);
     lash::testing::park_session(
@@ -607,12 +607,12 @@ async fn wedge(world: &World, name: &str) -> lash::TurnId {
         None,
         "{name}: the wedged run has no end"
     );
-    row.run
+    lash::RunId::parse(row.run.as_str()).expect("the persisted logical run id parses")
 }
 
 /// The output of `name`'s run `run` once it settles on the serving node, or
 /// a panic if it stays parked.
-async fn settled(world: &World, name: &str, run: &lash::TurnId) -> lash::TurnOutput {
+async fn settled(world: &World, name: &str, run: &lash::RunId) -> lash::TurnOutput {
     let session = world
         .core
         .session(session_id(name))
@@ -622,7 +622,7 @@ async fn settled(world: &World, name: &str, run: &lash::TurnId) -> lash::TurnOut
     tokio::time::timeout(served::WATCHDOG, async {
         loop {
             let outcome = session
-                .run(run.clone().into())
+                .run(run.clone())
                 .outcome()
                 .await
                 .unwrap_or_else(|error| panic!("{name}: the run answers: {error:?}"));

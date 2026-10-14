@@ -446,7 +446,9 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() -> R
     assert_eq!(evidence.honoured_after_step, None);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let repeat = session
-        .cancel(crate::CancelTarget::Run(run))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((run).as_str()).unwrap(),
+        ))
         .request_id("abort-late")
         .mode(TurnCancelMode::Immediate)
         .await?;

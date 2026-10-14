@@ -138,13 +138,13 @@ async fn withdraw_while_queued_vs_cancel_while_running(tier: Tier) {
             "the queue is unadmitted"
         );
         let receipt = session
-            .run(lash::RunId::from(id))
+            .run(lash::RunId::parse(id.as_str()).unwrap())
             .cancel()
             .await
             .expect("cancel the queued run");
         assert!(
             matches!(&receipt, lash::CancelReceipt::Withdrawn { run, input: Some(input) }
-                if run == queued.id().expect("the host named the queued run") && input == queued.input_id()),
+                if run.as_str() == queued.id().expect("the host named the queued run").as_str() && input == queued.input_id()),
             "a queued run withdraws: {receipt:?}"
         );
         let before = withdrawal_tombstone(&session, queued.input_id()).await;
@@ -288,6 +288,7 @@ async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
         model.release.notify_one();
         running.output().await.expect("the busy run answers");
         let head = queued[0].id().expect("the host named the run").clone();
+        let head_run = lash::RunId::parse(head.as_str()).unwrap();
         for handle in queued {
             let input = handle.input_id().clone();
             let output = handle
@@ -297,7 +298,7 @@ async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
             assert_eq!(output.status(), lash::TurnStatus::Answered);
             assert_eq!(
                 session.attach(input).run().await.expect("read the binding"),
-                Some(head.clone()),
+                Some(head_run.clone()),
                 "every queued input is bound to the first one's run"
             );
         }
@@ -402,7 +403,8 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
             }
             run = Some(this_run);
         }
-        assert_input_rows(&session, &expected, &run.unwrap()).await;
+        assert_eq!(run.as_ref().map(lash::RunId::as_str), Some(run_id.as_str()));
+        assert_input_rows(&session, &expected, &run_id).await;
         serving.shutdown().await.expect("stop the serving node");
     })
     .await

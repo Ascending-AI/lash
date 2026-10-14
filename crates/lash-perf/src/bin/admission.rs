@@ -136,7 +136,7 @@ fn main() -> Result<()> {
     let document = &lowered.document;
     let unregistered: BTreeMap<_, _> = standard
         .iter()
-        .map(|(id, registered)| (*id, registered.definition.as_ref().clone()))
+        .map(|(id, registered)| (*id, registered.definition().as_ref().clone()))
         .collect();
     let catalog: &dyn FunctionCatalog = if mode == "registered" {
         standard.as_ref()

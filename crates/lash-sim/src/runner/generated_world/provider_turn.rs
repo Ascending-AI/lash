@@ -447,7 +447,7 @@ async fn run_provider_turn_task(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing settled run binding".into()))?;
     let snapshot = session
-        .read_run(&run.into())
+        .read_run(&run)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| FixedScriptRunnerError::Assertion("missing committed head".into()))?

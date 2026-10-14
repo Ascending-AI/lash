@@ -24,6 +24,7 @@
 //! own observation that follows it, for at most the follow poll's ceiling
 //! (FIG-5793).
 
+use lash_sansio::core_support::RunIdCoreSupport;
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
@@ -509,7 +510,7 @@ pub(super) async fn follow(
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(
                         SendOutcome::OperationSettled {
-                            run,
+                            run: crate::RunId::from_turn_id(run),
                             outcome,
                             gaps: observation.gaps,
                         },
@@ -537,7 +538,7 @@ pub(super) async fn follow(
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Ok(Followed::Answered(Box::new(SendOutcome::Refused {
-                        run: Some(run),
+                        run: Some(crate::RunId::from_turn_id(run)),
                         refusal: Box::new(refusal),
                         gaps: observation.gaps,
                     })));
@@ -548,7 +549,7 @@ pub(super) async fn follow(
                     return Ok(Followed::Answered(Box::new(SendOutcome::Parked {
                         parked: crate::ParkedTurn {
                             session_id: ctx.parts.session_id.clone(),
-                            run,
+                            run: crate::RunId::from_turn_id(run),
                             reason,
                         },
                         gaps: observation.gaps,
@@ -778,7 +779,7 @@ async fn finish_settled(
     // reported gap. Retain duplicates and contradictions for validation.
     let result = durable_report(ctx, &run, outcome, acceptance, &activities).await?;
     Ok(SendOutcome::Settled {
-        run,
+        run: crate::RunId::from_turn_id(run),
         output: Box::new(TurnOutput { result, activities }),
         gaps: observation.gaps,
     })

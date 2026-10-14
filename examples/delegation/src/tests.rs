@@ -22,8 +22,10 @@ struct NoSnapshots {
     read: Mutex<Vec<SessionId>>,
 }
 
+impl lash::testing::RuntimeService for NoSnapshots {}
+
 #[lash::async_trait]
-impl SessionStateService for NoSnapshots {
+impl lash::plugins::SessionReadService for NoSnapshots {
     async fn snapshot_session(
         &self,
         session_id: &SessionId,
@@ -35,15 +37,6 @@ impl SessionStateService for NoSnapshots {
         Err(PluginError::Session("a spawn reads no session".to_string()))
     }
 
-    async fn turn_scope(
-        &self,
-        _session_id: &lash::SessionId,
-        _turn_id: &lash::TurnId,
-    ) -> Result<lash::runtime::ExecutionScope, lash::plugins::PluginError> {
-        Err(lash::plugins::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
-    }
     async fn snapshot_current(
         &self,
     ) -> Result<lash::runtime::SessionSnapshot, lash::plugins::PluginError> {
@@ -51,10 +44,24 @@ impl SessionStateService for NoSnapshots {
             "operation is absent from this fixture".into(),
         ))
     }
+
     async fn tool_catalog(
         &self,
         _session_id: &lash::SessionId,
     ) -> Result<Vec<serde_json::Value>, lash::plugins::PluginError> {
+        Err(lash::plugins::PluginError::Session(
+            "operation is absent from this fixture".into(),
+        ))
+    }
+}
+
+#[lash::async_trait]
+impl SessionStateService for NoSnapshots {
+    async fn turn_scope(
+        &self,
+        _session_id: &lash::SessionId,
+        _turn_id: &lash::TurnId,
+    ) -> Result<lash::runtime::ExecutionScope, lash::plugins::PluginError> {
         Err(lash::plugins::PluginError::Session(
             "operation is absent from this fixture".into(),
         ))

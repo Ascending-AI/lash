@@ -355,7 +355,9 @@ async fn assert_session_turn_cancel_disposition(
     let undelivered_id = undelivered.input_id().clone();
     let request_id = format!("{session_id}:cancel");
     let cancel = session
-        .cancel(crate::CancelTarget::Run(turn_id.clone()))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((turn_id.clone()).as_str()).unwrap(),
+        ))
         .request_id(request_id.clone())
         .origin("test-host")
         .reason("undelivered active input");
@@ -504,7 +506,9 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
     );
 
     let stopped = session
-        .cancel(crate::CancelTarget::Run(TurnId::from(active_turn_id)))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((TurnId::from(active_turn_id)).as_str()).unwrap(),
+        ))
         .undelivered(lash_core::facade_support::TurnCancelUndeliveredInputPolicy::Defer)
         .await?;
     assert!(matches!(stopped, crate::CancelReceipt::Cancelled { .. }));
@@ -652,7 +656,9 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         .expect("second provider signal");
 
     let stopped = session
-        .cancel(crate::CancelTarget::Run(TurnId::from(active_turn_id)))
+        .cancel(crate::CancelTarget::Run(
+            crate::RunId::parse((TurnId::from(active_turn_id)).as_str()).unwrap(),
+        ))
         .await?;
     assert!(matches!(stopped, crate::CancelReceipt::Cancelled { .. }));
     let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)

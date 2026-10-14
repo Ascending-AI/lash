@@ -1,3 +1,4 @@
+use lash_kernel_doc::core_support::RegisteredFunctionCoreSupport;
 use lash_kernel_doc::{Implementation, parse_definition};
 
 use crate::{Library, NamedLibrary, SourceError, define_functions};

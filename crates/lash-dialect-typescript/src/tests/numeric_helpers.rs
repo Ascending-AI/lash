@@ -87,11 +87,11 @@ fn kernels() -> Kernels {
     }
     let new = registry
         .iter()
-        .map(|(id, held)| (held.definition.name.to_string(), *id))
+        .map(|(id, held)| (held.definition().name.to_string(), *id))
         .collect();
     let mut library = NamedLibrary::resolving(&registry, |id| {
         !matches!(
-            registry.get(id).unwrap().definition.name.as_str(),
+            registry.get(id).unwrap().definition().name.as_str(),
             "ts.add" | "ts.sub" | "ts.lt"
         )
     })

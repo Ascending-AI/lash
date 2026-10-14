@@ -112,6 +112,9 @@ impl std::ops::Deref for PersistentRuntimeServices {
 pub(crate) struct NoopSessionManager;
 
 #[cfg(test)]
+impl crate::core_internal::RuntimeService for NoopSessionManager {}
+
+#[cfg(test)]
 #[async_trait::async_trait]
 impl SessionReadService for NoopSessionManager {
     async fn snapshot_current(&self) -> Result<crate::SessionSnapshot, crate::PluginError> {
@@ -158,27 +161,6 @@ impl SessionStateService for NoopSessionManager {
         _session_id: &crate::SessionId,
         _turn_id: &crate::TurnId,
     ) -> Result<crate::ExecutionScope, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
-    }
-    async fn snapshot_current(&self) -> Result<crate::SessionSnapshot, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
-    }
-    async fn snapshot_session(
-        &self,
-        _session_id: &crate::SessionId,
-    ) -> Result<crate::SessionSnapshot, crate::PluginError> {
-        Err(crate::PluginError::Session(
-            "operation is absent from this fixture".into(),
-        ))
-    }
-    async fn tool_catalog(
-        &self,
-        _session_id: &crate::SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
         Err(crate::PluginError::Session(
             "operation is absent from this fixture".into(),
         ))

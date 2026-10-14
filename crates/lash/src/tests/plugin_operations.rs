@@ -8,6 +8,7 @@ use crate::plugins::{
     PluginRuntimeEvent, PluginTask, SessionParam,
 };
 use crate::support::TurnInput;
+use lash_sansio::core_support::RunIdCoreSupport;
 
 use std::time::Duration;
 
@@ -132,11 +133,16 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         };
         let result = tokio::time::timeout(
             Duration::from_secs(2),
-            session.run(operation.run_id().into()).outcome(),
+            session
+                .run(crate::RunId::parse(operation.run_id().as_str()).unwrap())
+                .outcome(),
         )
         .await
         .expect("a completed operation Run must answer its follower")?;
-        assert_eq!(result.run(), Some(&operation.run_id()));
+        assert_eq!(
+            result.run().map(crate::RunId::as_str),
+            Some(operation.run_id().as_str())
+        );
         assert!(
             matches!(&result, crate::SendOutcome::OperationSettled { outcome, .. }
             if matches!(outcome.as_ref(), lash_core::runtime::PluginOperationCommandOutcome::Completed { output, .. }
@@ -146,7 +152,7 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
         drop(session);
         assert_eq!(
             durable
-                .run(operation.run_id().into())
+                .run(crate::RunId::parse(operation.run_id().as_str()).unwrap())
                 .result()
                 .await?
                 .output,
@@ -305,7 +311,7 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
             .await?;
         let operation = lash_core::tool_run::OperationRun::for_run_id(
             crate::SessionId::from("operation-session-process"),
-            &lash_core::TurnId::from(run.run().clone()),
+            run.run().turn_id(),
         )
         .unwrap();
         let result = run.result().await?;

@@ -1,0 +1,32 @@
+error[E0616]: field `storage` of struct `PostgresHost` is private
+ --> tests/ui/postgres_host_requires_connection.rs:5:23
+  |
+5 |         storage: host.storage,
+  |                       ^^^^^^^ private field
+  |
+help: a method `storage` also exists, call it with parentheses
+  |
+5 |         storage: host.storage(),
+  |                              ++
+
+error[E0616]: field `live_replay` of struct `PostgresHost` is private
+ --> tests/ui/postgres_host_requires_connection.rs:6:27
+  |
+6 |         live_replay: host.live_replay,
+  |                           ^^^^^^^^^^^ private field
+  |
+help: a method `live_replay` also exists, call it with parentheses
+  |
+6 |         live_replay: host.live_replay(),
+  |                                      ++
+
+error[E0616]: field `process_replay` of struct `PostgresHost` is private
+ --> tests/ui/postgres_host_requires_connection.rs:7:30
+  |
+7 |         process_replay: host.process_replay,
+  |                              ^^^^^^^^^^^^^^ private field
+  |
+help: a method `process_replay` also exists, call it with parentheses
+  |
+7 |         process_replay: host.process_replay(),
+  |                                            ++

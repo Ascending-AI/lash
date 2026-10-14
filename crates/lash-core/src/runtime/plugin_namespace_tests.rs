@@ -131,6 +131,8 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         }
     }
     struct Sessions;
+    impl crate::core_internal::RuntimeService for Sessions {}
+
     #[async_trait::async_trait]
     impl crate::plugin::SessionReadService for Sessions {
         async fn snapshot_current(

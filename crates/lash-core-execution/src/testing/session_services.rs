@@ -1,5 +1,7 @@
 use super::*;
 
+impl crate::core_internal::RuntimeService for MockSessionManager {}
+
 #[async_trait::async_trait]
 impl crate::plugin::SessionReadService for MockSessionManager {
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
@@ -21,23 +23,6 @@ impl crate::plugin::SessionStateService for MockSessionManager {
         turn_id: &TurnId,
     ) -> Result<crate::ExecutionScope, PluginError> {
         Ok(crate::ExecutionScope::turn(session_id, turn_id))
-    }
-
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
-        Ok(self.snapshot.clone())
-    }
-
-    async fn snapshot_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<SessionSnapshot, PluginError> {
-        Ok(self.snapshot.clone())
-    }
-    async fn tool_catalog(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, PluginError> {
-        Ok(self.tool_catalog.clone())
     }
 }
 

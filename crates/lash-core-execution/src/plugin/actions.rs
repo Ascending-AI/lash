@@ -256,7 +256,7 @@ pub struct PluginTaskContext {
 }
 
 #[async_trait::async_trait]
-pub trait SessionReadService: Send + Sync {
+pub trait SessionReadService: crate::core_internal::RuntimeService + Send + Sync {
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 
     async fn snapshot_session(

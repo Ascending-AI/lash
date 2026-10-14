@@ -331,7 +331,7 @@ async fn read_environment(State(host): State<Host>) -> ApiResult {
     let functions: BTreeMap<String, String> = environment
         .functions()
         .iter()
-        .map(|(id, function)| (function.definition.name.to_string(), id.to_string()))
+        .map(|(id, function)| (function.definition().name.to_string(), id.to_string()))
         .collect();
     Ok(Json(json!({
         "effects": serde_json::to_value(environment.effects()).map_err(api_error)?,

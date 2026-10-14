@@ -53,7 +53,7 @@ fn program(source: &str) -> Program {
     let registry = Arc::new(registry());
     let mut text = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
     for (id, function) in registry.iter() {
-        text.push_str(&format!("use {} = @{id}\n", function.definition.name));
+        text.push_str(&format!("use {} = @{id}\n", function.definition().name));
     }
     text.push_str(source);
     Program {
@@ -408,7 +408,7 @@ fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
     let registry = registry();
     let (_, function) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "collection.holds_none")
+        .find(|(_, f)| f.definition().name.as_str() == "collection.holds_none")
         .unwrap();
     let mut heap = crate::tests::Heap::default();
     let value = Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap());
@@ -418,7 +418,7 @@ fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
     );
     heap.1 = crate::tests::Room::of(0);
     assert_eq!(
-        function.native.as_ref().unwrap().call(NativeCall {
+        function.native().unwrap().call(NativeCall {
             args: &[value, kinds],
             heap: &mut heap,
             counter: &mut WorkCounter::new(None),
@@ -763,15 +763,14 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
     let registry = registry();
     let (_, copy) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "list.copy")
+        .find(|(_, f)| f.definition().name.as_str() == "list.copy")
         .unwrap();
     let mut heap = crate::tests::Heap::default();
     use lash_kernel_doc::{NativeCall, NativeHeap, Object, Operand, Value, WorkCounter};
     let xs = Value::List(heap.allocate(Object::List(vec![Value::Null; 3])).unwrap());
     for _ in 0..2 {
         let result = copy
-            .native
-            .as_ref()
+            .native()
             .unwrap()
             .call(NativeCall {
                 args: std::slice::from_ref(&xs),
@@ -779,7 +778,7 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
                 counter: &mut WorkCounter::new(None),
             })
             .unwrap();
-        let charge = copy.definition.charge.evaluate(&mut |operand, _| {
+        let charge = copy.definition().charge.evaluate(&mut |operand, _| {
             let value = match operand {
                 Operand::Result => &result,
                 Operand::Param(_) => &xs,
@@ -808,11 +807,11 @@ fn k_bnd_003_collection_expansion_reserves_before_building_results() {
         heap.1 = crate::tests::Room::of(0);
         let (_, function) = registry
             .iter()
-            .find(|(_, f)| f.definition.name.as_str() == name)
+            .find(|(_, f)| f.definition().name.as_str() == name)
             .unwrap();
         let args = [xs.clone(), xs];
         assert_eq!(
-            function.native.as_ref().unwrap().call(NativeCall {
+            function.native().unwrap().call(NativeCall {
                 args: if name == "list.entries" {
                     &args[..1]
                 } else {
@@ -866,7 +865,7 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
     let registry = registry();
     let (_, search) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "list.index_of_range")
+        .find(|(_, f)| f.definition().name.as_str() == "list.index_of_range")
         .unwrap();
     for length in [0, 1, 8, 64] {
         for bytes in [0, 1, 64] {
@@ -885,8 +884,7 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
                 Value::Bool(false),
             ];
             let answer = search
-                .native
-                .as_ref()
+                .native()
                 .unwrap()
                 .call(NativeCall {
                     args: &args,
@@ -898,25 +896,28 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
                 answer,
                 Value::Int(Integer::from(if length == 0 { -1 } else { 0 }))
             );
-            let charge = search.definition.charge.evaluate(&mut |operand, measure| {
-                let Operand::Param(name) = operand else {
-                    panic!("formula only measures arguments");
-                };
-                match (name.as_str(), measure) {
-                    ("xs", Measure::Size) => 1 + length as u64,
-                    ("xs", Measure::DeepSize) => 1 + length as u64 * (2 + bytes as u64),
-                    ("value", Measure::DeepSize) => 1 + bytes as u64,
-                    ("start", Measure::Size) => 1,
-                    ("end", Measure::Size) => {
-                        if length == 0 {
-                            1
-                        } else {
-                            2
+            let charge = search
+                .definition()
+                .charge
+                .evaluate(&mut |operand, measure| {
+                    let Operand::Param(name) = operand else {
+                        panic!("formula only measures arguments");
+                    };
+                    match (name.as_str(), measure) {
+                        ("xs", Measure::Size) => 1 + length as u64,
+                        ("xs", Measure::DeepSize) => 1 + length as u64 * (2 + bytes as u64),
+                        ("value", Measure::DeepSize) => 1 + bytes as u64,
+                        ("start", Measure::Size) => 1,
+                        ("end", Measure::Size) => {
+                            if length == 0 {
+                                1
+                            } else {
+                                2
+                            }
                         }
+                        other => panic!("unexpected measure: {other:?}"),
                     }
-                    other => panic!("unexpected measure: {other:?}"),
-                }
-            });
+                });
             assert_eq!(
                 charge,
                 12 + u64::from(length != 0) + length as u64 * (3 + 2 * bytes as u64) + bytes as u64
@@ -952,7 +953,7 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
         Value::Bool(false),
     ];
     assert_eq!(
-        search.native.as_ref().unwrap().call(NativeCall {
+        search.native().unwrap().call(NativeCall {
             args: &args,
             heap: &mut heap,
             counter: &mut WorkCounter::new(None)
@@ -1141,13 +1142,13 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
     let collection_ids = register_collections(&mut registered).unwrap();
     let natives: std::collections::BTreeSet<_> = collection_ids
         .into_values()
-        .filter(|id| registered.get(id).unwrap().native.is_some())
+        .filter(|id| registered.get(id).unwrap().native().is_some())
         .collect();
     let mut exercised = std::collections::BTreeSet::new();
     for (name, args, expected) in cases {
         let (id, _) = registered
             .iter()
-            .find(|(_, function)| function.definition.name.as_str() == name)
+            .find(|(_, function)| function.definition().name.as_str() == name)
             .unwrap();
         exercised.insert(*id);
         let program = program(&format!("main {{ return {name}({args}) }}"));
@@ -1192,9 +1193,9 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
     let registry = registry();
     let (_, function) = registry
         .iter()
-        .find(|(_, f)| f.definition.name.as_str() == "key.identity")
+        .find(|(_, f)| f.definition().name.as_str() == "key.identity")
         .unwrap();
-    let native = function.native.as_ref().unwrap();
+    let native = function.native().unwrap();
     let mut heap = crate::tests::Heap::default();
     let object = heap
         .allocate(Object::List(vec![Value::Null; 4096]))
@@ -1217,7 +1218,7 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
             out,
             Value::Tuple(vec![Value::Ref(Identity::Object(object)); length].into())
         );
-        let charged = function.definition.charge.evaluate(&mut |operand, _| {
+        let charged = function.definition().charge.evaluate(&mut |operand, _| {
             assert_eq!(*operand, Operand::Result);
             1 + length as u64
         });

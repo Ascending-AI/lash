@@ -512,7 +512,7 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
     );
     assert_ne!(
         steered.run().await.expect("the steer's run"),
-        Some(run),
+        Some(crate::RunId::parse(run.as_str()).unwrap()),
         "the steer is not bound to the turn whose checkpoint failed"
     );
     core.shutdown().await.expect("shutdown");

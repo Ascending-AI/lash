@@ -9,6 +9,7 @@ use lash_core::facade_support::{
     OperationCancelOutcome, QueueWithdrawalObservation, TurnAddress, TurnCancelMode,
     TurnCancelOutcome, TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
+use lash_sansio::core_support::RunIdCoreSupport;
 
 use super::follow::Subject;
 use super::{CancelReceipt, SendParts};
@@ -97,11 +98,11 @@ async fn cancel_run(
             .map_err(EmbedError::Runtime)?;
         return Ok(match outcome {
             OperationCancelOutcome::Withdrawn => CancelReceipt::Withdrawn {
-                run: run.clone(),
+                run: crate::RunId::from_turn_id(run.clone()),
                 input: None,
             },
             OperationCancelOutcome::Cancelled(receipt) => CancelReceipt::Cancelled {
-                run: run.clone(),
+                run: crate::RunId::from_turn_id(run.clone()),
                 receipt: Box::new(receipt),
             },
             OperationCancelOutcome::UnknownOrRevoked => CancelReceipt::UnknownOrRevoked,
@@ -129,7 +130,7 @@ async fn cancel_run(
         .map_err(EmbedError::Runtime)?;
     Ok(match receipt.outcome {
         TurnCancelOutcome::Withdrawn { input } => CancelReceipt::Withdrawn {
-            run: run.clone(),
+            run: crate::RunId::from_turn_id(run.clone()),
             input: Some(input),
         },
         TurnCancelOutcome::UnknownOrRevoked | TurnCancelOutcome::CompletionWonRace => {
@@ -139,7 +140,7 @@ async fn cancel_run(
         | TurnCancelOutcome::AlreadyRequested(_)
         | TurnCancelOutcome::Escalated(_)
         | TurnCancelOutcome::PolicyConflict { .. } => CancelReceipt::Cancelled {
-            run: run.clone(),
+            run: crate::RunId::from_turn_id(run.clone()),
             receipt: Box::new(receipt),
         },
     })

@@ -1,6 +1,8 @@
 use super::*;
 use crate::TurnId;
 
+impl crate::core_internal::RuntimeService for RuntimeSessionStateService {}
+
 #[async_trait::async_trait]
 impl crate::plugin::SessionReadService for RuntimeSessionStateService {
     async fn snapshot_current(&self) -> Result<SessionSnapshot, crate::PluginError> {
@@ -41,32 +43,9 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
             .turn_scope_by_id(session_id, turn_id)
             .await
     }
-
-    async fn snapshot_current(&self) -> Result<SessionSnapshot, crate::PluginError> {
-        self.services.current.snapshot_current().await
-    }
-
-    async fn snapshot_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<SessionSnapshot, crate::PluginError> {
-        self.services.current.snapshot_session(session_id).await
-    }
-
-    async fn tool_catalog(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Vec<serde_json::Value>, crate::PluginError> {
-        self.services.current.tool_catalog(session_id).await
-    }
-
-    async fn shared_tool_catalog(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
-        self.services.current.shared_tool_catalog(session_id).await
-    }
 }
+
+impl crate::core_internal::RuntimeService for RuntimeSessionLifecycleService {}
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
@@ -81,6 +60,8 @@ impl crate::plugin::SessionLifecycleService for RuntimeSessionLifecycleService {
         .await
     }
 }
+
+impl crate::core_internal::RuntimeService for RuntimeSessionGraphService {}
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {

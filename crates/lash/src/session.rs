@@ -938,7 +938,7 @@ impl LashSession {
     /// Re-await a logical run: after a park verb, or by the host id a send
     /// named.
     pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
-        crate::send::run(crate::send::SendTarget::Live(self.clone()), run.into())
+        crate::send::run(crate::send::SendTarget::Live(self.clone()), run)
     }
 
     /// Withdraw a queued input, or cooperatively cancel a running run

@@ -69,6 +69,7 @@ use lash_core::runtime::{
     PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
 use lash_sansio::SessionId;
+use lash_sansio::core_support::RunIdCoreSupport;
 use tokio::sync::OnceCell;
 
 /// How this handle obtains the session's store.
@@ -416,7 +417,7 @@ impl DurableSession {
 
     /// Re-await a logical run by id.
     pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
-        crate::send::run(crate::send::SendTarget::Durable(self.clone()), run.into())
+        crate::send::run(crate::send::SendTarget::Durable(self.clone()), run)
     }
 
     /// Withdraw a queued input, or cooperatively cancel a running run
@@ -624,7 +625,7 @@ impl DurableSession {
         run: &crate::RunId,
     ) -> Result<Option<crate::persistence::SessionReadView>> {
         self.read_window(lash_core::store::WindowSelector::Terminal(
-            run.clone().into(),
+            run.turn_id().clone(),
         ))
         .await
     }

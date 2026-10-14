@@ -8,6 +8,7 @@
 //! again for an admitted call, and everything here is repeat-safe until the
 //! call is admitted.
 
+use lash_sansio::core_support::RunIdCoreSupport;
 use std::sync::Arc;
 
 use lash_sansio::llm::types::{LlmEventSender, RecordedRequestTemplate};
@@ -75,7 +76,10 @@ impl RuntimeTurnDriver<'static> {
                 self.session_id, self.turn_id, iteration
             ),
         )
-        .with_turn(self.logical_run().into(), self.turn_id.clone());
+        .with_turn(
+            crate::RunId::from_turn_id(self.logical_run()),
+            self.turn_id.clone(),
+        );
         match self.lower_call(&request).await? {
             Ok(template) => Ok(PreparedCall::Admit(Box::new(ComposedCall {
                 request: Arc::new(request),

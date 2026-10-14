@@ -152,7 +152,7 @@ pub fn plan_helper_adoption(
         let Some(counterpart) = counterpart else {
             let name = functions
                 .get(&function)
-                .map(|registered| registered.definition.name.clone())
+                .map(|registered| registered.definition().name.clone())
                 .ok_or_else(|| state(format!("helper {function} is not held")))?;
             return Err(HelperAdoptionRefusal::NoCounterpart { function, name });
         };

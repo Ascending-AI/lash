@@ -19,7 +19,7 @@ pub fn check_native<M: Machine>(
     let registry = Arc::new(registry_factory()?);
     let natives: BTreeSet<_> = registry
         .iter()
-        .filter(|(_, function)| function.native.is_some())
+        .filter(|(_, function)| function.native().is_some())
         .map(|(id, _)| *id)
         .collect();
     let mut covered = BTreeSet::new();
@@ -56,10 +56,11 @@ pub fn check_native<M: Machine>(
         cases.push(case);
     }
     for (id, function) in registry.iter().filter(|(id, _)| natives.contains(id)) {
-        if !covered.contains(id) || (function.definition.guard.is_some() && !guarded.contains(id)) {
+        if !covered.contains(id) || (function.definition().guard.is_some() && !guarded.contains(id))
+        {
             return Err(HarnessError(format!(
                 "native {} lacks result or guard cases",
-                function.definition.name
+                function.definition().name
             )));
         }
     }

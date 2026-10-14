@@ -57,7 +57,7 @@ async fn run_report(
         .durable()
         .await
         .expect("bind the durable session")
-        .run(turn_id.clone().into())
+        .run(lash::RunId::parse(turn_id.as_str()).expect("a parseable run id"))
         .output()
         .await
         .expect("the run's settled output")

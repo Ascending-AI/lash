@@ -1293,7 +1293,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
                                 .await
                                 .expect("the session's durable handle")
                                 .cancel(lash::CancelTarget::Run(
-                                    lash::TurnId::parse(RUN).expect("a run id"),
+                                    lash::RunId::parse(RUN).expect("a run id"),
                                 ))
                                 .mode(lash_core::TurnCancelMode::Immediate)
                                 .reason("the host stopped the finishing turn")

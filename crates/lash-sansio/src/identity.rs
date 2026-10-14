@@ -539,14 +539,13 @@ impl RunId {
         self.0.as_str()
     }
 }
-impl From<TurnId> for RunId {
-    fn from(value: TurnId) -> Self {
+#[doc(hidden)]
+impl crate::core_support::RunIdCoreSupport for RunId {
+    fn from_turn_id(value: TurnId) -> Self {
         Self(value)
     }
-}
-impl From<RunId> for TurnId {
-    fn from(value: RunId) -> Self {
-        value.0
+    fn turn_id(&self) -> &TurnId {
+        &self.0
     }
 }
 /// The input that opened a Run is addressed by the Run's id.

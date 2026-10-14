@@ -74,7 +74,7 @@ impl Libraries {
     fn id(&self, name: &str) -> FunctionId {
         self.registry
             .iter()
-            .find(|(_, function)| function.definition.name.as_str() == name)
+            .find(|(_, function)| function.definition().name.as_str() == name)
             .map(|(id, _)| *id)
             .unwrap_or_else(|| panic!("no function `{name}`"))
     }
@@ -189,13 +189,13 @@ fn prepared_entries_answer_as_the_general_call() {
     let libraries = Libraries::new();
     let corpus = values();
     for (_, registered) in libraries.registry.iter() {
-        let Some(native) = &registered.native else {
+        let Some(native) = registered.native() else {
             continue;
         };
         let Some(prepared) = native.prepare() else {
             continue;
         };
-        let arity = registered.definition.signature.params.len();
+        let arity = registered.definition().signature.params.len();
         let mut tuple = vec![0; arity];
         let mut answered = 0;
         loop {

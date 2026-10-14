@@ -1028,7 +1028,7 @@ fn admission_reuses_registered_library_validation_identity_and_graphs() {
         admitted.graph
     );
     derive_definition(
-        registry.get(&library.outer).unwrap().definition.as_ref(),
+        registry.get(&library.outer).unwrap().definition().as_ref(),
         &registry,
     )
     .unwrap();
@@ -1074,7 +1074,11 @@ fn cached_library_refusals_keep_the_uncached_errors_and_view() {
         crate::derive_view(&document, &catalog).unwrap()
     );
     assert_eq!(
-        derive_definition(cloned.get(&function).unwrap().definition.as_ref(), &cloned).unwrap_err(),
+        derive_definition(
+            cloned.get(&function).unwrap().definition().as_ref(),
+            &cloned
+        )
+        .unwrap_err(),
         expected
     );
     // The uncached structural view above is the only validation/identity/graph work.

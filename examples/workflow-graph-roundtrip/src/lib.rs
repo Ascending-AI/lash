@@ -236,7 +236,7 @@ async fn read_environment(
         functions: environment
             .functions()
             .iter()
-            .map(|(id, function)| (function.definition.name.to_string(), id.to_string()))
+            .map(|(id, function)| (function.definition().name.to_string(), id.to_string()))
             .collect(),
     }))
 }
