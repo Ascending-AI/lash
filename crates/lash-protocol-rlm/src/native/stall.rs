@@ -1,18 +1,9 @@
-use lash_core::{DriverAction, DriverContextView, Part, PartKind};
+use lash_core::{Part, PartKind};
 
 use crate::protocol::stall::reply_fingerprint;
 
 pub(super) const LLM_EXTRACTION_PHASE: lash_rlm_types::RlmDiagnosticPhase =
     lash_rlm_types::RlmDiagnosticPhase::NativeExtraction;
-pub(super) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
-    lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
-pub(super) fn stalled_attempts(
-    ctx: &DriverContextView<'_>,
-    actions: &[DriverAction],
-) -> Result<usize, lash_core::StoredDataCorruption> {
-    crate::protocol::stall::stalled_attempts_in_phase(ctx, actions, LLM_EXTRACTION_PHASE)
-}
-
 /// Field separator between the parts of a native reply, so that a reply whose
 /// prose ends where the next part's content begins cannot digest as one whose
 /// parts split elsewhere. Unit separator: it cannot occur unescaped inside the

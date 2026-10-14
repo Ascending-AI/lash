@@ -23,7 +23,7 @@ use serde_json::Value;
 pub(super) const LLM_EXTRACTION_PHASE: lash_rlm_types::RlmDiagnosticPhase =
     lash_rlm_types::RlmDiagnosticPhase::LlmExtraction;
 /// Diagnostic phase that records a turn stopped by its no-progress budget.
-pub(super) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
+pub(crate) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
     lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
 /// Consecutive provider attempts *in this turn*, ending at its latest record,
 /// that committed no error-free execution.
@@ -48,13 +48,6 @@ pub(super) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
 /// decides an effect later — and a count that reads only committed history
 /// would be one short on exactly one of them.
 ///
-pub(super) fn stalled_attempts(
-    ctx: &DriverContextView<'_>,
-    actions: &[DriverAction],
-) -> Result<usize, lash_core::StoredDataCorruption> {
-    stalled_attempts_in_phase(ctx, actions, LLM_EXTRACTION_PHASE)
-}
-
 pub(crate) fn stalled_attempts_in_phase(
     ctx: &DriverContextView<'_>,
     actions: &[DriverAction],

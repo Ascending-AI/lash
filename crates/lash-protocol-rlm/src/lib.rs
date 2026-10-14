@@ -36,6 +36,7 @@ pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRl
 mod rlm_support;
 pub mod scenario_contracts;
 mod session_globals;
+mod settlement;
 pub use session_globals::{
     GlobalsPage, GlobalsPageView, SessionGlobal, SessionGlobalKind, SessionGlobals,
     StaleGlobalsPage,
