@@ -14,6 +14,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod expressions;
 mod metadata;
+mod readable;
 mod statements;
 
 pub(crate) struct Reader {
@@ -385,8 +386,17 @@ pub(crate) fn invocation(expr: &s::Expr) -> Result<(String, Vec<&s::Expr>), Diag
             Some(expr.span()),
         ));
     }
-    let args = call
-        .args
+    Ok((name.sym.to_string(), call_arguments(call)?))
+}
+
+fn call_arguments(call: &s::CallExpr) -> Result<Vec<&s::Expr>, Diagnostic> {
+    if call.type_args.is_some() {
+        return Err(invalid(
+            "generated calls have no type arguments",
+            Some(call.span()),
+        ));
+    }
+    call.args
         .iter()
         .map(|arg| {
             if arg.spread.is_none() {
@@ -394,12 +404,11 @@ pub(crate) fn invocation(expr: &s::Expr) -> Result<(String, Vec<&s::Expr>), Diag
             } else {
                 Err(invalid(
                     "k operations have no spread arguments",
-                    Some(expr.span()),
+                    Some(call.span()),
                 ))
             }
         })
-        .collect::<Result<_, _>>()?;
-    Ok((name.sym.to_string(), args))
+        .collect()
 }
 
 pub(crate) fn array(expr: &s::Expr) -> Result<Vec<&s::Expr>, Diagnostic> {

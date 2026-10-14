@@ -1,4 +1,4 @@
-//! Format v1 generic forms. See docs/design/generated-source-format.md.
+//! Format v1 exact forms. Paired readable rules: generated_rules.md.
 use crate::TypeScript;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
@@ -16,6 +16,7 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     let mut renderer = Renderer {
         out: SourceWriter::new(options),
         plan: &plan,
+        indent: 0,
     };
     renderer
         .out
@@ -64,12 +65,7 @@ impl Printer for TypeScript {
 }
 
 pub(crate) fn legal_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    swc_ecma_ast::Ident::is_valid_start(first)
-        && chars.all(swc_ecma_ast::Ident::is_valid_continue)
+    property_identifier(name)
         && !name.starts_with("helper_")
         && !name.starts_with("kernel_name_")
         && !matches!(
@@ -124,9 +120,25 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
                 | "yield"
         )
 }
+
+/// Property names have no binding-keyword or alias-namespace restrictions.
+pub(crate) fn property_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    swc_ecma_ast::Ident::is_valid_start(first) && chars.all(swc_ecma_ast::Ident::is_valid_continue)
+}
+fn native_record(items: &[k::RecordEntry]) -> bool {
+    let mut fields = std::collections::BTreeSet::new();
+    items.iter().all(|item| {
+        property_identifier(&item.field) && item.field != "__proto__" && fields.insert(&item.field)
+    })
+}
 struct Renderer<'a> {
     out: SourceWriter,
     plan: &'a NamePlan,
+    indent: usize,
 }
 impl Renderer<'_> {
     fn metadata(&mut self, value: &impl serde::Serialize) {
@@ -155,10 +167,14 @@ impl Renderer<'_> {
         match node {
             k::Node::Block(body) => {
                 self.out.write("{\n");
+                self.indent += 1;
                 for stmt in body {
+                    self.indentation();
                     self.node(k::Node::Stmt(stmt), None);
                     self.out.write("\n");
                 }
+                self.indent -= 1;
+                self.indentation();
                 self.out.write("}");
             }
             k::Node::Stmt(stmt) => self.statement(stmt),
@@ -166,6 +182,11 @@ impl Renderer<'_> {
             k::Node::Action(action) => self.action(action),
         }
         self.out.end_node();
+    }
+    fn indentation(&mut self) {
+        for _ in 0..self.indent {
+            self.out.write("  ");
+        }
     }
     fn expr(&mut self, expr: &k::Expr) {
         self.node(k::Node::Expr(expr), None);
@@ -193,7 +214,10 @@ impl Renderer<'_> {
                     k::Place::Variable(n) => self.name(n),
                     k::Place::Member(m) => {
                         self.member(m);
-                        self.out.write(".value");
+                        if matches!(m, k::Member::Field { field, .. } if !property_identifier(field))
+                        {
+                            self.out.write(".value");
+                        }
                     }
                 }
                 self.out.write(" = ");
@@ -218,8 +242,14 @@ impl Renderer<'_> {
                 self.expr(condition);
                 self.out.write(") ");
                 self.block(then_block);
-                self.out.write(" else ");
-                self.block(else_block);
+                if else_block.is_empty() {
+                    // The omitted empty else is the sole implicit TS node rule.
+                    self.out.begin_node(None);
+                    self.out.end_node();
+                } else {
+                    self.out.write(" else ");
+                    self.block(else_block);
+                }
             }
             k::Stmt::For {
                 binding,
@@ -283,20 +313,27 @@ impl Renderer<'_> {
     }
     fn member(&mut self, member: &k::Member) {
         match member {
+            k::Member::Field { target, field } if property_identifier(field) => {
+                self.out.write("(");
+                self.expr(target);
+                self.out.write(").");
+                self.out.write(field);
+            }
             k::Member::Field { target, field } => {
                 self.out.write("k.field(");
                 self.expr(target);
                 self.out.write(", ");
                 self.out.json(field);
+                self.out.write(")");
             }
             k::Member::Index { target, index } => {
-                self.out.write("k.index(");
+                self.out.write("(");
                 self.expr(target);
-                self.out.write(", ");
+                self.out.write(")[");
                 self.expr(index);
+                self.out.write("]");
             }
         }
-        self.out.write(")");
     }
     fn literal(&mut self, literal: &k::Literal) {
         match literal {
@@ -304,11 +341,13 @@ impl Renderer<'_> {
             k::Literal::Absent => self.out.write("k.absent"),
             k::Literal::Bool(b) => self.out.write(if *b { "true" } else { "false" }),
             k::Literal::Text(s) => self.out.json(s),
+            k::Literal::Int(n) if n.bits() <= 53 => self.out.write(&n.to_string()),
             k::Literal::Int(n) => {
                 self.out.write("k.int(");
                 self.out.json(&n.to_string());
                 self.out.write(")");
             }
+            k::Literal::Float(n) if n.get().is_finite() => self.out.write(&n.to_string()),
             k::Literal::Float(n) => {
                 self.out.write("k.float(");
                 self.out.json(&n.to_string());
@@ -353,8 +392,8 @@ impl Renderer<'_> {
                 self.out.json(n);
             }
             k::Callee::Library(id) => {
-                self.out.write("k.library(");
                 self.helper(id);
+                return;
             }
         }
         self.out.write(")");
@@ -415,10 +454,19 @@ impl Renderer<'_> {
         match expr {
             k::Expr::Literal(l) => self.literal(l),
             k::Expr::Variable(n) => self.name(n),
-            k::Expr::Tuple(items) | k::Expr::List(items) | k::Expr::Set(items) => {
+            k::Expr::List(items) => {
+                self.out.write("[");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.expr(item);
+                }
+                self.out.write("]");
+            }
+            k::Expr::Tuple(items) | k::Expr::Set(items) => {
                 self.out.write(match expr {
                     k::Expr::Tuple(_) => "k.tuple(",
-                    k::Expr::List(_) => "k.list(",
                     _ => "k.set(",
                 });
                 for (i, item) in items.iter().enumerate() {
@@ -443,6 +491,18 @@ impl Renderer<'_> {
                 }
                 self.out.write(")");
             }
+            k::Expr::Record(items) if native_record(items) => {
+                self.out.write("{");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.out.write(&item.field);
+                    self.out.write(": ");
+                    self.expr(&item.value);
+                }
+                self.out.write("}");
+            }
             k::Expr::Record(items) => {
                 self.out.write("k.record(");
                 for (i, item) in items.iter().enumerate() {
@@ -460,16 +520,15 @@ impl Renderer<'_> {
             k::Expr::Member(m) => self.member(m),
             k::Expr::Closure(c) => self.function(&c.params, &c.body, None),
             k::Expr::Call { function, args } => {
-                self.out.write("k.invoke(");
                 self.helper(function);
-                self.out.write(", [");
+                self.out.write("(");
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         self.out.write(", ");
                     }
                     self.expr(arg);
                 }
-                self.out.write("])");
+                self.out.write(")");
             }
             k::Expr::Clock => self.out.write("k.clock()"),
             k::Expr::Random => self.out.write("k.random()"),

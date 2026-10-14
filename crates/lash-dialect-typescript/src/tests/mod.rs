@@ -27,6 +27,7 @@ mod positional;
 mod printer;
 mod printer_corpus;
 mod process;
+mod readable_source;
 mod remaining_builtins;
 mod step_structure;
 mod trim;

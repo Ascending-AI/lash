@@ -51,6 +51,9 @@ impl Reader {
         })
     }
     pub(super) fn expression(&mut self, expr: &s::Expr) -> Result<k::Expr, Diagnostic> {
+        if let Some(readable) = self.readable_expression(expr) {
+            return readable;
+        }
         match expr {
             s::Expr::Paren(value) => self.expression(&value.expr),
             s::Expr::Ident(ident) => Ok(k::Expr::Variable(self.name(ident)?)),
@@ -158,6 +161,9 @@ impl Reader {
         args.iter().map(|arg| self.expression(arg)).collect()
     }
     pub(super) fn member(&mut self, expr: &s::Expr) -> Result<k::Member, Diagnostic> {
+        if let s::Expr::Member(member) = expr {
+            return self.native_member(member);
+        }
         let (name, args) = invocation(expr)?;
         match (name.as_str(), args.as_slice()) {
             ("field", [target, field]) => Ok(k::Member::Field {
@@ -185,6 +191,9 @@ impl Reader {
         array(expr)?.iter().map(|expr| self.atom(expr)).collect()
     }
     fn callee(&mut self, expr: &s::Expr) -> Result<k::Callee, Diagnostic> {
+        if matches!(expr, s::Expr::Ident(_)) {
+            return Ok(k::Callee::Library(self.id(expr)?));
+        }
         let (name, args) = invocation(expr)?;
         match (name.as_str(), args.as_slice()) {
             ("declared", [value]) => Ok(k::Callee::Declared(k::Name::new(string(value)?))),

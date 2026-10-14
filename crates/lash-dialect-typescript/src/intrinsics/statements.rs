@@ -137,8 +137,15 @@ impl Reader {
                 s::AssignTarget::Simple(s::SimpleAssignTarget::Ident(name)) => {
                     k::Place::Variable(self.name(&name.id)?)
                 }
-                s::AssignTarget::Simple(s::SimpleAssignTarget::Member(member)) if matches!(&member.prop, s::MemberProp::Ident(name) if name.sym == "value") => {
+                s::AssignTarget::Simple(s::SimpleAssignTarget::Member(member))
+                    if matches!(&member.prop, s::MemberProp::Ident(name) if name.sym == "value")
+                        && invocation(&member.obj)
+                            .is_ok_and(|(name, _)| matches!(name.as_str(), "field" | "index")) =>
+                {
                     k::Place::Member(self.member(&member.obj)?)
+                }
+                s::AssignTarget::Simple(s::SimpleAssignTarget::Member(member)) => {
+                    k::Place::Member(self.native_member(member)?)
                 }
                 _ => {
                     return Err(invalid(

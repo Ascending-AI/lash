@@ -148,12 +148,24 @@ Float spelling is kernel canonical spelling, including `nan`, `inf`, `-inf`
 and signed zero `-0.0`. No helper is rewritten into a native operator. Numeric
 variants, absent/null, expression/action calls and collection variants remain
 distinct. The codec rejects syntax it does not reconstruct, including imports,
-spread operands, numeric literals, const/var declarations, typed parameters,
+spread operands, const/var declarations, typed parameters,
 async/generator function wrappers and trailing module text.
 
-Readable successors extend a paired rule inventory next to the codec: each
-rule states its applicability predicate, exact inverse, positive spelling
+TypeScript's paired readable rule inventory is
+[`generated_rules.md`](../../crates/lash-dialect-typescript/src/generated_rules.md).
+It states each applicability predicate, exact inverse, positive spelling
 witness and nearest generic fallback witness. Generic forms remain permanent.
+The printer emits safe canonical integer tokens (magnitude at most 53 bits),
+finite canonical float tokens (fraction or exponent distinguishes Float),
+List arrays and eligible Record objects, dot fields and computed indices,
+direct helper expression calls and helper aliases as Library action callees.
+All numeric tokens decode from their original spelling rather than the
+parser's binary64 approximation; non-finite floats and larger integers stay
+explicit. Native records require unique identifier fields excluding
+`__proto__`; other fields retain `k.record`. Call tags retain Expression/Action
+and Declared/Value/Library distinctions. Controls decode directly and blocks
+use two-space indentation. An empty else can be omitted because absence has
+the exact inverse of an empty kernel else Block.
 No statement fusion, temporary erasure, closure introduction or spawn/join
 fusion is authorized by this format.
 
@@ -186,8 +198,9 @@ An instrumented shared-writer law proves zero map-specific work when disabled.
 Map completeness is exactly `Node::children` from main and declared Function
 roots. Each Site occurs once, with nonempty half-open ranges at valid UTF-8
 boundaries. Parent/child ranges may overlap. Generic forms spell every block,
-so they need no implicit anchors. `SourceSite::implicit` is reserved for a
-successor rule explicitly enumerating an unspelled empty block; executable
+so they need no implicit anchors. TypeScript's readable empty-else rule records
+the omitted Block with `SourceSite::implicit` at the byte boundary immediately
+after its then block. This is the only unspelled TypeScript node; executable
 statements, expressions and actions always have ranges. Metadata and alias
 rows have no synthetic Sites; actions have no child Sites for their atoms.
 Library bodies and graph IDs are outside this map.

@@ -4,7 +4,7 @@ use arbitrary::{Arbitrary, Unstructured};
 use lash_kernel_doc as k;
 use std::collections::{BTreeMap, BTreeSet};
 
-fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
+pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     let printed = crate::print(
         document,
         PrintOptions {
@@ -270,7 +270,7 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
         map.source,
         <[u8; 32]>::from(sha2::Sha256::digest(on.source.as_bytes()))
     );
-    let mut expected = BTreeSet::new();
+    let mut expected = BTreeMap::new();
     for (unit, root) in std::iter::once((k::Unit::Main, k::Node::Block(document.main.as_slice())))
         .chain(document.functions.iter().map(|(name, f)| {
             (
@@ -284,20 +284,31 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
             for (index, child) in node.children().into_iter().enumerate() {
                 stack.push((site.child(index as u32), child));
             }
-            expected.insert(site);
+            expected.insert(
+                site,
+                matches!(node, k::Node::Block(body) if body.is_empty()),
+            );
         }
     }
     let actual: BTreeSet<_> = map.sites.iter().map(|entry| entry.site.clone()).collect();
     assert_eq!(map.sites.len(), actual.len());
-    assert_eq!(actual, expected);
+    assert_eq!(actual, expected.keys().cloned().collect());
+    let mut implicit = 0;
     for entry in map.sites {
-        assert_eq!(entry.implicit, None);
-        assert!(!entry.ranges.is_empty());
+        if let Some(anchor) = entry.implicit {
+            implicit += 1;
+            assert!(expected[&entry.site], "only empty blocks can be implicit");
+            assert!(entry.ranges.is_empty());
+            assert!(on.source.is_char_boundary(anchor));
+        } else {
+            assert!(!entry.ranges.is_empty());
+        }
         for range in entry.ranges {
             assert!(range.start < range.end);
             assert!(on.source.get(range.start..range.end).is_some());
         }
     }
+    assert_eq!(implicit, 1, "inventory has one omitted empty else");
 }
 #[test]
 fn malformed_generated_modules_refuse_without_authored_fallback() {
