@@ -152,6 +152,43 @@ pub struct ProcessStepTools {
     pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::EffectLink>>,
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
+    /// The same composition and namespaces the round tools run under.
+    pub context: Arc<dyn ProcessStepContext>,
+}
+
+/// The prepared composition a process activation judges bindings against.
+/// It shares the resident component state its step bodies use, while provider
+/// bindings are still judged at every admission.
+#[async_trait::async_trait]
+pub trait ProcessStepContext: Send + Sync {
+    /// Judge the linked tool against its retained surface and current provider.
+    ///
+    /// # Errors
+    /// The prepared runtime cannot answer the binding.
+    fn step_link(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Result<crate::plugin::StepLink, PluginError>;
+    /// Judge a recorded dynamic match and its execution binding.
+    ///
+    /// # Errors
+    /// The prepared runtime cannot answer the binding.
+    fn matched_link(
+        &self,
+        matched: &crate::DeferredMatch,
+    ) -> Result<(crate::plugin::StepLink, Result<(), String>), PluginError>;
+    /// The component state/config formats the resident runtime holds.
+    ///
+    /// # Errors
+    /// The prepared runtime has no engine composition.
+    fn requirements(
+        &self,
+    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, PluginError>;
+    /// Resolve a new dynamic call through the prepared deferred provider.
+    ///
+    /// # Errors
+    /// The path or provider cannot be resolved.
+    async fn resolve_dynamic(&self, path: &str) -> Result<crate::DeferredMatch, PluginError>;
 }
 
 /// Why an activation's step tools are not there.
@@ -270,7 +307,7 @@ impl StepRuntime {
 /// A durable backend serving processes is given exactly one.
 #[async_trait::async_trait]
 pub trait ProcessSteps: Send + Sync {
-    /// Admit `step` of `process` at `now_ms`: the policy its tool declares
+    /// Admit `step` of `process` on the prepared `runtime` at `now_ms`: the policy its tool declares
     /// and the limit it runs under.
     ///
     /// # Errors
@@ -278,6 +315,7 @@ pub trait ProcessSteps: Send + Sync {
     /// [`StepRefusal`]; nothing is recorded.
     async fn admit(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,
@@ -325,13 +363,14 @@ pub trait ProcessSteps: Send + Sync {
     /// The composition cannot answer; the pass is retried.
     async fn requirements(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         steps: &[StepRequest],
     ) -> Result<
         Option<std::collections::BTreeSet<crate::ObligationToken>>,
         lash_durable::DurableError,
     > {
-        let _ = (process, steps);
+        let _ = (runtime, process, steps);
         Ok(None)
     }
 

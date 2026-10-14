@@ -103,70 +103,12 @@ impl EngineProcessRuntime {
         })
     }
 
-    /// The catalog this runtime's process's steps resolve against: the
-    /// tools its environment's components provide that its environment's
-    /// tools admit.
-    ///
-    /// # Errors
-    ///
-    /// The catalog does not build.
-    pub fn step_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        self.services.process_step_catalog()
-    }
-
-    /// How this node serves the process's linked call of `effect` (D3),
-    /// judged now.
-    ///
-    /// # Errors
-    ///
-    /// This runtime has no composition.
-    pub fn step_link(
+    /// The composition's bindings and format requirements, without building
+    /// its tool catalog. A successor checks these before committing its env.
+    pub fn step_context(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
-        self.services.process_step_link(effect)
-    }
-
-    /// How this node serves the process's call of the tool `matched`
-    /// resolved a `call_dynamic` path to (P6), and whether it reads the
-    /// match's execution binding (S8), judged now.
-    ///
-    /// # Errors
-    ///
-    /// This runtime has no composition.
-    pub fn matched_link(
-        &self,
-        matched: &crate::DeferredMatch,
-    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
-        self.services.process_matched_link(matched)
-    }
-
-    /// Resolve `path`, the call path of the process's `call_dynamic` call,
-    /// through the deferred provider its env links (P6): read-only
-    /// discovery, which runs again only while its decision has not
-    /// committed.
-    ///
-    /// # Errors
-    ///
-    /// This runtime has no composition, its env links no `call_dynamic`
-    /// endpoint, or this node does not serve its deferred provider.
-    pub async fn resolve_dynamic(
-        &self,
-        path: &str,
-    ) -> Result<crate::DeferredMatch, crate::PluginError> {
-        self.services.process_resolve_dynamic(path).await
-    }
-
-    /// The claim requirements this runtime's process carries while it holds
-    /// tool steps (§6.2).
-    ///
-    /// # Errors
-    ///
-    /// This runtime has no composition.
-    pub fn component_requirements(
-        &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
-        self.services.process_component_requirements()
+    ) -> Arc<dyn lash_core_execution::runtime::process::steps::ProcessStepContext> {
+        Arc::clone(&self.services) as _
     }
 
     /// The tools `process`'s steps run under `cx`, the process actor's

@@ -292,6 +292,7 @@ impl ProcessSteps for SimSteps {
 
     async fn admit(
         &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,

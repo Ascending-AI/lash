@@ -257,6 +257,7 @@ impl ProcessSteps for WorkerSteps {
 
     async fn admit(
         &self,
+        _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,

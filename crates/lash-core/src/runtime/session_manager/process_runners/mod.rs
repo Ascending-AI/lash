@@ -24,72 +24,6 @@ impl RuntimeSessionServices {
         Ok((routes, Arc::new(catalog)))
     }
 
-    /// How this node serves the engine process's linked call of `effect`
-    /// (D3), judged now.
-    pub(in crate::runtime) fn process_step_link(
-        &self,
-        effect: &lash_kernel_doc::EffectName,
-    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
-        let (_, engine) = self.current.engine_process()?;
-        Ok(engine.composition.step_link(&engine.env, effect))
-    }
-
-    /// How this node serves the engine process's call of the tool
-    /// `matched` resolved a `call_dynamic` path to (P6), and whether it
-    /// reads the match's execution binding (S8), judged now.
-    pub(in crate::runtime) fn process_matched_link(
-        &self,
-        matched: &crate::DeferredMatch,
-    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
-        let (_, engine) = self.current.engine_process()?;
-        Ok((
-            engine.composition.matched_link(matched),
-            engine.composition.check_matched_binding(matched),
-        ))
-    }
-
-    /// Resolve `path`, the call path of the engine process's `call_dynamic`
-    /// call, through the deferred provider its env links (P6).
-    pub(in crate::runtime) async fn process_resolve_dynamic(
-        &self,
-        path: &str,
-    ) -> Result<crate::DeferredMatch, crate::PluginError> {
-        let (_, engine) = self.current.engine_process()?;
-        let owner = self.current.execution_owner()?;
-        engine
-            .composition
-            .resolve_dynamic(&engine.env, &owner, path)
-            .await
-    }
-
-    /// The catalog an engine process's linked calls resolve against.
-    pub(in crate::runtime) fn process_step_catalog(
-        &self,
-    ) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
-        Ok(self.process_step_surface()?.1)
-    }
-
-    /// The claim requirements an engine process carries while it holds tool
-    /// steps (§6.2): its environment's components' state/config format tokens.
-    pub(in crate::runtime) fn process_component_requirements(
-        &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
-        let (_, engine) = self.current.engine_process()?;
-        let mut requires =
-            crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);
-        for entry in engine.env.components() {
-            let namespace = crate::plugin::ExecutionState::owner_state(
-                engine.state.as_ref(),
-                entry.id().as_str(),
-            );
-            requires.insert(crate::ObligationToken::for_component(
-                entry.id(),
-                namespace.format_version,
-            ));
-        }
-        Ok(requires)
-    }
-
     /// The tools `process`'s steps run (ADR 0132 §10): its catalog, the
     /// round tools that pin and run a catalog tool as a turn's round does,
     /// under `cx`, the process actor's claimed context. They run inside
@@ -135,6 +69,7 @@ impl RuntimeSessionServices {
             catalog,
             effects,
             tools,
+            context: Arc::new(self.clone()),
         })
     }
 
@@ -183,5 +118,67 @@ impl RuntimeSessionServices {
             process_lineage: None,
             process_originator: None,
         }))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::runtime::process::steps::ProcessStepContext for RuntimeSessionServices {
+    /// How this node serves the engine process's linked call of `effect`
+    /// (D3), judged now.
+    fn step_link(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        Ok(engine.composition.step_link(&engine.env, effect))
+    }
+
+    /// How this node serves the engine process's call of the tool
+    /// `matched` resolved a `call_dynamic` path to (P6), and whether it
+    /// reads the match's execution binding (S8), judged now.
+    fn matched_link(
+        &self,
+        matched: &crate::DeferredMatch,
+    ) -> Result<(crate::plugin::StepLink, Result<(), String>), crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        Ok((
+            engine.composition.matched_link(matched),
+            engine.composition.check_matched_binding(matched),
+        ))
+    }
+
+    /// Resolve `path`, the call path of the engine process's `call_dynamic`
+    /// call, through the deferred provider its env links (P6).
+    async fn resolve_dynamic(
+        &self,
+        path: &str,
+    ) -> Result<crate::DeferredMatch, crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        let owner = self.current.execution_owner()?;
+        engine
+            .composition
+            .resolve_dynamic(&engine.env, &owner, path)
+            .await
+    }
+
+    /// The claim requirements an engine process carries while it holds tool
+    /// steps (§6.2): its environment's components' state/config format tokens.
+    fn requirements(
+        &self,
+    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, crate::PluginError> {
+        let (_, engine) = self.current.engine_process()?;
+        let mut requires =
+            crate::plugin::ProcessComponentDeclaration::env_requirements(&engine.env);
+        for entry in engine.env.components() {
+            let namespace = crate::plugin::ExecutionState::owner_state(
+                engine.state.as_ref(),
+                entry.id().as_str(),
+            );
+            requires.insert(crate::ObligationToken::for_component(
+                entry.id(),
+                namespace.format_version,
+            ));
+        }
+        Ok(requires)
     }
 }

@@ -48,8 +48,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core_store::tool_run::{AvailableEvidence, CompletionSource};
 use lash_durable::domain::{
-    CANCEL_MAIL, ExecRootRow, OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState,
-    WaitWrite,
+    CANCEL_MAIL, ExecRootRow, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState, WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned, Wake};
 use lash_durable::{
@@ -58,10 +57,10 @@ use lash_durable::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
+use super::driver::{Blocked, Driver, Immediate, InFlight, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects};
 use super::session_turn::SessionTurns;
-use super::step_admission::{Admission, Consumed, Handoff, Hold};
+use super::step_admission::{Consumed, Handoff};
 use super::succession::{Current, Succession};
 use super::terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
 use super::{CascadeProgress, end_scope};
@@ -71,11 +70,9 @@ use crate::runtime::actor::round::{
     self, AdmittedExecution, Material, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
     SettledOutput,
 };
-use crate::runtime::actor::waits::{
-    self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
-};
+use crate::runtime::actor::waits::{self, Resolution, WaitKind};
 use crate::runtime::process::engine_state::{
-    CapacityVerdict, EngineAction, EngineEvent, EngineState, StepRequest,
+    CapacityVerdict, EngineEvent, EngineState, StepRequest,
 };
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
@@ -196,6 +193,7 @@ pub(super) struct Live {
     /// The claims in a row that committed nothing, as of the claim.
     failed_activations: u32,
     first_pass: bool,
+    history_restored: bool,
     /// Whether this activation ended the process for a corrupt refusal.
     ended_refused: bool,
     /// The process's durable publication mark as the last pass read it:
@@ -274,6 +272,7 @@ impl ProcessActivation {
             park,
             failed_activations,
             first_pass: true,
+            history_restored: false,
             ended_refused: false,
             published: None,
             requires: owned.requires().to_vec(),
@@ -408,7 +407,7 @@ impl ProcessActivation {
     /// The context the steps' lifecycle commits and runs bodies under. Its
     /// token is never cancelled: a cancel reaches the steps through the
     /// lifecycle, and the bodies end with the activation that holds them.
-    fn steps_context(&self, owned: &Owned, process: &ProcessId) -> ActorContext {
+    pub(super) fn steps_context(&self, owned: &Owned, process: &ProcessId) -> ActorContext {
         ActorContext::claimed(
             self.backend.clone(),
             owned,
@@ -629,11 +628,17 @@ impl ProcessActivation {
             self.commit_terminal(owned, tx, process).await?;
             return Ok(Pass::Again);
         }
-        let rows = reads.run_facts(&OwnerKey::Process(process.clone())).await?;
+        let rows = driver
+            .step_facts(reads, process, !live.history_restored)
+            .await?;
         let mut policies = Vec::with_capacity(driver.steps.len());
         let mut link_failures = BTreeMap::new();
         for step in driver.steps.values() {
-            if let Ok(admission) = self.steps.admit(&record, &step.request, millis(now)).await {
+            if let Ok(admission) = self
+                .steps
+                .admit(&live.bodies.runtime, &record, &step.request, millis(now))
+                .await
+            {
                 policies.push((admission.tool, admission.policy));
                 if let Some(output) = admission.settled {
                     link_failures.insert(step.call.clone(), (&step.request, output));
@@ -644,6 +649,10 @@ impl ProcessActivation {
         let waits = round::PinnedWaits::read(reads, &rows).await?;
         let fold = round::fold(&rows, &policies, &waits)
             .map_err(|error| corrupt("a process's run records", error))?;
+        live.lifecycle
+            .publish_committed(&fold)
+            .map_err(steps_failure)?;
+        live.history_restored = true;
         // A previously admitted call can drift on takeover or before a retry.
         // Settle at its existing ordinal; do not turn the drift into a policy
         // veto, restart a body, or write a new x_start. Admitted waits and
@@ -819,6 +828,7 @@ impl ProcessActivation {
         let mut fresh = Vec::new();
         let applied = self
             .apply(
+                &live.bodies.runtime,
                 &mut tx,
                 process,
                 &record,
@@ -1284,131 +1294,6 @@ impl ProcessActivation {
         Ok(Next::Nothing {
             due: due.into_iter().min(),
         })
-    }
-
-    /// Record `action`'s admission on `tx` and its effect on `driver`.
-    /// Answers the terminal to commit instead when the action ends the
-    /// process or its admission is refused.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the transition and the rows its admission is recorded against"
-    )]
-    async fn apply(
-        &self,
-        tx: &mut ActorTx,
-        process: &ProcessId,
-        record: &ProcessRecord,
-        driver: &mut Driver,
-        action: EngineAction,
-        now: DurableInstant,
-        fresh: &mut Vec<AdmittedExecution>,
-    ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
-        let ProcessInput::Engine { .. } = record.input.as_ref() else {
-            return Err(corrupt("an advanced process", "it runs no engine"));
-        };
-        // An engine wait is bounded by the engine's own bound, fixed now.
-        let deadline = |bound| ParkDeadline::admitted(bound, now).deadline();
-        driver.blocked = None;
-        match action {
-            EngineAction::Steps {
-                steps: requests,
-                wake,
-            } => {
-                // A recorded match is lash's to record, at the commit that
-                // consumes its resolution: an engine asks for the
-                // `call_dynamic` effect, never for a match.
-                if requests.iter().any(|request| request.matched().is_some()) {
-                    return Ok(Some(refused(
-                        "a step names a recorded match, which only lash records".to_owned(),
-                    )));
-                }
-                match self
-                    .admit_steps(
-                        tx,
-                        process,
-                        record,
-                        driver,
-                        requests,
-                        now,
-                        fresh,
-                        Hold::Counted,
-                    )
-                    .await?
-                {
-                    Admission::Admitted => {}
-                    Admission::Ended(outcome) => return Ok(Some(outcome)),
-                    Admission::Refused(refusal) => {
-                        return Ok(Some(refused(refusal.to_string())));
-                    }
-                }
-                driver.blocked = wake.map(|until| Blocked::Sleep {
-                    until: until.0,
-                    site: None,
-                });
-            }
-            EngineAction::PinKey { name, bound } => {
-                let (wait, key) = waits::pin(
-                    tx,
-                    WaitSpec {
-                        scope: ScopeKey::Process(process.clone()),
-                        purpose: WaitPurpose::EngineKey {
-                            name: name.0.clone(),
-                            deadline: deadline(bound).map(WaitDeadline::at),
-                        },
-                    },
-                );
-                let key = key.ok_or_else(|| corrupt("a pinned key", "no key was minted"))?;
-                driver.keys.insert(
-                    name.clone(),
-                    Pinned {
-                        wait: StoredWaitId(wait.id()),
-                        key: key.as_str().to_owned(),
-                    },
-                );
-                driver.immediate = Some(Immediate::KeyPinned { name });
-            }
-            EngineAction::AwaitExternal { name, site } => {
-                let Some(pinned) = driver.keys.get(&name) else {
-                    return Ok(Some(refused(format!("key `{}` was never pinned", name.0))));
-                };
-                driver.blocked = Some(Blocked::External {
-                    name,
-                    wait: pinned.wait,
-                    site,
-                });
-            }
-            EngineAction::AwaitProcess {
-                process: target,
-                bound,
-                site,
-            } => {
-                let (wait, _) = waits::pin(
-                    tx,
-                    WaitSpec {
-                        scope: ScopeKey::Process(process.clone()),
-                        purpose: WaitPurpose::ProcessTerminal {
-                            process: target.clone(),
-                            deadline: deadline(bound).map(WaitDeadline::at),
-                        },
-                    },
-                );
-                driver.blocked = Some(Blocked::Process {
-                    process: target,
-                    wait: StoredWaitId(wait.id()),
-                    site,
-                });
-            }
-            EngineAction::Sleep { until, site } => {
-                driver.blocked = Some(Blocked::Sleep {
-                    until: until.0,
-                    site,
-                });
-            }
-            EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
-            EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
-        }
-        super::waiting::settle(tx, process, record, driver);
-        Ok(None)
     }
 }
 

@@ -85,29 +85,6 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
     }
 }
 
-/// The hundred-effect count laws need no database-thread interleavings.
-/// Inline SQLite calls use the same stores and transactions without a
-/// host-thread scheduling round trip for every database operation.
-async fn effect_stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + Send>>) {
-    match tier {
-        Tier::SqliteMemory => (
-            Arc::new(
-                lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
-                    lash_sqlite_store::SqliteStoreSetOptions {
-                        inline_calls: true,
-                        ..lash_sqlite_store::SqliteStoreSetOptions::memory()
-                    },
-                    Arc::new(lash::runtime::SystemClock),
-                )
-                .await
-                .expect("an inline SQLite memory store opens"),
-            ),
-            Vec::new(),
-        ),
-        Tier::Postgres => stores(tier).await,
-    }
-}
-
 /// What a process event sink attached to a node's registry heard.
 #[derive(Clone, Default)]
 struct Heard(Arc<Mutex<Vec<lash::process::ProcessEvent>>>);
@@ -522,8 +499,19 @@ fn effects_advance(
     state: &mut serde_json::Value,
     event: lash_core::EngineEvent,
 ) -> lash_core::EngineAction {
+    effects_advance_to(state, event, NODE_WRITES)
+}
+
+fn effects_advance_to(
+    state: &mut serde_json::Value,
+    event: lash_core::EngineEvent,
+    writes: u64,
+) -> lash_core::EngineAction {
     let write_at = |n: u64| {
-        let mut action = write(&format!("write-{n}"), n + 1, None);
+        // x=999 is the fixture's deliberate parked call. The large-cost
+        // probe uses a disjoint input range and still executes every visit.
+        let x = n + if writes > NODE_WRITES { 1001 } else { 1 };
+        let mut action = write(&format!("write-{n}"), x, None);
         if let lash_core::EngineAction::Steps { steps, .. } = &mut action
             && let Some(lash_core::StepRequest::Tool { site, .. }) = steps.first_mut()
         {
@@ -536,7 +524,7 @@ fn effects_advance(
         lash_core::EngineEvent::StepSettled { .. } => {
             let settled = state.as_u64().unwrap_or(0) + 1;
             *state = serde_json::json!(settled);
-            if settled < NODE_WRITES {
+            if settled < writes {
                 write_at(settled)
             } else {
                 answer(serde_json::json!("done"))
@@ -553,7 +541,7 @@ fn effects_advance(
 /// counted in the omissions record committed just before the terminal.
 async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     let _guard = EFFECT_LAW_GUARD.lock().await;
-    let (stores, _keep) = effect_stores(tier).await;
+    let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
     let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
     let core = builder
@@ -617,7 +605,7 @@ on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
 /// FIG-6249: a host can retain every visit to a node above the standard cut.
 async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
     let _guard = EFFECT_LAW_GUARD.lock().await;
-    let (stores, _keep) = effect_stores(tier).await;
+    let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
     let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
     let core = builder
@@ -634,6 +622,122 @@ async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
 }
 
 on_every_tier!(a_configured_200_cut_records_all_100_effect_occurrences);
+
+/// Counts the physical store work of the actual process activation, including
+/// the run-fact rows it hydrates and decodes before incorporating each effect.
+struct MeasuredActivation {
+    inner: Arc<dyn lash_durable::runner::Activation>,
+    window: lash_core_execution::facade_support::sql::Window,
+}
+
+#[async_trait::async_trait]
+impl lash_durable::runner::Activation for MeasuredActivation {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        self.window.within(self.inner.activate(owned)).await
+    }
+}
+
+/// FIG-6260: incorporating a sequential effect must not hydrate and decode
+/// the already-consumed history. Count real SQL rows, rather than timing an
+/// assertion: each run-fact row is one RoundFact decode in the production fold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
+    for count in [12_u64, 1000] {
+        fn dozen(
+            state: &mut serde_json::Value,
+            event: lash_core::EngineEvent,
+        ) -> lash_core::EngineAction {
+            effects_advance_to(state, event, 12)
+        }
+        fn thousand(
+            state: &mut serde_json::Value,
+            event: lash_core::EngineEvent,
+        ) -> lash_core::EngineAction {
+            effects_advance_to(state, event, 1000)
+        }
+        let (stores, _keep) = stores(Tier::SqliteMemory).await;
+        let database = stores.durable_store();
+        let world = Arc::new(World::default());
+        let advance = if count == 12 { dozen } else { thousand };
+        let (backend, builder) = core_builder(&stores, advance, &world, None);
+        let core = builder
+            .serve_sessions(false)
+            .trace_limits(lash::tracing::TraceLimits {
+                process_effect_occurrences: 4096,
+                ..Default::default()
+            })
+            .build(owner("constant-fact-work"))
+            .unwrap();
+        let (node_backend, inner) =
+            lash::testing::node_activation(&core, Arc::new(lash_durable::NoProbe)).unwrap();
+        let window = lash_core_execution::facade_support::sql::Window::new(
+            format!("effect-occurrences-{count}"),
+            "sqlite",
+        );
+        let runner = lash_durable::runner::Runner::new(
+            database,
+            stores.clock(),
+            lash_durable::runner::RunnerConfig {
+                node: lash_durable::NodeId::new("counted-effects"),
+                lease: lash_durable::LeaseConfig::default(),
+                decodes: node_backend.formats().decodes(),
+                serves: lash::testing::node_serves(&core),
+                max_active: 1,
+                claim_batch: 1,
+            },
+            Arc::new(MeasuredActivation {
+                inner,
+                window: window.clone(),
+            }),
+        );
+        let process = start(&core).await;
+        let started = std::time::Instant::now();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            runner
+                .run(async {
+                    let _ = stopped.await;
+                })
+                .await
+        });
+        ended(&core, &process).await;
+        let elapsed = started.elapsed();
+        stop.send(()).unwrap();
+        task.await.unwrap().unwrap();
+        let receipt = window.snapshot();
+        let decodes: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(sql, _)| {
+                sql.starts_with(
+                    "select run_seq, ordinal, kind, call_id, record_ref, written_epoch from",
+                )
+            })
+            .map(|(_, shape)| shape.rows_returned)
+            .sum();
+        let events = log(&backend, &process).await;
+        assert_eq!(
+            of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE).len() as u64,
+            count
+        );
+        assert_eq!(world.writes.lock().unwrap().len() as u64, count);
+        eprintln!(
+            "FIG-6260 occurrences={count} elapsed={elapsed:?} fact_decodes={decodes} statements={}",
+            receipt.statements
+        );
+        assert!(
+            decodes >= 3 * count,
+            "the counter must observe the admitted, started and settled facts"
+        );
+        // Each call has three facts, read on at most four lifecycle passes.
+        // The bound is independent of how many earlier calls were consumed.
+        assert!(
+            decodes <= 12 * count,
+            "consumed history was decoded again: {decodes} facts for {count} occurrences"
+        );
+        core.shutdown().await.unwrap();
+    }
+}
 
 /// FIG-6249: configuration refuses unsupported cuts with their typed cause.
 #[tokio::test]
@@ -671,7 +775,7 @@ async fn a_configured_5000_cut_is_refused_typed() {
 /// FIG-6249: redrive retains the run's first cut after the host changes it.
 async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     let _guard = EFFECT_LAW_GUARD.lock().await;
-    let (stores, _keep) = effect_stores(tier).await;
+    let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
     let (_, builder) = core_builder(&stores, effects_advance, &world, Some(20));
     let first = builder
@@ -858,6 +962,7 @@ impl lash_core_execution::runtime::process::steps::ProcessSteps for NoSteps {
 
     async fn admit(
         &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &lash_core::ProcessRecord,
         step: &lash_core::StepRequest,
         _now_ms: u64,

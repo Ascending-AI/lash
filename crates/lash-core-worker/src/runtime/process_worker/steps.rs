@@ -54,15 +54,6 @@ fn engine_kind(process: &ProcessRecord) -> Option<&str> {
 }
 
 impl DurableProcessWorker {
-    /// How this node serves `process`'s linked call of `effect` (D3).
-    async fn step_link(
-        &self,
-        process: &ProcessRecord,
-        effect: &lash_core::EffectName,
-    ) -> Result<crate::plugin::StepLink, crate::PluginError> {
-        self.engine_runtime(process).await?.step_link(effect)
-    }
-
     /// The tool step `execution` of `process`, which runs `step` on
     /// `runtime`'s step tools.
     async fn tool_step(
@@ -84,7 +75,9 @@ impl DurableProcessWorker {
             return SettledOutput::Interrupted.into();
         };
         if resolves {
-            return self.resolve_dynamic(&process, &execution, input).await;
+            return self
+                .resolve_dynamic(&runtime, &process, &execution, input)
+                .await;
         }
         // `prepare` built the activation's tools before any step was
         // admitted or resumed, classifying every failure to build them: a
@@ -141,6 +134,7 @@ impl DurableProcessWorker {
     /// resolution that does not commit runs again: it is read-only.
     async fn resolve_dynamic(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         execution: &AdmittedExecution,
         input: serde_json::Value,
@@ -168,10 +162,10 @@ impl DurableProcessWorker {
                 );
             }
         };
-        let resolved = match self.engine_runtime(process).await {
-            Ok(runtime) => runtime.resolve_dynamic(&path).await,
-            Err(error) => Err(error),
+        let Some(tools) = runtime.built_tools() else {
+            return SettledOutput::Interrupted.into();
         };
+        let resolved = tools.context.resolve_dynamic(&path).await;
         match resolved {
             Ok(matched) => dynamic_resolution(&process.id, &call, &matched).into(),
             // The deferred provider left this node since the step was
@@ -386,6 +380,7 @@ impl ProcessSteps for WorkerSteps {
     /// session-turn process keeps none.
     async fn requirements(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         _steps: &[StepRequest],
     ) -> Result<
@@ -401,11 +396,18 @@ impl ProcessSteps for WorkerSteps {
                 message: error.to_string(),
             })
         };
-        let runtime = self.0.engine_runtime(process).await.map_err(unavailable)?;
-        runtime
-            .component_requirements()
-            .map(Some)
-            .map_err(unavailable)
+        let context = match runtime.built_tools() {
+            Some(tools) => Arc::clone(&tools.context),
+            // A successor's candidate env is judged before its commit;
+            // its catalog and tools build on the next claim, as before.
+            None => self
+                .0
+                .engine_runtime(process)
+                .await
+                .map_err(unavailable)?
+                .step_context(),
+        };
+        context.requirements().map(Some).map_err(unavailable)
     }
 
     /// The `max_tool_calls` the process's environment states (FIG-4546).
@@ -435,6 +437,7 @@ impl ProcessSteps for WorkerSteps {
 
     async fn admit(
         &self,
+        runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,
@@ -469,14 +472,15 @@ impl ProcessSteps for WorkerSteps {
                 // The target of a `call_dynamic` call is admitted as the
                 // tool its recorded match names, on the match's provider,
                 // once this node reads the match's binding (S8).
+                let tools = self
+                    .0
+                    .built_step_tools(runtime, process)
+                    .await
+                    .map_err(|error| unavailable(crate::PluginError::Session(error.to_string())))?;
                 let link = match matched {
                     Some(matched) => {
-                        let (link, binding) = self
-                            .0
-                            .engine_runtime(process)
-                            .await
-                            .and_then(|runtime| runtime.matched_link(matched))
-                            .map_err(unavailable)?;
+                        let (link, binding) =
+                            tools.context.matched_link(matched).map_err(unavailable)?;
                         if let Err(reason) = binding {
                             return Err(StepRefusal::CompositionUnavailable {
                                 component: None,
@@ -485,11 +489,7 @@ impl ProcessSteps for WorkerSteps {
                         }
                         link
                     }
-                    None => self
-                        .0
-                        .step_link(process, effect)
-                        .await
-                        .map_err(unavailable)?,
+                    None => tools.context.step_link(effect).map_err(unavailable)?,
                 };
                 match link {
                     crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {

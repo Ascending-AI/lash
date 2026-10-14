@@ -511,16 +511,25 @@ impl Lifecycle {
         self.act_with(folded, false).await
     }
 
-    async fn act_with(&mut self, folded: &RunFold, starting: bool) -> Result<Act, RoundError> {
-        // What the rows committed publishes before anything reads it: an
-        // earlier activation's outcomes on a resume, and outcomes whose
-        // acknowledgement was lost.
+    /// Restore committed namespaces before the process drops consumed runs
+    /// from its live fold. This runs no body and writes nothing.
+    pub(crate) fn publish_committed(&mut self, folded: &RunFold) -> Result<(), RoundError> {
         for view in folded.rounds() {
             for member in view.members() {
                 if member.outcome().is_some() {
                     self.publish(view.id_of(member), member.committed_state())?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    async fn act_with(&mut self, folded: &RunFold, starting: bool) -> Result<Act, RoundError> {
+        // What the rows committed publishes before anything reads it: an
+        // earlier activation's outcomes on a resume, and outcomes whose
+        // acknowledgement was lost.
+        self.publish_committed(folded)?;
+        for view in folded.rounds() {
             self.bodies.observe(view, &self.fresh);
         }
         // An outcome the rows already have came back on an unacknowledged

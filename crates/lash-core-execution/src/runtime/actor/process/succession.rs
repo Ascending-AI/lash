@@ -270,6 +270,9 @@ impl ProcessActivation {
         );
         // The new env's components are what the process requires from now
         // on, beside the callbacks its unsettled steps were admitted under.
+        let successor_runtime = std::sync::Arc::new(crate::runtime::process::StepRuntime::new(
+            self.steps_context(owned, current.process),
+        ));
         let environment = match driver
             .component_formats
             .as_ref()
@@ -278,7 +281,11 @@ impl ProcessActivation {
             Some(cut) => crate::plugin::ProcessComponentDeclaration::env_requirements(&cut.env),
             None => self
                 .steps
-                .requirements(&next, &super::step_admission::step_requests(&driver))
+                .requirements(
+                    &successor_runtime,
+                    &next,
+                    &super::step_admission::step_requests(&driver),
+                )
                 .await?
                 .unwrap_or_default(),
         };

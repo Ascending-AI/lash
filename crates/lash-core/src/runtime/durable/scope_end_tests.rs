@@ -1371,6 +1371,7 @@ impl ProcessSteps for HangingSteps {
 
     async fn admit(
         &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &crate::ProcessRecord,
         _step: &crate::StepRequest,
         now_ms: u64,

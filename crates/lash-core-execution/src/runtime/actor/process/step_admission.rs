@@ -5,6 +5,7 @@
 //! commit that admits the call of its matched tool, without the engine.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use lash_core_store::tool_run::{MaterialLocation, MaterialOwner, MaterialPayload, MaterialRole};
 use lash_durable::domain::{OwnerKey, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey};
@@ -13,13 +14,15 @@ use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError, DurableInsta
 use lash_sansio::{ToolCallAdmission, ToolCallPosition};
 
 use super::activation::{Live, Pass, corrupt, millis, refused, unavailable};
-use super::driver::{Driver, InFlight};
+use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::record_omitted_effects;
 use super::terminal::{ProcessParkReason, record_terminal};
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, RoundDraft, RunFold};
-use crate::runtime::process::engine_state::StepRequest;
+use crate::runtime::actor::waits::{self, ParkDeadline, WaitDeadline, WaitPurpose, WaitSpec};
+use crate::runtime::process::StepRuntime;
+use crate::runtime::process::engine_state::{EngineAction, StepRequest};
 use crate::runtime::process::steps::StepRefusal;
-use crate::{ProcessId, ProcessRecord};
+use crate::{ProcessId, ProcessInput, ProcessRecord};
 
 use super::ProcessActivation;
 
@@ -77,7 +80,7 @@ impl ProcessActivation {
     ) -> Result<Option<Vec<String>>, DurableError> {
         let environment = self
             .steps
-            .requirements(record, &step_requests(driver))
+            .requirements(&live.bodies.runtime, record, &step_requests(driver))
             .await?
             .unwrap_or_default();
         let mut work = outstanding_work(&record.id, environment, driver, Some(fold));
@@ -132,6 +135,7 @@ impl ProcessActivation {
         let mut fresh = Vec::new();
         match self
             .admit_steps(
+                &live.bodies.runtime,
                 &mut tx,
                 process,
                 record,
@@ -216,6 +220,7 @@ impl ProcessActivation {
     )]
     pub(super) async fn admit_steps(
         &self,
+        runtime: &Arc<crate::runtime::process::StepRuntime>,
         tx: &mut ActorTx,
         process: &ProcessId,
         record: &ProcessRecord,
@@ -270,7 +275,11 @@ impl ProcessActivation {
                     request.step().0
                 ))));
             }
-            let admitted = match self.steps.admit(record, &request, millis(now)).await {
+            let admitted = match self
+                .steps
+                .admit(runtime, record, &request, millis(now))
+                .await
+            {
                 Ok(admitted) => admitted,
                 // Not a refusal: the pass did not commit, and the
                 // next one asks again.
@@ -403,4 +412,133 @@ pub(super) fn outstanding_work(
         }
     }
     work
+}
+
+impl ProcessActivation {
+    /// Record `action`'s admission on `tx` and its effect on `driver`.
+    /// Answers the terminal to commit instead when the action ends the
+    /// process or its admission is refused.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the transition and the rows its admission is recorded against"
+    )]
+    pub(super) async fn apply(
+        &self,
+        runtime: &Arc<StepRuntime>,
+        tx: &mut ActorTx,
+        process: &ProcessId,
+        record: &ProcessRecord,
+        driver: &mut Driver,
+        action: EngineAction,
+        now: DurableInstant,
+        fresh: &mut Vec<AdmittedExecution>,
+    ) -> Result<Option<crate::ProcessOutcome>, DurableError> {
+        let ProcessInput::Engine { .. } = record.input.as_ref() else {
+            return Err(corrupt("an advanced process", "it runs no engine"));
+        };
+        // An engine wait is bounded by the engine's own bound, fixed now.
+        let deadline = |bound| ParkDeadline::admitted(bound, now).deadline();
+        driver.blocked = None;
+        match action {
+            EngineAction::Steps {
+                steps: requests,
+                wake,
+            } => {
+                // A recorded match is lash's to record, at the commit that
+                // consumes its resolution: an engine asks for the
+                // `call_dynamic` effect, never for a match.
+                if requests.iter().any(|request| request.matched().is_some()) {
+                    return Ok(Some(refused(
+                        "a step names a recorded match, which only lash records".to_owned(),
+                    )));
+                }
+                match self
+                    .admit_steps(
+                        runtime,
+                        tx,
+                        process,
+                        record,
+                        driver,
+                        requests,
+                        now,
+                        fresh,
+                        Hold::Counted,
+                    )
+                    .await?
+                {
+                    Admission::Admitted => {}
+                    Admission::Ended(outcome) => return Ok(Some(outcome)),
+                    Admission::Refused(refusal) => {
+                        return Ok(Some(refused(refusal.to_string())));
+                    }
+                }
+                driver.blocked = wake.map(|until| Blocked::Sleep {
+                    until: until.0,
+                    site: None,
+                });
+            }
+            EngineAction::PinKey { name, bound } => {
+                let (wait, key) = waits::pin(
+                    tx,
+                    WaitSpec {
+                        scope: ScopeKey::Process(process.clone()),
+                        purpose: WaitPurpose::EngineKey {
+                            name: name.0.clone(),
+                            deadline: deadline(bound).map(WaitDeadline::at),
+                        },
+                    },
+                );
+                let key = key.ok_or_else(|| corrupt("a pinned key", "no key was minted"))?;
+                driver.keys.insert(
+                    name.clone(),
+                    Pinned {
+                        wait: StoredWaitId(wait.id()),
+                        key: key.as_str().to_owned(),
+                    },
+                );
+                driver.immediate = Some(Immediate::KeyPinned { name });
+            }
+            EngineAction::AwaitExternal { name, site } => {
+                let Some(pinned) = driver.keys.get(&name) else {
+                    return Ok(Some(refused(format!("key `{}` was never pinned", name.0))));
+                };
+                driver.blocked = Some(Blocked::External {
+                    name,
+                    wait: pinned.wait,
+                    site,
+                });
+            }
+            EngineAction::AwaitProcess {
+                process: target,
+                bound,
+                site,
+            } => {
+                let (wait, _) = waits::pin(
+                    tx,
+                    WaitSpec {
+                        scope: ScopeKey::Process(process.clone()),
+                        purpose: WaitPurpose::ProcessTerminal {
+                            process: target.clone(),
+                            deadline: deadline(bound).map(WaitDeadline::at),
+                        },
+                    },
+                );
+                driver.blocked = Some(Blocked::Process {
+                    process: target,
+                    wait: StoredWaitId(wait.id()),
+                    site,
+                });
+            }
+            EngineAction::Sleep { until, site } => {
+                driver.blocked = Some(Blocked::Sleep {
+                    until: until.0,
+                    site,
+                });
+            }
+            EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
+            EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
+        }
+        super::waiting::settle(tx, process, record, driver);
+        Ok(None)
+    }
 }

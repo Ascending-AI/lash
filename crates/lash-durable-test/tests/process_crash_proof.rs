@@ -409,6 +409,7 @@ impl ProcessSteps for ProofSteps {
 
     async fn admit(
         &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         now_ms: u64,

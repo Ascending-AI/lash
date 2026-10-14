@@ -61,6 +61,32 @@ pub(super) struct Driver {
     pub(super) status: Option<Box<crate::EngineStatus>>,
 }
 
+impl Driver {
+    /// Only runs with steps not yet incorporated belong to the live fold.
+    /// Complete history is read once by a new activation to restore state.
+    pub(super) async fn step_facts(
+        &self,
+        reads: &dyn lash_durable::DurableReads,
+        process: &ProcessId,
+        restore: bool,
+    ) -> Result<lash_durable::domain::RunFacts, lash_durable::DurableError> {
+        use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
+        let owner = OwnerKey::Process(process.clone());
+        if restore {
+            return reads.run_facts(&owner).await;
+        }
+        let runs: std::collections::BTreeSet<_> =
+            self.steps.values().map(|step| step.run).collect();
+        let mut facts = RunFacts::default();
+        for run in runs {
+            let loaded = reads.run_facts_of(&owner, RunSeq(run)).await?;
+            facts.read_limits = loaded.read_limits;
+            facts.extend(loaded);
+        }
+        Ok(facts)
+    }
+}
+
 /// One admitted step.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

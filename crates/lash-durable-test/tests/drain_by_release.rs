@@ -240,6 +240,7 @@ impl ProcessSteps for DrainSteps {
 
     async fn admit(
         &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         _step: &StepRequest,
         now_ms: u64,
