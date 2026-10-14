@@ -16,6 +16,8 @@ mod heap_profile;
 /// each dialect's helpers against them.
 #[path = "../../lash-vm-releases/src/library.rs"]
 mod library;
+#[cfg(all(test, unix))]
+mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod read_laws;
 #[cfg(all(test, unix))]

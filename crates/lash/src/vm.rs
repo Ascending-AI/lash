@@ -49,8 +49,8 @@ pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 /// Host-selected worker entry, pool bounds, execution deadlines and process
 /// confinement.
 pub use lash_vm_client::{
-    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerConfinement, WorkerEntry,
-    WorkerTuning,
+    Deadlines as WorkerDeadlines, PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig,
+    WorkerConfinement, WorkerEntry, WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
 pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
@@ -101,10 +101,10 @@ pub use lash_vm_client::StateDigest;
 pub use lash_vm_client::{
     BootstrapFault, CodecRefusal, DecodeLimits, Detail, DetailLimit, Exchange, ExecutionClass,
     ExecutionLease, ExecutionReceipt, FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadKind,
-    InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError,
-    PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds,
-    RunInput, RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit,
+    InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PageRefusal, PayloadKind,
+    PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds, ProtocolBreach,
+    ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal, SequenceFault,
+    SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
 };
 /// Why lash's shipped library did not assemble: a defect of the build.
 #[cfg(feature = "codemode")]

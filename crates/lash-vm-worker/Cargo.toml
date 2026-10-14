@@ -56,6 +56,7 @@ workspace = true
 [dependencies]
 dhat = { version = "0.3", optional = true }
 lash-vm-client = { workspace = true }
+lash-vm-broker = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lash-core-store = { workspace = true }
@@ -83,6 +84,11 @@ libc = { workspace = true }
 
 [dev-dependencies]
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing", "dialect-typescript", "dialect-python"] }
+async-trait = { workspace = true }
+lash-durable = { workspace = true }
+lash-sansio = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
 rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 

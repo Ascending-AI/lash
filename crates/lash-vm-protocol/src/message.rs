@@ -9,7 +9,9 @@
 //! [`ParentMessage::ExportGraph`] do each part alone). While
 //! a slice runs the worker asks the parent what the machine reads from its
 //! host ([`WorkerMessage::HostRead`]) and hands over what it prints
-//! ([`WorkerMessage::Printed`]). Every message travels under a
+//! ([`WorkerMessage::Printed`]). A run on the persistent heap reads and
+//! seals its pages the same way, mid-slice ([`WorkerMessage::Pages`]).
+//! Every message travels under a
 //! [`MessageHeader`], and a receiver admits it through a [`MessageFence`].
 //!
 //! Documents, requests, outcomes and ends cross as [`EncodedPayload`] bytes
@@ -21,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph_state::SealedGraphState;
+use crate::page::{PageCapability, PageExchangeId, PageReply, PageRequest};
 use crate::state::VmOwner;
 
 /// The lease one checkout of a worker runs under. The parent mints it and
@@ -246,6 +249,24 @@ pub enum StartFrom {
     /// A parked run as checkpoint graph state, with the admission of every
     /// wait it holds.
     ParkedGraph(ParkedGraph),
+    /// A committed checkpoint root on the persistent heap: the worker reads
+    /// its control header, then only the pages its next steps touch.
+    Checkpoint(CheckpointStart),
+}
+
+/// A run resumed from a committed checkpoint root (FIG-6190): the root's
+/// capability under the activation's root lease, and the admission of every
+/// wait it holds. Nothing else crosses: the heap faults its pages in
+/// through [`WorkerMessage::Pages`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointStart {
+    /// The `CheckpointRoot` page, readable under the activation's root
+    /// lease.
+    pub root: PageCapability,
+    /// Each an admitted wait in the kernel's binary encoding
+    /// (`lash_kernel_state::AdmittedWait`); the protocol does not read it.
+    pub admissions: Vec<EncodedPayload>,
 }
 
 /// A parked run as the parent hands it back: the graph state a worker
@@ -362,6 +383,11 @@ pub enum ParentMessage {
         id: HostReadId,
         answer: EncodedPayload,
     },
+    /// The answer to the worker's pending [`WorkerMessage::Pages`].
+    Pages {
+        id: PageExchangeId,
+        reply: PageReply,
+    },
     /// Write the run's state at a park as checkpoint graph state, bound to
     /// the execution `binding` names (an OwnerBinding body in the graph's
     /// token encoding).
@@ -406,6 +432,13 @@ pub enum WorkerMessage {
         kind: HostReadKind,
         request: EncodedPayload,
     },
+    /// The machine's heap reads or seals pages; it runs on once the parent
+    /// answers. The machine's statement and native stack wait intact: a
+    /// page fault never parks, retries or reruns anything.
+    Pages {
+        id: PageExchangeId,
+        request: PageRequest,
+    },
     /// What the run printed, in order, with no authority.
     Printed {
         payload: EncodedPayload,
@@ -419,6 +452,10 @@ pub enum WorkerMessage {
         park: EncodedPayload,
         meters: RunMeters,
         state: Option<SealedGraphState>,
+        /// On the persistent heap, the sealed candidate root: a stage
+        /// capability for its `CheckpointRoot` page in the activation's
+        /// spool, which the parent publishes.
+        candidate: Option<PageCapability>,
     },
     /// The slice is spent and a task is still ready.
     Slice {
@@ -455,7 +492,8 @@ impl WorkerMessage {
             Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,
             Self::Ready { .. } => WorkerFrameKind::Ready,
             Self::Started => WorkerFrameKind::Started,
-            Self::HostRead { .. } => WorkerFrameKind::HostRead,
+            // A page exchange is a host read of the heap's storage.
+            Self::HostRead { .. } | Self::Pages { .. } => WorkerFrameKind::HostRead,
             Self::Printed { .. } => WorkerFrameKind::Printed,
             Self::Parked { .. } => WorkerFrameKind::Parked,
             Self::Slice { .. } => WorkerFrameKind::Slice,

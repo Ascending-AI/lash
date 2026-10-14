@@ -429,6 +429,9 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
         | InfrastructureOutcome::ProtocolViolation { .. } => {
             Some(CapacityCause::RetryableInfrastructure)
         }
+        InfrastructureOutcome::PageRefused { .. } => outcome
+            .is_retryable()
+            .then_some(CapacityCause::RetryableInfrastructure),
         InfrastructureOutcome::RunRefused { .. }
         | InfrastructureOutcome::WorkerDeployment { .. } => None,
     }

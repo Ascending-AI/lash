@@ -18,11 +18,13 @@ use lash_kernel_doc::{
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Start, Step, WaitId};
 use lash_sansio::VersionRange;
 use lash_vm_broker::ParentFault;
+use lash_vm_broker::kernel::pages::PageExchange;
 use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph, WholeState};
 use lash_vm_broker::kernel::{DrivenMachine, KernelFailure, Machines, ParkedState};
+use lash_vm_protocol::page::PageReply;
 use lash_vm_protocol::{
-    EncodedPayload, FrameEpoch, GraphStateExpectation, HostReadKind, OwnerEpoch, PayloadKind,
-    RunBounds, StartFrom, VmOwner,
+    CheckpointStart, EncodedPayload, FrameEpoch, GraphStateExpectation, HostReadKind, OwnerEpoch,
+    PayloadKind, RunBounds, StartFrom, VmOwner,
 };
 
 use crate::service::{CallHeld, Service};
@@ -264,6 +266,7 @@ impl RemoteMachines {
             host: Arc::clone(&self.host),
             owner: self.owner.clone(),
             document: self.document.to_string(),
+            pages: None,
         })
     }
 }
@@ -325,6 +328,23 @@ impl RemoteMachines {
         self.checkout(StartFrom::ParkedGraph(parked), binding).await
     }
 
+    /// Resumes a run from a committed checkpoint root on the persistent
+    /// heap: the worker reads the root's control header and then only the
+    /// pages its next steps touch, each through the page service the
+    /// returned machine is given ([`RemoteMachine::serve_pages`]).
+    ///
+    /// # Errors
+    ///
+    /// The worker's refusal of the run.
+    pub async fn resume_checkpoint(
+        &self,
+        checkpoint: CheckpointStart,
+        binding: &OwnerBinding,
+    ) -> Result<RemoteMachine, KernelFailure> {
+        self.checkout(StartFrom::Checkpoint(checkpoint), binding)
+            .await
+    }
+
     /// Whose runs these machines are.
     #[must_use]
     pub fn owner(&self) -> &VmOwner {
@@ -340,9 +360,18 @@ pub struct RemoteMachine {
     host: Arc<dyn RunHost>,
     owner: VmOwner,
     document: String,
+    /// The activation's page service, which answers the heap's page
+    /// exchanges in this process: never another worker (FIG-6190).
+    pages: Option<Box<dyn PageExchange>>,
 }
 
 impl RemoteMachine {
+    /// Answers the run's page exchanges with `pages`, the activation's page
+    /// service.
+    pub fn serve_pages(&mut self, pages: Box<dyn PageExchange>) {
+        self.pages = Some(pages);
+    }
+
     /// The run's end, as the worker sealed it: refused unless it is this
     /// owner's TerminalWhole under the run's document.
     fn end(&self, end: EndWire) -> Result<End, KernelFailure> {
@@ -454,6 +483,34 @@ impl DrivenMachine for RemoteMachine {
                     let answer = answer(host.as_ref(), kind, &request).await?;
                     step = self
                         .with(move |checkout| checkout.host_answer(id, answer))
+                        .await?;
+                }
+                RunStep::Pages { id, request } => {
+                    let reply = match self.pages.as_mut() {
+                        Some(pages) => pages.serve(request).await,
+                        None => {
+                            // A run with no page service never pages.
+                            self.checkout = None;
+                            return Err(worker(PoolError::breach(
+                                lash_vm_protocol::ProtocolBreach::Unexpected {
+                                    exchange: lash_vm_protocol::Exchange::Run,
+                                    found: lash_vm_protocol::WorkerFrameKind::HostRead,
+                                },
+                            )));
+                        }
+                    };
+                    if let PageReply::Refused(refusal) = reply {
+                        // The activation ends here, as infrastructure; the
+                        // worker that waits on the pages is discarded.
+                        self.checkout = None;
+                        return Err(KernelFailure::Worker {
+                            outcome: lash_vm_protocol::InfrastructureOutcome::PageRefused {
+                                refusal,
+                            },
+                        });
+                    }
+                    step = self
+                        .with(move |checkout| checkout.page_reply(id, reply))
                         .await?;
                 }
                 RunStep::Parked { park, .. } => {

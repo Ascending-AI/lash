@@ -19,6 +19,7 @@
 
 pub mod graph;
 pub mod ledger;
+pub mod pages;
 pub mod run;
 pub mod state;
 pub mod store;

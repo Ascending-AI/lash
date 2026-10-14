@@ -28,13 +28,12 @@ pub mod codec;
 pub mod graph_state;
 pub mod message;
 pub mod outcome;
-/// The page exchange of the persistent heap (FIG-6195): declared ahead of
-/// the cutover, sent by nothing yet.
+/// The page exchange of the persistent heap (FIG-6195, FIG-6190).
 pub mod page;
 pub mod state;
 mod version;
 
-pub use bounds::ProtocolBounds;
+pub use bounds::{PAGE_BATCH_BYTES, PAGE_BATCH_PAGES, ProtocolBounds};
 pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
     ObservationChunker,
@@ -44,10 +43,10 @@ pub use graph_state::{
     SealedGraphState,
 };
 pub use message::{
-    BorrowedParentFrame, BorrowedParentMessage, Delivery, EncodedPayload, ExecutionLease,
-    FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence, MessageHeader, OwnerEpoch,
-    ParentFrame, ParentMessage, ParkedGraph, RunBounds, RunMeters, Start, StartFrom,
-    TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
+    BorrowedParentFrame, BorrowedParentMessage, CheckpointStart, Delivery, EncodedPayload,
+    ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence,
+    MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, ParkedGraph, RunBounds, RunMeters,
+    Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{
     BootstrapFault, Detail, DetailLimit, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,

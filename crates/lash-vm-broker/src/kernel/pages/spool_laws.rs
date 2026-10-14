@@ -1,0 +1,547 @@
+//! S5's laws: the staging spool and the candidate manifest (FIG-6190), on
+//! a disk spool behind the parent's page service and a fake leased store.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the crash laws list the staging directory a test owns"
+)]
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use lash_core_store::checkpoint_graph::node::frame_direct;
+use lash_core_store::checkpoint_graph::stage::{
+    ManifestEntry, StageFault, StageLeaseId, StageSpool,
+};
+use lash_core_store::checkpoint_graph::{
+    CommitId, EncodedNode, GraphRefusal, MAX_NODE_BYTES, NodeId, NodeKind, TokenWriter,
+};
+use lash_durable::domain::ExecKey;
+use lash_durable::domain::graph::RootOwner;
+use lash_durable::domain::pages::{RootLease, RootLeaseId, StoredPage};
+use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
+use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
+use lash_kernel_state::paged::{PageBody, PageKind, PageSource};
+use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest};
+use lash_vm_protocol::{InfrastructureOutcome, ProtocolBounds};
+
+use super::{
+    ActivationPages, CapabilityKey, CommittedPages, LeasedReads, LocalPages, PageExchange,
+    PageLimits, Resolution, SpoolRoot,
+};
+
+/// A sequence leaf naming `children`, told apart by `label`.
+fn page(label: &str, children: &[NodeId]) -> EncodedNode {
+    let mut tokens = TokenWriter::new();
+    tokens.seq(children.len() as u64 + 1);
+    tokens.text(label);
+    for child in children {
+        tokens.child(child.child_ref());
+    }
+    frame_direct(
+        NodeKind(PageKind::SEQUENCE_LEAF.0),
+        tokens.as_bytes(),
+        MAX_NODE_BYTES,
+    )
+    .expect("a leaf frames")
+}
+
+/// The committed pages behind a root lease.
+#[derive(Default)]
+struct Committed {
+    pages: std::sync::Mutex<BTreeMap<NodeId, Arc<[u8]>>>,
+    lost: AtomicBool,
+}
+
+impl Committed {
+    fn commit(&self, node: &EncodedNode) {
+        self.pages
+            .lock()
+            .expect("pages")
+            .insert(node.id, node.bytes.clone());
+    }
+}
+
+#[async_trait::async_trait]
+impl LeasedReads for Committed {
+    async fn read_pages(
+        &self,
+        _lease: &RootLease,
+        pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        if self.lost.load(Ordering::SeqCst) {
+            return Err(DurableError::Graph(GraphRefusal::RootRetired));
+        }
+        let held = self.pages.lock().expect("pages");
+        Ok(pages
+            .iter()
+            .filter_map(|id| {
+                held.get(id).map(|bytes| StoredPage {
+                    id: *id,
+                    bytes: bytes.clone(),
+                })
+            })
+            .collect())
+    }
+
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+        Ok(lease.clone())
+    }
+}
+
+impl CommittedPages for Arc<Committed> {
+    fn page(&self, page: &NodeId) -> Option<Arc<[u8]>> {
+        self.pages.lock().expect("pages").get(page).cloned()
+    }
+}
+
+fn lease(root: NodeId) -> RootLease {
+    RootLease {
+        id: RootLeaseId(7),
+        owner: RootOwner::Exec(ExecKey::Process(lash_sansio::ProcessId::fixture("pages"))),
+        root,
+        actor: ActorKey::process("pages").expect("actor"),
+        epoch: Epoch(1),
+        expires_at: DurableInstant(i64::MAX),
+    }
+}
+
+/// An activation leased on `root`, staging under `dir` within `quota`.
+fn activation(
+    store: &Arc<Committed>,
+    root: &SpoolRoot,
+    base: NodeId,
+) -> ActivationPages<Committed> {
+    ActivationPages::new(
+        Arc::clone(store),
+        lease(base),
+        Duration::from_secs(20),
+        CapabilityKey::fresh(),
+        3,
+        Box::new(root.spool(StageLeaseId(11)).expect("spool")),
+        Instant::now() + Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    )
+}
+
+async fn seal(
+    pages: &mut ActivationPages<Committed>,
+    node: &EncodedNode,
+    children: Vec<PageCapability>,
+) -> PageReply {
+    pages
+        .serve(PageRequest::Seal {
+            pages: vec![PageEnvelope {
+                id: node.id.0,
+                envelope: node.bytes.to_vec(),
+            }],
+            children,
+        })
+        .await
+}
+
+fn sealed(reply: PageReply) -> PageCapability {
+    match reply {
+        PageReply::Sealed { pages } => pages[0],
+        other => panic!("the page seals: {other:?}"),
+    }
+}
+
+/// The manifest's entries, `limit` at a time from `after`.
+fn drain(
+    manifest: &mut dyn lash_core_store::checkpoint_graph::stage::CandidateManifest,
+    mut after: Option<NodeId>,
+    limit: usize,
+) -> Vec<ManifestEntry> {
+    let mut all = Vec::new();
+    loop {
+        let batch = manifest.entries(after, limit).expect("entries");
+        if batch.is_empty() {
+            return all;
+        }
+        after = Some(match batch.last().expect("an entry") {
+            ManifestEntry::External(id) => *id,
+            ManifestEntry::Fresh(node) => node.id,
+        });
+        all.extend(batch);
+    }
+}
+
+fn id_of(entry: &ManifestEntry) -> NodeId {
+    match entry {
+        ManifestEntry::External(id) => *id,
+        ManifestEntry::Fresh(node) => node.id,
+    }
+}
+
+/// A candidate's manifest is exactly the staged DAG its root reaches,
+/// stopping at committed references: one ascending digest stream of
+/// fresh and external entries, restartable from any cursor. A staged page
+/// the root does not reach is dropped.
+#[test]
+fn a_manifest_is_the_reachable_staged_dag_in_digest_order() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+    let (c1, c2) = (page("c1", &[]), page("c2", &[]));
+    let committed: BTreeSet<NodeId> = [c1.id, c2.id].into();
+    let protected = |id: &NodeId| committed.contains(id);
+    let a = page("a", &[]);
+    let b = page("b", &[a.id, c1.id]);
+    let top = page("top", &[b.id, a.id, c2.id]);
+    let orphan = page("orphan", &[c1.id]);
+    for node in [&a, &b, &orphan, &top] {
+        spool.seal(node.clone(), &protected).expect("staged");
+    }
+    // Sealing the same page twice is one page.
+    spool.seal(a.clone(), &protected).expect("staged again");
+    assert_eq!(spool.usage().pages, 4);
+
+    let commit = CommitId([9; 32]);
+    let mut manifest = spool
+        .candidate(top.id, Some(c1.id), commit)
+        .expect("candidate");
+    let summary = manifest.summary();
+    assert_eq!((summary.fresh_nodes, summary.external), (3, 2));
+    assert_eq!(summary.fresh_edges, 2 + 3);
+    assert_eq!(
+        summary.fresh_bytes,
+        [&a, &b, &top].iter().map(|node| node.len()).sum::<u64>()
+    );
+    let entries = drain(manifest.as_mut(), None, 2);
+    let ids: Vec<NodeId> = entries.iter().map(id_of).collect();
+    assert!(
+        ids.windows(2).all(|pair| pair[0] < pair[1]),
+        "one ascending stream"
+    );
+    let fresh: BTreeSet<NodeId> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            ManifestEntry::Fresh(node) => {
+                assert_eq!(spool.read(&node.id).expect("staged").as_ref(), &*node.bytes);
+                Some(node.id)
+            }
+            ManifestEntry::External(_) => None,
+        })
+        .collect();
+    assert_eq!(fresh, [a.id, b.id, top.id].into());
+    let external: BTreeSet<NodeId> = ids
+        .iter()
+        .copied()
+        .filter(|id| !fresh.contains(id))
+        .collect();
+    assert_eq!(external, committed);
+    // Restartable: from any cursor the stream is its own tail.
+    for cut in 0..ids.len() {
+        let tail: Vec<NodeId> = drain(manifest.as_mut(), Some(ids[cut]), 1)
+            .iter()
+            .map(id_of)
+            .collect();
+        assert_eq!(tail, ids[cut + 1..]);
+    }
+    // The orphan is dropped, and the spool counts what it keeps.
+    assert_eq!(spool.read(&orphan.id), Err(StageFault::Missing(orphan.id)));
+    assert_eq!(spool.usage().pages, 3);
+    assert_eq!(spool.usage().bytes, summary.fresh_bytes);
+}
+
+/// A staged page may name only committed pages a capability protects or
+/// pages staged before it: anything else is refused, so the staged graph
+/// is a DAG by construction. A forged capability protects nothing, and
+/// bytes that do not hash to their identity never stage.
+#[tokio::test]
+async fn staging_refuses_an_unprotected_child() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+    let stranger = page("stranger", &[]);
+    let parent = page("parent", &[stranger.id]);
+    assert_eq!(
+        spool.seal(parent.clone(), &|_| false),
+        Err(StageFault::Unauthorized {
+            page: parent.id,
+            child: stranger.id
+        })
+    );
+    let mut forged = parent.bytes.to_vec();
+    *forged.last_mut().expect("a byte") ^= 1;
+    assert_eq!(
+        spool.seal(
+            EncodedNode {
+                id: parent.id,
+                bytes: forged.into()
+            },
+            &|_| true
+        ),
+        Err(StageFault::HashMismatch(parent.id))
+    );
+    assert_eq!(spool.usage().pages, 0);
+
+    // Through the page service: a committed child the activation holds a
+    // capability for stages; a guessed digest under a forged MAC does not.
+    let store = Arc::new(Committed::default());
+    let base = page("base", &[stranger.id]);
+    store.commit(&stranger);
+    store.commit(&base);
+    let mut pages = activation(&store, &root, base.id);
+    let PageReply::Read { pages: read } = pages
+        .serve(PageRequest::Read {
+            pages: vec![pages.root()],
+        })
+        .await
+    else {
+        panic!("the root reads")
+    };
+    let child = read[0].children[0];
+    assert_eq!(child.page, stranger.id.0);
+    sealed(seal(&mut pages, &parent, vec![child]).await);
+    let other = page("other parent", &[stranger.id]);
+    let mut guessed = child;
+    guessed.mac = [0; 32];
+    assert_eq!(
+        seal(&mut pages, &other, vec![guessed]).await,
+        PageReply::Refused(PageRefusal::Unauthorized)
+    );
+    // The refusal ends the activation.
+    assert_eq!(
+        pages
+            .serve(PageRequest::Read {
+                pages: vec![pages.root()],
+            })
+            .await,
+        PageReply::Refused(PageRefusal::Unauthorized)
+    );
+}
+
+/// D-SPOOL, and the lost-receipt crash cut: a publication whose outcome
+/// is unknown keeps its spool. Read against the execution row, a row that
+/// still holds the base retries the exact candidate (the same digest
+/// stream), the candidate's own commit settles and deletes it, and another
+/// root supersedes it. The activation's staged pages stay readable until
+/// then, and a committed candidate's pages read from the store after.
+#[tokio::test]
+async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let store = Arc::new(Committed::default());
+    let kept = page("kept", &[]);
+    let base = page("base", &[kept.id]);
+    store.commit(&kept);
+    store.commit(&base);
+    let mut pages = activation(&store, &root, base.id);
+    let PageReply::Read { pages: read } = pages
+        .serve(PageRequest::Read {
+            pages: vec![pages.root()],
+        })
+        .await
+    else {
+        panic!("the root reads")
+    };
+    let kept_cap = read[0].children[0];
+    let fresh = page("fresh", &[kept.id]);
+    let fresh_cap = sealed(seal(&mut pages, &fresh, vec![kept_cap]).await);
+    let top = page("top", &[fresh.id, kept.id]);
+    let top_cap = sealed(seal(&mut pages, &top, vec![fresh_cap, kept_cap]).await);
+
+    let commit = CommitId([4; 32]);
+    let mut manifest = pages
+        .candidate(&top_cap, Some(base.id), commit)
+        .expect("candidate");
+    let published: Vec<NodeId> = drain(manifest.as_mut(), None, 8)
+        .iter()
+        .map(id_of)
+        .collect();
+    // The receipt is lost. Worker disconnection settles nothing: the spool
+    // still holds the candidate, and its pages still read.
+    let held = pages.usage();
+    assert_eq!(held.pages, 2);
+    assert!(matches!(
+        pages
+            .serve(PageRequest::Read {
+                pages: vec![top_cap]
+            })
+            .await,
+        PageReply::Read { .. }
+    ));
+    // The row still holds the base: retry the exact candidate.
+    let Resolution::Retry(mut retry) = pages
+        .resolve(Some((base.id, CommitId([1; 32]))))
+        .expect("resolves")
+    else {
+        panic!("the base stands, so the candidate is retried")
+    };
+    assert_eq!(retry.summary(), manifest.summary());
+    let again: Vec<NodeId> = drain(retry.as_mut(), None, 1).iter().map(id_of).collect();
+    assert_eq!(again, published);
+    assert_eq!(pages.usage(), held);
+    // The retry's receipt names the candidate's commit: settled, deleted.
+    assert!(matches!(
+        pages.resolve(Some((top.id, commit))).expect("resolves"),
+        Resolution::Committed
+    ));
+    assert_eq!((pages.usage().pages, pages.usage().bytes), (0, 0));
+    assert!(
+        retry.entries(None, 8).is_err(),
+        "a settled manifest is gone"
+    );
+    // The committed pages are the store's now, and read under the lease.
+    store.commit(&fresh);
+    store.commit(&top);
+    let PageReply::Read { pages: read } = pages
+        .serve(PageRequest::Read {
+            pages: vec![top_cap],
+        })
+        .await
+    else {
+        panic!("a committed candidate's page reads from the store")
+    };
+    assert_eq!(read[0].page.id, top.id.0);
+
+    // Another activation's candidate loses to a root it did not build on.
+    let mut loser = ActivationPages::new(
+        Arc::clone(&store),
+        lease(base.id),
+        Duration::from_secs(20),
+        CapabilityKey::fresh(),
+        5,
+        Box::new(root.spool(StageLeaseId(12)).expect("spool")),
+        Instant::now() + Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    );
+    let lone = page("lone", &[]);
+    let lone_cap = sealed(seal(&mut loser, &lone, Vec::new()).await);
+    loser
+        .candidate(&lone_cap, Some(base.id), CommitId([5; 32]))
+        .expect("candidate");
+    assert!(matches!(
+        loser.resolve(Some((top.id, commit))).expect("resolves"),
+        Resolution::Superseded
+    ));
+    assert_eq!(
+        loser.usage().pages,
+        1,
+        "kept until the activation discards it"
+    );
+    loser.discard();
+}
+
+/// Staging quota exhaustion is a host outcome: the page service refuses
+/// with `StagingExhausted`, the run's outcome is the retryable
+/// infrastructure `PageRefused`, and the heap sees `HeapFault::Exhausted`
+/// on staging bytes, never the guest's memory bound. Spilling published
+/// nothing: the committed root's pages are untouched.
+#[tokio::test]
+async fn a_quota_failure_is_a_host_outcome() {
+    let dir = tempfile::tempdir().expect("dir");
+    let small = page("small", &[]);
+    let large = page(&"x".repeat(2_000), &[]);
+    let quota = small.len() + 10;
+    let root = SpoolRoot::open(dir.path(), quota).expect("root");
+    let store = Arc::new(Committed::default());
+    let base = page("base", &[]);
+    store.commit(&base);
+    let mut pages = activation(&store, &root, base.id);
+    sealed(seal(&mut pages, &small, Vec::new()).await);
+    let refusal = PageRefusal::StagingExhausted { bytes: quota };
+    assert_eq!(
+        seal(&mut pages, &large, Vec::new()).await,
+        PageReply::Refused(refusal.clone())
+    );
+    let outcome = InfrastructureOutcome::PageRefused { refusal };
+    assert!(
+        outcome.is_retryable(),
+        "a host verdict, redriven from the committed root"
+    );
+    assert_eq!(store.pages.lock().expect("pages").len(), 1);
+
+    // The in-process port states the same as the heap's host fault.
+    let mut local = LocalPages::new(
+        Arc::clone(&store),
+        Box::new(root.spool(StageLeaseId(2)).expect("spool")),
+    );
+    let body = |text: &str| {
+        let mut tokens = TokenWriter::new();
+        tokens.text(text);
+        PageBody {
+            kind: PageKind::PAYLOAD_LEAF,
+            tokens: tokens.into_bytes(),
+            children: Vec::new(),
+        }
+    };
+    let sealed_ref = local.seal(body("fits")).expect("fits the quota");
+    assert_eq!(
+        local.read(&[sealed_ref]).expect("reads back")[0].kind,
+        PageKind::PAYLOAD_LEAF
+    );
+    assert_eq!(
+        local.seal(body(&"y".repeat(4_000))),
+        Err(HeapFault::Exhausted {
+            resource: HostResource::StagingBytes
+        })
+    );
+    // A committed page reads; an unknown one is missing, never absent.
+    let unknown = PageRef {
+        id: PageId([3; 32]),
+        grant: PageGrant::NONE,
+    };
+    assert_eq!(
+        local.read(&[unknown]).map(|answers| answers.len()),
+        Err(HeapFault::Missing { page: unknown.id })
+    );
+}
+
+/// The parent crash cuts: after a spill, and after a candidate is sealed.
+/// The spool dies with its parent; the next parent reaps it (and never a
+/// live parent's), and a fresh activation leases the committed root,
+/// which the crash left exactly as it was.
+#[tokio::test]
+async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
+    let dir = tempfile::tempdir().expect("dir");
+    let store = Arc::new(Committed::default());
+    let kept = page("kept", &[]);
+    let base = page("base", &[kept.id]);
+    store.commit(&kept);
+    store.commit(&base);
+    let before = store.pages.lock().expect("pages").clone();
+    for cut in ["after a spill", "after a candidate"] {
+        let crashed = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        let mut pages = activation(&store, &crashed, base.id);
+        let top = page(cut, &[]);
+        let top_cap = sealed(seal(&mut pages, &top, Vec::new()).await);
+        if cut == "after a candidate" {
+            pages
+                .candidate(&top_cap, Some(base.id), CommitId([6; 32]))
+                .expect("candidate");
+        }
+        let live = SpoolRoot::open(dir.path(), 1 << 20).expect("a live sibling");
+        assert_eq!(
+            std::fs::read_dir(dir.path()).expect("dir").count(),
+            2,
+            "{cut}: a live parent's spool is never reaped"
+        );
+        // The parent dies: nothing runs its spool's drop.
+        std::mem::forget(pages);
+        drop(crashed);
+        drop(live);
+        let next = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        assert_eq!(
+            std::fs::read_dir(dir.path()).expect("dir").count(),
+            1,
+            "{cut}: only the new parent's directory is left"
+        );
+        assert_eq!(*store.pages.lock().expect("pages"), before, "{cut}");
+        let mut fresh = activation(&store, &next, base.id);
+        let PageReply::Read { pages: read } = fresh
+            .serve(PageRequest::Read {
+                pages: vec![fresh.root()],
+            })
+            .await
+        else {
+            panic!("{cut}: the committed root reads")
+        };
+        assert_eq!(read[0].page.id, base.id.0);
+        drop(fresh);
+        drop(next);
+    }
+}

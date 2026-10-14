@@ -65935,6 +65935,7 @@
         "serde",
         "serde_json",
         "sqlx",
+        "tempfile",
         "thiserror",
         "tokio",
         "tokio-util"
@@ -66295,6 +66296,7 @@
         "testing"
       ],
       "dependencies": [
+        "async-trait",
         "dhat",
         "lash-dialect-python",
         "lash-dialect-typescript",
@@ -66303,6 +66305,9 @@
         "lash-ext-url-whatwg",
         "lash-internal-core-execution",
         "lash-internal-core-store",
+        "lash-internal-durable",
+        "lash-internal-sansio",
+        "lash-internal-vm-broker",
         "lash-internal-vm-client",
         "lash-internal-vm-library",
         "lash-internal-vm-protocol",
@@ -66320,7 +66325,9 @@
         "serde",
         "serde_bytes",
         "serde_json",
-        "thiserror"
+        "tempfile",
+        "thiserror",
+        "tokio"
       ],
       "doc": "//crates/lash-vm-worker:lash-vm-worker__doc",
       "manifest": "crates/lash-vm-worker/Cargo.toml",

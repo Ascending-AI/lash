@@ -75,6 +75,7 @@ pub(crate) struct Fences {
     pub incoming: Option<MessageFence>,
     pub outgoing: MessageFence,
     pub next_read: u64,
+    pub next_page: u64,
 }
 
 impl Fences {
@@ -149,6 +150,7 @@ impl<'embedding> Server<'embedding> {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
                 next_read: 0,
+                next_page: 0,
             })),
             owner: None,
             prepared: false,
@@ -338,6 +340,10 @@ impl<'embedding> Server<'embedding> {
                     // A read is answered inside the slice that made it.
                     return Err(PoolError::breach(SequenceFault::NoPendingRead));
                 }
+                ParentMessage::Pages { .. } => {
+                    // So is a page exchange.
+                    return Err(PoolError::breach(SequenceFault::NoPendingPages));
+                }
                 ParentMessage::Cancel => {
                     // Physical cancellation never decides the durable winner.
                     self.hosted = None;
@@ -356,6 +362,10 @@ impl<'embedding> Server<'embedding> {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .next_read = 0;
+                    self.fences
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .next_page = 0;
                     self.send(WorkerMessage::ResetDone {
                         cpu_nanos: cpu_nanos()?,
                     })?;
@@ -548,6 +558,30 @@ impl<'embedding> Server<'embedding> {
                         })?;
                 (machine, pinned)
             }
+            StartFrom::Checkpoint(checkpoint) => {
+                // A fresh worker reads the root's bounded control header
+                // through the page exchange, then only what it touches.
+                let mut source = crate::host::WirePageSource::new(
+                    self.wire()?,
+                    self.bootstrap.tuning.pages.clean_bytes,
+                );
+                let root = lash_kernel_doc::heap::PageRef {
+                    id: lash_kernel_doc::heap::PageId(checkpoint.root.page),
+                    grant: crate::host::grant_of(&checkpoint.root),
+                };
+                let header = lash_kernel_state::paged::PageSource::read(&mut source, &[root])
+                    .map_err(|fault| machine_breach(fault.to_string()))?;
+                if header.first().map(|answer| answer.kind)
+                    != Some(lash_kernel_state::paged::PageKind::CHECKPOINT_ROOT)
+                {
+                    return Err(undecodable(RunInput::ParkedRun, &"not a checkpoint root"));
+                }
+                // The paged machine opens the root over `source` (FIG-6188,
+                // wired by FIG-6193); this worker's machine cannot.
+                return Err(PoolError::refused(RunRefusal::Resume {
+                    detail: Detail::new("this worker's machine does not open checkpoint roots"),
+                }));
+            }
         };
         Ok(Hosted {
             machine,
@@ -676,6 +710,7 @@ impl<'embedding> Server<'embedding> {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
                 state,
+                candidate: None,
             },
             Step::Slice => WorkerMessage::Slice { meters },
             Step::Ended(end) => {
@@ -738,7 +773,8 @@ impl<'embedding> Server<'embedding> {
                     refusal @ (CodecRefusal::Truncated { .. }
                     | CodecRefusal::BadMagic
                     | CodecRefusal::Malformed { .. }
-                    | CodecRefusal::TrailingBytes { .. }),
+                    | CodecRefusal::TrailingBytes { .. }
+                    | CodecRefusal::PageBatch { .. }),
                 ) => return Err(refusal.into()),
             }
             if chunker.bytes() > budget {
@@ -804,6 +840,7 @@ impl<'embedding> Server<'embedding> {
                     park,
                     meters,
                     state: Some(state),
+                    candidate: None,
                 },
                 bytes,
             ) if !bytes
@@ -815,6 +852,7 @@ impl<'embedding> Server<'embedding> {
                     park,
                     meters,
                     state: None,
+                    candidate: None,
                 };
                 match encode_worker(&self.codec, header, parked) {
                     (

@@ -11,6 +11,7 @@ use crate::measurements::{
     ExecutionClass, ExecutionReceipt, Measurements, PoolMeasurements, SharedMeasurements,
 };
 use crate::{PoolConfig, PoolError};
+use lash_vm_protocol::page::{PageCapability, PageExchangeId, PageReply, PageRequest};
 use lash_vm_protocol::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -333,10 +334,18 @@ pub enum RunStep {
         kind: HostReadKind,
         request: EncodedPayload,
     },
-    /// No task is ready.
+    /// The machine's heap reads or seals pages; [`Checkout::page_reply`]
+    /// runs it on with the page service's answer.
+    Pages {
+        id: PageExchangeId,
+        request: PageRequest,
+    },
+    /// No task is ready. On the persistent heap, `candidate` is the stage
+    /// capability of the root the park sealed.
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
+        candidate: Option<PageCapability>,
     },
     /// The slice is spent and a task is still ready.
     Slice { meters: RunMeters },
@@ -375,8 +384,8 @@ pub struct Checkout {
     /// The state the run's last park carried, until `export_graph` takes
     /// it.
     staged: Option<SealedGraphState>,
-    /// The host read the worker waits on.
-    pending: Option<HostReadId>,
+    /// The host read or page exchange the worker waits on.
+    pending: Option<Pending>,
     /// Whether the worker stands at a safe point, where it can be reset.
     resettable: bool,
     owner: Option<VmOwner>,
@@ -391,6 +400,13 @@ pub struct Checkout {
     execution_class: Option<ExecutionClass>,
     execution_recorded: bool,
 }
+/// What a worker waits on mid-slice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pending {
+    Read(HostReadId),
+    Pages(PageExchangeId),
+}
+
 impl Checkout {
     fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
         #[cfg(feature = "testing")]
@@ -592,7 +608,7 @@ impl Checkout {
         id: HostReadId,
         answer: EncodedPayload,
     ) -> Result<RunStep, PoolError> {
-        if self.pending != Some(id) {
+        if self.pending != Some(Pending::Read(id)) {
             return Err(PoolError::breach(SequenceFault::WrongReadId));
         }
         if let Err(error) = self.effect_bound(answer.0.len()) {
@@ -607,18 +623,43 @@ impl Checkout {
         self.step(message)
     }
 
+    /// Answers the machine's pending page exchange with the page service's
+    /// reply; the slice runs on, its statement and native stack intact. No
+    /// worker deadline ran while the parent served the pages.
+    pub fn page_reply(
+        &mut self,
+        id: PageExchangeId,
+        reply: PageReply,
+    ) -> Result<RunStep, PoolError> {
+        if self.pending != Some(Pending::Pages(id)) {
+            return Err(PoolError::breach(SequenceFault::WrongPageExchange));
+        }
+        self.pending = None;
+        let message = self.exchange(
+            ParentMessage::Pages { id, reply },
+            self.pool.config.protocol.no_response_watchdog,
+        )?;
+        self.step(message)
+    }
+
     fn step(&mut self, message: WorkerMessage) -> Result<RunStep, PoolError> {
         Ok(match message {
             WorkerMessage::HostRead { id, kind, request } => {
                 RunStep::HostRead { id, kind, request }
             }
+            WorkerMessage::Pages { id, request } => RunStep::Pages { id, request },
             WorkerMessage::Parked {
                 park,
                 meters,
                 state,
+                candidate,
             } => {
                 self.staged = state;
-                RunStep::Parked { park, meters }
+                RunStep::Parked {
+                    park,
+                    meters,
+                    candidate,
+                }
             }
             WorkerMessage::Slice { meters } => RunStep::Slice { meters },
             WorkerMessage::Ended { end, meters } => RunStep::Ended { end, meters },
@@ -998,8 +1039,14 @@ impl Checkout {
                             bound: self.pool.config.protocol.max_effect_value_bytes,
                         }));
                     }
-                    self.pending = Some(id);
+                    self.pending = Some(Pending::Read(id));
                     return Ok(WorkerMessage::HostRead { id, kind, request });
+                }
+                WorkerMessage::Pages { id, request } => {
+                    // The codec held the request to its batch bound; the
+                    // page service owns the activation's deadline.
+                    self.pending = Some(Pending::Pages(id));
+                    return Ok(WorkerMessage::Pages { id, request });
                 }
                 WorkerMessage::ExportedGraph { state } => {
                     let owner = self

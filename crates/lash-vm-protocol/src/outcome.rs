@@ -127,6 +127,8 @@ pub enum Exchange {
     Run,
     /// The parent was answering the machine's host read.
     HostRead,
+    /// The parent was answering the machine's page exchange.
+    Pages,
     Deliver,
     Export,
     Prepare,
@@ -139,6 +141,7 @@ impl std::fmt::Display for Exchange {
             Self::Handshake => "as its handshake",
             Self::Run => "mid-run",
             Self::HostRead => "while its host read was answered",
+            Self::Pages => "while its page exchange was answered",
             Self::Deliver => "in answer to a delivery",
             Self::Export => "in answer to an export",
             Self::Prepare => "in answer to pure work",
@@ -174,6 +177,10 @@ pub enum SequenceFault {
     RepeatedReadId,
     #[error("a host read was answered with another message")]
     ReadOtherControl,
+    #[error("an answer answers no pending page exchange")]
+    NoPendingPages,
+    #[error("a page answer names another exchange than the pending one")]
+    WrongPageExchange,
     #[error("the exchange needs a started run")]
     NoRun,
     #[error("the run already ended")]
@@ -387,6 +394,11 @@ pub enum InfrastructureOutcome {
     RunRefused { refusal: RunRefusal },
     #[error("the run exhausted its {limit:?} limit")]
     WorkerLimitExceeded { limit: WorkerLimit },
+    /// The parent's page service refused the run's page exchange (FIG-6190):
+    /// infrastructure, never a guest outcome. The activation ends and its
+    /// execution resumes from its last committed root.
+    #[error("the run's page exchange is refused: {refusal}")]
+    PageRefused { refusal: crate::page::PageRefusal },
 }
 
 impl InfrastructureOutcome {
@@ -397,6 +409,13 @@ impl InfrastructureOutcome {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
+            // A page the store lacks or holds corrupt is so on every
+            // attempt; a lease, deadline, quota or transport refusal is the
+            // host's moment.
+            Self::PageRefused { refusal } => !matches!(
+                refusal,
+                crate::page::PageRefusal::Missing | crate::page::PageRefusal::Corrupt
+            ),
             Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
             Self::WorkerCrashed { .. }
             | Self::WorkerUnresponsive { .. }
@@ -489,9 +508,11 @@ impl WorkerRefusal {
             InfrastructureOutcome::RunRefused { refusal } => Some(crate::WorkerMessage::Refused {
                 refusal: Self::Run(refusal),
             }),
+            // The page service's refusal is the parent's own evidence.
             InfrastructureOutcome::WorkerDeployment { .. }
             | InfrastructureOutcome::WorkerCrashed { .. }
-            | InfrastructureOutcome::WorkerUnresponsive { .. } => None,
+            | InfrastructureOutcome::WorkerUnresponsive { .. }
+            | InfrastructureOutcome::PageRefused { .. } => None,
         }
     }
 }
@@ -546,7 +567,8 @@ impl From<CodecRefusal> for InfrastructureOutcome {
             | CodecRefusal::DepthExceeded { .. }
             | CodecRefusal::NodeLimitExceeded { .. }
             | CodecRefusal::Malformed { .. }
-            | CodecRefusal::TrailingBytes { .. }) => ProtocolBreach::Frame { refusal }.into(),
+            | CodecRefusal::TrailingBytes { .. }
+            | CodecRefusal::PageBatch { .. }) => ProtocolBreach::Frame { refusal }.into(),
         }
     }
 }
