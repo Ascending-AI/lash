@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::executor::RuntimeEffectControllerError;
-use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord};
+use super::llm_outcome::{AssistantResponsePlan, AssistantStreamCapsule, LlmStreamRecord};
 
 /// Effect-specific header whose address is present by construction.
 ///
@@ -357,19 +357,23 @@ pub enum RuntimeEffectCommand {
     LlmCall {
         request: Box<LlmRequestSpec>,
     },
-    /// Run host assistant-response hooks over the raw provider completion that
-    /// the paired [`RuntimeEffectCommand::LlmCall`] already journaled.
+    /// Derive a model call's response from its receipt: finish the
+    /// receipt's recorded stream, then run the host assistant-response hooks
+    /// over the raw provider completion the paired
+    /// [`RuntimeEffectCommand::LlmCall`] answered and `model.answer`
+    /// committed.
     ///
-    /// The payload is a replay-deterministic derivation of phase 1's journaled
-    /// outcome, so this command is reconstructed identically on redrive.
+    /// The payload is the receipt's, so this command is reconstructed
+    /// identically by every derivation.
     AssistantResponseHooks {
         response: Box<LlmResponse>,
-        /// The exact ordered callback keys and plugin ids phase 1 recorded.
+        /// The exact ordered callback keys and plugin ids the receipt recorded.
         plan: AssistantResponsePlan,
-        /// The stream-hook end states phase 1 recorded. The response hooks
-        /// read these, never state a stream hook left in plugin memory, so
-        /// phase 2 checks their formats before invoking the recorded keys.
-        stream_hook_states: Vec<AssistantStreamHookState>,
+        /// The stream the receipt recorded. The response hooks read the
+        /// states its replay hands them, never state a stream hook left in
+        /// plugin memory, and their formats are checked before the recorded
+        /// keys are invoked.
+        capsule: Box<AssistantStreamCapsule>,
     },
     Direct {
         request: Box<LlmRequestSpec>,
@@ -890,9 +894,8 @@ pub enum ToolAttemptLaunch {
 
 /// Plugin-attributed runtime events emitted by one assistant-response hook.
 ///
-/// Journaled with phase 2's outcome so replay serves the events at their
-/// original placement instead of re-running the hook that produced them, and
-/// never folds them into the phase-1 provider-completion entry.
+/// Returned with a derivation's outcome and published once it answers, at
+/// the derived response's placement; never part of the call's receipt.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AssistantResponseHookEvents {
     pub plugin_id: String,
@@ -953,13 +956,11 @@ pub enum RuntimeEffectOutcome {
         /// What the provider stream left that later steps read.
         stream: Box<LlmStreamRecord>,
     },
-    /// Phase 2 of the staged LLM-call boundary.
-    ///
-    /// Holds the transformed response host hooks derived from the raw
-    /// completion phase 1 journaled, and the events those hooks emitted. Only a
-    /// *complete* derivation is journaled: a failing hook fails the phase
-    /// instead, so a crash or hook failure between the two phases redrives this
-    /// entry alone and the paid completion is replayed, never re-bought.
+    /// A model call's derived response: what the host hooks derived from
+    /// the receipt's raw completion, and the events those hooks emitted. A
+    /// failing hook fails the derivation instead, and the next derivation
+    /// starts again from the receipt; the paid completion is never bought
+    /// again.
     AssistantResponseHooks {
         response: Box<LlmResponse>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

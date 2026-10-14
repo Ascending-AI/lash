@@ -208,17 +208,19 @@ pub trait TurnDrive: Send {
     /// [`TurnError`] when the effect cannot be answered.
     async fn local(&mut self, cx: &ActorContext, effect: Effect) -> Result<(), TurnError>;
 
-    /// The completion the last model call answered whose response its
-    /// assistant-response hooks still owe (FIG-6128), which `model.answer`
-    /// commits when [`derive_answer`](Self::derive_answer) aborts. `None`
-    /// once the call answered the machine.
+    /// The receipt of the model call the machine waits on that no
+    /// derivation has answered: the provider's outcome as
+    /// [`model_call`](Self::model_call) returned it, which `model.answer`
+    /// commits before anything derives from it, or the receipt a restore at
+    /// `model.answer` found. `None` once a derivation answered the machine.
     fn owed_answer(&self) -> Option<&ModelAnswer> {
         None
     }
 
-    /// Run the hooks over [`owed_answer`](Self::owed_answer), live or
-    /// restored, and answer the machine's model call `id` with the result.
-    /// An abort leaves the answer owed.
+    /// Derive the machine's model call `id` from
+    /// [`owed_answer`](Self::owed_answer), a committed receipt: finish its
+    /// recorded stream, run its recorded response hooks and answer the
+    /// machine with the result. An abort leaves the receipt owed.
     ///
     /// # Errors
     ///
@@ -229,10 +231,25 @@ pub trait TurnDrive: Send {
         )))
     }
 
+    /// Settle the machine's model call `id`, which an immediate cancel
+    /// stopped, with [`owed_answer`](Self::owed_answer) uncommitted and
+    /// underived: its record is recorded and an unsuccessful outcome
+    /// answers the machine; a completion that raced the cancel is dropped
+    /// unanswered, and no hook runs.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the outcome cannot be recorded.
+    fn settle_cancelled_answer(&mut self, _id: EffectId) -> Result<(), TurnError> {
+        Ok(())
+    }
+
     /// Run `attempt.ordinal` of the pinned model call `id`, bounded by
-    /// `attempt.limit` (its deadline is the pinned one, never refreshed), and answer
-    /// the machine with its result. Deltas it streams go to the session's
-    /// live stream; only the completed response is durable.
+    /// `attempt.limit` (its deadline is the pinned one, never refreshed), and
+    /// hold its outcome as [`owed_answer`](Self::owed_answer), the receipt the
+    /// phase runner commits before any derivation answers the machine with
+    /// it. Deltas it streams go to the session's live stream; only the
+    /// receipt is durable.
     ///
     /// # Errors
     ///
@@ -1090,8 +1107,9 @@ pub struct PhaseCheckpoint {
     /// which a resume and a cancel restore serve instead of resolving again
     /// (FIG-6021). `None` for a drive that resolves no configuration.
     pub config: Option<super::run_config::RecordedRunConfig>,
-    /// The pinned call's completion its hooks still owe
-    /// ([`TurnDrive::owed_answer`]); `None` outside `model.answer`.
+    /// The pinned call's receipt, which no derivation has answered
+    /// ([`TurnDrive::owed_answer`]): `Some` only in the checkpoint
+    /// `model.answer` commits.
     pub answered: Option<ModelAnswer>,
 }
 
@@ -1157,7 +1175,8 @@ pub struct RestoredTurn {
     pub delivered: Vec<crate::AdmittedTurnInputs>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
-    /// The pinned call's completion its hooks still owe, if any.
+    /// The pinned call's receipt, which no derivation has answered, if the
+    /// checkpoint is `model.answer`'s.
     pub answered: Option<ModelAnswer>,
     /// The turn's row.
     pub row: TurnRow,

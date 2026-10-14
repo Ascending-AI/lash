@@ -80,10 +80,10 @@ async fn transcript(core: &LashCore, id: &str) -> Result<Vec<(String, String)>> 
 /// the runtime marks a retryable response derivation) and whose next run
 /// answers: the turn answers the hooked response once, the hook ran again,
 /// and the committed transcript holds the hooked answer alone. The fault
-/// aborts the activation after `model.answer` committed the completion and
+/// aborts the activation after `model.answer` committed the call's receipt and
 /// before the hook settled, so the next one restores from the rows as a
 /// successor after a crash there would: it derives from the recorded
-/// completion and the model is paid once (FIG-6128).
+/// receipt and the model is paid once (FIG-6230).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_assistant_hook_session_fault_retries_the_step_without_recording_it() -> Result<()> {
     const ID: &str = "hook-live-fault";

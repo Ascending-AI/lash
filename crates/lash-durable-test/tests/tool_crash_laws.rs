@@ -2245,6 +2245,29 @@ async fn a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_o
     .await;
 }
 
+/// REPLAY-PRESERVES-CONTROL-AND-FEED (FIG-6230): a native call's turn cut
+/// at its model call's receipt (`model.answer`), before the receipt enters
+/// the store, losing its acknowledgement, with its owner killed around it,
+/// or reaped while it commits, resumes on the other node: the host's sink
+/// is handed the call's start and one completion, and the session commits
+/// one outcome for the call under its one identity.
+async fn a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_outcome(tier: Tier) {
+    prove_under(
+        Turn::Activity,
+        tier,
+        &[CommitLabel::MODEL_ANSWER],
+        &[
+            Fault::FailBefore,
+            Fault::AckHidden,
+            Fault::Zombie,
+            Fault::Abort,
+            Fault::CommitThenAbort,
+            Fault::StaleEpoch,
+        ],
+    )
+    .await;
+}
+
 /// A turn cut at its `turn.commit`, its acknowledgement or its owner lost
 /// after the commit landed and before it was published, still reaches the
 /// host following the session's recoverable chat (FIG-5251).
@@ -2425,6 +2448,7 @@ tiered_laws!(
     a_zombie_members_state_change_commits_nothing,
     a_member_never_observes_another_members_uncommitted_state,
     a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_outcome,
+    a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_outcome,
     a_commit_whose_publication_was_lost_still_reaches_the_host,
     tool_call_limit_refuses_the_same_call_across_a_crash,
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,

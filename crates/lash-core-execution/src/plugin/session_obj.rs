@@ -893,19 +893,136 @@ impl PluginSession {
         Ok(transforms)
     }
 
-    /// Runs every stream-finished hook. Its state is recorded for each
-    /// response callback that names it as its `stream_state_from`.
+    /// Runs every stream-finished hook, for a reset between streams or
+    /// attempts. Its state is handed to each response callback that names it
+    /// as its `stream_state_from`.
     pub async fn finish_assistant_stream(
         &self,
         session_id: &SessionId,
         reason: AssistantStreamFinishReason,
     ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
-        let mut states = Vec::new();
-        for registered in &self
+        let finished = self
             .capabilities()
             .contributions
             .assistant_stream_finished_hooks
-        {
+            .iter()
+            .collect::<Vec<_>>();
+        self.finish_assistant_stream_with(session_id, &finished, reason)
+            .await
+    }
+
+    /// The stream callbacks and the stream-finished callbacks a model call
+    /// streams under, each in registration order: recorded in the call's
+    /// [`AssistantStreamCapsule`](crate::runtime::AssistantStreamCapsule).
+    pub fn assistant_stream_callbacks(
+        &self,
+    ) -> (Vec<PluginCallbackIdentity>, Vec<PluginCallbackIdentity>) {
+        let contributions = &self.capabilities().contributions;
+        (
+            contributions
+                .assistant_stream_hooks
+                .iter()
+                .map(|registered| registered.identity.clone())
+                .collect(),
+            contributions
+                .assistant_stream_finished_hooks
+                .iter()
+                .map(|registered| registered.identity.clone())
+                .collect(),
+        )
+    }
+
+    /// Check that every callback `capsule` recorded resolves, without
+    /// invoking one.
+    pub fn validate_assistant_stream_capsule(
+        &self,
+        capsule: &crate::runtime::AssistantStreamCapsule,
+    ) -> Result<(), PluginError> {
+        self.resolve_assistant_stream_capsule(capsule).map(drop)
+    }
+
+    #[expect(
+        clippy::type_complexity,
+        reason = "the capsule's two resolved callback lists"
+    )]
+    fn resolve_assistant_stream_capsule(
+        &self,
+        capsule: &crate::runtime::AssistantStreamCapsule,
+    ) -> Result<
+        (
+            Vec<&RegisteredHook<AssistantStreamHook>>,
+            Vec<&RegisteredHook<AssistantStreamFinishedHook>>,
+        ),
+        PluginError,
+    > {
+        let recorded = self.capabilities().composition.recorded();
+        let contributions = &self.capabilities().contributions;
+        Ok((
+            recorded.resolve_all(
+                &capsule.stream_callbacks,
+                &contributions.assistant_stream_hooks,
+            )?,
+            recorded.resolve_all(
+                &capsule.finished_callbacks,
+                &contributions.assistant_stream_finished_hooks,
+            )?,
+        ))
+    }
+
+    /// Finish the stream a model call's receipt recorded in `capsule`, from
+    /// the capsule alone, on this worker: the recorded stream-finished
+    /// callbacks discard whatever they hold (an earlier stream's state, or
+    /// the live stream of this very call), the recorded stream callbacks are
+    /// handed the recorded chunks again in order, their transforms
+    /// discarded (what they published, the call published as it streamed),
+    /// and the stream-finished callbacks end the stream for the recorded
+    /// reason. The states they return are what the response callbacks
+    /// derive with: the same on every worker and every derivation, given
+    /// stream callbacks that are pure functions of the chunks they were
+    /// handed. A stream that produced no response hands no state. Every
+    /// recorded callback resolves before any runs.
+    pub async fn replay_assistant_stream(
+        &self,
+        session_id: &SessionId,
+        capsule: &crate::runtime::AssistantStreamCapsule,
+    ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
+        let (stream, finished) = self.resolve_assistant_stream_capsule(capsule)?;
+        if finished.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.finish_assistant_stream_with(
+            session_id,
+            &finished,
+            AssistantStreamFinishReason::AttemptReset,
+        )
+        .await?;
+        if !capsule.produced_response() {
+            return Ok(Vec::new());
+        }
+        for chunk in &capsule.chunks {
+            let mut current = chunk.clone();
+            for registered in &stream {
+                current = (registered.hook)(AssistantStreamHookContext {
+                    session_id: session_id.clone(),
+                    plugin_config: self.admitted_plugin_config(),
+                    chunk: current,
+                })
+                .await?
+                .chunk;
+            }
+        }
+        self.finish_assistant_stream_with(session_id, &finished, capsule.finish)
+            .await
+    }
+
+    async fn finish_assistant_stream_with(
+        &self,
+        session_id: &SessionId,
+        finished: &[&RegisteredHook<AssistantStreamFinishedHook>],
+        reason: AssistantStreamFinishReason,
+    ) -> Result<Vec<crate::runtime::AssistantStreamHookState>, PluginError> {
+        let mut states = Vec::new();
+        for registered in finished {
             let state = (registered.hook)(AssistantStreamFinishedContext {
                 session_id: session_id.clone(),
                 plugin_config: self.admitted_plugin_config(),

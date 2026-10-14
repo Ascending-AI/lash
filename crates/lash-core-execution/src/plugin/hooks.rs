@@ -139,50 +139,68 @@ pub type CheckpointHook =
     Arc<dyn Fn(CheckpointHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
 pub type ToolCatalogContributor =
     Arc<dyn Fn(ToolCatalogContext) -> Result<ToolCatalogContribution, PluginError> + Send + Sync>;
+/// Transforms each visible chunk of a model call's assistant text as it
+/// streams. **It must be replay-safe.** The chunks it was handed are recorded
+/// in the call's receipt (`model.answer`), and a derivation feeds them to it
+/// again, in order, on whichever worker derives: on the worker that streamed,
+/// after a crash, or after a derivation fault. A replayed chunk's
+/// [`AssistantStreamTransform`] is discarded: its chunk, reasoning and events
+/// were published while the call streamed, and its stop was already honoured.
+/// So the hook's only lasting effect is the per-stream state its
+/// [`AssistantStreamFinishedHook`] reads, which must be a pure function of the
+/// chunks it was handed since its last finish.
 pub type AssistantStreamHook =
     Arc<dyn Fn(AssistantStreamHookContext) -> PluginFuture<AssistantStreamTransform> + Send + Sync>;
-/// **This hook is at-least-once, and idempotency is your obligation.** It runs
-/// as phase 2 of a staged effect boundary: the raw completion is journaled
-/// first, so it is durable before this hook is ever called and is never
-/// re-bought from the provider. The price of that guarantee is that a crash,
-/// redrive, or hook failure replays the *same* raw completion into this hook
-/// again. Treat every invocation as a pure derivation of
+/// **This hook is at-least-once, and idempotency is your obligation.** It
+/// derives the response of a durable turn's model call from that call's
+/// receipt: the provider's raw outcome, committed under `model.answer` and
+/// acknowledged before this hook, or any stream hook's finish, runs. A
+/// durably recorded response is never purchased again; the price is that a
+/// crash, an abort or a hook failure before the derived response commits
+/// derives again from the *same* receipt, calling this hook again. Treat
+/// every invocation as a pure derivation of
 /// [`AssistantResponseHookContext::response`] and
 /// [`AssistantResponseHookContext::stream_state`]: same input, same
-/// [`AssistantResponseTransform`], no ambient side effects. In particular the
-/// hook never reads state its plugin's stream hooks left in memory: phase 2
-/// may run on another worker, or after a restart, from the journal alone. What
-/// the stream hooks learned reaches it only as the state its
-/// [`AssistantStreamFinishedHook`] returned. Side effects belong
-/// on the effect seam, where they are journaled — not in this hook, where a
-/// second invocation would repeat them.
+/// [`AssistantResponseTransform`], no ambient side effects (no clock, random
+/// value, mutable external state or unkeyed external write). In particular
+/// the hook never reads state its plugin's stream hooks left in memory: the
+/// derivation may run on another worker, or after a restart, from the
+/// receipt alone. What the stream hooks learned reaches it only as the state
+/// its [`AssistantStreamFinishedHook`] returns when the derivation finishes
+/// the receipt's recorded stream. Nothing this hook returns is recorded on
+/// its own: its response and events commit with the turn's next phase
+/// (`model.done`, a cell's first save or `turn.commit`), and a derivation
+/// that did not reach that commit runs again. Side effects belong on a
+/// durable effect seam, not in this hook, where a second invocation would
+/// repeat them.
 ///
 /// Returning `Err` is not data loss: it marks the derivation incomplete, and
-/// the paid completion remains in the journal to be derived again.
+/// the receipt remains to be derived again.
 ///
-/// Events returned in [`AssistantResponseTransform::events`] are journaled with
-/// this phase's outcome and served from it on replay, so they keep their
-/// placement and are never re-emitted by a redrive that replays the entry.
-///
-/// Phase 1 records an ordered
+/// The receipt records an ordered
 /// [`AssistantResponsePlan`](crate::runtime::AssistantResponsePlan) of callback
-/// keys and owning plugin ids selected before the paid call. Replay and redrive
-/// follow that plan. An empty plan serves the raw completion even if hooks
-/// were installed later. A completed derivation serves its recorded outcome
-/// without invoking hooks. An unfinished derivation resolves every recorded
-/// callback before invoking any, and parks if a key is unavailable or its stream-state format is unreadable.
+/// keys and owning plugin ids selected before the paid call. Every derivation
+/// follows that plan. An empty plan serves the raw completion even if hooks
+/// were installed later. A derivation resolves every recorded callback before
+/// invoking any, and parks if a key is unavailable or its stream-state format
+/// is unreadable.
 pub type AssistantResponseHook = Arc<
     dyn Fn(AssistantResponseHookContext) -> PluginFuture<AssistantResponseTransform> + Send + Sync,
 >;
-/// Runs once the provider stream of an LLM call finished, in phase 1 of the
-/// staged boundary. The value it returns for a stream that produced a
-/// response ([`AssistantStreamFinishReason::Complete`] or
-/// [`AssistantStreamFinishReason::Aborted`]) is recorded with the raw completion
-/// for each response callback of its plugin that names this callback's key
-/// as its `stream_state_from`. The receiving callback's key and owning
-/// plugin id identify that state in [`AssistantResponseHookContext::stream_state`].
-/// Return `None` when phase 2 needs nothing from the stream. The hook should
-/// leave no per-stream state behind: the next stream starts from nothing.
+/// Ends a model call's stream for a plugin's stream hooks. A derivation runs
+/// it once the call's receipt is acknowledged, after replaying the receipt's
+/// recorded chunks through the stream hooks; it never runs between the
+/// provider's answer and that acknowledgement. The value it returns for a
+/// stream that produced a response ([`AssistantStreamFinishReason::Complete`]
+/// or [`AssistantStreamFinishReason::Aborted`]) is handed to each response
+/// callback of its plugin that names this callback's key as its
+/// `stream_state_from`. The receiving callback's key and owning plugin id
+/// identify that state in [`AssistantResponseHookContext::stream_state`].
+/// Return `None` when the response callback needs nothing from the stream.
+/// [`AssistantStreamFinishReason::AttemptReset`] discards whatever the hooks
+/// hold, which the runtime also asks for before each stream and each
+/// derivation. The hook should leave no per-stream state behind: the next
+/// stream starts from nothing.
 pub type AssistantStreamFinishedHook = Arc<
     dyn Fn(AssistantStreamFinishedContext) -> PluginFuture<Option<serde_json::Value>> + Send + Sync,
 >;
@@ -337,12 +355,13 @@ pub struct AssistantResponseHookContext {
     pub plugin_config: super::AdmittedPluginConfig,
     pub response: crate::LlmResponse,
     /// The state the paired [`AssistantStreamFinishedHook`] returned when
-    /// the completion's stream finished. Phase 1 records it under this exact
-    /// response callback identity and format. `None` when the paired hook
-    /// returned nothing or the completion did not stream.
+    /// the derivation finished the receipt's recorded stream, handed to this
+    /// exact response callback identity in its plugin's stream-state format.
+    /// `None` when the paired hook returned nothing or the completion did
+    /// not stream.
     pub stream_state: Option<serde_json::Value>,
-    /// The recorded format of `stream_state`, so a reader can interpret an
-    /// older readable payload. `None` exactly when no stream state was recorded.
+    /// The format of `stream_state`, so a reader can interpret an older
+    /// readable payload. `None` exactly when there is no stream state.
     pub stream_state_format: Option<super::FormatVersion>,
 }
 
@@ -352,7 +371,8 @@ pub struct AssistantResponseTransform {
     pub events: Vec<PluginRuntimeEvent>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AssistantStreamFinishReason {
     /// The provider abandoned one streaming attempt and will retry the same
     /// logical request from an empty response state.

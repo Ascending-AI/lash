@@ -779,17 +779,23 @@ fn ordered_labels(script: Script) -> Vec<CommitLabel> {
     let mut labels = vec![
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
+        CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
         CommitLabel::TURN_ADMIT,
     ];
     if script != (Script::Globals { pressure: false }) {
         labels.extend([CommitLabel::COMPLETION_START, CommitLabel::PRESSURE_FRAME]);
     }
-    labels.extend([CommitLabel::MODEL_START, CommitLabel::TURN_COMMIT]);
+    labels.extend([
+        CommitLabel::MODEL_START,
+        CommitLabel::MODEL_ANSWER,
+        CommitLabel::TURN_COMMIT,
+    ]);
     if script == Script::ContinueAs {
         labels.extend([
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
         ]);
     }
@@ -830,6 +836,7 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
         vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
@@ -837,11 +844,13 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::COMPLETION_START,
             CommitLabel::PRESSURE_FRAME,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,

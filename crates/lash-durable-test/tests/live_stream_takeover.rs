@@ -2,7 +2,7 @@
 //! (FIG-5366).
 //!
 //! - **Takeover:** node A streams a turn's model call and dies before the
-//!   call's answer commits with the turn; node B reaps it and re-sends the pinned call
+//!   call's receipt commits, leaving it unanswered; node B reaps it and re-sends the pinned call
 //!   as its next attempt (ADR 0132 §4). A host's feed opened before the turn
 //!   and one opened after A died both follow the turn to its commit without
 //!   a replay gap: the live stream retracts A's partial prose with one
@@ -215,7 +215,7 @@ impl Takeover {
             ))
             .expect("the core builds");
         let script = Script::new();
-        script.cut_on("a", CommitLabel::TURN_COMMIT, 1, Fault::Abort);
+        script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::Abort);
         let nodes = SimNodes::new(
             database,
             Arc::clone(&clock),
@@ -275,8 +275,8 @@ impl Takeover {
         )
     }
 
-    /// Send the turn's input and run A until it dies before the turn's
-    /// commit, `follower` holding A's partial answer.
+    /// Send the turn's input and run A until it dies before its call's
+    /// receipt commits, `follower` holding A's partial answer.
     async fn a_streams_and_dies(&self, follower: &Feed) {
         self.durable
             .send(lash::TurnInput::text("answer"))
@@ -290,7 +290,7 @@ impl Takeover {
             assert!(
                 self.clock.logical_ms() < horizon
                     && (stepped.is_some() || !self.nodes.script().cuts().is_empty()),
-                "A stalled before its turn's commit:\n{}",
+                "A stalled before its call's receipt:\n{}",
                 self.nodes.script().rendered_trace()
             );
         }
@@ -422,7 +422,7 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
     world.shutdown().await;
 }
 
-/// A streams the call and dies before its answer commits with the turn; B
+/// A streams the call and dies before its receipt commits; B
 /// re-sends it.
 /// Both host feeds, one opened before the turn and one after A died, follow
 /// the turn to its commit without a gap, and hold B's answer alone.

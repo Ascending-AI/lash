@@ -10,8 +10,9 @@
 //! holds none.
 //!
 //! - **Capture failure:** a capture that fails at the turn's commit commits
-//!   nothing; the pass retries from the turn's last commit, re-sending its
-//!   model call, and the turn commits once, with the state captured then.
+//!   nothing; the pass retries from the turn's last commit, its model call's
+//!   receipt, without re-sending the call, and the turn commits once, with
+//!   the state captured then.
 //! - **Frame switch:** a committed frame switch clears the execution state:
 //!   the follow-on's runtime restores the fresh frame's state, never the
 //!   state the switch abandoned.
@@ -264,8 +265,9 @@ impl lash::tools::StaticToolExecute for NoTool {
 }
 
 /// A capture that fails at the commit commits nothing: the pass that met it
-/// retries from the turn's last commit, re-sending its model call, and the
-/// turn commits once, with the state the retry captured.
+/// retries from the turn's last commit, its model call's receipt, without
+/// re-sending the call (FIG-6230), and the turn commits once, with the state
+/// the retry captured.
 async fn a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn(tier: Tier) {
     const BASELINE: &str = "commit the baseline";
     const FAILING: &str = "capture fails once";
@@ -320,8 +322,8 @@ async fn a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn(
             .iter()
             .filter(|input| *input == FAILING)
             .count(),
-        2,
-        "the failed pass committed nothing, so its call is re-sent"
+        1,
+        "the failed pass committed its call's receipt, so its call is not re-sent"
     );
     world.shutdown().await;
 }

@@ -115,12 +115,13 @@ pub(super) async fn resume(image: &'static images::Image, protocol: Protocol) ->
     if labels
         != [
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ]
     {
         violations.push(format!(
-            "the resumed session committed {labels:?}, not the second model call's start, which consumes the cell, the turn's commit and the release"
+            "the resumed session committed {labels:?}, not the second model call's start, which consumes the cell, its receipt, the turn's commit and the release"
         ));
     }
     assert_eq!(

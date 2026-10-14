@@ -30,15 +30,11 @@ impl<'run> RuntimeTurnDriver<'run> {
         // so a replay that never ran the body reconstructs the same state.
         let scoped_effect_controller = self.scoped_effect_controller.clone();
         let scoped_effect_controller = match &envelope.command {
-            RuntimeEffectCommand::AssistantResponseHooks {
-                plan,
-                stream_hook_states,
-                ..
-            } => {
-                match self
-                    .session
-                    .plugins()
-                    .validate_assistant_response_plan(plan, stream_hook_states)
+            RuntimeEffectCommand::AssistantResponseHooks { plan, capsule, .. } => {
+                let plugins = self.session.plugins();
+                match plugins
+                    .validate_assistant_stream_capsule(capsule)
+                    .and_then(|()| plugins.validate_assistant_response_plan(plan, &[]))
                 {
                     Ok(()) => scoped_effect_controller,
                     Err(error) => scoped_effect_controller.with_journal_guard(Arc::new(

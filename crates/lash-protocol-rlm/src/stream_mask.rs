@@ -47,7 +47,7 @@ pub(crate) fn bind_stream_mask(dialect: Arc<SessionDialect>) -> StreamMaskBindin
             let dialect = Arc::clone(&dialect);
             Box::pin(async move {
                 let Some(recorded) = ctx.stream_state else {
-                    // Nothing streamed that phase 2 could splice.
+                    // Nothing streamed that the response could splice.
                     return Ok(lash_core::plugin::AssistantResponseTransform {
                         response: ctx.response,
                         events: Vec::new(),
@@ -111,8 +111,8 @@ struct CellDetector {
     visible_prose: String,
 }
 
-/// The detector's end state as phase 1 journals it: what the response hook
-/// needs to splice the cell the stream saw.
+/// The detector's end state as the stream's finish hands it: what the
+/// response hook needs to splice the cell the stream saw.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordedCellScan {
@@ -138,7 +138,8 @@ impl CellDetector {
         }
     }
 
-    /// Rebuild the detector phase 1 journaled, for the response hook.
+    /// Rebuild the detector the stream's finish handed over, for the
+    /// response hook.
     fn from_recorded(
         dialect: Arc<SessionDialect>,
         recorded: serde_json::Value,
@@ -158,10 +159,10 @@ impl CellDetector {
         })
     }
 
-    /// End the stream: hand the end state to the journal when the stream
-    /// produced a response phase 2 will derive, and clear the detector either
-    /// way, so the next stream starts from nothing whether or not phase 2
-    /// ever runs.
+    /// End the stream: hand the end state over when the stream produced a
+    /// response the derivation will splice, and clear the detector either
+    /// way, so the next stream (or the derivation's replay of this one)
+    /// starts from nothing.
     ///
     /// A scan still reading prose with nothing held needs no state: the
     /// response hook has nothing to splice and no end-of-response leg to run.

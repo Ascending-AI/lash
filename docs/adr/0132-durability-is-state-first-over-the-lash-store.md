@@ -130,19 +130,24 @@ effect the checkpoint names.
 - Admission commits the turn row, binds its inputs and records the turn
   deadline.
 - A model call is `Repeatable` generation. Its request is pinned and its
-  `model_total` deadline recorded before the first byte is sent. A crash
-  before the response commits re-sends the pinned request as the next attempt
-  while the deadline allows, even if the provider already answered and charged
-  for it. A cell may hold the response until its first save;
-  [ADR 0142](0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)
-  states that window's per-crash resend bound.
+  `model_total` deadline recorded before the first byte is sent. The
+  provider's raw outcome commits on receipt as `model.answer`, with what the
+  call's stream hooks saw, before any stream-finished or response hook runs;
+  a restore after it derives the response again from the receipt and never
+  re-sends the call. A crash before the receipt commits re-sends the pinned
+  request as the next attempt while the deadline allows, even if the
+  provider already answered and charged for it. A cell may hold the derived
+  response until its first save
+  ([ADR 0142](0142-a-cells-first-save-carries-its-turns-model-response.md)).
 - Streaming is not durable. Deltas go to the live replay store; a re-sent call
   retracts what its earlier attempts streamed with one `ModelAttemptReset`
   read back from the live replay, then streams under ids of its own
   ([ADR 0040](0040-retried-model-attempts-retract-live-text-by-correlation.md)),
   so clients discard the abandoned stream and keep their cursors. The
-  completed response commits with the next checkpoint and the round's
-  admission in one transaction.
+  receipt records the visible chunks the stream hooks saw since the
+  answering attempt began, so a derivation on any node replays them through
+  the same hooks. The derived response commits with the next checkpoint and
+  the round's admission in one transaction.
 - The turn commit is one transaction: the session head compare-and-set,
   terminal evidence (also the turn-scope close fact), the parent-end of
   `Until(turn)` processes and retirement of the turn's working state. The

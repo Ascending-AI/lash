@@ -35,13 +35,11 @@
 //!   turn's report holds the cell's calls once, and no execution of the
 //!   cell is left open. A cell that ends with an execution still open
 //!   closes it and records its end first.
-//! - **Held response (FIG-6000):** the model response that asked for a
-//!   cell commits with the cell's first save. A cancel the turn accepted
-//!   before that save admits nothing; a first stretch that outlasts its
-//!   slice commits the response on its own, so a node lost later in it
-//!   costs no provider request; and a node lost before the save loses the
-//!   response, whose re-sent call may answer with another cell, of which
-//!   the host never saw the first.
+//! - **Paid response (FIG-6000, FIG-6230):** the model response that asked
+//!   for a cell is committed on receipt, before the cell runs. A cancel the
+//!   turn accepted before the cell's first save admits nothing, and a node
+//!   lost in a first stretch that outlasts its slice costs no provider
+//!   request.
 //! - **Await process:** the cell awaits a host process with
 //!   `processes.await`. The call parks on its completion wait, the session
 //!   releases as `waiting` while the process runs, and the cell resumes
@@ -158,9 +156,6 @@ enum Cell {
     CancelledBeforeSave,
     /// A first stretch of many slices, then one `Once` call.
     LongStretch,
-    /// One `Once` call writing `x: 1`; the re-sent model call answers with a
-    /// cell that writes `x: 2` instead.
-    Replaced,
 }
 
 impl Cell {
@@ -200,22 +195,8 @@ impl Cell {
                  const a = await tools.ext_write({{ x: 1 }});\n\
                  console.log([n, a]);"
             ),
-            Self::Replaced => {
-                format!("const {FIRST} = await tools.ext_write({{ x: 1 }});\nconsole.log({FIRST});")
-            }
         };
         format!("<typescript>\n{body}\n</typescript>")
-    }
-
-    /// The cell a re-sent model call answers with: [`Cell::Replaced`]'s
-    /// second cell, every other cell's own.
-    fn resent_source(self) -> String {
-        if self == Self::Replaced {
-            "<typescript>\nconst second = await tools.ext_write({ x: 2 });\nconsole.log(second);\n</typescript>"
-                .to_owned()
-        } else {
-            self.source()
-        }
     }
 }
 
@@ -225,9 +206,6 @@ impl Cell {
 const STRETCH: u32 = 20_000;
 /// The charge units one slice of a [`Cell::LongStretch`] run may spend.
 const STRETCH_SLICE: u64 = 20_000;
-/// The name [`Cell::Replaced`]'s first cell binds: what marks it in the
-/// host's stream.
-const FIRST: &str = "replaced_first";
 
 /// The outside world: every body entry of every host call, by call. It
 /// survives every node.
@@ -546,15 +524,11 @@ fn ext_tools(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
 /// The scripted model: the cell until the transcript holds it, then prose.
 /// Every request it is sent is kept, rendered.
 fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
-    // How many times the model was asked for the cell: a later ask is the
-    // call re-sent.
-    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     lash_core::testing::TestProvider::builder()
         .kind("cell-restore-scripted")
         .requires_streaming(true)
         .complete(move |request: LlmRequest| {
             let requests = Arc::clone(&requests);
-            let asked = Arc::clone(&asked);
             async move {
                 requests
                     .lock_recover()
@@ -565,10 +539,8 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
                     .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant);
                 let answer = if answered {
                     FINAL.to_owned()
-                } else if asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                    cell.source()
                 } else {
-                    cell.resent_source()
+                    cell.source()
                 };
                 if let Some(stream) = request.stream_events.as_ref() {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
@@ -588,103 +560,6 @@ fn model(cell: Cell, requests: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
         })
         .build()
         .into_handle()
-}
-
-/// The session's live replay, keeping every event published on it: what a
-/// host following the session was shown.
-#[derive(Debug)]
-struct RecordedLive {
-    inner: lash_core::facade_support::InMemoryLiveReplayStore,
-    published: Mutex<Vec<Arc<lash_core::SessionObservationEvent>>>,
-}
-
-impl Default for RecordedLive {
-    fn default() -> Self {
-        Self {
-            inner: lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
-            ),
-            published: Mutex::default(),
-        }
-    }
-}
-
-impl RecordedLive {
-    /// The code of every cell the stream announced or completed.
-    fn cell_codes(&self) -> Vec<String> {
-        self.published
-            .lock_recover()
-            .iter()
-            .filter_map(|event| match &event.payload {
-                lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
-                    match &activity.event {
-                        lash_core::TurnEvent::CodeBlockStarted { code, .. } => Some(code.clone()),
-                        lash_core::TurnEvent::CodeBlockCompleted { .. } => {
-                            Some(format!("{:?}", activity.event))
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::LiveReplayStore for RecordedLive {
-    async fn publish(
-        &self,
-        session_id: &SessionId,
-        revision: lash_core::SessionRevision,
-        events: Vec<lash_core::LiveReplayEventDraft>,
-    ) -> Result<Vec<Arc<lash_core::SessionObservationEvent>>, lash_core::LiveReplayStoreError> {
-        let published = self.inner.publish(session_id, revision, events).await?;
-        self.published
-            .lock_recover()
-            .extend(published.iter().cloned());
-        Ok(published)
-    }
-
-    async fn replay_after_cursor(
-        &self,
-        cursor: &lash_core::SessionCursor,
-    ) -> Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.replay_after_cursor(cursor).await
-    }
-
-    async fn subscribe_after_cursor(
-        &self,
-        cursor: &lash_core::SessionCursor,
-    ) -> Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError> {
-        self.inner.subscribe_after_cursor(cursor).await
-    }
-
-    fn current_cursor(
-        &self,
-        session_id: &SessionId,
-        revision: lash_core::SessionRevision,
-    ) -> lash_core::SessionCursor {
-        self.inner.current_cursor(session_id, revision)
-    }
-
-    async fn invalidate_all(&self) -> Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.invalidate_all().await
-    }
-
-    async fn invalidate_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.invalidate_session(session_id).await
-    }
-
-    async fn trim_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::LiveReplayStoreError> {
-        self.inner.trim_session(session_id).await
-    }
 }
 
 /// [`sim::workers`] whose machines return to the broker every `slice`
@@ -908,8 +783,6 @@ struct CellTurn {
     ends_once: bool,
     /// The turn a [`Cell::CancelledBeforeSave`] resolution cancels.
     cancel: Arc<CancelTarget>,
-    /// The host's stream of a [`Cell::Replaced`] run.
-    live: Arc<RecordedLive>,
 }
 
 impl CellTurn {
@@ -928,7 +801,6 @@ impl CellTurn {
             run: Mutex::default(),
             ends_once: false,
             cancel: Arc::default(),
-            live: Arc::default(),
         }
     }
 
@@ -990,11 +862,6 @@ impl CellTurn {
                         )))
                     }
                     None => builder,
-                };
-                let builder = if self.cell == Cell::Replaced {
-                    builder.live_replay_store(Arc::clone(&self.live) as _)
-                } else {
-                    builder
                 };
                 builder
                     .serve_sessions(false)
@@ -1307,50 +1174,6 @@ impl CellTurn {
         violations.extend(turn_ended(nodes).await);
         violations
     }
-
-    /// A re-sent call replaces its cell (FIG-6000): a node lost before the
-    /// first cell's save lost the response that asked for it, and the
-    /// re-sent call answered with the second cell. The bodies that ran, the
-    /// turn's report and the host's stream hold the second cell alone.
-    async fn replaced_laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
-        let mut violations = turn_ended(nodes).await;
-        if cut.is_none() {
-            return violations;
-        }
-        let entries = self.world.entries();
-        let written = entries
-            .values()
-            .flatten()
-            .map(|(_, args)| written_x(args))
-            .collect::<Vec<_>>();
-        if written != [Some(2)] {
-            violations.push(format!(
-                "the bodies that ran are not the second cell's one call: {entries:?}"
-            ));
-        }
-        match self.reported_calls(nodes).await {
-            Ok(reported) => {
-                if reported.len() != 1 || reported.iter().any(|call| !entries.contains_key(call)) {
-                    violations.push(format!(
-                        "the turn's report does not hold the second cell's call alone: {reported:?}"
-                    ));
-                }
-            }
-            Err(error) => violations.push(error),
-        }
-        let shown = self.live.cell_codes();
-        if shown.iter().any(|code| code.contains(FIRST)) {
-            violations.push(format!(
-                "the host's stream showed the cell the re-sent call replaced: {shown:?}"
-            ));
-        }
-        if !shown.iter().any(|code| code.contains("second")) {
-            violations.push(format!(
-                "the host's stream never showed the second cell: {shown:?}"
-            ));
-        }
-        violations
-    }
 }
 
 /// A comparison needs both body populations as witnesses.
@@ -1482,7 +1305,6 @@ impl Scenario for CellTurn {
             }
             Cell::CancelledBeforeSave => self.cancelled_before_save_laws(nodes).await,
             Cell::LongStretch => self.held_past_its_slice_laws(nodes).await,
-            Cell::Replaced => self.replaced_laws(nodes, cut).await,
         };
         if self.ends_once {
             violations.extend(self.ends_once_laws(nodes).await);
@@ -1551,37 +1373,6 @@ async fn held_past_its_slice(dialect: Dialect) {
     assert!(
         !report.cells.is_empty(),
         "the matrix cut no save of the cell's first stretch"
-    );
-}
-
-/// A re-sent call replaces its cell (FIG-6000): kill the owner at the first
-/// cell's first save, within its first slice, before it enters the store;
-/// the re-sent call answers with another cell.
-async fn replaced(dialect: Dialect) {
-    let asked = Mutex::new(Vec::new());
-    let report = Matrix::new()
-        .labels(&[CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT])
-        .faults(&[Fault::Abort])
-        .horizon(Duration::from_secs(600))
-        .run_test(|| {
-            let turn = CellTurn::new(Cell::Replaced, dialect, None);
-            asked.lock_recover().push(Arc::clone(&turn.requests));
-            turn
-        })
-        .await;
-    let asked = asked
-        .lock_recover()
-        .iter()
-        .map(|requests| requests.lock_recover().len())
-        .collect::<Vec<_>>();
-    eprintln!(
-        "a replaced cell on {dialect:?}: {} cells; provider requests per run, the uncut first: {asked:?}",
-        report.cells.len()
-    );
-    report.assert_held();
-    assert!(
-        !report.cells.is_empty(),
-        "the matrix cut no first save of the first cell"
     );
 }
 
@@ -2326,12 +2117,6 @@ async fn a_cancel_accepted_before_a_cells_first_save_admits_nothing_on_sqlite_me
 #[tokio::test]
 async fn a_response_held_past_its_first_slice_is_recorded_on_sqlite_memory() {
     held_past_its_slice(Dialect::SqliteMemory).await;
-}
-
-/// A re-sent call replaces its cell, on SQLite in memory (FIG-6000).
-#[tokio::test]
-async fn a_re_sent_call_replaces_its_cell_on_sqlite_memory() {
-    replaced(Dialect::SqliteMemory).await;
 }
 
 /// `processes.await` in a cell parks, the session releases and the cell

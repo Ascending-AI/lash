@@ -32,9 +32,10 @@ impl CommitLabel {
     pub const MODEL_START: Self = Self::new("model.start");
     /// `model.done`: A model response, the next checkpoint and the round's admission, fused (C4).
     pub const MODEL_DONE: Self = Self::new("model.done");
-    /// `model.answer`: A model call's completed response, recorded in its
-    /// phase checkpoint when its assistant-response hooks' derivation
-    /// aborted the attempt, so the retry derives from it (FIG-6128).
+    /// `model.answer`: A model call's receipt, the provider's outcome,
+    /// recorded in its phase checkpoint before anything derives from it, so
+    /// every derivation and every restore reads it and the call is never
+    /// sent again (FIG-6230).
     pub const MODEL_ANSWER: Self = Self::new("model.answer");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");

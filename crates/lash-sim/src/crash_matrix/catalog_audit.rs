@@ -58,9 +58,7 @@ pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
     ),
     (
         CommitLabel::MODEL_ANSWER,
-        Coverage::Unemitted(
-            "the phase runner commits a completion under it only when its assistant-response hooks' derivation aborts the attempt (FIG-6128); no case's response hook faults",
-        ),
+        Coverage::Cases(&[Case::Cell, Case::CellKilled, Case::Prompt, Case::Pressure]),
     ),
     (
         CommitLabel::ROUND_PRESENT_MODEL_START,

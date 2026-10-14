@@ -136,17 +136,21 @@ pub(super) fn bind_delivered(
     })
 }
 
-/// `model.answer`: the completion `drive` owes its hooks, committed in the
-/// pinned call's phase checkpoint once their derivation aborted the
-/// attempt, so the next attempt, or a successor after a crash, derives
-/// again from it and never pays for the call twice (FIG-6128).
+/// `model.answer`: the receipt of the pinned call `drive` just answered,
+/// the provider's outcome, committed in the call's phase checkpoint under
+/// the owner fence, before anything derives from it. Its acknowledgement is
+/// awaited: a failed or unacknowledged commit fails the attempt, whose next
+/// pass reconciles from the rows (a committed receipt restores at
+/// `model.answer` and is derived, never sent again; an uncommitted one
+/// leaves the call unanswered at `model.start`), and never falls through to
+/// a derivation. What the commit read of the turn's cancel comes back.
 async fn record_answer(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
     session: &SessionId,
     run: &TurnId,
     pin: &lash_durable::domain::ModelPin,
-) -> Result<(), TurnError> {
+) -> Result<lash_durable::ActorCommit, TurnError> {
     let mut tx = cx.begin().await?;
     if let Some(bind) = bind_delivered(drive, session, run) {
         tx.write(bind);
@@ -162,11 +166,11 @@ async fn record_answer(
         },
         iteration: iteration(drive.machine()),
     }));
-    cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
+    let committed = cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
     stored.committed(drive);
     drive.run_changes_committed(&written);
     drive.phase_committed().await;
-    Ok(())
+    Ok(committed)
 }
 
 fn iteration(machine: &TurnMachine) -> u32 {
@@ -267,9 +271,8 @@ pub async fn run_phases(
         }
         match effect {
             Effect::LlmCall { id, request } => {
-                // A call restored at `model.answer` was paid for: its hooks
-                // derive from the recorded completion, which is never sent
-                // again (FIG-6128).
+                // A call restored at `model.answer` was answered: it derives
+                // from its receipt, and is never sent again.
                 if drive.owed_answer().is_some() {
                     if !matches!(model.take(), Some((redelivered, _)) if redelivered == id) {
                         return Err(TurnError::Exec(format!(
@@ -494,24 +497,32 @@ pub async fn run_phases(
                     }
                 }
                 if !model_call::send(cx, drive.as_mut(), id, request, &admitted, &start).await? {
+                    drive.settle_cancelled_answer(id)?;
                     let request = cx.begin().await?.turn_cancel().cloned();
                     let stopped = stopped(drive, &mut carry, &mut answered_cell);
                     return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 if let model_call::ModelStart::Send { pin, .. } = &start
                     && drive.owed_answer().is_some()
-                    && let Err(error) = drive.derive_answer(cx, id).await
                 {
-                    // A hook's fault aborts the attempt: the completion
-                    // commits on its own as `model.answer` first, so the
-                    // retry derives from it and never pays for the call
-                    // again (FIG-6128, as ADR 0142 §2 does for a cell). A
-                    // refused commit leaves the attempt's own failure to
-                    // answer.
-                    if drive.owed_answer().is_some() {
-                        drop(record_answer(cx, drive.as_mut(), &session, &run, pin).await);
+                    // The provider answered: its outcome commits as the
+                    // call's receipt, acknowledged, before any stream hook
+                    // is finished, any response hook runs, or anything is
+                    // admitted, launched or published from it. Every call
+                    // takes this path, with or without hooks.
+                    let committed = record_answer(cx, drive.as_mut(), &session, &run, pin).await?;
+                    // An immediate cancel the turn accepted while the call
+                    // answered wins over its derivation; the receipt stops
+                    // with the turn.
+                    if let Some(request) = committed
+                        .turn_cancel
+                        .filter(|request| request.mode == crate::TurnCancelMode::Immediate)
+                    {
+                        drive.settle_cancelled_answer(id)?;
+                        let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                        return stop(cx, services, &row, Some(request), stopped, heads).await;
                     }
-                    return Err(error);
+                    drive.derive_answer(cx, id).await?;
                 }
             }
 
@@ -634,10 +645,11 @@ pub async fn run_phases(
                                 // at lowering or start, a host fault before
                                 // its first park. The response commits on
                                 // its own as `model.done` first, so the
-                                // retried attempt re-delivers the cell and
-                                // never asks the model again (FIG-6038). A
-                                // refused commit leaves the attempt's own
-                                // failure to answer.
+                                // retried attempt re-delivers the cell
+                                // rather than deriving it again from the
+                                // call's receipt (FIG-6038). A refused
+                                // commit leaves the attempt's own failure
+                                // to answer.
                                 if let Some(response) = unconsumed {
                                     drop(response.commit_alone(cx).await);
                                 }

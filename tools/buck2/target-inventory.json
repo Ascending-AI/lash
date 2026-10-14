@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 72,
-  "cargo_target_count": 314,
+  "cargo_target_count": 315,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -63011,7 +63011,7 @@
       "//crates/lash:lash__fv_f107521c"
     ]
   },
-  "generated_label_count": 394,
+  "generated_label_count": 395,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -63116,6 +63116,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -63783,6 +63784,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -64373,7 +64375,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1390,
+  "metadata_target_count": 1391,
   "packages": [
     {
       "declared_features": [
@@ -65452,6 +65454,15 @@
           "clippy_label": "//crates/lash-durable-test:mcp_events_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:mcp_events_laws__test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-durable-test:model_answer_receipt_laws__test",
+          "cargo": "model_answer_receipt_laws",
+          "check_label": "//crates/lash-durable-test:model_answer_receipt_laws__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-durable-test:model_answer_receipt_laws__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:model_answer_receipt_laws__test",
           "tags": []
         },
         {
@@ -70985,6 +70996,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test": 300,
     "//crates/lash-durable-test:mcp_events_crash_proof__test": 300,
     "//crates/lash-durable-test:mcp_events_laws__test": 300,
+    "//crates/lash-durable-test:model_answer_receipt_laws__test": 300,
     "//crates/lash-durable-test:one_slot_process_await__test": 300,
     "//crates/lash-durable-test:open_session_commands__test": 300,
     "//crates/lash-durable-test:plugin_state_storage_laws__test": 300,
@@ -71650,6 +71662,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -72059,6 +72072,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:mcp_events_crash_proof__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:mcp_events_laws__test__rust_test__metadata[check]",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:one_slot_process_await__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:open_session_commands__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:plugin_state_storage_laws__test__rust_test__metadata[check]",
@@ -72486,6 +72500,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:mcp_events_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:mcp_events_laws__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:one_slot_process_await__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:open_session_commands__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:plugin_state_storage_laws__test__clippy[clippy.txt]",
@@ -72797,6 +72812,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -73109,6 +73125,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -73482,6 +73499,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -73662,6 +73680,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -73860,6 +73879,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -74279,6 +74299,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -74480,6 +74501,7 @@
     "//crates/lash-durable-test:live_stream_takeover__test",
     "//crates/lash-durable-test:mcp_events_crash_proof__test",
     "//crates/lash-durable-test:mcp_events_laws__test",
+    "//crates/lash-durable-test:model_answer_receipt_laws__test",
     "//crates/lash-durable-test:one_slot_process_await__test",
     "//crates/lash-durable-test:open_session_commands__test",
     "//crates/lash-durable-test:plugin_state_storage_laws__test",

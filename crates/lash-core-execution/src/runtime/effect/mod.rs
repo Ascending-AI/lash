@@ -45,7 +45,8 @@ pub use identity_types::{
 pub use lash_sansio::RunAggregateWakePolicy;
 pub use lash_sansio::{CausalRef, EffectAddress};
 pub use llm_outcome::{
-    AssistantResponsePlan, AssistantStreamHookState, LlmStreamRecord, RuntimeLlmCallOutcome,
+    AssistantResponsePlan, AssistantStreamCapsule, AssistantStreamHookState, LlmStreamRecord,
+    RuntimeLlmCallOutcome,
 };
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,

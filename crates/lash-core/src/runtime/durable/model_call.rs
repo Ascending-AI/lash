@@ -5,25 +5,36 @@
 //! first byte is sent: the digest of its request, its attempt and its
 //! `model_total` deadline, clipped to what remains of the turn's deadline.
 //!
-//! - **Re-send.** A turn restored in its `Model` phase re-delivers the same
-//!   call, and sends the request template its admission stored, its
-//!   attachment slots filled afresh (WIRE-SLOTS), reading the response
-//!   under the response context that admission recorded. It is sent again
-//!   as the next attempt only when its request has the pinned reference: the checkpoint the pin committed with re-yields it, and
-//!   anything else is a broken pin, never a new call. The reference is the
+//! - **Re-send.** A turn restored in its `Model` phase at `model.start`
+//!   re-delivers the same unanswered call, and sends the request template
+//!   its admission stored, its attachment slots filled afresh
+//!   (WIRE-SLOTS), reading the response under the response context that
+//!   admission recorded. It is sent again as the next attempt only when its
+//!   request has the pinned reference: the checkpoint the pin committed
+//!   with re-yields it, and anything else is a broken pin, never a new call. The reference is the
 //!   request as the checkpoint names it (FIG-5207), so pinning and checking
 //!   it reuse the digest the checkpoint computed once.
 //! - **The deadline is never refreshed.** A re-send runs under the pinned
 //!   deadline, and one found expired settles `TimedOut { ExecutionTotal }` at
 //!   once, without sending.
-//! - **Only the completed response is durable.** It commits with the next
-//!   phase; streamed deltas go to the live replay store, and a re-send
-//!   restarts the session's live stream first: the stream retracts what the
-//!   earlier attempts streamed and the re-sent attempt streams under ids of
-//!   its own, so an observer follows on without old partial text joined to
-//!   new. The pin holds where the live replay stood before the first
-//!   attempt streamed: the retraction is read back from there, or the
-//!   stream restarts with a gap (FIG-5399).
+//! - **The provider's outcome is durable once its receipt commits.**
+//!   `model.answer` commits the call's [`ModelAnswer`] and is acknowledged
+//!   before any stream hook is finished, any response hook runs, or any
+//!   admission, cell or publication follows from it. A restore at
+//!   `model.answer` derives from the receipt and never sends the call
+//!   again; a call restored at `model.start`, whose receipt never committed,
+//!   is unanswered and is re-sent. The provider may have executed and
+//!   charged that unanswered attempt: a crash between the provider's
+//!   execution and the receipt's commit, or a receipt write that fails, is
+//!   ambiguous, and only a provider-side idempotency or resume contract
+//!   could close it (FIG-1275). Streamed deltas go to the live replay store,
+//!   and a re-send restarts the session's live stream first: the stream
+//!   retracts what the earlier attempts streamed and the re-sent attempt
+//!   streams under ids of its own, so an observer follows on without old
+//!   partial text joined to new. The pin holds where the live replay stood
+//!   before the first attempt streamed: the retraction is read back from
+//!   there, or the stream restarts with a gap (FIG-5399). A derivation from
+//!   a receipt restarts nothing: it is the attempt that answered.
 //! - **Slots are held through the call.** Before a call is admitted, every
 //!   attachment its template's slots name is acquired under the call's
 //!   owner (`owned_call::hold_slots`), so a ref only the call names survives a
@@ -44,36 +55,56 @@ use lash_sansio::TurnCheckpoint;
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))
 const MODEL_REQUEST_PIN_DOMAIN: &str = "lash-model-request-pin/v1";
 
-/// A completion the provider answered whose response the turn's
-/// assistant-response hooks have not derived yet: the paid fact, committed
-/// in its call's phase checkpoint under `model.answer` when their
-/// derivation aborts the attempt (FIG-6128). A restore that finds it
-/// derives the response from it and never sends the call again. A
-/// derivation that answers commits nothing more than a turn without hooks:
-/// the response commits with the next phase, and a whole-node death while
-/// the hooks run may re-send the call once, as ADR 0142 §2 bounds for a
-/// cell's first slice.
+/// A model call's receipt: the provider's normalized outcome, committed in
+/// its call's phase checkpoint under `model.answer`, under the owner fence,
+/// and acknowledged before anything derives from it. It holds everything a
+/// derivation reads: the response (parts, correlations, opaque replay
+/// metadata and usage) or the call's typed unsuccessful end, the attempt
+/// that answered and the call's sealed record (its winning attempt and
+/// evidence), whether the response streamed and which reasoning it
+/// published, the response callbacks the call was admitted under and the
+/// stream capsule its stream hooks are finished from. A restore that finds
+/// it derives from it on any worker and never sends the call again: a
+/// durably recorded response is never purchased again. Only the receipt's
+/// own commit can be lost after the provider executed (see
+/// [`send`]); the commit that consumes the receipt (`model.done`, a cell's
+/// first save or `turn.commit`) leaves the model phase and drops it.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelAnswer {
     /// The attempt that answered.
     pub(crate) attempt: u32,
-    /// The raw completion.
-    pub(crate) response: crate::llm::types::LlmResponse,
+    /// The provider's outcome: the raw completion, or the call's typed
+    /// unsuccessful end.
+    pub(crate) result: Result<crate::llm::types::LlmResponse, LlmCallError>,
     pub(crate) text_streamed: bool,
-    /// The paid call's record, which a restore records again: the
-    /// activation that recorded it first published nothing.
+    /// The paid call's record, which its derivation records: nothing
+    /// recorded it before the receipt committed.
     pub(crate) call_record: Option<crate::LlmCallRecord>,
-    /// The hooks' plan and the stream state they derive with.
+    /// The hooks' plan, the stream capsule and the published reasoning.
     pub(crate) stream: crate::runtime::LlmStreamRecord,
 }
 
 impl ModelAnswer {
-    /// The callbacks the answer owes until it is derived: its response
-    /// plan's, in recorded order (S7). Its PhaseRoot records them, so a node
-    /// that cannot resolve one never claims the turn to run it.
+    /// The callbacks the receipt owes until it is derived (S7): its
+    /// response plan's, in recorded order, and the stream callbacks the
+    /// derivation finishes its stream with. Its PhaseRoot records them, so a
+    /// node that cannot resolve one never claims the turn to run it. An
+    /// unsuccessful outcome or an empty plan runs no hook and owes nothing.
     pub(crate) fn owed_callbacks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
-        self.stream.response_plan.callbacks.clone()
+        let plan = &self.stream.response_plan;
+        if self.result.is_err() || plan.callbacks.is_empty() {
+            return Vec::new();
+        }
+        let capsule = &self.stream.capsule;
+        let mut owed = plan.callbacks.clone();
+        if !capsule.finished_callbacks.is_empty() {
+            owed.extend(capsule.finished_callbacks.iter().cloned());
+            if capsule.produced_response() {
+                owed.extend(capsule.stream_callbacks.iter().cloned());
+            }
+        }
+        owed
     }
 }
 

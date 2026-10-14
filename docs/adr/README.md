@@ -173,7 +173,7 @@ The generated region below is checked against the live filenames and headings.
 | 0139 | [The Lash VM is a dialect-free kernel](0139-the-lash-vm-is-a-dialect-free-kernel.md) |
 | 0140 | [Hosts name their dialects](0140-hosts-name-their-dialects.md) |
 | 0141 | [A model-started process's environment is the host start policy's sealed choice](0141-a-model-started-process-environment-is-the-host-start-policys-sealed-choice.md) |
-| 0142 | [A whole-node crash in a cell's first slice may re-send one model call](0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md) |
+| 0142 | [A cell's first save carries its turn's model response](0142-a-cells-first-save-carries-its-turns-model-response.md) |
 | 0143 | [Plugins are fully trusted code](0143-plugins-are-fully-trusted-code.md) |
 | 0144 | [Declared reads are owned by the caller's saved state](0144-declared-reads-are-owned-by-the-callers-saved-state.md) |
 <!-- adr-index:end -->

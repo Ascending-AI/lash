@@ -1087,25 +1087,31 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
         Protocol::Code | Protocol::ImageCell(_, _) | Protocol::Archived => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
         Protocol::Tools => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
         Protocol::Noted => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -1115,20 +1121,26 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
         Protocol::Working(_) => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
         Protocol::NotedTwice => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -1294,12 +1306,13 @@ async fn cold_resume(dialect: Dialect, postgres_url: Option<String>) {
     if labels
         != [
             CommitLabel::MODEL_START,
+            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ]
     {
         violations.push(format!(
-            "the cold owner committed {labels:?}, not the second model call's next attempt, the turn's commit and the release"
+            "the cold owner committed {labels:?}, not the second model call's next attempt, its receipt, the turn's commit and the release"
         ));
     }
     assert!(

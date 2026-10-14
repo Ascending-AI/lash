@@ -366,9 +366,11 @@ started row commits before the body runs, and recovery finds it and records
 `Interrupted` instead of starting again. The guarantee is only as good as
 that row's survival.
 
-A whole-node crash in a cell's first slice before its first save can cost one
-extra model request with a different response, while committed tool work
-with committed outcomes remains intact ([ADR 0142](../adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)).
+A crash after a model call's receipt commits costs no extra model request:
+the turn derives the response again from the receipt. A crash between the
+provider's answer and its receipt commit can cost one extra model request
+with a different response, while committed tool work with committed outcomes
+remains intact ([ADR 0142](../adr/0142-a-cells-first-save-carries-its-turns-model-response.md)).
 
 **`Once` holds across a database failover only if acknowledged commits
 survive promotion.** The host chooses its topology. Lash runs no startup check

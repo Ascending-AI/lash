@@ -52,7 +52,7 @@ pub use effect::TurnCancelWait;
 /// Runtime effect contracts, including local process execution capabilities.
 pub use effect::{
     AdmittedDirectSend, AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan,
-    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
+    AssistantStreamCapsule, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
     CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
     EffectAddress, EffectJournalIdentity, EffectJournalRetirement, EffectOpener,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, JournalReplay, LlmRequestSpec,

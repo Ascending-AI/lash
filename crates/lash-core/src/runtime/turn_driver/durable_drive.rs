@@ -63,10 +63,10 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// §6), and the one a phase in flight stages in its place.
     working: Option<lash_core_store::checkpoint_graph::NodeId>,
     staged_working: Option<lash_core_store::checkpoint_graph::NodeId>,
-    /// The completion the turn's hooks still owe, and whether it was
-    /// restored from `model.answer` rather than answered on this activation
-    /// (FIG-6128).
-    owed: Option<(ModelAnswer, bool)>,
+    /// The receipt of the model call the machine waits on that no
+    /// derivation has answered yet: the outcome the call just returned, or
+    /// the one `model.answer` committed, restored.
+    owed: Option<ModelAnswer>,
 }
 
 #[derive(Default)]
@@ -201,7 +201,7 @@ impl RuntimeDrive {
             parts,
         );
         drive.working = row.working;
-        drive.owed = answered.map(|answer| (answer, true));
+        drive.owed = answered;
         Ok(OpenTurn {
             drive: Box::new(drive),
             pending,
@@ -669,12 +669,12 @@ impl TurnDrive for RuntimeDrive {
             }
         }
         .map_err(runtime)?;
-        self.owed = owed.map(|answer| (answer, false));
+        self.owed = owed;
         Ok(())
     }
 
     fn owed_answer(&self) -> Option<&ModelAnswer> {
-        self.owed.as_ref().map(|(answer, _)| answer)
+        self.owed.as_ref()
     }
 
     async fn derive_answer(
@@ -682,24 +682,30 @@ impl TurnDrive for RuntimeDrive {
         _cx: &ActorContext,
         id: crate::EffectId,
     ) -> Result<(), TurnError> {
-        let Some((answer, restored)) = self.owed.clone() else {
+        let Some(answer) = self.owed.clone() else {
             return Err(TurnError::Exec(format!(
                 "model call {id:?} owes no derivation"
             )));
         };
-        Box::pin(self.driver.derive_llm_answer(
-            &mut self.machine,
-            id,
-            answer,
-            restored,
-            &self.observer,
-        ))
+        Box::pin(
+            self.driver
+                .derive_llm_answer(&mut self.machine, id, answer, &self.observer),
+        )
         .await
         .map_err(runtime)?;
-        // A derivation that aborted still owes the answer, for the phase
-        // runner to record before the abort propagates.
+        // A derivation that aborted still owes its receipt, which the next
+        // attempt restores from the rows.
         self.owed = None;
         Ok(())
+    }
+
+    fn settle_cancelled_answer(&mut self, id: crate::EffectId) -> Result<(), TurnError> {
+        let Some(answer) = self.owed.take() else {
+            return Ok(());
+        };
+        self.driver
+            .settle_cancelled_llm_answer(&mut self.machine, id, answer, &self.observer)
+            .map_err(runtime)
     }
 
     async fn prepare_call(

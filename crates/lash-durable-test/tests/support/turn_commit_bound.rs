@@ -1,4 +1,6 @@
-//! FIG-5954: the owner commits through its answer, with exact retained boundaries.
+//! FIG-5954: the owner commits through its answer, with exact retained
+//! boundaries: each model call's receipt (FIG-6230), and the named cell
+//! and trace boundaries.
 
 use super::*;
 
@@ -9,6 +11,12 @@ const CELL_BOUNDARIES: [(CommitLabel, &str); 1] = [(
     CommitLabel::ROUND_OUTCOME,
     "the VM consumes only a recorded tool outcome",
 )];
+/// Every provider send's outcome commits as its call's receipt before
+/// anything derives from it: one boundary per send.
+const RECEIPT: (CommitLabel, &str) = (
+    CommitLabel::MODEL_ANSWER,
+    "FIG-6230: a paid answer commits before its derivation",
+);
 const TRACE_BOUNDARIES: [(CommitLabel, &str); 1] = [(
     CommitLabel::ROUND_TRACED,
     "FIG-5452: acknowledge exported tool admissions across owner replacement",
@@ -73,6 +81,10 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
             .collect::<Vec<_>>(),
         trace.iter().map(|(label, _)| *label).collect::<Vec<_>>()
     );
+    let (receipt, why) = RECEIPT;
+    assert!(!why.is_empty());
+    let receipts = owner.iter().filter(|found| **found == receipt).count();
+    assert_eq!(receipts, models, "one receipt per provider send: {why}");
     for (label, why) in cell.iter().chain(trace) {
         assert!(!why.is_empty());
         assert_eq!(
@@ -82,15 +94,15 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
         );
     }
     eprintln!(
-        "{turn:?} traced={traced}: commits={} outputs={outputs} K={} T={} labels={owner:?}; later session maintenance={:?}",
+        "{turn:?} traced={traced}: commits={} outputs={outputs} K={} T={} R={receipts} labels={owner:?}; later session maintenance={:?}",
         owner.len(),
         cell.len(),
         trace.len(),
         &all[answer + 1..]
     );
     assert!(
-        owner.len() <= outputs + 1 + cell.len() + trace.len(),
-        "{turn:?} traced={traced}: {} owner commits exceed {outputs} outputs + 1 + K={} + T={}: {owner:?}",
+        owner.len() <= outputs + 1 + cell.len() + trace.len() + receipts,
+        "{turn:?} traced={traced}: {} owner commits exceed {outputs} outputs + 1 + K={} + T={} + R={receipts}: {owner:?}",
         owner.len(),
         cell.len(),
         trace.len()

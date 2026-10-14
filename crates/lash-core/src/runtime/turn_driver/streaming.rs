@@ -39,35 +39,26 @@ pub(super) struct StreamChunkOutcome {
 }
 
 impl RuntimeTurnDriver<'_> {
-    /// Runs the staged two-phase LLM-call effect boundary (FIG-1276).
+    /// Runs one attempt of a model call and returns the provider's outcome
+    /// with everything its derivation reads: the call's receipt-to-be. It
+    /// derives nothing: no stream hook is finished and no response hook runs
+    /// here. The phase runner commits the outcome as the call's receipt
+    /// under `model.answer` and awaits its acknowledgement; only then does
+    /// [`Self::run_assistant_response_hooks`] derive the response from the
+    /// receipt, on this worker or any other.
     ///
-    /// Phase 1 yields the **raw** provider completion. Phase 2 derives from
-    /// that completion what host assistant-response hooks make of it: the
-    /// transformed response together with the plugin events those hooks
-    /// emitted. A derivation that aborts the attempt leaves the completion to
-    /// the phase runner, which commits it under `model.answer` in the call's
-    /// phase checkpoint before the fault propagates (FIG-6128).
-    ///
-    /// Only a *complete* derivation answers the turn. A hook failure seals nothing
-    /// and surfaces as a retryable
-    /// [`RuntimeErrorCode::RuntimeEffectAssistantResponseHook`](crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook),
-    /// because a sealed error would replay as a permanent result over a
-    /// completion that is merely underived.
-    ///
-    /// A hook failure, or a crash after `model.answer`, therefore redrives
-    /// phase 2 only: the restore serves the recorded completion and the
-    /// provider is never re-invoked. Hooks are consequently **at-least-once**; see
+    /// So a durably recorded response is never purchased again: a crash or a
+    /// fault anywhere after the receipt's acknowledgement derives again from
+    /// the receipt, which is why the hooks are **at-least-once**; see
     /// [`crate::plugin::AssistantResponseHook`].
     ///
-    /// Honest scope: the window this does *not* cover is whole-node death
-    /// before `model.answer` or the next phase commits — a process that dies
-    /// after the provider returns, while the hooks run, has no record to
-    /// replay and re-sends the call once, paying for it again, as ADR 0142
-    /// §2 bounds for a cell. No commit happens between the provider's answer
-    /// and the hooks to carry the completion, so closing this window would
-    /// cost an owner commit per hooked call, and a cell-mask protocol hooks
-    /// every call. Closing that needs
-    /// provider-side idempotency or resume (FIG-1275), not more staging here.
+    /// Honest scope: the window this does *not* cover is between the
+    /// provider's execution and the receipt's commit. A process that dies
+    /// there, or a receipt write that fails, leaves the call unanswered, and
+    /// recovery re-sends the pinned request, which the provider may execute
+    /// and charge again. No arrangement of local commits closes it; that
+    /// needs a provider-side idempotency or resume contract whose key
+    /// survives the crash (FIG-1275).
     pub(super) async fn invoke_turn_llm_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -142,55 +133,32 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    /// Phase 2 body of the staged LLM-call boundary: derive the host-visible
-    /// response from the raw completion phase 1 already journaled.
+    /// Derive the host-visible response of a model call from its receipt:
+    /// finish the receipt's recorded stream (`capsule`) on this worker, then
+    /// run the recorded response callbacks over the raw completion with the
+    /// stream states that replay hands them.
     ///
-    /// Hook-emitted plugin events are returned rather than forwarded here so
-    /// they are journaled with this phase's outcome and served from it on
-    /// replay. Because this phase redrives independently of phase 1, a hook may
-    /// observe the same raw completion more than once — the at-least-once
-    /// contract documented on [`crate::plugin::AssistantResponseHook`].
+    /// Hook-emitted plugin events are returned rather than forwarded here,
+    /// so they publish only once the derivation answers. A derivation that
+    /// faults runs again from the same receipt — the at-least-once contract
+    /// documented on [`crate::plugin::AssistantResponseHook`].
     pub(in crate::runtime) async fn run_assistant_response_hooks(
         &mut self,
         response: LlmResponse,
         plan: &crate::runtime::AssistantResponsePlan,
-        stream_hook_states: &[crate::runtime::AssistantStreamHookState],
+        capsule: &crate::runtime::AssistantStreamCapsule,
     ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
     {
         let original = response.clone();
-        let transforms = self
-            .session
-            .plugins()
-            .transform_assistant_response(&self.session_id, response, plan, stream_hook_states)
+        let plugins = self.session.plugins();
+        let stream_hook_states = plugins
+            .replay_assistant_stream(&self.session_id, capsule)
             .await
-            .map_err(|err| match err {
-                crate::PluginError::Runtime(error)
-                    if matches!(
-                        error.code,
-                        crate::RuntimeErrorCode::RecordedCallbackUnavailable
-                            | crate::RuntimeErrorCode::StreamStateFormatUnreadable
-                    ) =>
-                {
-                    RuntimeEffectControllerError::from(error)
-                }
-                err @ crate::PluginError::Invoke(_) => {
-                    // The paid completion is already recorded. An invocation
-                    // failure leaves only this response derivation to redrive.
-                    let mut failure = crate::PluginOperationFailure::from(err);
-                    failure.class = crate::PluginFailureClass::Retryable;
-                    let message = failure.message.clone();
-                    let mut error =
-                        RuntimeEffectControllerError::retryable_response_derivation(message);
-                    error.cause = Some(crate::RuntimeErrorCause::PluginOperation {
-                        failure: Box::new(failure),
-                    });
-                    error
-                }
-                err => RuntimeEffectControllerError::from(crate::PluginError::Operation(Box::new(
-                    err.into(),
-                )))
-                .retryable_uncommitted_derivation(),
-            })?;
+            .map_err(response_derivation_error)?;
+        let transforms = plugins
+            .transform_assistant_response(&self.session_id, response, plan, &stream_hook_states)
+            .await
+            .map_err(response_derivation_error)?;
         let mut current: Option<LlmResponse> = None;
         let mut events = Vec::new();
         for emitted in transforms {
@@ -225,6 +193,13 @@ impl RuntimeTurnDriver<'_> {
         dispatch: LlmCallDispatch,
     ) -> RuntimeLlmCallOutcome {
         let response_plan = self.session.plugins().assistant_response_plan();
+        let (stream_callbacks, finished_callbacks) =
+            self.session.plugins().assistant_stream_callbacks();
+        let mut capsule =
+            crate::runtime::AssistantStreamCapsule::new(stream_callbacks, finished_callbacks);
+        // What a stream hook still holds of an earlier stream on this worker,
+        // one whose derivation never ran here, is not this stream's.
+        self.reset_assistant_stream_hooks().await;
         let LlmCallDispatch { provider } = dispatch;
         let request = (*request).clone();
         let protocol_suppressed_stop_sequences =
@@ -308,6 +283,7 @@ impl RuntimeTurnDriver<'_> {
         let mut reasoning_publication = ReasoningPublicationState::default();
         let mut assistant_prose_attempt_correlations = Vec::new();
         let mut reasoning_attempt_correlations = Vec::new();
+        let mut stream_chunks = Vec::new();
         let mut stream_state = LlmStreamState {
             text_streamed: &mut text_streamed,
             streamed_usage: &mut streamed_usage,
@@ -322,6 +298,7 @@ impl RuntimeTurnDriver<'_> {
             reasoning_attempt_correlations: &mut reasoning_attempt_correlations,
             abort_requested: &mut abort_requested,
             block_raw_text: &mut block_raw_text,
+            stream_chunks: &mut stream_chunks,
         };
         debug_assert!(
             invocation.effect_replay_key().is_some(),
@@ -742,9 +719,10 @@ impl RuntimeTurnDriver<'_> {
             record_protocol_owned_stop_suppression(&mut result, call_record.as_mut());
         }
 
-        let stream_hook_states = self
-            .finish_assistant_stream_hooks(assistant_stream_finish_reason(&result, abort_requested))
-            .await;
+        // The stream hooks are finished by the derivation, from the receipt,
+        // never here: the receipt commits before any of them runs.
+        capsule.chunks = stream_chunks;
+        capsule.finish = assistant_stream_finish_reason(&result, abort_requested);
 
         if let Some(llm_call_id) = llm_call_id {
             let stream_summary = debug.summary.to_json();
@@ -779,37 +757,35 @@ impl RuntimeTurnDriver<'_> {
             call_record,
             stream: crate::runtime::LlmStreamRecord {
                 reasoning_published: reasoning_publication.into_published_blocks(),
-                stream_hook_states,
+                capsule,
                 response_plan,
             },
         }
     }
 
-    /// Ends the stream for every stream-finished hook and returns the end
-    /// states they hand to phase 2.
-    async fn finish_assistant_stream_hooks(
-        &mut self,
-        reason: crate::plugin::AssistantStreamFinishReason,
-    ) -> Vec<crate::runtime::AssistantStreamHookState> {
+    /// Discard what the stream-finished hooks hold: before a stream starts,
+    /// and when the provider resets an attempt. No stream hook is finished
+    /// for its state here: the call's derivation finishes them from its
+    /// receipt. A failure is logged; the derivation discards their state
+    /// again before it replays the receipt's stream.
+    async fn reset_assistant_stream_hooks(&mut self) {
         if !self.session.plugins().has_assistant_stream_finished_hooks() {
-            return Vec::new();
+            return;
         }
-        match self
+        if let Err(err) = self
             .session
             .plugins()
-            .finish_assistant_stream(&self.session_id, reason)
+            .finish_assistant_stream(
+                &self.session_id,
+                crate::plugin::AssistantStreamFinishReason::AttemptReset,
+            )
             .await
         {
-            Ok(states) => states,
-            Err(err) => {
-                tracing::error!(
-                    session_id = %self.session_id,
-                    reason = ?reason,
-                    error = %err,
-                    "assistant stream cleanup hook failed"
-                );
-                Vec::new()
-            }
+            tracing::error!(
+                session_id = %self.session_id,
+                error = %err,
+                "assistant stream reset hook failed"
+            );
         }
     }
 
@@ -1008,6 +984,11 @@ impl RuntimeTurnDriver<'_> {
             .or_default()
             .push_str(&text);
         let raw_text = self.trace.is_observed().then(|| text.clone());
+        // The receipt's capsule keeps every chunk the stream hooks are
+        // handed, so a derivation can hand them over again.
+        if self.session.plugins().has_assistant_stream_hooks() {
+            state.stream_chunks.push(text.clone());
+        }
         let outcome = self
             .transform_assistant_stream_chunk(forwarder, text)
             .await?;
@@ -1116,10 +1097,8 @@ impl RuntimeTurnDriver<'_> {
     ) -> Result<(), LlmCallError> {
         match stream_event {
             LlmStreamEvent::AttemptReset => {
-                self.finish_assistant_stream_hooks(
-                    crate::plugin::AssistantStreamFinishReason::AttemptReset,
-                )
-                .await;
+                self.reset_assistant_stream_hooks().await;
+                state.stream_chunks.clear();
                 forwarder.send_semantic_turn_activity(
                     None,
                     take_attempt_reset(
@@ -1387,6 +1366,40 @@ impl RuntimeTurnDriver<'_> {
                 .await?;
         }
         Ok(())
+    }
+}
+
+/// A derivation's plugin failure as the derivation's error: an unavailable
+/// recorded callback or an unreadable stream-state format parks the turn, an
+/// invocation failure is a live fault the next derivation retries from the
+/// same receipt, and any other failure is the hook's own.
+fn response_derivation_error(err: crate::PluginError) -> RuntimeEffectControllerError {
+    match err {
+        crate::PluginError::Runtime(error)
+            if matches!(
+                error.code,
+                crate::RuntimeErrorCode::RecordedCallbackUnavailable
+                    | crate::RuntimeErrorCode::StreamStateFormatUnreadable
+            ) =>
+        {
+            RuntimeEffectControllerError::from(error)
+        }
+        err @ crate::PluginError::Invoke(_) => {
+            // The receipt is committed: an invocation failure leaves only
+            // this derivation to run again.
+            let mut failure = crate::PluginOperationFailure::from(err);
+            failure.class = crate::PluginFailureClass::Retryable;
+            let message = failure.message.clone();
+            let mut error = RuntimeEffectControllerError::retryable_response_derivation(message);
+            error.cause = Some(crate::RuntimeErrorCause::PluginOperation {
+                failure: Box::new(failure),
+            });
+            error
+        }
+        err => {
+            RuntimeEffectControllerError::from(crate::PluginError::Operation(Box::new(err.into())))
+                .retryable_uncommitted_derivation()
+        }
     }
 }
 

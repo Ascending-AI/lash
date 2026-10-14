@@ -409,11 +409,13 @@ fn uncut_labels() -> Vec<CommitLabel> {
     vec![
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
+        CommitLabel::MODEL_ANSWER,
         CommitLabel::MODEL_DONE,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::TURN_COMMIT,
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
+        CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
         CommitLabel::SESSION_RELEASE,
     ]

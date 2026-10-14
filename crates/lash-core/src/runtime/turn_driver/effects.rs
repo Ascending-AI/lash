@@ -292,23 +292,25 @@ impl RuntimeTurnDriver<'_> {
         )
     }
 
-    /// Phase 2 of [`RuntimeTurnDriver::invoke_turn_llm_effect`].
+    /// Derive the response of model call `id` from its receipt: `response`,
+    /// the raw completion, through `plan`, with the stream `capsule`
+    /// recorded.
     pub(super) async fn invoke_assistant_response_hooks_effect(
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
         response: LlmResponse,
         plan: crate::runtime::AssistantResponsePlan,
-        stream_hook_states: Vec<crate::runtime::AssistantStreamHookState>,
+        capsule: crate::runtime::AssistantStreamCapsule,
         event_tx: &TurnObserver,
     ) -> Result<LlmResponse, RuntimeEffectControllerError> {
-        // Rebuilt rather than threaded through: phase 1's invocation is a pure
-        // function of the same turn identity, so this is the identical parent
-        // and the causal edge survives a redrive that only runs phase 2.
-        let phase_one = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
+        // Rebuilt rather than threaded through: the call's invocation is a
+        // pure function of the same turn identity, so this is the identical
+        // parent on every derivation, restored or live.
+        let call = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
         let invocation = crate::runtime::causal::turn_phase_effect_invocation(
             self.scoped_effect_controller.execution_scope(),
-            &phase_one,
+            &call,
             id,
             RuntimeEffectKind::AssistantResponseHooks,
         );
@@ -321,14 +323,14 @@ impl RuntimeTurnDriver<'_> {
                     RuntimeEffectCommand::AssistantResponseHooks {
                         response: Box::new(response),
                         plan,
-                        stream_hook_states,
+                        capsule: Box::new(capsule),
                     },
                 ),
                 RuntimeEffectOutcome::into_assistant_response_hooks,
             )
             .await?;
-        // Emitted from the decoded outcome, so a replayed phase 2 serves the
-        // recorded events rather than re-running the hooks that produced them.
+        // The derivation's events publish once it answers; a derivation that
+        // faults publishes none, and the next runs the hooks again.
         for emitted in events {
             for event in
                 crate::plugin::plugin_runtime_session_events(&emitted.plugin_id, emitted.events)

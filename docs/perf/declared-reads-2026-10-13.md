@@ -83,7 +83,7 @@ Tracing removes another 50 commits and 50 `decide` facts. The extra removed
 ledger has no recorded calls needs none.
 
 The large projection control outlasts its first compute slice and pays one
-standalone `model.done`, as [ADR 0142](../adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md)
+standalone `model.done`, as [ADR 0142](../adr/0142-a-cells-first-save-carries-its-turns-model-response.md)
 requires. Read already committed that response with its initial plan. This
 explains the control's extra enclosing transaction; it changes no per-read
 count. Read's initial save adds fixed IPC traffic, and the large Read/control

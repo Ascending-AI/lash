@@ -97,19 +97,21 @@ and [SQLite's configuration](crates/lash-sqlite-store/src/conn.rs).
   and [retry admission](crates/lash-core-execution/src/runtime/actor/round/rounds.rs).
   Laws: [the mixed-round crash matrix and attempt cap](crates/lash-durable-test/tests/round_crash_matrix.rs)
   (`the_attempt_cap_ends_a_repeatable_call`).
-- **Model calls can be sent and charged again before their response commits.**
-  Recovery re-sends the pinned request while its recorded deadline allows,
-  including a crash after the provider answered but before the response commit
-  ([ADR 0132 §4](docs/adr/0132-durability-is-state-first-over-the-lash-store.md#4-turns-restore-from-their-checkpoint)).
-  A whole-node crash during a cell's first slice, before the first save carrying
-  the held response, can cost at most one extra provider call *per crash in that
-  window*. Repeated crashes can cost more; the replacement answer may differ.
-  A worker failure can avoid this resend if the surviving node commits the held
-  response. See [ADR 0142 (FIG-6108)](docs/adr/0142-a-whole-node-crash-in-a-cells-first-slice-may-re-send-one-model-call.md).
-  Enforcement: [model send and restore](crates/lash-core/src/runtime/durable/model_call.rs)
-  and [held-response phases](crates/lash-core/src/runtime/durable/phases.rs).
-  Law: [cell restore](crates/lash-durable-test/tests/cell_restore_laws.rs)
-  (`a_re_sent_call_replaces_its_cell_on_sqlite_memory`).
+- **A durably recorded response of a durable turn-model call is never
+  purchased again.** The turn commits the provider's raw response, with what
+  its stream hooks saw, as the call's receipt (`model.answer`) before any
+  stream-finished or response hook runs. A crash after the receipt commits
+  derives the response again from the receipt on any node: hooks run again,
+  the provider is not asked again. Recovery re-sends the pinned request only
+  for a call with no receipt, while its recorded deadline allows; a crash
+  after the provider answered but before the receipt commits can therefore
+  still cost a second provider call, whose answer may differ
+  ([ADR 0132 §4](docs/adr/0132-durability-is-state-first-over-the-lash-store.md#4-turns-restore-from-their-checkpoint),
+  [ADR 0142](docs/adr/0142-a-cells-first-save-carries-its-turns-model-response.md)).
+  Model calls a tool owns (direct calls) and the unowned client are outside
+  this guarantee. Enforcement: [model send, receipt and restore](crates/lash-core/src/runtime/durable/model_call.rs)
+  and [phases](crates/lash-core/src/runtime/durable/phases.rs).
+  Laws: [model answer receipts](crates/lash-durable-test/tests/model_answer_receipt_laws.rs).
 - **Exactly-once external behaviour is the host's job.** Lash supplies a stable
   `ToolCallId`, exposed as `AttemptContext::call_id()`, across crash recovery and
   reported-failure retries of the same logical tool call. The host and external

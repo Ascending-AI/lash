@@ -1224,16 +1224,17 @@ pub mod runtime {
     pub use lash_core::runtime::current_epoch_ms;
     pub use lash_core::runtime::{
         AdmittedDirectSend, AdmittedScope, AssembledTurn, AssistantResponseHookEvents,
-        AssistantResponsePlan, AssistantStreamHookState, CheckpointAdmittedSet,
-        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
-        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
-        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
-        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
+        AssistantResponsePlan, AssistantStreamCapsule, AssistantStreamHookState,
+        CheckpointAdmittedSet, DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost,
+        EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord, NoopEventSink,
+        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome, ProcessListSelection,
+        RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+        RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec,
+        TraceEmitter, TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef,
+        WorkCadenceError,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

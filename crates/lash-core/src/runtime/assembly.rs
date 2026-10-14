@@ -177,6 +177,9 @@ pub(super) struct LlmStreamState<'a> {
     /// tail through the plugin transform, while a non-prefix correction seals
     /// with the provider's text verbatim.
     pub(super) block_raw_text: &'a mut std::collections::BTreeMap<String, String>,
+    /// Every visible chunk handed to the stream hooks since the attempt
+    /// began, raw: the receipt's capsule, which a derivation replays.
+    pub(super) stream_chunks: &'a mut Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

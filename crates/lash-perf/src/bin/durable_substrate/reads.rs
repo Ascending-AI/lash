@@ -276,12 +276,17 @@ fn assert_geometry(
     let labels = crate::support::by_label(transactions);
     let actual_facts = facts(transactions);
     let recorded = variant.recorded();
-    let mut expected = BTreeMap::from([("model.start", 2), ("turn.admit", 1), ("turn.commit", 1)]);
+    let mut expected = BTreeMap::from([
+        ("model.start", 2),
+        ("model.answer", 2),
+        ("turn.admit", 1),
+        ("turn.commit", 1),
+    ]);
     if variant != Variant::Projection {
         expected.insert("model.done+cell.snapshot+admit", 1);
     } else if payload == PAYLOADS[1] {
         // ADR 0142: the large projection chain outlasts its first compute
-        // slice, so the held model response commits alone. A Read plan
+        // slice, so the held derived model response commits alone. A Read plan
         // already committed it before the first statement.
         expected.insert("model.done", 1);
     }
