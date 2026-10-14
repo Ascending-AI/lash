@@ -33,6 +33,7 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
   .started .dot { background: var(--run); } .succeeded .dot { background: var(--ok); }
   .waiting .dot { background: var(--wait); } .failed .dot { background: var(--bad); }
+  .incomplete .dot { background: transparent; border: 1px dashed var(--muted); }
   .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
   .tabs button.on { border-color: var(--run); color: var(--run); }
   .bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin: 6px 0; }
@@ -76,6 +77,7 @@
       <button id="run" class="primary">Run</button>
       <button id="approve" hidden>Approve</button>
       <span class="meta" id="run-status"></span>
+      <span class="meta" id="run-notice" role="status"></span>
     </div>
     <div class="bar"><div id="progress"></div></div>
     <dl id="display"></dl>
@@ -167,6 +169,7 @@ async function run() {
   statuses = new Map();
   renderStatements();
   $("run-status").textContent = "starting";
+  $("run-notice").textContent = "";
   try {
     const response = await fetch("/run", { method: "POST" });
     if (!response.ok) throw (await response.json()).error;
@@ -194,8 +197,15 @@ async function run() {
 }
 
 function observe(event) {
-  if (event.site) statuses.set(key(event.site), event.status);
-  else $("run-status").textContent = `${event.status}${event.error ? `: ${event.error}` : ""}`;
+  if (event.reset) {
+    statuses.clear();
+    $("approve").hidden = true;
+    $("approve").onclick = null;
+    $("run-status").textContent = "Recovering observation";
+    $("run-notice").textContent = event.error ?? "Observation gap: prior live evidence was discarded.";
+  }
+  if (event.site && !event.callOnly) statuses.set(key(event.site), event.status);
+  else if (!event.site && !event.reset && !event.callOnly) $("run-status").textContent = `${event.status}${event.error ? `: ${event.error}` : ""}`;
   const approve = $("approve");
   if (event.approvalKey) {
     approve.hidden = false;

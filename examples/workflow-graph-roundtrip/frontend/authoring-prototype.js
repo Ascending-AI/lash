@@ -26,6 +26,7 @@ let workflow,
   dataView,
   connecting,
   finalOutput,
+  observationGap = false,
   expandedValues = new Map(),
   selected,
   steps = [],
@@ -124,6 +125,7 @@ function show(next, correspondence) {
   if (!sameEntry || !correspondence) runInputs = initialInputs(next);
   connecting = undefined;
   finalOutput = undefined;
+  observationGap = false;
   statuses = new Map();
   calls = new Map();
   statementNodes = new Map(
@@ -380,6 +382,7 @@ async function run() {
   statuses = new Map();
   calls = new Map();
   finalOutput = undefined;
+  observationGap = false;
   renderInvocationOutput();
   if (selected) renderCallData(selected);
   renderCanvas();
@@ -387,16 +390,46 @@ async function run() {
   $("run-status").textContent = "Running";
   const version = workflow.version;
   let sawTerminal = false;
+  const traceLinks = new Map();
   function observe(event) {
     if (event.workflowVersion !== version) {
       output("Ignored an event for a different workflow revision.", true);
       return;
     }
+    if (event.reset) {
+      statuses.clear();
+      calls.clear();
+      traceLinks.clear();
+      finalOutput = undefined;
+      observationGap = true;
+      sawTerminal = false;
+      $("approve").hidden = true;
+      $("approve").onclick = null;
+      $("run-output").replaceChildren();
+      $("run-status").textContent = "Recovering observation";
+      output(
+        event.error ??
+          "Observation gap: live evidence was discarded; retained outcomes follow.",
+      );
+      const display = event.display ?? {};
+      for (const message of display.messages ?? []) output(message);
+      for (const [name, value] of Object.entries(display.statuses ?? {}))
+        output(`${name}: ${value}`);
+      for (const [name, items] of Object.entries(display.lists ?? {}))
+        output(`${name}: ${items.join(", ")}`);
+      for (const [name, value] of Object.entries(display.lights ?? {}))
+        output(`${name}: ${value}`);
+      if (display.progress !== undefined)
+        output(`Progress ${display.progress}%`);
+      renderInvocationOutput();
+      if (selected) renderCallData(selected);
+    }
     if (event.output !== undefined) {
       finalOutput = event.output;
       renderInvocationOutput();
     }
-    if (event.site) statuses.set(key(event.site), event.status);
+    if (event.site && !event.callOnly)
+      statuses.set(key(event.site), event.status);
     if (event.site && event.callId) {
       const site = key(event.site);
       const occurrences = calls.get(site) ?? new Map();
@@ -406,21 +439,22 @@ async function run() {
         (node) => node.s?.action && key(node.s.action) === site,
       );
       if (node) {
-        const button = el(
-          "button",
-          "trace-link",
-          `${node.info.name} · ${event.status} · View data`,
-        );
-        button.onclick = () => {
-          $("execution").close();
-          openNode(node);
-        };
-        $("run-output").append(button);
+        let button = traceLinks.get(event.callId);
+        if (!button) {
+          button = el("button", "trace-link");
+          button.onclick = () => {
+            $("execution").close();
+            openNode(node);
+          };
+          traceLinks.set(event.callId, button);
+          $("run-output").append(button);
+        }
+        button.textContent = `${node.info.name} · ${event.status} · View data`;
       }
       if (selected?.action && key(selected.action) === site)
         renderCallData(selected);
     }
-    if (!event.site) {
+    if (!event.site && !event.reset && !event.callOnly) {
       $("run-status").textContent = event.status;
       if (event.status === "succeeded" || event.status === "failed")
         sawTerminal = true;
@@ -753,7 +787,11 @@ function drawNode(node, x, y) {
   card.style.left = x + "px";
   card.style.top = y + "px";
   const state = node.s?.action && statuses.get(key(node.s.action));
-  if (state) card.classList.add(state);
+  if (state) {
+    card.classList.add(state);
+    if (state === "incomplete")
+      card.title = "Incomplete evidence: this step's outcome was not observed.";
+  }
   if (
     node.s &&
     selected &&
@@ -775,7 +813,13 @@ function drawNode(node, x, y) {
       el(
         "span",
         "data-status",
-        state === "succeeded" ? "✓" : state === "failed" ? "!" : "…",
+        state === "succeeded"
+          ? "✓"
+          : state === "failed"
+            ? "!"
+            : state === "incomplete"
+              ? "?"
+              : "…",
       ),
     );
   header.onclick = () => openNode(node);
@@ -1211,9 +1255,11 @@ function renderCallData(statement) {
       el(
         "p",
         "help",
-        running
-          ? "Waiting for this step to settle…"
-          : "Run this workflow to inspect its inputs and outputs.",
+        observationGap
+          ? "No call data is available in the replacement snapshot. Earlier live observations were discarded."
+          : running
+            ? "Waiting for this step to settle…"
+            : "Run this workflow to inspect its inputs and outputs.",
       ),
     );
     return;
@@ -1231,7 +1277,13 @@ function renderCallData(statement) {
     const record = records[Number(select.value)];
     body.replaceChildren(el("p", "help", `Call ${record.callId}`));
     if (!record.call) {
-      body.append(el("p", "help", "This call's data is no longer available."));
+      body.append(
+        el(
+          "p",
+          "help",
+          "Call data is unavailable. It may be unfinished or not retained.",
+        ),
+      );
       return;
     }
     body.append(

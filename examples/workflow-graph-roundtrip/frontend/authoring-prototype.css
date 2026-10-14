@@ -999,3 +999,11 @@ dialog::backdrop {
   color: inherit;
   border-color: currentColor;
 }
+
+.data-node.incomplete {
+  border-color: #9a8a6d;
+  border-style: dashed;
+}
+.data-node.incomplete .data-status {
+  color: #796545;
+}

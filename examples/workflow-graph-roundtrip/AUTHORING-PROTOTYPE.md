@@ -164,3 +164,21 @@ record through `core.processes().tool_call`. Output display uses the public
 owns the definition/site/call identities, execution and records; this example
 owns the SSE fields, mock tools, app labels and inspector. No dialect-specific
 analysis or new core observation API is required.
+
+## Observation adapter behavior
+
+The adapter preserves `incomplete` when an observed step has no terminal evidence;
+a successful invocation does not prove that step succeeded. The canvas marks this
+state with a dashed border and question mark.
+
+A recovering-feed gap emits a reset before replaying retained evidence. Both
+example clients discard prior node status and approval state. The visual editor
+also discards call rows, trace links and the old invocation output, then reports
+that live evidence was lost. The host's applied display state remains intact.
+
+Live completed-node observations expose call IDs to the inspector independently
+of the bounded durable effect summary. Call-only updates do not overwrite a
+node's aggregate status, and the visual editor merges repeated live/durable
+updates by call ID. This improves continuous live inspection; it does not make
+the retained history complete after a gap or restart. The runtime's existing
+history cap and retention rules still apply.
