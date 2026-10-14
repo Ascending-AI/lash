@@ -12,59 +12,27 @@ use std::sync::Arc;
 use lash_core::LiveReplayStoreError;
 use lash_sansio::SessionId;
 use sqlx::Row as _;
-use sqlx::postgres::PgListener;
 
 use super::Shared;
 use super::codec::unpack_doorbells;
 use super::schema::{db_error, ensure_incarnation, position};
 
 pub(super) async fn run(shared: Arc<Shared>) {
-    let mut failures = 0_u32;
-    let mut epoch = 0_u64;
-    loop {
-        match connect(&shared).await {
-            Ok(mut listener) => {
-                epoch += 1;
-                shared.listening.send_replace(Some(epoch));
-                failures = 0;
-                shared.ring_all();
-                loop {
-                    match listener.try_recv().await {
-                        Ok(Some(notification)) => {
-                            let doorbells = unpack_doorbells(notification.payload());
-                            shared.ring_mirror(&doorbells);
-                            shared.ring_sessions(&doorbells);
-                        }
-                        Ok(None) => break,
-                        Err(error) => {
-                            tracing::warn!(%error, "the live replay listener failed");
-                            break;
-                        }
-                    }
+    shared
+        .listener
+        .run(
+            || reload(&shared),
+            |payload| match payload {
+                Some(payload) => {
+                    let doorbells = unpack_doorbells(payload);
+                    shared.ring_mirror(&doorbells);
+                    shared.ring_sessions(&doorbells);
                 }
-                shared.listening.send_replace(None);
-                tracing::warn!("the live replay listener lost its connection; reconnecting");
-            }
-            Err(error) => {
-                tracing::warn!(%error, "the live replay listener could not connect");
-            }
-        }
-        tokio::time::sleep(shared.reconnect.wait(failures)).await;
-        failures = failures.saturating_add(1);
-    }
-}
-
-/// Listen, confirmed, then load what the tables hold.
-async fn connect(shared: &Shared) -> Result<PgListener, LiveReplayStoreError> {
-    let mut listener = PgListener::connect_with(&shared.listener_pool)
-        .await
-        .map_err(db_error("listen"))?;
-    listener
-        .listen(&shared.sql.channel)
-        .await
-        .map_err(db_error("listen"))?;
-    reload(shared).await?;
-    Ok(listener)
+                None => shared.ring_all(),
+            },
+            db_error("listen"),
+        )
+        .await;
 }
 
 /// Replace the mirror with the incarnation, heads and revision runs the

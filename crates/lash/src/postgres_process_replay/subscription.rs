@@ -1,7 +1,6 @@
 //! Replay and subscription: reads judged against the head in one snapshot,
 //! and a live tail that re-reads the table whenever its doorbell rings.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use futures_util::Stream;
@@ -93,83 +92,9 @@ pub(super) async fn read(
     Ok(Read::Events(events))
 }
 
-/// A subscription's live tail: it waits for its process's doorbell and
-/// reads the rows past the last position it delivered. A missed doorbell
-/// only delays it; the table is the log.
-struct LiveTail {
-    shared: Arc<Shared>,
-    process_id: ProcessId,
-    incarnation: String,
-    last: u64,
-    bell: BellGuard,
-    queue: VecDeque<Arc<ProcessObservationEvent>>,
-    done: bool,
-}
-
 type LiveItem = Result<Arc<ProcessObservationEvent>, ProcessReplayStoreError>;
 
-impl LiveTail {
-    async fn next(&mut self) -> Option<LiveItem> {
-        loop {
-            if let Some(event) = self.queue.pop_front() {
-                return Some(Ok(event));
-            }
-            if self.done {
-                return None;
-            }
-            if self.bell.receiver.changed().await.is_err() {
-                // The store is gone.
-                return self.end(ProcessReplayStoreError::Closed);
-            }
-            let cursor = Incarnation {
-                id: self.incarnation.clone(),
-                watermark: 0,
-            }
-            .cursor(&self.process_id, ProcessSequence::new(0), self.last);
-            let parsed = match cursor.parse() {
-                Ok(parsed) => parsed,
-                Err(error) => return self.end(error.into()),
-            };
-            match read(&self.shared, &parsed).await {
-                Ok(Read::Events(events)) => {
-                    if let Some(last) = events.last() {
-                        self.last = last.live_position();
-                        // A full window may have more behind it.
-                        if events.len() >= self.shared.config.max_events_per_process {
-                            self.bell.receiver.mark_changed();
-                        }
-                    }
-                    self.queue.extend(events);
-                }
-                // The window moved past this subscriber: it lagged.
-                Ok(Read::Gap(ProcessReplayGapReason::Trimmed)) => {
-                    return self.end(ProcessReplayStoreError::SubscriberLagged(1));
-                }
-                // Invalidated, evicted, forgotten or rotated: the
-                // generation it followed ended.
-                Ok(Read::Gap(ProcessReplayGapReason::Unavailable)) => {
-                    return self.end(ProcessReplayStoreError::Closed);
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        process_id = %self.process_id,
-                        %error,
-                        "a process replay tail could not read its process; the observer resubscribes"
-                    );
-                    return self.end(ProcessReplayStoreError::Closed);
-                }
-            }
-        }
-    }
-
-    fn end(&mut self, error: ProcessReplayStoreError) -> Option<LiveItem> {
-        self.done = true;
-        Some(Err(error))
-    }
-}
-
-/// The live tail after `last` for a subscriber whose doorbell `bell` was
-/// registered before its replay was read.
+/// The feed owns cursor and gap semantics; shared plumbing drains its tail.
 pub(super) fn live_tail(
     shared: Arc<Shared>,
     process_id: ProcessId,
@@ -177,17 +102,40 @@ pub(super) fn live_tail(
     last: u64,
     bell: BellGuard,
 ) -> impl Stream<Item = LiveItem> + Send + 'static {
-    let tail = LiveTail {
-        shared,
-        process_id,
-        incarnation,
-        last,
+    crate::postgres_replay::live_tail(
         bell,
-        queue: VecDeque::new(),
-        done: false,
-    };
-    futures_util::stream::unfold(tail, |mut tail| async move {
-        let item = tail.next().await?;
-        Some((item, tail))
-    })
+        last,
+        shared.config.max_events_per_process,
+        ProcessReplayStoreError::Closed,
+        move |last| {
+            let shared = Arc::clone(&shared);
+            let process_id = process_id.clone();
+            let incarnation = incarnation.clone();
+            async move {
+                let cursor = Incarnation {
+                    id: incarnation,
+                    watermark: 0,
+                }
+                .cursor(&process_id, ProcessSequence::new(0), last);
+                let parsed = cursor.parse()?;
+                match read(&shared, &parsed).await {
+                    Ok(Read::Events(events)) => {
+                        let position = events.last().map_or(last, |event| event.live_position());
+                        Ok((position, events))
+                    }
+                    Ok(Read::Gap(ProcessReplayGapReason::Trimmed)) => {
+                        Err(ProcessReplayStoreError::SubscriberLagged(1))
+                    }
+                    Ok(Read::Gap(ProcessReplayGapReason::Unavailable)) => {
+                        Err(ProcessReplayStoreError::Closed)
+                    }
+                    Err(error) => {
+                        tracing::warn!(process_id = %process_id, %error,
+                            "a process replay tail could not read its process; the observer resubscribes");
+                        Err(ProcessReplayStoreError::Closed)
+                    }
+                }
+            }
+        },
+    )
 }

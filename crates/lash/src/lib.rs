@@ -105,6 +105,8 @@ mod postgres_host;
 mod postgres_live_replay;
 #[cfg(feature = "postgres")]
 mod postgres_process_replay;
+#[cfg(feature = "postgres")]
+mod postgres_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
 mod process_authority;

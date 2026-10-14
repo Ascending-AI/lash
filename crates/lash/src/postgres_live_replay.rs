@@ -33,7 +33,6 @@
 //! publications and every doorbell; what it has not learned only makes it
 //! answer earlier.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use lash_core::{
@@ -42,16 +41,18 @@ use lash_core::{
     SessionRevision,
 };
 use lash_postgres_store::host::{
-    ConnectionRole, PostgresHostConfig, ReconnectPolicy, ReplayDataPolicy, ReplaySchemaMode,
-    RetryPolicy,
+    ConnectionRole, PostgresHostConfig, ReplayDataPolicy, ReplaySchemaMode, RetryPolicy,
 };
 use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt as _;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+
+use crate::postgres_replay::{self, Bells, Listener};
+type BellGuard = postgres_replay::BellGuard<SessionId>;
 
 mod cleanup;
 mod codec;
@@ -108,46 +109,15 @@ impl std::fmt::Debug for PostgresLiveReplayStore {
 struct Shared {
     /// Publication, reads, cleanup and reloads.
     pool: sqlx::PgPool,
-    /// The listener's own session.
-    listener_pool: sqlx::PgPool,
+    listener: Listener,
     config: ReplayDataPolicy,
-    /// How long a subscribe or a connect waits for the listener.
-    listener_wait: std::time::Duration,
-    reconnect: ReconnectPolicy,
     retry: RetryPolicy,
     /// The replay guard profile each publication and cleanup transaction
     /// begins with.
     prelude: TransactionPrelude,
     sql: Statements,
     mirror: StdMutex<Mirror>,
-    /// `Some(epoch)` while the listener's LISTEN is confirmed.
-    listening: watch::Sender<Option<u64>>,
-    bells: StdMutex<HashMap<SessionId, Bell>>,
-}
-
-/// A session's doorbell on this replica, refcounted by its subscribers.
-struct Bell {
-    sender: watch::Sender<u64>,
-    subscribers: usize,
-}
-
-/// One subscriber's hold on its session's doorbell.
-struct BellGuard {
-    shared: Arc<Shared>,
-    session_id: SessionId,
-    receiver: watch::Receiver<u64>,
-}
-
-impl Drop for BellGuard {
-    fn drop(&mut self) {
-        let mut bells = self.shared.bells.lock_recover();
-        if let Some(bell) = bells.get_mut(&self.session_id) {
-            bell.subscribers -= 1;
-            if bell.subscribers == 0 {
-                bells.remove(&self.session_id);
-            }
-        }
-    }
+    bells: Bells<SessionId>,
 }
 
 impl Shared {
@@ -179,11 +149,7 @@ impl Shared {
 
     /// The sessions this replica's subscribers follow.
     fn followed(&self) -> Vec<String> {
-        self.bells
-            .lock_recover()
-            .keys()
-            .map(ToString::to_string)
-            .collect()
+        self.bells.followed()
     }
 
     /// Wake this replica's subscribers of every session `doorbells` name;
@@ -196,15 +162,9 @@ impl Shared {
             self.ring_all();
             return;
         }
-        let bells = self.bells.lock_recover();
-        if bells.is_empty() {
-            return;
-        }
         let ring = |session: &str| {
-            if let Ok(session_id) = SessionId::parse(session)
-                && let Some(bell) = bells.get(&session_id)
-            {
-                bell.sender.send_modify(|rings| *rings += 1);
+            if let Ok(session_id) = SessionId::parse(session) {
+                self.bells.ring([session_id]);
             }
         };
         for doorbell in doorbells {
@@ -225,39 +185,20 @@ impl Shared {
     /// Wake every subscriber on this replica: each re-reads from its
     /// cursor.
     fn ring_all(&self) {
-        for bell in self.bells.lock_recover().values() {
-            bell.sender.send_modify(|rings| *rings += 1);
-        }
+        self.bells.ring_all();
     }
 
-    /// Register a subscriber's doorbell, once the listener's LISTEN is
-    /// confirmed: every doorbell rung after this reaches it.
-    async fn bell(
-        self: &Arc<Self>,
-        session_id: &SessionId,
-    ) -> Result<BellGuard, LiveReplayStoreError> {
-        let mut listening = self.listening.subscribe();
-        tokio::time::timeout(self.listener_wait, listening.wait_for(Option::is_some))
-            .await
-            .map_err(|_| {
+    /// Register after LISTEN is confirmed and before reading the replay.
+    async fn bell(&self, session_id: &SessionId) -> Result<BellGuard, LiveReplayStoreError> {
+        self.listener
+            .wait(
                 LiveReplayStoreError::Store(
                     "postgres live replay listener is not connected".to_string(),
-                )
-            })?
-            .map_err(|_| LiveReplayStoreError::Closed)?;
-        let mut bells = self.bells.lock_recover();
-        let bell = bells.entry(session_id.clone()).or_insert_with(|| Bell {
-            sender: watch::channel(0).0,
-            subscribers: 0,
-        });
-        bell.subscribers += 1;
-        let mut receiver = bell.sender.subscribe();
-        receiver.mark_unchanged();
-        Ok(BellGuard {
-            shared: Arc::clone(self),
-            session_id: session_id.clone(),
-            receiver,
-        })
+                ),
+                LiveReplayStoreError::Closed,
+            )
+            .await?;
+        Ok(self.bells.register(session_id.clone()))
     }
 }
 
@@ -299,13 +240,15 @@ impl PostgresLiveReplayStore {
         let incarnation = schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
             pool,
-            listener_pool,
+            listener: Listener::new(
+                listener_pool,
+                sql.channel.clone(),
+                policy.reconnect,
+                policy.listener.acquire_timeout,
+            ),
             sql,
             mirror: StdMutex::new(Mirror::new(incarnation)),
-            listening: watch::channel(None).0,
-            bells: StdMutex::new(HashMap::new()),
-            listener_wait: policy.listener.acquire_timeout,
-            reconnect: policy.reconnect,
+            bells: Bells::default(),
             retry: config.retry.live_replay,
             prelude: TransactionPrelude::new(&config.guards.replay),
             config: policy.data,
@@ -322,16 +265,14 @@ impl PostgresLiveReplayStore {
         };
         // The mirror is loaded once the listener confirms, so a cursor
         // handed out after `connect` knows every head.
-        let mut listening = store.shared.listening.subscribe();
-        tokio::time::timeout(
-            store.shared.listener_wait,
-            listening.wait_for(Option::is_some),
-        )
-        .await
-        .map_err(|_| {
-            LiveReplayStoreError::Store("postgres live replay listener did not connect".into())
-        })?
-        .map_err(|_| LiveReplayStoreError::Closed)?;
+        store
+            .shared
+            .listener
+            .wait(
+                LiveReplayStoreError::Store("postgres live replay listener did not connect".into()),
+                LiveReplayStoreError::Closed,
+            )
+            .await?;
         Ok(store)
     }
 
@@ -379,7 +320,7 @@ impl Drop for PostgresLiveReplayStore {
         }
         // Closing every doorbell ends the live tails: their observers
         // resubscribe elsewhere.
-        self.shared.bells.lock_recover().clear();
+        self.shared.bells.clear();
     }
 }
 

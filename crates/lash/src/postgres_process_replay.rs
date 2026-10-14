@@ -38,8 +38,7 @@
 //!   mode. Every connect checks them against the generated shape artifact
 //!   and refuses on drift.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 
 use lash_core::{
     ProcessId, ProcessObservationCursor, ProcessObservationEvent, ProcessReplayEventDraft,
@@ -47,15 +46,16 @@ use lash_core::{
     ProcessReplaySubscription, ProcessSequence,
 };
 use lash_postgres_store::host::{
-    ConnectionRole, PostgresHostConfig, ProcessReplayDataPolicy, ReconnectPolicy, ReplaySchemaMode,
-    RetryPolicy,
+    ConnectionRole, PostgresHostConfig, ProcessReplayDataPolicy, ReplaySchemaMode, RetryPolicy,
 };
 use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
-use lash_sansio::sync::MutexExt as _;
-use tokio::sync::{Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::JoinHandle;
+
+use crate::postgres_replay::{self, Bells, Listener};
+type BellGuard = postgres_replay::BellGuard<String>;
 
 mod cleanup;
 mod codec;
@@ -114,99 +114,43 @@ impl std::fmt::Debug for PostgresProcessReplayStore {
 struct Shared {
     /// Publication, reads and cleanup.
     pool: sqlx::PgPool,
-    /// The listener's own session.
-    listener_pool: sqlx::PgPool,
+    listener: Listener,
     config: ProcessReplayDataPolicy,
-    /// How long a subscribe or a connect waits for the listener.
-    listener_wait: std::time::Duration,
-    reconnect: ReconnectPolicy,
     retry: RetryPolicy,
     /// The replay guard profile each publication and cleanup transaction
     /// begins with.
     prelude: TransactionPrelude,
     sql: Statements,
-    /// `Some(epoch)` while the listener's LISTEN is confirmed.
-    listening: watch::Sender<Option<u64>>,
-    bells: StdMutex<HashMap<String, Bell>>,
-}
-
-/// A process's doorbell on this replica, refcounted by its subscribers.
-struct Bell {
-    sender: watch::Sender<u64>,
-    subscribers: usize,
-}
-
-/// One subscriber's hold on its process's doorbell.
-struct BellGuard {
-    shared: Arc<Shared>,
-    process: String,
-    receiver: watch::Receiver<u64>,
-}
-
-impl Drop for BellGuard {
-    fn drop(&mut self) {
-        let mut bells = self.shared.bells.lock_recover();
-        if let Some(bell) = bells.get_mut(&self.process) {
-            bell.subscribers -= 1;
-            if bell.subscribers == 0 {
-                bells.remove(&self.process);
-            }
-        }
-    }
+    bells: Bells<String>,
 }
 
 impl Shared {
     /// Wake this replica's subscribers of every process `doorbell` names:
     /// each re-reads from its cursor.
     fn ring(&self, doorbell: &Doorbell) {
-        let bells = self.bells.lock_recover();
         if doorbell.all {
-            for bell in bells.values() {
-                bell.sender.send_modify(|rings| *rings += 1);
-            }
-            return;
-        }
-        for process in &doorbell.processes {
-            if let Some(bell) = bells.get(process) {
-                bell.sender.send_modify(|rings| *rings += 1);
-            }
+            self.bells.ring_all();
+        } else {
+            self.bells.ring(doorbell.processes.iter().cloned());
         }
     }
 
     /// The processes this replica's subscribers follow.
     fn followed(&self) -> Vec<String> {
-        self.bells.lock_recover().keys().cloned().collect()
+        self.bells.followed()
     }
 
-    /// Register a subscriber's doorbell, once the listener's LISTEN is
-    /// confirmed: every doorbell rung after this reaches it.
-    async fn bell(
-        self: &Arc<Self>,
-        process_id: &ProcessId,
-    ) -> Result<BellGuard, ProcessReplayStoreError> {
-        let mut listening = self.listening.subscribe();
-        tokio::time::timeout(self.listener_wait, listening.wait_for(Option::is_some))
-            .await
-            .map_err(|_| {
+    /// Register after LISTEN is confirmed and before reading the replay.
+    async fn bell(&self, process_id: &ProcessId) -> Result<BellGuard, ProcessReplayStoreError> {
+        self.listener
+            .wait(
                 ProcessReplayStoreError::Store(
                     "postgres process replay listener is not connected".to_string(),
-                )
-            })?
-            .map_err(|_| ProcessReplayStoreError::Closed)?;
-        let process = process_id.to_string();
-        let mut bells = self.bells.lock_recover();
-        let bell = bells.entry(process.clone()).or_insert_with(|| Bell {
-            sender: watch::channel(0).0,
-            subscribers: 0,
-        });
-        bell.subscribers += 1;
-        let mut receiver = bell.sender.subscribe();
-        receiver.mark_unchanged();
-        Ok(BellGuard {
-            shared: Arc::clone(self),
-            process,
-            receiver,
-        })
+                ),
+                ProcessReplayStoreError::Closed,
+            )
+            .await?;
+        Ok(self.bells.register(process_id.to_string()))
     }
 }
 
@@ -259,12 +203,14 @@ impl PostgresProcessReplayStore {
         schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
             pool,
-            listener_pool,
+            listener: Listener::new(
+                listener_pool,
+                sql.channel.clone(),
+                policy.reconnect,
+                policy.listener.acquire_timeout,
+            ),
             sql,
-            listening: watch::channel(None).0,
-            bells: StdMutex::new(HashMap::new()),
-            listener_wait: policy.listener.acquire_timeout,
-            reconnect: policy.reconnect,
+            bells: Bells::default(),
             retry: config.retry.process_replay,
             prelude: TransactionPrelude::new(&config.guards.replay),
             config: policy.data,
@@ -281,18 +227,16 @@ impl PostgresProcessReplayStore {
             pending_bytes: Arc::new(Semaphore::new(shared.config.max_pending_bytes)),
             shared,
         };
-        let mut listening = store.shared.listening.subscribe();
-        tokio::time::timeout(
-            store.shared.listener_wait,
-            listening.wait_for(Option::is_some),
-        )
-        .await
-        .map_err(|_| {
-            ProcessReplayStoreError::Store(
-                "postgres process replay listener did not connect".into(),
+        store
+            .shared
+            .listener
+            .wait(
+                ProcessReplayStoreError::Store(
+                    "postgres process replay listener did not connect".into(),
+                ),
+                ProcessReplayStoreError::Closed,
             )
-        })?
-        .map_err(|_| ProcessReplayStoreError::Closed)?;
+            .await?;
         Ok(store)
     }
 
@@ -340,7 +284,7 @@ impl Drop for PostgresProcessReplayStore {
         }
         // Closing every doorbell ends the live tails: their observers
         // resubscribe elsewhere.
-        self.shared.bells.lock_recover().clear();
+        self.shared.bells.clear();
     }
 }
 
@@ -408,7 +352,7 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
         let bell = self.shared.bell(&parsed.process_id).await?;
         // From here the replica's cleanup passes keep the head; this covers
         // the time until the first of them.
-        cleanup::keep(&self.shared, std::slice::from_ref(&bell.process)).await?;
+        cleanup::keep(&self.shared, &[parsed.process_id.to_string()]).await?;
         let events = match subscription::read(&self.shared, &parsed).await? {
             Read::Gap(reason) => return Ok(ProcessReplaySubscribeOutcome::Gap(reason)),
             Read::Events(events) => events,
