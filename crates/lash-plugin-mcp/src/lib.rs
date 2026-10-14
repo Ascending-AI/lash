@@ -78,6 +78,8 @@
 //! completion source or process adapter; deferred work and isolation refuse
 //! before send.
 
+#![deny(clippy::future_not_send)]
+
 mod call_failure;
 pub mod config;
 mod diagnostics;

@@ -119,7 +119,7 @@ impl Observed {
     }
 
     /// Until `ready` holds, within [`WITHIN`].
-    async fn until(&self, what: &str, ready: impl Fn(&Self) -> bool) {
+    async fn until(&self, what: &str, ready: impl Fn(&Self) -> bool + Send + Sync) {
         tokio::time::timeout(WITHIN, async {
             while !ready(self) {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;

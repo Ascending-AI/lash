@@ -24,7 +24,12 @@ const STAYS_PENDING_FOR: std::time::Duration = std::time::Duration::from_secs(2)
 const TOOL: &str = "held_tool";
 
 /// The stores a law's deployments run over, and what must outlive them.
-async fn stores(storage: &str) -> (Arc<dyn lash_core::StoreSet>, Vec<Box<dyn std::any::Any>>) {
+async fn stores(
+    storage: &str,
+) -> (
+    Arc<dyn lash_core::StoreSet>,
+    Vec<Box<dyn std::any::Any + Send>>,
+) {
     match storage {
         "sqlite_memory" => (sqlite_memory_store_set().await, Vec::new()),
         "postgres" => {
@@ -156,7 +161,10 @@ impl Stranded {
 
 const RUN: &str = "stranded-turn";
 
-async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std::any::Any>>)> {
+async fn stranded(
+    storage: &str,
+    id: &str,
+) -> Result<(Stranded, Vec<Box<dyn std::any::Any + Send>>)> {
     stranded_over(storage, id, std::convert::identity).await
 }
 
@@ -164,8 +172,8 @@ async fn stranded(storage: &str, id: &str) -> Result<(Stranded, Vec<Box<dyn std:
 pub(super) async fn stranded_over(
     storage: &str,
     id: &str,
-    layer: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet>,
-) -> Result<(Stranded, Vec<Box<dyn std::any::Any>>)> {
+    layer: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet> + Send,
+) -> Result<(Stranded, Vec<Box<dyn std::any::Any + Send>>)> {
     let (stores, held) = stores(storage).await;
     let backend = lash_conformance::backend_over(layer(stores));
     let calls = Calls::default();

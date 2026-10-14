@@ -35,6 +35,8 @@
 //! The SQL lives in one module per dialect, in the store crates that
 //! implement [`DurableStore`]; this crate holds none.
 
+#![deny(clippy::future_not_send)]
+
 mod config;
 mod dispatch;
 pub mod domain;

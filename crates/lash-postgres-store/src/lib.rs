@@ -37,6 +37,8 @@
 //! [`PostgresStorage::schema_advisory_lock_key`] publishes the key so a host's
 //! migrations can participate.
 
+#![deny(clippy::future_not_send)]
+
 /// The dependency version used by this backend's public signatures.
 pub use sqlx;
 

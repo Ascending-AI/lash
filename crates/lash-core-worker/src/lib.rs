@@ -1,3 +1,5 @@
+#![deny(clippy::future_not_send)]
+
 #[doc(hidden)]
 pub use lash_core::JsonSchema;
 #[doc(hidden)]

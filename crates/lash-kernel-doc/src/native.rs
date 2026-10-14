@@ -218,7 +218,7 @@ pub struct PreparedNative {
 }
 
 /// Where a library function's definition is looked up by identity.
-pub trait FunctionCatalog {
+pub trait FunctionCatalog: Send + Sync {
     fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition>;
 }
 

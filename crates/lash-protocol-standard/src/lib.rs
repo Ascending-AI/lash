@@ -16,6 +16,8 @@
 //!   held behind the step's other calls, and refused when one of them
 //!   failed.
 
+#![deny(clippy::future_not_send)]
+
 use lash_sansio::TurnId;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;

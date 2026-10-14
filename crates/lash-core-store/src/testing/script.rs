@@ -609,11 +609,14 @@ impl<S: ?Sized> Scripted<S> {
 
     /// One call of `op`: apply the script before `store` runs and after it
     /// answered. The generated forwarders are the callers.
-    pub async fn call<T, E: ScriptedError>(
+    pub async fn call<T: Send, E: ScriptedError + Send>(
         &self,
-        op: impl Into<Op>,
-        store: impl Future<Output = Result<T, E>>,
-    ) -> Result<T, E> {
+        op: impl Into<Op> + Send,
+        store: impl Future<Output = Result<T, E>> + Send,
+    ) -> Result<T, E>
+    where
+        S: Send + Sync,
+    {
         let mut call = {
             let op = op.into();
             let state = self.shared.state.lock_recover();

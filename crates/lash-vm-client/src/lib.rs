@@ -1,5 +1,7 @@
 //! Parent-owned worker pool, framed transport and the kernel machine a
 //! pooled worker hosts.
+#![deny(clippy::future_not_send)]
+
 mod config;
 mod error;
 /// A kernel run as checkpoint graph state: the broker's adapter.

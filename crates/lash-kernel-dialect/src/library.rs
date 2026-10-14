@@ -13,7 +13,7 @@ use lash_kernel_doc::{
 /// The kernel names a function by identity and lets two definitions share a
 /// name. A front end writes names, so it needs one answer per name; a
 /// library is that answer, and replacing a function is replacing its entry.
-pub trait Library: FunctionCatalog {
+pub trait Library: FunctionCatalog + Send + Sync {
     /// The function `name` stands for.
     fn resolve(&self, name: &str) -> Option<FunctionId>;
 }

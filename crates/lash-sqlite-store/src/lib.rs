@@ -46,6 +46,8 @@
 //! [`DeploymentStore`]: lash_core_execution::DeploymentStore
 //! [`AttachmentReferrers`]: lash_core_execution::AttachmentReferrers
 
+#![deny(clippy::future_not_send)]
+
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;

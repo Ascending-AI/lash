@@ -1,3 +1,5 @@
+#![deny(clippy::future_not_send)]
+
 mod attachment_delivery;
 mod chat;
 pub mod codex;

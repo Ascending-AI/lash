@@ -3,6 +3,8 @@
 //! host-selected [`Dialect`]'s cells are executed, printed values yield
 //! observations, and the dialect's finish form yields the final value.
 
+#![deny(clippy::future_not_send)]
+
 mod catalogue_preview;
 mod cell_scan;
 mod cell_value;

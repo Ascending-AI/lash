@@ -78,6 +78,8 @@
 //! has no allowlist and no exemption mechanism: a gap is fixed by exporting or
 //! by narrowing, never by listing it.
 
+#![deny(clippy::future_not_send)]
+
 /// Administrative facade handles and operations.
 pub mod admin;
 mod artifacts;

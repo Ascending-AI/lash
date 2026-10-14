@@ -14,6 +14,8 @@
 //! answer reads with kernel data; [`ParentHost`] answers a worker-hosted
 //! machine's host reads on the parent. Kernel crates know none of it.
 
+#![deny(clippy::future_not_send)]
+
 mod binding;
 mod boundary;
 mod formats;

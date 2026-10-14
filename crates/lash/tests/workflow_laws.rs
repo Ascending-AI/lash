@@ -998,6 +998,22 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     assert_eq!(read.document.identity(), publication.document.identity());
 }
 
+/// FIG-6215: a multithreaded host can await workflow import in a Send future.
+#[cfg(feature = "typescript")]
+#[test]
+fn typescript_import_with_limits_future_is_send() {
+    fn assert_send<T: Send>(_: T) {}
+
+    let _: fn(&lash::process::HostArtifacts, &lash::process::ProcessEnv) =
+        |artifacts, environment| {
+            assert_send(artifacts.import_typescript_workflow_with_limits(
+                "export async function main() { return null; }",
+                environment,
+                lash::typescript::SourceLimits::standard(),
+            ));
+        };
+}
+
 /// FIG-6009: whole-workflow syntax lowers to entries without process tools,
 /// while a front-end defect preserves its byte span at the host boundary.
 #[cfg(feature = "typescript")]

@@ -1,3 +1,5 @@
+#![deny(clippy::future_not_send)]
+
 #[cfg(feature = "testing")]
 pub mod cache_regression;
 #[cfg(feature = "testing")]

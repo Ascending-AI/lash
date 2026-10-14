@@ -241,7 +241,7 @@ impl PostgresDurableStore {
     /// on a live connection is the read's answer.
     pub(super) async fn read<'a, T>(
         &self,
-        body: impl for<'c> Fn(&'c mut ReadConnection<'a>) -> ReadBody<'c, T>,
+        body: impl for<'c> Fn(&'c mut ReadConnection<'a>) -> ReadBody<'c, T> + Send + Sync,
     ) -> Result<T, DurableError> {
         self.within(CommitCapacity::Work, async {
             let mut connection = ReadConnection {

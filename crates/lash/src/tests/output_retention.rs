@@ -393,7 +393,7 @@ fn collect_retained(
 
 /// A backend over a fresh PostgreSQL store set. An explicitly selected
 /// PostgreSQL test requires the service URL.
-async fn postgres_backend() -> (lash_core::Backend, Box<dyn std::any::Any>) {
+async fn postgres_backend() -> (lash_core::Backend, Box<dyn std::any::Any + Send>) {
     let (stores, held) = postgres_store_set().await;
     (lash_conformance::backend_over(stores), held)
 }

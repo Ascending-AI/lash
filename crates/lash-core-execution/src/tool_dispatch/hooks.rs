@@ -221,7 +221,7 @@ fn attributed_reply<V>(
 /// winner and every displaced terminal, in reduction order, as one
 /// conflict fact attributed to the winner's plugin: once on the trace and
 /// once to the session's observers.
-async fn publish_check_evidence<V: RankedVerdict>(
+async fn publish_check_evidence<V: RankedVerdict + Sync>(
     context: &ToolDispatchContext<'_>,
     phase: crate::ToolCheckPhase,
     record: &CheckRecord<V>,

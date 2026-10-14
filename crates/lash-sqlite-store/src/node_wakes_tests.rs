@@ -389,7 +389,7 @@ impl NodeWakes for ObservedWakes {
 
 async fn evidence_until(
     evidence: &mut mpsc::UnboundedReceiver<WakeEvidence>,
-    reached: impl Fn(&WakeEvidence) -> bool,
+    reached: impl Fn(&WakeEvidence) -> bool + Send + Sync,
 ) -> WakeEvidence {
     // What the runner produced instead, so a hang names the wait it broke.
     let mut passed = Vec::new();

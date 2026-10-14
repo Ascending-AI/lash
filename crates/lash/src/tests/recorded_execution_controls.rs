@@ -387,12 +387,12 @@ async fn applied_then_stale<C, T>(
     id: &str,
     change: C,
     other: C,
-    control: impl Fn(&lash_core::PersistedSessionConfig) -> T,
+    control: impl Fn(&lash_core::PersistedSessionConfig) -> T + Send + Sync,
     changed: T,
 ) -> Result<()>
 where
     C: crate::plugins::ConfigCommand,
-    T: PartialEq + std::fmt::Debug,
+    T: PartialEq + std::fmt::Debug + Send,
 {
     let (core, session) = created_session(id).await?;
     let base = session.admin().config().revision().await?;
@@ -459,7 +459,7 @@ async fn refused_publishes_nothing<T: PartialEq + std::fmt::Debug>(
     transaction: crate::config::ConfigTransaction,
     index: usize,
     command: &str,
-    control: impl Fn(&lash_core::PersistedSessionConfig) -> T,
+    control: impl Fn(&lash_core::PersistedSessionConfig) -> T + Send + Sync,
 ) -> Result<crate::config::ConfigRefusal> {
     let (core, session) = created_session(id).await?;
     let created = recorded_config(&core, id).await?;

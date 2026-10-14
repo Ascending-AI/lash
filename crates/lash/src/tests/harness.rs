@@ -111,7 +111,8 @@ pub(crate) async fn store_backend_with_clock(
     clippy::disallowed_methods,
     reason = "the test host reads the PostgreSQL service URL its gate sets"
 )]
-pub(crate) async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any>) {
+pub(crate) async fn postgres_store_set()
+-> (Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any + Send>) {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::testing::connect(database.url())

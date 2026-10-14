@@ -7,6 +7,8 @@
 //! store, a plugin or the runtime, so `lash-core` re-exports every module and
 //! item below at its original path.
 
+#![deny(clippy::future_not_send)]
+
 pub mod llm;
 pub use lash_sansio::llm_profile;
 pub mod provider;

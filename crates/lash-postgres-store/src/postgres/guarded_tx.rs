@@ -809,7 +809,8 @@ pub(crate) async fn guarded<'a, T, F>(
     body: F,
 ) -> Result<T, StoreError>
 where
-    F: for<'t> Fn(&'t mut GuardedTx<'a>) -> GuardedBody<'t, T>,
+    T: Send,
+    F: for<'t> Fn(&'t mut GuardedTx<'a>) -> GuardedBody<'t, T> + Send + Sync,
 {
     let prelude = &fence.state.prelude;
     let retry = &fence.state.retry;

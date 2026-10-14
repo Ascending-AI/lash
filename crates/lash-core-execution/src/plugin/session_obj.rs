@@ -43,9 +43,10 @@ async fn collect_owned_async<C, O, H, F>(
     invoke: F,
 ) -> Result<Vec<PluginOwned<O>>, PluginError>
 where
-    C: Clone,
-    O: ProposesState,
-    F: Fn(&H, C) -> PluginFuture<O>,
+    C: Clone + Send + Sync,
+    O: ProposesState + Send,
+    H: Sync,
+    F: Fn(&H, C) -> PluginFuture<O> + Send + Sync,
 {
     let clock = session.host.trace_runtime().clock();
     let deadline = super::ControlPhaseDeadline::new(

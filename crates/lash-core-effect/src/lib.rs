@@ -1,3 +1,5 @@
+#![deny(clippy::future_not_send)]
+
 pub mod retirement;
 #[doc(hidden)]
 pub mod core_internal {

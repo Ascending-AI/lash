@@ -58,7 +58,7 @@ pub(super) async fn stores_of(
     storage: Storage,
 ) -> (
     Arc<dyn lash_core::StoreSet>,
-    Box<dyn std::any::Any>,
+    Box<dyn std::any::Any + Send>,
     Arc<dyn lash_core::store::StoreTestSupport>,
 ) {
     match storage {

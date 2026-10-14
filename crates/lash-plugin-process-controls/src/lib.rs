@@ -7,6 +7,8 @@
 //! process whose environment names [`PROCESS_CONTROLS_CONFIG`]'s component
 //! gets the same tools through [`ProcessControlsComponent`] (FIG-6034).
 
+#![deny(clippy::future_not_send)]
+
 use std::sync::Arc;
 
 use serde_json::Value;

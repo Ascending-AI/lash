@@ -1,3 +1,5 @@
+#![deny(clippy::future_not_send)]
+
 #[cfg(test)]
 mod allocation_counter;
 mod error;
