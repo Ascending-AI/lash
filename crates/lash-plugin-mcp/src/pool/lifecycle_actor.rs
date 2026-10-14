@@ -529,15 +529,15 @@ impl LifecycleActor {
                 return ConnectionExit::Failed;
             }
             Err(_) => {
+                if let Some(child) = stdio_child.as_mut() {
+                    child.observe_startup_failure();
+                }
                 drop(connection_attempt);
                 let error = McpError::StartupTimeout {
                     server: server_name.clone(),
                     timeout_ms: startup_timeout.as_millis() as u64,
                     observation: diagnostics.snapshot(),
                 };
-                if let Some(child) = stdio_child.as_mut() {
-                    child.observe_startup_failure();
-                }
                 self.record_mcp_error(&error);
                 self.reap_child(stdio_child.take()).await;
                 self.report_startup_failure(initial_reply, error, &diagnostics);
