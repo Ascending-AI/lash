@@ -52,20 +52,14 @@ fn project(
                 .get(&ordinal_key(id.ordinal), &heap.access)?
                 .ok_or_else(|| invalid("frozen occurrence is missing"))?;
             match (value, head.body) {
-                (Value::List(_), Body::List { inline, rows, .. }) => {
+                (Value::List(_), Body::List { rows, .. }) => {
                     let mut values = Vec::new();
-                    if let Some(inline) = inline {
-                        for value in inline {
-                            values.push(nested(&value)?);
-                        }
-                    } else {
-                        let rows = rows.in_family(RELATIVE);
-                        for at in 0..rows.len() {
-                            let (_, value) = rows
-                                .rank_get(at, &heap.access)?
-                                .ok_or_else(|| invalid("frozen list member missing"))?;
-                            values.push(nested(&value)?);
-                        }
+                    let rows = rows.in_family(RELATIVE);
+                    for at in 0..rows.len() {
+                        let (_, value) = rows
+                            .rank_get(at, &heap.access)?
+                            .ok_or_else(|| invalid("frozen list member missing"))?;
+                        values.push(nested(&value)?);
                     }
                     Datum::List(values)
                 }

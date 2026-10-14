@@ -1044,3 +1044,27 @@ S4 charge/typed-cause preservation (approved 331580): CommittedOutcomeRecord
 adds Rejected(FrozenRef). It instantiates the frozen effect_result error on
 semantic resume with zero inbound charge, while Failed retains its deep-size
 charge. OpenError.MissingFunction preserves the typed FunctionId cause.
+
+### S4 amendment: canonical nested trees (331503)
+
+Every nested `Tree<T>` uses one root grammar: empty, an inline canonical
+leaf body of at most 256 token bytes, or a page reference with its body byte
+count. Small bodies always inline; oversized inline bodies and paged nested
+roots at or below the threshold are refused. Tree cells and their cost,
+task-edge and membership summaries are identical in both forms. External
+`KeyedRoot` and `SequenceRoot` descriptors always name pages. Inline bodies
+retain only their own authenticated child references, including when frozen
+relative tokens acquire a receiving family's context. The list-specific
+`Vec<Value>` body and its grammar are deleted.
+
+### S4 amendment: bounded semantic metadata (332329)
+
+`NameRef` is a bounded descriptor over `TextRef`, with short names inline
+under the canonical 256-byte threshold and long names paged. `SiteRef` holds
+semantic unit/path coordinates, never compiled offsets. `TaskIdentityRef`
+is a content-addressed parent-reference node: spawning adds one node and
+shares prior lineage. These descriptors belong to `lash-kernel-state::paged`;
+the VM resolves them against admitted code and materializes full identities
+only for explicit diagnostics. Closure metadata signatures follow these
+descriptors. Laws cover 1 MiB binding/capture names, bounded per-task writes
+along a 10k serial spawn chain, and exact diagnostic lineage.

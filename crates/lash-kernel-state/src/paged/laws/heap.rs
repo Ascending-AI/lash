@@ -612,22 +612,43 @@ fn an_edge_visitor_fault_stops_before_the_next_leaf() {
 #[test]
 fn a_forged_membership_aggregate_is_a_corrupt_page() {
     use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, decode_body};
-    let (mut heap, _) = fresh();
-    let family = heap.register_family(frozen(3, true)).expect("family");
-    let record = heap
-        .families
-        .get(&directory::ordinal_key(family.0), &heap.access)
-        .expect("read")
-        .expect("row");
+    let (heap, pages) = fresh();
+    let mut actual = tree::Tree::new(false);
+    for i in 0..32 {
+        actual
+            .write(
+                directory::ordinal_key(i),
+                MembershipRun {
+                    start: i,
+                    len: 1,
+                    live: true,
+                },
+                &heap.access,
+            )
+            .unwrap();
+    }
+    actual
+        .seal_nested(
+            &heap.access,
+            &mut tree::SealWork::new(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            }),
+        )
+        .unwrap();
+    let page = actual.page().expect("above inline threshold");
+    let body_bytes = pages.borrow().pages[&page.id].tokens.len() as u64;
     let mut out = TokenWriter::new();
     out.seq(7);
     false.encode(&mut out);
     Option::<FamilyId>::None.encode(&mut out);
-    record.membership.page.encode(&mut out);
-    1u64.encode(&mut out);
+    out.sum(2, 2);
+    page.encode(&mut out);
+    body_bytes.encode(&mut out);
+    32u64.encode(&mut out);
     0u64.encode(&mut out);
     0u64.encode(&mut out);
-    2u64.encode(&mut out);
+    31u64.encode(&mut out);
     let runs = decode_body::<tree::Tree<MembershipRun>>(&out.into_bytes()).expect("descriptor");
     assert!(matches!(
         runs.rank_get(0, &heap.access),
@@ -922,13 +943,73 @@ fn a_shared_dirty_directory_keeps_its_prior_version() {
         .get(&super::super::directory::entity_key(list), &heap.access)
         .unwrap()
         .unwrap();
-    let super::super::directory::Body::List {
-        inline: Some(values),
-        ..
-    } = head.body
-    else {
+    let super::super::directory::Body::List { rows, .. } = head.body else {
         panic!("small list");
     };
-    assert!(is_int(values.first().cloned(), 1));
+    assert!(is_int(
+        rows.rank_get(0, &heap.access).unwrap().map(|(_, v)| v),
+        1
+    ));
     assert!(is_int(heap.list_get(list, 0).unwrap(), 2));
+}
+
+/// D-CAP: tiny maps use the same bounded inline tree as every collection.
+#[test]
+fn a_small_map_needs_no_collection_pages() {
+    let (mut heap, pages) = fresh();
+    let map = heap
+        .allocate_object(ObjectInit::Map(vec![(int(1), int(2))]))
+        .unwrap();
+    let before = pages.borrow().seals;
+    let mut heap = reopen(&mut heap, &pages);
+    assert_eq!(
+        pages.borrow().seals - before,
+        2,
+        "directory and heap header only"
+    );
+    assert!(is_int(heap.map_get(map, &int(1)).unwrap(), 2));
+    heap.map_write(map, int(1), int(3)).unwrap();
+    let before = pages.borrow().seals;
+    let heap = reopen(&mut heap, &pages);
+    assert_eq!(pages.borrow().seals - before, 2);
+    assert!(is_int(heap.map_get(map, &int(1)).unwrap(), 3));
+}
+
+/// S4 inline amendment: below-threshold nested roots have one grammar,
+/// including after a larger indexed tree shrinks back to a tiny leaf.
+#[test]
+fn nested_trees_choose_one_form_across_growth_and_shrink() {
+    use super::super::directory::{Ordinal, ordinal_key};
+    use super::super::tree::{SealWork, Tree};
+    use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
+    let (heap, _) = fresh();
+    let budget = || {
+        SealWork::new(SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        })
+    };
+    let mut tree = Tree::new(false);
+    tree.write(ordinal_key(0), Ordinal(7), &heap.access)
+        .unwrap();
+    tree.seal_nested(&heap.access, &mut budget()).unwrap();
+    let small = encode_body(&tree);
+    assert!(tree.page().is_none());
+    let mut tree: Tree<Ordinal> = decode_body(&small).unwrap();
+    for i in 1..200 {
+        tree.write(ordinal_key(i), Ordinal(i), &heap.access)
+            .unwrap();
+    }
+    tree.seal_nested(&heap.access, &mut budget()).unwrap();
+    assert!(tree.page().is_some());
+    let mut decoded: Tree<Ordinal> = decode_body(&encode_body(&tree)).unwrap();
+    let mut children = Vec::new();
+    tree.children(&mut children);
+    decoded.grants(&children).unwrap();
+    for i in 1..200 {
+        decoded.remove(&ordinal_key(i), &heap.access).unwrap();
+    }
+    decoded.seal_nested(&heap.access, &mut budget()).unwrap();
+    assert!(decoded.page().is_none());
+    assert_eq!(encode_body(&decoded), small);
 }

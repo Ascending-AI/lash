@@ -250,7 +250,7 @@ struct Freezer<'a> {
     functions: BTreeSet<Name>,
 }
 impl Freezer<'_> {
-    fn sequence(&self, values: Vec<Value>) -> Result<Tree<Value>, HeapFault> {
+    fn sequence(&self, values: Vec<Value>, nested: bool) -> Result<Tree<Value>, HeapFault> {
         let mut rows = Tree::new(true);
         for (i, value) in values.into_iter().enumerate() {
             rows.write(
@@ -259,13 +259,12 @@ impl Freezer<'_> {
                 &self.heap.access,
             )?;
         }
-        rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
-        Ok(Tree::open(
-            rows.page(),
-            rows.len(),
-            LogicalBytes(rows.cost()),
-            true,
-        ))
+        if nested {
+            rows.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
+        } else {
+            rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
+        }
+        Ok(rows.retype()?.in_family(RELATIVE))
     }
     fn value(&mut self, value: &Value) -> Result<Value, HeapWriteError> {
         if self.depth >= 128 {
@@ -306,7 +305,7 @@ impl Freezer<'_> {
                     .max()
                     .unwrap_or(0)
                     + 1;
-                let rows = self.sequence(values)?;
+                let rows = self.sequence(values, false)?;
                 let mut summary = t.summary;
                 summary.cost = LogicalBytes(rows.cost());
                 summary.has_edges = has_edges;
@@ -355,13 +354,9 @@ impl Freezer<'_> {
                 .iter()
                 .map(|(v, _)| self.value(v))
                 .collect::<Result<Vec<_>, _>>()?;
-            let rows = self.sequence(values)?;
+            let rows = self.sequence(values, true)?;
             let next = rows.len();
-            Body::List {
-                inline: None,
-                rows,
-                next,
-            }
+            Body::List { rows, next }
         } else {
             let kind = match value {
                 Value::Map(_) => ObjectKind::Map,
@@ -395,13 +390,13 @@ impl Freezer<'_> {
                     &self.heap.access,
                 )?;
             }
-            lookup.seal(&self.heap.access, &mut SealWork::new(budget()))?;
-            rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
+            lookup.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
+            rows.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
             Body::Table {
                 kind,
                 lookup,
-                rows: Tree::open(rows.page(), rows.len(), LogicalBytes(rows.cost()), true),
                 next: rows.len(),
+                rows: rows.retype()?.in_family(RELATIVE),
             }
         };
         let head = ObjectHead {
@@ -428,7 +423,7 @@ impl Freezer<'_> {
     fn finish(mut self, value: Value) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
         self.cost = plus(self.cost, value_cost(&value))?;
         self.objects
-            .seal(&self.heap.access, &mut SealWork::new(budget()))?;
+            .seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
         let summary = FrozenSummary {
             entities: self.entities,
             cost: LogicalBytes(self.cost),
@@ -443,7 +438,7 @@ impl Freezer<'_> {
         };
         let mut children = Vec::new();
         header.value.children(&mut children);
-        children.extend(header.objects.page());
+        header.objects.children(&mut children);
         let root = self
             .heap
             .access

@@ -9,6 +9,10 @@ use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
+
+mod inline;
+pub const INLINE_TREE_BYTES: usize = super::source::INLINE_BODY_MAX as usize;
 
 /// Cells maintain their child links and accounting before publication.
 pub trait Cell: TokenCodec + Clone {
@@ -159,11 +163,16 @@ impl TokenCodec for Summary {
 #[derive(Clone)]
 enum Link<T: Cell> {
     Sealed(PageRef),
+    Inline {
+        tokens: Arc<[u8]>,
+        children: Vec<PageRef>,
+    },
     Dirty(Rc<RefCell<Node<T>>>),
 }
 #[derive(Clone)]
 struct Branch<T: Cell> {
     family: Option<FamilyId>,
+    encoded_bytes: Option<u64>,
     first: Key,
     summary: Summary,
     tasks_known: bool,
@@ -198,6 +207,7 @@ impl<T: Cell> Tree<T> {
             (Some(a), Some(b)) if a.family == b.family && a.summary == b.summary => {
                 match (&a.link, &b.link) {
                     (Link::Sealed(a), Link::Sealed(b)) => a.id == b.id,
+                    (Link::Inline { tokens: a, .. }, Link::Inline { tokens: b, .. }) => a == b,
                     (Link::Dirty(a), Link::Dirty(b)) => Rc::ptr_eq(a, b),
                     _ => false,
                 }
@@ -225,6 +235,7 @@ impl<T: Cell> Tree<T> {
         Self {
             root: page.map(|p| Branch {
                 family: None,
+                encoded_bytes: None,
                 tasks_known: false,
                 members_known: false,
                 first: Key(Vec::new()),
@@ -291,27 +302,26 @@ impl<T: Cell> Tree<T> {
     pub fn page(&self) -> Option<PageRef> {
         self.root.as_ref().and_then(|r| match r.link {
             Link::Sealed(p) => Some(p),
-            Link::Dirty(_) => None,
+            Link::Dirty(_) | Link::Inline { .. } => None,
         })
     }
     pub fn sealed(&self) -> bool {
-        self.root.is_none() || self.page().is_some()
-    }
-    pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
-        if let Some(Branch {
-            link: Link::Sealed(p),
-            ..
-        }) = self.root.as_mut()
-        {
-            grant(p, children)?;
-        }
-        Ok(())
+        self.root
+            .as_ref()
+            .is_none_or(|r| !matches!(r.link, Link::Dirty(_)))
     }
     fn load(branch: &Branch<T>, access: &Access<'_>, sequence: bool) -> Result<Node<T>, HeapFault> {
         match &branch.link {
             Link::Dirty(n) => Ok(n.borrow().clone()),
+            Link::Inline { tokens, children } => Self::inline_node(branch, tokens, children, true),
             Link::Sealed(p) => {
                 let answer = access.read(*p)?;
+                if branch
+                    .encoded_bytes
+                    .is_some_and(|n| n != answer.tokens.len() as u64)
+                {
+                    return Err(corrupt(*p, "tree root byte count mismatch"));
+                }
                 let leaf = if sequence {
                     PageKind::SEQUENCE_LEAF
                 } else {
@@ -351,6 +361,7 @@ impl<T: Cell> Tree<T> {
                     Node::Index(
                         rows.into_iter()
                             .map(|(first, (summary, (family, page)))| Branch {
+                                encoded_bytes: None,
                                 tasks_known: true,
                                 members_known: true,
                                 family: family.or(branch.family),
@@ -661,6 +672,9 @@ impl<T: Cell> Tree<T> {
             work: &mut SealWork,
             seq: bool,
         ) -> Result<bool, HeapFault> {
+            if matches!(branch.link, Link::Inline { .. }) {
+                make_dirty(branch, access, seq)?;
+            }
             let Link::Dirty(page) = &branch.link else {
                 return Ok(true);
             };
@@ -710,9 +724,11 @@ impl<T: Cell> Tree<T> {
             if !work.take(tokens.len() as u64 + children.len() as u64 * 32 + 32) {
                 return Ok(false);
             }
+            let encoded_bytes = tokens.len() as u64;
             let sealed = access.seal(kind, tokens, children)?;
             drop(node);
             branch.link = Link::Sealed(sealed);
+            branch.encoded_bytes = Some(encoded_bytes);
             Ok(true)
         }
         self.root
@@ -725,9 +741,10 @@ fn make_dirty<T: Cell>(
     access: &Access<'_>,
     seq: bool,
 ) -> Result<Rc<RefCell<Node<T>>>, HeapFault> {
-    if let Link::Sealed(_) = branch.link {
+    if !matches!(branch.link, Link::Dirty(_)) {
         let node = Tree::load(branch, access, seq)?;
         branch.family = None;
+        branch.encoded_bytes = None;
         branch.link = Link::Dirty(Rc::new(RefCell::new(node)));
     }
     if let Link::Dirty(page) = &mut branch.link
@@ -738,12 +755,15 @@ fn make_dirty<T: Cell>(
     }
     match &branch.link {
         Link::Dirty(page) => Ok(Rc::clone(page)),
-        Link::Sealed(_) => Err(HeapFault::Malformed("tree copy failed".into())),
+        Link::Sealed(_) | Link::Inline { .. } => {
+            Err(HeapFault::Malformed("tree copy failed".into()))
+        }
     }
 }
 fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
     let mut branch = Branch {
         family: None,
+        encoded_bytes: None,
         tasks_known: true,
         members_known: true,
         first: Key(Vec::new()),
@@ -754,6 +774,7 @@ fn dirty<T: Cell>(node: Node<T>) -> Result<Branch<T>, HeapFault> {
     Ok(branch)
 }
 fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFault> {
+    branch.encoded_bytes = None;
     branch.tasks_known = true;
     branch.members_known = true;
     branch.summary = match node {
@@ -844,51 +865,6 @@ impl TokenCodec for Key {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.bytes().map(|b| Self(b.to_vec()))
-    }
-}
-
-impl<T: Cell> TokenCodec for Tree<T> {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(7);
-        self.sequence.encode(out);
-        self.root.as_ref().and_then(|r| r.family).encode(out);
-        // Dirty links use a fixed-size placeholder only for packing estimates.
-        // Cell::prepare replaces all of them before a page may be sealed.
-        let page = self.root.as_ref().map(|r| match r.link {
-            Link::Sealed(p) => p,
-            Link::Dirty(_) => PageRef {
-                id: PageId([0; 32]),
-                grant: lash_kernel_doc::heap::PageGrant::NONE,
-            },
-        });
-        page.encode(out);
-        self.len().encode(out);
-        self.cost().encode(out);
-        self.task_edges().encode(out);
-        self.root
-            .as_ref()
-            .map_or(0, |r| r.summary.members)
-            .encode(out);
-    }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(7)?;
-        let sequence = bool::decode(input)?;
-        let family = Option::<FamilyId>::decode(input)?;
-        let page = Option::<PageRef>::decode(input)?;
-        let len = u64::decode(input)?;
-        let cost = u64::decode(input)?;
-        let tasks = u64::decode(input)?;
-        let members = u64::decode(input)?;
-        if page.is_some() != (len != 0) || (len == 0 && cost != 0) {
-            return Err(TokenError::Invalid("tree root length mismatch".into()));
-        }
-        let mut tree = Self::open(page, len, LogicalBytes(cost), sequence).with_task_edges(tasks);
-        if let Some(root) = &mut tree.root {
-            root.family = family;
-            root.summary.members = members;
-            root.members_known = true;
-        }
-        Ok(tree)
     }
 }
 

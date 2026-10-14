@@ -136,13 +136,12 @@ impl Freezer<'_> {
                             &self.heap.access,
                         )?;
                     }
-                    rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
+                    rows.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
                     let next = rows.len();
                     self.frozen_object(
                         ordinal,
                         Body::List {
-                            inline: None,
-                            rows: Tree::open(rows.page(), next, LogicalBytes(rows.cost()), true),
+                            rows: rows.retype()?.in_family(RELATIVE),
                             next,
                         },
                     )?
@@ -309,15 +308,15 @@ impl Freezer<'_> {
         mut lookup: Tree<Ordinal>,
         mut rows: Tree<RelativeEntry>,
     ) -> Result<Value, HeapWriteError> {
-        lookup.seal(&self.heap.access, &mut SealWork::new(budget()))?;
-        rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
+        lookup.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
+        rows.seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
         self.frozen_object(
             ordinal,
             Body::Table {
                 kind,
                 lookup,
                 next: rows.len(),
-                rows: Tree::open(rows.page(), rows.len(), LogicalBytes(rows.cost()), true),
+                rows: rows.retype()?.in_family(RELATIVE),
             },
         )
     }

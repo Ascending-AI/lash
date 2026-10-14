@@ -283,9 +283,6 @@ impl NativeHeap for PagedHeap {
     }
     fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault> {
         Ok(match self.head(list)?.map(|h| h.body) {
-            Some(Body::List {
-                inline: Some(v), ..
-            }) => v.get(index as usize).cloned(),
             Some(Body::List { rows, .. }) => rows.rank_get(index, &self.access)?.map(|(_, v)| v),
             _ => None,
         })
@@ -326,15 +323,6 @@ impl NativeHeap for PagedHeap {
         visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault> {
         match self.head(object)?.map(|h| h.body) {
-            Some(Body::List {
-                inline: Some(v), ..
-            }) => {
-                for v in &v {
-                    if visitor(Element::Item(v)).is_break() {
-                        break;
-                    }
-                }
-            }
             Some(Body::List { rows, .. }) => rows.visit(&self.access, &mut |_, v| {
                 visitor(Element::Item(v)).is_continue()
             })?,

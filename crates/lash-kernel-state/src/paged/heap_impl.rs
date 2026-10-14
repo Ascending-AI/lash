@@ -3,7 +3,6 @@
 use super::directory::{
     Body, Entry, ObjectHead, Ordinal, entity_key, ordinal_key, value_cost, value_has_edges,
 };
-use super::source::INLINE_BODY_MAX;
 use super::tree::{Access, Cell, SealWork, Tree, checked_sum};
 use super::*;
 use lash_kernel_doc::Integer;
@@ -369,15 +368,10 @@ impl PagedHeap {
             ObjectInit::List(values) => {
                 let mut rows = Tree::new(true);
                 let next = values.len() as u64;
-                let inline = if encode_body(&values).len() <= INLINE_BODY_MAX as usize {
-                    Some(values)
-                } else {
-                    for (i, v) in values.into_iter().enumerate() {
-                        rows.write(ordinal_key(i as u64), v, &self.access)?;
-                    }
-                    None
-                };
-                Body::List { inline, rows, next }
+                for (i, v) in values.into_iter().enumerate() {
+                    rows.write(ordinal_key(i as u64), v, &self.access)?;
+                }
+                Body::List { rows, next }
             }
             ObjectInit::Map(values) => self.make_table(ObjectKind::Map, values)?,
             ObjectInit::Set(values) => self.make_table(
@@ -777,35 +771,19 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = self.canonical(value)?;
-        if let Body::List { inline, rows, next } = &mut head.body {
-            if let Some(values) = inline {
-                if index == values.len() as u64 {
-                    values.push(value);
-                    *next += 1;
-                } else {
-                    values[index as usize] = value;
-                }
-                if encode_body(values).len() > INLINE_BODY_MAX as usize {
-                    for (i, v) in values.iter().enumerate() {
-                        rows.write(ordinal_key(i as u64), v.clone(), &self.access)?;
-                    }
-                    *next = values.len() as u64;
-                    *inline = None;
-                }
+        if let Body::List { rows, next } = &mut head.body {
+            let key = if index == rows.len() {
+                let key = ordinal_key(*next);
+                *next = next
+                    .checked_add(1)
+                    .ok_or_else(|| HeapFault::Malformed("list ordinal overflow".into()))?;
+                key
             } else {
-                let key = if index == rows.len() {
-                    let key = ordinal_key(*next);
-                    *next = next
-                        .checked_add(1)
-                        .ok_or_else(|| HeapFault::Malformed("list ordinal overflow".into()))?;
-                    key
-                } else {
-                    rows.rank_get(index, &self.access)?
-                        .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?
-                        .0
-                };
-                rows.write(key, value, &self.access)?;
-            }
+                rows.rank_get(index, &self.access)?
+                    .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?
+                    .0
+            };
+            rows.write(key, value, &self.access)?;
         }
         self.publish(list, head)
     }
@@ -818,9 +796,6 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = match &mut head.body {
-            Body::List {
-                inline: Some(v), ..
-            } => v.remove(index as usize),
             Body::List { rows, .. } => {
                 let (key, _) = rows
                     .rank_get(index, &self.access)?

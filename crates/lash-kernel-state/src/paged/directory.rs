@@ -16,7 +16,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum Body {
     List {
-        inline: Option<Vec<Value>>,
         rows: Tree<Value>,
         next: u64,
     },
@@ -55,9 +54,7 @@ impl ObjectHead {
     }
     pub fn len(&self) -> u64 {
         match &self.body {
-            Body::List { inline, rows, .. } => inline
-                .as_ref()
-                .map_or_else(|| rows.len(), |v| v.len() as u64),
+            Body::List { rows, .. } => rows.len(),
             Body::Table { rows, .. } => rows.len(),
             _ => 0,
         }
@@ -155,9 +152,6 @@ impl TokenCodec for Entry {
 impl Cell for ObjectHead {
     fn task_edges(&self) -> u64 {
         match &self.body {
-            Body::List {
-                inline: Some(v), ..
-            } => v.iter().map(Cell::task_edges).sum(),
             Body::List { rows, .. } => rows.task_edges(),
             Body::Table { rows, .. } => rows.task_edges(),
             Body::Variable(v) => v.task_edges(),
@@ -166,9 +160,7 @@ impl Cell for ObjectHead {
     }
     fn cost(&self) -> u64 {
         32u64.saturating_add(match &self.body {
-            Body::List { inline, rows, .. } => inline
-                .as_ref()
-                .map_or_else(|| rows.cost(), |v| v.iter().map(value_cost).sum()),
+            Body::List { rows, .. } => rows.cost(),
             Body::Table {
                 kind: ObjectKind::Record,
                 rows,
@@ -181,44 +173,28 @@ impl Cell for ObjectHead {
     }
     fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
         match &mut self.body {
-            Body::List { rows, .. } => rows.seal(access, work),
+            Body::List { rows, .. } => rows.seal_nested(access, work),
             Body::Table { lookup, rows, .. } => {
-                Ok(lookup.seal(access, work)? && rows.seal(access, work)?)
+                Ok(lookup.seal_nested(access, work)? && rows.seal_nested(access, work)?)
             }
-            Body::Closure { captures, .. } => captures.seal(access, work),
+            Body::Closure { captures, .. } => captures.seal_nested(access, work),
             Body::Variable(_) => Ok(true),
         }
     }
     fn children(&self, out: &mut Vec<PageRef>) {
         match &self.body {
-            Body::List { inline, rows, .. } => {
-                if let Some(v) = inline {
-                    for value in v {
-                        value_children(value, out);
-                    }
-                }
-                if let Some(p) = rows.page() {
-                    out.push(p);
-                }
-            }
+            Body::List { rows, .. } => rows.children(out),
             Body::Table { lookup, rows, .. } => {
-                out.extend(lookup.page());
-                out.extend(rows.page());
+                lookup.children(out);
+                rows.children(out);
             }
-            Body::Closure { captures, .. } => out.extend(captures.page()),
+            Body::Closure { captures, .. } => captures.children(out),
             Body::Variable(v) => value_children(v, out),
         }
     }
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         match &mut self.body {
-            Body::List { inline, rows, .. } => {
-                if let Some(v) = inline {
-                    for value in v {
-                        value_grants(value, children)?;
-                    }
-                }
-                rows.grants(children)?;
-            }
+            Body::List { rows, .. } => rows.grants(children)?,
             Body::Table { lookup, rows, .. } => {
                 lookup.grants(children)?;
                 rows.grants(children)?;
@@ -234,9 +210,8 @@ impl TokenCodec for ObjectHead {
         out.seq(2);
         self.family.encode(out);
         match &self.body {
-            Body::List { inline, rows, next } => {
-                out.sum(0, 3);
-                inline.encode(out);
+            Body::List { rows, next } => {
+                out.sum(0, 2);
                 rows.encode(out);
                 next.encode(out);
             }
@@ -277,14 +252,11 @@ impl TokenCodec for ObjectHead {
             family,
             body: match tag {
                 0 => {
-                    TokenReader::expect_fields(fields, 3)?;
-                    let inline: Option<Vec<Value>> = Option::decode(input)?;
-                    let rows = Tree::decode(input)?;
-                    let next = u64::decode(input)?;
-                    if inline.is_some() && rows.len() != 0 {
-                        return Err(TokenError::Invalid("two list bodies".into()));
+                    TokenReader::expect_fields(fields, 2)?;
+                    Body::List {
+                        rows: Tree::decode(input)?,
+                        next: u64::decode(input)?,
                     }
-                    Body::List { inline, rows, next }
                 }
                 1..=3 => {
                     TokenReader::expect_fields(fields, 3)?;
@@ -533,10 +505,10 @@ pub mod execution {
             0
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
-            self.members.seal(access, work)
+            self.members.seal_nested(access, work)
         }
         fn children(&self, out: &mut Vec<PageRef>) {
-            out.extend(self.members.page());
+            self.members.children(out);
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
             self.members.grants(children)
@@ -594,24 +566,24 @@ pub mod execution {
                 + self.arguments.as_ref().map_or(0, Tree::cost)
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
-            Ok(self.bindings.seal(access, work)?
-                && self.loops.seal(access, work)?
-                && self.finally.seal(access, work)?
-                && self.iterated.seal(access, work)?
-                && self.departing.seal(access, work)?
+            Ok(self.bindings.seal_nested(access, work)?
+                && self.loops.seal_nested(access, work)?
+                && self.finally.seal_nested(access, work)?
+                && self.iterated.seal_nested(access, work)?
+                && self.departing.seal_nested(access, work)?
                 && match &mut self.arguments {
-                    Some(a) => a.seal(access, work)?,
+                    Some(a) => a.seal_nested(access, work)?,
                     None => true,
                 })
         }
         fn children(&self, out: &mut Vec<PageRef>) {
-            out.extend(self.bindings.page());
-            out.extend(self.loops.page());
-            out.extend(self.finally.page());
-            out.extend(self.iterated.page());
-            out.extend(self.departing.page());
+            self.bindings.children(out);
+            self.loops.children(out);
+            self.finally.children(out);
+            self.iterated.children(out);
+            self.departing.children(out);
             if let Some(a) = &self.arguments {
-                out.extend(a.page());
+                a.children(out);
             }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
@@ -655,14 +627,14 @@ pub mod execution {
                 }
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
-            Ok(self.joiners.seal(access, work)?
-                && self.occurrences.seal(access, work)?
-                && self.frames.seal(access, work)?)
+            Ok(self.joiners.seal_nested(access, work)?
+                && self.occurrences.seal_nested(access, work)?
+                && self.frames.seal_nested(access, work)?)
         }
         fn children(&self, out: &mut Vec<PageRef>) {
-            out.extend(self.joiners.page());
-            out.extend(self.occurrences.page());
-            out.extend(self.frames.page());
+            self.joiners.children(out);
+            self.occurrences.children(out);
+            self.frames.children(out);
             match &self.state {
                 TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v))
                 | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
@@ -1183,13 +1155,6 @@ impl CensusGraph for PagedHeap {
                     }
                 },
             )?,
-            Body::List {
-                inline: Some(v), ..
-            } => {
-                for v in &v {
-                    self.stream_edges(v, out)?;
-                }
-            }
             Body::List { rows, .. } => {
                 rows.visit(&self.access, &mut |_, v| match self.stream_edges(v, out) {
                     Ok(()) => true,
