@@ -1,157 +1,234 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lash · Workflow workbench</title>
-<link rel="icon" href="data:,">
-<style>
-:root{--paper:#f5f2ea;--panel:#fffdf8;--ink:#292c28;--muted:#74776e;--line:#d8d8cc;--accent:#c84c32;--wash:#f9e6de;--green:#477459;--mono:"IBM Plex Mono","Liberation Mono",monospace;--sans:"Avenir Next","Trebuchet MS",sans-serif}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 var(--sans)}button,input,select,textarea{font:inherit}button,input,select{border:1px solid var(--line);border-radius:5px;padding:8px 10px;background:var(--panel);color:var(--ink)}button{cursor:pointer}button:hover:not(:disabled){border-color:var(--accent)}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}header{padding:19px 26px 15px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;gap:22px;align-items:center;flex-wrap:wrap}.brand{font-size:25px;letter-spacing:-1px;font-weight:700}.brand b{color:var(--accent)}.eyebrow{font:10px var(--mono);text-transform:uppercase;letter-spacing:1.5px;color:var(--muted)}h1{font-size:16px;margin:0;font-weight:500}.header-title{border-left:1px solid var(--line);padding-left:22px}.header-tools{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.statusbar{padding:9px 26px;display:flex;gap:16px;align-items:center;border-bottom:1px solid var(--line);font:11px var(--mono)}.statusbar .lamp{width:7px;height:7px;border-radius:50%;background:var(--green)}.muted{color:var(--muted)}main{display:grid;grid-template-columns:minmax(360px,1fr) 360px;max-width:1700px;margin:auto}.canvas-panel{min-width:0;border-right:1px solid var(--line)}.panel-heading{padding:18px 24px;display:flex;justify-content:space-between;align-items:center;gap:10px}h2{margin:0;font-size:14px;font-weight:600}.canvas{background-image:radial-gradient(#c8c9be 1px,transparent 1px);background-size:18px 18px;min-height:420px;max-height:620px;overflow:auto;padding:30px 25px 45px}.flow{max-width:610px;margin:auto;display:flex;flex-direction:column;align-items:stretch}.node{position:relative;text-align:left;width:calc(100% - var(--indent));margin-left:var(--indent);padding:14px 16px;display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;background:var(--panel);box-shadow:0 2px 0 #dedfd3;border:1px solid #c8cabe;border-radius:7px;flex-shrink:0}.node.selected{border-color:var(--accent);box-shadow:0 0 0 2px #c84c3222}.node .icon{width:32px;height:32px;display:grid;place-items:center;background:#edeee6;border-radius:6px;font:14px var(--mono)}.node.effect .icon{background:var(--wash);color:var(--accent)}.node strong{display:block;font-size:13px;font-weight:600;overflow-wrap:anywhere}.node small{font:10px var(--mono);color:var(--muted);overflow-wrap:anywhere}.node .badge{font:10px var(--mono);color:var(--muted)}.node.succeeded{border-color:var(--green)}.node.failed{border-color:#ba3327}.node.started,.node.waiting{border-color:#b08423}.connector{height:30px;display:flex;align-items:center;gap:7px;margin-left:calc(var(--indent) + 32px);color:var(--muted);font:9px var(--mono)}.connector::before{content:'↓';font-size:20px;color:#9da397}.canvas-note{font-size:11px;color:var(--muted);text-align:center;padding:14px 20px}.inspector{padding:20px;background:var(--panel)}.section-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}.pill{font:10px var(--mono);border:1px solid var(--line);padding:3px 6px;border-radius:20px;color:var(--muted)}label{display:block;font-size:11px;color:var(--muted);margin:12px 0 5px}input,select{width:100%}textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:5px;background:#faf9f4;color:var(--ink);font:11px/1.6 var(--mono);resize:vertical;tab-size:2}#payload{height:100px}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.help{font-size:11px;color:var(--muted);margin:8px 0 12px}.wide{width:100%}.divider{border:0;border-top:1px solid var(--line);margin:22px 0}details>summary{cursor:pointer;font-size:12px;font-weight:600}#direct{height:130px;margin-top:10px}.small{font-size:11px;padding:6px 9px}.button-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.queue-panel{padding:18px 24px;background:var(--panel);border-top:1px solid var(--line)}.queue-list{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0;min-height:24px}.queue-step{display:flex;gap:8px;align-items:center;font:11px var(--mono);padding:5px 8px;background:var(--paper);border:1px solid var(--line);border-radius:4px}.queue-step button{border:0;background:transparent;padding:0 3px;color:var(--muted)}.result{white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.6 var(--mono);max-height:140px;overflow:auto}.result.error{color:#a42b20}.result.ok{color:var(--green)}.bottom{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) 360px;border-top:1px solid var(--line)}.source-panel{padding:20px 24px;min-width:0;border-right:1px solid var(--line)}.tabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}.tabs button{border-color:transparent;background:transparent;font-size:12px}.tabs button.active{background:var(--ink);color:#fff}.code-pane{height:300px;overflow:auto;white-space:pre;font:11px/1.65 var(--mono);background:#eeeee5;border:1px solid var(--line);border-radius:5px;padding:14px;margin:0}#source{height:300px;white-space:pre;overflow:auto;background:#faf9f4}.run-panel{padding:20px;background:var(--panel)}#run-output{max-height:280px;overflow:auto;font:11px/1.65 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}.run-line{padding:7px 0;border-bottom:1px solid var(--line)}.run-line.error{color:#a42b20}.entry-row{display:flex;align-items:center;gap:10px}.entry-row label{margin:0;white-space:nowrap}.entry-row input{max-width:130px}.empty{color:var(--muted);font:11px var(--mono);padding:18px 0}footer{padding:16px 26px;color:var(--muted);font:10px var(--mono);border-top:1px solid var(--line)}[hidden]{display:none!important}@media(max-width:900px){main{grid-template-columns:minmax(0,1fr) 320px}.bottom{grid-template-columns:1fr}.run-panel{border-top:1px solid var(--line)}.source-panel{border-right:0}.header-tools{margin-left:0}}@media(max-width:680px){header{padding:16px}.header-title{padding-left:14px}.statusbar{padding:9px 16px;flex-wrap:wrap}main{display:block}.canvas-panel{border-right:0}.canvas{min-height:320px;max-height:460px;padding:22px 14px}.inspector{border-top:1px solid var(--line)}.bottom{display:block}.header-tools{width:100%}.header-tools select{flex:1;min-width:130px}.node{--indent:0px!important}.connector{--indent:0px!important}.source-panel,.queue-panel{padding:18px 16px}}@media(prefers-reduced-motion:no-preference){.node{transition:border-color .15s,box-shadow .15s}.lamp{animation:breathe 3s infinite}@keyframes breathe{50%{opacity:.45}}}
-</style>
-</head>
-<body>
-<header><div class="brand">lash<b> /</b></div><div class="header-title"><div class="eyebrow">Authoring prototype</div><h1>Workflow workbench</h1></div><div class="header-tools"><select id="template" aria-label="Example workflow" style="width:200px"></select><button id="load" data-write>Load example</button><button id="run" class="primary" data-write>▶ Run workflow</button></div></header>
-<div class="statusbar"><span class="lamp"></span><span id="revision">Connecting…</span><span class="muted" id="admission"></span><span class="muted">Mock effects · local execution</span></div>
-<main>
-<section class="canvas-panel" aria-label="Workflow canvas"><div class="panel-heading"><h2>Workflow</h2><span class="eyebrow" id="node-count">Statements</span></div><div class="canvas"><div class="flow" id="flow"></div></div><div class="canvas-note">Arrows show statement order within each block. Data comes from explicit arguments.</div><div class="queue-panel"><div class="section-label"><h2>Pending changes</h2><span class="pill" id="queue-count">0 operations</span></div><div class="queue-list" id="queue"></div><div class="button-row"><button id="preview" data-write>Preview transaction</button><button id="apply" class="primary" data-write disabled>Apply changes</button><button id="clear" class="small" data-write>Clear</button></div><div id="result" class="result" role="status" aria-live="polite"></div></div></section>
-<aside class="inspector" aria-label="Statement inspector"><div class="section-label"><h2>Insert an effect</h2><span class="pill">Helper</span></div><p class="help">Choose an input and a position. Computed inputs become visible statements.</p><label for="placement">Insert before</label><select id="placement"></select><label for="effect">Effect</label><select id="effect"><option value="display.show_message">Display · show message</option><option value="display.set_status">Display · set status</option><option value="gmail.list_recent">Gmail · list recent emails</option><option value="web.search">Web · search</option></select><div class="two"><div><label for="binding">Result binding</label><input id="binding" value="notification" placeholder="e.g. notification"></div><div><label for="input-mode">Input format</label><select id="input-mode"><option value="json">JSON value</option><option value="expression">Kernel expression</option></select></div></div><label for="payload">Effect input</label><textarea id="payload" spellcheck="false">{"text": "Hello from the workbench"}</textarea><p class="help" id="input-help">Records and lists are expanded by the authoring helper.</p><button id="queue-helper" class="wide" data-write>+ Queue effect</button><hr class="divider"><div class="section-label"><h2>Selected statement</h2><span class="pill" id="selected-kind">—</span></div><div id="selection" class="help">Select a statement on the canvas.</div><details id="direct-details"><summary>Direct typed edit</summary><p class="help">This escape hatch uses the same transaction. Sites refer to the current saved version.</p><div class="button-row"><button id="rename" class="small" data-write>Rename binding preset</button><button id="replace" class="small" data-write>Replace statement preset</button></div><textarea id="direct" aria-label="Direct typed edits" spellcheck="false">[]</textarea><button id="queue-direct" class="wide" data-write>+ Queue direct edits</button></details></aside>
-<div class="bottom"><section class="source-panel"><div class="tabs" role="group" aria-label="Document views"><button data-tab="source" class="active">TypeScript</button><button data-tab="document">Kernel document</button><button data-tab="transaction">Planned transaction</button><button data-tab="preview">Preview source</button></div><textarea id="source" aria-label="TypeScript source" spellcheck="false" wrap="off"></textarea><pre id="code" class="code-pane" hidden></pre><div id="source-actions" class="button-row entry-row"><label for="entry">Entry function</label><input id="entry" value="demo"><button id="import" data-write>Import TypeScript</button><span class="help" style="margin:0">Import validates before replacing. Generated text starts with round-trip metadata; preserve it.</span></div></section><section class="run-panel"><div class="section-label"><h2>Execution</h2><span class="pill" id="run-status">Not started</span></div><p class="help">These effects return local sample data. No provider calls.</p><button id="approve" hidden>Approve request</button><div id="run-output"><div class="empty">Run a workflow to see its results.</div></div></section></div>
-</main><footer>One kernel document. Helpers and direct edits share one atomic transaction.</footer>
-<script type="module">
-const $ = id => document.getElementById(id);
-const key = site => JSON.stringify([site.unit, site.path ?? []]);
-let workflow, templates = [], selected, steps = [], plan, tab = 'source', busy = false, running = false;
-let statuses = new Map(), statementNodes = new Map();
-const presets = {'display.show_message':{text:'Hello from the workbench'},'display.set_status':{key:'workflow',value:'Ready'},'gmail.list_recent':{count:3},'web.search':{query:'workflow authoring'}};
-async function call(path, body) {
-  const response = await fetch(path, body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-  const answer = await response.json();
-  if (!response.ok) throw answer.error ?? {message:response.statusText};
-  return answer;
-}
-function report(message, error = false) { $('result').textContent = message; $('result').className = `result ${error ? 'error' : 'ok'}`; }
-function errorText(error) { return error?.details?.diagnostics?.map(d => d.message).join('\n') || error?.message || String(error); }
-function controls() {
-  document.querySelectorAll('[data-write], #queue button').forEach(button => button.disabled = busy || running || !workflow);
-  $('apply').disabled = busy || running || !plan;
-  $('preview').disabled = busy || running || !steps.length;
-  $('run').disabled = busy || running || !workflow?.definition;
-  $('rename').disabled ||= !statementNodes.get(key(selected?.site ?? {unit:'main'}))?.let;
-  $('replace').disabled ||= !selected;
-}
-async function action(work) {
-  busy = true; controls();
-  try { await work(); } catch(error) { report(errorText(error), true); }
-  finally { busy = false; controls(); }
-}
-function show(next, correspondence) {
-  const old = selected?.site;
-  workflow = next; statuses = new Map(); statementNodes = new Map(next.statements.map(item => [key(item.site), item.statement]));
-  const mapped = old && correspondence?.entries?.find(item => key(item.from) === key(old))?.to;
-  selected = next.statements.find(stmt => key(stmt.site) === key((correspondence ? mapped : old) ?? {unit:'main'})) ?? next.statements[0];
-  $('revision').textContent = `Revision ${next.version} / ${next.entry}`;
-  $('admission').textContent = next.definition ? 'Ready to run' : `Not admitted: ${next.notAdmitted}`;
-  $('source').value = next.source ?? ''; $('source').scrollTop=0; $('source').scrollLeft=0; $('entry').value = next.entry;
-  $('direct').value='[]'; $('run-status').textContent='Not started'; $('run-output').textContent='Run this revision to see its results.';
-  renderCanvas(); renderPlacement(); renderSelection(); renderPane(); controls();
-}
-function renderCanvas() {
-  const nodes = [];
-  let previous;
-  for (const statement of workflow.statements) {
-    const indent = `${Math.min(statement.depth,5)*24}px`;
-    if (previous && key(previous.block) === key(statement.block)) { const line=document.createElement('div'); line.className='connector'; line.style.setProperty('--indent',indent); line.textContent='sequence'; nodes.push(line); }
-    else if(statement.depth) { const scope=document.createElement('div'); scope.className='connector'; scope.style.setProperty('--indent',indent); scope.textContent=`nested block · depth ${statement.depth}`; nodes.push(scope); }
-    const button = document.createElement('button'); button.className='node'; button.style.setProperty('--indent',indent);
-    button.classList.toggle('effect',!!statement.action); button.classList.toggle('selected',selected && key(selected.site) === key(statement.site));
-    const status=statement.action && statuses.get(key(statement.action)); if(status)button.classList.add(status);
-    button.setAttribute('aria-pressed',String(!!selected && key(selected.site)===key(statement.site)));
-    const icon=document.createElement('span'); icon.className='icon'; icon.textContent=statement.action?'↗':'=';
-    const title=document.createElement('span'); const strong=document.createElement('strong'); strong.textContent=statement.summary;
-    const small=document.createElement('small'); small.textContent=`${statement.depth ? 'Nested · ' : ''}site ${(statement.site.path??[]).join('.') || 'root'}`; title.append(strong,small);
-    const badge=document.createElement('span'); badge.className='badge'; badge.textContent=status ?? (statement.action?'effect':'code');
-    button.append(icon,title,badge); button.onclick=()=>{selected=statement;renderCanvas();renderPlacement();renderSelection();controls();};nodes.push(button); previous=statement;
-  }
-  $('flow').replaceChildren(...nodes); $('node-count').textContent=`${workflow.statements.length} visible statements`;
-}
-function renderPlacement() {
-  $('placement').replaceChildren(...workflow.statements.map((statement,index)=>{
-    const option=document.createElement('option'); option.value=String(index); option.textContent=`${'↳ '.repeat(statement.depth)}${statement.summary}`; option.selected=selected && key(statement.site)===key(selected.site); return option;
-  }));
-}
-function renderSelection() {
-  const stmt=selected && statementNodes.get(key(selected.site)); $('selected-kind').textContent=stmt?Object.keys(stmt)[0]:'—';
-  $('selection').textContent=selected?`${selected.summary}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ''}`:'Select a statement on the canvas.';
-  $('selection').style.whiteSpace='pre-wrap';
-}
-function renderPane() {
-  document.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===tab));
-  $('source').hidden=tab!=='source'; $('source-actions').hidden=tab!=='source'; $('code').hidden=tab==='source';
-  $('code').textContent=tab==='document'?JSON.stringify(workflow?.document,null,2):tab==='transaction'?(plan?JSON.stringify(plan.transaction,null,2):'Preview pending changes to inspect the typed transaction.'):(plan?.preview?.source ?? 'Preview pending changes to inspect the resulting TypeScript.');
-}
-function invalidate() { plan=undefined; renderQueue(); renderPane(); controls(); }
-function renderQueue() {
-  $('queue-count').textContent=`${steps.length} operation${steps.length===1?'':'s'}`;
-  $('queue').replaceChildren(...steps.map((step,index)=>{const row=document.createElement('div');row.className='queue-step';const label=document.createElement('span');label.textContent=`${index+1}. ${step.effect?step.effect.effect:Object.keys(step.direct)[0]}`;const remove=document.createElement('button');remove.textContent='×';remove.setAttribute('aria-label',`Remove operation ${index+1}`);remove.disabled=busy||running;remove.onclick=()=>{steps.splice(index,1);invalidate();};row.append(label,remove);return row;}));
-  if(!steps.length)$('queue').textContent='Queue helpers and direct edits in any order.';
-}
-function expression(value) {
-  if(value===null)return {literal:'null'};
-  if(typeof value==='string')return {literal:{text:value}};
-  if(typeof value==='boolean')return {literal:{bool:value}};
-  if(typeof value==='number'){if(!Number.isSafeInteger(value))throw Error('JSON number inputs must be safe integers. Use kernel expression mode for exact floats.');return {literal:{int:String(value)}};}
-  if(Array.isArray(value))return {list:value.map(expression)};
-  return {record:Object.entries(value).map(([field,value])=>({field,value:expression(value)}))};
-}
-$('queue-helper').onclick=()=>action(async()=>{
-  const target=workflow.statements[Number($('placement').value)]; if(!target)throw Error('Select an insertion position.');
-  const input=JSON.parse($('payload').value); const effect={at:{block:target.block,before:target.site},effect:$('effect').value,args:[$('input-mode').value==='json'?expression(input):input],result:'any'};
-  effect.binding=$('binding').value.trim(); if(!effect.binding)throw Error('Enter a result binding before queuing this effect.');
-  steps.push({effect});invalidate();report('Effect queued. Preview checks the complete transaction.');
-});
-$('queue-direct').onclick=()=>action(async()=>{const edits=JSON.parse($('direct').value);if(!Array.isArray(edits)||!edits.length)throw Error('Enter a non-empty JSON list of typed edits.');steps.push(...edits.map(direct=>({direct})));invalidate();report('Direct edits queued in order.');});
-$('rename').onclick=()=>{const stmt=statementNodes.get(key(selected.site));if(!stmt?.let)return;$('direct').value=JSON.stringify([{rename_variable:{declared_at:selected.site,name:stmt.let.name,to:`${stmt.let.name}_renamed`}}],null,2);};
-$('replace').onclick=()=>{const stmt=statementNodes.get(key(selected.site));$('direct').value=JSON.stringify([{replace_statement:{statement:selected.site,with:stmt}}],null,2);};
-$('effect').onchange=()=>{$('input-mode').value='json';$('payload').value=JSON.stringify(presets[$('effect').value],null,2);};
-$('input-mode').onchange=()=>{$('input-help').textContent=$('input-mode').value==='json'?'Records and lists are expanded by the authoring helper.':'One canonical Expr, e.g. {"variable":"customer"}. Names resolve in the target scope.';};
-$('placement').onchange=()=>{selected=workflow.statements[Number($('placement').value)];renderCanvas();renderSelection();controls();};
-$('preview').onclick=()=>action(async()=>{plan=undefined;plan=await call('/prototype/plan',{version:workflow.version,steps});renderPane();report(`Preview ready · ${plan.transaction.edits.length} typed edits · saved revision ${workflow.version} unchanged.`);});
-$('apply').onclick=()=>action(async()=>{if(!plan)return;const answer=await call('/workflow/edits',{version:plan.version,edits:plan.transaction.edits});steps=[];plan=undefined;show(answer.workflow,answer.correspondence);renderQueue();report(`Applied revision ${workflow.version}. Generated statements can now be selected and edited directly.`);});
-$('clear').onclick=()=>{steps=[];invalidate();report('Pending changes cleared.');};
-$('import').onclick=()=>action(async()=>{if(steps.length)throw Error('Apply or clear pending changes before importing source.');const next=await call('/prototype/source',{version:workflow.version,source:$('source').value,entry:$('entry').value});plan=undefined;selected=undefined;show(next);report(`Imported TypeScript · revision ${workflow.version}.`);});
-$('load').onclick=()=>action(async()=>{if(steps.length)throw Error('Apply or clear pending changes before loading an example.');const template=templates.find(t=>t.id===$('template').value);if(!template)throw Error('Choose an example.');const next=await call('/prototype/source',{version:workflow.version,source:template.source,entry:template.entry});selected=undefined;show(next);plan=undefined;renderPane();report(`Loaded ${template.name}.`);});
-for(const button of document.querySelectorAll('[data-tab]'))button.onclick=()=>{tab=button.dataset.tab;renderPane();};
-function output(text,error=false){const line=document.createElement('div');line.className=`run-line${error?' error':''}`;line.textContent=text;$('run-output').append(line);}
-async function run() {
-  running=true;controls();statuses=new Map();renderCanvas();$('run-output').replaceChildren();$('run-status').textContent='Running';
-  const version=workflow.version; let sawTerminal=false;
-  function observe(event){
-    if(event.workflowVersion!==version){output('Ignored an event for a different workflow revision.',true);return;}
-    if(event.site)statuses.set(key(event.site),event.status);
-    else{$('run-status').textContent=event.status;if(event.status==='succeeded'||event.status==='failed')sawTerminal=true;output(`${event.status}${event.error?`: ${event.error}`:''}`,event.status==='failed');}
-    const delta=event.displayDelta??{};
-    for(const message of delta.messagesAppended??[])output(message);
-    for(const [name,value] of Object.entries(delta.statuses??{}))output(`${name}: ${value}`);
-    for(const [name,items] of Object.entries(delta.listItemsAppended??{}))output(`${name}: ${items.join(', ')}`);
-    for(const [name,value] of Object.entries(delta.lights??{}))output(`${name}: ${value}`);
-    if(delta.progress!==undefined)output(`Progress ${delta.progress}%`);
-    if(event.approvalKey){$('approve').hidden=false;$('approve').onclick=()=>action(async()=>{await call(`/approvals/${encodeURIComponent(event.approvalKey)}`,{approved:true});$('approve').hidden=true;});}
-    renderCanvas();
-  }
-  try{
-    const response=await fetch('/run',{method:'POST'});if(!response.ok)throw (await response.json()).error;
-    const reader=response.body.pipeThrough(new TextDecoderStream()).getReader();let pending='';
-    for(;;){const {value,done}=await reader.read();if(done)break;pending+=value;pending=pending.replace(/\r\n/g,'\n');let end;
-      while((end=pending.indexOf('\n\n'))>=0){const frame=pending.slice(0,end);pending=pending.slice(end+2);const type=frame.split('\n').find(l=>l.startsWith('event:'))?.slice(6).trim();const data=frame.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(type==='run_error')throw Error(data);if(type==='run_event'&&data)observe(JSON.parse(data));}
-    }
-    if(!sawTerminal){$('run-status').textContent='Disconnected';output('Observation ended before a terminal event. The process may still be running.',true);}
-  }catch(error){$('run-status').textContent='Failed';output(errorText(error),true);}
-  finally{running=false;$('approve').hidden=true;controls();}
-}
-$('run').onclick=run;
-controls();renderQueue();
-await action(async()=>{show(await call('/workflow'));templates=await call('/prototype/templates');$('template').replaceChildren(...templates.map(template=>{const option=document.createElement('option');option.value=template.id;option.textContent=template.name;option.title=template.description;return option;}));report('Load an example or edit the current workflow.');});
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lash · Workflow editor</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/authoring-prototype.css" />
+  </head>
+  <body>
+    <header>
+      <a
+        class="brand"
+        href="/authoring-prototype.html"
+        aria-label="Lash workflows"
+        >lash<span>✳</span></a
+      ><span class="slash">/</span>
+      <div class="workflow-name">
+        <span class="eyebrow">PERSONAL WORKSPACE</span>
+        <h1>Notification workflow</h1>
+      </div>
+      <span class="saved" id="revision">Connecting…</span
+      ><button id="examples-button" class="quiet">Examples</button
+      ><button id="advanced-button" class="quiet" aria-label="Advanced">
+        Advanced</button
+      ><button id="run" class="primary" data-write>
+        ▶ &nbsp; Run workflow
+      </button>
+    </header>
+    <nav class="viewbar">
+      <span class="active-view">Editor</span
+      ><button id="history-button" class="quiet">Execution</button
+      ><span class="mock"><i></i> Mock connections</span>
+    </nav>
+    <main class="workspace">
+      <div id="viewport" class="viewport" aria-label="Workflow canvas">
+        <div id="scene">
+          <svg id="wires" aria-hidden="true"></svg>
+          <div id="flow"></div>
+        </div>
+      </div>
+      <div class="canvas-caption">
+        <span class="eyebrow">WORKFLOW</span>
+        <p>Build it one step at a time.</p>
+        <span id="node-count"></span>
+      </div>
+      <div class="canvas-tools">
+        <button id="zoom-out" aria-label="Zoom out">−</button
+        ><span id="zoom-label">100%</span
+        ><button id="zoom-in" aria-label="Zoom in">+</button
+        ><span class="tool-rule"></span
+        ><button id="fit" aria-label="Fit workflow">Fit</button>
+      </div>
+      <button id="add-step" class="add-step" data-write>
+        + &nbsp; Add step
+      </button>
+      <aside id="node-panel" hidden aria-label="Node settings">
+        <div class="panel-top">
+          <span id="panel-kicker" class="eyebrow">STEP SETTINGS</span
+          ><button
+            id="close-panel"
+            class="quiet"
+            aria-label="Close node settings"
+          >
+            ×
+          </button>
+        </div>
+        <div id="node-form"></div>
+      </aside>
+      <div id="result" class="result" role="status" aria-live="polite"></div>
+    </main>
+    <dialog id="examples">
+      <div class="dialog-top">
+        <h2>Start from an example</h2>
+        <button data-close="examples" aria-label="Close examples">×</button>
+      </div>
+      <p class="help">Replace the current workflow with a sample.</p>
+      <select id="template" aria-label="Example workflow"></select
+      ><button id="load" class="primary" data-write>Load example</button>
+    </dialog>
+    <dialog id="advanced">
+      <div class="dialog-top">
+        <div>
+          <h2>Advanced authoring</h2>
+          <p class="help">Source, document and direct edits</p>
+        </div>
+        <button data-close="advanced" aria-label="Close advanced">×</button>
+      </div>
+      <div class="advanced-layout">
+        <section class="canvas-panel">
+          <div class="queue-panel">
+            <div class="section-label">
+              <h2>Pending changes</h2>
+              <span class="pill" id="queue-count">0 operations</span>
+            </div>
+            <div class="queue-list" id="queue"></div>
+            <div class="button-row">
+              <button id="preview" data-write>Preview transaction</button
+              ><button id="apply" class="primary" data-write disabled>
+                Apply changes</button
+              ><button id="clear" class="small" data-write>Clear</button>
+            </div>
+          </div>
+        </section>
+        <aside class="inspector" aria-label="Statement inspector">
+          <div class="section-label">
+            <h2>Insert an effect</h2>
+            <span class="pill">Helper</span>
+          </div>
+          <p class="help">
+            Choose an input and a position. Computed inputs become visible
+            statements.
+          </p>
+          <label for="placement">Insert before</label
+          ><select id="placement"></select
+          ><label for="effect">Effect</label
+          ><select id="effect">
+            <option value="display.show_message">Display · show message</option>
+            <option value="display.set_status">Display · set status</option>
+            <option value="gmail.list_recent">
+              Gmail · list recent emails
+            </option>
+            <option value="web.search">Web · search</option>
+          </select>
+          <div class="two">
+            <div>
+              <label for="binding">Result binding</label
+              ><input
+                id="binding"
+                value="notification"
+                placeholder="e.g. notification"
+              />
+            </div>
+            <div>
+              <label for="input-mode">Input format</label
+              ><select id="input-mode">
+                <option value="json">JSON value</option>
+                <option value="expression">Kernel expression</option>
+              </select>
+            </div>
+          </div>
+          <label for="payload">Effect input</label
+          ><textarea id="payload" spellcheck="false">
+{"text": "Hello from the workbench"}</textarea
+          >
+          <p class="help" id="input-help">
+            Records and lists are expanded by the authoring helper.
+          </p>
+          <button id="queue-helper" class="wide" data-write>
+            + Queue effect
+          </button>
+          <hr class="divider" />
+          <div class="section-label">
+            <h2>Selected statement</h2>
+            <span class="pill" id="selected-kind">—</span>
+          </div>
+          <div id="selection" class="help">
+            Select a statement on the canvas.
+          </div>
+          <details id="direct-details">
+            <summary>Direct typed edit</summary>
+            <p class="help">
+              This escape hatch uses the same transaction. Sites refer to the
+              current saved version.
+            </p>
+            <div class="button-row">
+              <button id="rename" class="small" data-write>
+                Rename binding preset</button
+              ><button id="replace" class="small" data-write>
+                Replace statement preset
+              </button>
+            </div>
+            <textarea
+              id="direct"
+              aria-label="Direct typed edits"
+              spellcheck="false"
+            >
+[]</textarea
+            ><button id="queue-direct" class="wide" data-write>
+              + Queue direct edits
+            </button>
+          </details>
+        </aside>
+        <div class="bottom">
+          <section class="source-panel">
+            <div class="tabs" role="group" aria-label="Document views">
+              <button data-tab="source" class="active">TypeScript</button
+              ><button data-tab="document">Kernel document</button
+              ><button data-tab="transaction">Planned transaction</button
+              ><button data-tab="preview">Preview source</button>
+            </div>
+            <textarea
+              id="source"
+              aria-label="TypeScript source"
+              spellcheck="false"
+              wrap="off"
+            ></textarea>
+            <pre id="code" class="code-pane" hidden></pre>
+            <div id="source-actions" class="button-row entry-row">
+              <label for="entry">Entry function</label
+              ><input id="entry" value="demo" /><button id="import" data-write>
+                Import TypeScript</button
+              ><span class="help" style="margin: 0"
+                >Import validates before replacing. Generated text starts with
+                round-trip metadata; preserve it.</span
+              >
+            </div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="execution">
+      <div class="dialog-top">
+        <h2>Workflow execution</h2>
+        <button data-close="execution" aria-label="Close execution">×</button>
+      </div>
+      <section class="run-panel">
+        <div class="section-label">
+          <h2>Execution</h2>
+          <span class="pill" id="run-status">Not started</span>
+        </div>
+        <p class="help">
+          These effects return local sample data. No provider calls.
+        </p>
+        <button id="approve" hidden>Approve request</button>
+        <div id="run-output">
+          <div class="empty">Run a workflow to see its results.</div>
+        </div>
+      </section>
+    </dialog>
+    <span id="admission" hidden></span>
+    <script type="module" src="/authoring-prototype.js"></script>
+  </body>
 </html>

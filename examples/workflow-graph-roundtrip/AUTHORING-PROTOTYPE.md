@@ -17,21 +17,32 @@ creates a scratch SQLite database under `/tmp`. Workflow editing state lives in
 memory. The existing Lash runtime executes the examples; email and display tools
 are deterministic mocks. No model or external email service is called.
 
-Load an example, select a statement, and queue an effect helper. Queue a direct
-edit between two helpers, preview their combined transaction, then apply it.
-The preview validates a cloned draft without publishing. Applying uses the
-existing version guard, typed transaction and admission path. Inspect the
-generated transaction and canonical document to see the ordinary bindings the
-helper creates. Run the workflow to see the actual recorded display effects.
+The default screen is a visual workflow editor: app action tiles on a dotted
+canvas, curved connections, true/false paths, and a manual trigger. Click a tile
+to edit its fields, or a connection's **+** to choose another action. Adding,
+editing, and deleting steps plan and validate a transaction, then save it through
+the existing version-guarded endpoint. The canvas supports panning and zooming.
+**Run workflow** executes the saved document and opens its recorded outputs.
 
-The TypeScript editor imports a whole workflow into a new document. An import
-refusal preserves the existing version. Export uses Lash's exact TypeScript
-printer. Source import resets site selection because sites belong to the
-replaced document; direct edits carry correspondence within a draft.
+The canvas projects effect calls and effect-containing conditions from the
+canonical statements. It hides lowering scaffolding such as temporary bindings,
+boundary conversions, and async closure wrappers. Connections show execution
+order and conditional paths; they are not editable data wires. This projection
+is a prototype for the included examples, not a complete visual language for
+arbitrary kernel programs. Computed inputs and conditions remain available in
+Advanced. Node positions are derived, not persistent user layout.
 
-The nested example keeps branches visible and permits insertion in their blocks.
-Canvas order indicates statement sequence, not implicit data wiring. Inputs are
-explicit kernel expressions or literal JSON values converted by this host.
+**Advanced** contains TypeScript import/export, the kernel document, and the
+original helper/direct-edit transaction experiment. Queue a direct edit between
+two helpers, preview their combined transaction, then apply it. The preview
+validates a cloned draft without publishing. Generated statements remain
+available to direct edits. Import validates before replacing the document and
+resets site selection; direct edits carry correspondence within a draft.
+
+Visual settings currently edit literal input records and boolean conditions.
+Add-step forms support the mocked Gmail, web search, message and status actions.
+The helper chooses a fresh result binding for each visual insertion. A rejected
+edit preserves the saved document and reports the error in the current panel.
 
 ## API experiment
 
