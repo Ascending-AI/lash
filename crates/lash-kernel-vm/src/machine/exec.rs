@@ -643,6 +643,7 @@ impl KernelMachine {
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let (value, failed) = match outcome {
             CommittedOutcomeRecord::Elapsed => (Value::Null, false),
+            CommittedOutcomeRecord::Rejected(frozen) => (self.heap.instantiate(&frozen)?, true),
             CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
                 let charge = self.heap.frozen_charge(&frozen)?;
                 let value = self.heap.instantiate(&frozen)?;

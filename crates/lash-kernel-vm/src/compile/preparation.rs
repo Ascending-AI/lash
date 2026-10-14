@@ -41,9 +41,7 @@ impl From<Refused> for StartError {
 impl From<Refused> for OpenError {
     fn from(refused: Refused) -> Self {
         match refused {
-            Refused::Missing(function) => Self::Malformed {
-                problem: format!("missing function {function}"),
-            },
+            Refused::Missing(function) => Self::MissingFunction { function },
             Refused::Invalid(invalid) => Self::NotAdmitted(invalid),
         }
     }

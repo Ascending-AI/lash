@@ -1039,3 +1039,8 @@ through Arc<str>. Public methods, serde/schema/token text and content eq/hash
 stay the same. Cloning a Value now allocates no name string during root refresh.
 No cheap scoped allocation counter exists in these layers; buffer reuse and
 Value clone behavior are verified by inspection.
+
+S4 charge/typed-cause preservation (approved 331580): CommittedOutcomeRecord
+adds Rejected(FrozenRef). It instantiates the frozen effect_result error on
+semantic resume with zero inbound charge, while Failed retains its deep-size
+charge. OpenError.MissingFunction preserves the typed FunctionId cause.

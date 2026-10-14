@@ -907,3 +907,28 @@ fn a_thousand_lookups_normalize_a_resident_paged_key_at_most_once() {
         "one canonical 1 MiB tree read, got {reads}"
     );
 }
+
+/// D-COW: publishing a working tree version gives later edits a private
+/// path, even when neither version has been sealed yet.
+#[test]
+fn a_shared_dirty_directory_keeps_its_prior_version() {
+    let (mut heap, _) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![int(1)]))
+        .unwrap();
+    let prior = heap.directory.clone();
+    heap.list_write(list, 0, int(2)).unwrap();
+    let head = prior
+        .get(&super::super::directory::entity_key(list), &heap.access)
+        .unwrap()
+        .unwrap();
+    let super::super::directory::Body::List {
+        inline: Some(values),
+        ..
+    } = head.body
+    else {
+        panic!("small list");
+    };
+    assert!(is_int(values.first().cloned(), 1));
+    assert!(is_int(heap.list_get(list, 0).unwrap(), 2));
+}

@@ -127,7 +127,7 @@ pub(super) fn start(
                 } else {
                     machine
                         .decode(&exe, datum, &param.ty)
-                        .map_err(|error| arguments(format!("{}: {error:?}", param.name)))?
+                        .map_err(|error| start_interrupt(param.name.as_str(), error))?
                 });
             }
             machine.charged = 0;
@@ -138,11 +138,11 @@ pub(super) fn start(
     machine.regs = args;
     machine
         .push_frame(TaskId::MAIN, &exe, exec::Call::new(code, 0, count))
-        .map_err(|error| arguments(format!("the start: {error:?}")))?;
+        .map_err(|error| start_interrupt("the start", error.into()))?;
     machine.regs.clear();
     machine
         .publish_roots()
-        .map_err(|error| arguments(format!("the start: {error:?}")))?;
+        .map_err(|error| start_interrupt("the start", error.into()))?;
     machine.heap.release_statement_roots()?;
     Ok(machine)
 }
@@ -244,5 +244,14 @@ impl KernelMachine {
             Layout::default(),
             limits,
         )
+    }
+}
+
+fn start_interrupt(what: &str, error: Interrupt) -> StartError {
+    match error {
+        Interrupt::Halt(Halt::Heap(error)) => StartError::Heap(error),
+        other => StartError::Arguments {
+            problem: format!("{what}: {other:?}"),
+        },
     }
 }

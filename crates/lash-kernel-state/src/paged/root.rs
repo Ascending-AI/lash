@@ -237,6 +237,8 @@ pub enum WaitPhase {
 pub enum CommittedOutcomeRecord {
     Completed(FrozenRef),
     Failed(FrozenRef),
+    /// A Completed input rejected by the perform type; no inbound work charge.
+    Rejected(FrozenRef),
     Elapsed,
 }
 

@@ -420,6 +420,10 @@ impl TokenCodec for CommittedOutcomeRecord {
                 value.encode(out);
             }
             Self::Elapsed => out.sum(2, 0),
+            Self::Rejected(value) => {
+                out.sum(3, 1);
+                value.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -436,6 +440,10 @@ impl TokenCodec for CommittedOutcomeRecord {
             2 => {
                 TokenReader::expect_fields(fields, 0)?;
                 Self::Elapsed
+            }
+            3 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Self::Rejected(FrozenRef::decode(input)?)
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

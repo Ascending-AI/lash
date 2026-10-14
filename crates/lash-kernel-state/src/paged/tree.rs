@@ -709,6 +709,12 @@ fn make_dirty<T: Cell>(
         branch.family = None;
         branch.link = Link::Dirty(Rc::new(RefCell::new(node)));
     }
+    if let Link::Dirty(page) = &mut branch.link
+        && Rc::strong_count(page) > 1
+    {
+        let private = page.borrow().clone();
+        *page = Rc::new(RefCell::new(private));
+    }
     match &branch.link {
         Link::Dirty(page) => Ok(Rc::clone(page)),
         Link::Sealed(_) => Err(HeapFault::Malformed("tree copy failed".into())),

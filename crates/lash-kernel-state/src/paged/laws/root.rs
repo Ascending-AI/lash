@@ -284,6 +284,7 @@ fn every_record_round_trips_canonically() {
             WaitPhase::Admitted,
             WaitPhase::Committed(CommittedOutcomeRecord::Completed(frozen)),
             WaitPhase::Committed(CommittedOutcomeRecord::Failed(frozen)),
+            WaitPhase::Committed(CommittedOutcomeRecord::Rejected(frozen)),
             WaitPhase::Committed(CommittedOutcomeRecord::Elapsed),
         ] {
             round(&WaitRecord {

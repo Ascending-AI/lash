@@ -120,7 +120,7 @@ impl Machine for KernelMachine {
                     Ok(datum) => CommittedOutcomeRecord::Completed(
                         self.heap.freeze_datum(&datum).map_err(delivery_error)?,
                     ),
-                    Err(problem) => CommittedOutcomeRecord::Failed(
+                    Err(problem) => CommittedOutcomeRecord::Rejected(
                         self.heap
                             .freeze_datum(&Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
                                 kind: "effect_result".into(),
@@ -310,8 +310,8 @@ impl KernelMachine {
         let admitted = library.admit(&program.document, limits)?;
         let exe = admitted
             .executable(&program.document, &library)
-            .map_err(|missing| OpenError::Malformed {
-                problem: format!("missing function {}", missing.0),
+            .map_err(|missing| OpenError::MissingFunction {
+                function: missing.0,
             })?;
         if root.document
             != program

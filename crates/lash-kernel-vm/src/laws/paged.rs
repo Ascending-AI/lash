@@ -101,3 +101,90 @@ fn a_committed_outcome_survives_seal_before_semantic_resume() {
     );
     assert_eq!(embedder.machine.wait_count(), 0);
 }
+
+/// K-EFF-005/009: rejected Completed data has no inbound charge. A host
+/// failure is charged once by its error's deep size, even after reopen.
+#[test]
+fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
+    use crate::Outcome;
+    use lash_kernel_doc::{Datum, ErrorDatum};
+    for cold in [false, true] {
+        for rejected in [false, true] {
+            let mut embedder = Embedder::new(
+                "effect typed() -> Int main { try { let v = perform typed() as Int return v } catch e { return 1 } }",
+            );
+            let Step::Parked(park) = embedder.run() else {
+                panic!("must park");
+            };
+            let Request::Effect(request) = &park.requests[0] else {
+                panic!("must perform");
+            };
+            let before = embedder.machine.meters().charged;
+            let outcome = if rejected {
+                Outcome::Completed(Datum::Text("not an integer".into()))
+            } else {
+                Outcome::Failed(ErrorDatum {
+                    kind: "host".into(),
+                    message: "bad".into(),
+                    data: Datum::Null,
+                })
+            };
+            embedder.machine.deliver(request.wait, outcome).unwrap();
+            assert_eq!(
+                embedder.machine.meters().charged,
+                before,
+                "delivery is not a semantic step"
+            );
+            if cold {
+                reopen(&mut embedder);
+            }
+            assert_eq!(result(embedder.run_to_end(&[])), int(1));
+            // Return 1: statement 1 + literal 1 + outbound integer size 2.
+            // Failed error: size 1 + kind bytes 4 + message bytes 3 + null 1.
+            let expected = 4 + if rejected { 0 } else { 9 };
+            assert_eq!(
+                embedder.machine.meters().charged - before,
+                expected,
+                "cold={cold}, rejected={rejected}"
+            );
+        }
+    }
+}
+
+/// K-MACH infrastructure causes stay typed when inbound argument freezing
+/// fails; a page-port loss is never an argument/type refusal.
+#[test]
+fn argument_freezing_preserves_a_page_ports_typed_failure() {
+    use super::embedder::{ROOMY, census};
+    use crate::{
+        CellStart, EffectModes, KernelMachine, PreparedLibrary, Program, StartError, Target,
+    };
+    use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
+    use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
+    use std::sync::Arc;
+    struct Lost;
+    impl PageSource for Lost {
+        fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+            Err(HeapFault::LeaseLost)
+        }
+        fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
+            Err(HeapFault::LeaseLost)
+        }
+    }
+    let program = Program {
+        release: PageId([8; 32]),
+        document: Arc::new(parse_document("kernel 1\nnumbers by_spelling\nentry f(x: Any) -> Any\nfn f(x) { return x }\nmain { }").unwrap()),
+        library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+    };
+    let start = CellStart {
+        owner: PageId([9; 32]),
+        target: Target::Entry("f".into()),
+        args: vec![Datum::Int(1.into())],
+        session: None,
+        modes: EffectModes::recorded(),
+    };
+    assert!(matches!(
+        KernelMachine::start(program, ROOMY, start, Box::new(Lost), census(ROOMY.memory)),
+        Err(StartError::Heap(HeapFault::LeaseLost))
+    ));
+}

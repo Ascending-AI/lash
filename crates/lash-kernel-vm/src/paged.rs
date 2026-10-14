@@ -81,6 +81,10 @@ pub enum MachineError {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OpenError {
+    #[error("the registry has no function {function}, which the checkpoint pins")]
+    MissingFunction {
+        function: lash_kernel_doc::FunctionId,
+    },
     #[error("the document is not admitted: {0}")]
     NotAdmitted(#[from] Invalid),
     #[error("the state was parked under document {parked}, not {given}")]

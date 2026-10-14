@@ -507,7 +507,8 @@ pub mod execution {
                 WaitPhase::Issued { request } => out.push(request.root),
                 WaitPhase::Committed(
                     CommittedOutcomeRecord::Completed(value)
-                    | CommittedOutcomeRecord::Failed(value),
+                    | CommittedOutcomeRecord::Failed(value)
+                    | CommittedOutcomeRecord::Rejected(value),
                 ) => out.push(value.root),
                 _ => {}
             }
@@ -517,7 +518,8 @@ pub mod execution {
                 WaitPhase::Issued { request } => grant(&mut request.root, children),
                 WaitPhase::Committed(
                     CommittedOutcomeRecord::Completed(value)
-                    | CommittedOutcomeRecord::Failed(value),
+                    | CommittedOutcomeRecord::Failed(value)
+                    | CommittedOutcomeRecord::Rejected(value),
                 ) => grant(&mut value.root, children),
                 _ => Ok(()),
             }
