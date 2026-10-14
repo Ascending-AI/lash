@@ -16,6 +16,7 @@ pub(super) struct Pages {
     pub payload_reads: u64,
     pub seals: u64,
     pub bytes: u64,
+    pub seal_fault: Option<HeapFault>,
 }
 pub(super) struct Source(pub Rc<RefCell<Pages>>);
 impl PageSource for Source {
@@ -45,6 +46,9 @@ impl PageSource for Source {
             .collect()
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+        if let Some(fault) = self.0.borrow().seal_fault.clone() {
+            return Err(fault);
+        }
         let mut tokens = body.kind.0.to_be_bytes().to_vec();
         tokens.extend_from_slice(&body.tokens);
         let page = PageRef {
@@ -1059,5 +1063,136 @@ fn unequal_prefixes_do_not_read_missing_later_members() {
     assert_eq!(
         heap.equal(&Value::List(left), &Value::List(right)),
         Ok(false)
+    );
+}
+
+/// D-CAP/D-SEALTIME: private pages spill at 32 MiB without publishing a
+/// checkpoint, retaining old working versions and exact new contents.
+#[test]
+fn dirty_residency_spills_before_checkpoint_and_preserves_working_versions() {
+    use super::super::directory::Body;
+    let (mut heap, pages) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(Vec::new()))
+        .expect("list");
+    for i in 0..10_000 {
+        heap.list_write(list, i, int(i as i64))
+            .expect("initial row");
+    }
+    let Body::List { rows: prior, .. } = heap.head(list).expect("head").expect("list exists").body
+    else {
+        panic!("list")
+    };
+    heap.list_write(list, 0, int(-1)).expect("new version");
+    let mut peak = 0;
+    for i in 10_000..250_000 {
+        heap.list_write(list, i, int(i as i64)).expect("row");
+        peak = peak.max(heap.access.dirty_bytes());
+        assert!(
+            heap.access.dirty_bytes() <= 32 << 20,
+            "dirty resident bytes"
+        );
+    }
+    assert!(pages.borrow().seals > 0, "stage before explicit seal");
+    assert!(is_int(
+        prior
+            .rank_get(0, &heap.access)
+            .expect("old working row")
+            .map(|(_, v)| v),
+        0
+    ));
+    assert!(is_int(heap.list_get(list, 0).expect("new working row"), -1));
+    let heap = reopen(&mut heap, &pages);
+    assert!(is_int(
+        heap.list_get(list, 249_999).expect("last restored row"),
+        249_999
+    ));
+    assert!(is_int(
+        heap.list_get(list, 0).expect("first restored row"),
+        -1
+    ));
+    println!("dirty_limit=33554432 peak_accounted_bytes={peak}");
+}
+
+/// D-SEALTIME: a stage quota failure remains an infrastructure cause, and
+/// the previously committed root remains readable.
+#[test]
+fn dirty_spill_quota_failure_preserves_the_committed_root_and_typed_cause() {
+    let (mut heap, pages) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![int(7)]))
+        .expect("list");
+    heap.release_statement_roots().expect("release");
+    seal(&mut heap);
+    let committed = heap.sealed_root().expect("committed root");
+    let fault = HeapFault::Exhausted {
+        resource: HostResource::StagingBytes,
+    };
+    pages.borrow_mut().seal_fault = Some(fault.clone());
+    let mut stopped = false;
+    for i in 1..250_000 {
+        match heap.list_write(list, i, int(i as i64)) {
+            Ok(()) => (),
+            Err(HeapWriteError::Fault(actual)) => {
+                assert_eq!(actual, fault);
+                stopped = true;
+                break;
+            }
+            Err(other) => panic!("stage failure changed cause: {other:?}"),
+        }
+    }
+    assert!(stopped, "dirty pressure must stage");
+    pages.borrow_mut().seal_fault = None;
+    let old = PagedHeap::open_header(committed, Box::new(Source(pages)), EditEpoch(2))
+        .expect("committed open");
+    assert_eq!(old.len(list).expect("old length"), 1);
+    assert!(is_int(old.list_get(list, 0).expect("old row"), 7));
+}
+
+/// D-IMM/D-CAP: reloading a value from a resident decoded page retains its
+/// normal form; clean tokens and decoded nodes share the 64 MiB allowance.
+#[test]
+fn repeated_variable_reads_share_the_resident_normal_form() {
+    let (mut heap, pages) = fresh();
+    let key = text(&mut heap, &"x".repeat(1 << 20));
+    let variable = heap
+        .allocate_object(ObjectInit::Variable(key.clone()))
+        .expect("variable");
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![key.clone()]))
+        .expect("inline list");
+    let map = heap
+        .allocate_object(ObjectInit::Map(vec![(key, int(7))]))
+        .expect("map");
+    let heap = reopen(&mut heap, &pages);
+    let before = pages.borrow().payload_reads;
+    let key = heap.variable_get(variable).expect("key");
+    assert!(is_int(heap.map_get(map, &key).expect("lookup"), 7));
+    let list_key = heap.list_get(list, 0).expect("inline key").expect("member");
+    assert!(is_int(heap.map_get(map, &list_key).expect("lookup"), 7));
+    for _ in 0..1000 {
+        let list_key = heap.list_get(list, 0).expect("inline key").expect("member");
+        let Value::Text(descriptor) = list_key else {
+            panic!("text key")
+        };
+        assert!(
+            descriptor.normal.get().is_some(),
+            "inline tree retains normal form"
+        );
+        let key = heap.variable_get(variable).expect("reload key");
+        let Value::Text(descriptor) = &key else {
+            panic!("text key")
+        };
+        assert!(
+            descriptor.normal.get().is_some(),
+            "decoded page retains normal form"
+        );
+        assert!(is_int(heap.map_get(map, &key).expect("lookup"), 7));
+        assert!(heap.access.clean_bytes() <= 64 << 20);
+    }
+    let reads = pages.borrow().payload_reads - before;
+    assert!(
+        reads > 0 && reads <= 270,
+        "one payload normalization: {reads} pages"
     );
 }

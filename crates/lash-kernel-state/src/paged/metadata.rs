@@ -35,6 +35,7 @@ pub fn metadata_key<T: TokenCodec>(value: &T) -> Vec<u8> {
 pub struct NameRef {
     text: TextRef,
     cached: Arc<OnceLock<Name>>,
+    key: Arc<OnceLock<Vec<u8>>>,
 }
 impl NameRef {
     pub fn new(name: &Name, access: &Access<'_>) -> Result<Self, HeapFault> {
@@ -45,7 +46,11 @@ impl NameRef {
             Payload::Paged(build(access, text.as_bytes(), true)?)
         };
         let cached = OnceLock::new();
-        let _ = cached.set(name.clone());
+        if text.len() <= IMMUTABLE_INLINE_MAX as usize {
+            let _ = cached.set(name.clone());
+        }
+        let key = OnceLock::new();
+        let _ = key.set(metadata_key(name));
         Ok(Self {
             text: TextRef {
                 normal: Default::default(),
@@ -53,6 +58,7 @@ impl NameRef {
                 body,
             },
             cached: Arc::new(cached),
+            key: Arc::new(key),
         })
     }
     pub fn resolve(&self, access: &Access<'_>) -> Result<Name, HeapFault> {
@@ -79,11 +85,18 @@ impl NameRef {
                 )
             }
         };
-        let _ = self.cached.set(name.clone());
+        if name.as_str().len() <= IMMUTABLE_INLINE_MAX as usize {
+            let _ = self.cached.set(name.clone());
+        }
         Ok(name)
     }
     pub fn key(&self, access: &Access<'_>) -> Result<Vec<u8>, HeapFault> {
-        Ok(metadata_key(&self.resolve(access)?))
+        if let Some(key) = self.key.get() {
+            return Ok(key.clone());
+        }
+        let key = metadata_key(&self.resolve(access)?);
+        let _ = self.key.set(key.clone());
+        Ok(key)
     }
     pub fn same_version(&self, other: &Self) -> bool {
         if self.text.summary != other.text.summary {
@@ -115,6 +128,7 @@ impl TokenCodec for NameRef {
         Ok(Self {
             text: TextRef::decode(input)?,
             cached: Default::default(),
+            key: Default::default(),
         })
     }
 }
@@ -211,7 +225,9 @@ impl SiteRef {
         }
         path.seal_nested(access, &mut budget())?;
         let cached = OnceLock::new();
-        let _ = cached.set(Arc::new(site.clone()));
+        if encode_body(site).len() <= super::tree::INLINE_TREE_BYTES {
+            let _ = cached.set(Arc::new(site.clone()));
+        }
         Ok(Self {
             unit,
             path,
@@ -237,7 +253,9 @@ impl SiteRef {
             );
         }
         let site = Arc::new(Site::new(unit, path));
-        let _ = self.cached.set(Arc::clone(&site));
+        if encode_body(site.as_ref()).len() <= super::tree::INLINE_TREE_BYTES {
+            let _ = self.cached.set(Arc::clone(&site));
+        }
         Ok(site)
     }
     pub fn matches(&self, site: &Site, access: &Access<'_>) -> Result<bool, HeapFault> {

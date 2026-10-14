@@ -1098,3 +1098,14 @@ so resident and paged forms have identical keys. `Datum::Function(Name)` and
 `Literal::Function(Name)` keep the boundary/code grammar. A 1 MiB function
 name must fit in bounded binding, tuple and frozen row cells and round-trip
 exactly through the datum boundary.
+
+D-CAP/D-SEALTIME implementation: one weak dirty-page registry spans the
+activation's trees. At 32 MiB of conservative physical accounting it seals
+oldest working pages through PageSource, down to 24 MiB. A shared dirty node
+becomes an immutable staged reference; copy-on-write reifies only the edited
+path. Checkpoint sealing promotes staged references without reserializing them.
+Stage quota and transport failures remain HeapFaults and leave the committed
+root intact. Clean token and decoded-node residency share one 64 MiB allowance.
+Decoded-node keys include cell type, family context and tree kind; inline keys
+retain their token Arc so pointer reuse cannot alias cached bodies. Long names
+and sites remain descriptors, with only bounded metadata and normal-form caches.

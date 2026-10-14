@@ -116,9 +116,10 @@ impl<T: Cell> Tree<T> {
                         rows.push((Key(key.to_vec()), cell.clone()));
                         true
                     })?;
-                    self.root = Some(dirty(Node::Leaf(rows))?);
+                    self.root = Some(dirty(Node::Leaf(rows), access, self.sequence)?);
                 }
                 Node::Index(_) => return self.seal(access, work),
+                Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(mut rows) => {
                     let mut children = Vec::new();
                     for (_, cell) in &mut rows {
@@ -132,7 +133,10 @@ impl<T: Cell> Tree<T> {
                         // Keep prepared children even if the next page exceeds
                         // this seal budget; retry never discards staged work.
                         let root = self.root.as_mut().expect("nonempty tree");
-                        root.link = Link::Dirty(Rc::new(RefCell::new(Node::Leaf(rows))));
+                        let node = Node::Leaf(rows);
+                        let page = Rc::new(RefCell::new(node));
+                        access.track(&page, &page.borrow(), self.sequence);
+                        root.link = Link::Dirty(page);
                         root.encoded_bytes = None;
                         root.is_leaf = None;
                         return self.seal(access, work);
