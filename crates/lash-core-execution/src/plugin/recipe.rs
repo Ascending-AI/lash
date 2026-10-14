@@ -82,8 +82,17 @@ pub struct InstalledInventory {
     pub scope: InventoryScope,
     pub entries: Vec<ContributionDescriptor>,
     pub readiness: Vec<ContributionReadiness>,
+    /// The plugins whose recipes declare they keep no state
+    /// ([`PluginRecipe::stateless`]).
+    pub stateless: std::collections::BTreeSet<String>,
 }
 impl InstalledInventory {
+    /// Whether `plugin` may publish state: every plugin but one whose recipe
+    /// declares it stateless.
+    pub fn keeps_state(&self, plugin: &str) -> bool {
+        !self.stateless.contains(plugin)
+    }
+
     pub fn callbacks(&self) -> impl Iterator<Item = &PluginCallbackIdentity> {
         self.entries.iter().filter_map(|entry| match &entry.key {
             ContributionKey::Callback(key) => Some(key),
@@ -946,6 +955,7 @@ pub struct PluginRecipe {
     pub(crate) transcript_decoder: Option<Arc<dyn TranscriptDecoderPlugin>>,
     pub(crate) entries: Vec<ContributionDescriptor>,
     pub requirements: Requirements,
+    pub(crate) stateless: bool,
     bind: SessionOwnerBinder,
 }
 impl PluginRecipe {
@@ -965,6 +975,16 @@ impl PluginRecipe {
 
     pub(crate) fn owner(&self) -> &str {
         &self.owner
+    }
+    /// Declare that the plugin keeps no state. Its namespace stays empty:
+    /// every state command its callbacks or tool bodies return is refused as
+    /// [`DecisionOnly`](crate::plugin::StateCommandRefusal::DecisionOnly), and
+    /// installing it with a state reducer or initial values is refused.
+    /// Certification then reports its state law not applicable.
+    #[must_use]
+    pub fn stateless(mut self) -> Self {
+        self.stateless = true;
+        self
     }
     /// Freeze the codecs registered through the configuration facet.
     pub fn with_configuration(mut self, configuration: ConfigRegistrar) -> Self {
@@ -1107,6 +1127,7 @@ impl PluginRecipe {
             transcript_decoder: None,
             entries,
             requirements,
+            stateless: false,
             bind: Arc::new(move |context, state, reg| {
                 let owner = binder(context, state)?;
                 registrations.bind(owner.as_ref(), state, reg)?;
@@ -1164,6 +1185,7 @@ impl PluginRecipe {
             transcript_decoder: None,
             entries: registrations.descriptors(id, RegistryKind::Session),
             requirements: registrations.requirements.clone(),
+            stateless: false,
             bind: Arc::new(move |context, state, reg| {
                 let owner = binder(context, state)?;
                 registrations.bind(owner.as_ref(), state, reg)?;

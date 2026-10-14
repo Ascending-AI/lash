@@ -54,6 +54,7 @@ fn catalog(plugins: Vec<(&'static str, Register)>) -> Result<PromptCatalog, Plug
         scope: crate::plugin::InventoryScope::Deployment(crate::plugin::RegistryKind::Session),
         readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
         entries,
+        stateless: Default::default(),
     });
     Ok(PromptCatalog::new(contributions.prompt, metadata))
 }

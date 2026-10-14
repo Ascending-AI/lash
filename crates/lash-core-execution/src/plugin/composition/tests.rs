@@ -721,6 +721,7 @@ fn prompt_metadata_comes_from_frozen_inventory() {
         scope: InventoryScope::Deployment(RegistryKind::Session),
         entries: reg.descriptors("prompt-metadata", RegistryKind::Session),
         readiness: vec![ContributionReadiness::Ready; 3],
+        stateless: Default::default(),
     };
     let expected = super::super::prompt::PromptCatalogSnapshot::from_inventory(&inventory);
     let mut contributions = PluginContributions {

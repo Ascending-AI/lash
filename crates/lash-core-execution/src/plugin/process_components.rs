@@ -532,6 +532,7 @@ impl ProcessComponentRegistry {
             scope: InventoryScope::Deployment(crate::RegistryKind::Process),
             entries,
             readiness,
+            stateless: Default::default(),
         }
     }
 
@@ -660,6 +661,7 @@ impl ProcessComponentRegistry {
             ),
             readiness: vec![ContributionReadiness::Ready; entries.len()],
             entries,
+            stateless: Default::default(),
         };
         contributions.inventory = Some(Arc::new(inventory));
         for entry in env.components() {

@@ -351,6 +351,10 @@ pub(in crate::plugin) trait StateAuthority: Send + Sync {
     fn declared(&self, plugin: &str) -> Option<FormatVersion>;
     /// `plugin`'s reducer `name`.
     fn reducer(&self, plugin: &str, name: &str) -> Option<StateReducer>;
+    /// Whether `plugin` may publish state at all.
+    fn keeps_state(&self, _plugin: &str) -> bool {
+        true
+    }
 }
 
 /// One owner's published state, as its publication coordinator reads and
@@ -483,6 +487,10 @@ impl StateAuthority for crate::PluginSession {
             .and_then(|capabilities| capabilities.contributions.state_reducers.get(plugin))
             .and_then(|reducers| reducers.get(name))
             .cloned()
+    }
+
+    fn keeps_state(&self, plugin: &str) -> bool {
+        self.host.keeps_state(plugin)
     }
 }
 
@@ -630,6 +638,9 @@ impl StateDesk<'_> {
         match proposer {
             Some(proposer) => batch.check(proposer, self.limits)?,
             None => batch.check_bounds(self.limits)?,
+        }
+        if !self.authority.keeps_state(&batch.plugin) {
+            return Err(StateCommandRefusal::DecisionOnly);
         }
         let format_version = self
             .authority

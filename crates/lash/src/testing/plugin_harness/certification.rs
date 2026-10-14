@@ -48,7 +48,10 @@ pub enum CertificationUnavailable {
     AttributionNotRecorded,
     NotRecordedAtCut,
     CounterUnavailable,
-    /// The callback can publish state, but the scenario left its namespace empty.
+    /// The callback can publish state, but the scenario left its namespace
+    /// empty. A plugin whose recipe is declared
+    /// [`stateless`](crate::plugins::PluginRecipe::stateless) cannot publish,
+    /// so its state law is not applicable instead.
     ScenarioDidNotPublish,
 }
 /// A law has no subject in this exercised contribution.
@@ -301,9 +304,12 @@ pub async fn certify_plugin_with(
             let tool_body = slot == CallbackSlot::ToolProvider
                 && (!harness.deferred_resolution_counts().contains_key(&callback)
                     || recorded.1 > 0);
-            if slot.state_authority() == crate::plugins::StateAuthority::Commands
-                || tool_body
-                || has_reducer
+            // A plugin declared stateless has every command refused, so none
+            // of its callbacks can publish.
+            if inventory.keeps_state(factory.id())
+                && (slot.state_authority() == crate::plugins::StateAuthority::Commands
+                    || tool_body
+                    || has_reducer)
             {
                 unavailable(CertificationUnavailable::ScenarioDidNotPublish)
             } else {

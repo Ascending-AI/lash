@@ -118,6 +118,12 @@ impl PluginHost {
                         factory
                             .initialize_state(&request.owner, config)
                             .and_then(|values| {
+                                if !values.is_empty() && !self.keeps_state(factory.id()) {
+                                    return Err(PluginError::Registration(format!(
+                                        "stateless plugin `{}` initializes state",
+                                        factory.id()
+                                    )));
+                                }
                                 super::state::validate_namespace(
                                     &values,
                                     self.data_limits().plugin_state,

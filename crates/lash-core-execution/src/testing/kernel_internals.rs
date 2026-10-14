@@ -290,6 +290,7 @@ pub fn prompt_catalog(
                 ),
                 readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
                 entries,
+                stateless: Default::default(),
             },
         ),
     ))
@@ -336,6 +337,7 @@ pub fn prompt_catalog_from_recipes(
                 ),
                 readiness: vec![crate::plugin::ContributionReadiness::NotValidated; entries.len()],
                 entries,
+                stateless: Default::default(),
             },
         ),
     ))

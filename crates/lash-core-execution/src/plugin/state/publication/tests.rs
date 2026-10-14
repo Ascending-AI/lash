@@ -1161,3 +1161,67 @@ async fn a_deployment_state_limit_is_honored_by_its_sessions() {
         }
     ));
 }
+
+/// A host whose only plugin is `plugin`'s recipe, declared stateless.
+fn stateless_host(
+    plugin: &'static str,
+    entries: crate::plugin::PluginRegistrar<()>,
+) -> crate::PluginHost {
+    crate::PluginHost::new(
+        vec![Arc::new(crate::plugin::PluginRecipeFactory::new(
+            PluginDeclaration::initial(plugin),
+            crate::plugin::PluginRecipe::from_registrar(plugin, entries).stateless(),
+        ))],
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    )
+}
+
+/// STATELESS-IS-ENFORCED (FIG-6278): a plugin declared stateless publishes
+/// nothing. Its tool body's commands are refused as decision-only, and
+/// installing it with a reducer is refused.
+#[tokio::test]
+async fn a_stateless_plugin_publishes_nothing() {
+    const LOOKUP: &str = "lookup";
+    let host = stateless_host(LOOKUP, crate::plugin::PluginRegistrar::new(LOOKUP));
+    let live = session(&host, None);
+    let outcome = record(
+        &live,
+        "stateless-body",
+        vec![tool_commands(
+            LOOKUP,
+            "stateless-body",
+            StateCommands::new().set("cached", serde_json::json!(1)),
+        )],
+    )
+    .await;
+    assert!(
+        matches!(
+            &resolutions(&outcome)[0].outcome,
+            StateResolutionOutcome::Refused {
+                refusal: StateCommandRefusal::DecisionOnly
+            }
+        ),
+        "{outcome:?}"
+    );
+    publish(&live, "stateless-body", outcome).unwrap();
+    assert!(live.export_state().plugins[LOOKUP].values.is_empty());
+
+    let mut entries = crate::plugin::PluginRegistrar::new(LOOKUP);
+    entries
+        .state_reducer("count", |_, _| {
+            Ok(Arc::new(|_: StateReduction<'_>| Ok(None)) as StateReducer)
+        })
+        .unwrap();
+    let refused = stateless_host(LOOKUP, entries)
+        .isolated_registry()
+        .build_session(PluginSessionRequest::creation(
+            "state-owner",
+            crate::plugin::SessionAuthorityContext::fixture(),
+        ));
+    assert!(
+        matches!(&refused, Err(crate::PluginError::Registration(message)) if message.contains("state reducer")),
+        "{:?}",
+        refused.err()
+    );
+}

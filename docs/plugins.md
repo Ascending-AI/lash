@@ -51,10 +51,15 @@ is `Failed` if any law fails, `Partial` if an applicable law is unavailable,
 and `Full` when every applicable law is exercised and passes. An exercised
 callback that can publish state needs a scenario that publishes values:
 an empty namespace yields `Unavailable { reason:
-CertificationUnavailable::ScenarioDidNotPublish }`. Only a decision-only
-contribution that ran no tool body and whose factory declares no state reducer
-receives `NotApplicable { reason: CertificationNotApplicable::NoPublishedState }`,
-after verifying that its namespace stayed empty on reopen.
+CertificationUnavailable::ScenarioDidNotPublish }`. Every tool body can return
+state commands, so a stateless tool provider, such as an HTTP lookup, declares
+it with `PluginRecipe::stateless()`. The runtime enforces that declaration: it
+refuses every state command the plugin returns as `DecisionOnly` and refuses to
+install it with a state reducer or initial values. Its callbacks, and a
+decision-only contribution that ran no tool body and whose factory declares no
+state reducer, receive `NotApplicable { reason:
+CertificationNotApplicable::NoPublishedState }`, after verifying that the
+namespace stayed empty on reopen.
 A factory whose inventory has no certifiable callbacks, such as a prompt-only
 plugin, receives `NoCertifiableContributions`. Its inventory passed admission,
 but the battery proves no prompt rendering, replay or reopen behavior.

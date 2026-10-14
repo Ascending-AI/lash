@@ -839,3 +839,98 @@ async fn a_state_publishing_hook_requires_a_published_state_scenario() {
         serde_json::json!(1)
     );
 }
+
+/// An HTTP-style lookup provider whose body publishes nothing, declared
+/// stateless when `stateless`.
+fn http_lookup(stateless: bool) -> Result<Arc<dyn PluginFactory>, Box<dyn std::error::Error>> {
+    struct Lookup;
+    #[lash::async_trait]
+    impl lash::tools::StaticToolExecute for Lookup {
+        async fn execute(&self, _: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+            lash::tools::ToolOutcome::ok(serde_json::json!("sunny")).into()
+        }
+    }
+    let lookup = lash::tools::ToolDefinition::raw(
+        "lookup",
+        "lookup",
+        "Fetch the forecast",
+        serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+        serde_json::json!({"type":"string"}),
+    )?
+    .with_execution(std::time::Duration::from_secs(1));
+    let mut entries = PluginRegistrar::new("weather");
+    entries
+        .tools()
+        .provider(lash::tool_provider_key!("http"), move |_, _| {
+            Ok(Arc::new(lash::tools::StaticToolProvider::new(
+                vec![lookup.clone()],
+                Lookup,
+            )))
+        })?;
+    let recipe = PluginRecipe::from_registrar("weather", entries);
+    Ok(Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("weather"),
+        if stateless {
+            recipe.stateless()
+        } else {
+            recipe
+        },
+    )))
+}
+async fn certify_http_lookup(
+    stateless: bool,
+) -> Result<PluginCertification, Box<dyn std::error::Error>> {
+    let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
+        callback: PluginCallbackIdentity::tool_provider("weather", "http"),
+        tool: "lookup",
+        args: serde_json::json!({}),
+        support: None,
+    });
+    let report =
+        certify_plugin_with(http_lookup(stateless)?, HostPolicy::standard(), &[scenario]).await?;
+    no_failed_law(&report);
+    assert_eq!(report.reports.len(), 4, "{report:#?}");
+    Ok(report)
+}
+fn state_law(report: &PluginCertification) -> Option<&PluginLawResult> {
+    report
+        .reports
+        .iter()
+        .find(|report| report.law == PluginLaw::StateSurvivesReopen)
+        .map(|report| &report.result)
+}
+/// STATELESS-TOOL-BODY-CERTIFIES-FULL (FIG-6278): a provider declared
+/// stateless cannot publish, so its tool body's state law has no subject.
+#[tokio::test]
+async fn a_stateless_http_provider_certifies_full() {
+    let report = certify_http_lookup(true).await.unwrap();
+    assert_eq!(
+        state_law(&report),
+        Some(&PluginLawResult::NotApplicable {
+            reason: CertificationNotApplicable::NoPublishedState
+        })
+    );
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::Full,
+        "{report:#?}"
+    );
+}
+/// UNPUBLISHED-STATE-CAPABLE-BODY-IS-UNAVAILABLE (FIG-6264): without the
+/// declaration the same body could publish, so a scenario that leaves the
+/// namespace empty leaves the state law unexercised.
+#[tokio::test]
+async fn a_state_capable_provider_that_does_not_publish_stays_unavailable() {
+    let report = certify_http_lookup(false).await.unwrap();
+    assert_eq!(
+        state_law(&report),
+        Some(&PluginLawResult::Unavailable {
+            reason: CertificationUnavailable::ScenarioDidNotPublish
+        })
+    );
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::Partial,
+        "{report:#?}"
+    );
+}

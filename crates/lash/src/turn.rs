@@ -132,6 +132,96 @@ pub enum ReportSource {
 }
 
 impl TurnReport {
+    /// A settled report of `outcome` and `usage` for a host that produces
+    /// reports itself, such as a wire fixture or a projection test.
+    ///
+    /// The outcome is kept unchanged, with any cancellation evidence or error
+    /// cause it carries. Every other fact starts empty: no call ledgers,
+    /// failure evidence, observed errors, acceptance receipt or affected
+    /// inputs, and default execution metrics. Empty evidence means none was
+    /// supplied, not that none occurred, so the report is
+    /// [`ReportSource::Durable`]. Supply the facts a test reads with the
+    /// `with_*` methods.
+    pub fn new(outcome: TurnOutcome, usage: LlmUsage) -> Self {
+        Self {
+            outcome,
+            usage,
+            llm_calls: Vec::new(),
+            failure_evidence: Vec::new(),
+            tool_calls: Vec::new(),
+            execution: TurnExecutionMetrics::default(),
+            errors: Vec::new(),
+            acceptance: None,
+            cancel_input_outcome: lash_core::TurnCancelInputOutcome::default(),
+            source: ReportSource::Durable,
+        }
+    }
+
+    /// The parent session's provider calls, in protocol order.
+    #[must_use]
+    pub fn with_llm_calls(mut self, llm_calls: Vec<LlmCallRecord>) -> Self {
+        self.llm_calls = llm_calls;
+        self
+    }
+
+    /// Evidence from charge-safety-refused generations.
+    #[must_use]
+    pub fn with_failure_evidence(
+        mut self,
+        failure_evidence: Vec<lash_core::TurnFailureEvidence>,
+    ) -> Self {
+        self.failure_evidence = failure_evidence;
+        self
+    }
+
+    /// The turn's tool calls, in protocol order.
+    #[must_use]
+    pub fn with_tool_calls(mut self, tool_calls: Vec<ToolCallRecord>) -> Self {
+        self.tool_calls = tool_calls;
+        self
+    }
+
+    /// The turn's execution metrics.
+    #[must_use]
+    pub fn with_execution(mut self, execution: TurnExecutionMetrics) -> Self {
+        self.execution = execution;
+        self
+    }
+
+    /// Typed errors observed while settling the turn.
+    #[must_use]
+    pub fn with_errors(mut self, errors: Vec<TurnIssue>) -> Self {
+        self.errors = errors;
+        self
+    }
+
+    /// The acceptance receipt of the input the turn ran from.
+    #[must_use]
+    pub fn with_acceptance(
+        mut self,
+        acceptance: lash_core::runtime::TurnInputAcceptanceReceipt,
+    ) -> Self {
+        self.acceptance = Some(acceptance);
+        self
+    }
+
+    /// Undelivered inputs the turn's cancellation policy affected.
+    #[must_use]
+    pub fn with_cancel_input_outcome(
+        mut self,
+        cancel_input_outcome: lash_core::TurnCancelInputOutcome,
+    ) -> Self {
+        self.cancel_input_outcome = cancel_input_outcome;
+        self
+    }
+
+    /// Where the report was assembled.
+    #[must_use]
+    pub fn with_source(mut self, source: ReportSource) -> Self {
+        self.source = source;
+        self
+    }
+
     /// The four-way status of the settled turn this report describes:
     /// [`Answered`](crate::TurnStatus::Answered),
     /// [`Failed`](crate::TurnStatus::Failed) or

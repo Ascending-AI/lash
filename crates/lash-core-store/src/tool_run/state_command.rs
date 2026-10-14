@@ -223,7 +223,9 @@ pub struct StateCommandBatch {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StateCommandRefusal {
-    #[error("a decision-only callback returned state commands")]
+    /// A decision-only callback, or a callback or tool body of a plugin
+    /// declared stateless, returned state commands.
+    #[error("a decision-only callback or stateless plugin returned state commands")]
     DecisionOnly,
     #[error("the batch addresses another plugin's namespace")]
     WrongOwner,

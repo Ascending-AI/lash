@@ -640,6 +640,17 @@ impl PluginHost {
                             factory.id()
                         )));
                     }
+                    if recipe.stateless
+                        && recipe
+                            .entries
+                            .iter()
+                            .any(|entry| entry.kind == ContributionKind::StateReducer)
+                    {
+                        return Err(PluginError::Registration(format!(
+                            "stateless plugin `{}` registers a state reducer",
+                            factory.id()
+                        )));
+                    }
                 }
                 Ok(recipes)
             })
@@ -717,6 +728,22 @@ impl PluginHost {
             scope: InventoryScope::Deployment(lash_core_store::obligations::RegistryKind::Session),
             readiness: vec![readiness; entries.len()],
             entries,
+            stateless: self
+                .recipes()?
+                .iter()
+                .filter(|recipe| recipe.stateless)
+                .map(|recipe| recipe.owner().to_owned())
+                .collect(),
+        })
+    }
+
+    /// Whether `plugin` may publish state: false only for a plugin whose
+    /// recipe declares it stateless.
+    pub(crate) fn keeps_state(&self, plugin: &str) -> bool {
+        self.recipes().map_or(true, |recipes| {
+            recipes
+                .iter()
+                .all(|recipe| !recipe.stateless || recipe.owner() != plugin)
         })
     }
 

@@ -795,18 +795,18 @@ mod tests {
             ]
         );
 
-        let mut report = lash::testing::settled_turn_report(lash::TurnOutcome::Finished(
-            lash::TurnFinish::AssistantMessage {
+        let report = lash::TurnReport::new(
+            lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage {
                 text: "answer".into(),
+            }),
+            lash::usage::LlmUsage {
+                input_tokens: i64::MAX - 2,
+                output_tokens: 1,
+                cache_read_input_tokens: 1,
+                cache_write_input_tokens: 1,
+                reasoning_output_tokens: i64::MAX,
             },
-        ));
-        report.usage = lash::usage::LlmUsage {
-            input_tokens: i64::MAX - 2,
-            output_tokens: 1,
-            cache_read_input_tokens: 1,
-            cache_write_input_tokens: 1,
-            reasoning_output_tokens: i64::MAX,
-        };
+        );
         let facts = runtime_usage_invariant_facts(&report, &[]);
         assert!(facts.non_negative);
         let mut totals = facts.turn_usage;
@@ -821,12 +821,14 @@ mod tests {
 
     #[test]
     fn final_value_builder_derives_pass_and_fail_from_real_outcomes_and_events() {
-        let prose_only =
-            lash::testing::settled_turn_report(lash_core::facade_support::TurnOutcome::Finished(
+        let prose_only = lash::TurnReport::new(
+            lash_core::facade_support::TurnOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: "looks final".to_string(),
                 },
-            ));
+            ),
+            Default::default(),
+        );
         let failed = runtime_final_value_invariant_facts(
             &prose_only,
             &[lash::TurnActivity::independent(
@@ -841,13 +843,15 @@ mod tests {
         assert!(failed.transcript_inference_required());
 
         let value = serde_json::json!({"answer": 42});
-        let semantic =
-            lash::testing::settled_turn_report(lash_core::facade_support::TurnOutcome::Finished(
+        let semantic = lash::TurnReport::new(
+            lash_core::facade_support::TurnOutcome::Finished(
                 lash_core::facade_support::TurnFinish::Finished {
                     tool_name: "finish".into(),
                     value: value.clone(),
                 },
-            ));
+            ),
+            Default::default(),
+        );
         let mismatched = runtime_final_value_invariant_facts(
             &semantic,
             &[lash::TurnActivity::independent(lash::TurnEvent::Finished {
