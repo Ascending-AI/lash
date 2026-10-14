@@ -390,6 +390,7 @@ async function run() {
   $("run-status").textContent = "Running";
   const version = workflow.version;
   let sawTerminal = false;
+  let observing = false;
   const traceLinks = new Map();
   function observe(event) {
     if (event.workflowVersion !== version) {
@@ -491,6 +492,7 @@ async function run() {
       body: JSON.stringify({ version, inputs: runInputs }),
     });
     if (!response.ok) throw (await response.json()).error;
+    observing = true;
     const reader = response.body
       .pipeThrough(new TextDecoderStream())
       .getReader();
@@ -526,7 +528,10 @@ async function run() {
       );
     }
   } catch (error) {
-    $("run-status").textContent = "Failed";
+    if (!sawTerminal)
+      $("run-status").textContent = observing
+        ? "Observation unavailable"
+        : "Could not start";
     output(errorText(error), true);
   } finally {
     running = false;

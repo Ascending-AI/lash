@@ -189,7 +189,7 @@ async function run() {
       }
     }
   } catch (error) {
-    $("run-status").textContent = `failed: ${error?.message ?? error}`;
+    $("run-status").textContent = `Run request or observation failed: ${error?.message ?? error}`;
   }
   running = false;
   $("approve").hidden = true;
