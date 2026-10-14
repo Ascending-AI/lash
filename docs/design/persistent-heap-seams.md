@@ -863,3 +863,31 @@ sweeping a dead ordinal changes nothing. When it reaches zero the same heap edit
 removes the family row, frozen base reference and conservative population
 contribution. An empty family registers no row. The family allocator remains
 monotonic, and pressure enumeration includes untouched live family members.
+
+### S1 (amended): native equality
+
+Structural `equal(a, b) -> Result<bool, HeapFault>` belongs to `NativeHeap`.
+`SemanticHeap` inherits it; first-party natives use the same cycle-safe
+implementation as machine operations, with storage faults propagated intact.
+
+### S4 (amended): one execution-record grammar
+
+Public `FrameRecord` and `TaskRecord` are the paged working records. Frames hold
+binding, loop, finally, iterated, departing and optional argument trees. Tasks
+hold joiner, occurrence and frame trees, plus bounded state and obligation
+metadata. The `result_retained` flag distinguishes retired ended-result payloads.
+The former Vec-snapshot declarations/codecs and `HeldRecord` are deleted. Sealing
+prepares these same working trees; it never assembles another frame/task image.
+
+`ListJoinRecord.members` is a `Tree<TaskId>`, with the canonical tree codec;
+the former Vec grammar is deleted. Other unbounded S4 record vectors likewise
+become working trees, rather than whole records rebuilt when parking.
+
+Statement roots' local holding costs and outstanding native reservations are
+included in U before conservative admission. Installing a value/object/family
+consumes its reservation credit instead of charging it twice. Under pressure,
+a directory or root replacement traces the proposed private graph, including
+its fresh target; it does not retain a reference solely because the overwritten
+body held it. Infrastructure failures still resume from the committed root.
+Resident immutable descriptors validate local cost, depth and edge aggregates
+against their canonical members before their summaries may serve as oracles.

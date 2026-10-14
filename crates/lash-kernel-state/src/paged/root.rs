@@ -123,22 +123,6 @@ pub struct CheckpointRoot {
     pub meters: SavedMeters,
 }
 
-/// One task.
-#[derive(Clone, Debug)]
-pub struct TaskRecord {
-    pub identity: TaskIdentity,
-    pub state: TaskStateRecord,
-    /// Joins waiting on the task, in join-start order (`K-TASK-008`).
-    pub joiners: Vec<JoinerRecord>,
-    pub observed: bool,
-    pub passed: bool,
-    pub failed: bool,
-    /// Occurrence counts by action site (`K-SITE-002`): `Site` to count.
-    pub occurrences: KeyedRoot,
-    /// [`FrameRecord`]s, the outermost first. Empty once the task ended.
-    pub frames: SequenceRoot,
-}
-
 /// A waiting join.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JoinerRecord {
@@ -172,19 +156,6 @@ pub enum IncomingRecord {
 pub enum EndedTask {
     Returned(Value),
     Raised(Value),
-}
-
-/// One active call, in semantic coordinates.
-#[derive(Clone, Debug)]
-pub struct FrameRecord {
-    /// The pending statement (`K-SITE-001`); the function body is the one
-    /// that holds it.
-    pub statement: Site,
-    /// The bindings in the order the body declares them.
-    pub bindings: Vec<BindingRecord>,
-    pub loops: Vec<LoopRecord>,
-    pub finally: Vec<FinallyRecord>,
-    pub held: HeldRecord,
 }
 
 #[derive(Clone, Debug)]
@@ -225,16 +196,6 @@ pub enum EnteredRecord {
     Continue,
 }
 
-/// Values a frame's control state alone holds.
-#[derive(Clone, Debug, Default)]
-pub struct HeldRecord {
-    pub iterated: Vec<Value>,
-    pub departing: Vec<Value>,
-    /// A native-bodied library call's arguments, measured when it ends
-    /// (`K-CHG-003`).
-    pub arguments: Option<Vec<Value>>,
-}
-
 /// One wait handed out. Its request is the admission the parent froze;
 /// the record names it by effect identity and never copies its arguments.
 #[derive(Clone, Debug)]
@@ -267,9 +228,9 @@ pub enum CommittedOutcomeRecord {
     Elapsed,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ListJoinRecord {
     pub joiner: TaskId,
     pub mode: JoinMode,
-    pub members: Vec<TaskId>,
+    pub members: super::tree::Tree<TaskId>,
 }

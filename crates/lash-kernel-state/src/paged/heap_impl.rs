@@ -28,7 +28,7 @@ pub struct PagedHeap {
     family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     pub session: Tree<BindingRecord>,
-    pub tasks: Tree<super::directory::execution::TaskPage>,
+    pub tasks: Tree<super::directory::execution::TaskRecord>,
     temporary: Vec<Value>,
     pub(super) reserved: u64,
 }
@@ -135,7 +135,12 @@ impl PagedHeap {
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
         if let Some(census) = &mut self.census {
             census
-                .changed(LogicalBytes(self.reserved), LogicalBytes(0))
+                .changed(
+                    LogicalBytes(checked_sum(
+                        self.temporary.iter().map(value_cost).chain([self.reserved]),
+                    )?),
+                    LogicalBytes(0),
+                )
                 .map_err(census_fault)?;
             self.accounting = census.certificate();
         }
@@ -225,8 +230,61 @@ impl PagedHeap {
             _ => Err(raised("type_error", "the object has another kind")),
         }
     }
-    pub fn set_statement_roots(&mut self, values: Vec<Value>) {
-        self.temporary = values;
+    pub fn set_statement_roots(&mut self, values: Vec<Value>) -> Result<(), HeapWriteError> {
+        let before = checked_sum(self.temporary.iter().map(value_cost))?;
+        let after = checked_sum(values.iter().map(value_cost))?;
+        let mut census = self
+            .census
+            .take()
+            .ok_or_else(|| HeapFault::Malformed("statement has no census".into()))?;
+        let credit = self.reserved.min(after.saturating_sub(before));
+        let decision = census.reserve(LogicalBytes(
+            after.saturating_sub(before).saturating_sub(credit),
+        ));
+        let result = (|| {
+            census
+                .changed(LogicalBytes(credit), LogicalBytes(0))
+                .map_err(census_fault)?;
+            self.reserved -= credit;
+            self.temporary = values;
+            match decision {
+                ReservationDecision::Granted(_) => census
+                    .changed(LogicalBytes(before), LogicalBytes(after))
+                    .map_err(census_fault)
+                    .map_err(HeapWriteError::from),
+                ReservationDecision::NeedsPrecision(_) => self.refine_installed(&mut *census, &[]),
+            }
+        })();
+        self.accounting = census.certificate();
+        self.census = Some(census);
+        self.header = None;
+        result
+    }
+    fn refine_installed(
+        &mut self,
+        census: &mut dyn AllocationCensus,
+        fresh: &[EntityId],
+    ) -> Result<(), HeapWriteError> {
+        let registers = self.temporary.clone();
+        let reserved = self.reserved;
+        match census.refine(
+            self,
+            &TransientRoots {
+                registers: &registers,
+                pinned: &[],
+                native_args: &[],
+                fresh,
+                reserved: LogicalBytes(reserved),
+            },
+            PendingReservation {
+                bytes: LogicalBytes(0),
+                overflowed: false,
+            },
+        ) {
+            Ok(RefinedDecision::Granted(_)) => Ok(()),
+            Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
+            Err(error) => Err(census_fault(error).into()),
+        }
     }
     pub(super) fn admit(&mut self, bytes: u64, extra: &[Value]) -> Result<(), HeapWriteError> {
         let mut values = self.temporary.clone();
@@ -245,49 +303,58 @@ impl PagedHeap {
     fn publish(&mut self, entity: EntityId, head: ObjectHead) -> Result<(), HeapWriteError> {
         let before = self.head(entity)?.map_or(0, |h| h.cost());
         let after = head.cost();
-        let upper = self
-            .accounting
-            .upper
-            .0
-            .checked_sub(before)
-            .and_then(|u| u.checked_add(after))
-            .ok_or_else(|| HeapFault::Malformed("directory cost overflow".into()))?;
-        if let Some(census) = &mut self.census {
-            if before == 0 {
-                census.added(LogicalBytes(after), 1).map_err(census_fault)?;
-            } else {
-                census
-                    .changed(LogicalBytes(before), LogicalBytes(after))
-                    .map_err(census_fault)?;
+        let mut census = self
+            .census
+            .take()
+            .ok_or_else(|| HeapFault::Malformed("edit has no census".into()))?;
+        let credit = self.reserved.min(after.saturating_sub(before));
+        let decision = census.reserve(LogicalBytes(
+            after.saturating_sub(before).saturating_sub(credit),
+        ));
+        let result = (|| {
+            census
+                .changed(LogicalBytes(credit), LogicalBytes(0))
+                .map_err(census_fault)?;
+            self.reserved -= credit;
+            let old = self.directory.get(&entity_key(entity), &self.access)?;
+            let old_closures =
+                old.as_ref()
+                    .is_some_and(|h| h.kind() == ObjectKind::Closure) as u64;
+            let old_tasks = old.as_ref().map_or(0, Cell::task_edges);
+            self.population.closure_entities = self
+                .population
+                .closure_entities
+                .checked_sub(old_closures)
+                .and_then(|v| v.checked_add((head.kind() == ObjectKind::Closure) as u64))
+                .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_sub(old_tasks)
+                .and_then(|v| v.checked_add(head.task_edges()))
+                .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
+            self.directory
+                .write(entity_key(entity), head, &self.access)?;
+            self.header = None;
+            match decision {
+                ReservationDecision::Granted(_) => {
+                    if before == 0 {
+                        census.added(LogicalBytes(after), 1).map_err(census_fault)?;
+                    } else {
+                        census
+                            .changed(LogicalBytes(before), LogicalBytes(after))
+                            .map_err(census_fault)?;
+                    }
+                    Ok(())
+                }
+                ReservationDecision::NeedsPrecision(_) => {
+                    self.refine_installed(&mut *census, &[entity])
+                }
             }
-            self.accounting = census.certificate();
-        } else {
-            self.accounting.upper = LogicalBytes(upper);
-            if before == 0 {
-                self.accounting.entities += 1;
-            }
-        }
-        let old = self.directory.get(&entity_key(entity), &self.access)?;
-        let old_closures = old
-            .as_ref()
-            .is_some_and(|h| h.kind() == ObjectKind::Closure) as u64;
-        let old_tasks = old.as_ref().map_or(0, Cell::task_edges);
-        self.population.closure_entities = self
-            .population
-            .closure_entities
-            .checked_sub(old_closures)
-            .and_then(|v| v.checked_add((head.kind() == ObjectKind::Closure) as u64))
-            .ok_or_else(|| HeapFault::Malformed("closure population overflow".into()))?;
-        self.population.task_edges = self
-            .population
-            .task_edges
-            .checked_sub(old_tasks)
-            .and_then(|v| v.checked_add(head.task_edges()))
-            .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
-        self.directory
-            .write(entity_key(entity), head, &self.access)?;
-        self.header = None;
-        Ok(())
+        })();
+        self.accounting = census.certificate();
+        self.census = Some(census);
+        result
     }
     fn make_head(&self, init: ObjectInit) -> Result<ObjectHead, HeapFault> {
         let body = match init {
@@ -666,30 +733,7 @@ impl SemanticHeap for PagedHeap {
             ObjectInit::Variable(v) => ObjectInit::Variable(self.canonical(v)?),
             other => other,
         };
-        let mut values = Vec::new();
-        match &init {
-            ObjectInit::List(v) | ObjectInit::Set(v) => values.extend_from_slice(v),
-            ObjectInit::Map(v) => {
-                for (k, v) in v {
-                    values.push(k.clone());
-                    values.push(v.clone());
-                }
-            }
-            ObjectInit::Record(v) => {
-                for (k, v) in v {
-                    values.push(Value::Text(k.clone()));
-                    values.push(v.clone());
-                }
-            }
-            ObjectInit::Variable(v) => values.push(v.clone()),
-            ObjectInit::Closure { captures, .. } => values.extend(
-                captures
-                    .iter()
-                    .map(|(_, id)| Value::Ref(Identity::Object(*id))),
-            ),
-        }
         let head = self.make_head(init)?;
-        self.admit(head.cost(), &values)?;
         let id = EntityId {
             family: FamilyId::PRIMARY,
             ordinal: self.next_ordinal,
@@ -716,11 +760,6 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = self.canonical(value)?;
-        let before = self.list_get(list, index)?.as_ref().map_or(0, value_cost);
-        self.admit(
-            value_cost(&value).saturating_sub(before),
-            &[Value::List(list), value.clone()],
-        )?;
         if let Body::List { inline, rows, next } = &mut head.body {
             if let Some(values) = inline {
                 if index == values.len() as u64 {
@@ -832,12 +871,8 @@ impl SemanticHeap for PagedHeap {
         self.table_remove(record, &key)
     }
     fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError> {
-        let head = self.required(variable, ObjectKind::Variable)?;
+        self.required(variable, ObjectKind::Variable)?;
         let value = self.canonical(value)?;
-        self.admit(
-            (32 + value_cost(&value)).saturating_sub(head.cost()),
-            &[Value::Ref(Identity::Object(variable)), value.clone()],
-        )?;
         self.publish(
             variable,
             ObjectHead {
@@ -917,100 +952,6 @@ impl SemanticHeap for PagedHeap {
         } else {
             NormalKey::Digest(key_digest(&bytes))
         }))
-    }
-    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
-        let mut pending = vec![(a.clone(), b.clone())];
-        let mut seen = BTreeSet::new();
-        while let Some((a, b)) = pending.pop() {
-            match (&a, &b) {
-                (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => (),
-                (Value::Bool(a), Value::Bool(b)) if a == b => (),
-                (Value::Int(a), Value::Int(b)) if self.copy_int(a)? == self.copy_int(b)? => (),
-                (Value::Float(a), Value::Float(b)) if a.get() == b.get() => (),
-                (Value::Int(i), Value::Float(f)) | (Value::Float(f), Value::Int(i)) => {
-                    if integral_float(f.get()).as_ref() != Some(&self.copy_int(i)?) {
-                        return Ok(false);
-                    }
-                }
-                (Value::Text(a), Value::Text(b)) if text_same(self, a, b)? => (),
-                (Value::Bytes(a), Value::Bytes(b)) if bytes_same(self, a, b)? => (),
-                (Value::Timestamp(a), Value::Timestamp(b)) if a == b => (),
-                (Value::Function(a), Value::Function(b)) if a == b => (),
-                (Value::Handle(a), Value::Handle(b)) if a == b => (),
-                (Value::Task(a), Value::Task(b)) if a == b => (),
-                (Value::Ref(a), Value::Ref(b)) if a == b => (),
-                (Value::Closure(a), Value::Closure(b)) if a == b => (),
-                (Value::Tuple(a), Value::Tuple(b)) => {
-                    if a.summary.len != b.summary.len {
-                        return Ok(false);
-                    }
-                    for i in 0..a.summary.len {
-                        pending.push((
-                            required_value(self.tuple_get(a, i)?)?,
-                            required_value(self.tuple_get(b, i)?)?,
-                        ));
-                    }
-                }
-                (Value::Error(a), Value::Error(b)) => {
-                    if !text_same(self, &a.kind, &b.kind)?
-                        || !text_same(self, &a.message, &b.message)?
-                    {
-                        return Ok(false);
-                    }
-                    pending.push((self.error_data(a)?, self.error_data(b)?));
-                }
-                (Value::List(a), Value::List(b)) => {
-                    if !seen.insert((0, *a, *b)) {
-                        continue;
-                    }
-                    let len = self.len(*a)?;
-                    if len != self.len(*b)? {
-                        return Ok(false);
-                    }
-                    for i in 0..len {
-                        pending.push((
-                            required_value(self.list_get(*a, i)?)?,
-                            required_value(self.list_get(*b, i)?)?,
-                        ));
-                    }
-                }
-                (Value::Map(a), Value::Map(b))
-                | (Value::Set(a), Value::Set(b))
-                | (Value::Record(a), Value::Record(b)) => {
-                    if !seen.insert((1, *a, *b)) {
-                        continue;
-                    }
-                    if self.len(*a)? != self.len(*b)? {
-                        return Ok(false);
-                    }
-                    let Some(ObjectHead {
-                        body: Body::Table { rows, .. },
-                        ..
-                    }) = self.head(*a)?
-                    else {
-                        return Err(HeapFault::Malformed("table identity missing".into()));
-                    };
-                    let mut error = None;
-                    let mut same = true;
-                    rows.visit(&self.access, &mut |_, e| {
-                        match self.table_get(*b, &e.key) {
-                            Ok(Some(v)) => pending.push((e.value.clone(), v)),
-                            Ok(None) => same = false,
-                            Err(e) => error = Some(e),
-                        }
-                        same && error.is_none()
-                    })?;
-                    if let Some(e) = error {
-                        return Err(e);
-                    }
-                    if !same {
-                        return Ok(false);
-                    }
-                }
-                _ => return Ok(false),
-            }
-        }
-        Ok(true)
     }
     fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault> {
         match value {
@@ -1135,20 +1076,6 @@ impl PagedHeap {
         let mut head = self.required(table, kind)?;
         let key = self.canonical(key)?;
         let value = self.canonical(value)?;
-        let before = self.table_get(table, &key)?.as_ref().map_or(0, value_cost);
-        let key_cost = if before == 0 {
-            value_cost(&key).saturating_sub(if kind == ObjectKind::Record { 16 } else { 0 })
-        } else {
-            0
-        };
-        self.admit(
-            value_cost(&value).saturating_sub(before) + key_cost,
-            &[
-                Value::Ref(Identity::Object(table)),
-                key.clone(),
-                value.clone(),
-            ],
-        )?;
         if let Body::Table {
             lookup, rows, next, ..
         } = &mut head.body
@@ -1305,5 +1232,102 @@ pub(super) fn census_fault(error: CensusFault) -> HeapFault {
     match error {
         CensusFault::Heap(error) => error,
         CensusFault::Malformed(message) => HeapFault::Malformed(message),
+    }
+}
+
+impl PagedHeap {
+    pub(super) fn equal_values(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
+        let mut pending = vec![(a.clone(), b.clone())];
+        let mut seen = BTreeSet::new();
+        while let Some((a, b)) = pending.pop() {
+            match (&a, &b) {
+                (Value::Null, Value::Null) | (Value::Absent, Value::Absent) => (),
+                (Value::Bool(a), Value::Bool(b)) if a == b => (),
+                (Value::Int(a), Value::Int(b)) if self.copy_int(a)? == self.copy_int(b)? => (),
+                (Value::Float(a), Value::Float(b)) if a.get() == b.get() => (),
+                (Value::Int(i), Value::Float(f)) | (Value::Float(f), Value::Int(i)) => {
+                    if integral_float(f.get()).as_ref() != Some(&self.copy_int(i)?) {
+                        return Ok(false);
+                    }
+                }
+                (Value::Text(a), Value::Text(b)) if text_same(self, a, b)? => (),
+                (Value::Bytes(a), Value::Bytes(b)) if bytes_same(self, a, b)? => (),
+                (Value::Timestamp(a), Value::Timestamp(b)) if a == b => (),
+                (Value::Function(a), Value::Function(b)) if a == b => (),
+                (Value::Handle(a), Value::Handle(b)) if a == b => (),
+                (Value::Task(a), Value::Task(b)) if a == b => (),
+                (Value::Ref(a), Value::Ref(b)) if a == b => (),
+                (Value::Closure(a), Value::Closure(b)) if a == b => (),
+                (Value::Tuple(a), Value::Tuple(b)) => {
+                    if a.summary.len != b.summary.len {
+                        return Ok(false);
+                    }
+                    for i in 0..a.summary.len {
+                        pending.push((
+                            required_value(self.tuple_get(a, i)?)?,
+                            required_value(self.tuple_get(b, i)?)?,
+                        ));
+                    }
+                }
+                (Value::Error(a), Value::Error(b)) => {
+                    if !text_same(self, &a.kind, &b.kind)?
+                        || !text_same(self, &a.message, &b.message)?
+                    {
+                        return Ok(false);
+                    }
+                    pending.push((self.error_data(a)?, self.error_data(b)?));
+                }
+                (Value::List(a), Value::List(b)) => {
+                    if !seen.insert((0, *a, *b)) {
+                        continue;
+                    }
+                    let len = self.len(*a)?;
+                    if len != self.len(*b)? {
+                        return Ok(false);
+                    }
+                    for i in 0..len {
+                        pending.push((
+                            required_value(self.list_get(*a, i)?)?,
+                            required_value(self.list_get(*b, i)?)?,
+                        ));
+                    }
+                }
+                (Value::Map(a), Value::Map(b))
+                | (Value::Set(a), Value::Set(b))
+                | (Value::Record(a), Value::Record(b)) => {
+                    if !seen.insert((1, *a, *b)) {
+                        continue;
+                    }
+                    if self.len(*a)? != self.len(*b)? {
+                        return Ok(false);
+                    }
+                    let Some(ObjectHead {
+                        body: Body::Table { rows, .. },
+                        ..
+                    }) = self.head(*a)?
+                    else {
+                        return Err(HeapFault::Malformed("table identity missing".into()));
+                    };
+                    let mut error = None;
+                    let mut same = true;
+                    rows.visit(&self.access, &mut |_, e| {
+                        match self.table_get(*b, &e.key) {
+                            Ok(Some(v)) => pending.push((e.value.clone(), v)),
+                            Ok(None) => same = false,
+                            Err(e) => error = Some(e),
+                        }
+                        same && error.is_none()
+                    })?;
+                    if let Some(e) = error {
+                        return Err(e);
+                    }
+                    if !same {
+                        return Ok(false);
+                    }
+                }
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
     }
 }

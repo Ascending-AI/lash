@@ -536,7 +536,7 @@ fn relative_references_in_error_data_inherit_the_page_family() {
     TupleSummary {
         len: 1,
         depth: 2,
-        cost: LogicalBytes(22),
+        cost: LogicalBytes(38),
         has_edges: true,
         task_edges: 0,
     }
@@ -559,7 +559,7 @@ fn relative_references_in_error_data_inherit_the_page_family() {
         .access
         .seal(PageKind::SEQUENCE_LEAF, out.into_bytes(), vec![])
         .expect("relative leaf");
-    let tree = tree::Tree::<Value>::open(Some(page), 1, LogicalBytes(38), true);
+    let tree = tree::Tree::<Value>::open(Some(page), 1, LogicalBytes(54), true);
     assert!(
         tree.rank_get(0, &heap.access).is_err(),
         "relative references require context"
@@ -619,5 +619,225 @@ fn errors_at_the_depth_limit_have_bounded_descendants() {
             .pages
             .values()
             .all(|p| p.tokens.len() + 32 * p.children.len() + 32 <= 65_536)
+    );
+}
+
+#[test]
+fn an_allocation_consumes_its_native_reservation() {
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(48)).expect("census"),
+    ))
+    .expect("install");
+    heap.reserve(3, 0).expect("reserve 48");
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![Value::Null]))
+        .expect("consume reservation");
+    assert!(matches!(
+        heap.list_get(list, 0).expect("get"),
+        Some(Value::Null)
+    ));
+    assert_eq!(heap.certificate().upper, LogicalBytes(48));
+    heap.release_statement_roots().expect("release");
+    assert_eq!(heap.certificate().upper, LogicalBytes(48));
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(16)).expect("census"),
+    ))
+    .expect("install");
+    heap.reserve(1, 0).expect("reserve value");
+    heap.set_statement_roots(vec![Value::Null])
+        .expect("consume value reservation");
+    assert_eq!(heap.certificate().upper, LogicalBytes(16));
+    heap.release_statement_roots().expect("release");
+    assert_eq!(heap.certificate().upper, LogicalBytes(0));
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(32)).expect("census"),
+    ))
+    .expect("install");
+    heap.reserve(2, 0).expect("reserve family");
+    heap.register_family(frozen(1, true))
+        .expect("consume family reservation");
+    heap.release_statement_roots().expect("release");
+    assert_eq!(heap.certificate().upper, LogicalBytes(32));
+}
+
+#[test]
+fn replacing_a_reference_checks_the_proposed_reachable_graph() {
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(264)).expect("census"),
+    ))
+    .expect("install");
+    let garbage = heap
+        .allocate_object(ObjectInit::List(vec![Value::Null; 10]))
+        .expect("large list");
+    let root = heap
+        .allocate_object(ObjectInit::List(vec![Value::List(garbage)]))
+        .expect("root");
+    let mut bindings = tree::Tree::new(false);
+    bindings
+        .write(
+            b"root".to_vec(),
+            BindingRecord {
+                name: "root".into(),
+                declared: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+                value: BoundRecord::Value(Value::List(root)),
+            },
+            &heap.access,
+        )
+        .expect("binding");
+    heap.set_session_root(bindings).expect("session");
+    let text = heap.text(&"x".repeat(200)).expect("text");
+    heap.list_write(root, 0, Value::Text(text))
+        .expect("proposed graph fits exactly");
+    assert_eq!(heap.certificate().upper, LogicalBytes(264));
+    assert_eq!(heap.certificate().entities, 1);
+    assert!(heap.entity_cost(garbage).expect("swept").is_none());
+}
+
+#[test]
+fn statement_holding_cost_is_counted_before_fast_reservation() {
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        TestCensus::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
+    ))
+    .expect("install");
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![Value::Null]))
+        .expect("list");
+    heap.set_statement_roots(vec![Value::List(list)])
+        .expect("register");
+    assert_eq!(heap.certificate().upper, LogicalBytes(64));
+    assert!(matches!(heap.reserve(2, 0), Err(NativeError::Memory)));
+    heap.release_statement_roots().expect("release");
+    assert_eq!(heap.certificate().upper, LogicalBytes(48));
+}
+
+#[test]
+fn an_edge_visitor_fault_stops_before_the_next_leaf() {
+    let (mut heap, pages) = fresh();
+    let tuple = heap
+        .tuple(
+            (0..65)
+                .map(|ordinal| {
+                    Value::List(EntityId {
+                        family: FamilyId::PRIMARY,
+                        ordinal,
+                    })
+                })
+                .collect(),
+        )
+        .expect("tuple");
+    heap.access.clear();
+    pages.borrow_mut().reads = 0;
+    let fault = HeapFault::Malformed("visitor stopped".into());
+    let mut calls = 0;
+    let result = heap.value_edges(&Value::Tuple(tuple), &mut |_| {
+        calls += 1;
+        Err(fault.clone())
+    });
+    assert_eq!(result, Err(fault));
+    assert_eq!(calls, 1);
+    assert_eq!(pages.borrow().reads, 2, "root and first leaf only");
+}
+
+#[test]
+fn a_forged_membership_aggregate_is_a_corrupt_page() {
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter, decode_body};
+    let (mut heap, _) = fresh();
+    let family = heap.register_family(frozen(3, true)).expect("family");
+    let record = heap
+        .families
+        .get(&directory::ordinal_key(family.0), &heap.access)
+        .expect("read")
+        .expect("row");
+    let mut out = TokenWriter::new();
+    out.seq(7);
+    false.encode(&mut out);
+    Option::<FamilyId>::None.encode(&mut out);
+    record.membership.page.encode(&mut out);
+    1u64.encode(&mut out);
+    0u64.encode(&mut out);
+    0u64.encode(&mut out);
+    2u64.encode(&mut out);
+    let runs = decode_body::<tree::Tree<MembershipRun>>(&out.into_bytes()).expect("descriptor");
+    assert!(matches!(
+        runs.rank_get(0, &heap.access),
+        Err(HeapFault::Corrupt { .. })
+    ));
+}
+
+#[test]
+fn population_summaries_follow_seeded_directory_edits() {
+    use tree::Cell;
+    let (mut heap, _) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![Value::Null]))
+        .expect("list");
+    let variable = heap
+        .allocate_object(ObjectInit::Variable(Value::Null))
+        .expect("variable");
+    let record = heap
+        .allocate_object(ObjectInit::Record(vec![]))
+        .expect("record");
+    let map = heap.allocate_object(ObjectInit::Map(vec![])).expect("map");
+    let closure = heap
+        .allocate_object(ObjectInit::Closure {
+            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+            captures: vec![],
+        })
+        .expect("closure");
+    let mut seed = 417u64;
+    for step in 0..64 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let value = if seed & 8 == 0 {
+            Value::Null
+        } else {
+            Value::Task(lash_kernel_doc::TaskId(step))
+        };
+        match seed % 6 {
+            0 => heap.list_write(list, 0, value).expect("list write"),
+            1 => heap
+                .variable_write(variable, value)
+                .expect("variable write"),
+            2 => heap
+                .record_write(record, FieldName::Static("task"), value)
+                .expect("record write"),
+            3 => heap
+                .record_remove(record, FieldName::Static("task"))
+                .expect("record remove"),
+            4 => heap.map_write(map, Value::Null, value).expect("map write"),
+            _ => heap.table_remove(map, &Value::Null).expect("map remove"),
+        }
+        let mut closure_entities = 0;
+        let mut task_edges = 0;
+        heap.directory
+            .visit(&heap.access, &mut |_, head| {
+                closure_entities += (head.kind() == ObjectKind::Closure) as u64;
+                task_edges += head.task_edges();
+                true
+            })
+            .expect("recount");
+        assert_eq!(
+            heap.data_only_certificate(),
+            DataOnlyCertificate {
+                closure_entities,
+                task_edges
+            }
+        );
+    }
+    heap.sweep(&SweepSet {
+        entities: vec![list, variable, record, map, closure],
+        ended_task_results: vec![],
+    })
+    .expect("sweep");
+    assert_eq!(
+        heap.data_only_certificate(),
+        DataOnlyCertificate {
+            closure_entities: 0,
+            task_edges: 0
+        }
     );
 }
