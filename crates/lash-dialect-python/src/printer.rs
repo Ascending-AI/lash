@@ -19,6 +19,10 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
         plan: &plan,
         inline: &inline,
         indent: 0,
+        bound: Default::default(),
+        main: false,
+        effects: &document.manifest.effects,
+        operators: crate::generated_operators::Operators::new(&document.manifest.functions),
     };
     r.out.write("k.document(\"lash.generated.python\", \"1\", ");
     r.metadata(&document.manifest);
@@ -34,21 +38,18 @@ pub fn print(document: &k::Document, options: PrintOptions) -> Result<PrintedSou
     r.metadata(&helpers);
     r.out.write(")\n");
     for (name, function) in &document.functions {
-        r.out.write("with k.declare(");
-        r.out.json(name);
-        r.out.write(", ");
-        r.names(&function.params);
-        r.suite();
+        r.out.write("def ");
+        r.name(name);
+        r.parameters(&function.params);
+        r.out.write(":\n");
         let unit = options.source_map.then(|| k::Unit::Function(name.clone()));
-        r.node(k::Node::Block(&function.body), unit.as_ref());
-        r.indent -= 1;
+        r.bound = function.params.iter().cloned().collect();
+        r.root_block(&function.body, unit.as_ref());
     }
-    r.out.write("with k.main():\n");
-    r.indent = 1;
-    r.node(
-        k::Node::Block(&document.main),
-        options.source_map.then_some(&k::Unit::Main),
-    );
+    r.bound.clear();
+    r.main = true;
+    r.out.write("def main():\n");
+    r.root_block(&document.main, options.source_map.then_some(&k::Unit::Main));
     r.out.finish(document, SourceFormat::PythonV1)
 }
 impl Printer for Python {
@@ -68,13 +69,63 @@ pub(crate) fn identifier(name: &str) -> bool {
         .is_some_and(|c| c == '_' || unicode_ident::is_xid_start(c))
         && chars.all(unicode_ident::is_xid_continue)
 }
+pub(crate) fn attribute_identifier(name: &str) -> bool {
+    identifier(name)
+        && !matches!(
+            name,
+            "False"
+                | "None"
+                | "True"
+                | "and"
+                | "as"
+                | "assert"
+                | "async"
+                | "await"
+                | "break"
+                | "class"
+                | "continue"
+                | "def"
+                | "del"
+                | "elif"
+                | "else"
+                | "except"
+                | "finally"
+                | "for"
+                | "from"
+                | "global"
+                | "if"
+                | "import"
+                | "in"
+                | "is"
+                | "lambda"
+                | "nonlocal"
+                | "not"
+                | "or"
+                | "pass"
+                | "raise"
+                | "return"
+                | "try"
+                | "while"
+                | "with"
+                | "yield"
+        )
+}
 pub(crate) fn legal_identifier(name: &str) -> bool {
     identifier(name)
         && !name.starts_with("helper_")
         && !name.starts_with("kernel_name_")
         && !matches!(
             name,
-            "k" | "False"
+            "k" | "main"
+                | "Final"
+                | "reassigned"
+                | "tools"
+                | "record"
+                | "finish"
+                | "failure"
+                | "returned"
+                | "declared"
+                | "False"
                 | "None"
                 | "True"
                 | "and"
@@ -284,8 +335,83 @@ struct Renderer<'a> {
     plan: &'a NamePlan,
     inline: &'a InlinePlan,
     indent: usize,
+    bound: std::collections::BTreeSet<k::Name>,
+    main: bool,
+    effects: &'a std::collections::BTreeMap<k::EffectName, k::Signature>,
+    operators: crate::generated_operators::Operators,
 }
 impl Renderer<'_> {
+    fn parameters(&mut self, names: &[k::Name]) {
+        self.out.write("(");
+        for (i, name) in names.iter().enumerate() {
+            if i > 0 {
+                self.out.write(", ");
+            }
+            self.name(name);
+        }
+        self.out.write(")");
+    }
+    fn root_block(&mut self, block: &k::Block, root: Option<&k::Unit>) {
+        self.out.begin_node(root);
+        self.indent += 1;
+        if block.is_empty() {
+            self.empty();
+        }
+        for stmt in block {
+            self.node(k::Node::Stmt(stmt), None);
+        }
+        self.indent -= 1;
+        self.out.end_node();
+    }
+    fn inline_rhs(&self, rhs: &k::Rhs) -> bool {
+        match rhs {
+            k::Rhs::Expr(e) => self.inline.contains(e),
+            k::Rhs::Action(_) => true,
+        }
+    }
+    fn write_inline_rhs(&mut self, rhs: &k::Rhs) {
+        match rhs {
+            k::Rhs::Expr(e) => self.inline_expr(e),
+            k::Rhs::Action(a) => {
+                self.out.begin_node(None);
+                self.action(a);
+                self.out.end_node();
+            }
+        }
+    }
+    fn inline_member(&self, member: &k::Member) -> bool {
+        match member {
+            k::Member::Field { target, .. } => self.inline.contains(target),
+            k::Member::Index { target, index } => {
+                self.inline.contains(target) && self.inline.contains(index)
+            }
+        }
+    }
+    fn write_member(&mut self, member: &k::Member) {
+        match member {
+            k::Member::Field { target, field } => {
+                let grouped = !matches!(
+                    target,
+                    k::Expr::Variable(_) | k::Expr::Member(_) | k::Expr::Call { .. }
+                );
+                if grouped {
+                    self.out.write("(");
+                }
+                self.inline_expr(target);
+                if grouped {
+                    self.out.write(")");
+                }
+                self.out.write(".");
+                self.out.write(field);
+            }
+            k::Member::Index { target, index } => {
+                self.inline_expr(target);
+                self.out.write("[");
+                self.inline_expr(index);
+                self.out.write("]");
+            }
+        }
+    }
     fn inline_expr(&mut self, expr: &k::Expr) {
         self.out.begin_node(None);
         self.inline_body(expr);
@@ -298,14 +424,87 @@ impl Renderer<'_> {
             k::Expr::Clock => self.out.write("k.clock()"),
             k::Expr::Random => self.out.write("k.random()"),
             k::Expr::Call { function, args } => {
-                self.helper(function);
-                self.out.write("(");
-                for (i, arg) in args.iter().enumerate() {
+                if let Some(token) = self.operators.token(function, args.len()) {
+                    match token {
+                        "not" | "neg" => {
+                            self.out.write(if token == "not" { "not (" } else { "-(" });
+                            self.inline_expr(&args[0]);
+                            self.out.write(")");
+                        }
+                        _ => {
+                            self.out.write("(");
+                            self.inline_expr(&args[0]);
+                            self.out.write(" ");
+                            self.out.write(token);
+                            self.out.write(" ");
+                            self.inline_expr(&args[1]);
+                            self.out.write(")");
+                        }
+                    }
+                } else {
+                    self.helper(function);
+                    self.out.write("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.out.write(", ");
+                        }
+                        self.inline_expr(arg);
+                    }
+                    self.out.write(")");
+                }
+            }
+            k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                let (open, close) = match expr {
+                    k::Expr::List(_) => ("[", "]"),
+                    k::Expr::Tuple(_) => ("(", ")"),
+                    _ if items.is_empty() => ("set(", ")"),
+                    _ => ("{", "}"),
+                };
+                self.out.write(open);
+                for (i, item) in items.iter().enumerate() {
                     if i > 0 {
                         self.out.write(", ");
                     }
-                    self.inline_expr(arg);
+                    self.inline_expr(item);
                 }
+                if matches!(expr, k::Expr::Tuple(_)) && items.len() == 1 {
+                    self.out.write(",");
+                }
+                self.out.write(close);
+            }
+            k::Expr::Map(items) => {
+                self.out.write("{");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.inline_expr(&item.key);
+                    self.out.write(": ");
+                    self.inline_expr(&item.value);
+                }
+                self.out.write("}");
+            }
+            k::Expr::Record(items) => {
+                self.out.write("record({");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.out.json(&item.field);
+                    self.out.write(": ");
+                    self.inline_expr(&item.value);
+                }
+                self.out.write("})");
+            }
+            k::Expr::Member(member) if matches!(member.as_ref(), k::Member::Field { field, .. } if !attribute_identifier(field)) =>
+            {
+                let k::Member::Field { target, field } = member.as_ref() else {
+                    unreachable!()
+                };
+                self.out.write("getattr(");
+                self.inline_expr(target);
+                self.out.write(", ");
+                self.out.json(field);
                 self.out.write(")");
             }
             k::Expr::Member(member) => {
@@ -391,6 +590,101 @@ impl Renderer<'_> {
     }
     fn readable_statement(&mut self, stmt: &k::Stmt) -> bool {
         match stmt {
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Closure(c)),
+            }
+            | k::Stmt::Assign {
+                place: k::Place::Variable(name),
+                value: k::Rhs::Expr(k::Expr::Closure(c)),
+            } => {
+                self.out.write("def ");
+                self.name(name);
+                self.out.begin_node(None); // Closure expression
+                self.parameters(&c.params);
+                let was_bound = self.bound.contains(name);
+                let is_let = matches!(stmt, k::Stmt::Let { .. });
+                self.bound.insert(name.clone());
+                if is_let == was_bound {
+                    self.out.write(if is_let {
+                        " -> Final"
+                    } else {
+                        " -> reassigned"
+                    });
+                }
+                let parent = std::mem::replace(&mut self.bound, c.params.iter().cloned().collect());
+                let outer_main = self.main;
+                self.main = false;
+                self.out.write(":\n");
+                self.readable_block(&c.body);
+                self.main = outer_main;
+                self.bound = parent;
+                self.out.end_node();
+            }
+            k::Stmt::Let { name, value } if self.inline_rhs(value) => {
+                self.name(name);
+                if !self.bound.insert(name.clone()) {
+                    self.out.write(": Final");
+                }
+                self.out.write(" = ");
+                self.write_inline_rhs(value);
+                self.out.write("\n");
+            }
+            k::Stmt::Assign {
+                place: k::Place::Member(k::Member::Field { target, field }),
+                value,
+            } if !attribute_identifier(field)
+                && self.inline.contains(target)
+                && self.inline_rhs(value) =>
+            {
+                self.out.write("setattr(");
+                self.inline_expr(target);
+                self.out.write(", ");
+                self.out.json(field);
+                self.out.write(", ");
+                self.write_inline_rhs(value);
+                self.out.write(")\n");
+            }
+            k::Stmt::Assign { place, value }
+                if self.inline_rhs(value)
+                    && match place {
+                        k::Place::Variable(_) => true,
+                        k::Place::Member(m) => self.inline_member(m),
+                    } =>
+            {
+                match place {
+                    k::Place::Variable(n) => {
+                        self.name(n);
+                        if self.bound.insert(n.clone()) {
+                            self.out.write(": reassigned");
+                        }
+                    }
+                    k::Place::Member(m) => self.write_member(m),
+                }
+                self.out.write(" = ");
+                self.write_inline_rhs(value);
+                self.out.write("\n");
+            }
+            k::Stmt::Remove {
+                member: k::Member::Field { target, field },
+            } if !attribute_identifier(field) && self.inline.contains(target) => {
+                self.out.write("delattr(");
+                self.inline_expr(target);
+                self.out.write(", ");
+                self.out.json(field);
+                self.out.write(")\n");
+            }
+            k::Stmt::Remove { member } if self.inline_member(member) => {
+                self.out.write("del ");
+                self.write_member(member);
+                self.out.write("\n");
+            }
+            k::Stmt::Do { action } => {
+                self.out.begin_node(None);
+                self.action(action);
+                self.out.end_node();
+                self.out.write("\n");
+            }
             k::Stmt::Break => self.out.write("break\n"),
             k::Stmt::Continue => self.out.write("continue\n"),
             k::Stmt::If {
@@ -407,6 +701,7 @@ impl Renderer<'_> {
             } if self.inline.contains(iterable) => {
                 self.out.write("for ");
                 self.name(binding);
+                self.bound.insert(binding.clone());
                 self.out.write(" in ");
                 self.inline_expr(iterable);
                 self.out.write(":\n");
@@ -425,6 +720,7 @@ impl Renderer<'_> {
                     self.padding();
                     self.out.write("except BaseException as ");
                     self.name(&catch.binding);
+                    self.bound.insert(catch.binding.clone());
                     self.out.write(":\n");
                     self.readable_block(&catch.body);
                 }
@@ -441,13 +737,20 @@ impl Renderer<'_> {
             | k::Stmt::Fail { value }
                 if self.inline.contains(value) =>
             {
-                let call = !matches!(stmt, k::Stmt::Return { .. } | k::Stmt::Throw { .. });
+                let call = match stmt {
+                    k::Stmt::Return { .. } => self.main,
+                    k::Stmt::Finish { .. } => !self.main,
+                    k::Stmt::Throw { .. } => false,
+                    _ => true,
+                };
                 self.out.write(match stmt {
+                    k::Stmt::Return { .. } if self.main => "return returned(",
                     k::Stmt::Return { .. } => "return ",
                     k::Stmt::Throw { .. } => "raise ",
-                    k::Stmt::Print { .. } => "k.print(",
-                    k::Stmt::Finish { .. } => "k.finish(",
-                    _ => "k.fail(",
+                    k::Stmt::Print { .. } => "print(",
+                    k::Stmt::Finish { .. } if self.main => "return ",
+                    k::Stmt::Finish { .. } => "return finish(",
+                    _ => "raise failure(",
                 });
                 self.inline_expr(value);
                 if call {
@@ -561,6 +864,7 @@ impl Renderer<'_> {
             k::Stmt::Let { name, value } => {
                 self.out.write("with k.let(");
                 self.name(name);
+                self.bound.insert(name.clone());
                 self.suite();
                 self.rhs(value);
             }
@@ -569,6 +873,7 @@ impl Renderer<'_> {
                     k::Place::Variable(n) => {
                         self.out.write("with k.assign(");
                         self.name(n);
+                        self.bound.insert(n.clone());
                         self.suite();
                     }
                     k::Place::Member(m) => self.member_header("assign_", m),
@@ -599,6 +904,7 @@ impl Renderer<'_> {
             } => {
                 self.out.write("with k.for_(");
                 self.name(binding);
+                self.bound.insert(binding.clone());
                 self.suite();
                 self.expr(iterable);
                 self.block(body);
@@ -628,6 +934,7 @@ impl Renderer<'_> {
                 self.out.write("with k.try_(");
                 if let Some(catch) = &scope.catch {
                     self.name(&catch.binding);
+                    self.bound.insert(catch.binding.clone());
                 } else {
                     self.out.write("None");
                 }
@@ -703,7 +1010,12 @@ impl Renderer<'_> {
                 self.out.write("with k.closure(");
                 self.names(&c.params);
                 self.suite();
+                let parent = std::mem::replace(&mut self.bound, c.params.iter().cloned().collect());
+                let outer_main = self.main;
+                self.main = false;
                 self.block(&c.body);
+                self.main = outer_main;
+                self.bound = parent;
             }
             k::Expr::Call { function, args } => {
                 self.out.write("with k.invoke(");
@@ -736,19 +1048,18 @@ impl Renderer<'_> {
             }
             k::Literal::Float(n) if n.get().is_finite() => self.out.write(&n.to_string()),
             k::Literal::Float(n) => {
-                self.out.write("k.float(");
+                self.out.write("float(");
                 self.out.json(&n.to_string());
                 self.out.write(")");
             }
             k::Literal::Bytes(b) => {
-                self.out.write("k.bytes(");
+                self.out.write("bytes.fromhex(");
                 self.out.json(&b.to_hex());
                 self.out.write(")");
             }
             k::Literal::Function(n) => {
-                self.out.write("k.function(");
-                self.out.json(n);
-                self.out.write(")");
+                self.out.write("declared.");
+                self.name(n);
             }
         }
     }
@@ -787,62 +1098,73 @@ impl Renderer<'_> {
     }
     fn action(&mut self, action: &k::Action) {
         match action {
-            k::Action::Call {
-                callee: k::Callee::Library(id),
-                args,
-            }
-            | k::Action::Spawn {
-                callee: k::Callee::Library(id),
-                args,
-            } => {
-                self.out.write(if matches!(action, k::Action::Call { .. }) {
-                    "k.call("
-                } else {
-                    "k.spawn("
-                });
-                self.helper(id);
-                self.out.write("(");
-                for (i, atom) in args.iter().enumerate() {
-                    if i > 0 {
-                        self.out.write(", ");
+            k::Action::Call { callee, args } => {
+                self.out.write("await ");
+                match callee {
+                    k::Callee::Library(id) => self.helper(id),
+                    k::Callee::Declared(n) => {
+                        self.out.write("declared.");
+                        self.name(n);
                     }
-                    self.atom(atom);
+                    k::Callee::Value(n) => self.name(n),
                 }
-                self.out.write(")");
-            }
-            k::Action::Call { callee, args } | k::Action::Spawn { callee, args } => {
-                self.out.write(if matches!(action, k::Action::Call { .. }) {
-                    "k.call("
-                } else {
-                    "k.spawn("
-                });
-                self.callee(callee);
-                self.out.write(", ");
-                self.atoms(args);
+                self.out.write("(");
+                self.call_atoms(args);
             }
             k::Action::Perform {
                 effect,
                 args,
                 result,
             } => {
-                self.out.write("k.perform(");
-                self.out.json(effect);
+                self.out.write("await tools");
+                if effect.as_str().split('.').all(attribute_identifier) {
+                    self.out.write(".");
+                    self.out.write(effect.as_str());
+                } else {
+                    self.out.write("[");
+                    self.out.json(effect);
+                    self.out.write("]");
+                }
+                self.out.write("(");
+                self.call_atoms(args);
+                if !self
+                    .effects
+                    .get(effect)
+                    .is_some_and(|signature| &signature.result == result)
+                {
+                    if !args.is_empty() {
+                        self.out.write(", ");
+                    }
+                    self.out.write("result=");
+                    self.metadata(result);
+                }
+            }
+            k::Action::Spawn {
+                callee: k::Callee::Library(id),
+                args,
+            } => {
+                self.out.write("k.spawn(");
+                self.helper(id);
+                self.out.write("(");
+                self.call_atoms(args);
+                self.out.write(")");
+            }
+            k::Action::Spawn { callee, args } => {
+                self.out.write("k.spawn(");
+                self.callee(callee);
                 self.out.write(", ");
                 self.atoms(args);
-                self.out.write(", k.type(");
-                self.metadata(result);
-                self.out.write(")");
             }
             k::Action::Sleep { duration } => {
                 self.out.write("k.sleep(");
                 self.atom(duration);
             }
-            k::Action::Join { task } | k::Action::Cancel { task } => {
-                self.out.write(if matches!(action, k::Action::Join { .. }) {
-                    "k.join("
-                } else {
-                    "k.cancel("
-                });
+            k::Action::Join { task } => {
+                self.out.write("k.join(");
+                self.atom(task);
+            }
+            k::Action::Cancel { task } => {
+                self.out.write("k.cancel(");
                 self.atom(task);
             }
             k::Action::JoinMany { mode, tasks } => {
@@ -859,6 +1181,14 @@ impl Renderer<'_> {
             k::Action::Yield => self.out.write("k.yield_("),
         }
         self.out.write(")");
+    }
+    fn call_atoms(&mut self, atoms: &[k::Atom]) {
+        for (i, atom) in atoms.iter().enumerate() {
+            if i > 0 {
+                self.out.write(", ");
+            }
+            self.atom(atom);
+        }
     }
 }
 
@@ -887,14 +1217,19 @@ impl InlinePlan {
                     true
                 }
                 k::Expr::Member(member) => match member.as_ref() {
-                    k::Member::Field { target, field } => {
-                        legal_identifier(field) && self.contains(target)
-                    }
+                    k::Member::Field { target, .. } => self.contains(target),
                     k::Member::Index { target, index } => {
                         self.contains(target) && self.contains(index)
                     }
                 },
                 k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+                k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
+                    items.iter().all(|e| self.contains(e))
+                }
+                k::Expr::Map(items) => items
+                    .iter()
+                    .all(|e| self.contains(&e.key) && self.contains(&e.value)),
+                k::Expr::Record(items) => items.iter().all(|e| self.contains(&e.value)),
                 _ => false,
             };
             if eligible {

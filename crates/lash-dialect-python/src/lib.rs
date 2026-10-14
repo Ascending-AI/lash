@@ -14,6 +14,7 @@
 mod diagnostics;
 mod exceptions;
 mod generated;
+mod generated_operators;
 mod lower;
 mod package;
 mod printer;

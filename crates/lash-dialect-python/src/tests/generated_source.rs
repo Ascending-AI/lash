@@ -285,10 +285,16 @@ fn bounded_name_literal_control_domain_is_exact() {
                         | "__build_class__"
                         | "eval"
                 ) {
-                    assert!(printed.source.contains("with k.let(kernel_name_"));
+                    assert!(
+                        printed
+                            .source
+                            .lines()
+                            .any(|line| line.trim_start().starts_with("kernel_name_")
+                                && line.contains(" = "))
+                    );
                 }
                 if name == "value" || name == "λ" {
-                    assert!(printed.source.contains(&format!("with k.let({name}):")));
+                    assert!(printed.source.contains(&format!("{name} = ")));
                 }
             }
         }
@@ -325,7 +331,7 @@ fn try_handler_presence_and_empty_bodies_reconstruct_exactly() {
                     } else {
                         "with k.try_("
                     }));
-                    assert!(printed.source.contains("with k.block():"));
+                    assert!(printed.source.contains("def main():"));
                 }
             }
         }
@@ -447,7 +453,12 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     let document = hand_document();
     let printed = roundtrip(&document, false);
     let limits = GeneratedSourceLimits {
-        max_bytes: printed.source.len(),
+        // Readable source can be smaller than the stored document; both
+        // inputs independently obey the same budget.
+        max_bytes: printed
+            .source
+            .len()
+            .max(serde_json::to_vec(&document).unwrap().len()),
         ..Default::default()
     };
     let at_limit = crate::print(
@@ -1343,6 +1354,7 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
     );
 }
 
+mod acceptance;
 mod readable;
 
 /// G-SOURCE-ENVELOPE: native literals carry nested optional types exactly.
@@ -1379,7 +1391,7 @@ fn structured_envelope_and_types_keep_nested_optional_metadata() {
     let source = roundtrip(&document, true).source;
     assert!(source.contains("{\"kernel\":1"), "{source}");
     assert!(!source.contains("\\\""), "{source}");
-    assert!(source.contains("k.type({\"record\":"), "{source}");
+    assert!(source.contains("result={\"record\":"), "{source}");
     assert!(
         source.contains("True false None"),
         "quoted metadata is not token-converted"

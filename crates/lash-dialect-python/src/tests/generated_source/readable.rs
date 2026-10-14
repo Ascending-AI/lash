@@ -17,7 +17,7 @@ fn readable_if_has_a_direct_exact_inverse() {
     assert!(
         printed
             .source
-            .contains("        if ready:\n            break\n        else:\n            pass\n"),
+            .contains("    if ready:\n        break\n    else:\n        pass\n"),
         "{}",
         printed.source
     );
@@ -55,16 +55,16 @@ fn spelling(stmt: k::Stmt, expected: &str) {
 #[test]
 fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
     // Naming and reserved collisions use the landed NamePlan, including shadowing.
-    for (name, expected) in [("λ", "k.finish(λ)"), ("return", "k.finish(kernel_name_1)")] {
+    for (name, expected) in [("λ", "return λ"), ("return", "return kernel_name_1")] {
         spelling(finish(variable(name)), expected);
     }
     spelling(
         finish(field(variable("object_value"), "title")),
-        "k.finish(object_value.title)",
+        "return object_value.title",
     );
     spelling(
         finish(field(variable("object_value"), "return")),
-        "with k.field(\"return\"):",
+        "return getattr(object_value, \"return\")",
     );
     spelling(
         finish(field(closure(), "title")),
@@ -72,7 +72,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
     );
     spelling(
         finish(index(variable("items"), int(-1))),
-        "k.finish(items[-1])",
+        "return items[-1]",
     );
     spelling(
         finish(index(variable("items"), closure())),
@@ -120,7 +120,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                 value: expr.clone(),
             },
             if native {
-                "return ready\n"
+                "return returned(ready)\n"
             } else {
                 "with k.return_():"
             },
@@ -140,7 +140,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                 value: expr.clone(),
             },
             if native {
-                "k.print(ready)"
+                "print(ready)"
             } else {
                 "with k.print():"
             },
@@ -150,7 +150,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                 value: expr.clone(),
             },
             if native {
-                "k.finish(ready)"
+                "return ready"
             } else {
                 "with k.finish():"
             },
@@ -158,7 +158,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
         spelling(
             k::Stmt::Fail { value: expr },
             if native {
-                "k.fail(ready)"
+                "raise failure(ready)"
             } else {
                 "with k.fail():"
             },
@@ -193,7 +193,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             then_block: vec![],
             else_block: vec![nested, k::Stmt::Continue],
         },
-        "else:\n            if second:\n",
+        "else:\n        if second:\n",
     );
     let id = k::FunctionId::from_bytes([31; 32]);
     // Helper identity is in the envelope once; labels do not drive the reader.
@@ -202,7 +202,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             function: id,
             args: vec![int(3), variable("λ")],
         }),
-        "k.finish(helper_function(3, λ))",
+        "return helper_function(3, λ)",
     );
     spelling(
         finish(k::Expr::Call {
@@ -225,7 +225,13 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                 k::Action::Call { callee, args }
             };
             let op = if spawn { "spawn" } else { "call" };
-            let expected = if library {
+            let expected = if !spawn {
+                if library {
+                    "await helper_function(3)".to_owned()
+                } else {
+                    "await kernel_name_1(3)".to_owned()
+                }
+            } else if library {
                 format!("k.{op}(helper_function(3))")
             } else {
                 format!("k.{op}(k.value(\"helper_function\"), [3])")
@@ -233,23 +239,23 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             spelling(k::Stmt::Do { action }, &expected);
         }
     }
-    spelling(finish(int(-7)), "k.finish(-7)");
+    spelling(finish(int(-7)), "return -7");
     spelling(
         finish(k::Expr::Literal(k::Literal::Function("-7".into()))),
-        "k.finish(k.function(\"-7\"))",
+        "return declared.kernel_name_1",
     );
     spelling(
         finish(k::Expr::Literal(k::Literal::Float(k::Float::new(-0.0)))),
-        "k.finish(-0.0)",
+        "return -0.0",
     );
     spelling(
         finish(k::Expr::Literal(k::Literal::Float(k::Float::new(
             f64::INFINITY,
         )))),
-        "k.finish(k.float(\"inf\"))",
+        "return float(\"inf\")",
     );
-    spelling(k::Stmt::Break, "        break\n");
-    spelling(k::Stmt::Continue, "        continue\n");
+    spelling(k::Stmt::Break, "    break\n");
+    spelling(k::Stmt::Continue, "    continue\n");
 }
 /// An independently written reader fixture pins tree shape without using the printer.
 #[test]
@@ -449,7 +455,7 @@ fn check_map(doc: &k::Document, printed: &crate::PrintedSource) {
             assert!(range.start < range.end);
             let slice = printed.source.get(range.start..range.end).unwrap();
             if matches!(node, k::Node::Action(_)) {
-                assert!(slice.contains("k."));
+                assert!(slice.contains("k.") || slice.starts_with("await "));
             }
             if matches!(node, k::Node::Expr(k::Expr::Variable(n)) if n.as_str() == "λ") {
                 assert_eq!(slice.trim(), "λ");
@@ -468,7 +474,7 @@ fn readable_inline_depth_and_malformed_syntax_refuse() {
     let doc = document(finish(expr));
     let printed = roundtrip(&doc, true);
     check_map(&doc, &printed);
-    let bad = printed.source.replace("k.finish(x", "k.finish(x.title");
+    let bad = printed.source.replace("return x", "return x.title");
     assert_eq!(
         crate::compile_generated(&bad, Default::default())
             .unwrap_err()
@@ -530,7 +536,7 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
             assert!(
                 roundtrip(&doc, false)
                     .source
-                    .contains(&format!("k.finish({text})"))
+                    .contains(&format!("return {text}"))
             );
         }
         for value in floats {
@@ -542,7 +548,7 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
             assert!(
                 roundtrip(&doc, false)
                     .source
-                    .contains(&format!("k.finish({literal})"))
+                    .contains(&format!("return {literal}"))
             );
         }
     }
@@ -553,16 +559,16 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
         (k::Literal::Absent, "k.absent"),
         (
             k::Literal::Bytes(k::Bytes::parse_hex("00ff").unwrap()),
-            "k.bytes(\"00ff\")",
+            "bytes.fromhex(\"00ff\")",
         ),
-        (k::Literal::Function("None".into()), "k.function(\"None\")"),
         (
-            k::Literal::Float(k::Float::new(f64::NAN)),
-            "k.float(\"nan\")",
+            k::Literal::Function("None".into()),
+            "declared.kernel_name_1",
         ),
+        (k::Literal::Float(k::Float::new(f64::NAN)), "float(\"nan\")"),
         (
             k::Literal::Float(k::Float::new(f64::NEG_INFINITY)),
-            "k.float(\"-inf\")",
+            "float(\"-inf\")",
         ),
     ] {
         spelling_literal(literal, spelling);
@@ -571,6 +577,449 @@ fn native_literals_preserve_variants_extremes_and_explicit_fallbacks() {
 fn spelling_literal(literal: k::Literal, expected: &str) {
     spelling(
         finish(k::Expr::Literal(literal)),
-        &format!("k.finish({expected})"),
+        &format!("return {expected}"),
     );
+}
+
+/// G-SOURCE-READABLE: ordinary bindings, collections and function bodies never use suites.
+#[test]
+fn ordinary_python_body_uses_native_bindings_collections_and_definitions() {
+    let mut doc = document(k::Stmt::Let {
+        name: "items".into(),
+        value: k::Rhs::Expr(k::Expr::List(vec![int(1), int(2)])),
+    });
+    doc.functions.insert(
+        "worker".into(),
+        k::Function {
+            params: vec!["incoming".into()],
+            body: vec![k::Stmt::Return {
+                value: variable("incoming"),
+            }],
+        },
+    );
+    doc.main.push(k::Stmt::Assign {
+        place: k::Place::Variable("items".into()),
+        value: k::Rhs::Action(k::Action::Call {
+            callee: k::Callee::Declared("worker".into()),
+            args: vec![k::Atom::Variable("items".into())],
+        }),
+    });
+    doc.main.push(finish(variable("items")));
+    let printed = roundtrip(&doc, true);
+    assert!(
+        printed.source.contains("def worker(incoming):"),
+        "{}",
+        printed.source
+    );
+    assert!(printed.source.contains("def main():"), "{}", printed.source);
+    assert!(
+        printed.source.contains("items = [1, 2]"),
+        "{}",
+        printed.source
+    );
+    assert!(
+        printed
+            .source
+            .contains("items = await declared.worker(items)"),
+        "{}",
+        printed.source
+    );
+    assert!(
+        !printed
+            .source
+            .lines()
+            .skip(1)
+            .any(|line| line.contains("k.")),
+        "{}",
+        printed.source
+    );
+    check_map(&doc, &printed);
+}
+
+/// G-SOURCE-COLLECTIONS: each native delimiter retains its kernel variant and order.
+#[test]
+fn native_collections_preserve_variants_order_and_expression_fallbacks() {
+    for (expr, expected) in [
+        (k::Expr::List(vec![]), "return []"),
+        (k::Expr::List(vec![int(1), int(2)]), "return [1, 2]"),
+        (k::Expr::Tuple(vec![]), "return ()"),
+        (k::Expr::Tuple(vec![int(1)]), "return (1,)"),
+        (k::Expr::Tuple(vec![int(1), int(2)]), "return (1, 2)"),
+        (k::Expr::Set(vec![]), "return set()"),
+        (k::Expr::Set(vec![int(2), int(1)]), "return {2, 1}"),
+        (k::Expr::Map(vec![]), "return {}"),
+        (
+            k::Expr::Map(vec![k::MapEntry {
+                key: int(1),
+                value: int(2),
+            }]),
+            "return {1: 2}",
+        ),
+        (
+            k::Expr::Record(vec![k::RecordEntry {
+                field: "x".into(),
+                value: int(2),
+            }]),
+            "return record({\"x\": 2})",
+        ),
+        (k::Expr::List(vec![closure()]), "with k.list():"),
+        (k::Expr::Tuple(vec![closure()]), "with k.tuple():"),
+        (k::Expr::Set(vec![closure()]), "with k.set():"),
+        (
+            k::Expr::Map(vec![k::MapEntry {
+                key: int(1),
+                value: closure(),
+            }]),
+            "with k.map():",
+        ),
+        (
+            k::Expr::Record(vec![k::RecordEntry {
+                field: "x".into(),
+                value: closure(),
+            }]),
+            "with k.record(",
+        ),
+    ] {
+        let doc = document(finish(expr));
+        let printed = roundtrip(&doc, true);
+        assert!(
+            printed.source.contains(expected),
+            "{expected}\n{}",
+            printed.source
+        );
+        check_map(&doc, &printed);
+    }
+    // Duplicate dictionary keys are syntax, not a dictionary evaluation: the
+    // inverse preserves every entry, including duplicates and their order.
+    for expr in [
+        k::Expr::Map(vec![
+            k::MapEntry {
+                key: int(1),
+                value: int(2),
+            },
+            k::MapEntry {
+                key: int(1),
+                value: int(3),
+            },
+        ]),
+        k::Expr::Record(vec![
+            k::RecordEntry {
+                field: "x".into(),
+                value: int(2),
+            },
+            k::RecordEntry {
+                field: "x".into(),
+                value: int(3),
+            },
+        ]),
+    ] {
+        roundtrip(&document(finish(expr)), true);
+    }
+    for place in [
+        k::Place::Member(k::Member::Field {
+            target: int(1),
+            field: "title".into(),
+        }),
+        k::Place::Member(k::Member::Field {
+            target: variable("items"),
+            field: "return".into(),
+        }),
+        k::Place::Member(k::Member::Index {
+            target: variable("items"),
+            index: int(0),
+        }),
+    ] {
+        let doc = document(k::Stmt::Assign {
+            place,
+            value: k::Rhs::Expr(int(4)),
+        });
+        check_map(&doc, &roundtrip(&doc, true));
+    }
+    spelling(
+        k::Stmt::Remove {
+            member: k::Member::Index {
+                target: variable("items"),
+                index: int(0),
+            },
+        },
+        "del items[0]",
+    );
+}
+
+/// G-SOURCE-BINDINGS: lexical inference never collapses Let, Assign or Closure.
+#[test]
+fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
+    let mut doc = k::Document::new(
+        k::NumberPolicy::BySpelling,
+        vec![
+            k::Stmt::Let {
+                name: "x".into(),
+                value: k::Rhs::Expr(int(1)),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable("x".into()),
+                value: k::Rhs::Expr(int(2)),
+            },
+            k::Stmt::Let {
+                name: "x".into(),
+                value: k::Rhs::Expr(int(3)),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable("earlier".into()),
+                value: k::Rhs::Expr(int(4)),
+            },
+            k::Stmt::Let {
+                name: "nested".into(),
+                value: k::Rhs::Expr(k::Expr::Closure(Box::new(k::Closure {
+                    params: vec!["x".into()],
+                    body: vec![
+                        k::Stmt::Assign {
+                            place: k::Place::Variable("x".into()),
+                            value: k::Rhs::Expr(int(5)),
+                        },
+                        k::Stmt::Return {
+                            value: variable("x"),
+                        },
+                    ],
+                }))),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable("nested".into()),
+                value: k::Rhs::Expr(closure()),
+            },
+            k::Stmt::Let {
+                name: "nested".into(),
+                value: k::Rhs::Expr(closure()),
+            },
+            finish(variable("x")),
+        ],
+    );
+    doc.main.push(k::Stmt::Do {
+        action: k::Action::Call {
+            callee: k::Callee::Value("toolshed".into()),
+            args: vec![],
+        },
+    });
+    doc.functions.insert(
+        "main".into(),
+        k::Function {
+            params: vec![],
+            body: vec![finish(int(9))],
+        },
+    );
+    let printed = roundtrip(&doc, true);
+    for expected in [
+        "x = 1",
+        "x = 2",
+        "x: Final = 3",
+        "earlier: reassigned = 4",
+        "def nested(x):",
+        "def nested():",
+        "def nested() -> Final:",
+        "return x",
+        "return finish(9)",
+    ] {
+        assert!(
+            printed.source.contains(expected),
+            "{expected}\n{}",
+            printed.source
+        );
+    }
+    check_map(&doc, &printed);
+    // Parameters are already bound; first assignment must stay Assign.
+    let mut doc = document(finish(int(0)));
+    doc.functions.insert(
+        "worker".into(),
+        k::Function {
+            params: vec!["x".into()],
+            body: vec![k::Stmt::Assign {
+                place: k::Place::Variable("x".into()),
+                value: k::Rhs::Expr(int(1)),
+            }],
+        },
+    );
+    roundtrip(&doc, true);
+}
+
+/// G-SOURCE-OPERATORS: surface operators retain the envelope's full identity.
+#[test]
+fn native_operators_require_unique_identity_and_exact_arity() {
+    let labels = [
+        ("add", "+"),
+        ("sub", "-"),
+        ("mul", "*"),
+        ("eq", "=="),
+        ("same", "is"),
+        ("lt", "<"),
+        ("le", "<="),
+        ("gt", ">"),
+        ("ge", ">="),
+        ("bool.not", "not"),
+        ("neg", "neg"),
+    ];
+    for (i, (label, token)) in labels.into_iter().enumerate() {
+        let id = k::FunctionId::from_bytes([i as u8 + 1; 32]);
+        let unary = matches!(token, "not" | "neg");
+        let args = if unary {
+            vec![variable("x")]
+        } else {
+            vec![variable("x"), int(2)]
+        };
+        let mut doc = document(finish(k::Expr::Call { function: id, args }));
+        doc.manifest
+            .functions
+            .insert(id, k::FunctionName::new(label).unwrap());
+        let printed = roundtrip(&doc, true);
+        let expected = match token {
+            "not" => "not (x)".to_owned(),
+            "neg" => "-(x)".to_owned(),
+            _ => format!("(x {token} 2)"),
+        };
+        assert!(printed.source.contains(&expected), "{}", printed.source);
+        check_map(&doc, &printed);
+        let changed = printed.source.replace(&expected, "x");
+        let decoded = crate::compile_generated(&changed, Default::default()).unwrap();
+        assert_ne!(
+            doc.canonical_bytes().unwrap(),
+            decoded.canonical_bytes().unwrap()
+        );
+        // An arity mismatch cannot use the native operator inverse.
+        doc.main = vec![finish(k::Expr::Call {
+            function: id,
+            args: vec![],
+        })];
+        assert!(roundtrip(&doc, false).source.contains("return helper_"));
+    }
+    let ids = [
+        k::FunctionId::from_bytes([80; 32]),
+        k::FunctionId::from_bytes([81; 32]),
+    ];
+    let mut doc = document(finish(k::Expr::Call {
+        function: ids[0],
+        args: vec![int(1), int(2)],
+    }));
+    for (id, label) in ids.into_iter().zip(["add", "text.concat"]) {
+        doc.manifest
+            .functions
+            .insert(id, k::FunctionName::new(label).unwrap());
+    }
+    assert!(roundtrip(&doc, false).source.contains("helper_add(1, 2)"));
+}
+
+/// G-SOURCE-EFFECTS: dotted and nonidentifier names preserve result metadata.
+#[test]
+fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
+    for name in [
+        "research.search",
+        "tools.search",
+        "class.query",
+        "tools.class",
+    ] {
+        let effect = k::EffectName::new(name).unwrap();
+        for declared in [true, false] {
+            for result in [k::Type::Any, k::Type::List(Box::new(k::Type::Text))] {
+                let mut doc = document(k::Stmt::Let {
+                    name: "answer".into(),
+                    value: k::Rhs::Action(k::Action::Perform {
+                        effect: effect.clone(),
+                        args: vec![
+                            k::Atom::Variable("query".into()),
+                            k::Atom::Literal(k::Literal::Int(1.into())),
+                        ],
+                        result,
+                    }),
+                });
+                if declared {
+                    doc.manifest.effects.insert(
+                        effect.clone(),
+                        k::Signature {
+                            params: vec![],
+                            result: k::Type::Any,
+                        },
+                    );
+                }
+                let printed = roundtrip(&doc, true);
+                assert!(
+                    printed.source.contains("answer = await tools"),
+                    "{}",
+                    printed.source
+                );
+                assert!(
+                    !printed
+                        .source
+                        .lines()
+                        .skip(1)
+                        .any(|line| line.contains("k.")),
+                    "{}",
+                    printed.source
+                );
+                check_map(&doc, &printed);
+            }
+        }
+    }
+}
+
+/// G-SOURCE-INVERSE: independently authored generated syntax pins Let/Assign and call kinds.
+#[test]
+fn independent_native_source_preserves_binding_and_call_kinds() {
+    let source = r#"k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [["worker", "worker"], ["incoming", "incoming"], ["items", "items"], ["answer", "answer"]], [])
+def worker(incoming):
+    incoming = 3
+    return incoming
+def main():
+    items = [1, 2]
+    items = (2,)
+    items: Final = {1: 2}
+    answer = await declared.worker(items)
+    return answer
+"#;
+    let mut doc = k::Document::new(
+        k::NumberPolicy::BySpelling,
+        vec![
+            k::Stmt::Let {
+                name: "items".into(),
+                value: k::Rhs::Expr(k::Expr::List(vec![int(1), int(2)])),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable("items".into()),
+                value: k::Rhs::Expr(k::Expr::Tuple(vec![int(2)])),
+            },
+            k::Stmt::Let {
+                name: "items".into(),
+                value: k::Rhs::Expr(k::Expr::Map(vec![k::MapEntry {
+                    key: int(1),
+                    value: int(2),
+                }])),
+            },
+            k::Stmt::Let {
+                name: "answer".into(),
+                value: k::Rhs::Action(k::Action::Call {
+                    callee: k::Callee::Declared("worker".into()),
+                    args: vec![k::Atom::Variable("items".into())],
+                }),
+            },
+            finish(variable("answer")),
+        ],
+    );
+    doc.functions.insert(
+        "worker".into(),
+        k::Function {
+            params: vec!["incoming".into()],
+            body: vec![
+                k::Stmt::Assign {
+                    place: k::Place::Variable("incoming".into()),
+                    value: k::Rhs::Expr(int(3)),
+                },
+                k::Stmt::Return {
+                    value: variable("incoming"),
+                },
+            ],
+        },
+    );
+    let decoded = crate::compile_generated(source, Default::default()).unwrap();
+    assert_eq!(
+        doc.canonical_bytes().unwrap(),
+        decoded.canonical_bytes().unwrap()
+    );
+    roundtrip(&doc, true);
 }

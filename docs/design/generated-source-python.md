@@ -1,219 +1,116 @@
 # Python generated source, format v1
 
-This is the Python exact codec under the [shared exact-source contract](generated-source-format.md).
-`lash_dialect_python::print(Document, PrintOptions)` renders only;
-`compile_generated(source, GeneratedSourceLimits)` reconstructs an unadmitted
-Document directly. Neither operation resolves a library. Python's authored
-`lower` remains a separate cell operation. Host and worker integration belongs to FIG-6205. The readable rules below
-extend the landed generic codec without a second printer or decoder.
+The Python codec implements the [shared exact-source contract](generated-source-format.md).
+`print(Document, PrintOptions)` only renders. `compile_generated(source, limits)`
+reconstructs the document directly, without authored lowering, admission or an
+installed library. Every accepted document retains its complete canonical bytes.
+The generated subset uses kernel semantics; stock Python execution is not promised.
 
-The source is a Python syntax subset with kernel semantics. In the complete generic spelling, every compound
-node is a `with k.form(operands):` suite. Children appear as separate lines,
-in `Node::children` order, indented by four spaces. Empty blocks and empty
-expression-child sequences contain exactly `pass`. No body is hidden in
-metadata. Suites let the generic codec express a closure in any expression
-position without lifting a declaration or inserting a temporary.
-
-```python
-k.document("lash.generated.python", "1", "{\"kernel\":1,\"numbers\":\"by_spelling\"}", "{}", [], "[[\"answer\",\"answer\"]]", "[]")
-with k.main():
-    with k.block():
-        with k.let(answer):
-            k.int("42")
-        with k.finish():
-            answer
-```
-
-The envelope has the same seven logical operands as TypeScript: format,
-version, complete manifest JSON, entries JSON, original private names,
-identifier alias pairs JSON and full-FunctionId helper alias pairs JSON.
-Zero or more `with k.declare("original", [parameterAliases]):` items precede
-exactly one `with k.main():`. Each wrapper contains exactly one explicit
-block. Extra items, missing markers, unsupported versions, duplicate
-metadata keys, duplicate declarations and ambiguous aliases refuse.
-
-Naming uses the shared deterministic `NamePlan` traversal and allocation.
-Legal Unicode XID identifiers retain their original spelling. Python keywords,
-soft keywords, builtins (including exception classes), `k`, `helper_` and
-`kernel_name_` are reserved. Other names get deterministic `kernel_name_N`
-aliases. Repeated original Names use the same alias, including shadowed
-bindings and closure parameters. Explicit string-bearing forms carry originals.
-Helper aliases use the shared full-ID order and label collision suffixes;
-they never resolve labels against installed helpers.
-
-## Paired generic inventory
-
-Each row is both the printer rule and its direct decoding inverse. `e`
-is an expression line/suite, `a` is an inline atomic operand, `n` an identifier
-alias, `h` a full-ID helper alias, and `b` an explicit block suite. Compound
-forms below are `with k.form(...):`, followed by the listed children.
-
-| Kernel form | Header / leaf | Children and inverse |
-| --- | --- | --- |
-| Block | `k.block()` | Ordered statements; `pass` means empty |
-| Let / variable Assign | `k.let(n)` / `k.assign(n)` | One RHS, its outer form distinguishes Expr from Action |
-| Member Assign | `k.assign_field("field")` / `k.assign_index()` | Target, optional index, RHS |
-| Remove | `k.remove_field("field")` / `k.remove_index()` | Target, optional index |
-| Do | `k.do()` | One Action |
-| If | `k.if_()` | Condition, then block, else block, including empty else |
-| For / While | `k.for_(n)` / `k.while_()` | Iterable / condition, body block |
-| Break / Continue | `k.break_()` / `k.continue_()` | Leaf statements |
-| Return / Throw / Print / Finish / Fail | `k.return_()` / `k.throw()` / `k.print()` / `k.finish()` / `k.fail()` | One expression |
-| Try | `k.try_(n or None, True or False)` | Body, catch block if binding present, finally block if flag true |
-| Tuple / List / Set | `k.tuple()` / `k.list()` / `k.set()` | Ordered expressions; `pass` means empty |
-| Map | `k.map()` | Alternating key/value expressions, in entry order; odd counts refuse |
-| Record | `k.record(["field", ...])` | One expression per field, in field order |
-| Member | `k.field("field")` / `k.index()` | Target, optional index |
-| Closure | `k.closure([n, ...])` | One block, captures remain derived |
-| Expression Call | `k.invoke(h)` | Ordered expressions; `pass` means no arguments |
-| Projection Read | `k.read()` | Handle, request |
-| Clock / Random | `k.clock()` / `k.random()` | Leaf expressions |
-| Variable | `n` | Original Name from the injective alias table |
-| Null / Absent / Bool / Text | `None` / `k.absent` / `True` or `False` / JSON-quoted string | Exact literal variant |
-| Int / Float / Bytes | `k.int("decimal")` / `k.float("canonical")` / `k.bytes("hex")` | Kernel parsers preserve variants, non-finite values and signed zero |
-| Function literal | `k.function("original")` | Original declared Name |
-| Action Call / Spawn | `k.call(callee, [a, ...])` / `k.spawn(callee, [a, ...])` | Leaf Action; atoms never invent expression Sites |
-| Perform | `k.perform("effect", [a, ...], k.type("type JSON"))` | Complete effect, atoms and result type |
-| Sleep / Join / Cancel | `k.sleep(a)` / `k.join(a)` / `k.cancel(a)` | Leaf Action |
-| JoinMany | `k.join_many("mode", a)` | `all`, `all_settled`, `race`, or `any` |
-| Yield | `k.yield_()` | No-operand Action |
-| Callee | `k.declared("original")` / `k.value("original")` / `k.library(h)` | Declared, value and library call kinds remain distinct |
-
-Action forms are ordinary expression-statement lines, never suites. Literal,
-variable, clock and random forms are also leaves. Other forms use suites.
-No automatic coercion, authored lowering, temporary renaming or closure
-introduction occurs. Every expected child must be consumed exactly once.
-Strings use JSON quoting/escapes with Unicode scalar values, including text
-and metadata; raw numeric literals, triple strings, concatenation, imports,
-operators and arbitrary Python statements are outside this generic subset.
-The readable subset below additionally accepts exact native numbers and
-its enumerated statement, member and helper-call spellings.
-Blank lines and whole-line comments are ignored. In-line comments and
-non-four-space indentation are outside this canonical generic spelling.
-
-## Paired readable rule inventory
-
-The printer chooses these spellings by structural predicates, without trying
-compilation. `InlinePlan` computes eligibility once in postorder and remembers
-eligible expression addresses for this print only. Its membership lookups never
-control ordering or alias allocation. The extra pass and expected hash-table
-cost are O(nodes); output remains append-only O(bytes). The decoder uses its
-own bounded operand grammar, never Python authored lowering or a library.
-
-An inline expression is a literal, variable, clock/random leaf, an eligible
-member, or a helper expression call whose arguments are all inline. Collections,
-closures and projection reads keep explicit suites. This preserves tuple/list/
-set/map/record distinctions and lets closures remain at their exact tree position.
-A generic suite can contain readable children, and a readable block can contain
-generic statements. No statements or temporaries disappear.
-
-Every conditional row has a complete-byte positive and nearest-fallback witness
-in `tests::generated_source::readable::paired_readable_rules_pin_positive_and_near_miss_spellings`.
-The existing bounded naming and stored-field inventories also cover the reused
-unconditional leaf rules.
-
-| Rule and applicability | Readable spelling and exact inverse | Positive / nearest fallback witness |
-| --- | --- | --- |
-| Original identifier: shared legal, injective name plan | `λ` reconstructs the exact Name through its envelope row | `λ` / keyword `return` becomes `kernel_name_1`; aliases apply equally to shadowed bindings |
-| Native integer: Literal::Int, all canonical decimal integers | `-7` reconstructs Int regardless of number policy, including arbitrary precision | Int `-7` / Function named `-7` stays `k.function("-7")` |
-| Native float: Literal::Float with finite value | `-0.0`, `1.0`, `1e20` reconstruct Float through its kernel canonical parser; a point or exponent distinguishes Int | signed zero / infinity stays `k.float("inf")`; nan and negative infinity also stay explicit |
-| Existing scalar leaves: null, bool or text | `None`, `True`/`False`, JSON-quoted text preserve their variants | null / absent stays `k.absent`; text / function and bytes stay `k.function` and `k.bytes` |
-| Attribute: inline target and field satisfying the codec's conservative binding-identifier predicate | `object_value.title` wraps the target in Member::Field, preserving field text; non-variable/call/member targets are parenthesized | legal `title` / keyword field or closure target keeps `k.field` suite |
-| Subscript: target and index both inline | `items[-1]` wraps them in Member::Index, in target/index child order | literal index / closure index keeps `k.index` suite |
-| Expression helper call: every argument inline | `helper_function(3, λ)` constructs Expr::Call with the envelope's full FunctionId; empty argument lists are allowed | scalar args / closure argument keeps `k.invoke` suite |
-| Library Call or Spawn Action: callee is Library; operands remain atoms | `k.call(helper_function(3))`, `k.spawn(helper_function(3))` construct Action::Call/Spawn with Library callee; no expression call is introduced | Library / Value or Declared callee keeps explicit `k.value`/`k.declared` plus atom list |
-| If: inline condition | `if ready:` and mandatory `else:` decode directly to If with both Blocks; empty bodies spell `pass` | variable condition / closure condition keeps `k.if_` suite |
-| Elif: else Block has exactly one If whose condition is inline | `elif second:` reconstructs an else Block containing that one If; both Nodes keep their Sites | singleton nested If / extra statement preserves `else:` plus nested `if` |
-| For: inline iterable | `for item in ready:` preserves binding, iterable and body, without iterator/coercion nodes | variable iterable / closure iterable keeps `k.for_` suite |
-| While: inline condition | `while ready:` preserves condition and body exactly | variable condition / closure condition keeps `k.while_` suite |
-| Try: at least one handler present | `try:`, optional `except BaseException as error:`, optional `finally:` preserve absent versus present empty Blocks; BaseException is reserved clause syntax, not an effect or lookup | finally-only / handlerless Try keeps `k.try_(None, False)` suite |
-| Terminal expression statement: inline value | `return ready`, `raise ready`, `k.print(ready)`, `k.finish(ready)`, `k.fail(ready)` each reconstruct their distinct Stmt variant | variable value / closure value keeps the corresponding explicit suite |
-| Break and Continue: unconditional Stmt leaves | `break`, `continue` preserve their variants | both positive leaves; a function literal named `break` remains an explicit expression, never a statement |
-
-For example, the same generic envelope and main wrapper can contain:
+The shared seven-field envelope contains native Python dictionaries and lists,
+including complete signatures and full helper identities. No body is hidden in
+metadata and no metadata is escaped JSON. Original names use deterministic,
+injective aliases from `NamePlan`. Python keywords, builtins and the generated
+namespaces are reserved; aliases apply to declarations, parameters, references,
+function values, entries and private names, including shadowing. Helper labels
+never resolve dependencies against an installed library.
 
 ```python
-with k.main():
-    with k.block():
-        with k.let(answer):
-            helper_math_add(input_value.total, 2)
-        if ready:
-            k.finish(answer)
-        elif retry:
-            while pending:
-                with k.do():
-                    k.call(helper_worker(answer))
-        else:
-            try:
-                raise "unavailable"
-            except BaseException as error:
-                k.fail(error)
-            finally:
-                pass
+k.document("lash.generated.python", "1", {"kernel": 1, "numbers": "by_spelling"}, {}, [], [["answer", "answer"], ["items", "items"], ["worker", "worker"]], [])
+def worker(items):
+    return items[0]
+def main():
+    items = [1, 2]
+    answer = await declared.worker(items)
+    return answer
 ```
 
-Here every identifier and helper alias must be declared by the envelope. The
-nested `while` does not insert a condition evaluation temporary. Let and Assign
-remain distinct explicit suites, and action wrappers never fuse spawn/join.
-Numeric selection ignores the manifest's authored number policy: the spelling
-itself records the stored variant. Only canonical numeric text is accepted;
-leading zeros, noncanonical floats and overflowing native floats refuse.
+## Paired readable inventory
 
-Readable blocks emit statements directly at one deeper indentation, or exactly
-`pass`. Else is mandatory even when empty; it is never inferred from a missing
-clause. A flattened elif creates exactly the same two kernel Nodes as an explicit
-else containing one If. The reader accounts for both levels in its node-depth
-budget. Postfix expression depth is checked independently of indentation;
-parentheses introduce no Node and have a separate bounded syntax-depth guard.
-Unexpected operators, calls through variable identifiers, non-atomic action
-arguments, extra handlers or leftover clauses refuse.
+Each rule is a structural rendering predicate and a direct decoding inverse.
+There is no compile-and-fallback loop, statement fusion, temporary removal,
+closure lifting, runtime dependency conversion or alternative generated codec.
+`InlinePlan` memoizes expression eligibility in one postorder pass; names use
+ordered tables and output uses the shared append-only writer.
 
-Maps begin and end frames in `Node::children` order during final writing,
-including inline arguments, member target/index, direct Blocks and both elif
-frames. Clause labels create no synthetic Site. Even empty Blocks have their
-`pass` range; no new implicit-node category is needed. Each inline invocation
-has its own range, whereas the shared alias declaration has no Site.
+| Rule and applicability | Python spelling and exact inverse | Positive / boundary witness |
+| --- | --- | --- |
+| Document function or main | `def worker(x):` / `def main():` with direct suites; aliases reconstruct original names and parameters | Declared worker / function originally named `main` receives a reversible alias |
+| First binding in a Python function scope | `x = value` reconstructs Let; after a parameter, loop/catch binding or previous assignment, it reconstructs Assign | First Let, repeated Assign / repeated Let uses `x: Final = value`; an Assign before any binding uses `x: reassigned = value` |
+| Bound closure RHS | `def nested(x):` reconstructs the closure RHS and its enclosing binding statement, with a fresh parameter scope | First Let and subsequent Assign / `-> Final` or `-> reassigned` carries an exceptional binding kind; an unbound block expression stays explicit |
+| Literal variants | Native integers, finite canonical floats, `None`, booleans and quoted text; `float("nan")`, `float("inf")`, `bytes.fromhex("00ff")`, `declared.worker` preserve nonfinite floats, bytes and Function versus Variable | Signed zero, huge integers, UTF-8 escapes / Absent remains `k.absent` because None is Null |
+| Inline List, Tuple and Set | `[a, b]`, `(a, b)`, `(a,)`, `()`, `{a, b}`, `set()` reconstruct distinct variants and ordered children | Empty and singleton variants / child block expression requires an explicit suite |
+| Inline Map | `{key: value}` reconstructs Map entries in source order, including repeated keys | Authored Python dict / a key or value block expression requires a suite |
+| Inline Record | `record({"field": value})` reconstructs Record field text and ordered values, including duplicates | Shared workflow records / child block expression requires a suite; unwrapped dict always means Map, which authored Python lowers to |
+| Field and Index | `value.title`, `value[index]`; `getattr(value, "return")` for fields Python cannot spell as attributes | Builtin attribute names and keyword fields / a target or index block expression requires a suite |
+| Member Assign and Remove | `value.title = rhs`, `value[index] = rhs`, `del value[index]`; `setattr` and `delattr` preserve nonidentifier Field places | Literal target is grouped / target, index or RHS block expression requires a suite |
+| Expression helper call | `helper_name(expressions)` reconstructs Expr::Call with its full envelope identity | Foreign helper and empty args / a child block expression requires an invocation suite |
+| Operators and comparisons | Parenthesized native operators reconstruct exactly one full identity through an unambiguous manifest requirement label | `add` becomes `(x + y)`, `eq` becomes `(x == y)`, `bool.not` becomes `not (x)` / ambiguous identity or wrong arity keeps the ordinary helper call |
+| Action Call | `await helper_name(atoms)`, `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls | All callee kinds / non-atomic operands refuse; Spawn remains a separate action |
+| Perform | `await tools.research.search(atoms)` preserves the effect name, using the manifest's exact result type; bracket names and `result=` native metadata cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata or non-atomic arguments refuse |
+| If / Elif / Else | Direct clauses preserve both Blocks; elif is exactly one If in an else Block | Singleton nested If / extra statement requires an explicit else and nested if |
+| For / While | `for item in values:` and `while ready:` retain the exact binding, iterable, condition and body | List iteration and nested loops / a header block expression requires a suite |
+| Try / Except / Finally | `try:`, optional `except BaseException as error:`, optional `finally:` retain handler presence and empty blocks | Catch-only or finally-only / handlerless Try requires an explicit kernel form |
+| Terminals | Main Finish uses `return value`; function Return uses `return value`; Throw uses `raise value`; Print uses `print(value)`; Break and Continue use their keywords | Ordinary terminals / unusual main Return uses `return returned(value)`, function Finish uses `return finish(value)`, and Fail uses `raise failure(value)` to preserve distinct terminal kinds |
 
-The acceptance and independent handwritten-source laws pin the inverses rather
-than execution observations. The additional bounded domain is exactly 6 names
-× 7 literals × 8 control contexts × 2 empty/nonempty choices = 672 Documents,
-with map-on/off canonical-byte checks, foreign full IDs, duplicate helper labels,
-keyword/namespace aliases, closure shadowing and escaping. The native literal
-law additionally covers arbitrary-precision integers, finite binary64 extrema,
-subnormals, exponents and both signed zeroes under both number policies.
-The independent finite form inventory, admitted Python corpus, TypeScript-origin
-batch and 64 Smith seeds are reused. Dropping the else Block in the readable
-inverse makes the independent reader fixture's complete-byte law fail.
+Scope inference follows stable source traversal within each function, not
+runtime branch execution. A block's declaration that shadows an earlier binding
+uses the explicit annotation, including across conditional branches. Closure
+parameters start a fresh scope; outer binding state is restored after its body.
+Captures and original Names remain the kernel's own derived facts; decoding never
+introduces Python coercions, temporaries, `global` or `nonlocal` semantics.
 
-## Limits, maps and proof
+Operator aliases are generated syntax, not algebraic rewrites. The fixed label
+inventory is `add`, `text.concat`, `py.add` (+), `sub`, `py.sub` (-), `mul`,
+`py.mul` (*), `py.truediv` (/), `py.floordiv` (//), `py.mod` (%), `py.pow` (**),
+`eq` (==), `same` (is), `lt` (<), `le` (<=), `gt` (>), `ge` (>=), `bool.not`
+(not), and `neg`, `py.neg` (unary -). Only one full requirement identity may
+occupy each operator token. Competing requirements retain explicit helper calls.
+The decoder uses the preserved identity and exact stored argument order, never
+assumptions about operator behavior or a live library.
 
-Both operations enforce the shared byte and node-depth limits, independently
-of the authored cell budget. Print uses `check_document_depth` before naming,
-encoding or rendering, and the shared append-only `SourceWriter`. The direct
-reader has no recursive operand parser or intermediate source tree: inline
-arrays contain only the allowed strings, aliases or atoms. Suite recursion
-checks real node depth before descent. Indentation and metadata JSON depth
-are preflighted, and parsing, conversion and destruction use a bounded
-8 MiB reserved stack. The reconstructed Document and metadata types undergo
-the same shared resource check as printing. Expanded original-name bytes are
-counted before alias uses clone them, bounding compression-driven allocation.
+## Remaining generic forms and reasons
 
-`GeneratedSourceCode` distinguishes format, bytes, depth and malformed body
-refusals. Missing/obsolete envelopes require re-exporting the original Document
-with the current toolchain; ordinary authored lowering is never a fallback.
-Decoding success grants no admission or execution authority.
+Generic forms permanently express exact kernel distinctions that ordinary
+Python syntax cannot carry. Their decoder consumes every child in kernel order.
+They are not a printer mode or a compatibility path. A suite has four-space
+indentation and uses exactly `pass` when empty.
 
-Maps default off and use the shared optional collector. All real Nodes,
-including empty blocks and no-operand actions, have nonempty final UTF-8
-ranges. Member wrappers, atom operands, declarations and envelope fields
-create no synthetic Sites. Enabling maps leaves source bytes identical.
+| Rule | Generic forms | Why ordinary Python cannot carry the exact node |
+| --- | --- | --- |
+| `absent` | `k.absent`, including atomic action operands | Python None already represents kernel Null; an absent value is different |
+| `block-expression` | `with k.closure([params]):`, followed by its block | Python has no arbitrary statement block in an expression position; bound closures instead print as def |
+| `expression-child-suite` | `with k.list/tuple/set/map/record/invoke/field/index(...):` | A child block expression cannot be embedded in native expression syntax without lifting or changing stored boundaries |
+| `statement-child-suite` | `with k.let/assign/assign_field/assign_index/remove_field/remove_index/if_/for_/while_/return_/throw/print/finish/fail(...):` | A child block expression needs visible child suites without introducing a temporary |
+| `explicit-block` | `with k.block():` inside a generic parent | The generic parent's child boundaries must remain explicit, including empty blocks |
+| `handlerless-try` | `with k.try_(None, False):` | Python requires an except or finally clause; adding one would change handler presence |
+| `projection-read` | `with k.read():` with handle and request children | Kernel projection reads have no ordinary Python primitive and retain their dedicated expression kind |
+| `clock` / `random` | `k.clock()` / `k.random()` | Kernel nondeterministic expressions are distinct from library calls and Python's time/random APIs |
+| `task-action` | `k.spawn`, `k.sleep`, `k.join`, `k.join_many`, `k.cancel`, `k.yield_` | Kernel task actions, modes and timing units differ from Python coroutine/library operations; no spawn/join fusion is allowed |
 
-The owning `tests::generated_source` laws compare canonical bytes after every
-successful print. They cover an independently handwritten source, unequal
-manifest/entry/private/declaration controls, an exhaustive stored-field and
-kernel-variant inventory, the 64 fixed Smith inputs, the admitted Python
-conformance batch, TypeScript-origin documents, a bounded 560-document
-name/literal/control domain, all Try handler-presence combinations, malformed
-sources and byte/depth boundaries. A separate `Node::children` walk checks
-Site completeness and final UTF-8 slices. Dropping private bindings in the
-printer makes the independent-envelope byte law fail.
+The generic reader also accepts full explicit variants for the readable forms,
+including `with k.declare`, `with k.main`, `k.int`, `k.float`, `k.bytes`,
+`k.function`, `k.call`, and `k.perform`. The printer always chooses the eligible
+readable rule. The envelope is exclusively the current structured v1 contract;
+obsolete escaped envelopes refuse and require re-exporting the original Document.
+
+## Proof, limits and maps
+
+Each paired witness runs print, public compile_generated and complete canonical
+byte comparison. The independent finite form/stored-field inventory, 64 Smith
+seeds, 28 authored Python cases, four foreign TypeScript cases and the 560- and
+672-document bounded domains remain in use. The shared seven-document readability
+corpus registers Python with no generic allowances. Authored-source acceptance
+reports any generic form against the documented unavoidable list. A mutation of
+the first-binding inverse fails the canonical-byte law.
+
+Print and decode independently bound actual bytes and real node depth. Compressed
+source does not bypass the encoded input budget. Postfix and collection parsing
+track tree height before constructing deeper nodes, separately from syntax
+nesting. Alias expansion counts original-name bytes before cloning. Metadata
+is depth-preflighted and rejects duplicate fields before deserialization.
+
+Maps default off and do no map-specific work in that mode. Requested maps cover
+all real Nodes from `Node::children`, including direct root Blocks, closures,
+actions and atomic-free calls; aliases and atomic operands invent no Sites.
+Ranges use final UTF-8 byte offsets and maps never change output bytes. Every
+empty block has its `pass` range; no new implicit-node category is necessary.

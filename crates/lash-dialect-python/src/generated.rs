@@ -21,6 +21,8 @@ fn error(code: Code, message: impl Into<String>) -> Diagnostic {
         repairs: vec![],
     }
 }
+mod inline;
+
 type Result<T> = std::result::Result<T, Diagnostic>;
 fn invalid(message: impl Into<String>) -> Diagnostic {
     error(Code::InvalidGeneratedSource, message)
@@ -222,6 +224,10 @@ struct Reader<'a> {
     byte_limit: usize,
     names: BTreeMap<String, k::Name>,
     helpers: BTreeMap<String, k::FunctionId>,
+    bound: BTreeSet<k::Name>,
+    main: bool,
+    effects: BTreeMap<k::EffectName, k::Signature>,
+    operators: crate::generated_operators::Operators,
 }
 impl<'a> Reader<'a> {
     fn new(source: &'a str, limits: GeneratedSourceLimits) -> Result<Self> {
@@ -253,6 +259,10 @@ impl<'a> Reader<'a> {
             byte_limit: limits.max_bytes,
             names: BTreeMap::new(),
             helpers: BTreeMap::new(),
+            bound: BTreeSet::new(),
+            main: false,
+            effects: BTreeMap::new(),
+            operators: Default::default(),
         })
     }
     fn line(&mut self, indent: usize) -> Result<(Cursor<'a>, bool)> {
@@ -332,6 +342,104 @@ impl<'a> Reader<'a> {
             .get(c.word()?)
             .copied()
             .ok_or_else(|| invalid("undeclared helper alias"))
+    }
+    fn parameters(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Name>> {
+        c.expect("(")?;
+        let mut params = vec![];
+        if !c.take(")") {
+            loop {
+                params.push(self.name(c)?);
+                if c.take(")") {
+                    break;
+                }
+                c.expect(",")?;
+            }
+        }
+        Ok(params)
+    }
+    fn inline_rhs(&self, c: &mut Cursor<'_>, depth: usize) -> Result<k::Rhs> {
+        self.depth(depth)?;
+        if c.take("await ") {
+            return self.await_call(c).map(k::Rhs::Action);
+        }
+        // Explicit async operations remain tagged; atoms carry no expression Sites.
+        let mut probe = Cursor::new(c.text);
+        if probe.operation().is_ok_and(|op| {
+            matches!(
+                op,
+                "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "cancel" | "yield_"
+            )
+        }) {
+            return self.action_cursor(c).map(k::Rhs::Action);
+        }
+        self.inline(c, depth).map(k::Rhs::Expr)
+    }
+    fn await_call(&self, c: &mut Cursor<'_>) -> Result<k::Action> {
+        if c.text.trim_start().starts_with("tools.") || c.text.trim_start().starts_with("tools[") {
+            c.expect("tools")?;
+            let name = if c.take("[") {
+                let name = c.string()?;
+                c.expect("]")?;
+                name
+            } else {
+                c.expect(".")?;
+                let mut name = c.word()?.to_owned();
+                while c.take(".") {
+                    name.push('.');
+                    name.push_str(c.word()?);
+                }
+                name
+            };
+            let effect = k::EffectName::new(name).map_err(|e| invalid(e.to_string()))?;
+            let mut result = None;
+            c.expect("(")?;
+            let mut args = vec![];
+            if !c.take(")") {
+                loop {
+                    if c.take("result=") {
+                        result = Some(c.metadata()?);
+                        c.expect(")")?;
+                        break;
+                    }
+                    args.push(self.atom(c)?);
+                    if c.take(")") {
+                        break;
+                    }
+                    c.expect(",")?;
+                }
+            }
+            let result = result
+                .or_else(|| {
+                    self.effects
+                        .get(&effect)
+                        .map(|signature| signature.result.clone())
+                })
+                .ok_or_else(|| invalid("effect call requires exact result metadata"))?;
+            return Ok(k::Action::Perform {
+                effect,
+                args,
+                result,
+            });
+        }
+        let callee = if c.take("declared.") {
+            k::Callee::Declared(self.name(c)?)
+        } else if c.text.trim_start().starts_with("helper_") {
+            k::Callee::Library(self.id(c)?)
+        } else {
+            k::Callee::Value(self.name(c)?)
+        };
+        c.expect("(")?;
+        let mut args = vec![];
+        if !c.take(")") {
+            loop {
+                args.push(self.atom(c)?);
+                if c.take(")") {
+                    break;
+                }
+                c.expect(",")?;
+            }
+        }
+        Ok(k::Action::Call { callee, args })
     }
     fn names(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Name>> {
         c.expect("[")?;
@@ -422,9 +530,41 @@ impl<'a> Reader<'a> {
             e
         })?;
         let mut document = envelope;
+        self.effects = document.manifest.effects.clone();
+        self.operators = crate::generated_operators::Operators::new(&document.manifest.functions);
         let mut main = false;
         while self.more(0) {
             let (mut c, suite) = self.line(0)?;
+            if !suite && c.take("def ") && !main {
+                let alias = c.word()?;
+                let name = if alias == "main" {
+                    None
+                } else {
+                    Some(self.named(alias)?)
+                };
+                let params = self.parameters(&mut c)?;
+                c.expect(":")?;
+                c.finish()?;
+                self.main = name.is_none();
+                self.bound = params.iter().cloned().collect();
+                let body = self.readable_block(1, 0)?;
+                if let Some(name) = name {
+                    if document
+                        .functions
+                        .insert(name, k::Function { params, body })
+                        .is_some()
+                    {
+                        return Err(format_error("duplicate declaration"));
+                    }
+                } else {
+                    if !params.is_empty() {
+                        return Err(format_error("main takes no parameters"));
+                    }
+                    document.main = body;
+                    main = true;
+                }
+                continue;
+            }
             if !suite || main {
                 return Err(format_error(
                     "expected declarations followed by exactly one main",
@@ -436,6 +576,7 @@ impl<'a> Reader<'a> {
                     c.expect(",")?;
                     let params = self.names(&mut c)?;
                     c.end(true)?;
+                    self.bound = params.iter().cloned().collect();
                     let body = self.block(1, 0)?;
                     self.closed(0)?;
                     if document
@@ -448,6 +589,8 @@ impl<'a> Reader<'a> {
                 }
                 "main" => {
                     c.end(true)?;
+                    self.main = false; // Explicit generic wrappers retain explicit terminals.
+                    self.bound.clear();
                     document.main = self.block(1, 0)?;
                     self.closed(0)?;
                     main = true;
@@ -491,6 +634,7 @@ impl<'a> Reader<'a> {
         let stmt = match op {
             "let" | "assign" => {
                 let name = self.name(&mut c)?;
+                self.bound.insert(name.clone());
                 c.end(true)?;
                 let value = self.rhs(i, d)?;
                 if op == "let" {
@@ -529,6 +673,7 @@ impl<'a> Reader<'a> {
             }
             "for_" => {
                 let binding = self.name(&mut c)?;
+                self.bound.insert(binding.clone());
                 c.end(true)?;
                 k::Stmt::For {
                     binding,
@@ -559,7 +704,9 @@ impl<'a> Reader<'a> {
                 let binding = if alias == "None" {
                     None
                 } else {
-                    Some(self.named(alias)?)
+                    let name = self.named(alias)?;
+                    self.bound.insert(name.clone());
+                    Some(name)
                 };
                 c.expect(",")?;
                 let finally = match c.word()? {
@@ -634,16 +781,93 @@ impl<'a> Reader<'a> {
             else_block,
         })
     }
+    fn action_form(text: &str) -> bool {
+        let mut probe = Cursor::new(text);
+        probe.operation().is_ok_and(|op| {
+            matches!(
+                op,
+                "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "cancel" | "yield_"
+            )
+        })
+    }
     fn readable_statement(
         &mut self,
         mut c: Cursor<'_>,
         indent: usize,
         depth: usize,
     ) -> Result<k::Stmt> {
-        let stmt = if c.take("if ") {
+        let field_operation = if c.take("setattr(") {
+            Some(true)
+        } else if c.take("delattr(") {
+            Some(false)
+        } else {
+            None
+        };
+        let stmt = if let Some(assign) = field_operation {
+            let target = self.inline(&mut c, depth + 1)?;
+            c.expect(",")?;
+            let field = c.string()?;
+            let member = k::Member::Field { target, field };
+            let stmt = if assign {
+                c.expect(",")?;
+                let value = self.inline_rhs(&mut c, depth + 1)?;
+                k::Stmt::Assign {
+                    place: k::Place::Member(member),
+                    value,
+                }
+            } else {
+                k::Stmt::Remove { member }
+            };
+            c.expect(")")?;
+            c.finish()?;
+            stmt
+        } else if c.take("def ") {
+            let name = self.name(&mut c)?;
+            self.depth(depth + 1)?;
+            let params = self.parameters(&mut c)?;
+            let declaration = if c.take("-> Final") {
+                true
+            } else if c.take("-> reassigned") {
+                false
+            } else {
+                !self.bound.contains(&name)
+            };
+            self.bound.insert(name.clone());
+            c.expect(":")?;
+            c.finish()?;
+            let parent = std::mem::replace(&mut self.bound, params.iter().cloned().collect());
+            let outer_main = self.main;
+            self.main = false;
+            let body = self.readable_block(indent + 1, depth + 2)?;
+            self.main = outer_main;
+            self.bound = parent;
+            let value = k::Rhs::Expr(k::Expr::Closure(Box::new(k::Closure { params, body })));
+            if declaration {
+                k::Stmt::Let { name, value }
+            } else {
+                k::Stmt::Assign {
+                    place: k::Place::Variable(name),
+                    value,
+                }
+            }
+        } else if c.take("del ") {
+            // The target's Member has no Site. Its children start at depth+1.
+            let target = self.inline(&mut c, depth)?;
+            c.finish()?;
+            let k::Expr::Member(member) = target else {
+                return Err(invalid("del requires a member"));
+            };
+            k::Stmt::Remove { member: *member }
+        } else if c.take("await ") {
+            self.depth(depth + 1)?;
+            let action = self.await_call(&mut c)?;
+            c.finish()?;
+            k::Stmt::Do { action }
+        } else if c.take("if ") {
             self.readable_if(c, indent, depth)?
         } else if c.take("for ") {
             let binding = self.name(&mut c)?;
+            self.bound.insert(binding.clone());
             c.expect("in ")?;
             let iterable = self.inline(&mut c, depth + 1)?;
             c.expect(":")?;
@@ -671,6 +895,7 @@ impl<'a> Reader<'a> {
                 }
                 c.expect("except BaseException as ")?;
                 let binding = self.name(&mut c)?;
+                self.bound.insert(binding.clone());
                 c.expect(":")?;
                 c.finish()?;
                 Some(k::Catch {
@@ -696,10 +921,34 @@ impl<'a> Reader<'a> {
                 catch,
                 finally,
             })
+        } else if c.take("return returned(") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.expect(")")?;
+            c.finish()?;
+            k::Stmt::Return { value }
+        } else if c.take("return finish(") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.expect(")")?;
+            c.finish()?;
+            k::Stmt::Finish { value }
+        } else if c.take("raise failure(") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.expect(")")?;
+            c.finish()?;
+            k::Stmt::Fail { value }
+        } else if c.take("print(") {
+            let value = self.inline(&mut c, depth + 1)?;
+            c.expect(")")?;
+            c.finish()?;
+            k::Stmt::Print { value }
         } else if c.take("return ") {
             let value = self.inline(&mut c, depth + 1)?;
             c.finish()?;
-            k::Stmt::Return { value }
+            if self.main {
+                k::Stmt::Finish { value }
+            } else {
+                k::Stmt::Return { value }
+            }
         } else if c.take("raise ") {
             let value = self.inline(&mut c, depth + 1)?;
             c.finish()?;
@@ -710,6 +959,40 @@ impl<'a> Reader<'a> {
             } else {
                 k::Stmt::Continue
             }
+        } else if !c.text.starts_with("k.") {
+            // Parse the place separately from the RHS; an annotation is the
+            // exact stored distinction between declaration and reassignment.
+            let target = self.inline(&mut c, depth)?;
+            let declaration = if c.take(": Final") {
+                true
+            } else if c.take(": reassigned") {
+                false
+            } else {
+                matches!(&target, k::Expr::Variable(name) if !self.bound.contains(name))
+            };
+            if let k::Expr::Variable(name) = &target {
+                self.bound.insert(name.clone());
+            }
+            c.expect("=")?;
+            let value = self.inline_rhs(&mut c, depth + 1)?;
+            c.finish()?;
+            match target {
+                k::Expr::Variable(name) if declaration => k::Stmt::Let { name, value },
+                k::Expr::Variable(name) => k::Stmt::Assign {
+                    place: k::Place::Variable(name),
+                    value,
+                },
+                k::Expr::Member(m) if !declaration => k::Stmt::Assign {
+                    place: k::Place::Member(*m),
+                    value,
+                },
+                _ => return Err(invalid("invalid assignment place")),
+            }
+        } else if Self::action_form(c.text) {
+            self.depth(depth + 1)?;
+            let action = self.action_cursor(&mut c)?;
+            c.finish()?;
+            k::Stmt::Do { action }
         } else {
             let op = c.operation()?;
             let stmt = match op {
@@ -731,82 +1014,7 @@ impl<'a> Reader<'a> {
         self.closed(indent)?;
         Ok(stmt)
     }
-    fn inline(&self, c: &mut Cursor<'_>, depth: usize) -> Result<k::Expr> {
-        self.depth(depth)?;
-        let (expr, height) = self.inline_value(c, 0)?;
-        self.depth(depth + height - 1)?;
-        Ok(expr)
-    }
-    // Parentheses create no Node. Bound syntax recursion separately and compute
-    // real tree height as postfixes are wrapped, before allocating deep trees.
-    fn inline_value(&self, c: &mut Cursor<'_>, nesting: usize) -> Result<(k::Expr, usize)> {
-        if nesting > self.limit * 2 + 2 {
-            return Err(depth_error());
-        }
-        let (mut expr, mut height) = if c.take("(") {
-            let value = self.inline_value(c, nesting + 1)?;
-            c.expect(")")?;
-            value
-        } else if c.text.trim_start().starts_with("helper_") {
-            let function = self.id(c)?;
-            c.expect("(")?;
-            let mut args = vec![];
-            let mut height = 1;
-            if !c.take(")") {
-                loop {
-                    let (arg, h) = self.inline_value(c, nesting + 1)?;
-                    height = height.max(h + 1);
-                    self.depth(height - 1)?;
-                    args.push(arg);
-                    if c.take(")") {
-                        break;
-                    }
-                    c.expect(",")?;
-                }
-            }
-            (k::Expr::Call { function, args }, height)
-        } else if c.take("k.clock()") {
-            (k::Expr::Clock, 1)
-        } else if c.take("k.random()") {
-            (k::Expr::Random, 1)
-        } else {
-            let atom = self.atom(c)?;
-            (
-                match atom {
-                    k::Atom::Variable(n) => k::Expr::Variable(n),
-                    k::Atom::Literal(l) => k::Expr::Literal(l),
-                },
-                1,
-            )
-        };
-        loop {
-            let member = if c.take(".") {
-                let field = c.word()?;
-                if !crate::printer::legal_identifier(field) {
-                    return Err(invalid("reserved attribute spelling"));
-                }
-                self.depth(height)?;
-                k::Member::Field {
-                    target: expr,
-                    field: field.into(),
-                }
-            } else if c.take("[") {
-                let (index, h) = self.inline_value(c, nesting + 1)?;
-                c.expect("]")?;
-                height = height.max(h);
-                self.depth(height)?;
-                k::Member::Index {
-                    target: expr,
-                    index,
-                }
-            } else {
-                break;
-            };
-            height += 1;
-            expr = k::Expr::Member(Box::new(member));
-        }
-        Ok((expr, height))
-    }
+
     fn member(
         &mut self,
         field: bool,
@@ -862,10 +1070,13 @@ impl<'a> Reader<'a> {
             "closure" => {
                 let params = self.names(&mut c)?;
                 c.end(true)?;
-                k::Expr::Closure(Box::new(k::Closure {
-                    params,
-                    body: self.block(i, d)?,
-                }))
+                let parent = std::mem::replace(&mut self.bound, params.iter().cloned().collect());
+                let outer_main = self.main;
+                self.main = false;
+                let body = self.block(i, d)?;
+                self.main = outer_main;
+                self.bound = parent;
+                k::Expr::Closure(Box::new(k::Closure { params, body }))
             }
             "read" => {
                 c.end(true)?;
@@ -932,77 +1143,7 @@ impl<'a> Reader<'a> {
         self.closed(indent)?;
         Ok(expr)
     }
-    fn atom(&self, c: &mut Cursor<'_>) -> Result<k::Atom> {
-        if c.text.trim_start().starts_with('"') {
-            return Ok(k::Atom::Literal(k::Literal::Text(c.string()?)));
-        }
-        c.text = c.text.trim_start_matches(' ');
-        if c.text
-            .starts_with(|ch: char| ch.is_ascii_digit() || ch == '-')
-        {
-            let end = c
-                .text
-                .find(|ch: char| !ch.is_ascii_digit() && !matches!(ch, '.' | 'e' | '-'))
-                .unwrap_or(c.text.len());
-            let token = &c.text[..end];
-            c.text = &c.text[end..];
-            let literal = if token.contains(['.', 'e']) {
-                let n = k::Float::parse(token).map_err(|e| invalid(e.to_string()))?;
-                if !n.get().is_finite() {
-                    return Err(invalid("non-finite native number"));
-                }
-                k::Literal::Float(n)
-            } else {
-                k::Literal::Int(k::Integer::parse(token).map_err(|e| invalid(e.to_string()))?)
-            };
-            return Ok(k::Atom::Literal(literal));
-        }
-        let word = c.word()?;
-        let lit = match word {
-            "None" => k::Literal::Null,
-            "True" => k::Literal::Bool(true),
-            "False" => k::Literal::Bool(false),
-            "k" => {
-                c.expect(".")?;
-                let op = c.word()?;
-                if op == "absent" {
-                    return Ok(k::Atom::Literal(k::Literal::Absent));
-                }
-                c.expect("(")?;
-                let value = c.string()?;
-                c.expect(")")?;
-                match op {
-                    "int" => k::Literal::Int(
-                        k::Integer::parse(&value).map_err(|e| invalid(e.to_string()))?,
-                    ),
-                    "float" => k::Literal::Float(
-                        k::Float::parse(&value).map_err(|e| invalid(e.to_string()))?,
-                    ),
-                    "bytes" => k::Literal::Bytes(
-                        k::Bytes::parse_hex(&value).map_err(|e| invalid(e.to_string()))?,
-                    ),
-                    "function" => k::Literal::Function(k::Name::new(value)),
-                    _ => return Err(invalid("unknown exact literal")),
-                }
-            }
-            alias => return self.named(alias).map(k::Atom::Variable),
-        };
-        Ok(k::Atom::Literal(lit))
-    }
-    fn atoms(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Atom>> {
-        c.expect("[")?;
-        let mut atoms = vec![];
-        if c.take("]") {
-            return Ok(atoms);
-        }
-        loop {
-            atoms.push(self.atom(c)?);
-            if c.take("]") {
-                return Ok(atoms);
-            }
-            c.expect(",")?;
-        }
-    }
+
     fn callee(&self, c: &mut Cursor<'_>) -> Result<k::Callee> {
         let op = c.operation()?;
         let callee = match op {
@@ -1041,19 +1182,24 @@ impl<'a> Reader<'a> {
         if suite {
             return Err(invalid("actions have only atomic operands"));
         }
+        let action = self.action_cursor(&mut c)?;
+        c.finish()?;
+        Ok(action)
+    }
+    fn action_cursor(&self, c: &mut Cursor<'_>) -> Result<k::Action> {
         let action = match c.operation()? {
             "call" => {
-                let (callee, args) = self.action_operands(&mut c)?;
+                let (callee, args) = self.action_operands(c)?;
                 k::Action::Call { callee, args }
             }
             "spawn" => {
-                let (callee, args) = self.action_operands(&mut c)?;
+                let (callee, args) = self.action_operands(c)?;
                 k::Action::Spawn { callee, args }
             }
             "perform" => {
                 let effect = k::EffectName::new(c.string()?).map_err(|e| invalid(e.to_string()))?;
                 c.expect(",")?;
-                let args = self.atoms(&mut c)?;
+                let args = self.atoms(c)?;
                 c.expect(",")?;
                 if c.operation()? != "type" {
                     return Err(invalid("expected complete result type"));
@@ -1067,13 +1213,13 @@ impl<'a> Reader<'a> {
                 }
             }
             "sleep" => k::Action::Sleep {
-                duration: self.atom(&mut c)?,
+                duration: self.atom(c)?,
             },
             "join" => k::Action::Join {
-                task: self.atom(&mut c)?,
+                task: self.atom(c)?,
             },
             "cancel" => k::Action::Cancel {
-                task: self.atom(&mut c)?,
+                task: self.atom(c)?,
             },
             "join_many" => {
                 let mode = match c.string()?.as_str() {
@@ -1086,13 +1232,13 @@ impl<'a> Reader<'a> {
                 c.expect(",")?;
                 k::Action::JoinMany {
                     mode,
-                    tasks: self.atom(&mut c)?,
+                    tasks: self.atom(c)?,
                 }
             }
             "yield_" => k::Action::Yield,
             _ => return Err(invalid("unknown action form")),
         };
-        c.end(false)?;
+        c.expect(")")?;
         Ok(action)
     }
 }
