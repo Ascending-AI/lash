@@ -1,9 +1,18 @@
 import {
+  buildDataflow,
+  availableName,
+  planInputEdit,
+  encodeValue as expression,
+  sourceOptions,
+  typeName,
+  expressionName,
+  constantValue,
+  fieldsOf,
+} from "./authoring-dataflow.mjs";
+import {
   actionOf,
   recordInput as canonicalRecordInput,
   literal,
-  conditionValue,
-  project as projectScope,
   startPosition as scopeStart,
   appendPosition,
 } from "./authoring-projection.mjs";
@@ -12,6 +21,11 @@ const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
   templates = [],
   calls = new Map(),
+  runInputs = {},
+  dataView,
+  connecting,
+  finalOutput,
+  expandedValues = new Map(),
   selected,
   steps = [],
   plan,
@@ -96,7 +110,19 @@ function show(next, correspondence) {
   $("node-form").replaceChildren();
   const old = selected?.site;
   const previousScope = activeScope;
+  const sameEntry = workflow?.entry === next.entry;
+  const retainedExpanded = new Map();
+  for (const site of expandedValues.values()) {
+    const mapped = correspondence?.entries?.find(
+      (entry) => key(entry.from) === key(site),
+    )?.to;
+    if (mapped) retainedExpanded.set(key(mapped), mapped);
+  }
+  expandedValues = retainedExpanded;
   workflow = next;
+  if (!sameEntry || !correspondence) runInputs = initialInputs(next);
+  connecting = undefined;
+  finalOutput = undefined;
   statuses = new Map();
   calls = new Map();
   statementNodes = new Map(
@@ -205,25 +231,6 @@ function renderQueue() {
   );
   if (!steps.length)
     $("queue").textContent = "Queue helpers and direct edits in any order.";
-}
-function expression(value) {
-  if (value === null) return { literal: "null" };
-  if (typeof value === "string") return { literal: { text: value } };
-  if (typeof value === "boolean") return { literal: { bool: value } };
-  if (typeof value === "number") {
-    if (!Number.isSafeInteger(value))
-      throw Error(
-        "JSON number inputs must be safe integers. Use kernel expression mode for exact floats.",
-      );
-    return { literal: { int: String(value) } };
-  }
-  if (Array.isArray(value)) return { list: value.map(expression) };
-  return {
-    record: Object.entries(value).map(([field, value]) => ({
-      field,
-      value: expression(value),
-    })),
-  };
 }
 $("queue-helper").onclick = () =>
   action(async () => {
@@ -371,6 +378,8 @@ async function run() {
   controls();
   statuses = new Map();
   calls = new Map();
+  finalOutput = undefined;
+  renderInvocationOutput();
   if (selected) renderCallData(selected);
   renderCanvas();
   $("run-output").replaceChildren();
@@ -381,6 +390,10 @@ async function run() {
     if (event.workflowVersion !== version) {
       output("Ignored an event for a different workflow revision.", true);
       return;
+    }
+    if (event.output !== undefined) {
+      finalOutput = event.output;
+      renderInvocationOutput();
     }
     if (event.site) statuses.set(key(event.site), event.status);
     if (event.site && event.callId) {
@@ -437,7 +450,11 @@ async function run() {
     renderCanvas();
   }
   try {
-    const response = await fetch("/run", { method: "POST" });
+    const response = await fetch("/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version, inputs: runInputs }),
+    });
     if (!response.ok) throw (await response.json()).error;
     const reader = response.body
       .pipeThrough(new TextDecoderStream())
@@ -478,6 +495,7 @@ async function run() {
     output(errorText(error), true);
   } finally {
     running = false;
+    renderInvocationOutput();
     if (selected) renderCallData(selected);
     $("approve").hidden = true;
     controls();
@@ -648,7 +666,52 @@ function model(s) {
   };
 }
 function project() {
-  return activeScope ? projectScope(workflow, activeScope, model) : [];
+  dataView = buildDataflow(
+    workflow,
+    activeScope,
+    new Set(expandedValues.keys()),
+  );
+  function decorate(nodes) {
+    return nodes.map((node) => {
+      const details = model(node.s);
+      if (node.kind === "value")
+        Object.assign(details, {
+          info: {
+            name: node.binding.name,
+            app: node.binding.assigned ? "Variable" : "Value",
+            icon: "status",
+          },
+          title: node.binding.name,
+          subtitle: node.binding.assigned ? "Mutable binding" : "Named value",
+          generic: false,
+        });
+      if (node.kind === "output")
+        Object.assign(details, {
+          info: {
+            name: node.workflowOutput ? "Workflow Output" : "Function Output",
+            app: "Result",
+            icon: "message",
+          },
+          title: node.workflowOutput ? "Workflow Output" : "Function Output",
+          subtitle: "Returned to the caller",
+          generic: false,
+        });
+      if (node.kind === "write")
+        Object.assign(details, {
+          info: { name: "Set value", app: "Variable", icon: "status" },
+          title: "Set value",
+          subtitle: node.outputs[0]?.name,
+          generic: false,
+        });
+      return {
+        ...details,
+        ...node,
+        ...(node.children ? { children: decorateBranches(node.children) } : {}),
+      };
+    });
+  }
+  const decorateBranches = (branches) => branches.map(decorate);
+  return decorate(dataView.nodes);
 }
 function positionAfter(s) {
   const index = workflow.statements.indexOf(s);
@@ -660,25 +723,6 @@ function positionAfter(s) {
 function startPosition() {
   return activeScope ? scopeStart(workflow, activeScope) : undefined;
 }
-function wire(from, to, label) {
-  const ns = "http://www.w3.org/2000/svg";
-  const p = document.createElementNS(ns, "path");
-  p.setAttribute(
-    "d",
-    `M ${from.x} ${from.y} C ${from.x + 65} ${from.y}, ${to.x - 65} ${to.y}, ${to.x} ${to.y}`,
-  );
-  p.setAttribute("class", "wire");
-  p.setAttribute("marker-end", "url(#arrow)");
-  $("wires").append(p);
-  if (label) {
-    const text = document.createElementNS(ns, "text");
-    text.setAttribute("x", from.x + 22);
-    text.setAttribute("y", from.y + (to.y < from.y ? -14 : 24));
-    text.setAttribute("class", "wire-label");
-    text.textContent = label;
-    $("wires").append(text);
-  }
-}
 function addPort(x, y, at, label) {
   if (!at) return;
   const button = el("button", "add-port", "+");
@@ -689,123 +733,306 @@ function addPort(x, y, at, label) {
   button.onclick = () => openCatalog(at);
   $("flow").append(button);
 }
-function endPoint(x, y) {
-  return { x: x + 112, y };
+const cardWidth = 230;
+function nodeHeight(node) {
+  return (
+    74 +
+    (node.inputs.length + node.outputs.length) * 27 +
+    (node.inputs.length ? 21 : 0) +
+    (node.outputs.length ? 21 : 0)
+  );
 }
 function drawNode(node, x, y) {
-  const button = el("button", "workflow-node" + (node.start ? " start" : ""));
-  button.style.left = x + "px";
-  button.style.top = y - 56 + "px";
-  button.setAttribute("aria-label", node.title);
-  button.append(icon(node.info.icon));
+  const card = el("section", "data-node " + node.kind);
+  card.style.left = x + "px";
+  card.style.top = y + "px";
+  const state = node.s?.action && statuses.get(key(node.s.action));
+  if (state) card.classList.add(state);
   if (
     node.s &&
     selected &&
-    key(selected.site) === key(node.s.site) &&
+    key(node.s.site) === key(selected.site) &&
     !$("node-panel").hidden
   )
-    button.classList.add("selected");
-  const state = node.s?.action && statuses.get(key(node.s.action));
-  if (state) {
-    button.classList.add(state);
-    if (state === "succeeded") button.append(el("span", "node-status", "✓"));
+    card.classList.add("selected");
+  const header = el("button", "data-node-header");
+  header.setAttribute("aria-label", node.title);
+  header.append(icon(node.info.icon));
+  const heading = el("span");
+  heading.append(
+    el("strong", null, node.title),
+    el("small", null, node.subtitle),
+  );
+  header.append(heading);
+  if (state)
+    header.append(
+      el(
+        "span",
+        "data-status",
+        state === "succeeded" ? "✓" : state === "failed" ? "!" : "…",
+      ),
+    );
+  header.onclick = () => openNode(node);
+  card.append(header);
+  const placed = { ...node, x, y, inputPoints: [], outputPoints: [] };
+  let row = 74;
+  for (const [direction, ports] of [
+    ["input", node.inputs],
+    ["output", node.outputs],
+  ]) {
+    if (!ports.length) continue;
+    card.append(
+      el("div", "port-heading", direction === "input" ? "INPUTS" : "OUTPUTS"),
+    );
+    row += 21;
+    for (const port of ports) {
+      const button = el(
+        "button",
+        "data-port " + direction + (port.discarded ? " discarded" : ""),
+      );
+      button.setAttribute(
+        "aria-label",
+        `${direction === "input" ? "Configure" : "Connect"} ${node.title} ${port.name}`,
+      );
+      button.title =
+        direction === "input"
+          ? `${port.name}: ${typeName(port.type)} ← ${expressionName(port.expression)}`
+          : `${port.name}: ${typeName(port.type)}`;
+      button.append(el("i", "socket"), el("span", "port-name", port.name));
+      const fixed =
+        direction === "input"
+          ? constantValue(port.expression)
+          : { known: false };
+      if (fixed.known)
+        button.append(el("span", "port-literal", JSON.stringify(fixed.value)));
+      button.append(el("span", "port-type", typeName(port.type)));
+      const point = {
+        x: direction === "input" ? x : x + cardWidth,
+        y: y + row + 13,
+        port,
+        node: placed,
+      };
+      placed[direction + "Points"].push(point);
+      button.onclick = () => {
+        if (direction === "input") {
+          if (connecting) connectPort(port, connecting);
+          else openPort(node, port);
+        } else if (port.discarded || port.stored) openNode(node);
+        else {
+          connecting = port;
+          report(
+            `Connect ${port.name}: choose an input port, or press Escape to cancel.`,
+          );
+          document
+            .querySelectorAll(".data-port.output")
+            .forEach((p) => p.classList.remove("chosen"));
+          button.classList.add("chosen");
+        }
+      };
+      if (direction === "output" && port.discarded)
+        button.title += " · result is discarded by this statement";
+      card.append(button);
+      row += 27;
+    }
   }
-  const title = el("span", "node-title", node.title);
-  title.append(el("span", "node-description", node.subtitle));
-  button.append(title, el("span", "port"));
-  if (!node.start) button.append(el("span", "port input"));
-  button.onclick = () =>
-    node.start ? openCatalog(startPosition()) : openNode(node);
-  $("flow").append(button);
-  visualNodes.push({ ...node, x, y });
-  if (!node.branch) {
-    wire(endPoint(x, y), { x: x + 164, y });
+  $("flow").append(card);
+  visualNodes.push(placed);
+  if (node.s && !node.branch && node.kind !== "output")
     addPort(
-      x + 164,
-      y,
-      node.start ? startPosition() : positionAfter(node.s),
+      x + cardWidth + 40,
+      y + 22,
+      positionAfter(node.s),
       `Add step after ${node.title}`,
     );
-  }
-  return { x: x + 112, y };
+  return placed;
 }
-function height(nodes) {
+function controlWire(from, to, label) {
+  const ns = "http://www.w3.org/2000/svg";
+  const path = document.createElementNS(ns, "path");
+  const a = { x: from.x + cardWidth, y: from.y + 22 },
+    b = { x: to.x, y: to.y + 22 };
+  path.setAttribute(
+    "d",
+    `M${a.x},${a.y} C${a.x + 50},${a.y} ${b.x - 50},${b.y} ${b.x},${b.y}`,
+  );
+  path.setAttribute("class", "control-wire");
+  path.setAttribute("marker-end", "url(#arrow)");
+  $("wires").append(path);
+  if (label) {
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", a.x + 38);
+    text.setAttribute("y", a.y - 9);
+    text.setAttribute("class", "wire-label");
+    text.textContent = label;
+    $("wires").append(text);
+  }
+}
+function branchHeight(nodes) {
   return Math.max(
-    1,
+    350,
     ...nodes.map((n) =>
-      n.branch ? height(n.children[0]) + height(n.children[1]) : 1,
+      n.branch
+        ? branchHeight(n.children[0]) + branchHeight(n.children[1])
+        : nodeHeight(n) + 70,
     ),
   );
 }
 function layout(nodes, x, y, incoming) {
   let ends = incoming;
   for (const node of nodes) {
-    const end = drawNode(node, x, y);
-    for (const prior of ends) wire(prior, { x, y }, prior.label);
+    const placed = drawNode(node, x, y);
+    for (const prior of ends) controlWire(prior, placed, prior.label);
     if (node.branch) {
-      const a = height(node.children[0]),
-        b = height(node.children[1]);
-      const top = y - b * 115,
-        bottom = y + a * 115;
+      const top = y - branchHeight(node.children[0]) / 2,
+        bottom = y + branchHeight(node.children[1]) / 2;
       const outputs = [];
       for (const [i, branch] of node.children.entries()) {
-        const row = i ? bottom : top;
-        const source = { ...end, label: i ? "False" : "True" };
         if (branch.length)
-          outputs.push(...layout(branch, x + 250, row, [source]));
-        else {
-          const target = { x: x + 200, y: row };
-          wire(source, target, source.label);
-          const block = {
-            unit: node.s.site.unit,
-            path: [...node.s.site.path, i ? 2 : 1],
-          };
-          if (i === 0 || node.s.statement.if.else_block)
-            addPort(
-              target.x,
-              row,
-              { block },
-              `Add step to ${i ? "false" : "true"} branch`,
-            );
-          outputs.push(target);
-        }
+          outputs.push(
+            ...layout(branch, x + 300, i ? bottom : top, [
+              { ...placed, label: i ? "False" : "True" },
+            ]),
+          );
+        else outputs.push({ ...placed, label: i ? "False" : "True" });
       }
+      if (!outputs.length) return [];
       ends = outputs;
-      x = Math.max(...outputs.map((p) => p.x)) + 140;
+      x = Math.max(...outputs.map((p) => p.x)) + 300;
     } else {
-      ends = [end];
-      x += 250;
+      const tag =
+        typeof node.s?.statement === "string"
+          ? node.s.statement
+          : Object.keys(node.s?.statement ?? {})[0];
+      if (
+        node.kind === "output" ||
+        ["throw", "fail", "finish", "break", "continue"].includes(tag)
+      )
+        return [];
+      ends = [placed];
+      x += 300;
     }
   }
   return ends;
+}
+function dataWires() {
+  const ns = "http://www.w3.org/2000/svg";
+  for (const node of visualNodes)
+    for (const point of node.inputPoints) {
+      for (const id of point.port.references ?? []) {
+        const sourceNode = visualNodes.find((n) =>
+          n.outputs.some((p) => p.binding === id),
+        );
+        if (!sourceNode) continue;
+        let path = [];
+        let expression = point.port.expression;
+        while (expression?.member?.field) {
+          path.unshift(expression.member.field.field);
+          expression = expression.member.field.target;
+        }
+        const source =
+          sourceNode.outputPoints.find(
+            (p) =>
+              p.port.binding === id &&
+              JSON.stringify(p.port.path ?? []) === JSON.stringify(path),
+          ) ?? sourceNode.outputPoints.find((p) => p.port.binding === id);
+        if (!source) continue;
+        const edge = document.createElementNS(ns, "path");
+        const lift = Math.min(source.y, point.y) - 45;
+        edge.setAttribute(
+          "d",
+          point.x > source.x
+            ? `M${source.x},${source.y} C${source.x + 90},${source.y} ${point.x - 90},${point.y} ${point.x},${point.y}`
+            : `M${source.x},${source.y} C${source.x + 60},${lift} ${point.x - 60},${lift} ${point.x},${point.y}`,
+        );
+        edge.setAttribute("class", "data-wire");
+        edge.setAttribute("marker-end", "url(#data-arrow)");
+        const title = document.createElementNS(ns, "title");
+        title.textContent = `${sourceNode.title}.${source.port.name} → ${node.title}.${point.port.name}`;
+        edge.append(title);
+        $("wires").append(edge);
+      }
+    }
 }
 function renderCanvas() {
   if (!workflow) return;
   visualNodes = [];
   $("flow").replaceChildren();
   $("wires").innerHTML =
-    '<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 8 4 0 8Z" fill="#9da5aa"/></marker></defs>';
+    '<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#aeb5bc"/></marker><marker id="data-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#6287b1"/></marker></defs>';
   const roots = project(),
-    center = Math.max(290, height(roots) * 115 + 100);
+    center = Math.max(160, branchHeight(roots) / 2);
+  const rootScope = !activeScope?.path?.length;
+  const used = new Set(),
+    produced = new Set();
+  function collect(nodes) {
+    for (const node of nodes) {
+      if (node.binding) produced.add(node.binding.id);
+      node.inputs.forEach((port) =>
+        port.references.forEach((id) => used.add(id)),
+      );
+      if (node.children) node.children.forEach(collect);
+    }
+  }
+  collect(roots);
+  const scopeBindings = rootScope
+    ? dataView.parameters
+    : workflow.dataflow.bindings.filter(
+        (binding) =>
+          (key(binding.block) === key(activeScope) && binding.kind !== "let") ||
+          (used.has(binding.id) && !produced.has(binding.id)),
+      );
   const start = drawNode(
     {
-      start: true,
-      info: { icon: "start" },
-      title: activeScope?.path?.length ? "Block entry" : "Manual trigger",
-      subtitle: activeScope?.path?.length
-        ? "Inspecting a nested block"
-        : "When you click Run workflow",
+      kind: rootScope ? "input" : "scope-input",
+      info: {
+        name: rootScope ? "Workflow Input" : "Scope inputs",
+        app: "Invocation",
+        icon: "start",
+      },
+      title: rootScope ? "Workflow Input" : "Scope inputs",
+      subtitle: rootScope
+        ? "Parameters for this invocation"
+        : "Bindings in this scope",
+      inputs: [],
+      outputs: scopeBindings.flatMap((b) => dataView.outputPorts(b)),
     },
-    110,
+    70,
     center,
   );
-  layout(roots, 360, center, [start]);
-  graphWidth = Math.max(900, ...visualNodes.map((n) => n.x + 290));
-  graphHeight = Math.max(600, ...visualNodes.map((n) => n.y + 210));
+  if (!start.outputs.length) start.subtitle = "No parameters";
+  addPort(
+    70 + cardWidth + 40,
+    center + 22,
+    startPosition(),
+    "Add step after Workflow Input",
+  );
+  const ends = layout(roots, 370, center, [start]);
+  if (ends.length && rootScope) {
+    const x = Math.max(...ends.map((p) => p.x)) + 300;
+    const end = drawNode(
+      {
+        kind: "output",
+        info: { name: "Workflow Output", app: "Result", icon: "message" },
+        title: "Workflow Output",
+        subtitle: "No explicit return",
+        inputs: [],
+        outputs: [],
+      },
+      x,
+      center,
+    );
+    ends.forEach((prior) => controlWire(prior, end));
+  }
+  dataWires();
+  graphWidth = Math.max(900, ...visualNodes.map((n) => n.x + cardWidth + 70));
+  graphHeight = Math.max(
+    650,
+    ...visualNodes.map((n) => n.y + nodeHeight(n) + 100),
+  );
   $("scene").style.width = graphWidth + "px";
   $("scene").style.height = graphHeight + "px";
   $("node-count").textContent =
-    `${visualNodes.length} steps · Click a step to configure it`;
+    `${visualNodes.length} nodes · Select an input to edit its source`;
   document.querySelector("h1").textContent = workflow.entry.replaceAll(
     "_",
     " ",
@@ -945,40 +1172,6 @@ function newNode(effect) {
     el("p", "help", "Uses a mock connection. No external requests."),
   );
 }
-function expressionLabel(value) {
-  if (value?.literal === "null") return "null";
-  const fixed = literal(value);
-  if (fixed !== undefined) return JSON.stringify(fixed);
-  if (value?.variable) return value.variable;
-  const field = value?.member?.field;
-  if (field) return `${expressionLabel(field.target)}.${field.field}`;
-  const index = value?.member?.index;
-  if (index)
-    return `${expressionLabel(index.target)}[${expressionLabel(index.index)}]`;
-  return "Computed expression · inspect in Advanced";
-}
-function renderMappings(container, statement) {
-  const section = el("section", "input-mappings");
-  section.append(el("h3", null, "Input mappings"));
-  const input = recordInput(statement);
-  const entries =
-    input?.record ??
-    actionOf(statement).perform.args.map((value, i) => ({
-      field: `Input ${i + 1}`,
-      value,
-    }));
-  for (const { field, value } of entries) {
-    const row = el("div", "mapping-row");
-    row.append(
-      el("span", "mapping-key", field),
-      el("span", "mapping-value", expressionLabel(value)),
-    );
-    section.append(row);
-  }
-  const binding = statement.statement.let?.name;
-  if (binding) section.append(el("p", "help", `Output saved as ${binding}`));
-  container.append(section);
-}
 function dataTree(value, depth = 0) {
   if (value === null || typeof value !== "object")
     return el("span", "data-value", value === null ? "null" : String(value));
@@ -1055,140 +1248,539 @@ function renderCallData(statement) {
   container.append(select, body);
   showRecord();
 }
+function initialInputs(next) {
+  const presets = {
+    deep_research: { topic: "Reducing customer onboarding drop-off" },
+    weekly_kpis: { workspace: "Acme Cloud" },
+  };
+  return Object.fromEntries(
+    (next.document.entries[next.entry]?.params ?? []).map((param) => [
+      param.name,
+      presets[next.entry]?.[param.name] ?? defaultValue(param.ty),
+    ]),
+  );
+}
+function defaultValue(type) {
+  if (type === "text") return "";
+  if (type === "bool") return false;
+  if (["int", "float", "number"].includes(type)) return 0;
+  if (type?.enum) return type.enum[0];
+  if (type?.list) return [];
+  if (type?.record)
+    return Object.fromEntries(
+      fieldsOf(type)
+        .filter((f) => !f.optional)
+        .map((f) => [f.name, defaultValue(f.ty)]),
+    );
+  return null;
+}
+function constantControl(parent, label, type, value, id, config = {}) {
+  const caption = el("label", null, label);
+  caption.htmlFor = id;
+  let input;
+  if (type === "bool" || type?.enum) {
+    input = el("select");
+    const options = type === "bool" ? [true, false] : type.enum;
+    options.forEach((v) => {
+      const option = el("option", null, String(v));
+      option.value = String(v);
+      input.append(option);
+    });
+    input.value = String(value ?? options[0]);
+  } else {
+    const scalar = ["text", "int", "float", "number"].includes(type);
+    input = el(scalar ? "input" : "textarea");
+    if (scalar) input.type = type === "text" ? "text" : "number";
+    if (input.type === "number") {
+      input.step = type === "int" ? "1" : "any";
+      if (config.min !== undefined) input.min = config.min;
+      if (config.max !== undefined) input.max = config.max;
+    }
+    input.value = scalar
+      ? String(value ?? defaultValue(type))
+      : JSON.stringify(value ?? defaultValue(type), null, 2);
+  }
+  input.id = id;
+  parent.append(caption, input);
+  return () => {
+    if (type === "bool") return input.value === "true";
+    if (type === "text" || type?.enum) return input.value;
+    if (["int", "float", "number"].includes(type)) {
+      const result = Number(input.value);
+      if (
+        input.value.trim() === "" ||
+        !Number.isFinite(result) ||
+        (type === "int" && !Number.isSafeInteger(result))
+      )
+        throw Error(`Enter a valid ${typeName(type)} value.`);
+      if (
+        (config.min !== undefined && result < config.min) ||
+        (config.max !== undefined && result > config.max)
+      )
+        throw Error(`Choose a number between ${config.min} and ${config.max}.`);
+      return result;
+    }
+    try {
+      const value = JSON.parse(input.value);
+      if (
+        type?.record &&
+        (!value || typeof value !== "object" || Array.isArray(value))
+      )
+        throw Error("Expected an object.");
+      if (type?.list && !Array.isArray(value)) throw Error("Expected a list.");
+      if (type === "null" && value !== null) throw Error("Expected null.");
+      return value;
+    } catch {
+      throw Error("Enter valid JSON for this structured value.");
+    }
+  };
+}
+function renderInvocationInputs(container) {
+  const params = workflow.document.entries[workflow.entry]?.params ?? [];
+  if (!params.length) {
+    container.append(
+      el("p", "help", "This workflow takes no invocation parameters."),
+    );
+    return;
+  }
+  container.append(
+    el(
+      "p",
+      "help",
+      "These values are supplied when you run the workflow. They do not change the document.",
+    ),
+  );
+  const reads = params.map((param, index) => [
+    param.name,
+    constantControl(
+      container,
+      `${param.name} · ${typeName(param.ty)}`,
+      param.ty,
+      runInputs[param.name],
+      "invocation-" + index,
+    ),
+  ]);
+  const save = el("button", "primary save-node", "Save inputs");
+  save.onclick = () =>
+    action(async () => {
+      runInputs = Object.fromEntries(
+        reads.map(([name, read]) => [name, read()]),
+      );
+      report("Invocation inputs saved");
+    });
+  container.append(save);
+}
+function typeCompatible(expected, actual) {
+  if (!expected || !actual || expected === "any" || actual === "any")
+    return true;
+  if (JSON.stringify(expected) === JSON.stringify(actual)) return true;
+  if (expected === "number" && ["int", "float"].includes(actual)) return true;
+  if (expected?.union)
+    return expected.union.some((t) => typeCompatible(t, actual));
+  if (actual?.union)
+    return actual.union.every((t) => typeCompatible(expected, t));
+  if (expected === "text" && actual?.enum) return true;
+  if (expected?.enum && actual === "text") return true;
+  if (expected?.enum && actual?.enum)
+    return actual.enum.every((v) => expected.enum.includes(v));
+  if (expected?.list && actual?.list)
+    return typeCompatible(expected.list, actual.list);
+  if (expected?.record && actual?.record) {
+    return fieldsOf(expected).every((field) => {
+      const match = fieldsOf(actual).find((f) => f.name === field.name);
+      return match
+        ? typeCompatible(field.ty, match.ty)
+        : field.optional || !!actual.record.rest;
+    });
+  }
+  return false;
+}
+function freshBinding(base = "value") {
+  return availableName(workflow, base);
+}
+function replacePort(port, value) {
+  return planInputEdit(workflow, port, value).map((direct) => ({ direct }));
+}
+function connectPort(port, source) {
+  if (busy || running) return;
+  action(async () => {
+    if (!(port.available ?? []).includes(source.binding))
+      throw Error(
+        "This value is not available at the selected input. Choose a value in scope that is defined before this step.",
+      );
+    if (!typeCompatible(port.acceptsType ?? port.type, source.type))
+      throw Error(
+        `Cannot connect ${typeName(source.type)} to ${typeName(port.type)}.`,
+      );
+    await applyVisual(replacePort(port, source.expression));
+    connecting = undefined;
+    report(`Connected ${source.name} to ${port.name}`);
+  });
+}
+function openPort(node, port) {
+  if (busy) return;
+  selected = node.s;
+  const container = panel("EDIT INPUT");
+  identity(container, node.info);
+  container.append(el("h3", null, `${port.name} · ${typeName(port.type)}`));
+  const modeLabel = el("label", null, "Value source");
+  modeLabel.htmlFor = "mapping-mode";
+  const mode = el("select");
+  mode.id = "mapping-mode";
+  for (const [value, label] of [
+    ["constant", "Constant"],
+    ["connection", "Connected value"],
+    ["expression", "Expression (advanced)"],
+  ]) {
+    const option = el("option", null, label);
+    option.value = value;
+    mode.append(option);
+  }
+  const literal = constantValue(port.expression);
+  const options = sourceOptions(dataView, port);
+  const current = options.findIndex(
+    (option) =>
+      JSON.stringify(option.expression) === JSON.stringify(port.expression),
+  );
+  mode.value = literal.known
+    ? "constant"
+    : current >= 0
+      ? "connection"
+      : "expression";
+  container.append(modeLabel, mode);
+  const editor = el("div", "mapping-editor");
+  container.append(editor);
+  let read;
+  function draw() {
+    editor.replaceChildren();
+    if (mode.value === "constant") {
+      const hostConfig = node.info.fields?.find((f) => f[0] === port.name)?.[3];
+      const holder = el("div");
+      let currentType =
+        port.expression?.literal?.float !== undefined &&
+        ["number", "any"].includes(port.type)
+          ? "float"
+          : port.type;
+      let value = literal.known ? literal.value : defaultValue(port.type);
+      function drawConstant() {
+        holder.replaceChildren();
+        const readValue = constantControl(
+          holder,
+          "Constant value",
+          currentType,
+          value,
+          "constant-value",
+          hostConfig,
+        );
+        read = () => expression(readValue(), currentType);
+      }
+      if (port.acceptsType === "any" || port.type === "any") {
+        const label = el("label", null, "Constant type");
+        label.htmlFor = "constant-type";
+        const select = el("select");
+        select.id = "constant-type";
+        const types = [
+          "text",
+          "int",
+          "float",
+          "number",
+          "bool",
+          "null",
+          { record: { fields: [], rest: "any" } },
+          { list: "any" },
+          "any",
+        ];
+        types.forEach((type, index) => {
+          const option = el("option", null, typeName(type));
+          option.value = String(index);
+          select.append(option);
+        });
+        const index = types.findIndex((type) =>
+          typeof type === "string"
+            ? type === currentType
+            : !!type.record === !!currentType?.record &&
+              !!type.list === !!currentType?.list,
+        );
+        select.value = String(index >= 0 ? index : types.length - 1);
+        select.onchange = () => {
+          currentType = types[Number(select.value)];
+          value = defaultValue(currentType);
+          drawConstant();
+        };
+        editor.append(label, select);
+        editor.append(
+          el(
+            "p",
+            "help",
+            "The displayed type describes the current value. This binding has no declared type constraint.",
+          ),
+        );
+      }
+      editor.append(holder);
+      drawConstant();
+    } else if (mode.value === "connection") {
+      const label = el("label", null, "Source output");
+      label.htmlFor = "source-output";
+      const select = el("select");
+      select.id = "source-output";
+      options.forEach((option, index) => {
+        const item = el("option", null, option.label);
+        item.value = String(index);
+        item.disabled = !typeCompatible(
+          port.acceptsType ?? port.type,
+          option.type,
+        );
+        select.append(item);
+      });
+      const first = options.findIndex((o) =>
+        typeCompatible(port.acceptsType ?? port.type, o.type),
+      );
+      select.value = String(current >= 0 ? current : first);
+      editor.append(
+        label,
+        select,
+        el(
+          "p",
+          "help",
+          "Only values visible at this input are selectable. Any means the type is not known statically.",
+        ),
+      );
+      read = () => {
+        const option = options[Number(select.value)];
+        if (!option)
+          throw Error(
+            "No source is available. Define a value before this step.",
+          );
+        if (!typeCompatible(port.acceptsType ?? port.type, option.type))
+          throw Error("The selected types do not match.");
+        return option.expression;
+      };
+    } else {
+      const label = el("label", null, "Canonical expression");
+      label.htmlFor = "mapping-expression";
+      const input = el("textarea");
+      input.id = "mapping-expression";
+      input.value = JSON.stringify(port.expression, null, 2);
+      editor.append(
+        label,
+        input,
+        el(
+          "p",
+          "help",
+          "This edits a canonical expression. Library calls remain opaque; the transaction is checked by Lash.",
+        ),
+      );
+      read = () => JSON.parse(input.value);
+    }
+  }
+  mode.onchange = draw;
+  draw();
+  const save = el("button", "primary save-node", "Save mapping");
+  save.onclick = () => action(() => applyVisual(replacePort(port, read())));
+  container.append(save);
+  const details = el("details", "promote-value");
+  details.append(el("summary", null, "Make this a named value"));
+  const nameLabel = el("label", null, "Value name");
+  nameLabel.htmlFor = "value-name";
+  const name = el("input");
+  name.id = "value-name";
+  name.value = freshBinding(
+    port.name.replace(/[^a-zA-Z0-9_]/g, "_") + "_value",
+  );
+  const promote = el("button", "save-node", "Create value node");
+  promote.onclick = () =>
+    action(async () => {
+      const binding = name.value.trim();
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(binding))
+        throw Error("Use a name starting with a letter or underscore.");
+      if (workflow.dataflow.bindings.some((b) => b.name === binding))
+        throw Error("Choose a new value name.");
+      const changes = [
+        {
+          direct: {
+            insert_statement: {
+              at: { block: port.context.block, before: port.context.statement },
+              statement: { let: { name: binding, value: { expr: read() } } },
+            },
+          },
+        },
+        ...replacePort(port, { variable: binding }),
+      ];
+      await applyVisual(changes);
+      const created = workflow.dataflow.bindings.find(
+        (item) => item.name === binding,
+      );
+      if (created) expandedValues.set(key(created.site), created.site);
+      renderCanvas();
+      report(`Created ${binding}`);
+    });
+  details.append(nameLabel, name, promote);
+  container.append(details);
+  renderCanvas();
+  controls();
+}
+
+function renderInvocationOutput() {
+  const container = $("invocation-output");
+  if (!container) return;
+  container.replaceChildren(
+    el("h3", null, "Invocation result"),
+    finalOutput === undefined
+      ? el(
+          "p",
+          "help",
+          running
+            ? "Waiting for this invocation to finish…"
+            : "No returned value recorded for this invocation.",
+        )
+      : dataTree(finalOutput),
+  );
+}
 function openNode(node) {
   if (busy) return;
   selected = node.s;
   renderPlacement();
   renderSelection();
-  const container = panel("STEP SETTINGS");
+  const container = panel(
+    node.kind === "input"
+      ? "WORKFLOW INPUTS"
+      : node.kind === "output"
+        ? "WORKFLOW OUTPUT"
+        : "NODE SETTINGS",
+  );
   identity(container, node.info);
-  if (actionOf(node.s)?.perform) {
-    renderMappings(container, node.s);
-    const data = el("section", "call-data");
-    data.id = "call-data";
-    container.append(data);
-    renderCallData(node.s);
-  }
-  if (node.generic) {
+  if (node.kind === "input") renderInvocationInputs(container);
+  else if (node.kind === "scope-input") {
     container.append(
       el(
         "p",
-        "field-note",
-        "This is a canonical action or control block. Its inputs and behavior are available in Advanced. Nested blocks can be selected from the scope menu.",
+        "help",
+        "These values come from the enclosing scope or this function’s caller. Run still invokes the workflow entry.",
       ),
     );
-    const open = el("button", "wide", "Open in Advanced");
-    open.onclick = () => {
-      $("advanced").showModal();
-      $("replace").click();
-      $("direct-details").open = true;
-    };
-    container.append(open);
-    renderCanvas();
-    controls();
-    return;
-  }
-  if (node.branch) {
-    const label = el("label", null, "Condition value");
-    label.htmlFor = "branch-value";
-    const select = el("select");
-    select.id = "branch-value";
-    for (const [value, text] of [
-      ["true", "Yes"],
-      ["false", "No"],
-    ]) {
-      const o = el("option", null, text);
-      o.value = value;
-      select.append(o);
+    for (const output of node.outputs)
+      container.append(
+        el("p", "mapping-row", `${output.name} · ${typeName(output.type)}`),
+      );
+  } else {
+    for (const port of node.inputs) {
+      const button = el("button", "mapping-button");
+      button.append(
+        el("strong", null, port.name),
+        el("span", "port-type", typeName(port.type)),
+        el("small", null, expressionName(port.expression)),
+      );
+      button.onclick = () => openPort(node, port);
+      container.append(button);
     }
-    const value = conditionValue(workflow, node.s);
-    if (typeof value !== "boolean") {
+    for (const port of node.wholeInputs ?? []) {
+      const edit = el("button", null, `Edit ${port.name} object`);
+      edit.onclick = () => openPort(node, port);
+      container.append(edit);
+    }
+    if (node.outputs.some((port) => port.stored))
       container.append(
         el(
           "p",
-          "field-note",
-          "This condition depends on earlier steps. Use Advanced to edit its rule.",
+          "help",
+          "This node writes mutable state. Later reads use the variable’s value at that point in execution.",
         ),
       );
-      renderCanvas();
-      return;
+    if (node.kind === "output" && !node.workflowOutput)
+      container.append(
+        el(
+          "p",
+          "help",
+          "This returns to the enclosing function’s caller. Its result is not the workflow invocation result.",
+        ),
+      );
+    const foldedBindings = [...dataView.hidden]
+      .map((id) => dataView.bindings.get(id))
+      .filter((binding) =>
+        node.inputs.some(
+          (port) =>
+            port.context && key(port.context.statement) === key(binding.site),
+        ),
+      );
+    for (const binding of foldedBindings) {
+      const expand = el("button", null, `Show ${binding.name} as a node`);
+      expand.onclick = () => {
+        expandedValues.set(key(binding.site), binding.site);
+        $("node-panel").hidden = true;
+        renderCanvas();
+      };
+      container.append(expand);
     }
-    select.value = value === false ? "false" : "true";
-    container.append(
-      label,
-      select,
-      el("p", "help", "Yes follows the True connection. No follows False."),
-    );
-    const save = el("button", "primary save-node", "Save changes");
-    save.onclick = () =>
-      action(() =>
-        applyVisual([
-          {
-            direct: {
-              set_condition: {
-                statement: node.s.site,
-                condition: expression(select.value === "true"),
+    if (node.binding) {
+      const label = el("label", null, "Output name");
+      label.htmlFor = "output-name";
+      const input = el("input");
+      input.id = "output-name";
+      input.value = node.binding.name;
+      const rename = el("button", "save-node", "Rename value");
+      rename.onclick = () =>
+        action(() =>
+          applyVisual([
+            {
+              direct: {
+                rename_variable: {
+                  declared_at: node.binding.site,
+                  name: node.binding.name,
+                  to: input.value.trim(),
+                },
               },
             },
-          },
-        ]),
-      );
-    container.append(save);
-  } else {
-    const input = recordInput(node.s);
-    if (input && node.info.fields) {
-      const values = Object.fromEntries(
-        input.record.map((f) => [f.field, literal(f.value)]),
-      );
-      const computed = input.record.some((f) => literal(f.value) === undefined);
-      if (computed) {
+          ]),
+        );
+      container.append(label, input, rename);
+      if (node.binding.assigned)
         container.append(
           el(
             "p",
-            "field-note",
-            "This step uses values from earlier steps. Use Advanced to edit those connections.",
+            "help",
+            "This variable is reassigned. Data wires identify the binding; its value depends on execution order.",
           ),
         );
-      } else {
-        const read = fields(container, node.info, values);
-        const save = el("button", "primary save-node", "Save changes");
-        save.onclick = () =>
-          action(async () => {
-            const withStmt = structuredClone(input.statement.statement);
-            withStmt.let.value.expr = expression(read());
-            await applyVisual([
-              {
-                direct: {
-                  replace_statement: {
-                    statement: input.statement.site,
-                    with: withStmt,
-                  },
-                },
-              },
-            ]);
-          });
-        container.append(save);
-      }
-    } else
+    }
+    if (node.s?.action) {
+      const data = el("section", "call-data");
+      data.id = "call-data";
+      container.append(data);
+      renderCallData(node.s);
+    }
+    if (node.kind === "output" && node.workflowOutput !== false) {
+      const result = el("section");
+      result.id = "invocation-output";
+      container.append(result);
+      renderInvocationOutput();
+    }
+    if (node.generic || node.kind === "control") {
       container.append(
         el(
           "p",
-          "field-note",
-          "This step uses a computed input. Its connections are available in Advanced.",
+          "help",
+          "Nested blocks are available from the scope menu. Advanced exposes the complete canonical action.",
         ),
       );
-    const remove = el("button", "danger save-node", "Delete step");
-    remove.onclick = () =>
-      action(() =>
-        applyVisual([
-          { direct: { remove_statement: { statement: node.s.site } } },
-        ]),
-      );
-    container.append(remove);
+      const advanced = el("button", null, "Open in Advanced");
+      advanced.onclick = () => {
+        $("advanced").showModal();
+        $("replace").click();
+        $("direct-details").open = true;
+      };
+      container.append(advanced);
+    }
+    if (node.s && node.kind !== "output") {
+      const remove = el("button", "danger save-node", "Delete node");
+      remove.onclick = () =>
+        action(() =>
+          applyVisual([
+            { direct: { remove_statement: { statement: node.s.site } } },
+          ]),
+        );
+      container.append(remove);
+    }
   }
-  container.append(
-    el("p", "help", "Changes are saved to this workflow immediately."),
-  );
   renderCanvas();
   controls();
 }
@@ -1248,7 +1840,7 @@ function setupVisual() {
   const viewport = $("viewport");
   let drag;
   viewport.onpointerdown = (e) => {
-    if (e.target.closest("button")) return;
+    if (e.target.closest("button, input, select, textarea, .data-node")) return;
     drag = {
       x: e.clientX,
       y: e.clientY,
@@ -1269,6 +1861,8 @@ function setupVisual() {
   };
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      connecting = undefined;
+      report("");
       $("node-panel").hidden = true;
       renderCanvas();
     }

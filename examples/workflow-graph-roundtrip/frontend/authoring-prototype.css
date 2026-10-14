@@ -787,3 +787,207 @@ dialog::backdrop {
   font-size: 12px;
   color: #406f60;
 }
+
+.data-node {
+  position: absolute;
+  width: 230px;
+  background: #fff;
+  border: 1px solid #cbd1d6;
+  border-radius: 12px;
+  box-shadow: 0 3px 12px #24344508;
+  overflow: visible;
+  cursor: default;
+  padding-bottom: 12px;
+}
+.data-node-header {
+  width: 100%;
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  text-align: left;
+  background: #fff;
+}
+.data-node-header .node-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+.data-node-header .node-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.data-node-header strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.data-node-header small {
+  display: block;
+  font-size: 10px;
+  color: #8b9299;
+  margin-top: 3px;
+}
+.data-node.input {
+  border-color: #dbac73;
+}
+.data-node.output {
+  border-color: #8b9acb;
+}
+.data-node.value {
+  border-color: #b6a2ca;
+}
+.data-node.succeeded {
+  border-color: #3a9d73;
+}
+.data-node.failed {
+  border-color: #ce6962;
+}
+.data-node.started {
+  border-color: #d49f45;
+  box-shadow: 0 0 0 4px #d49f4518;
+}
+.data-node.selected {
+  box-shadow: 0 0 0 4px #e66a5020;
+}
+.data-status {
+  color: #3a9d73;
+  margin-left: auto;
+}
+.port-heading {
+  height: 21px;
+  padding: 3px 14px;
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: #9aa2a9;
+  border-top: 1px solid #eff1f3;
+}
+.data-port {
+  position: relative;
+  width: 100%;
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 0;
+  font-size: 10px;
+  background: white;
+  text-align: left;
+}
+.data-port:hover:not(:disabled) {
+  background: #eff5fb;
+}
+.data-port.chosen {
+  background: #e3eefb;
+}
+.data-port .socket {
+  position: absolute;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #6287b1;
+  border-radius: 50%;
+  background: white;
+}
+.data-port.input .socket {
+  left: -5px;
+}
+.data-port.output .socket {
+  right: -5px;
+  background: #6287b1;
+}
+.data-port.discarded {
+  opacity: 0.55;
+}
+.data-port.discarded .socket {
+  background: #fff;
+  border-style: dashed;
+}
+.port-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.port-type {
+  margin-left: auto;
+  color: #8696a5;
+  font-size: 10px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.control-wire {
+  fill: none;
+  stroke: #aeb5bc;
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 4;
+}
+.data-wire {
+  fill: none;
+  stroke: #6287b1;
+  stroke-width: 1.8px;
+  opacity: 0.78;
+}
+.mapping-button {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+  text-align: left;
+  margin: 8px 0;
+  padding: 12px;
+  gap: 6px;
+}
+.mapping-button strong {
+  font-size: 12px;
+}
+.mapping-button small {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+  color: #6287b1;
+}
+.mapping-editor {
+  margin-bottom: 15px;
+}
+.promote-value {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 14px;
+  font-size: 12px;
+}
+.promote-value summary {
+  cursor: pointer;
+  color: #7a5c94;
+}
+.canvas-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: #84909b;
+}
+.canvas-legend span::before {
+  content: "";
+  display: inline-block;
+  vertical-align: middle;
+  width: 21px;
+  border-top: 2px solid #6287b1;
+  margin-right: 5px;
+}
+.canvas-legend span + span::before {
+  border-top: 2px dashed #aeb5bc;
+}
+.port-literal {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9d769c;
+  font-size: 10px;
+}

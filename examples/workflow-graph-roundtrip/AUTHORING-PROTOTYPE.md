@@ -18,8 +18,11 @@ memory. The existing Lash runtime executes the examples; email and display tools
 are deterministic mocks. No model or external email service is called.
 
 The default screen is a visual workflow editor: app action tiles on a dotted
-canvas, curved connections, true/false paths, and a manual trigger. Click a tile
-to edit its fields, or a connection's **+** to choose another action. Adding,
+canvas, named and typed ports, true/false paths, and explicit workflow input and
+output nodes. Blue connections carry values; dashed gray connections show execution
+order. Click an output port and then an input port to connect them, or select a
+source in the input inspector. Click a tile to edit its fields, or a connection's
+**+** to choose another action. Adding,
 editing, and deleting steps plan and validate a transaction, then save it through
 the existing version-guarded endpoint. The canvas supports panning and zooming.
 **Run workflow** executes the saved document and opens its recorded outputs.
@@ -47,11 +50,23 @@ validates a cloned draft without publishing. Generated statements remain
 available to direct edits. Import validates before replacing the document and
 resets site selection; direct edits carry correspondence within a draft.
 
-Visual settings edit literal records only when the effect's input comes from an
-adjacent, single-use binding in the same block. The use check is conservative
-across the document, so repeated names in independent scopes may also require
-Advanced. Boolean conditions accept literals or the same safe binding case.
-The host never follows a call to guess its result or edits a shared input record.
+Inputs support constants, connected values and canonical expressions. Constants
+can stay inline or become named value nodes. Promoting a constant inserts a
+binding and replaces its use in one transaction. Named values can be renamed;
+record values expose fields and a whole-object editor. Adjacent, single-use,
+unassigned and uncaptured input records can appear inside their consuming action.
+Shared records keep their own nodes. Explicit expansion is browser presentation
+state and follows edit correspondence.
+
+The backend derives binding identity, lexical availability, expression sites,
+assignment destinations and callable ownership from the canonical graph. The
+frontend consumes that metadata without recognizing dialect syntax. Known type
+mismatches are rejected; unknown types remain `Any`. Inferred display types do
+not narrow an unconstrained binding or replace a declared return contract.
+Assignment nodes show state writes, and closure returns show function outputs.
+Scope inputs expose enclosing bindings without turning them into workflow entry
+parameters. Running always invokes the entry.
+
 Add-step forms support the mocked Gmail, web search, message and status actions.
 The helper chooses a fresh result binding for each visual insertion. A rejected
 edit preserves the saved document and reports the error in the current panel.
@@ -84,14 +99,21 @@ objects, a second graph model or unrestricted same-batch references to new nodes
 Run the focused host projection laws with:
 
 ```sh
-node --test examples/workflow-graph-roundtrip/frontend/authoring-projection.test.mjs
+node --test examples/workflow-graph-roundtrip/frontend/authoring-projection.test.mjs examples/workflow-graph-roundtrip/frontend/authoring-dataflow.test.mjs
 ```
 
 These pin the unused-closure, opaque-library-call, shared/shadowed-input,
 empty-scope and terminal-insertion rules. The HTTP regression
 `each_edit_response_maps_its_immediate_base` pins per-transaction correspondence
 across consecutive edits. Existing Graph scopes, Sites and Draft edit receipts
-support this behavior; no Lash core API was added.
+support this behavior; no Lash core API was added. The dataflow value-encoding
+law preserves integral floats, negative zero and typed nested record values.
+
+Focused Rust laws cover lexical source choices and shadowing, callable return
+ownership and assignment identity, named invocation inputs reaching effects and
+the final output, and imported parameterized entries. Browser checks exercise
+promotion, renaming, rewiring, type mismatch rejection, actual research and KPI
+executions, output reset between runs and mobile layout.
 
 ## Dataflow examples
 
@@ -99,16 +121,26 @@ The Examples menu includes **Deep research brief** and **Weekly business KPIs**.
 Both are canonical kernel documents. Research maps the search result's topic and
 sources into a cited brief. KPIs maps current and previous period records into a
 comparison with calculated percentage changes. Their last step displays the
-report summary. Change the first step's topic or workspace to try another run.
+report summary. Edit `topic` or `workspace` in the workflow Input node to try
+another run. These values are invocation arguments, separate from document edits.
 Research evidence, URLs and business metrics are synthetic fixtures; the mock
 synthesis and comparison consume their actual mapped inputs.
 
-Click an effect to see **Input mappings**. These display canonical variable and
-member expressions from the same safe adjacent-record shape the editor supports;
-unknown computations remain opaque. **Execution data** shows each retained call's
-input and output, with separate occurrences for repeated calls. Execution log
-links also open the relevant node. Data resets when the document changes or a
-new run begins; this prototype does not persist a run-history browser.
+Each action shows named inputs and result ports. Record outputs also expose
+fields as connection sources. Click an input to edit its constant, select an
+available source or use the canonical expression editor. **Execution data** shows
+each retained call's input and output, with separate occurrences for repeated
+calls. Execution log links open the relevant node. The workflow Output inspector
+shows the actual terminal result. A function Output node never borrows the
+workflow's terminal result. Data resets when the document changes or a new run
+begins; this prototype does not persist a run-history browser.
+
+`src/dataflow.rs` derives the view from the canonical document and graph.
+`frontend/authoring-dataflow.mjs` projects ports and plans ordinary canonical
+edits. Neither changes Lash core or introduces a second persisted dataflow graph.
+The example host owns port labels, layout, expansion state, invocation forms,
+mock defaults and transport. Kernel types, lexical bindings, Sites, edits and
+runtime records remain authoritative.
 
 The host attaches `callId` from `ProcessEffectOccurrence`, then reads the settled
 record through `core.processes().tool_call`. Output display uses the public
