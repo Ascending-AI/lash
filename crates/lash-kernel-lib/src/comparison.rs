@@ -36,7 +36,10 @@ pub(crate) fn scalar_equal(a: &Value, b: &Value) -> Option<bool> {
         (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
         (Value::Task(a), Value::Task(b)) => a == b,
         (Value::Ref(a), Value::Ref(b)) => a == b,
-        (Value::Function(a), Value::Function(b)) => a == b,
+        (Value::Function(a), Value::Function(b)) => match (&a.body, &b.body) {
+            (Payload::Resident(a), Payload::Resident(b)) => a == b,
+            _ => return None,
+        },
         (Value::Handle(a), Value::Handle(b)) => a == b,
         (Value::Closure(a), Value::Closure(b)) => a == b,
         (Value::Tuple(_), Value::Tuple(_))
@@ -137,7 +140,8 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
                 }
                 pending.push(Step::Pair(heap.error_data(a)?, heap.error_data(b)?));
             }
-            (Value::Int(_), Value::Int(_))
+            (Value::Function(_), Value::Function(_))
+            | (Value::Int(_), Value::Int(_))
             | (Value::Text(_), Value::Text(_))
             | (Value::Bytes(_), Value::Bytes(_)) => {
                 if !heap.equal(&a, &b)? {

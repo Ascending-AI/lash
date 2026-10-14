@@ -389,7 +389,7 @@ impl PagedHeap {
             ObjectInit::Closure { site, captures } => {
                 let mut rows = Tree::new(false);
                 for (name, id) in captures {
-                    let key = name.as_str().as_bytes().to_vec();
+                    let key = name.key(&self.access)?;
                     if rows.get(&key, &self.access)?.is_some() {
                         return Err(HeapFault::Malformed(
                             "duplicate closure capture name".into(),
@@ -445,6 +445,12 @@ impl PagedHeap {
     }
     pub(super) fn canonical(&mut self, value: Value) -> Result<Value, HeapWriteError> {
         Ok(match value {
+            Value::Function(t) => {
+                let Value::Text(t) = self.canonical(Value::Text(t))? else {
+                    unreachable!()
+                };
+                Value::Function(t)
+            }
             Value::Text(t) => match &t.body {
                 Payload::Resident(s) if s.len() as u64 > IMMUTABLE_INLINE_MAX => {
                     Value::Text(self.text(s).map_err(write_native)?)
@@ -669,17 +675,7 @@ impl SemanticHeap for PagedHeap {
     }
     fn closure(&self, closure: EntityId) -> Result<ClosureView, HeapFault> {
         match self.head(closure)?.map(|h| h.body) {
-            Some(Body::Closure { site, captures }) => {
-                let mut values = Vec::new();
-                captures.visit(&self.access, &mut |_, id| {
-                    values.push(id.clone());
-                    true
-                })?;
-                Ok(ClosureView {
-                    site,
-                    captures: values,
-                })
-            }
+            Some(Body::Closure { site, captures }) => Ok(ClosureView { site, captures }),
             _ => Err(HeapFault::Malformed("expected a closure".into())),
         }
     }
@@ -1201,7 +1197,7 @@ impl PagedHeap {
                 }
                 Value::Function(n) => {
                     out.sum(8, 1);
-                    n.encode(out);
+                    out.text(&heap.copy_text(n)?);
                 }
                 Value::Tuple(t) => {
                     out.sum(9, 1);
@@ -1219,20 +1215,31 @@ impl PagedHeap {
             }
             Ok(true)
         }
+        let function = matches!(value, Value::Function(_));
         let cache = match value {
-            Value::Text(text) => Some(&text.normal),
+            Value::Text(text) | Value::Function(text) => Some(&text.normal),
             Value::Bytes(bytes) => Some(&bytes.normal),
             Value::Tuple(tuple) => Some(&tuple.normal),
             Value::Int(IntRef::Paged { normal, .. }) => Some(normal),
             _ => None,
         };
-        if let Some(key) = cache.and_then(|cache| cache.get()) {
+        if let Some(key) = cache.and_then(|cache| {
+            if function {
+                cache.get_function()
+            } else {
+                cache.get()
+            }
+        }) {
             return Ok(key.clone());
         }
         let mut out = TokenWriter::new();
         if !tokens(self, value, &mut out)? {
             if let Some(cache) = cache {
-                cache.set(None);
+                if function {
+                    cache.set_function(None);
+                } else {
+                    cache.set(None);
+                }
             }
             return Ok(None);
         }
@@ -1243,7 +1250,11 @@ impl PagedHeap {
             NormalKey::Digest(key_digest(&bytes))
         });
         if let Some(cache) = cache {
-            cache.set(key.clone());
+            if function {
+                cache.set_function(key.clone());
+            } else {
+                cache.set(key.clone());
+            }
         }
         Ok(key)
     }

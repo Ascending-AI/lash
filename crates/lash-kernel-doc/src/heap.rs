@@ -129,13 +129,24 @@ pub struct TextSummary {
 
 /// A lazily computed runtime normal form. Decoding a descriptor starts empty.
 #[derive(Clone, Debug, Default)]
-pub struct NormalKeyCache(std::sync::Arc<std::sync::OnceLock<Option<NormalKey>>>);
+pub struct NormalKeyCache(std::sync::Arc<NormalForms>);
+#[derive(Debug, Default)]
+struct NormalForms {
+    value: std::sync::OnceLock<Option<NormalKey>>,
+    function: std::sync::OnceLock<Option<NormalKey>>,
+}
 impl NormalKeyCache {
     pub fn get(&self) -> Option<&Option<NormalKey>> {
-        self.0.get()
+        self.0.value.get()
     }
     pub fn set(&self, key: Option<NormalKey>) {
-        let _ = self.0.set(key);
+        let _ = self.0.value.set(key);
+    }
+    pub fn get_function(&self) -> Option<&Option<NormalKey>> {
+        self.0.function.get()
+    }
+    pub fn set_function(&self, key: Option<NormalKey>) {
+        let _ = self.0.function.set(key);
     }
 }
 
@@ -252,7 +263,7 @@ pub enum Value {
     Closure(EntityId),
     Error(Arc<ErrorRef>),
     Task(TaskId),
-    Function(Name),
+    Function(TextRef),
     Handle(Arc<Handle>),
     Ref(Identity),
 }

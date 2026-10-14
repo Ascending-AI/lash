@@ -23,11 +23,11 @@
 
 use std::ops::Range;
 
+use super::{NameRef, SiteRef};
 use lash_kernel_doc::heap::{
     EntityId, HeapFault, Identity, LogicalBytes, NativeHeap, PageRef, TextRef, TupleRef, Value,
 };
 pub use lash_kernel_doc::heap::{FieldName, NormalKey};
-use lash_kernel_doc::{Name, Site};
 
 use super::census::TransientRoots;
 use super::root::HeapRoot;
@@ -57,17 +57,17 @@ pub enum ObjectInit {
     Closure {
         /// The site of the closure expression: a semantic coordinate, never
         /// a compiled code index.
-        site: Site,
-        captures: Vec<(Name, EntityId)>,
+        site: SiteRef,
+        captures: Vec<(NameRef, EntityId)>,
     },
     Variable(Value),
 }
 
 /// A closure as the machine reads it.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ClosureView {
-    pub site: Site,
-    pub captures: Vec<(Name, EntityId)>,
+    pub site: SiteRef,
+    pub captures: super::tree::Tree<(NameRef, EntityId)>,
 }
 
 /// A loop's position in a map or a set: the insertion sequence of the

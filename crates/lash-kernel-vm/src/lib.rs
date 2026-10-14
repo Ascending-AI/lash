@@ -46,6 +46,7 @@ mod laws;
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
+pub use paged::{TaskFilter, TaskPage};
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellStart, DeliverError, Delivered, EffectMode, EffectModes,

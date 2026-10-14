@@ -258,20 +258,11 @@ struct Frame {
     inline: bool,
 }
 
-fn binding_key(site: &lash_kernel_doc::Site, name: &Name) -> Vec<u8> {
-    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
-    let mut out = TokenWriter::new();
-    out.seq(2);
-    site.encode(&mut out);
-    name.encode(&mut out);
-    out.into_bytes()
-}
-
 impl Frame {
     fn slot(&self, at: u32) -> Result<SlotState, HeapFault> {
         let code = self.exe.code(self.code);
         let info = &code.slots[code.slots_by_at[at as usize] as usize];
-        let key = binding_key(&info.declared, &info.name);
+        let key = &info.key;
         Ok(match self.record.bindings.get(&key, &self.access)? {
             None => SlotState::Empty,
             Some(BindingRecord {
@@ -287,7 +278,7 @@ impl Frame {
     fn set_slot(&mut self, at: u32, state: SlotState) -> Result<(), HeapFault> {
         let code = self.exe.code(self.code);
         let info = &code.slots[code.slots_by_at[at as usize] as usize];
-        let key = binding_key(&info.declared, &info.name);
+        let key = &info.key;
         let value = match state {
             SlotState::Empty => {
                 self.record.bindings.remove(&key, &self.access)?;
@@ -296,11 +287,18 @@ impl Frame {
             SlotState::Value(value) => BoundRecord::Value(value),
             SlotState::Cell(id) => BoundRecord::Shared(id),
         };
+        let (name, declared) = match self.record.bindings.get(key, &self.access)? {
+            Some(old) => (old.name, old.declared),
+            None => (
+                lash_kernel_state::paged::NameRef::new(&info.name, &self.access)?,
+                lash_kernel_state::paged::SiteRef::new(&info.declared, &self.access)?,
+            ),
+        };
         self.record.bindings.write(
-            key,
+            key.clone(),
             BindingRecord {
-                name: info.name.clone(),
-                declared: info.declared.clone(),
+                name,
+                declared,
                 value,
             },
             &self.access,
@@ -348,7 +346,7 @@ pub struct KernelMachine {
     withdrawn_ever: Tree<u64>,
     /// The mode each effect is performed in, bound at the start and saved
     /// with the run (`K-EFF-012`).
-    modes: Tree<Name>,
+    modes: Tree<lash_kernel_state::paged::NameRef>,
     /// The session's bindings, when the run is a session cell.
     functions: lash_kernel_state::paged::KeyedRoot,
     session_cell: bool,
@@ -475,8 +473,8 @@ impl KernelMachine {
             }
             let name = Name::new(effect.as_str());
             self.modes.write(
-                lash_kernel_doc::graph_tokens::encode_body(&name),
-                name,
+                lash_kernel_state::paged::metadata::metadata_key(&name),
+                lash_kernel_state::paged::NameRef::new(&name, &self.heap.access)?,
                 &self.heap.access,
             )?;
         }
@@ -491,7 +489,7 @@ impl KernelMachine {
             if self
                 .modes
                 .get(
-                    &lash_kernel_doc::graph_tokens::encode_body(&name),
+                    &lash_kernel_state::paged::metadata::metadata_key(&name),
                     &self.heap.access,
                 )?
                 .is_some()
@@ -664,6 +662,7 @@ impl KernelMachine {
     fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> Result<End, Halt> {
         let mut unfinished = Vec::new();
         let mut unobserved = Vec::new();
+        let access = self.heap.access.clone();
         self.tasks.visit(&mut |id, task| {
             if id != TaskId::MAIN && ender != Some(id) && !task.passed {
                 match task.state {
@@ -677,6 +676,14 @@ impl KernelMachine {
             true
         })?;
         if !unfinished.is_empty() || !unobserved.is_empty() {
+            let unfinished = unfinished
+                .into_iter()
+                .map(|id| id.resolve(&access))
+                .collect::<Result<Vec<_>, _>>()?;
+            let unobserved = unobserved
+                .into_iter()
+                .map(|id| id.resolve(&access))
+                .collect::<Result<Vec<_>, _>>()?;
             return Ok(End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
@@ -699,29 +706,21 @@ impl KernelMachine {
         if host.cancel_requested() {
             return Ok(self.finish_with(End::Cancelled));
         }
-        let mut outstanding = Vec::new();
-        let mut live = Vec::new();
-        let mut waiting = Vec::new();
-        self.tasks
-            .visit(&mut |id, task| {
-                if !matches!(task.state, TaskState::Ended(_)) {
-                    waiting.push(task.identity.clone());
-                }
-                if id != TaskId::MAIN {
-                    if !matches!(task.state, TaskState::Ended(_)) {
-                        live.push(task.identity.clone());
-                    }
-                    if !task.passed
-                        && (!matches!(task.state, TaskState::Ended(_))
-                            || task.failed && !task.observed)
-                    {
-                        outstanding.push(task.identity.clone());
-                    }
-                }
-                true
-            })
-            .map_err(MachineError::Heap)?;
         if self.waits.len() == 0 {
+            let mut waiting = Vec::new();
+            self.tasks
+                .visit(&mut |_, task| {
+                    if task.is_live() {
+                        waiting.push(task.identity);
+                    }
+                    true
+                })
+                .map_err(MachineError::Heap)?;
+            let waiting = waiting
+                .into_iter()
+                .map(|id| id.resolve(&self.heap.access))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(MachineError::Heap)?;
             return Ok(self.finish_with(End::Error(RunError::Deadlock { waiting })));
         }
         let mut requests = Vec::new();
@@ -756,11 +755,14 @@ impl KernelMachine {
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(WaitId(wait));
         }
+        let (tasks, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
+        let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,
             withdrawn,
             outstanding,
             live,
+            tasks,
         }))
     }
 
@@ -859,3 +861,6 @@ fn machine_error(halt: Halt) -> MachineError {
         },
     }
 }
+
+#[cfg(test)]
+mod park_laws;

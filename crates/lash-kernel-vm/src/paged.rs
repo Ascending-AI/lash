@@ -151,4 +151,34 @@ pub trait Machine: Sized {
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError>;
 
     fn meters(&self) -> Meters;
+    fn task_identity(
+        &self,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
+    ) -> Result<lash_kernel_doc::TaskIdentity, HeapFault>;
+    fn tasks(
+        &self,
+        root: lash_kernel_state::paged::KeyedRoot,
+        filter: TaskFilter,
+        after: Option<lash_kernel_doc::TaskId>,
+        limit: u32,
+    ) -> Result<TaskPage, HeapFault>;
+}
+
+/// A filter for explicit task-table diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskFilter {
+    All,
+    Live,
+    Outstanding,
+}
+
+/// At most `limit` rows are examined; a filter may return fewer members.
+#[derive(Clone, Debug)]
+pub struct TaskPage {
+    pub tasks: Vec<(
+        lash_kernel_doc::TaskId,
+        lash_kernel_state::paged::TaskIdentityRef,
+    )>,
+    pub after: Option<lash_kernel_doc::TaskId>,
+    pub finished: bool,
 }

@@ -81,17 +81,14 @@ impl KernelMachine {
                     self.pin(out)?;
                     return Ok(Flow::Done);
                 }
-                let (wait, identity) = self.request(task, exe, stmt, &action.site)?;
+                let wait = self.request(task, stmt, &action.site)?;
                 self.issue(
                     task,
                     wait,
-                    Request::Effect(EffectRequest {
-                        wait,
-                        identity,
+                    lash_kernel_state::AdmittedRequest::Effect {
                         effect: effect.clone(),
                         args: copied,
-                        result: result.clone(),
-                    }),
+                    },
                 )?;
                 Ok(Flow::Step)
             }
@@ -123,15 +120,13 @@ impl KernelMachine {
                     }
                     _ => return raise("type_error", "`sleep` takes a number of milliseconds"),
                 };
-                let (wait, identity) = self.request(task, exe, stmt, &action.site)?;
+                let wait = self.request(task, stmt, &action.site)?;
                 self.issue(
                     task,
                     wait,
-                    Request::Sleep(SleepRequest {
-                        wait,
-                        identity,
-                        duration,
-                    }),
+                    lash_kernel_state::AdmittedRequest::Sleep {
+                        duration: duration.into(),
+                    },
                 )?;
                 Ok(Flow::Step)
             }
@@ -306,10 +301,10 @@ impl KernelMachine {
             Callee::Value(var) => match self.read_var(task, exe, var)? {
                 Value::Closure(id) => {
                     let closure = self.heap.closure(id)?;
+                    let closure_site = closure.site.resolve(&self.heap.access)?;
                     let site = Site::new(
-                        closure.site.unit.clone(),
-                        closure
-                            .site
+                        closure_site.unit.clone(),
+                        closure_site
                             .path
                             .iter()
                             .copied()
@@ -324,22 +319,27 @@ impl KernelMachine {
                         .captures
                         .iter()
                         .map(|capture| {
+                            let name = &exe.code(code).slots[capture.inner as usize].name;
                             closure
                                 .captures
-                                .iter()
-                                .find(|(name, _)| {
-                                    *name == exe.code(code).slots[capture.inner as usize].name
-                                })
-                                .map(|(_, id)| *id)
+                                .get(
+                                    &lash_kernel_state::paged::metadata::metadata_key(name),
+                                    &self.heap.access,
+                                )?
+                                .map(|(_, id)| id)
                                 .ok_or_else(|| fault("a closure capture is missing"))
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(Target::Code(code, captures))
                 }
-                Value::Function(name) => match exe.declared.get(&name) {
-                    Some(code) => Ok(Target::Code(*code, Vec::new())),
-                    None => raise("type_error", format!("no function `{name}` is declared")),
-                },
+                Value::Function(name) => {
+                    let name =
+                        lash_kernel_doc::Name::new(crate::data::text_copy(&self.heap, &name)?);
+                    match exe.declared.get(&name) {
+                        Some(code) => Ok(Target::Code(*code, Vec::new())),
+                        None => raise("type_error", format!("no function `{name}` is declared")),
+                    }
+                }
                 _ => raise(
                     "type_error",
                     "only a closure or a function reference can be called",
@@ -380,7 +380,7 @@ impl KernelMachine {
     }
 
     fn occurrence(&mut self, task: TaskId, site: &Site) -> Result<u64, Halt> {
-        let key = encode_body(site);
+        let key = lash_kernel_state::paged::metadata::metadata_key(site);
         let access = self.heap.access.clone();
         let task = self.task(task)?;
         let occurrence = task.occurrences.get(&key, &access)?.unwrap_or(0);
@@ -393,53 +393,34 @@ impl KernelMachine {
 
     /// Takes the next wait for a `perform` or a `sleep` of the running
     /// task and gives its identity (`K-EFF-008`).
-    fn request(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        stmt: StmtId,
-        site: &Site,
-    ) -> Result<(WaitId, EffectIdentity), Halt> {
+    fn request(&mut self, task: TaskId, stmt: StmtId, site: &Site) -> Result<WaitId, Halt> {
         let limit = u64::from(self.bounds.requests_per_park);
         if self.issued_count()? >= limit {
             return Err(bound(Bound::RequestsPerPark, limit));
         }
-        let occurrence = self.occurrence(task, site)?;
-        let running = self.task(task)?;
-        let loops = running.frames.loop_coordinates()?;
-        let identity = EffectIdentity {
-            task: running.identity.clone(),
-            site: site.clone(),
-            occurrence,
-            loops,
-        };
+        self.occurrence(task, site)?;
         let wait = WaitId(self.next_wait);
-        self.next_wait += 1;
+        self.next_wait = self
+            .next_wait
+            .checked_add(1)
+            .ok_or_else(|| fault("wait counter overflow"))?;
         self.suspend(task, stmt, Wait::Request(wait))?;
-        Ok((wait, identity))
+        Ok(wait)
     }
 
-    /// Records what a wait asks for, for the next park to hand out.
-    fn issue(&mut self, task: TaskId, wait: WaitId, request: Request) -> Result<(), Halt> {
-        let (identity, request, kind) = match request {
-            Request::Effect(request) => (
-                request.identity,
-                lash_kernel_state::AdmittedRequest::Effect {
-                    effect: request.effect,
-                    args: request.args,
-                },
-                WaitKindRecord::Effect,
-            ),
-            Request::Sleep(request) => (
-                request.identity,
-                lash_kernel_state::AdmittedRequest::Sleep {
-                    duration: request.duration.into(),
-                },
-                WaitKindRecord::Sleep,
-            ),
+    /// The intent records request data. Identity is projected at its host
+    /// boundary from the waiting task's stable semantic coordinates.
+    fn issue(
+        &mut self,
+        task: TaskId,
+        wait: WaitId,
+        request: lash_kernel_state::AdmittedRequest,
+    ) -> Result<(), Halt> {
+        let kind = match request {
+            lash_kernel_state::AdmittedRequest::Effect { .. } => WaitKindRecord::Effect,
+            lash_kernel_state::AdmittedRequest::Sleep { .. } => WaitKindRecord::Sleep,
         };
-        let intent = lash_kernel_state::AdmittedWait { identity, request };
-        let datum = Datum::Bytes(lash_kernel_doc::Bytes::new(encode_body(&intent)));
+        let datum = Datum::Bytes(lash_kernel_doc::Bytes::new(encode_body(&request)));
         let frozen = self
             .heap
             .freeze_datum(&datum)
@@ -466,35 +447,52 @@ impl KernelMachine {
                 "issued request is not its token envelope".into(),
             ));
         };
-        let intent: lash_kernel_state::AdmittedWait = decode_body(bytes.as_slice())
+        let intent: lash_kernel_state::AdmittedRequest = decode_body(bytes.as_slice())
             .map_err(|error| lash_kernel_doc::heap::HeapFault::Malformed(error.to_string()))?;
-        Ok(match intent.request {
+        let access = self.heap.access.clone();
+        let running = self.tasks.get_mut(task.0 as usize)?.ok_or_else(|| {
+            lash_kernel_doc::heap::HeapFault::Malformed("issued task is missing".into())
+        })?;
+        let loops = running.frames.loop_coordinates()?;
+        let stmt = running
+            .frames
+            .last_mut()?
+            .and_then(|frame| frame.awaiting)
+            .ok_or_else(|| {
+                lash_kernel_doc::heap::HeapFault::Malformed("issued request has no action".into())
+            })?;
+        let Form::Action(action) = &self.exe.stmt(stmt).form else {
+            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                "issued request has no action".into(),
+            ));
+        };
+        let occurrence = running
+            .occurrences
+            .get(
+                &lash_kernel_state::paged::metadata::metadata_key(&action.site),
+                &access,
+            )?
+            .and_then(|next| next.checked_sub(1))
+            .ok_or_else(|| {
+                lash_kernel_doc::heap::HeapFault::Malformed("issued occurrence is missing".into())
+            })?;
+        let identity = EffectIdentity {
+            task: running.identity.resolve(&access)?,
+            site: action.site.clone(),
+            occurrence,
+            loops,
+        };
+        Ok(match intent {
             lash_kernel_state::AdmittedRequest::Sleep { duration } => {
                 Request::Sleep(SleepRequest {
                     wait,
-                    identity: intent.identity,
+                    identity,
                     duration: duration.duration().ok_or_else(|| {
                         lash_kernel_doc::heap::HeapFault::Malformed("invalid sleep duration".into())
                     })?,
                 })
             }
             lash_kernel_state::AdmittedRequest::Effect { effect, args } => {
-                let stmt = self
-                    .frame(task)
-                    .map_err(|error| {
-                        lash_kernel_doc::heap::HeapFault::Malformed(format!("{error:?}"))
-                    })?
-                    .awaiting
-                    .ok_or_else(|| {
-                        lash_kernel_doc::heap::HeapFault::Malformed(
-                            "issued effect has no action".into(),
-                        )
-                    })?;
-                let Form::Action(action) = &self.exe.stmt(stmt).form else {
-                    return Err(lash_kernel_doc::heap::HeapFault::Malformed(
-                        "issued effect has no action".into(),
-                    ));
-                };
                 let ActionKind::Perform { result, .. } = &action.kind else {
                     return Err(lash_kernel_doc::heap::HeapFault::Malformed(
                         "issued effect is not a perform".into(),
@@ -502,7 +500,7 @@ impl KernelMachine {
                 };
                 Request::Effect(EffectRequest {
                     wait,
-                    identity: intent.identity,
+                    identity,
                     effect,
                     args,
                     result: result.clone(),
@@ -560,11 +558,12 @@ impl KernelMachine {
         let parent = self.task(task)?.identity.clone();
         let child = TaskId(self.tasks.len() as u64);
         self.tasks.push(Task::fresh(
-            TaskIdentity::Spawned(SpawnIdentity {
-                parent: Arc::new(parent),
-                site: site.clone(),
+            lash_kernel_state::paged::TaskIdentityRef::spawn(
+                parent,
+                lash_kernel_state::paged::SiteRef::new(site, &self.heap.access)?,
                 occurrence,
-            }),
+                &self.heap.access,
+            )?,
             self.heap.access.clone(),
             Arc::clone(&self.exe),
         ))?;

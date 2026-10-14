@@ -6,7 +6,6 @@ use super::*;
 use super::{
     FamilyRecord, FrozenRef, HeapWriteError, MembershipRun, ObjectKind, SealBudget, TransientRoots,
 };
-use lash_kernel_doc::Site;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
@@ -26,8 +25,8 @@ pub enum Body {
         next: u64,
     },
     Closure {
-        site: Site,
-        captures: Tree<(lash_kernel_doc::Name, EntityId)>,
+        site: SiteRef,
+        captures: Tree<(NameRef, EntityId)>,
     },
     Variable(Value),
 }
@@ -82,11 +81,6 @@ impl Cell for Value {
     }
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         value_grants(self, children)
-    }
-}
-impl Cell for (lash_kernel_doc::Name, EntityId) {
-    fn cost(&self) -> u64 {
-        8
     }
 }
 impl Cell for EntityId {
@@ -188,7 +182,10 @@ impl Cell for ObjectHead {
                 lookup.children(out);
                 rows.children(out);
             }
-            Body::Closure { captures, .. } => captures.children(out),
+            Body::Closure { site, captures } => {
+                site.children(out);
+                captures.children(out);
+            }
             Body::Variable(v) => value_children(v, out),
         }
     }
@@ -199,7 +196,10 @@ impl Cell for ObjectHead {
                 lookup.grants(children)?;
                 rows.grants(children)?;
             }
-            Body::Closure { captures, .. } => captures.grants(children)?,
+            Body::Closure { site, captures } => {
+                site.grants(children)?;
+                captures.grants(children)?;
+            }
             Body::Variable(v) => value_grants(v, children)?,
         }
         Ok(())
@@ -274,7 +274,7 @@ impl TokenCodec for ObjectHead {
                 4 => {
                     TokenReader::expect_fields(fields, 2)?;
                     Body::Closure {
-                        site: Site::decode(input)?,
+                        site: SiteRef::decode(input)?,
                         captures: Tree::decode(input)?,
                     }
                 }
@@ -289,7 +289,11 @@ impl TokenCodec for ObjectHead {
 }
 pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
     match value {
-        Value::Text(TextRef {
+        Value::Function(TextRef {
+            body: Payload::Paged(p),
+            ..
+        })
+        | Value::Text(TextRef {
             body: Payload::Paged(p),
             ..
         })
@@ -325,7 +329,7 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
         Ok(())
     }
     match value {
-        Value::Text(t) => text_grants(t, children)?,
+        Value::Text(t) | Value::Function(t) => text_grants(t, children)?,
         Value::Bytes(b) => {
             if let Payload::Paged(p) = &mut b.body {
                 grant(p, children)?;
@@ -404,7 +408,7 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct FrameRecord {
-        pub statement: Site,
+        pub statement: SiteRef,
         pub bindings: Tree<BindingRecord>,
         pub loops: Tree<LoopRecord>,
         pub finally: Tree<FinallyRecord>,
@@ -414,7 +418,7 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct TaskRecord {
-        pub identity: TaskIdentity,
+        pub identity: TaskIdentityRef,
         pub state: TaskStateRecord,
         pub result_retained: bool,
         pub joiners: Tree<JoinerRecord>,
@@ -425,7 +429,7 @@ pub mod execution {
         pub frames: Tree<FrameRecord>,
     }
     impl FrameRecord {
-        pub fn fresh(statement: Site) -> Self {
+        pub fn fresh(statement: SiteRef) -> Self {
             Self {
                 statement,
                 bindings: Tree::new(false),
@@ -459,10 +463,22 @@ pub mod execution {
         fn cost(&self) -> u64 {
             0
         }
+        fn children(&self, out: &mut Vec<PageRef>) {
+            self.site.children(out);
+        }
+        fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.site.grants(children)
+        }
     }
     impl Cell for FinallyRecord {
         fn cost(&self) -> u64 {
             0
+        }
+        fn children(&self, out: &mut Vec<PageRef>) {
+            self.site.children(out);
+        }
+        fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.site.grants(children)
         }
     }
     impl Cell for JoinerRecord {
@@ -528,11 +544,15 @@ pub mod execution {
             }
         }
         fn children(&self, out: &mut Vec<PageRef>) {
+            self.name.children(out);
+            self.declared.children(out);
             if let BoundRecord::Value(v) = &self.value {
                 value_children(v, out);
             }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.name.grants(children)?;
+            self.declared.grants(children)?;
             if let BoundRecord::Value(v) = &mut self.value {
                 value_grants(v, children)?;
             }
@@ -541,7 +561,7 @@ pub mod execution {
     }
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
-            self.statement == other.statement
+            self.statement.same_version(&other.statement)
                 && self.bindings.same_version(&other.bindings)
                 && self.loops.same_version(&other.loops)
                 && self.finally.same_version(&other.finally)
@@ -577,6 +597,7 @@ pub mod execution {
                 })
         }
         fn children(&self, out: &mut Vec<PageRef>) {
+            self.statement.children(out);
             self.bindings.children(out);
             self.loops.children(out);
             self.finally.children(out);
@@ -587,6 +608,7 @@ pub mod execution {
             }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.statement.grants(children)?;
             self.bindings.grants(children)?;
             self.loops.grants(children)?;
             self.finally.grants(children)?;
@@ -598,7 +620,32 @@ pub mod execution {
             Ok(())
         }
     }
+    impl TaskRecord {
+        pub fn is_live(&self) -> bool {
+            !matches!(self.state, TaskStateRecord::Ended(_))
+        }
+        pub fn is_outstanding(&self) -> bool {
+            !self.identity.is_main()
+                && !self.passed
+                && (self.is_live() || self.failed && !self.observed)
+        }
+    }
     impl Cell for TaskRecord {
+        fn same_version(&self, other: &Self) -> bool {
+            self.identity.root.map(|p| p.id) == other.identity.root.map(|p| p.id)
+                && self.result_retained == other.result_retained
+                && self.observed == other.observed
+                && self.passed == other.passed
+                && self.failed == other.failed
+                && lash_kernel_doc::graph_tokens::encode_body(&self.state)
+                    == lash_kernel_doc::graph_tokens::encode_body(&other.state)
+                && self.frames.same_version(&other.frames)
+                && self.joiners.same_version(&other.joiners)
+                && self.occurrences.same_version(&other.occurrences)
+        }
+        fn live_members(&self) -> u64 {
+            u64::from(self.is_outstanding())
+        }
         fn task_edges(&self) -> u64 {
             self.frames.task_edges()
                 + match &self.state {
@@ -632,6 +679,7 @@ pub mod execution {
                 && self.frames.seal_nested(access, work)?)
         }
         fn children(&self, out: &mut Vec<PageRef>) {
+            out.extend(self.identity.root);
             self.joiners.children(out);
             self.occurrences.children(out);
             self.frames.children(out);
@@ -644,6 +692,7 @@ pub mod execution {
             }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.identity.grants(children)?;
             self.joiners.grants(children)?;
             self.occurrences.grants(children)?;
             self.frames.grants(children)?;
@@ -671,7 +720,7 @@ pub mod execution {
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             input.expect_struct(7)?;
             Ok(Self {
-                statement: <Site>::decode(input)?,
+                statement: <SiteRef>::decode(input)?,
                 bindings: <Tree<BindingRecord>>::decode(input)?,
                 loops: <Tree<LoopRecord>>::decode(input)?,
                 finally: <Tree<FinallyRecord>>::decode(input)?,
@@ -698,7 +747,7 @@ pub mod execution {
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             input.expect_struct(9)?;
             Ok(Self {
-                identity: <TaskIdentity>::decode(input)?,
+                identity: <TaskIdentityRef>::decode(input)?,
                 state: <TaskStateRecord>::decode(input)?,
                 result_retained: bool::decode(input)?,
                 joiners: <Tree<JoinerRecord>>::decode(input)?,

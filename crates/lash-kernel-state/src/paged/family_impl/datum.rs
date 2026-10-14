@@ -21,7 +21,7 @@ impl PagedHeap {
         writer.finish(value).map(|(frozen, _)| frozen)
     }
 }
-fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault> {
+pub(super) fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault> {
     Ok(TextRef {
         normal: Default::default(),
         summary: text_summary(text),
@@ -91,7 +91,7 @@ impl Freezer<'_> {
             Datum::Text(v) => Value::Text(text(&self.heap.access, v)?),
             Datum::Bytes(v) => Value::Bytes(bytes(&self.heap.access, v.as_slice())?),
             Datum::Timestamp(v) => Value::Timestamp(v.clone()),
-            Datum::Function(v) => Value::Function(v.clone()),
+            Datum::Function(v) => Value::Function(text(&self.heap.access, v.as_str())?),
             Datum::Handle(v) => Value::Handle(Arc::new(v.clone())),
             Datum::Tuple(values) => {
                 let mut rows = Tree::new(true);

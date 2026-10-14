@@ -192,8 +192,8 @@ fn every_record_round_trips_canonically() {
     }
     round(&RootStatus::Parked);
     round(&BindingRecord {
-        name: Name::from("v"),
-        declared: site.clone(),
+        name: NameRef::new(&(Name::from("v")), &heap.access).unwrap(),
+        declared: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
         value: BoundRecord::Value(value.clone()),
     });
     round(&BoundRecord::Shared(EntityId {
@@ -201,7 +201,7 @@ fn every_record_round_trips_canonically() {
         ordinal: 0,
     }));
     round(&LoopRecord {
-        site: site.clone(),
+        site: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
         started: 7,
         position: Some(8),
     });
@@ -213,18 +213,18 @@ fn every_record_round_trips_canonically() {
         EnteredRecord::Continue,
     ] {
         round(&FinallyRecord {
-            site: site.clone(),
+            site: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
             entered,
         });
     }
-    let mut frame = FrameRecord::fresh(site.clone());
+    let mut frame = FrameRecord::fresh(SiteRef::new(&(site.clone()), &heap.access).unwrap());
     frame
         .bindings
         .write(
             b"v".to_vec(),
             BindingRecord {
-                name: "v".into(),
-                declared: site.clone(),
+                name: NameRef::new(&("v".into()), &heap.access).unwrap(),
+                declared: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
                 value: BoundRecord::Value(value.clone()),
             },
             &heap.access,
@@ -256,7 +256,7 @@ fn every_record_round_trips_canonically() {
         TaskStateRecord::Ended(EndedTask::Raised(value.clone())),
     ] {
         let mut task = TaskRecord {
-            identity: TaskIdentity::Main,
+            identity: TaskIdentityRef::MAIN,
             state,
             result_retained: true,
             joiners: Tree::new(true),

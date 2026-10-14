@@ -328,8 +328,8 @@ impl TokenCodec for EndedTask {
 }
 
 record!(BindingRecord {
-    name: Name,
-    declared: Site,
+    name: NameRef,
+    declared: SiteRef,
     value: BoundRecord
 });
 impl TokenCodec for BoundRecord {
@@ -360,9 +360,9 @@ impl TokenCodec for BoundRecord {
         })
     }
 }
-record!(LoopRecord { site: Site, started: u64, position: Option<u64> });
+record!(LoopRecord { site: SiteRef, started: u64, position: Option<u64> });
 record!(FinallyRecord {
-    site: Site,
+    site: SiteRef,
     entered: EnteredRecord
 });
 units!(EnteredRecord { Normal = 0, Throw = 1, Return = 2, Break = 3, Continue = 4 });

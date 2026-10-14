@@ -362,8 +362,12 @@ fn a_direct_task_binding_prevents_the_data_only_certificate() {
         .write(
             b"task".to_vec(),
             BindingRecord {
-                name,
-                declared: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+                name: NameRef::new(&name, &heap.access).unwrap(),
+                declared: SiteRef::new(
+                    &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
+                    &heap.access,
+                )
+                .unwrap(),
                 value: BoundRecord::Value(Value::Task(lash_kernel_doc::TaskId(7))),
             },
             &heap.access,
@@ -541,8 +545,12 @@ fn replacing_a_reference_checks_the_proposed_reachable_graph() {
         .write(
             b"root".to_vec(),
             BindingRecord {
-                name: "root".into(),
-                declared: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+                name: NameRef::new(&("root".into()), &heap.access).unwrap(),
+                declared: SiteRef::new(
+                    &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
+                    &heap.access,
+                )
+                .unwrap(),
                 value: BoundRecord::Value(Value::List(root)),
             },
             &heap.access,
@@ -673,7 +681,11 @@ fn population_summaries_follow_seeded_directory_edits() {
     let map = heap.allocate_object(ObjectInit::Map(vec![])).expect("map");
     let closure = heap
         .allocate_object(ObjectInit::Closure {
-            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, []),
+            site: SiteRef::new(
+                &(lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [])),
+                &heap.access,
+            )
+            .unwrap(),
             captures: vec![],
         })
         .expect("closure");
@@ -776,14 +788,14 @@ fn a_long_native_error_in_a_frame_keeps_paged_data_without_reads() {
     };
     assert!(matches!(error.data, Payload::Paged(_)));
     let site = Site::new(Unit::Main, vec![0]);
-    let mut frame = FrameRecord::fresh(site.clone());
+    let mut frame = FrameRecord::fresh(SiteRef::new(&(site.clone()), &heap.access).unwrap());
     frame
         .bindings
         .write(
             vec![0],
             BindingRecord {
-                name: Name::new("error"),
-                declared: site,
+                name: NameRef::new(&(Name::new("error")), &heap.access).unwrap(),
+                declared: SiteRef::new(&(site), &heap.access).unwrap(),
                 value: BoundRecord::Value(value.clone()),
             },
             &heap.access,
@@ -844,8 +856,8 @@ fn an_ended_task_result_counts_toward_fast_reservation() {
         .write(
             vec![0],
             BindingRecord {
-                name: Name::new("task"),
-                declared: Site::new(Unit::Main, [0]),
+                name: NameRef::new(&(Name::new("task")), &heap.access).unwrap(),
+                declared: SiteRef::new(&(Site::new(Unit::Main, [0])), &heap.access).unwrap(),
                 value: BoundRecord::Value(Value::Task(TaskId(1))),
             },
             &heap.access,
@@ -858,7 +870,7 @@ fn an_ended_task_result_counts_toward_fast_reservation() {
         .write(
             super::super::directory::ordinal_key(1),
             TaskRecord {
-                identity: TaskIdentity::Main,
+                identity: TaskIdentityRef::MAIN,
                 state: TaskStateRecord::Ended(EndedTask::Returned(Value::List(list))),
                 result_retained: true,
                 joiners: Tree::new(true),

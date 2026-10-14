@@ -305,7 +305,7 @@ pub enum Step {
     Ended(End),
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Park {
     /// Every effect and sleep requested since the last park, in request
     /// order.
@@ -318,11 +318,28 @@ pub struct Park {
     /// not ended and was never a member of a list `join` that returned or
     /// raised, and one that ended in an error nothing observed. An embedder
     /// can inspect the kernel's end condition independently of live tasks.
-    pub outstanding: Vec<TaskIdentity>,
+    pub outstanding: u64,
     /// Every task other than `main` that has not ended, including passed
     /// list-join members (`K-TASK-018` exempts those from `outstanding`).
     /// A turn control must wait for these tasks to settle too.
-    pub live: Vec<TaskIdentity>,
+    pub live: u64,
+    pub tasks: lash_kernel_state::paged::KeyedRoot,
+}
+
+impl Default for Park {
+    fn default() -> Self {
+        Self {
+            requests: Vec::new(),
+            withdrawn: Vec::new(),
+            outstanding: 0,
+            live: 0,
+            tasks: lash_kernel_state::paged::KeyedRoot {
+                page: None,
+                len: 0,
+                cost: lash_kernel_doc::heap::LogicalBytes(0),
+            },
+        }
+    }
 }
 
 /// How a run ended.

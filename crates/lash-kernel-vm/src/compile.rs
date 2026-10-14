@@ -551,6 +551,7 @@ pub(crate) struct Code {
 }
 
 pub(crate) struct SlotInfo {
+    pub(crate) key: Vec<u8>,
     pub(crate) name: Name,
     /// The node that declares the variable: its `let`, the block it is a
     /// parameter, a loop binding or a `catch` binding of, or, for a
@@ -1143,6 +1144,10 @@ impl Compiler<'_> {
         };
         let slot = scopes.slots.len() as Slot;
         scopes.slots.push(SlotInfo {
+            key: lash_kernel_state::paged::metadata::metadata_key(&(
+                declared.clone(),
+                name.clone(),
+            )),
             name: name.clone(),
             declared,
             shared: false,
@@ -1252,6 +1257,10 @@ impl Compiler<'_> {
                 let scopes = &mut self.scopes[level];
                 let inner = scopes.slots.len() as Slot;
                 scopes.slots.push(SlotInfo {
+                    key: lash_kernel_state::paged::metadata::metadata_key(&(
+                        scopes.body.clone(),
+                        name.clone(),
+                    )),
                     name: name.clone(),
                     declared: scopes.body.clone(),
                     shared: true,

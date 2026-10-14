@@ -459,12 +459,16 @@ impl KernelMachine {
 
     /// A closure of `code` over the cells of the variables it shares.
     fn closure(&mut self, task: TaskId, exe: &Executable, code: CodeId) -> Eval<EntityId> {
+        let access = self.heap.access.clone();
         let frame = self.frame(task)?;
         let mut captures = Vec::new();
         for capture in &exe.code(code).captures {
             match frame.slot(capture.outer_at)? {
                 SlotState::Cell(cell) => captures.push((
-                    exe.code(code).slots[capture.inner as usize].name.clone(),
+                    lash_kernel_state::paged::NameRef::new(
+                        &exe.code(code).slots[capture.inner as usize].name,
+                        &access,
+                    )?,
                     cell,
                 )),
                 _ => return Err(fault("a captured variable has no cell").into()),
@@ -473,6 +477,7 @@ impl KernelMachine {
         let code = exe.code(code);
         let mut site = code.site.clone();
         site.path.pop();
+        let site = lash_kernel_state::paged::SiteRef::new(&site, &self.heap.access)?;
         Ok(self.alloc(ObjectInit::Closure { site, captures })?)
     }
 

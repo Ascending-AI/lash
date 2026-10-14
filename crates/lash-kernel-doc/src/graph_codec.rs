@@ -1083,7 +1083,7 @@ pub mod heap_values {
                     13 => Value::Closure(absolute_entity(input, family)?),
                     14 => Value::Error(Arc::new(decode_error(input, family)?)),
                     15 => Value::Task(TaskId::decode(input)?),
-                    16 => Value::Function(Name::decode(input)?),
+                    16 => Value::Function(TextRef::decode(input)?),
                     17 => Value::Handle(Arc::decode(input)?),
                     18 => {
                         let identity = Identity::decode(input)?;
@@ -1126,7 +1126,7 @@ pub mod heap_values {
             Value::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
             Value::Tuple(v) => v.summary.cost.0,
             Value::Error(v) => v.cost.0,
-            Value::Function(v) => v.as_str().len() as u64,
+            Value::Function(v) => v.summary.utf8_bytes,
             Value::Handle(v) => (v.kind.len() + v.id.len()) as u64,
             _ => 0,
         })

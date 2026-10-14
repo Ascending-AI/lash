@@ -1068,3 +1068,33 @@ the VM resolves them against admitted code and materializes full identities
 only for explicit diagnostics. Closure metadata signatures follow these
 descriptors. Laws cover 1 MiB binding/capture names, bounded per-task writes
 along a 10k serial spawn chain, and exact diagnostic lineage.
+
+### S5 amendment: bounded park diagnostics (332782)
+
+A park reports `live: u64`, `outstanding: u64` and the sealed task-table
+`KeyedRoot`. It neither enumerates tasks nor constructs ancestry. The task
+tree's membership summary counts outstanding tasks; the saved live-task
+meter supplies the live count. `Machine::tasks(root, filter, after, limit)`
+explicitly examines at most `limit` rows (1–64), returns matching task IDs
+and `TaskIdentityRef`s, and a continuation cursor. The limit bounds examined
+rows even when none match. `Machine::task_identity(TaskIdentityRef)` resolves
+full ancestry for an explicit diagnostic. Terminal task/deadlock errors keep
+full identities. An issued intent freezes only its `AdmittedRequest`; request
+projection resolves effect identity from the waiting task's retained ancestry,
+semantic action site, occurrence and loop records at the host boundary.
+
+Nested paged tree descriptors also carry a leaf/index hint, authenticated
+against the root page kind on first read. A short index over a large tree
+remains paged; the 256-token-byte inline rule applies to the complete leaf
+body, and cannot mistake index bytes for the whole collection.
+
+### S1 amendment: bounded function values (333044)
+
+`Value::Function(TextRef)` holds the canonical name as a bounded text
+descriptor, built with `NativeHeap::text`. Calls resolve it against admitted
+code and use the existing missing-function error path. Function equality
+compares canonical text; key normalization keeps tag 8 plus exact name text,
+so resident and paged forms have identical keys. `Datum::Function(Name)` and
+`Literal::Function(Name)` keep the boundary/code grammar. A 1 MiB function
+name must fit in bounded binding, tuple and frozen row cells and round-trip
+exactly through the datum boundary.

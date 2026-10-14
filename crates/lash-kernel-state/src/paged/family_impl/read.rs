@@ -28,7 +28,7 @@ fn project(
         Value::Text(v) => Datum::Text(heap.copy_text(v)?.to_string()),
         Value::Bytes(v) => Datum::Bytes(Bytes::new(heap.copy_bytes(v)?.to_vec())),
         Value::Timestamp(v) => Datum::Timestamp(v.clone()),
-        Value::Function(v) => Datum::Function(v.clone()),
+        Value::Function(v) => Datum::Function(Name::new(heap.copy_text(v)?.to_string())),
         Value::Handle(v) => Datum::Handle(v.as_ref().clone()),
         Value::Tuple(tuple) => {
             let mut values = Vec::new();

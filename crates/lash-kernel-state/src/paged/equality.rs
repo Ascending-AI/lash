@@ -66,7 +66,7 @@ impl PagedHeap {
                 (Value::Text(a), Value::Text(b)) if text_same(self, a, b)? => (),
                 (Value::Bytes(a), Value::Bytes(b)) if bytes_same(self, a, b)? => (),
                 (Value::Timestamp(a), Value::Timestamp(b)) if a == b => (),
-                (Value::Function(a), Value::Function(b)) if a == b => (),
+                (Value::Function(a), Value::Function(b)) if text_same(self, a, b)? => (),
                 (Value::Handle(a), Value::Handle(b)) if a == b => (),
                 (Value::Task(a), Value::Task(b)) if a == b => (),
                 (Value::Ref(a), Value::Ref(b)) if a == b => (),

@@ -84,7 +84,7 @@ impl KernelMachine {
             Literal::Int(value) => Value::Int(self.heap.int(value.clone())?),
             Literal::Text(value) => Value::Text(self.heap.text(value)?),
             Literal::Bytes(value) => Value::Bytes(self.heap.bytes(value.as_slice())?),
-            Literal::Function(name) => Value::Function(name.clone()),
+            Literal::Function(name) => Value::Function(self.heap.text(name.as_str())?),
         })
     }
 }
@@ -515,7 +515,10 @@ impl KernelMachine {
         });
         let mut frame = Frame {
             code: code_id,
-            record: FrameRecord::fresh(code.site.child(0)),
+            record: FrameRecord::fresh(lash_kernel_state::paged::SiteRef::new(
+                &code.site.child(0),
+                &self.heap.access,
+            )?),
             access: self.heap.access.clone(),
             exe: Arc::clone(&self.exe),
             control,

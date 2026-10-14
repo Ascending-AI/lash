@@ -56,10 +56,14 @@ impl Frame {
             } else {
                 *next
             };
-            self.record.statement =
+            let statement =
                 self.exe.block(*block).site.child(
                     u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?,
                 );
+            if !self.record.statement.matches(&statement, &self.access)? {
+                self.record.statement =
+                    lash_kernel_state::paged::SiteRef::new(&statement, &self.access)?;
+            }
         }
         // Expression evaluation may temporarily stand at a loop test or
         // a departure. The coordinate is refreshed at its next safe point;
@@ -89,7 +93,7 @@ impl Frame {
                         &mut self.record.loops,
                         loops,
                         LoopRecord {
-                            site: site.clone(),
+                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
                             started: *started,
                             position: Some(position),
                         },
@@ -112,7 +116,7 @@ impl Frame {
                         &mut self.record.loops,
                         loops,
                         LoopRecord {
-                            site: site.clone(),
+                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
                             started: *started,
                             position: None,
                         },
@@ -150,7 +154,7 @@ impl Frame {
                         &mut self.record.finally,
                         finally,
                         FinallyRecord {
-                            site: site.clone(),
+                            site: lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
                             entered,
                         },
                         &self.access,
@@ -227,6 +231,12 @@ impl Frames {
     }
     pub(super) fn push(&mut self, mut frame: Frame) -> Result<(), HeapFault> {
         self.flush()?;
+        // Inline calls run inside their caller's expression. Its live
+        // cursor cannot be restored from a statement boundary until that
+        // expression completes, so retain its derived frame while pinned.
+        if !frame.inline && !self.cache.values().any(|frame| frame.inline) {
+            self.cache.clear();
+        }
         frame.sync()?;
         let index = self.rows.len();
         self.rows
@@ -258,6 +268,9 @@ impl Frames {
         }
         Ok(())
     }
+    pub(super) fn pinned(&self) -> bool {
+        self.cache.values().any(|frame| frame.inline)
+    }
     pub(super) fn cached(&self) -> Vec<&Frame> {
         self.cache.values().collect()
     }
@@ -271,7 +284,7 @@ impl Frames {
             for at in 0..frame.loops.len() {
                 let record = row(&frame.loops, at, &self.access)?;
                 loops.push(lash_kernel_doc::LoopIteration {
-                    site: record.site,
+                    site: record.site.resolve(&self.access)?.as_ref().clone(),
                     iteration: record.started.saturating_sub(1),
                 });
             }
@@ -286,7 +299,7 @@ fn restore(
     access: Access<'static>,
     exe: Arc<Executable>,
 ) -> Result<Frame, HeapFault> {
-    let site = &record.statement;
+    let site = record.statement.resolve(&access)?;
     let code_id = (0..site.path.len())
         .rev()
         .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
@@ -300,12 +313,7 @@ fn restore(
     let mut iterated = 0;
     let mut departing = 0;
     let mut awaiting = None;
-    let nowhere = || {
-        malformed(format!(
-            "{} is no statement of the admitted document",
-            record.statement
-        ))
-    };
+    let nowhere = || malformed(format!("{} is no statement of the admitted document", site));
     loop {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
@@ -343,7 +351,7 @@ fn restore(
             Form::For { site, body, .. } if at(*body) => {
                 let saved = row(&record.loops, loops, &access)?;
                 loops += 1;
-                if saved.site != *site {
+                if !saved.site.matches(site, &access)? {
                     return Err(malformed("a saved loop belongs to another site"));
                 }
                 let value = row(&record.iterated, iterated, &access)?.0;
@@ -377,7 +385,7 @@ fn restore(
             Form::While { site, body, .. } if at(*body) => {
                 let saved = row(&record.loops, loops, &access)?;
                 loops += 1;
-                if saved.site != *site || saved.position.is_some() {
+                if !saved.site.matches(site, &access)? || saved.position.is_some() {
                     return Err(malformed("a saved while has another site or a position"));
                 }
                 control.push(Control::While {
@@ -399,7 +407,7 @@ fn restore(
                 } else if let Some(cleanup) = cleanup.filter(|cleanup| at(*cleanup)) {
                     let saved = row(&record.finally, finally, &access)?;
                     finally += 1;
-                    if saved.site != *site {
+                    if !saved.site.matches(site, &access)? {
                         return Err(malformed("a cleanup belongs to another site"));
                     }
                     let mut value = || {

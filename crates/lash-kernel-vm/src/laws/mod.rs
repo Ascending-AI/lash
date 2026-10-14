@@ -4,7 +4,7 @@
 
 mod bounds;
 mod census;
-mod embedder;
+pub(crate) mod embedder;
 mod forms;
 mod layout;
 mod paged;

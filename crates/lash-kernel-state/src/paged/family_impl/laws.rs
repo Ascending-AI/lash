@@ -32,11 +32,15 @@ fn bindings(heap: &mut PagedHeap, values: impl IntoIterator<Item = (Name, Value)
             .write(
                 name.as_str().as_bytes().to_vec(),
                 BindingRecord {
-                    name,
-                    declared: lash_kernel_doc::Site {
-                        unit: lash_kernel_doc::Unit::Main,
-                        path: vec![],
-                    },
+                    name: NameRef::new(&name, &heap.access).unwrap(),
+                    declared: SiteRef::new(
+                        &(lash_kernel_doc::Site {
+                            unit: lash_kernel_doc::Unit::Main,
+                            path: vec![],
+                        }),
+                        &heap.access,
+                    )
+                    .unwrap(),
                     value: BoundRecord::Value(value),
                 },
                 &heap.access,
@@ -337,10 +341,14 @@ fn carry_classification_walks_the_union_and_propagates_through_cycles() {
     let (mut heap, pages) = fresh();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
-            site: lash_kernel_doc::Site {
-                unit: lash_kernel_doc::Unit::Main,
-                path: vec![],
-            },
+            site: SiteRef::new(
+                &(lash_kernel_doc::Site {
+                    unit: lash_kernel_doc::Unit::Main,
+                    path: vec![],
+                }),
+                &heap.access,
+            )
+            .unwrap(),
             captures: Vec::new(),
         })
         .expect("closure");

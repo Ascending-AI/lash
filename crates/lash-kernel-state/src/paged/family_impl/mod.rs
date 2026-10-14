@@ -279,13 +279,25 @@ impl Freezer<'_> {
             Value::Closure(id) => match self.named.get(id) {
                 Some(name) => {
                     self.functions.insert(name.clone());
-                    Ok(Value::Function(name.clone()))
+                    Ok(Value::Function(datum::text(
+                        &self.heap.access,
+                        name.as_str(),
+                    )?))
                 }
                 None => Err(nondata()),
             },
             Value::Function(name) => {
+                let name = Name::new(self.heap.copy_text(name)?.to_string());
                 self.functions.insert(name.clone());
-                Ok(value.clone())
+                match value {
+                    Value::Function(TextRef {
+                        body: Payload::Resident(text),
+                        ..
+                    }) if text.len() as u64 > IMMUTABLE_INLINE_MAX => Ok(Value::Function(
+                        datum::text(&self.heap.access, name.as_str())?,
+                    )),
+                    _ => Ok(value.clone()),
+                }
             }
             Value::Task(_) | Value::Ref(_) => Err(nondata()),
             Value::Tuple(t) => {
@@ -587,7 +599,7 @@ impl HeapLifecycle for PagedHeap {
         let mut dropped = Vec::new();
         for ((key, record), edges) in candidates.iter().zip(roots) {
             if edges.iter().any(|e| bad.contains(e)) {
-                dropped.push(record.name.clone());
+                dropped.push(record.name.resolve(&self.access)?);
                 table.remove(key, &self.access)?;
             }
         }

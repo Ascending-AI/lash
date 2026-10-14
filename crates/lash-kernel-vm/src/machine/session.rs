@@ -87,9 +87,11 @@ pub(super) fn start(
         observer: None,
     };
     machine.bind_modes(start.modes)?;
-    machine
-        .tasks
-        .push(Task::fresh(TaskIdentity::Main, access, Arc::clone(&exe)))?;
+    machine.tasks.push(Task::fresh(
+        lash_kernel_state::paged::TaskIdentityRef::MAIN,
+        access,
+        Arc::clone(&exe),
+    ))?;
     let arguments = |problem: String| StartError::Arguments { problem };
     let (code, args) = match &start.target {
         Target::Main => {
@@ -150,7 +152,10 @@ impl KernelMachine {
     pub(super) fn session_get(&self, name: &Name) -> Result<Option<Value>, HeapFault> {
         self.heap
             .session
-            .get(&encode_body(name), &self.heap.access)?
+            .get(
+                &lash_kernel_state::paged::metadata::metadata_key(name),
+                &self.heap.access,
+            )?
             .map(|binding| match binding.value {
                 BoundRecord::Value(value) => Ok(value),
                 BoundRecord::Shared(id) => self.heap.variable_get(id),
@@ -164,10 +169,13 @@ impl KernelMachine {
             .map_err(|error| self.heap_halt(error))?;
         let mut bindings = self.heap.session.clone();
         bindings.write(
-            encode_body(&name),
+            lash_kernel_state::paged::metadata::metadata_key(&name),
             BindingRecord {
-                name,
-                declared: self.exe.code(self.exe.main).site.clone(),
+                name: lash_kernel_state::paged::NameRef::new(&name, &self.heap.access)?,
+                declared: lash_kernel_state::paged::SiteRef::new(
+                    &self.exe.code(self.exe.main).site,
+                    &self.heap.access,
+                )?,
                 value: BoundRecord::Value(value),
             },
             &self.heap.access,

@@ -5,14 +5,14 @@ use crate::compile::Executable;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{TaskId, TaskIdentity};
 use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::tree::{Access, Tree};
+use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 impl Task {
     pub(super) fn fresh(
-        identity: TaskIdentity,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
         access: Access<'static>,
         exe: Arc<Executable>,
     ) -> Self {
@@ -102,6 +102,7 @@ impl Tasks {
     pub(super) fn get_mut(&mut self, index: usize) -> Result<Option<&mut Task>, HeapFault> {
         let index = index as u64;
         if !self.cache.contains_key(&index) {
+            self.make_room()?;
             let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
                 return Ok(None);
             };
@@ -123,6 +124,7 @@ impl Tasks {
         Ok(self.cache.get_mut(&index))
     }
     pub(super) fn push(&mut self, task: Task) -> Result<(), HeapFault> {
+        self.make_room()?;
         let index = self.rows.len();
         self.rows
             .write(ordinal_key(index), task.record.clone(), &self.access)?;
@@ -146,10 +148,39 @@ impl Tasks {
         for (index, task) in &mut self.cache {
             task.frames.flush()?;
             task.record.frames = task.frames.rows.clone();
-            self.rows
-                .write(ordinal_key(*index), task.record.clone(), &self.access)?;
+            let key = ordinal_key(*index);
+            if !self
+                .rows
+                .get(&key, &self.access)?
+                .is_some_and(|old| old.same_version(&task.record))
+            {
+                self.rows.write(key, task.record.clone(), &self.access)?;
+            }
         }
         Ok(self.rows.clone())
+    }
+    pub(super) fn sealed_root(
+        &mut self,
+    ) -> Result<(lash_kernel_state::paged::KeyedRoot, u64), HeapFault> {
+        self.roots()?;
+        let outstanding = self.rows.live_members(&self.access)?;
+        self.rows.seal(
+            &self.access,
+            &mut lash_kernel_state::paged::tree::SealWork::new(
+                lash_kernel_state::paged::SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                },
+            ),
+        )?;
+        Ok((
+            lash_kernel_state::paged::KeyedRoot {
+                page: self.rows.page(),
+                len: self.rows.len(),
+                cost: lash_kernel_doc::heap::LogicalBytes(self.rows.cost()),
+            },
+            outstanding,
+        ))
     }
     pub(super) fn visit(
         &mut self,
@@ -171,7 +202,32 @@ impl Tasks {
     }
     pub(super) fn evict(&mut self) -> Result<(), HeapFault> {
         self.roots()?;
-        self.cache.clear();
+        Ok(())
+    }
+    fn make_room(&mut self) -> Result<(), HeapFault> {
+        if self.cache.len() < 64 {
+            return Ok(());
+        }
+        let Some(index) = self
+            .cache
+            .iter()
+            .find_map(|(index, task)| (!task.frames.pinned()).then_some(*index))
+        else {
+            return Err(HeapFault::Malformed(
+                "all derived task frames are pinned".into(),
+            ));
+        };
+        let mut task = self.cache.remove(&index).expect("selected cached task");
+        task.frames.flush()?;
+        task.record.frames = task.frames.rows.clone();
+        let key = ordinal_key(index);
+        if !self
+            .rows
+            .get(&key, &self.access)?
+            .is_some_and(|old| old.same_version(&task.record))
+        {
+            self.rows.write(key, task.record, &self.access)?;
+        }
         Ok(())
     }
 }

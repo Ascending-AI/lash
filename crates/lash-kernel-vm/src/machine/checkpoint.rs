@@ -5,8 +5,8 @@ use crate::paged::{OpenError, SealError, SealedRoot};
 use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_state::paged::tree::SealWork;
 use lash_kernel_state::paged::{
-    AllocationCensus, CheckpointRoot, EditEpoch, PageKind, PageSource, RootStatus, SavedMeters,
-    SealBudget, SequenceRoot,
+    AllocationCensus, CheckpointRoot, EditEpoch, KeyedRoot, PageKind, PageSource, RootStatus,
+    SavedMeters, SealBudget, SequenceRoot,
 };
 
 impl Machine for KernelMachine {
@@ -269,6 +269,60 @@ impl Machine for KernelMachine {
             .map_err(SealError::Heap)?;
         self.tasks = tasks::Tasks::open(self.heap.tasks.clone(), access, Arc::clone(&self.exe));
         Ok(Some(SealedRoot { page, root }))
+    }
+    fn task_identity(
+        &self,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
+    ) -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+        identity.resolve(&self.heap.access)
+    }
+    fn tasks(
+        &self,
+        root: KeyedRoot,
+        filter: crate::paged::TaskFilter,
+        after: Option<lash_kernel_doc::TaskId>,
+        limit: u32,
+    ) -> Result<crate::paged::TaskPage, lash_kernel_doc::heap::HeapFault> {
+        use crate::paged::{TaskFilter, TaskPage};
+        if limit == 0 || limit > 64 {
+            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                "a task query examines 1 to 64 rows".into(),
+            ));
+        }
+        let rows = Tree::<lash_kernel_state::paged::TaskRecord>::open(
+            root.page, root.len, root.cost, false,
+        );
+        let mut cursor = after;
+        let mut tasks = Vec::new();
+        let mut finished = after.is_some_and(|id| id.0 >= root.len.saturating_sub(1));
+        for _ in 0..limit {
+            let key = cursor.map(|id| ordinal_key(id.0));
+            let Some((key, task)) = rows.after(key.as_deref(), &self.heap.access)? else {
+                finished = true;
+                break;
+            };
+            let id = lash_kernel_doc::TaskId(u64::from_be_bytes(key.try_into().map_err(|_| {
+                lash_kernel_doc::heap::HeapFault::Malformed("task key is not an ordinal".into())
+            })?));
+            cursor = Some(id);
+            let include = match filter {
+                TaskFilter::All => true,
+                TaskFilter::Live => !task.identity.is_main() && task.is_live(),
+                TaskFilter::Outstanding => task.is_outstanding(),
+            };
+            if include {
+                tasks.push((id, task.identity));
+            }
+            if id.0 + 1 >= root.len {
+                finished = true;
+                break;
+            }
+        }
+        Ok(TaskPage {
+            tasks,
+            after: cursor,
+            finished,
+        })
     }
     fn meters(&self) -> Meters {
         Meters {

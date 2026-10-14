@@ -53,6 +53,8 @@ pub mod tree;
 
 pub mod directory;
 pub mod heap_impl;
+pub mod metadata;
+pub use metadata::{NameRef, SiteRef, TaskIdentityRef};
 pub mod payload;
 pub use heap_impl::PagedHeap;
 
@@ -61,6 +63,7 @@ mod laws {
     pub mod heap;
     #[path = "../family_impl/laws.rs"]
     mod lifecycle;
+    mod metadata;
     pub mod root;
 }
 

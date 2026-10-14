@@ -207,7 +207,7 @@ impl From<HeapFault> for CopyError {
     }
 }
 
-fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String, HeapFault> {
+pub(crate) fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String, HeapFault> {
     let mut out = String::new();
     heap.payload_visit(
         &Value::Text(text.clone()),
@@ -278,7 +278,7 @@ fn copy(
             Datum::Bytes(lash_kernel_doc::Bytes::new(bytes))
         }
         Value::Timestamp(t) => Datum::Timestamp(t.clone()),
-        Value::Function(n) => Datum::Function(n.clone()),
+        Value::Function(n) => Datum::Function(lash_kernel_doc::Name::new(text_copy(heap, n)?)),
         Value::Handle(h) => Datum::Handle(h.as_ref().clone()),
         Value::Error(e) => Datum::Error(Box::new(ErrorDatum {
             kind: text_copy(heap, &e.kind)?,

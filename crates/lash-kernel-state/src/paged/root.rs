@@ -20,8 +20,9 @@
 //! token encodings are layer hp-heap's (FIG-6188), in this crate; the
 //! envelope around them is the generic node store's.
 
+use super::{NameRef, SiteRef};
 use lash_kernel_doc::heap::{EntityId, LogicalBytes, PageId, PageRef, Value};
-use lash_kernel_doc::{DocumentId, JoinMode, Name, Site, TaskId};
+use lash_kernel_doc::{DocumentId, JoinMode, TaskId};
 
 use super::census::AccountingCertificate;
 use super::family::FrozenRef;
@@ -170,8 +171,8 @@ pub enum EndedTask {
 
 #[derive(Clone, Debug)]
 pub struct BindingRecord {
-    pub name: Name,
-    pub declared: Site,
+    pub name: NameRef,
+    pub declared: SiteRef,
     pub value: BoundRecord,
 }
 
@@ -184,7 +185,7 @@ pub enum BoundRecord {
 
 #[derive(Clone, Debug)]
 pub struct LoopRecord {
-    pub site: Site,
+    pub site: SiteRef,
     pub started: u64,
     /// A `for`'s position; a map or set position is its
     /// [`TableCursor`](super::TableCursor), not a count.
@@ -193,7 +194,7 @@ pub struct LoopRecord {
 
 #[derive(Clone, Debug)]
 pub struct FinallyRecord {
-    pub site: Site,
+    pub site: SiteRef,
     pub entered: EnteredRecord,
 }
 
