@@ -18,7 +18,7 @@ use crate::interface::{Bound, Host, Outcome};
 use crate::observe::Event;
 use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::heap::{HeapFault, IntRef};
-use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit};
+use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit, SemanticHeap};
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
@@ -100,8 +100,10 @@ impl KernelMachine {
     ) -> Eval<Completion> {
         let frame = self
             .tasks
-            .get_mut(task.0 as usize)
-            .and_then(|task| task.frames.last_mut())
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("a running task is missing"))?
+            .frames
+            .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
         let code = frame.code;
@@ -309,14 +311,14 @@ impl KernelMachine {
         exe: &Executable,
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
-        let Some(frame) = self.task(task)?.frames.pop() else {
+        let Some(frame) = self.task(task)?.frames.pop()? else {
             return Err(fault("a task with no frame returned"));
         };
-        self.refresh_charging(task, exe);
+        self.refresh_charging(task, exe)?;
         if let Some(call) = &frame.library {
             let evaluates = self.charging && exe.lib(call.lib).native;
             let units = self.in_formula(call.lib, evaluates, |machine| {
-                machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
+                machine.call_units_tree(exe, call.lib, &call.args, result.as_ref().ok())
             })?;
             self.charge_call(exe, call.lib, units)?;
         }
@@ -393,19 +395,44 @@ impl KernelMachine {
             ..
         } = frame;
         control.clear();
-        let mut args = library.map(|call| call.args).unwrap_or_default();
-        args.clear();
-        self.storage.frames.push(FrameStorage {
-            slots: Vec::new(),
-            control,
-            args,
-        });
+        self.storage.frames.push(FrameStorage { control });
+    }
+
+    fn call_units_tree(
+        &self,
+        exe: &Executable,
+        lib: LibId,
+        args: &super::Tree<Value>,
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        if !self.charging || !exe.lib(lib).native {
+            return Ok(0);
+        }
+        self.formula_source(
+            &exe.lib(lib).charge,
+            |index| {
+                Ok(args.get(
+                    &lash_kernel_state::paged::directory::ordinal_key(index as u64),
+                    &self.heap.access,
+                )?)
+            },
+            result,
+        )
     }
 
     pub(super) fn formula(
         &self,
         plan: &Plan,
         args: &[Value],
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        self.formula_source(plan, |index| Ok(args.get(index).cloned()), result)
+    }
+
+    fn formula_source(
+        &self,
+        plan: &Plan,
+        mut argument: impl FnMut(usize) -> Result<Option<Value>, HeapFault>,
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
         let mut fault = None;
@@ -416,11 +443,17 @@ impl KernelMachine {
                 return 0;
             }
             let value = match source {
-                Source::Arg(index) => args.get(index),
-                Source::Result => result,
+                Source::Arg(index) => match argument(index) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        fault = Some(error);
+                        return 0;
+                    }
+                },
+                Source::Result => result.cloned(),
                 Source::Nothing => None,
             };
-            let amount = match (value, measure) {
+            let amount = match (value.as_ref(), measure) {
                 (None, _) => Ok(0),
                 (Some(value), Measure::Size) => size(&self.heap, value),
                 (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
@@ -473,12 +506,9 @@ impl KernelMachine {
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.reserve(super::FRAME_BYTES.saturating_add(code.slots.len() as u64 * 8))?;
-        let FrameStorage {
-            mut control,
-            mut args,
-            ..
-        } = self.storage.frames.pop().unwrap_or_default();
+        self.publish_roots()?;
+        self.reserve(super::FRAME_BYTES)?;
+        let FrameStorage { mut control, .. } = self.storage.frames.pop().unwrap_or_default();
         control.push(Control::Block {
             block: code.body,
             next: 0,
@@ -490,21 +520,33 @@ impl KernelMachine {
             exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
-            library: library.map(|lib| {
-                if exe.lib(lib).native {
-                    args.extend_from_slice(&self.regs[base..base + given]);
-                }
-                LibraryCall { lib, args }
-            }),
+            library: None,
             inline,
         };
+        if let Some(lib) = library {
+            let mut args = super::Tree::new(true);
+            if exe.lib(lib).native {
+                for at in 0..given {
+                    let value = self
+                        .heap
+                        .canonical_value(self.regs[base + at].clone())
+                        .map_err(|error| self.heap_halt(error))?;
+                    args.write(
+                        lash_kernel_state::paged::directory::ordinal_key(at as u64),
+                        value,
+                        &self.heap.access,
+                    )?;
+                }
+            }
+            frame.library = Some(LibraryCall { lib, args });
+        }
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell))?;
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);
         }
-        self.task(task)?.frames.push(frame);
+        self.task(task)?.frames.push(frame)?;
         self.observe(Event::Push {
             task,
             code: code_id,
@@ -528,6 +570,10 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
+        let value = self
+            .heap
+            .canonical_value(value)
+            .map_err(|error| self.heap_halt(error))?;
         let state = if shared {
             SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {
@@ -549,8 +595,8 @@ impl KernelMachine {
                     at: local.at,
                 },
             ),
-            Var::Session(name) => match self.session.get(name) {
-                Some(value) => Ok(value.clone()),
+            Var::Session(name) => match self.session_get(name)? {
+                Some(value) => Ok(value),
                 None => unbound(name),
             },
             Var::Unbound(name) => unbound(name),
@@ -575,36 +621,42 @@ impl KernelMachine {
         match incoming {
             Incoming::Value(value) => Ok(value),
             Incoming::Raise(value) => Err(Interrupt::Raise(value)),
-            Incoming::Join(joined) => self.join_result(joined),
-            Incoming::Outcome(answered) => self.resume_outcome(task, exe, answered.outcome),
+            Incoming::Joined(joined) => self.join_result(joined),
+            Incoming::Outcome(wait) => self.resume_outcome(task, exe, wait),
         }
     }
 
-    fn resume_outcome(&mut self, task: TaskId, exe: &Executable, outcome: Outcome) -> Eval<Value> {
-        match outcome {
-            Outcome::Elapsed => Ok(Value::Null),
-            Outcome::Failed(error) => {
-                let datum = lash_kernel_doc::Datum::Error(Box::new(error));
-                Err(Interrupt::Raise(self.decode(
-                    exe,
-                    &datum,
-                    &lash_kernel_doc::Type::Any,
-                )?))
+    fn resume_outcome(
+        &mut self,
+        _task: TaskId,
+        _exe: &Executable,
+        wait: crate::interface::WaitId,
+    ) -> Eval<Value> {
+        let key = lash_kernel_state::paged::directory::ordinal_key(wait.0);
+        let pending = self
+            .waits
+            .get(&key, &self.heap.access)?
+            .ok_or_else(|| fault("a resuming outcome has no wait"))?;
+        let lash_kernel_state::paged::WaitPhase::Committed(outcome) = pending.phase else {
+            return Err(fault("a resuming outcome is not committed").into());
+        };
+        use lash_kernel_state::paged::CommittedOutcomeRecord;
+        let (value, failed) = match outcome {
+            CommittedOutcomeRecord::Elapsed => (Value::Null, false),
+            CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
+                let charge = self.heap.frozen_charge(&frozen)?;
+                let value = self.heap.instantiate(&frozen)?;
+                self.charge(charge)?;
+                (value, matches!(outcome, CommittedOutcomeRecord::Failed(_)))
             }
-            Outcome::Completed(datum) => {
-                let awaiting = self.frame(task)?.awaiting;
-                let ty = awaiting.and_then(|stmt| match &exe.stmt(stmt).form {
-                    Form::Action(action) => match &action.kind {
-                        crate::compile::ActionKind::Perform { result, .. } => Some(result),
-                        _ => None,
-                    },
-                    _ => None,
-                });
-                match ty {
-                    Some(ty) => self.decode(exe, &datum, ty),
-                    None => Err(fault("an outcome arrived at no `perform`").into()),
-                }
-            }
+        };
+        // run cannot seal inside a statement; installation and consumption
+        // therefore publish together at the statement's safe point.
+        self.waits.remove(&key, &self.heap.access)?;
+        if failed {
+            Err(Interrupt::Raise(value))
+        } else {
+            Ok(value)
         }
     }
 
@@ -614,8 +666,8 @@ impl KernelMachine {
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
         let joined = self.task(joined)?;
         match &joined.state {
-            TaskState::Ended(Ok(value)) => Ok(value.clone()),
-            TaskState::Ended(Err(value)) => {
+            TaskState::Ended(super::EndedTask::Returned(value)) => Ok(value.clone()),
+            TaskState::Ended(super::EndedTask::Raised(value)) => {
                 let value = value.clone();
                 joined.observed = true;
                 Err(Interrupt::Raise(value))

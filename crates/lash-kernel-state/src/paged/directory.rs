@@ -958,15 +958,39 @@ impl PagedHeap {
             heap.session = root
         })
     }
-    pub fn set_task_root(&mut self, tasks: Tree<TaskRecord>) -> Result<(), HeapWriteError> {
-        let before = self.tasks.cost();
-        let old_tasks = self.tasks.read_task_edges(&self.access)?;
-        self.replace_execution_root(before, old_tasks, tasks, |heap, root| heap.tasks = root)
-    }
-    pub fn set_join_root(&mut self, joins: Tree<ListJoinRecord>) -> Result<(), HeapWriteError> {
-        let before = self.joins.cost();
-        let old_tasks = self.joins.read_task_edges(&self.access)?;
-        self.replace_execution_root(before, old_tasks, joins, |heap, root| heap.joins = root)
+    pub fn set_execution_roots(
+        &mut self,
+        tasks: Tree<TaskRecord>,
+        joins: Tree<ListJoinRecord>,
+        registers: &[Value],
+        pinned: &[Value],
+        fresh: &[EntityId],
+    ) -> Result<(), HeapWriteError> {
+        let before = checked_sum(
+            [self.tasks.cost(), self.joins.cost()]
+                .into_iter()
+                .chain(self.statement_roots().iter().map(value_cost)),
+        )?;
+        let after = checked_sum(
+            [tasks.cost(), joins.cost()]
+                .into_iter()
+                .chain(registers.iter().chain(pinned).map(value_cost)),
+        )?;
+        let old_tasks = checked_sum(
+            [
+                self.tasks.read_task_edges(&self.access)?,
+                self.joins.read_task_edges(&self.access)?,
+            ]
+            .into_iter(),
+        )?;
+        let task_edges = tasks.read_task_edges(&self.access)?;
+        let join_edges = joins.read_task_edges(&self.access)?;
+        let new_tasks = checked_sum([task_edges, join_edges].into_iter())?;
+        self.replace_holding(before, after, old_tasks, new_tasks, |heap| {
+            heap.tasks = tasks.with_task_edges(task_edges);
+            heap.joins = joins.with_task_edges(join_edges);
+            heap.install_transient(registers, pinned, fresh);
+        })
     }
     fn replace_execution_root<T: Cell>(
         &mut self,
@@ -978,6 +1002,18 @@ impl PagedHeap {
         let after = root.cost();
         let new_tasks = root.read_task_edges(&self.access)?;
         let root = root.with_task_edges(new_tasks);
+        self.replace_holding(before, after, old_tasks, new_tasks, |heap| {
+            install(heap, root)
+        })
+    }
+    fn replace_holding(
+        &mut self,
+        before: u64,
+        after: u64,
+        old_tasks: u64,
+        new_tasks: u64,
+        install: impl FnOnce(&mut Self),
+    ) -> Result<(), HeapWriteError> {
         let mut census = self
             .census
             .take()
@@ -991,7 +1027,7 @@ impl PagedHeap {
                 .changed(LogicalBytes(credit), LogicalBytes(0))
                 .map_err(census_fault)?;
             self.reserved -= credit;
-            install(self, root);
+            install(self);
             self.population.task_edges = self
                 .population
                 .task_edges
@@ -1006,6 +1042,7 @@ impl PagedHeap {
                     .map_err(HeapWriteError::from),
                 ReservationDecision::NeedsPrecision(_) => {
                     let registers = self.statement_roots().to_vec();
+                    let fresh = self.fresh_roots().to_vec();
                     let reserved = self.outstanding_reserved();
                     match census.refine(
                         self,
@@ -1013,7 +1050,7 @@ impl PagedHeap {
                             registers: &registers,
                             pinned: &[],
                             native_args: &[],
-                            fresh: &[],
+                            fresh: &fresh,
                             reserved: LogicalBytes(reserved),
                         },
                         PendingReservation {

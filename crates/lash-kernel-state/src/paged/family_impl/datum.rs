@@ -23,6 +23,7 @@ impl PagedHeap {
 }
 fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault> {
     Ok(TextRef {
+        normal: Default::default(),
         summary: text_summary(text),
         body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(text))
@@ -33,6 +34,7 @@ fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault> {
 }
 fn bytes(access: &Access<'_>, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
     Ok(BytesRef {
+        normal: Default::default(),
         len: bytes.len() as u64,
         body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(bytes))
@@ -68,6 +70,7 @@ impl Freezer<'_> {
                 IntRef::Inline(v.clone())
             } else {
                 IntRef::Paged {
+                    normal: Default::default(),
                     summary: IntSummary {
                         bits: v.bits(),
                         negative: v.is_negative(),
@@ -106,6 +109,7 @@ impl Freezer<'_> {
                 }
                 rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
                 Value::Tuple(TupleRef {
+                    normal: Default::default(),
                     family: None,
                     summary: TupleSummary {
                         task_edges: 0,

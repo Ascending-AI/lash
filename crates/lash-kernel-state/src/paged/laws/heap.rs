@@ -1,4 +1,5 @@
 //! S1/S2 counted-work and semantic laws over an in-process page port.
+use super::super::census_impl::Census;
 use super::super::*;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::key_digest;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 pub(super) struct Pages {
     pub pages: BTreeMap<PageId, PageAnswer>,
     pub reads: u64,
+    pub payload_reads: u64,
     pub seals: u64,
     pub bytes: u64,
 }
@@ -20,6 +22,17 @@ impl PageSource for Source {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
         let mut store = self.0.borrow_mut();
         store.reads += pages.len() as u64;
+        store.payload_reads += pages
+            .iter()
+            .filter(|page| {
+                store.pages.get(&page.id).is_some_and(|answer| {
+                    matches!(
+                        answer.kind,
+                        PageKind::PAYLOAD_LEAF | PageKind::PAYLOAD_INDEX
+                    )
+                })
+            })
+            .count() as u64;
         pages
             .iter()
             .map(|p| {
@@ -57,7 +70,7 @@ pub(super) fn fresh() -> (PagedHeap, Rc<RefCell<Pages>>) {
     let pages = Rc::new(RefCell::new(Pages::default()));
     let mut heap = PagedHeap::fresh(Box::new(Source(Rc::clone(&pages))), EditEpoch(1));
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
     ))
     .expect("install census");
     (heap, pages)
@@ -80,7 +93,7 @@ fn reopen(heap: &mut PagedHeap, pages: &Rc<RefCell<Pages>>) -> PagedHeap {
     )
     .expect("open");
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(1 << 30)).expect("census"),
     ))
     .expect("install census");
     heap
@@ -265,165 +278,6 @@ fn equal_payloads_share_one_canonical_root() {
     assert_eq!(a.id, b.id);
 }
 
-/// Exact test-only census; production policy is injected by composition.
-struct TestCensus {
-    certificate: AccountingCertificate,
-    limit: u64,
-}
-impl AllocationCensus for TestCensus {
-    fn restore(
-        certificate: AccountingCertificate,
-        bound: LogicalBytes,
-    ) -> Result<Self, CensusFault> {
-        Ok(Self {
-            certificate,
-            limit: bound.0,
-        })
-    }
-    fn certificate(&self) -> AccountingCertificate {
-        self.certificate
-    }
-    fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault> {
-        if entities
-            .checked_mul(32)
-            .is_none_or(|minimum| minimum > cost.0)
-        {
-            return Err(CensusFault::Malformed("entity cost below minimum".into()));
-        }
-        self.changed(LogicalBytes(0), cost)?;
-        self.certificate.entities += entities;
-        Ok(())
-    }
-    fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault> {
-        self.certificate.upper.0 = self
-            .certificate
-            .upper
-            .0
-            .checked_sub(before.0)
-            .and_then(|v| v.checked_add(after.0))
-            .ok_or_else(|| CensusFault::Malformed("test census overflow".into()))?;
-        Ok(())
-    }
-    fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision {
-        if self
-            .certificate
-            .upper
-            .0
-            .checked_add(bytes.0)
-            .is_some_and(|v| v <= self.limit)
-        {
-            ReservationDecision::Granted(LogicalPermit { bytes })
-        } else {
-            ReservationDecision::NeedsPrecision(PendingReservation {
-                bytes,
-                overflowed: self.certificate.upper.0.checked_add(bytes.0).is_none(),
-            })
-        }
-    }
-    fn refine(
-        &mut self,
-        graph: &mut dyn CensusGraph,
-        roots: &TransientRoots<'_>,
-        pending: PendingReservation,
-    ) -> Result<RefinedDecision, CensusFault> {
-        use std::collections::BTreeSet;
-        let mut cost = graph.root_cost()?.0;
-        let mut queue = Vec::new();
-        let mut persistent = Vec::new();
-        graph.persistent_roots(&mut |v| {
-            persistent.push(v.clone());
-            Ok(())
-        })?;
-        for v in persistent {
-            graph.value_edges(&v, &mut |i| {
-                queue.push(i);
-                Ok(())
-            })?;
-        }
-        for v in roots
-            .registers
-            .iter()
-            .chain(roots.pinned)
-            .chain(roots.native_args)
-        {
-            cost = cost
-                .checked_add(graph.value_cost(v)?.0)
-                .ok_or_else(|| CensusFault::Malformed("trace cost overflow".into()))?;
-            graph.value_edges(v, &mut |i| {
-                queue.push(i);
-                Ok(())
-            })?;
-        }
-        queue.extend(roots.fresh.iter().map(|id| Identity::Object(*id)));
-        cost = cost
-            .checked_add(roots.reserved.0)
-            .ok_or_else(|| CensusFault::Malformed("reservation cost overflow".into()))?;
-        let mut marked = BTreeSet::new();
-        let mut entities = 0;
-        while let Some(identity) = queue.pop() {
-            if !marked.insert(identity) {
-                continue;
-            }
-            let local = match identity {
-                Identity::Object(id) => {
-                    let local = graph
-                        .entity_cost(id)?
-                        .ok_or_else(|| {
-                            CensusFault::Malformed("trace reaches absent entity".into())
-                        })?
-                        .local
-                        .0;
-                    graph.entity_edges(id, &mut |i| {
-                        queue.push(i);
-                        Ok(())
-                    })?;
-                    entities += 1;
-                    local
-                }
-                Identity::Task(id) => {
-                    graph
-                        .task_result(id, &mut |i| {
-                            queue.push(i);
-                            Ok(())
-                        })?
-                        .0
-                }
-            };
-            cost = cost
-                .checked_add(local)
-                .ok_or_else(|| CensusFault::Malformed("trace overflow".into()))?;
-        }
-        let all = graph.census_after(None, usize::MAX)?;
-        let ended = graph.ended_tasks_after(None, usize::MAX)?;
-        graph.sweep(&SweepSet {
-            entities: all
-                .into_iter()
-                .filter(|id| !marked.contains(&Identity::Object(*id)))
-                .collect(),
-            ended_task_results: ended
-                .into_iter()
-                .filter(|id| !marked.contains(&Identity::Task(*id)))
-                .collect(),
-        })?;
-        self.certificate.upper = LogicalBytes(cost);
-        self.certificate.entities = entities;
-        self.certificate.refinements += 1;
-        Ok(
-            if cost
-                .checked_add(pending.bytes.0)
-                .is_some_and(|v| v <= self.limit)
-            {
-                RefinedDecision::Granted(LogicalPermit {
-                    bytes: pending.bytes,
-                })
-            } else {
-                RefinedDecision::Refused {
-                    reachable: LogicalBytes(cost),
-                }
-            },
-        )
-    }
-}
 fn frozen(entities: u64, data_only: bool) -> FrozenRef {
     FrozenRef {
         root: PageRef {
@@ -626,7 +480,7 @@ fn errors_at_the_depth_limit_have_bounded_descendants() {
 fn an_allocation_consumes_its_native_reservation() {
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(48)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(48)).expect("census"),
     ))
     .expect("install");
     heap.reserve(3, 0).expect("reserve 48");
@@ -642,18 +496,24 @@ fn an_allocation_consumes_its_native_reservation() {
     assert_eq!(heap.certificate().upper, LogicalBytes(48));
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(16)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(16)).expect("census"),
     ))
     .expect("install");
     heap.reserve(1, 0).expect("reserve value");
-    heap.set_statement_roots(vec![Value::Null])
-        .expect("consume value reservation");
+    heap.set_execution_roots(
+        heap.tasks.clone(),
+        heap.joins.clone(),
+        &[Value::Null],
+        &[],
+        &[],
+    )
+    .expect("consume value reservation");
     assert_eq!(heap.certificate().upper, LogicalBytes(16));
     heap.release_statement_roots().expect("release");
     assert_eq!(heap.certificate().upper, LogicalBytes(0));
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(32)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(32)).expect("census"),
     ))
     .expect("install");
     heap.reserve(2, 0).expect("reserve family");
@@ -667,7 +527,7 @@ fn an_allocation_consumes_its_native_reservation() {
 fn replacing_a_reference_checks_the_proposed_reachable_graph() {
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(264)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(264)).expect("census"),
     ))
     .expect("install");
     let garbage = heap
@@ -701,14 +561,20 @@ fn replacing_a_reference_checks_the_proposed_reachable_graph() {
 fn statement_holding_cost_is_counted_before_fast_reservation() {
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
     ))
     .expect("install");
     let list = heap
         .allocate_object(ObjectInit::List(vec![Value::Null]))
         .expect("list");
-    heap.set_statement_roots(vec![Value::List(list)])
-        .expect("register");
+    heap.set_execution_roots(
+        heap.tasks.clone(),
+        heap.joins.clone(),
+        &[Value::List(list)],
+        &[],
+        &[],
+    )
+    .expect("register");
     assert_eq!(heap.certificate().upper, LogicalBytes(64));
     assert!(matches!(heap.reserve(2, 0), Err(NativeError::Memory)));
     heap.release_statement_roots().expect("release");
@@ -945,7 +811,7 @@ fn an_ended_task_result_counts_toward_fast_reservation() {
     use lash_kernel_doc::{Name, Site, TaskId, TaskIdentity, Unit};
     let (mut heap, _) = fresh();
     heap.set_census(Box::new(
-        TestCensus::restore(heap.certificate(), LogicalBytes(100)).expect("census"),
+        Census::restore(heap.certificate(), LogicalBytes(100)).expect("census"),
     ))
     .expect("census");
     let list = heap
@@ -983,12 +849,61 @@ fn an_ended_task_result_counts_toward_fast_reservation() {
             &heap.access,
         )
         .expect("ended task");
-    heap.set_task_root(tasks).expect("16-byte result holding");
+    heap.set_execution_roots(tasks, heap.joins.clone(), &[], &[], &[])
+        .expect("16-byte result holding");
     assert!(
         matches!(
             heap.allocate_object(ObjectInit::List(vec![])),
             Err(HeapWriteError::Memory)
         ),
         "49 + 16 + 16 live bytes leave less than a 32-byte object under a 100-byte bound"
+    );
+}
+
+/// S1/S7: a newly created entity is a zero-cost tracing seed until its
+/// enclosing expression installs the completed value in a holding location.
+#[test]
+fn a_fresh_mid_expression_entity_survives_the_next_allocation_pressure() {
+    let (mut heap, _) = fresh();
+    heap.set_census(Box::new(
+        Census::restore(heap.certificate(), LogicalBytes(96)).unwrap(),
+    ))
+    .unwrap();
+    let garbage = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
+    let fresh = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
+    heap.set_execution_roots(heap.tasks.clone(), heap.joins.clone(), &[], &[], &[fresh])
+        .unwrap();
+    let next = heap
+        .allocate_object(ObjectInit::List(vec![Value::Null]))
+        .unwrap();
+    assert!(heap.certificate().refinements > 0);
+    assert_eq!(heap.len(fresh).unwrap(), 0);
+    assert_eq!(heap.len(next).unwrap(), 1);
+    assert!(heap.kind(garbage).unwrap().is_none());
+    assert_eq!(heap.certificate().entities, 2);
+}
+
+/// D-IMM/D-KEY: an immutable descriptor retains its computed normal form.
+/// Payload-page eviction does not force repeated normalization of a live key.
+#[test]
+fn a_thousand_lookups_normalize_a_resident_paged_key_at_most_once() {
+    let (mut heap, pages) = fresh();
+    let mut key = text(&mut heap, &"k".repeat(1 << 20));
+    let map = heap
+        .allocate_object(ObjectInit::Map(vec![(key.clone(), int(7))]))
+        .unwrap();
+    // Model a newly decoded descriptor with an empty runtime key cache.
+    if let Value::Text(text) = &mut key {
+        text.normal = Default::default();
+    }
+    let before = pages.borrow().payload_reads;
+    for _ in 0..1000 {
+        heap.access.clear();
+        assert!(is_int(heap.map_get(map, &key).unwrap(), 7));
+    }
+    let reads = pages.borrow().payload_reads - before;
+    assert!(
+        reads > 0 && reads <= 270,
+        "one canonical 1 MiB tree read, got {reads}"
     );
 }

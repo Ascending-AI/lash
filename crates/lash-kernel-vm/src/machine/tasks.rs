@@ -129,6 +129,19 @@ impl Tasks {
         self.cache.insert(index, task);
         Ok(())
     }
+    pub(super) fn after_refinement(&mut self, rows: Tree<TaskRecord>) -> Result<(), HeapFault> {
+        for (index, task) in &mut self.cache {
+            if matches!(task.record.state, TaskStateRecord::Ended(_))
+                && let Some(record) = rows.get(&ordinal_key(*index), &self.access)?
+                && !record.result_retained
+            {
+                task.record.result_retained = false;
+                task.record.state = record.state;
+            }
+        }
+        self.rows = rows;
+        Ok(())
+    }
     pub(super) fn roots(&mut self) -> Result<Tree<TaskRecord>, HeapFault> {
         for (index, task) in &mut self.cache {
             task.frames.flush()?;
@@ -151,6 +164,11 @@ impl Tasks {
     }
     /// At a complete statement the canonical records are authoritative.
     /// Retire derived frames so the cache cannot grow with task history.
+    pub(super) fn cached_frames(&self, id: TaskId) -> Vec<&super::Frame> {
+        self.cache
+            .get(&id.0)
+            .map_or_else(Vec::new, |task| task.frames.cached())
+    }
     pub(super) fn evict(&mut self) -> Result<(), HeapFault> {
         self.roots()?;
         self.cache.clear();

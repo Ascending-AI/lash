@@ -15,6 +15,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 mod datum;
+mod read;
 
 const RELATIVE: FamilyId = FamilyId(u64::MAX);
 fn budget() -> SealBudget {
@@ -312,6 +313,7 @@ impl Freezer<'_> {
                 summary.task_edges = 0;
                 summary.depth = depth;
                 Ok(Value::Tuple(TupleRef {
+                    normal: Default::default(),
                     family: None,
                     summary,
                     body: rows

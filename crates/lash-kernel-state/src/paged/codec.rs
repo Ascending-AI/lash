@@ -88,6 +88,8 @@ record!(CheckpointRoot {
     document: DocumentId,
     release: PageId,
     owner: PageId,
+    target: CellTargetKind,
+    functions: KeyedRoot,
     status: RootStatus,
     heap: PageRef,
     tasks: KeyedRoot,
@@ -440,3 +442,5 @@ impl TokenCodec for CommittedOutcomeRecord {
     }
 }
 record!(ListJoinRecord { joiner: TaskId, mode: JoinMode, members: tree::Tree<TaskId> });
+
+units!(CellTargetKind { Main = 0, Entry = 1 });

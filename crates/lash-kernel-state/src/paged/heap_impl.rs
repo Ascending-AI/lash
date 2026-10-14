@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub struct PagedHeap {
     pub access: Access<'static>,
+    pub(super) limits: lash_kernel_doc::KernelDataLimits,
     pub directory: Tree<ObjectHead>,
     pub families: Tree<FamilyRecord>,
     next_ordinal: u64,
@@ -31,6 +32,7 @@ pub struct PagedHeap {
     pub tasks: Tree<super::directory::execution::TaskRecord>,
     pub joins: Tree<ListJoinRecord>,
     temporary: Vec<Value>,
+    temporary_fresh: Vec<EntityId>,
     pub(super) reserved: u64,
 }
 impl PagedHeap {
@@ -87,6 +89,7 @@ impl PagedHeap {
         );
         Ok(Self {
             access,
+            limits: lash_kernel_doc::KernelDataLimits::standard(),
             directory,
             families,
             next_ordinal: root.next_ordinal,
@@ -101,8 +104,12 @@ impl PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             temporary: Vec::new(),
+            temporary_fresh: Vec::new(),
             reserved: 0,
         })
+    }
+    pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
+        self.limits = limits;
     }
     /// The machine installs the accounting lane's admitted census and bound.
     pub fn set_census(&mut self, census: Box<dyn AllocationCensus>) -> Result<(), HeapFault> {
@@ -147,12 +154,16 @@ impl PagedHeap {
             self.accounting = census.certificate();
         }
         self.temporary.clear();
+        self.temporary_fresh.clear();
         self.reserved = 0;
         self.header = None;
         Ok(())
     }
     pub(super) fn statement_roots(&self) -> &[Value] {
         &self.temporary
+    }
+    pub(super) fn fresh_roots(&self) -> &[EntityId] {
+        &self.temporary_fresh
     }
     pub(super) fn outstanding_reserved(&self) -> u64 {
         self.reserved
@@ -232,35 +243,17 @@ impl PagedHeap {
             _ => Err(raised("type_error", "the object has another kind")),
         }
     }
-    pub fn set_statement_roots(&mut self, values: Vec<Value>) -> Result<(), HeapWriteError> {
-        let before = checked_sum(self.temporary.iter().map(value_cost))?;
-        let after = checked_sum(values.iter().map(value_cost))?;
-        let mut census = self
-            .census
-            .take()
-            .ok_or_else(|| HeapFault::Malformed("statement has no census".into()))?;
-        let credit = self.reserved.min(after.saturating_sub(before));
-        let decision = census.reserve(LogicalBytes(
-            after.saturating_sub(before).saturating_sub(credit),
-        ));
-        let result = (|| {
-            census
-                .changed(LogicalBytes(credit), LogicalBytes(0))
-                .map_err(census_fault)?;
-            self.reserved -= credit;
-            self.temporary = values;
-            match decision {
-                ReservationDecision::Granted(_) => census
-                    .changed(LogicalBytes(before), LogicalBytes(after))
-                    .map_err(census_fault)
-                    .map_err(HeapWriteError::from),
-                ReservationDecision::NeedsPrecision(_) => self.refine_installed(&mut *census, &[]),
-            }
-        })();
-        self.accounting = census.certificate();
-        self.census = Some(census);
-        self.header = None;
-        result
+    pub(super) fn install_transient(
+        &mut self,
+        values: &[Value],
+        pinned: &[Value],
+        fresh: &[EntityId],
+    ) {
+        self.temporary.clear();
+        self.temporary.extend_from_slice(values);
+        self.temporary.extend_from_slice(pinned);
+        self.temporary_fresh.clear();
+        self.temporary_fresh.extend_from_slice(fresh);
     }
     fn refine_installed(
         &mut self,
@@ -269,13 +262,15 @@ impl PagedHeap {
     ) -> Result<(), HeapWriteError> {
         let registers = self.temporary.clone();
         let reserved = self.reserved;
+        let mut seeds = self.temporary_fresh.clone();
+        seeds.extend_from_slice(fresh);
         match census.refine(
             self,
             &TransientRoots {
                 registers: &registers,
                 pinned: &[],
                 native_args: &[],
-                fresh,
+                fresh: &seeds,
                 reserved: LogicalBytes(reserved),
             },
             PendingReservation {
@@ -289,6 +284,17 @@ impl PagedHeap {
         }
     }
     pub(super) fn admit(&mut self, bytes: u64, extra: &[Value]) -> Result<(), HeapWriteError> {
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("reservation has no census".into()))?;
+        if matches!(
+            census.reserve(LogicalBytes(bytes)),
+            ReservationDecision::Granted(_)
+        ) {
+            return Ok(());
+        }
+        let fresh = self.temporary_fresh.clone();
         let mut values = self.temporary.clone();
         values.extend_from_slice(extra);
         self.reserve_logical(
@@ -297,7 +303,7 @@ impl PagedHeap {
                 registers: &values,
                 pinned: &[],
                 native_args: &[],
-                fresh: &[],
+                fresh: &fresh,
                 reserved: LogicalBytes(self.reserved),
             },
         )
@@ -484,8 +490,8 @@ impl PagedHeap {
                 e.depth = value_depth(&data) + 1;
                 e.task_edges = lash_kernel_doc::heap_values::task_count(&data);
                 e.family = None;
-                if e.depth > 128 {
-                    return Err(raised("depth", "error nesting exceeds K-VAL-034"));
+                if e.depth as usize > self.limits.value_depth() {
+                    return Err(raised("too_deep", "error nesting exceeds K-VAL-034"));
                 }
                 e.cost = LogicalBytes(checked_sum(
                     [
@@ -553,7 +559,9 @@ impl PagedHeap {
     pub(super) fn copy_int(&self, int: &IntRef) -> Result<Integer, HeapFault> {
         match int {
             IntRef::Inline(i) => Ok(i.clone()),
-            IntRef::Paged { summary, digits } => {
+            IntRef::Paged {
+                summary, digits, ..
+            } => {
                 let len = summary.bits.div_ceil(8);
                 let mut out = Vec::new();
                 self.payload_visit(&Value::Int(int.clone()), 0..len, &mut |chunk| {
@@ -578,6 +586,7 @@ impl SemanticHeap for PagedHeap {
     fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self {
         Self {
             access: Access::new(source),
+            limits: lash_kernel_doc::KernelDataLimits::standard(),
             directory: Tree::new(false),
             families: Tree::new(false),
             next_ordinal: 0,
@@ -600,6 +609,7 @@ impl SemanticHeap for PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             temporary: Vec::new(),
+            temporary_fresh: Vec::new(),
             reserved: 0,
         }
     }
@@ -610,6 +620,7 @@ impl SemanticHeap for PagedHeap {
     ) -> Result<Self, HeapFault> {
         Ok(Self {
             access: Access::new(source),
+            limits: lash_kernel_doc::KernelDataLimits::standard(),
             directory: Tree::open(
                 root.directory.page,
                 root.directory.len,
@@ -634,6 +645,7 @@ impl SemanticHeap for PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             temporary: Vec::new(),
+            temporary_fresh: Vec::new(),
             reserved: 0,
         })
     }
@@ -1113,10 +1125,12 @@ fn raised(kind: &'static str, message: &str) -> HeapWriteError {
 pub(super) fn native_raised(kind: &str, message: &str) -> NativeError {
     NativeError::Raised(Arc::new(ErrorRef {
         kind: TextRef {
+            normal: Default::default(),
             summary: text_summary(kind),
             body: Payload::Resident(Arc::from(kind)),
         },
         message: TextRef {
+            normal: Default::default(),
             summary: text_summary(message),
             body: Payload::Resident(Arc::from(message)),
         },
@@ -1327,15 +1341,32 @@ impl PagedHeap {
             }
             Ok(true)
         }
+        let cache = match value {
+            Value::Text(text) => Some(&text.normal),
+            Value::Bytes(bytes) => Some(&bytes.normal),
+            Value::Tuple(tuple) => Some(&tuple.normal),
+            Value::Int(IntRef::Paged { normal, .. }) => Some(normal),
+            _ => None,
+        };
+        if let Some(key) = cache.and_then(|cache| cache.get()) {
+            return Ok(key.clone());
+        }
         let mut out = TokenWriter::new();
         if !tokens(self, value, &mut out)? {
+            if let Some(cache) = cache {
+                cache.set(None);
+            }
             return Ok(None);
         }
         let bytes = out.into_bytes();
-        Ok(Some(if bytes.len() <= NormalKey::INLINE_MAX {
+        let key = Some(if bytes.len() <= NormalKey::INLINE_MAX {
             NormalKey::Inline(bytes)
         } else {
             NormalKey::Digest(key_digest(&bytes))
-        }))
+        });
+        if let Some(cache) = cache {
+            cache.set(key.clone());
+        }
+        Ok(key)
     }
 }

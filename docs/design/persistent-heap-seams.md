@@ -76,8 +76,10 @@ open that two lanes would otherwise settle differently.
   are **canonical**: greedy leaves of at most `PAYLOAD_LEAF_BYTES` (4096)
   that end on UTF-8 scalar boundaries, with fanout-32 indexes built bottom-up
   and carrying byte, character and UTF-16 counts. Two paged payloads are
-  therefore equal exactly when their root digests are, so equality and key
-  normalization need no page read, and equal payloads share pages. This
+  therefore equal exactly when their root digests are. Equality of canonical
+  payloads and comparison of already-built normal forms need no page read;
+  building a long value's normal form may read its payload once. Equal
+  payloads share pages. This
   rejects the representation report's "root-preserving partial chunks". A
   concatenation or slice re-chunks its output in O(output), which is already
   the cost of today's `Arc` copy.
@@ -1007,3 +1009,33 @@ return `Result<(), HeapFault>`. A visitor error stops summary traversal
 immediately and propagates unchanged, matching `persistent_roots`. The
 census can therefore end traversal at its host-work or memory limit without
 loading the rest of a large edge summary.
+
+S4 amendment (hp-heap, approved 330736): CheckpointRoot.target is CellTargetKind
+{ Main, Entry }; functions is KeyedRoot. Start retains the target and adopted
+saved-function root; seal copies both and open attaches without tree reads.
+
+S8 read-only projection (hp-heap, approved 330606): PagedHeap.frozen_datum
+(&FrozenRef) -> Result<Datum, HeapFault> decodes the existing frozen grammar for
+host reporting, without guest reservation or family allocation.
+
+S1 transient refresh (approved 330825): set_transient_roots replaces
+set_statement_roots. It takes borrowed value, pinned-value and fresh-identity
+slices, reusing heap-owned buffers. Fresh identities are zero-cost census seeds;
+release_statement_roots clears both buffers. Fast admission copies no roots.
+
+S1 fused publication (approved 330913): set_execution_roots(tasks, joins,
+registers: &[Value], pinned: &[Value], fresh: &[EntityId]) is the sole task, join
+and transient root publication. Proposed records and zero-cost fresh seeds are
+visible together before refinement. Supersedes set_task_root, set_join_root and
+set_transient_roots; no other production caller needs those entry points.
+FIG-6196 step counters are an integrator gate on 27c22f1672, not this lane.
+
+D-IMM clarification (approved 331092): normalized keys are cached on resident
+immutable descriptors only, outside the canonical grammar; reload starts an
+empty cache. No persisted per-string or per-tuple digest is introduced.
+
+Name representation (approved 331194): Name internally shares immutable text
+through Arc<str>. Public methods, serde/schema/token text and content eq/hash
+stay the same. Cloning a Value now allocates no name string during root refresh.
+No cheap scoped allocation counter exists in these layers; buffer reuse and
+Value clone behavior are verified by inspection.

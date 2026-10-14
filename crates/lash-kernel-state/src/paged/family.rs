@@ -65,7 +65,7 @@ pub struct FamilyRecord {
 
 /// A carried session: what a cell starts from and a terminal cell hands
 /// on (kind [`PageKind::SESSION_ROOT`](super::PageKind::SESSION_ROOT)).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionRoot {
     pub heap: PageRef,
     /// Carried bindings: name to value.

@@ -39,7 +39,6 @@ pub mod observe;
 pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
-mod whole;
 
 #[cfg(test)]
 mod laws;
@@ -47,11 +46,10 @@ mod laws;
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
-pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
 
 pub use interface::{
-    Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectMode, EffectModes,
-    EffectRequest, End, ExportError, Finished, Host, HostFault, ImportError, Machine, MachineError,
-    Meters, Outcome, Park, Program, Request, RunError, SleepRequest, Start, StartError, Step,
-    Target, WaitId,
+    Bound, BoundExceeded, Bounds, CellStart, DeliverError, Delivered, EffectMode, EffectModes,
+    EffectRequest, End, Finished, Host, HostFault, Machine, MachineError, Meters, OpenError,
+    Outcome, Park, Program, Request, RunError, SealError, SleepRequest, StartError, Step, Target,
+    WaitId,
 };

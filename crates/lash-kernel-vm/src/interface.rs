@@ -45,8 +45,8 @@ use std::time::Duration;
 
 use crate::PreparedLibrary;
 use lash_kernel_doc::{
-    Datum, Document, DocumentId, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName,
-    Handle, Invalid, Name, Object, ObjectId, Site, TaskIdentity, Timestamp, Type, Value,
+    Datum, Document, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Handle,
+    Invalid, Name, Site, TaskIdentity, Timestamp, Type,
 };
 
 /// What a machine runs: an admitted document and the library functions the
@@ -121,27 +121,6 @@ pub enum Target {
     Main,
     /// One of the document's entries, by name.
     Entry(Name),
-}
-
-/// How a new run starts.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Start {
-    pub target: Target,
-    /// The entry's arguments, decoded by the entry's signature. Empty for
-    /// `main`.
-    pub args: Vec<Datum>,
-    /// The session's bindings, which `main` reads and writes (`K-SES-001`).
-    /// Empty for an entry.
-    pub bindings: Bindings,
-}
-
-/// A session's bindings as data: each variable's value, and the heap
-/// objects those values reach, with their identities, so that two bindings
-/// that share an object still share it in the next cell.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Bindings {
-    pub variables: BTreeMap<Name, Value>,
-    pub objects: BTreeMap<ObjectId, Object>,
 }
 
 /// How a run's `perform` of one effect runs (`K-EFF-012`).
@@ -309,6 +288,8 @@ pub enum DeliverError {
     WrongOutcome { wait: WaitId },
     #[error("the run has ended")]
     Ended,
+    #[error(transparent)]
+    Heap(#[from] lash_kernel_doc::heap::HeapFault),
 }
 
 /// Where [`Machine::run`] stopped.
@@ -347,32 +328,10 @@ pub struct Park {
 /// How a run ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum End {
-    /// `main` or the entry returned, or a `finish` ran.
     Finished(Finished),
-    /// A `fail` ran, with this reason.
     Failed(Datum),
     Error(RunError),
-    /// The embedder's cancel was observed. No cleanup block ran.
     Cancelled,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Finished {
-    pub result: Datum,
-    /// Whether a `finish` ended the run. Otherwise `main` or the entry
-    /// returned, and `result` is what it returned.
-    pub finish: bool,
-    /// The session's bindings after `main`. Empty for an entry.
-    pub bindings: Bindings,
-    /// The session bindings that were not carried because they reach a
-    /// closure or a task handle (`K-SES-003`).
-    pub not_carried: Vec<Name>,
-    /// Those of `not_carried` that reach no task handle, as the run left
-    /// them: each one's value and the objects it reaches, with every
-    /// closure as the expression it was made from and the variables it
-    /// shares. No later run starts from these; an embedder reads them to
-    /// keep a function as a value of its own.
-    pub closures: Bindings,
 }
 
 /// A run that ended in an error (`K-TASK-018`, `K-BND-001`).
@@ -414,103 +373,8 @@ pub enum StartError {
     /// declare.
     #[error("the run binds `{effect}` as a read, and the manifest declares no such effect")]
     UndeclaredRead { effect: EffectName },
+    #[error(transparent)]
+    Heap(#[from] lash_kernel_doc::heap::HeapFault),
 }
 
-/// A call the machine cannot serve in its present state.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum MachineError {
-    #[error("the run has ended")]
-    Ended,
-    /// The machine found its own state inconsistent: a defect in the
-    /// machine, never in the document. The run is over.
-    #[error("the machine is in a state it cannot run from: {problem}")]
-    Fault { problem: String },
-    /// The host failed a read-bound `perform` it was asked to answer
-    /// ([`Host::perform`]): nothing about the guest. The run is over; its
-    /// last save stands.
-    #[error("the host failed a read: {0}")]
-    Host(HostFault),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ExportError {
-    #[error("the run has ended; there is nothing to park")]
-    Ended,
-    /// The machine found its own state inconsistent: a defect in the
-    /// machine, never in the document.
-    #[error("the machine is in a state it cannot write: {problem}")]
-    Fault { problem: String },
-}
-
-/// A parked state the machine refuses to resume.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ImportError {
-    #[error("the document is not admitted: {0}")]
-    NotAdmitted(#[from] Invalid),
-    #[error("the state was parked under document {parked}, not {given}")]
-    DocumentMismatch {
-        parked: DocumentId,
-        given: DocumentId,
-    },
-    #[error(
-        "the state was parked under kernel version {parked}; the document is written for {supported}"
-    )]
-    KernelVersion { parked: u32, supported: u32 },
-    #[error("the registry has no function {function}, which the parked run pins")]
-    MissingFunction { function: FunctionId },
-    #[error("the parked state is malformed: {problem}")]
-    Malformed { problem: String },
-}
-
-/// A kernel machine: one run of one document.
-///
-/// An embedder drives it in a loop: [`run`](Self::run) until it parks,
-/// commit the park, [`deliver`](Self::deliver) outcomes as they commit, and
-/// `run` again. Between calls the run is at a safe point: every task is
-/// between statements, and [`export`](Self::export) may be called.
-///
-/// The conformance harness runs its corpus against any implementation of
-/// this trait.
-pub trait Machine: Sized {
-    /// The parked state this machine writes and reads: for
-    /// [`KernelMachine`](crate::KernelMachine), the `ParkedRun` of
-    /// `lash-kernel-state`.
-    type Parked;
-
-    /// Admits and prepares `program`'s document, reusing immutable preparation
-    /// when available, and creates a run that has executed nothing.
-    fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError>;
-
-    /// Creates a run as [`start`](Self::start) does, performing each
-    /// effect in the mode `modes` binds (`K-EFF-012`).
-    fn start_reading(
-        program: Program,
-        bounds: Bounds,
-        start: Start,
-        modes: EffectModes,
-    ) -> Result<Self, StartError>;
-
-    /// Runs ready tasks, first in first out, until no task is ready, the
-    /// run ends, or `slice` charge units are spent in this call
-    /// (`K-MACH-002`). A slice of `u64::MAX` never ends early.
-    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError>;
-
-    /// Hands the machine one committed outcome. Outcomes may be delivered
-    /// in any order, and several before the next `run` (`K-MACH-004`).
-    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError>;
-
-    /// Writes the run's state as it stands at this safe point
-    /// (`K-MACH-007`).
-    fn export(&mut self) -> Result<Self::Parked, ExportError>;
-
-    /// Rebuilds a run from a parked state against its document's prepared
-    /// executable. Every parked-state refusal is checked; resuming continues
-    /// the computation and its effect ownership exactly (`K-MACH-008`).
-    fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError>;
-
-    /// What the run has used so far.
-    fn meters(&self) -> Meters;
-}
+pub use crate::paged::{CellStart, Finished, Machine, MachineError, OpenError, SealError};

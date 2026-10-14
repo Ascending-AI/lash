@@ -49,7 +49,7 @@ pub struct SealedRoot {
 }
 
 /// A successful run's end after the cutover.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Finished {
     pub result: Datum,
     pub finish: bool,

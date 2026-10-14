@@ -24,6 +24,8 @@ fn a_checkpoint_root_fits_its_root_bound() {
         document: DocumentId::from_bytes([1; 32]),
         release: PageId([2; 32]),
         owner: PageId([3; 32]),
+        target: CellTargetKind::Main,
+        functions: empty(),
         status: RootStatus::Parked,
         heap: PageRef {
             id: PageId([4; 32]),

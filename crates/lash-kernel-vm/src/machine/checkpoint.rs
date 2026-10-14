@@ -1,0 +1,401 @@
+//! Safe points publish one bounded root naming the canonical record trees.
+use super::*;
+use crate::interface::CellStart;
+use crate::paged::{OpenError, SealError, SealedRoot};
+use lash_kernel_doc::graph_tokens::encode_body;
+use lash_kernel_state::paged::tree::SealWork;
+use lash_kernel_state::paged::{
+    AllocationCensus, CheckpointRoot, EditEpoch, PageKind, PageSource, RootStatus, SavedMeters,
+    SealBudget, SequenceRoot,
+};
+
+impl Machine for KernelMachine {
+    fn start(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
+    ) -> Result<Self, StartError> {
+        session::start(
+            program,
+            bounds,
+            start,
+            source,
+            census,
+            Layout::default(),
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
+    }
+    fn open(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        admissions: Vec<lash_kernel_state::AdmittedWait>,
+        source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
+    ) -> Result<Self, OpenError> {
+        Self::open_with_layout(
+            program,
+            bounds,
+            root,
+            admissions,
+            source,
+            census,
+            Layout::default(),
+        )
+    }
+    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        if self.ended {
+            return Err(MachineError::Ended);
+        }
+        self.observe_phase(GuestPhase::Interpret);
+        let result = self.run_slice(host, slice);
+        self.regs.clear();
+        self.observe_phase(if matches!(result, Ok(Step::Parked(_))) {
+            GuestPhase::Park
+        } else {
+            GuestPhase::Inactive
+        });
+        result
+    }
+    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
+        if self.ended {
+            return Err(DeliverError::Ended);
+        }
+        let key = ordinal_key(wait.0);
+        let Some(mut pending) = self.waits.get(&key, &self.heap.access)? else {
+            return if self.withdrawn_ever.get(&key, &self.heap.access)?.is_some() {
+                Ok(Delivered::Dropped)
+            } else if wait.0 < self.next_wait {
+                Err(DeliverError::AlreadyDelivered { wait })
+            } else {
+                Err(DeliverError::UnknownWait { wait })
+            };
+        };
+        match pending.phase {
+            WaitPhase::Issued { .. } => return Err(DeliverError::UnknownWait { wait }),
+            WaitPhase::Committed(_) => return Err(DeliverError::AlreadyDelivered { wait }),
+            WaitPhase::Admitted => (),
+        }
+        if matches!(
+            pending.kind,
+            lash_kernel_state::paged::WaitKindRecord::Sleep
+        ) != matches!(outcome, Outcome::Elapsed)
+        {
+            return Err(DeliverError::WrongOutcome { wait });
+        }
+        use lash_kernel_state::paged::CommittedOutcomeRecord;
+        let frozen = match outcome {
+            Outcome::Elapsed => CommittedOutcomeRecord::Elapsed,
+            Outcome::Failed(error) => CommittedOutcomeRecord::Failed(
+                self.heap
+                    .freeze_datum(&Datum::Error(Box::new(error)))
+                    .map_err(delivery_error)?,
+            ),
+            Outcome::Completed(datum) => {
+                let task = pending.task;
+                let ty = self
+                    .frame(task)
+                    .map_err(|error| {
+                        DeliverError::Heap(HeapFault::Malformed(format!("{error:?}")))
+                    })?
+                    .awaiting
+                    .and_then(|stmt| match &self.exe.stmt(stmt).form {
+                        crate::compile::Form::Action(action) => match &action.kind {
+                            crate::compile::ActionKind::Perform { result, .. } => Some(result),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .ok_or_else(|| {
+                        DeliverError::Heap(HeapFault::Malformed("outcome has no perform".into()))
+                    })?;
+                let decoder = crate::data::Decoder {
+                    max_depth: self.limits.value_depth(),
+                    policy: self.program.document.manifest.numbers,
+                    declared: &|name| self.exe.declared.contains_key(name),
+                };
+                match decoder.decode(&datum, ty) {
+                    Ok(datum) => CommittedOutcomeRecord::Completed(
+                        self.heap.freeze_datum(&datum).map_err(delivery_error)?,
+                    ),
+                    Err(problem) => CommittedOutcomeRecord::Failed(
+                        self.heap
+                            .freeze_datum(&Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+                                kind: "effect_result".into(),
+                                message: format!(
+                                    "the result does not fit the stated type: {problem}"
+                                ),
+                                data: Datum::Null,
+                            })))
+                            .map_err(delivery_error)?,
+                    ),
+                }
+            }
+        };
+        pending.phase = WaitPhase::Committed(frozen);
+        let task = pending.task;
+        self.waits.write(key, pending, &self.heap.access)?;
+        self.task(task)
+            .map_err(|error| DeliverError::Heap(HeapFault::Malformed(format!("{error:?}"))))?
+            .wake(Incoming::Outcome(wait));
+        self.ready.push_back(task)?;
+        Ok(Delivered::Accepted)
+    }
+    fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        if self.ended {
+            return Err(SealError::Ended);
+        }
+        self.publish_roots().map_err(|error| SealError::Fault {
+            problem: format!("{error:?}"),
+        })?;
+        let access = self.heap.access.clone();
+        // The running task is first on reopen; retain the untouched ready tree.
+        if let Some(task) = self.current.take() {
+            self.ready.push_front(task).map_err(SealError::Heap)?;
+        }
+        let mut work = SealWork::new(budget);
+        if !self
+            .heap
+            .tasks
+            .seal(&access, &mut work)
+            .map_err(SealError::Heap)?
+            || !self
+                .ready
+                .rows
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .waits
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .joins
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .withdrawn_ever
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .withdrawn
+                .rows
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .modes
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+            || !self
+                .heap
+                .session
+                .seal(&access, &mut work)
+                .map_err(SealError::Heap)?
+        {
+            return Ok(None);
+        }
+        // Reserve the maximum bounded root before giving the rest to the heap.
+        if !work.take(4096 + 128) {
+            return Ok(None);
+        }
+        if self
+            .heap
+            .seal(work.remaining)
+            .map_err(SealError::Heap)?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let root = CheckpointRoot {
+            kernel: self.program.document.manifest.kernel,
+            document: self
+                .program
+                .document
+                .identity()
+                .map_err(|error| SealError::Fault {
+                    problem: error.to_string(),
+                })?,
+            release: self.release,
+            owner: self.owner,
+            target: if self.session_cell {
+                lash_kernel_state::paged::CellTargetKind::Main
+            } else {
+                lash_kernel_state::paged::CellTargetKind::Entry
+            },
+            functions: self.functions,
+            status: RootStatus::Parked,
+            heap: self.heap.sealed_root().ok_or_else(|| SealError::Fault {
+                problem: "sealed heap has no header".into(),
+            })?,
+            tasks: keyed(&self.heap.tasks),
+            ready: sequence_root(&self.ready.rows),
+            waits: keyed(&self.waits),
+            joins: keyed(&self.joins),
+            withdrawn: keyed(&self.withdrawn_ever),
+            unreported: sequence_root(&self.withdrawn.rows),
+            reads: keyed(&self.modes),
+            session: keyed(&self.heap.session),
+            meters: SavedMeters {
+                charged: self.charged,
+                waits_issued: self.next_wait,
+                next_join: self.next_join,
+                live_tasks: self.live_tasks,
+            },
+        };
+        let tokens = encode_body(&root);
+        if tokens.len() > 4096 {
+            return Err(SealError::Fault {
+                problem: "checkpoint header exceeds the root bound".into(),
+            });
+        }
+        let children = [
+            Some(root.heap),
+            root.tasks.page,
+            root.ready.page,
+            root.waits.page,
+            root.joins.page,
+            root.withdrawn.page,
+            root.unreported.page,
+            root.reads.page,
+            root.session.page,
+            root.functions.page,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let page = access
+            .seal(PageKind::CHECKPOINT_ROOT, tokens, children)
+            .map_err(SealError::Heap)?;
+        self.tasks = tasks::Tasks::open(self.heap.tasks.clone(), access, Arc::clone(&self.exe));
+        Ok(Some(SealedRoot { page, root }))
+    }
+    fn meters(&self) -> Meters {
+        Meters {
+            charged: self.charged,
+            memory: self.heap.certificate().upper.0,
+            live_tasks: self.live_tasks,
+        }
+    }
+}
+fn sequence<T: lash_kernel_state::paged::tree::Cell>(root: SequenceRoot) -> Tree<T> {
+    Tree::open(root.page, root.len, root.cost, true)
+}
+fn sequence_root<T: lash_kernel_state::paged::tree::Cell>(tree: &Tree<T>) -> SequenceRoot {
+    SequenceRoot {
+        page: tree.page(),
+        len: tree.len(),
+        cost: LogicalBytes(tree.cost()),
+    }
+}
+fn delivery_error(error: HeapWriteError) -> DeliverError {
+    match error {
+        HeapWriteError::Fault(error) => DeliverError::Heap(error),
+        other => DeliverError::Heap(HeapFault::Malformed(format!("frozen delivery: {other}"))),
+    }
+}
+
+impl KernelMachine {
+    pub fn open_with_layout(
+        program: Program,
+        bounds: Bounds,
+        root: &CheckpointRoot,
+        _admissions: Vec<lash_kernel_state::AdmittedWait>,
+        source: Box<dyn PageSource>,
+        census: Box<dyn AllocationCensus>,
+        layout: Layout,
+    ) -> Result<Self, OpenError> {
+        let limits = lash_kernel_doc::KernelDataLimits::standard();
+        let library = program.library.in_layout(layout);
+        let admitted = library.admit(&program.document, limits)?;
+        let exe = admitted
+            .executable(&program.document, &library)
+            .map_err(|missing| OpenError::Malformed {
+                problem: format!("missing function {}", missing.0),
+            })?;
+        if root.document
+            != program
+                .document
+                .identity()
+                .map_err(|error| OpenError::Malformed {
+                    problem: error.to_string(),
+                })?
+        {
+            return Err(OpenError::DocumentMismatch {
+                parked: root.document,
+                given: program
+                    .document
+                    .identity()
+                    .map_err(|error| OpenError::Malformed {
+                        problem: error.to_string(),
+                    })?,
+            });
+        }
+        if root.kernel != program.document.manifest.kernel {
+            return Err(OpenError::KernelVersion {
+                parked: root.kernel,
+                supported: program.document.manifest.kernel,
+            });
+        }
+        if root.release != program.release {
+            return Err(OpenError::Malformed {
+                problem: "helper release differs from the checkpoint".into(),
+            });
+        }
+        if !matches!(root.status, RootStatus::Parked) {
+            return Err(OpenError::Malformed {
+                problem: "an ended root cannot execute".into(),
+            });
+        }
+        let mut heap =
+            PagedHeap::open_header(root.heap, source, EditEpoch(0)).map_err(OpenError::Heap)?;
+        heap.set_data_limits(limits);
+        heap.set_census(census).map_err(OpenError::Heap)?;
+        heap.set_family_base(Box::new(
+            lash_kernel_state::paged::family_impl::FrozenBase::default(),
+        ));
+        heap.session = open_tree(root.session);
+        heap.tasks = open_tree(root.tasks);
+        heap.joins = open_tree(root.joins);
+        let access = heap.access.clone();
+        let census_refinements = heap.certificate().refinements;
+        Ok(Self {
+            release: root.release,
+            owner: root.owner,
+            document: Some(root.document),
+            costs: crate::costs::Costs::of_document(&program.document),
+            session_cell: matches!(root.target, lash_kernel_state::paged::CellTargetKind::Main),
+            program,
+            exe: Arc::clone(&exe),
+            bounds,
+            limits,
+            tasks: tasks::Tasks::open(heap.tasks.clone(), access.clone(), exe),
+            ready: queue::Queue::open(sequence(root.ready), access.clone()),
+            current: None,
+            joins: heap.joins.clone(),
+            waits: open_tree(root.waits),
+            next_wait: root.meters.waits_issued,
+            next_join: root.meters.next_join,
+            withdrawn: queue::Queue::open(sequence(root.unreported), access),
+            withdrawn_ever: open_tree(root.withdrawn),
+            modes: open_tree(root.reads),
+            functions: root.functions,
+            heap,
+            pins: Pins::default(),
+            fresh: Vec::new(),
+            charging: true,
+            charged: root.meters.charged,
+            live_tasks: root.meters.live_tasks,
+            census_refinements,
+            inline_depth: 0,
+            inline_result: None,
+            regs: Vec::new(),
+            top: 0,
+            storage: Storage::default(),
+            steps: Default::default(),
+            end: None,
+            ended: false,
+            observer: None,
+        })
+    }
+}

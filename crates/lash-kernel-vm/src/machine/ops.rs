@@ -133,6 +133,7 @@ impl KernelMachine {
     /// when the heap is due and ending the run when what is live does not
     /// leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
+        self.publish_roots()?;
         let transient = TransientRoots {
             registers: &self.regs,
             pinned: &self.pins.values,
@@ -146,6 +147,7 @@ impl KernelMachine {
     }
 
     pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
+        self.publish_roots()?;
         let id = self
             .heap
             .allocate_object(object)
@@ -458,18 +460,17 @@ impl KernelMachine {
                 _ => Err(super::error("type_error", "`deref` takes a ref")),
             },
             LibRun::Machine(MachineFunction::TasksUnfinished) => {
-                let unfinished = self
-                    .tasks
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, other)| {
-                        *index as u64 != task.0 && !matches!(other.state, TaskState::Ended(_))
-                    })
-                    .map(|(index, _)| Value::Task(TaskId(index as u64)))
-                    .collect();
+                let mut unfinished = Vec::new();
+                self.tasks.visit(&mut |id, other| {
+                    if id != task && !matches!(other.state, TaskStateRecord::Ended(_)) {
+                        unfinished.push(Value::Task(id));
+                    }
+                    true
+                })?;
                 Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
             LibRun::Native(native) => {
+                self.publish_roots()?;
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
@@ -593,7 +594,7 @@ impl KernelMachine {
         };
         self.inline_depth -= 1;
         self.top = top;
-        self.refresh_charging(task, exe);
+        self.refresh_charging(task, exe)?;
         match result {
             Ok(value) => {
                 self.put(out, value);
@@ -648,8 +649,10 @@ impl KernelMachine {
         // against the heap.
         let Some(frame) = self
             .tasks
-            .get_mut(task.0 as usize)
-            .and_then(|task| task.frames.last_mut())
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("a running task is missing"))?
+            .frames
+            .last_mut()?
         else {
             return Err(fault("a running task has no frame").into());
         };

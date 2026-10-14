@@ -208,7 +208,12 @@ impl CensusGraph for Graph {
                     }
                 }
             },
-            Value::Error(error) if error.has_edges => self.value_edges(&error.data, out)?,
+            Value::Error(error) if error.has_edges => match &error.data {
+                Payload::Resident(data) => self.value_edges(data, out)?,
+                Payload::Paged(page) => {
+                    self.read_summary(*page, out)?;
+                }
+            },
             _ => {}
         }
         Ok(())
@@ -373,13 +378,16 @@ fn refinement_counts_registers_native_args_and_reservations() {
     let tuple = graph.summary(32, &[edge(1), Identity::Task(TaskId(10))]);
     let registers = [Value::List(id(0))];
     let native_args = [Value::Tuple(TupleRef {
+        normal: Default::default(),
         summary: TupleSummary {
             len: 2,
             cost: LogicalBytes(32),
             has_edges: true,
+            task_edges: 1,
             depth: 1,
         },
         body: Payload::Paged(tuple),
+        family: None,
     })];
     let pinned = [Value::Ref(Identity::Task(TaskId(10)))];
     let transient = TransientRoots {

@@ -49,20 +49,21 @@ fn truncate<T: Cell>(tree: &mut Tree<T>, len: u64, access: &Access<'_>) -> Resul
 
 impl Frame {
     pub(super) fn sync(&mut self) -> Result<(), HeapFault> {
-        let Some(Control::Block { block, next }) = self.control.last() else {
-            return Err(malformed("a live frame stands outside a statement block"));
-        };
-        let index = if self.awaiting.is_some() {
-            next.checked_sub(1)
-                .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
-        } else {
-            *next
-        };
-        self.record.statement = self
-            .exe
-            .block(*block)
-            .site
-            .child(u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?);
+        if let Some(Control::Block { block, next }) = self.control.last() {
+            let index = if self.awaiting.is_some() {
+                next.checked_sub(1)
+                    .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
+            } else {
+                *next
+            };
+            self.record.statement =
+                self.exe.block(*block).site.child(
+                    u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?,
+                );
+        }
+        // Expression evaluation may temporarily stand at a loop test or
+        // a departure. The coordinate is refreshed at its next safe point;
+        // its held values must already be visible to pressure accounting.
         let mut loops = 0;
         let mut iterated = 0;
         let mut finally = 0;
@@ -165,11 +166,7 @@ impl Frame {
         truncate(&mut self.record.departing, departing, &self.access)?;
         if let Some(call) = &self.library {
             if self.exe.lib(call.lib).native {
-                let args = self.record.arguments.get_or_insert_with(|| Tree::new(true));
-                for (index, value) in call.args.iter().enumerate() {
-                    write(args, index as u64, value.clone(), &self.access)?;
-                }
-                truncate(args, call.args.len() as u64, &self.access)?;
+                self.record.arguments = Some(call.args.clone());
             } else {
                 self.record.arguments = None;
             }
@@ -257,10 +254,12 @@ impl Frames {
     pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
         for (index, frame) in &mut self.cache {
             frame.sync()?;
-            self.rows
-                .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
+            write(&mut self.rows, *index, frame.record.clone(), &self.access)?;
         }
         Ok(())
+    }
+    pub(super) fn cached(&self) -> Vec<&Frame> {
+        self.cache.values().collect()
     }
     pub(super) fn loop_coordinates(
         &mut self,
@@ -439,14 +438,8 @@ fn restore(
                 .lib_of(function)
                 .ok_or_else(|| malformed("a frame's library is not admitted"))?;
             let args = match (exe.lib(lib).native, &record.arguments) {
-                (true, Some(args)) => {
-                    let mut values = Vec::new();
-                    for at in 0..args.len() {
-                        values.push(row(args, at, &access)?);
-                    }
-                    values
-                }
-                (false, None) => Vec::new(),
+                (true, Some(args)) => args.clone(),
+                (false, None) => Tree::new(true),
                 _ => return Err(malformed("a library frame has the wrong held arguments")),
             };
             Some(LibraryCall { lib, args })

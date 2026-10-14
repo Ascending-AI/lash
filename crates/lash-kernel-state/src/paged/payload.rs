@@ -273,10 +273,10 @@ impl NativeHeap for PagedHeap {
         self.equal_values(a, b)
     }
     fn data_depth_limit(&self) -> usize {
-        128
+        self.limits.document_depth()
     }
     fn value_depth_limit(&self) -> usize {
-        128
+        self.limits.value_depth()
     }
     fn len(&self, object: EntityId) -> Result<u64, HeapFault> {
         Ok(self.head(object)?.map_or(0, |h| h.len()))
@@ -312,6 +312,7 @@ impl NativeHeap for PagedHeap {
         }
         let text = match field {
             FieldName::Static(field) => TextRef {
+                normal: Default::default(),
                 summary: text_summary(field),
                 body: Payload::Resident(Arc::from(field)),
             },
@@ -462,7 +463,9 @@ impl NativeHeap for PagedHeap {
                     &mut |bytes| visitor(Chunk::Bytes(bytes)),
                 ),
             },
-            Value::Int(IntRef::Paged { summary, digits }) => {
+            Value::Int(IntRef::Paged {
+                summary, digits, ..
+            }) => {
                 let len = summary.bits.div_ceil(8);
                 let mut offset = range.start;
                 let mut invalid = false;
@@ -532,6 +535,7 @@ impl NativeHeap for PagedHeap {
     }
     fn text(&mut self, text: &str) -> Result<TextRef, NativeError> {
         Ok(TextRef {
+            normal: Default::default(),
             summary: text_summary(text),
             body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
                 Payload::Resident(Arc::from(text))
@@ -542,6 +546,7 @@ impl NativeHeap for PagedHeap {
     }
     fn bytes(&mut self, bytes: &[u8]) -> Result<BytesRef, NativeError> {
         Ok(BytesRef {
+            normal: Default::default(),
             len: bytes.len() as u64,
             body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
                 Payload::Resident(Arc::from(bytes))
@@ -559,6 +564,7 @@ impl NativeHeap for PagedHeap {
             negative: int.is_negative(),
         };
         Ok(IntRef::Paged {
+            normal: Default::default(),
             summary,
             digits: super::payload::build(&self.access, &integer_digits(&int), false)?,
         })
@@ -571,9 +577,9 @@ impl NativeHeap for PagedHeap {
             depth = depth.max(value_depth(&v) + 1);
             values.push(v);
         }
-        if depth > 128 {
+        if depth as usize > self.limits.value_depth() {
             return Err(native_raised(
-                "depth",
+                "too_deep",
                 "tuple nesting exceeds the value depth bound",
             ));
         }
@@ -606,6 +612,7 @@ impl NativeHeap for PagedHeap {
             )
         };
         Ok(TupleRef {
+            normal: Default::default(),
             summary,
             body,
             family: None,

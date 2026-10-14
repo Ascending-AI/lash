@@ -555,3 +555,31 @@ fn a_paged_frozen_error_keeps_its_receiving_family_at_every_immutable_depth() {
         matches!(reopened.list_get(b, 0).expect("second"), Some(Value::Int(IntRef::Inline(n))) if n == 1.into())
     );
 }
+
+/// S4 Issued requests use the frozen grammar as a host envelope. Reporting
+/// reads that envelope without reserving or instantiating guest entities.
+#[test]
+fn an_issued_intent_projects_identical_data_without_allocating_entities() {
+    use lash_kernel_doc::{Datum, ErrorDatum};
+    let (mut heap, pages) = fresh();
+    let datum = Datum::Tuple(vec![
+        Datum::Text("request".repeat(32_000)),
+        Datum::Error(Box::new(ErrorDatum {
+            kind: "intent".into(),
+            message: "issued".into(),
+            data: Datum::List(vec![
+                Datum::Int(7.into()),
+                Datum::Record(vec![("args".into(), Datum::Text("x".repeat(100_000)))]),
+            ]),
+        })),
+    ]);
+    let frozen = heap.freeze_datum(&datum).expect("freeze request");
+    let before = heap.heap_root();
+    let seals = pages.borrow().seals;
+    assert_eq!(heap.frozen_datum(&frozen).expect("report request"), datum);
+    let after = heap.heap_root();
+    assert_eq!(after.accounting, before.accounting);
+    assert_eq!(after.next_family, before.next_family);
+    assert_eq!(after.directory.len, before.directory.len);
+    assert_eq!(pages.borrow().seals, seals);
+}

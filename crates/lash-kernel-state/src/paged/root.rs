@@ -27,7 +27,7 @@ use super::census::AccountingCertificate;
 use super::family::FrozenRef;
 
 /// The root of an ordered-key tree: lookup by a canonical key.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyedRoot {
     /// `None` for an empty tree.
     pub page: Option<PageRef>,
@@ -37,7 +37,7 @@ pub struct KeyedRoot {
 }
 
 /// The root of an order-statistic sequence tree: access by position.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SequenceRoot {
     pub page: Option<PageRef>,
     pub len: u64,
@@ -91,6 +91,12 @@ pub struct SavedMeters {
     pub live_tasks: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellTargetKind {
+    Main,
+    Entry,
+}
+
 /// Kind 1000: one execution's complete root.
 #[derive(Clone, Debug)]
 pub struct CheckpointRoot {
@@ -101,6 +107,8 @@ pub struct CheckpointRoot {
     pub release: PageId,
     /// The OwnerBinding node of the execution.
     pub owner: PageId,
+    pub target: CellTargetKind,
+    pub functions: KeyedRoot,
     pub status: RootStatus,
     pub heap: PageRef,
     /// [`TaskRecord`](super::TaskRecord)s by task number; `main` is task 0.

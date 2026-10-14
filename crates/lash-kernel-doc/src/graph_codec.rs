@@ -754,7 +754,11 @@ pub mod heap_values {
                     Payload::Paged(PageRef::decode(input)?)
                 }
             };
-            Ok(Self { summary, body })
+            Ok(Self {
+                summary,
+                body,
+                normal: Default::default(),
+            })
         }
     }
     impl TokenCodec for BytesRef {
@@ -790,7 +794,11 @@ pub mod heap_values {
                     Payload::Paged(PageRef::decode(input)?)
                 }
             };
-            Ok(Self { len, body })
+            Ok(Self {
+                len,
+                body,
+                normal: Default::default(),
+            })
         }
     }
     impl TokenCodec for IntRef {
@@ -800,7 +808,9 @@ pub mod heap_values {
                     out.sum(0, 1);
                     int.encode(out);
                 }
-                Self::Paged { summary, digits } => {
+                Self::Paged {
+                    summary, digits, ..
+                } => {
                     out.sum(1, 2);
                     summary.encode(out);
                     digits.encode(out);
@@ -827,6 +837,7 @@ pub mod heap_values {
                             return Err(invalid("a short integer must be inline"));
                         }
                         Self::Paged {
+                            normal: Default::default(),
                             summary,
                             digits: PageRef::decode(input)?,
                         }
@@ -987,6 +998,7 @@ pub mod heap_values {
             _ => Payload::Paged(PageRef::decode(input)?),
         };
         Ok(TupleRef {
+            normal: Default::default(),
             summary,
             family,
             body,

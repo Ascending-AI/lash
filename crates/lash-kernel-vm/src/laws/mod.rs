@@ -5,11 +5,7 @@
 mod bounds;
 mod census;
 mod embedder;
-mod fast;
 mod forms;
 mod layout;
-mod observe;
-mod parked;
-mod stream;
+mod paged;
 mod tasks;
-mod whole;

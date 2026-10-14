@@ -132,7 +132,7 @@ impl KernelMachine {
                 }
                 Op::Session { dst, name } => {
                     let name = &running.stream.names[name.ix()];
-                    let value = match self.session.get(name) {
+                    let value = match self.session_get(name)? {
                         Some(value) => value.clone(),
                         None => return unbound(name),
                     };
@@ -142,10 +142,10 @@ impl KernelMachine {
                     let value = self.take(at(base, src));
                     self.reserve(value_bytes(&value))?;
                     let name = &running.stream.names[name.ix()];
-                    match self.session.get_mut(name) {
-                        Some(held) => *held = value,
-                        None => return unbound(name),
+                    if self.session_get(name)?.is_none() {
+                        return unbound(name);
                     }
+                    self.session_write(name.clone(), value)?;
                     return Ok(Ran::Done);
                 }
                 Op::Bind { local, src } => {
@@ -295,7 +295,7 @@ impl KernelMachine {
             Op::BindSession { name, src } => {
                 let value = self.take(at(base, src));
                 self.reserve(value_bytes(&value))?;
-                self.session.insert(stream.names[name.ix()].clone(), value);
+                self.session_write(stream.names[name.ix()].clone(), value)?;
                 Ran::Done
             }
             Op::WriteUnbound { name, src } => {
@@ -422,8 +422,10 @@ impl KernelMachine {
 
     fn make_tuple(&mut self, base: usize, items: RegRange) -> Eval<()> {
         let (start, items) = self.members(base, items)?;
-        let tuple = Value::Tuple(self.heap.tuple(items)?);
-        if !within_depth(&tuple, self.limits.value_depth()) {
+        if items
+            .iter()
+            .any(|value| !within_depth(value, self.limits.value_depth().saturating_sub(1)))
+        {
             return raise(
                 "too_deep",
                 format!(
@@ -432,6 +434,7 @@ impl KernelMachine {
                 ),
             );
         }
+        let tuple = Value::Tuple(self.heap.tuple(items)?);
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())

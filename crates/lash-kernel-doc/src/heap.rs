@@ -127,9 +127,23 @@ pub struct TextSummary {
     pub utf16_units: u64,
 }
 
+/// A lazily computed runtime normal form. Decoding a descriptor starts empty.
+#[derive(Clone, Debug, Default)]
+pub struct NormalKeyCache(std::sync::Arc<std::sync::OnceLock<Option<NormalKey>>>);
+impl NormalKeyCache {
+    pub fn get(&self) -> Option<&Option<NormalKey>> {
+        self.0.get()
+    }
+    pub fn set(&self, key: Option<NormalKey>) {
+        let _ = self.0.set(key);
+    }
+}
+
 /// An immutable text.
 #[derive(Clone, Debug)]
 pub struct TextRef {
+    /// Runtime normal form, shared by descriptor clones and omitted from tokens.
+    pub normal: NormalKeyCache,
     pub summary: TextSummary,
     pub body: Payload<str>,
 }
@@ -137,6 +151,7 @@ pub struct TextRef {
 /// Immutable bytes.
 #[derive(Clone, Debug)]
 pub struct BytesRef {
+    pub normal: NormalKeyCache,
     pub len: u64,
     pub body: Payload<[u8]>,
 }
@@ -155,6 +170,7 @@ pub struct IntSummary {
 pub enum IntRef {
     Inline(Integer),
     Paged {
+        normal: NormalKeyCache,
         summary: IntSummary,
         digits: PageRef,
     },
@@ -183,6 +199,7 @@ pub struct TupleSummary {
 /// An immutable tuple.
 #[derive(Clone, Debug)]
 pub struct TupleRef {
+    pub normal: NormalKeyCache,
     /// Namespace for untouched frozen tuple pages.
     pub family: Option<FamilyId>,
     pub summary: TupleSummary,
@@ -280,6 +297,7 @@ impl Value {
     pub fn text(text: impl Into<Arc<str>>) -> Self {
         let text = text.into();
         Self::Text(TextRef {
+            normal: Default::default(),
             summary: crate::heap_values::text_summary(&text),
             body: Payload::Resident(text),
         })
@@ -288,6 +306,7 @@ impl Value {
 impl ErrorRef {
     pub fn new(kind: &str, message: &str) -> Self {
         let text = |s: &str| TextRef {
+            normal: Default::default(),
             summary: crate::heap_values::text_summary(s),
             body: Payload::Resident(Arc::from(s)),
         };
