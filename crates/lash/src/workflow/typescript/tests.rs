@@ -87,12 +87,19 @@ fn typescript_workflow_print_import_preserves_the_printer_corpus_observations() 
                     bindings: &bindings,
                     functions: &std::collections::BTreeMap::new(),
                 };
-                let source =
-                    lash_dialect_typescript::print(&document).map_err(|e| e.to_string())?;
+                let source = lash_dialect_typescript::print(&document, Default::default())
+                    .map_err(|e| e.to_string())?;
+                let decoded =
+                    lash_dialect_typescript::compile_generated(&source.source, Default::default())
+                        .map_err(|e| e.to_string())?;
+                assert_eq!(
+                    document.canonical_bytes().unwrap(),
+                    decoded.canonical_bytes().unwrap()
+                );
                 let mut checker = lash_kernel_check::Environment::new(registry.as_ref());
                 checker.effects = effects.clone();
                 let imported = super::import(
-                    &source,
+                    &source.source,
                     &environment,
                     &checker,
                     lash_dialect_typescript::SourceLimits::standard(),

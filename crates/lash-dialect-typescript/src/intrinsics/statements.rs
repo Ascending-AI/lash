@@ -5,7 +5,7 @@ use swc_ecma_ast as s;
 use super::{Reader, invalid, invocation};
 use crate::Diagnostic;
 
-impl Reader<'_> {
+impl Reader {
     pub(super) fn block(&mut self, statements: &[s::Stmt]) -> Result<k::Block, Diagnostic> {
         statements.iter().map(|stmt| self.statement(stmt)).collect()
     }
@@ -18,7 +18,7 @@ impl Reader<'_> {
     }
     pub(super) fn statement(&mut self, stmt: &s::Stmt) -> Result<k::Stmt, Diagnostic> {
         Ok(match stmt {
-            s::Stmt::Decl(s::Decl::Var(var)) => {
+            s::Stmt::Decl(s::Decl::Var(var)) if var.kind == s::VarDeclKind::Let && !var.declare => {
                 let [binding] = var.decls.as_slice() else {
                     return Err(invalid(
                         "one binding per kernel statement",
@@ -28,6 +28,12 @@ impl Reader<'_> {
                 let s::Pat::Ident(name) = &binding.name else {
                     return Err(invalid("kernel bindings are names", Some(stmt.span())));
                 };
+                if name.type_ann.is_some() || name.id.optional || binding.definite {
+                    return Err(invalid(
+                        "kernel bindings have no type or optional marker",
+                        Some(stmt.span()),
+                    ));
+                }
                 let value = binding.init.as_ref().ok_or_else(|| {
                     invalid("kernel bindings need an initializer", Some(stmt.span()))
                 })?;
@@ -54,6 +60,9 @@ impl Reader<'_> {
                         Some(stmt.span()),
                     ));
                 };
+                if var.kind != s::VarDeclKind::Let || var.declare {
+                    return Err(invalid("kernel iteration uses let", Some(stmt.span())));
+                }
                 let [binding] = var.decls.as_slice() else {
                     return Err(invalid(
                         "kernel iteration binds one name",
@@ -63,6 +72,16 @@ impl Reader<'_> {
                 let s::Pat::Ident(name) = &binding.name else {
                     return Err(invalid("kernel iteration binds a name", Some(stmt.span())));
                 };
+                if name.type_ann.is_some()
+                    || name.id.optional
+                    || binding.init.is_some()
+                    || binding.definite
+                {
+                    return Err(invalid(
+                        "kernel iteration binds an untyped name",
+                        Some(stmt.span()),
+                    ));
+                }
                 k::Stmt::For {
                     binding: self.name(&name.id)?,
                     iterable: self.expression(&statement.right)?,
@@ -135,6 +154,20 @@ impl Reader<'_> {
         }
         let (name, args) = invocation(expr)?;
         Ok(match (name.as_str(), args.as_slice()) {
+            ("try", [body]) => {
+                let function = self.function(body)?;
+                if !function.params.is_empty() {
+                    return Err(invalid(
+                        "kernel try body has no parameters",
+                        Some(expr.span()),
+                    ));
+                }
+                k::Stmt::Try(k::TryStmt {
+                    body: function.body,
+                    catch: None,
+                    finally: None,
+                })
+            }
             ("remove", [member]) => k::Stmt::Remove {
                 member: self.member(member)?,
             },

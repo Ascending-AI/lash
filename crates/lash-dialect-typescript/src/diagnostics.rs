@@ -6,6 +6,9 @@ pub use lash_kernel_dialect::{DiagnosticKind, Span as SourceSpan};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DiagnosticCode {
+    GeneratedSourceFormat,
+    GeneratedSourceBytes,
+    GeneratedSourceDepth,
     SyntaxError,
     ClassUnsupported,
     GeneratorUnsupported,
@@ -89,6 +92,9 @@ impl DiagnosticCode {
     /// lets a test walk the rendered prompt and reject a name the dialect
     /// cannot produce. `all_codes_are_listed` keeps it complete.
     pub const ALL: &'static [Self] = &[
+        Self::GeneratedSourceFormat,
+        Self::GeneratedSourceBytes,
+        Self::GeneratedSourceDepth,
         Self::SyntaxError,
         Self::ClassUnsupported,
         Self::GeneratorUnsupported,
@@ -290,6 +296,12 @@ impl DiagnosticCode {
             }
             Self::SourceNestingLimit => "name intermediate values instead of nesting expressions",
             Self::SourceTooLarge => "split the work across several cells",
+            Self::GeneratedSourceBytes => {
+                "export a smaller document or raise the host's generated-source byte budget"
+            }
+            Self::GeneratedSourceDepth => {
+                "export a shallower document or raise the host's depth budget within the native ceiling"
+            }
             Self::ReservedIdentifier => "choose a different name",
             Self::ShadowsBuiltin => {
                 "rename the binding and its references, preserving the built-in name"
@@ -371,6 +383,8 @@ impl DiagnosticCode {
             | Self::RegexPatternTooLong
             | Self::RegexNestingLimit
             | Self::SourceNestingLimit
+            | Self::GeneratedSourceBytes
+            | Self::GeneratedSourceDepth
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
             | Self::ShadowsBuiltin
@@ -396,6 +410,7 @@ impl DiagnosticCode {
             | Self::AwaitRequired
             | Self::ReturnOutsideFunction
             | Self::LoopControlOutsideLoop
+            | Self::GeneratedSourceFormat
             | Self::InvalidAst
             | Self::ControlCallPlacement
             | Self::LinkError => CodeClassification::AlwaysDefect,
@@ -405,6 +420,9 @@ impl DiagnosticCode {
     /// The stable machine-readable diagnostic name.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::GeneratedSourceFormat => "TS_GENERATED_SOURCE_FORMAT",
+            Self::GeneratedSourceBytes => "TS_GENERATED_SOURCE_BYTES",
+            Self::GeneratedSourceDepth => "TS_GENERATED_SOURCE_DEPTH",
             Self::SyntaxError => "TS_SYNTAX_ERROR",
             Self::ClassUnsupported => "TS_CLASS_UNSUPPORTED",
             Self::GeneratorUnsupported => "TS_GENERATOR_UNSUPPORTED",
@@ -790,12 +808,22 @@ mod tests {
     }
 
     /// FIG-5765: every advertised repair idiom is accepted by the dialect.
-    /// Prose-only idioms have a complete cell witness; concrete site repairs
+    /// Prose-only idioms have a complete cell or generated-module witness; concrete site repairs
     /// are checked against the actual suggestion before lowering that form.
     #[test]
     fn every_accepted_repair_idiom_lowers() {
         use DiagnosticCode::*;
+        let document = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::Float, vec![]);
+        let generated = crate::print(&document, Default::default()).expect("small document prints");
+        let decoded = crate::compile_generated(&generated.source, Default::default())
+            .expect("small, shallow generated source decodes");
+        assert_eq!(
+            document.canonical_bytes().unwrap(),
+            decoded.canonical_bytes().unwrap()
+        );
         let examples = [
+            (GeneratedSourceBytes, generated.source.as_str()),
+            (GeneratedSourceDepth, generated.source.as_str()),
             (
                 ClassUnsupported,
                 "function make(message, code) { return Object.assign(new Error(message), { code }); } make('oops', 'bad');",
@@ -984,7 +1012,13 @@ mod tests {
             }
         }
         for (code, source) in examples {
-            crate::tests::lower_with_effects(source).unwrap_or_else(|error| {
+            let accepted = match code {
+                GeneratedSourceBytes | GeneratedSourceDepth => {
+                    crate::compile_generated(source, Default::default()).map(|_| ())
+                }
+                _ => crate::tests::lower_with_effects(source).map(|_| ()),
+            };
+            accepted.unwrap_or_else(|error| {
                 panic!(
                     "{} suggests an unaccepted idiom: {error}\n{source}",
                     code.as_str()

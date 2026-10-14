@@ -88,7 +88,7 @@
 //! entries. The printer's exact source is also accepted.
 //!
 //! With the `typescript` feature, [`WorkflowDocument::typescript`] prints a
-//! document as TypeScript that lowers back to the same behaviour, or
+//! document as generated TypeScript that reconstructs identical canonical bytes, or
 //! answers the printer's typed refusal. A refusal leaves the document
 //! readable, editable and publishable.
 

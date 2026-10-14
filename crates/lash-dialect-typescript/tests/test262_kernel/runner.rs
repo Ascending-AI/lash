@@ -538,11 +538,19 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     let Ok(original) = lash_dialect_typescript::lower(&source, &environment) else {
         return false;
     };
-    let printed =
-        lash_dialect_typescript::print(&original.document).expect("an admitted document prints");
-    let re_lowered = lash_dialect_typescript::lower_kernel_text(&printed, &environment)
-        .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed}"));
-    assert_eq!(original.document, re_lowered.document, "{relative}");
+    let printed = lash_dialect_typescript::print(&original.document, Default::default())
+        .expect("an admitted document prints");
+    let re_lowered =
+        lash_dialect_typescript::compile_generated(&printed.source, Default::default())
+            .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
+    assert_eq!(
+        original
+            .document
+            .canonical_bytes()
+            .expect("original encodes"),
+        re_lowered.canonical_bytes().expect("decoded encodes"),
+        "{relative}"
+    );
     true
 }
 

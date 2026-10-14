@@ -102,6 +102,14 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         "the catalog workflow is admitted: {opened}"
     );
     let source = opened["source"].as_str().expect("the printer spells it");
+    let original: lash::workflow::document::Document =
+        serde_json::from_value(opened["document"].clone()).expect("the document is readable");
+    let decoded = lash::typescript::compile_generated(source, Default::default())
+        .expect("the source reconstructs without a library");
+    assert_eq!(
+        original.canonical_bytes().unwrap(),
+        decoded.canonical_bytes().unwrap()
+    );
     assert!(
         source.contains("Welcome to the workflow graph") && source.contains("set_status"),
         "the TypeScript lens shows the document: {source}"

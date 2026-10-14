@@ -136,7 +136,7 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 **Types.** A front end may use declared and inferred types to choose tier 1. If the type was wrong at run time, the strict operation raises a typed error (§2.1). Where no type is known the front end emits a helper that tests at run time, or refuses. Using types this way needs a type analysis per dialect; today's TypeScript front end erases types. Trusting types makes a dialect deliberately stricter than its language: where JavaScript would coerce a mistyped value, lash raises a typed error. Each dialect lists these in a deviation register, with a test per entry.
 
-**Printer.** A dialect can print any document as source in its language, including one edited by a host. The one law: lowering the printed source gives a program that behaves the same (values, errors, mutation, order of effects, task interleaving). There is no promise to reproduce original text. To make this total, each dialect reserves a namespace that reaches the kernel by name (`k.add(a, b)`, `k.tuple(a, b)`, `k.absent`, `k.spawn`, `k.yield`) and a way to call a library function by identity. The printer uses a native spelling only where the front end lowers it back to the same kernel operation. Printing a document in a different dialect from the one it was written in is a conversion: the result is a new workflow in that dialect, whose manifest may still reference the first dialect's helpers.
+**Printer.** A dialect prints a supported, structurally valid document as exact generated source in its language, including documents edited by a host or produced by another dialect. Its independent generated-source compiler reconstructs identical canonical bytes, including the complete manifest and original helper identities, without an installed library. Printing does not compile or admit. It does not recover original text. Native spellings require a precise direct inverse; complete generic forms cover every other case. The [generated-source format v1 contract](../design/generated-source-format.md) defines envelopes, reversible names, helper aliases, resource limits and optional final-text Site maps. Choosing a source dialect changes spelling only; the Document, admission environment and execution context stay the host's.
 
 ## 5. Execution
 
@@ -236,7 +236,7 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 | `lash-kernel-lib` | The kernel library: bodies and native implementations | The machine, any second reader |
 | `lash-kernel-vm` | Compile to the executable, run tasks, charge, park, resume. The embedder assembles the function registry, prepares it once and hands it in | lash, other embedders |
 | `lash-kernel-state` | The parked-run schema and its per-root encoding | The machine; a host that reads a run as data |
-| `lash-kernel-dialect` | The front end and printer interfaces, diagnostics, the shared document-to-source walker | Dialect packages |
+| `lash-kernel-dialect` | The front end and printer interfaces, diagnostics, bounded final-text writing and optional spans | Dialect packages |
 | `lash-kernel-conformance` | The corpus and the harness that runs it against a reader, a front end or a function | Everyone's tests |
 
 Dialect packages sit beside them: `lash-dialect-typescript`, `lash-ext-regex-ecma`, `lash-ext-url-whatwg`.

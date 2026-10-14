@@ -103,7 +103,10 @@ fn document(body: &str) -> k::Document {
     k::parse_document(&format!("kernel 1\nnumbers by_spelling\n{body}")).unwrap()
 }
 fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, library: &NamedLibrary) {
-    let source = TypeScript::default().print(document, library).unwrap();
+    let source = TypeScript::default()
+        .print(document, Default::default())
+        .unwrap()
+        .source;
     let bindings = BTreeSet::new();
     let environment = Environment {
         library,
@@ -113,21 +116,25 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };
-    let lowered = crate::lower_kernel_text(&source, &environment)
+    let lowered = crate::compile_generated(&source, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
-    assert_eq!(lowered.document, *document, "{source}");
+    assert_eq!(
+        lowered.canonical_bytes().unwrap(),
+        document.canonical_bytes().unwrap(),
+        "{source}"
+    );
     let registry = &PreparedLibrary::new(Arc::clone(registry));
     assert_eq!(
         run(document, registry, Target::Main),
-        run(&lowered.document, registry, Target::Main),
+        run(&lowered, registry, Target::Main),
         "{source}"
     );
     for entry in document.entries.keys() {
         assert_eq!(
             run(document, registry, Target::Entry(entry.clone())),
-            run(&lowered.document, registry, Target::Entry(entry.clone()))
+            run(&lowered, registry, Target::Entry(entry.clone()))
         );
     }
     // The worker's reusable parser lowers model cells, so it refuses
@@ -344,73 +351,29 @@ main {
     roundtrip(&case, &registry, &library);
 }
 
+/// G-SOURCE-EXACT: decoding preserves dependency identities before admission.
 #[test]
-fn kernel_source_nesting_is_refused_before_recursive_parsing() {
-    let effects = BTreeMap::new();
-    let bindings = BTreeSet::new();
-    let environment = Environment {
-        library: super::library(),
-        effects: &effects,
-        controls: &BTreeMap::new(),
-        tool_roots: &BTreeSet::new(),
-        bindings: &bindings,
-        functions: &BTreeMap::new(),
-    };
-    // Kernel text keeps its own limit, rather than the ordinary cell's 28.
-    // The block and finish statement consume two levels before the value.
-    let depth = k::MAX_NESTING_DEPTH - 2;
-    let source =
-        "k.finish(".to_owned() + &"k.tuple(".repeat(depth) + "null" + &")".repeat(depth + 1) + ";";
-    crate::lower_kernel_text(&source, &environment)
-        .expect("a kernel value at its depth limit lowers");
-
-    let limit = k::MAX_NESTING_DEPTH * 4 + 16;
-    for source in [
-        "k.finish(".to_owned() + &"(".repeat(limit),
-        "k.finish(".to_owned() + &"k.tuple(".repeat(limit) + "null" + &")".repeat(limit + 1),
-    ] {
-        let error = crate::lower_kernel_text(&source, &environment).unwrap_err();
-        assert_eq!(error.code, crate::DiagnosticCode::InvalidAst);
-        assert_eq!(error.message, "kernel source exceeds its nesting limit");
-    }
-}
-
-#[test]
-fn reserved_operations_obey_the_kernel_statement_rule() {
-    let library = super::library();
-    let effects = BTreeMap::new();
-    let bindings = BTreeSet::new();
-    let environment = Environment {
-        library,
-        effects: &effects,
-        controls: &BTreeMap::new(),
-        tool_roots: &std::collections::BTreeSet::new(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
-    };
-    let lowered = crate::lower_kernel_text(
-        "let x = k.add(k.int(\"1\"), k.float(\"2.0\")); k.finish(k.tuple(x, k.absent));",
-        &environment,
+fn generated_decoding_does_not_require_installed_dependencies() {
+    let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
+    let id = k::FunctionId::try_from(
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_owned(),
     )
     .unwrap();
-    assert!(
-        matches!(&lowered.document.main[0], k::Stmt::Let { value: k::Rhs::Expr(k::Expr::Call { function, .. }), .. } if Some(*function) == lash_kernel_dialect::Library::resolve(library, "num.add"))
+    document
+        .manifest
+        .functions
+        .insert(id, k::FunctionName::new("foreign.helper").unwrap());
+    document.main.push(k::Stmt::Finish {
+        value: k::Expr::Call {
+            function: id,
+            args: vec![],
+        },
+    });
+    let source = crate::print(&document, Default::default()).unwrap().source;
+    let decoded = crate::compile_generated(&source, Default::default())
+        .expect("decoding is independent of admission");
+    assert_eq!(
+        document.canonical_bytes().unwrap(),
+        decoded.canonical_bytes().unwrap()
     );
-    for source in [
-        "let x = k.tuple(k.yield());",
-        "let x = k.sleep(k.add(k.int(\"1\"), k.int(\"2\")));",
-        "let x = k.invoke(\"not-an-id\", []);",
-        "let x = k.absent; k.unknown();",
-        "let k = k.int(\"1\");",
-        "let k = 1;",
-    ] {
-        assert!(
-            crate::lower_kernel_text(source, &environment).is_err(),
-            "{source}"
-        );
-    }
-    let deep = "k.tuple(".repeat(300) + "null" + &")".repeat(300);
-    assert!(crate::lower(&format!("let x = {deep};"), &environment).is_err());
-    // Kernel-looking text is ordinary text, never a parser mode switch.
-    assert!(crate::lower("const text = 'k.yield()';", &environment).is_ok());
 }

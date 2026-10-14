@@ -14,6 +14,7 @@ mod async_fn;
 mod builtin_values;
 mod controls;
 mod deviations;
+mod generated_source;
 mod guarded_text;
 mod hoisting;
 mod hot_helpers;

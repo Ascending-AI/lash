@@ -64289,6 +64289,7 @@
         "lash-kernel-doc",
         "serde",
         "serde_json",
+        "sha2",
         "thiserror"
       ],
       "doc": "//crates/lash-kernel-dialect:lash-kernel-dialect__doc",

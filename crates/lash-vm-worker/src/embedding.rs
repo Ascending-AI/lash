@@ -473,7 +473,7 @@ pub fn python_with_limits(limits: lash_dialect_python::SourceLimits) -> Dialect 
 mod typescript {
     use std::sync::Mutex;
 
-    use lash_kernel_dialect::{Diagnostic, Environment, Library, Lowered};
+    use lash_kernel_dialect::{Diagnostic, Environment, Lowered};
     use lash_kernel_doc::Document;
 
     /// The TypeScript front end on one reused parser thread, whose stack
@@ -525,8 +525,12 @@ mod typescript {
     pub(super) struct Printer;
 
     impl lash_kernel_dialect::Printer for Printer {
-        fn print(&self, document: &Document, _library: &dyn Library) -> Result<String, Diagnostic> {
-            lash_dialect_typescript::print(document)
+        fn print(
+            &self,
+            document: &Document,
+            options: lash_kernel_dialect::PrintOptions,
+        ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
+            lash_dialect_typescript::print(document, options)
         }
     }
 }

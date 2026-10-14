@@ -115,23 +115,3 @@ fn a_cell_cannot_bind_a_tool_namespace_root() {
     let tool = lower_against_control("await control.finish(42);").expect("the tool call lowers");
     assert!(ends_main(&tool));
 }
-
-/// Law 14: only the trusted kernel-text entry reads kernel text. A model's
-/// cell written as kernel text is ordinary TypeScript, in which `k` is the
-/// reserved kernel namespace, so it cannot reach the kernel's `finish`.
-#[test]
-fn model_cells_cannot_reach_the_kernel_finish() {
-    let source = "let x = k.add(k.int(\"1\"), k.float(\"2.0\")); k.finish(k.tuple(x, k.absent));";
-    let error = super::lower(source).expect_err("a model cell does not read kernel text");
-    assert_eq!(error.code.as_str(), "TS_RESERVED_IDENTIFIER", "{error}");
-    let environment = Environment {
-        library: super::library(),
-        effects: &BTreeMap::new(),
-        controls: &BTreeMap::new(),
-        tool_roots: &std::collections::BTreeSet::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
-    };
-    let lowered = crate::lower_kernel_text(source, &environment).expect("the host entry reads it");
-    assert!(ends_main(&lowered));
-}

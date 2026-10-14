@@ -1,9 +1,7 @@
 //! K-DIALECT-001/002 over every admitted conformance document.
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_conformance::{ExpectedEnd, MachineRunner, check_case, load_corpus};
-use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::{parse_document, print_document};
 use lash_kernel_vm::KernelMachine;
 
@@ -46,7 +44,6 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
     let shards = load_corpus(CORPUS_FILES.iter().chain(SUPPLEMENTS).copied())
         .expect("decode every conformance document shard");
     let registry = Arc::new(super::kernel_registry());
-    let library = NamedLibrary::from_registry(&registry).expect("corpus library names");
     let mut runner = MachineRunner::<KernelMachine>::new(Arc::clone(&registry));
     let mut executed = 0;
     let mut refusals = 0;
@@ -61,25 +58,17 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
             let result = (|| -> Result<(), String> {
                 let original = check_case(&mut runner, case).map_err(|e| e.to_string())?;
                 let document = parse_document(&case.document).map_err(|e| e.to_string())?;
-                let effects = case
-                    .environment
-                    .effects
-                    .as_ref()
-                    .unwrap_or(&document.manifest.effects);
-                let bindings = BTreeSet::new();
-                let environment = Environment {
-                    library: &library,
-                    effects,
-                    controls: &std::collections::BTreeMap::new(),
-                    tool_roots: &std::collections::BTreeSet::new(),
-                    bindings: &bindings,
-                    functions: &std::collections::BTreeMap::new(),
-                };
-                let source = crate::print(&document).map_err(|e| e.to_string())?;
-                let lowered =
-                    crate::lower_kernel_text(&source, &environment).map_err(|e| e.to_string())?;
+                let source = crate::print(&document, Default::default())
+                    .map_err(|e| e.to_string())?
+                    .source;
+                let lowered = crate::compile_generated(&source, Default::default())
+                    .map_err(|e| e.to_string())?;
+                assert_eq!(
+                    document.canonical_bytes().unwrap(),
+                    lowered.canonical_bytes().unwrap()
+                );
                 let mut clone = case.clone();
-                clone.document = print_document(&lowered.document);
+                clone.document = print_document(&lowered);
                 let roundtrip = check_case(&mut runner, &clone).map_err(|e| e.to_string())?;
                 if original != roundtrip {
                     return Err(format!("original {original:?}\nroundtrip {roundtrip:?}"));

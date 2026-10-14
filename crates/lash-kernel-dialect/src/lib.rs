@@ -2,7 +2,7 @@
 //!
 //! A dialect is a package of three things (`docs/kernel/design.md` §4): a
 //! [`FrontEnd`] that lowers source in its language to a kernel document, a
-//! [`Printer`] that writes any document back as equivalent source, and the
+//! [`Printer`] that writes any document back as exact generated source, and the
 //! library functions its front end emits calls to. This crate fixes those
 //! shapes and nothing about any one language.
 //!
@@ -16,6 +16,7 @@ mod diagnostic;
 mod dialect;
 mod imperative;
 mod library;
+mod name_plan;
 mod saved;
 mod source;
 
@@ -27,6 +28,7 @@ pub use dialect::{
     EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
 };
 pub use library::{Library, LibraryError, NamedLibrary};
+pub use name_plan::NamePlan;
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, Constant, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, Kept, Left, MemberBody, NotSaved, SavedFunction, Token, Unusable,
@@ -35,5 +37,6 @@ pub use saved::{
 pub use source::{SourceError, define_functions};
 
 pub use imperative::{
-    SourceExpr, SourcePlace, SourceStmt, Spelling, imperative_source, render_source,
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
+    SourceSite, SourceWriter, check_document_depth,
 };

@@ -90,12 +90,15 @@ pub trait FrontEnd {
     fn lower(&self, source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic>;
 }
 
-/// Writes any admitted document as source in one language.
-///
-/// The one law: lowering the printed source gives a program that behaves
-/// the same. Nothing promises the text a document was lowered from.
+/// Writes a document as exact generated source, without compiling or admitting it.
+/// The dialect's generated compiler reconstructs identical canonical bytes.
+/// Optional maps describe final UTF-8 offsets and never change the source.
 pub trait Printer {
-    fn print(&self, document: &Document, library: &dyn Library) -> Result<String, Diagnostic>;
+    fn print(
+        &self,
+        document: &Document,
+        options: crate::PrintOptions,
+    ) -> Result<crate::PrintedSource, crate::PrintError>;
 }
 
 /// A dialect, as an embedder installs it.

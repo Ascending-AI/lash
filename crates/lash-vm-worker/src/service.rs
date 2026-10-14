@@ -69,9 +69,11 @@ pub(crate) fn perform(
                 .and_then(|package| package.printer.as_ref())
             {
                 None => Response::UnknownDialect { dialect },
-                Some(printer) => match printer.print(&document, &embedding.library) {
-                    Ok(source) => Response::Printed { source },
-                    Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
+                Some(printer) => match printer.print(&document, Default::default()) {
+                    Ok(printed) => Response::Printed {
+                        source: printed.source,
+                    },
+                    Err(error) => Response::DialectRefused(refusal(error.into())),
                 },
             }
         }

@@ -1097,6 +1097,7 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318",
+            "sha2": "//third-party/rust:p0324",
             "thiserror": "//third-party/rust:p0371"
         }
     },

@@ -5,7 +5,7 @@ use swc_ecma_ast as s;
 use super::{Reader, array, invalid, invocation, string};
 use crate::Diagnostic;
 
-impl Reader<'_> {
+impl Reader {
     pub(super) fn function(&mut self, expr: &s::Expr) -> Result<k::Function, Diagnostic> {
         let s::Expr::Fn(function) = expr else {
             return Err(invalid(
@@ -13,7 +13,12 @@ impl Reader<'_> {
                 Some(expr.span()),
             ));
         };
-        if function.ident.is_some() || function.function.is_async || function.function.is_generator
+        if function.ident.is_some()
+            || function.function.is_async
+            || function.function.is_generator
+            || function.function.type_params.is_some()
+            || function.function.return_type.is_some()
+            || !function.function.decorators.is_empty()
         {
             return Err(invalid(
                 "kernel functions have no async/generator marker or expression name",
@@ -25,7 +30,13 @@ impl Reader<'_> {
             .params
             .iter()
             .map(|param| match &param.pat {
-                s::Pat::Ident(binding) => self.name(&binding.id),
+                s::Pat::Ident(binding)
+                    if binding.type_ann.is_none()
+                        && !binding.id.optional
+                        && param.decorators.is_empty() =>
+                {
+                    self.name(&binding.id)
+                }
                 _ => Err(invalid("kernel parameters are names", Some(param.span()))),
             })
             .collect::<Result<_, _>>()?;
@@ -55,9 +66,6 @@ impl Reader<'_> {
                 Ok(k::Expr::Literal(k::Literal::Bool(value.value)))
             }
             s::Expr::Lit(s::Lit::Str(_)) => Ok(k::Expr::Literal(k::Literal::Text(string(expr)?))),
-            s::Expr::Lit(s::Lit::Num(value)) => Ok(k::Expr::Literal(k::Literal::Float(
-                k::Float::new(value.value),
-            ))),
             s::Expr::Member(member)
                 if matches!(member.obj.as_ref(), s::Expr::Ident(root) if root.sym == "k")
                     && matches!(&member.prop, s::MemberProp::Ident(name) if name.sym == "absent") =>
@@ -138,42 +146,6 @@ impl Reader<'_> {
                 function: self.id(id)?,
                 args: self.expressions(&array(args)?)?,
             },
-            // Named kernel operations never resolve to TypeScript coercion helpers.
-            (
-                "add" | "sub" | "mul" | "div" | "div_floor" | "div_trunc" | "rem_floor"
-                | "rem_trunc" | "neg" | "lt" | "le",
-                _,
-            ) => {
-                let qualified = format!("num.{name}");
-                let id = self
-                    .environment
-                    .library
-                    .resolve(&qualified)
-                    .ok_or_else(|| {
-                        invalid(
-                            format!("kernel function {qualified} is unavailable"),
-                            Some(expr.span()),
-                        )
-                    })?;
-                self.require(id, expr)?;
-                k::Expr::Call {
-                    function: id,
-                    args: self.expressions(&args)?,
-                }
-            }
-            ("eq" | "same" | "ref" | "deref", _) => {
-                let id = self.environment.library.resolve(&name).ok_or_else(|| {
-                    invalid(
-                        format!("kernel function {name} is unavailable"),
-                        Some(expr.span()),
-                    )
-                })?;
-                self.require(id, expr)?;
-                k::Expr::Call {
-                    function: id,
-                    args: self.expressions(&args)?,
-                }
-            }
             _ => {
                 return Err(invalid(
                     format!("unknown or misplaced kernel expression k.{name}"),
@@ -245,14 +217,10 @@ impl Reader<'_> {
                 }
                 let effect = k::EffectName::new(string(effect)?)
                     .map_err(|error| invalid(error.to_string(), Some(effect.span())))?;
-                if let Some(signature) = self.environment.effects.get(&effect) {
-                    self.effects.insert(effect.clone(), signature.clone());
-                }
                 k::Action::Perform {
                     effect,
                     args: self.atoms(args)?,
-                    result: super::decode(&string(value)?, self.limits)
-                        .map_err(|error| invalid(error.to_string(), Some(value.span())))?,
+                    result: super::decode(&string(value)?, self.limits)?,
                 }
             }
             ("sleep", [duration]) => k::Action::Sleep {

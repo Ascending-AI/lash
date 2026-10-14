@@ -253,19 +253,15 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
     let source = "const f = async () => {}; const p = f(); \
                   console.log(p instanceof Promise, 1 instanceof Promise);";
     let original = lower(source).expect("promise predicates lower");
-    let printed = crate::print(&original.document).expect("the document prints");
-    let environment = lash_kernel_dialect::Environment {
-        library: super::library(),
-        effects: &std::collections::BTreeMap::new(),
-        controls: &std::collections::BTreeMap::new(),
-        tool_roots: &std::collections::BTreeSet::new(),
-        bindings: &std::collections::BTreeSet::new(),
-        functions: &std::collections::BTreeMap::new(),
-    };
-    let re_lowered =
-        crate::lower_kernel_text(&printed, &environment).expect("printed promise predicates lower");
+    let printed =
+        crate::print(&original.document, Default::default()).expect("the document prints");
+    let re_lowered = crate::compile_generated(&printed.source, Default::default())
+        .expect("printed promise predicates lower");
     // The same document runs the same.
-    assert_eq!(original.document, re_lowered.document);
+    assert_eq!(
+        original.document.canonical_bytes().unwrap(),
+        re_lowered.canonical_bytes().unwrap()
+    );
     let recorded = run(source, &[]);
     assert_eq!(recorded.lines(), ["true false"]);
     assert_eq!(recorded.end, "ok");

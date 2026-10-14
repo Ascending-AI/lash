@@ -1,357 +1,446 @@
-//! One document walk shared by dialect printers.
-//!
-//! The tree retains statement boundaries and evaluation order. A spelling
-//! table renders this tree, never traverses the kernel document again.
+//! Bounded final-text writing and optional Site collection for generated codecs.
+use lash_kernel_doc::{Document, DocumentId, Node, Site, Unit};
+use sha2::{Digest, Sha256};
 
-use lash_kernel_doc::{self as k, Name};
+/// Generated source is a separate, disposable format from stored documents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceFormat {
+    TypeScriptV1,
+    PythonV1,
+}
 
-/// Language independent expressions in an imperative source.
+/// Host policy for whole generated workflows, independent of cell limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GeneratedSourceLimits {
+    pub max_bytes: usize,
+    /// Node depth, counting the root block as zero. Native safety ceiling: 64.
+    pub max_depth: usize,
+}
+impl Default for GeneratedSourceLimits {
+    fn default() -> Self {
+        Self {
+            max_bytes: 16 * 1024 * 1024,
+            max_depth: 64,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PrintOptions {
+    pub source_map: bool,
+    pub limits: GeneratedSourceLimits,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceExpr {
-    Null,
-    Bool(bool),
-    Text(String),
-    Variable(Name),
-    Array(Vec<SourceExpr>),
-    /// A reserved operation; its name is part of the printer/front-end contract.
-    Intrinsic(&'static str, Vec<SourceExpr>),
-    Function {
-        params: Vec<Name>,
-        body: Vec<SourceStmt>,
-    },
+pub struct PrintedSource {
+    pub source: String,
+    pub format: SourceFormat,
+    pub source_map: Option<SourceMap>,
 }
-
-/// Native imperative control with explicit kernel operations as leaves.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceStmt {
-    Let(Name, SourceExpr),
-    Assign(SourcePlace, SourceExpr),
-    Expression(SourceExpr),
-    If(SourceExpr, Vec<SourceStmt>, Vec<SourceStmt>),
-    For(Name, SourceExpr, Vec<SourceStmt>),
-    While(SourceExpr, Vec<SourceStmt>),
-    Break,
-    Continue,
-    Return(SourceExpr),
-    Throw(SourceExpr),
-    Try {
-        body: Vec<SourceStmt>,
-        catch: Option<(Name, Vec<SourceStmt>)>,
-        finally: Option<Vec<SourceStmt>>,
-    },
+pub struct SourceMap {
+    /// SHA-256 of the final UTF-8 source bytes (without a domain prefix).
+    pub source: [u8; 32],
+    pub document: DocumentId,
+    pub format: SourceFormat,
+    pub sites: Vec<SourceSite>,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourcePlace {
-    Variable(Name),
-    /// A reserved field/index reference, written as a dialect's lvalue.
-    Member(SourceExpr),
+pub struct SourceSite {
+    pub site: Site,
+    pub ranges: Vec<crate::Span>,
+    /// Reserved for genuinely unspelled blocks. Generic forms spell all blocks.
+    pub implicit: Option<usize>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum PrintError {
+    #[error("generated source exceeds byte budget {limit}")]
+    Bytes { limit: usize },
+    #[error("generated source exceeds depth budget {limit}")]
+    Depth { limit: usize },
+    #[error("cannot encode generated source: {0}")]
+    Encode(#[from] lash_kernel_doc::EncodeError),
+    #[error("invalid generated source: {0}")]
+    Invalid(String),
+}
+impl From<PrintError> for crate::Diagnostic {
+    fn from(error: PrintError) -> Self {
+        Self {
+            code: match &error {
+                PrintError::Bytes { .. } => "GENERATED_SOURCE_BYTES",
+                PrintError::Depth { .. } => "GENERATED_SOURCE_DEPTH",
+                PrintError::Encode(_) | PrintError::Invalid(_) => "GENERATED_SOURCE_INVALID",
+            }
+            .into(),
+            message: error.to_string(),
+            span: None,
+            kind: crate::DiagnosticKind::Refusal,
+            repairs: vec![],
+        }
+    }
 }
 
-/// A dialect supplies spelling for expressions and statements of the shared tree.
-pub trait Spelling {
-    /// Operands are already spelled by the shared renderer. Function bodies
-    /// arrive as one block operand; leaves have none.
-    fn expression(&self, expression: &SourceExpr, operands: &[String]) -> String;
-    /// Children are already spelled, in source evaluation order.
-    fn statement(&self, statement: &SourceStmt, operands: &[String]) -> String;
-}
-
-/// Renders the imperative tree with a dialect's spelling table. All recursive
-/// walking lives here; a dialect sees only the form and rendered children.
-pub fn render_source(source: &[SourceStmt], spelling: &impl Spelling) -> String {
-    source
-        .iter()
-        .map(|statement| render_statement(statement, spelling))
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n"
-}
-fn render_expression(expression: &SourceExpr, spelling: &impl Spelling) -> String {
-    let operands = match expression {
-        SourceExpr::Array(items) | SourceExpr::Intrinsic(_, items) => items
-            .iter()
-            .map(|item| render_expression(item, spelling))
-            .collect(),
-        SourceExpr::Function { body, .. } => vec![render_source(body, spelling)],
-        _ => vec![],
+/// Refuse depth before any recursive conversion, rendering, hashing or encoding.
+/// The iterative walk is ordinary structural work, also required without maps.
+pub fn check_document_depth(
+    document: &Document,
+    limits: GeneratedSourceLimits,
+) -> Result<(), PrintError> {
+    let limit = limits.max_depth.min(64);
+    for effect in document.manifest.effects.keys() {
+        check_leaf_size(effect.as_str().len(), limits.max_bytes)?;
+    }
+    for label in document.manifest.functions.values() {
+        check_leaf_size(label.as_str().len(), limits.max_bytes)?;
+    }
+    let roots = std::iter::once(Node::Block(&document.main))
+        .chain(document.functions.values().map(|f| Node::Block(&f.body)));
+    for root in roots {
+        let mut stack = vec![(root, 0usize)];
+        while let Some((node, depth)) = stack.pop() {
+            if depth > limit {
+                return Err(PrintError::Depth { limit });
+            }
+            match node {
+                Node::Expr(lash_kernel_doc::Expr::Literal(literal)) => {
+                    check_literal_size(literal, limits.max_bytes)?
+                }
+                Node::Action(action) => check_action_leaves(action, limits.max_bytes)?,
+                _ => {}
+            }
+            if let Node::Action(lash_kernel_doc::Action::Perform { result, .. }) = node {
+                check_type(result, limit)?;
+            }
+            stack.extend(node.children().into_iter().map(|child| (child, depth + 1)));
+        }
+    }
+    for signature in document
+        .manifest
+        .effects
+        .values()
+        .chain(document.entries.values())
+    {
+        check_signature(signature, limit)?;
+    }
+    // Count actual encoded input bytes before names or source buffers are allocated.
+    // Depth has already been checked, so this serializer is stack bounded.
+    let mut counter = ByteCounter {
+        used: 0,
+        limit: limits.max_bytes,
     };
-    spelling.expression(expression, &operands)
+    serde_json::to_writer(&mut counter, document).map_err(|_| PrintError::Bytes {
+        limit: limits.max_bytes,
+    })?;
+    Ok(())
 }
-fn render_statement(statement: &SourceStmt, spelling: &impl Spelling) -> String {
-    let expr = |expression: &SourceExpr| render_expression(expression, spelling);
-    let block = |block: &Vec<SourceStmt>| render_source(block, spelling);
-    let operands = match statement {
-        SourceStmt::Let(_, value)
-        | SourceStmt::Expression(value)
-        | SourceStmt::Return(value)
-        | SourceStmt::Throw(value) => vec![expr(value)],
-        SourceStmt::Assign(place, value) => vec![
-            match place {
-                SourcePlace::Variable(name) => expr(&SourceExpr::Variable(name.clone())),
-                SourcePlace::Member(member) => expr(member),
-            },
-            expr(value),
-        ],
-        SourceStmt::If(condition, yes, no) => vec![expr(condition), block(yes), block(no)],
-        SourceStmt::For(_, iterable, body) | SourceStmt::While(iterable, body) => {
-            vec![expr(iterable), block(body)]
+fn check_leaf_size(size: usize, limit: usize) -> Result<(), PrintError> {
+    if size > limit {
+        Err(PrintError::Bytes { limit })
+    } else {
+        Ok(())
+    }
+}
+fn check_literal_size(literal: &lash_kernel_doc::Literal, limit: usize) -> Result<(), PrintError> {
+    use lash_kernel_doc::Literal;
+    match literal {
+        Literal::Bytes(bytes) => check_leaf_size(
+            bytes
+                .as_slice()
+                .len()
+                .checked_mul(2)
+                .ok_or(PrintError::Bytes { limit })?,
+            limit,
+        ),
+        // More than four magnitude bits per admitted byte cannot fit in decimal.
+        // A passing estimate bounds allocation by a constant multiple of the budget.
+        // The exact encoded byte count is still enforced by ByteCounter.
+        Literal::Int(integer) => check_leaf_size(
+            usize::try_from(integer.bits() / 4).map_err(|_| PrintError::Bytes { limit })?,
+            limit,
+        ),
+        Literal::Text(text) => check_leaf_size(text.len(), limit),
+        Literal::Null
+        | Literal::Absent
+        | Literal::Bool(_)
+        | Literal::Float(_)
+        | Literal::Function(_) => Ok(()),
+    }
+}
+fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result<(), PrintError> {
+    use lash_kernel_doc::{Action, Atom};
+    let check = |atom: &Atom| {
+        if let Atom::Literal(literal) = atom {
+            check_literal_size(literal, limit)
+        } else {
+            Ok(())
         }
-        SourceStmt::Try {
-            body,
-            catch,
-            finally,
-        } => vec![
-            block(body),
-            catch
-                .as_ref()
-                .map(|(_, body)| block(body))
-                .unwrap_or_default(),
-            finally.as_ref().map(block).unwrap_or_default(),
-        ],
-        SourceStmt::Break | SourceStmt::Continue => vec![],
     };
-    spelling.statement(statement, &operands)
+    match action {
+        Action::Call { args, .. } | Action::Spawn { args, .. } => {
+            for atom in args {
+                check(atom)?;
+            }
+        }
+        Action::Perform { effect, args, .. } => {
+            check_leaf_size(effect.as_str().len(), limit)?;
+            for atom in args {
+                check(atom)?;
+            }
+        }
+        Action::Sleep { duration } => check(duration)?,
+        Action::Join { task } | Action::Cancel { task } => check(task)?,
+        Action::JoinMany { tasks, .. } => check(tasks)?,
+        Action::Yield => {}
+    }
+    Ok(())
+}
+fn check_signature(signature: &lash_kernel_doc::Signature, limit: usize) -> Result<(), PrintError> {
+    check_type(&signature.result, limit)?;
+    for param in &signature.params {
+        check_type(&param.ty, limit)?;
+    }
+    Ok(())
+}
+fn check_type(ty: &lash_kernel_doc::Type, limit: usize) -> Result<(), PrintError> {
+    use lash_kernel_doc::Type;
+    let mut stack = vec![(ty, 1usize)];
+    while let Some((ty, depth)) = stack.pop() {
+        if depth > limit {
+            return Err(PrintError::Depth { limit });
+        }
+        let next = depth + 1;
+        match ty {
+            Type::Tuple(items) | Type::Union(items) => {
+                stack.extend(items.iter().map(|t| (t, next)))
+            }
+            Type::List(t) | Type::Set(t) | Type::Task(t) => stack.push((t, next)),
+            Type::Map(t) => {
+                stack.push((&t.key, next));
+                stack.push((&t.value, next));
+            }
+            Type::Record(t) => {
+                stack.extend(t.fields.iter().map(|f| (&f.ty, next)));
+                if let Some(rest) = &t.rest {
+                    stack.push((rest, next));
+                }
+            }
+            Type::Function(s) => {
+                stack.push((&s.result, next));
+                stack.extend(s.params.iter().map(|p| (&p.ty, next)));
+            }
+            Type::Any
+            | Type::Null
+            | Type::Absent
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Number
+            | Type::Text
+            | Type::Bytes
+            | Type::Timestamp
+            | Type::Enum(_)
+            | Type::Error
+            | Type::Handle(_) => {}
+        }
+    }
+    Ok(())
+}
+struct ByteCounter {
+    used: usize,
+    limit: usize,
+}
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.used = self
+            .used
+            .checked_add(bytes.len())
+            .filter(|n| *n <= self.limit)
+            .ok_or_else(|| std::io::Error::other("input byte budget"))?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
-/// Walks a document once. Metadata strings contain declarations only, never code.
-/// Every action stays at its original statement; no temporary is folded.
-pub fn imperative_source(document: &k::Document) -> Result<Vec<SourceStmt>, k::EncodeError> {
-    let mut source = vec![SourceStmt::Expression(call(
-        "document",
-        vec![
-            text(json(&document.manifest)?),
-            text(json(&document.entries)?),
-            SourceExpr::Array(
-                document
-                    .private_bindings
-                    .iter()
-                    .map(|name| text(name.as_str()))
-                    .collect(),
-            ),
-        ],
-    ))];
-    for (name, function) in &document.functions {
-        source.push(SourceStmt::Expression(call(
-            "declare",
-            vec![
-                text(name.as_str()),
-                function_expr(&function.params, &function.body),
-            ],
-        )));
+struct Frame {
+    site: Site,
+    start: usize,
+    child: u32,
+}
+/// A single append-only output buffer. Codecs emit final layout directly.
+/// A disabled collector allocates no frames, Sites, ranges or hashes.
+pub struct SourceWriter {
+    source: String,
+    limit: usize,
+    error: Option<PrintError>,
+    frames: Option<Vec<Frame>>,
+    sites: Option<Vec<SourceSite>>,
+    #[cfg(test)]
+    map_work: usize,
+}
+impl SourceWriter {
+    pub fn new(options: PrintOptions) -> Self {
+        Self {
+            source: String::new(),
+            limit: options.limits.max_bytes,
+            error: None,
+            frames: options.source_map.then(Vec::new),
+            sites: options.source_map.then(Vec::new),
+            #[cfg(test)]
+            map_work: 0,
+        }
     }
-    source.push(SourceStmt::Expression(call(
-        "main",
-        vec![function_expr(&[], &document.main)],
-    )));
-    Ok(source)
-}
-
-fn json(value: &impl serde::Serialize) -> Result<String, k::EncodeError> {
-    serde_json::to_string(value).map_err(|error| k::EncodeError {
-        message: error.to_string(),
-    })
-}
-fn text(value: impl Into<String>) -> SourceExpr {
-    SourceExpr::Text(value.into())
-}
-fn call(name: &'static str, args: Vec<SourceExpr>) -> SourceExpr {
-    SourceExpr::Intrinsic(name, args)
-}
-fn function_expr(params: &[Name], body: &k::Block) -> SourceExpr {
-    SourceExpr::Function {
-        params: params.to_vec(),
-        body: block(body),
+    pub fn write(&mut self, text: &str) {
+        if self.error.is_some() {
+            return;
+        }
+        if self
+            .source
+            .len()
+            .checked_add(text.len())
+            .is_none_or(|size| size > self.limit)
+        {
+            self.error = Some(PrintError::Bytes { limit: self.limit });
+        } else {
+            self.source.push_str(text);
+        }
     }
-}
-fn block(body: &k::Block) -> Vec<SourceStmt> {
-    body.iter().map(statement).collect()
-}
-fn statement(statement: &k::Stmt) -> SourceStmt {
-    match statement {
-        k::Stmt::Let { name, value } => SourceStmt::Let(name.clone(), rhs(value)),
-        k::Stmt::Assign { place, value } => SourceStmt::Assign(
-            match place {
-                k::Place::Variable(name) => SourcePlace::Variable(name.clone()),
-                k::Place::Member(value) => SourcePlace::Member(member(value)),
+    /// Retain the first typed refusal; finish cannot report truncated success.
+    pub fn refuse(&mut self, error: PrintError) {
+        self.error.get_or_insert(error);
+    }
+    /// Serialize metadata into a bounded temporary and quote it into final text.
+    pub fn metadata(&mut self, value: &(impl serde::Serialize + ?Sized)) {
+        let mut nested = Self::new(PrintOptions {
+            limits: GeneratedSourceLimits {
+                max_bytes: self.limit,
+                ..Default::default()
             },
-            rhs(value),
-        ),
-        k::Stmt::Remove { member: value } => {
-            SourceStmt::Expression(call("remove", vec![member(value)]))
-        }
-        k::Stmt::Do { action: value } => SourceStmt::Expression(action(value)),
-        k::Stmt::If {
-            condition,
-            then_block,
-            else_block,
-        } => SourceStmt::If(expression(condition), block(then_block), block(else_block)),
-        k::Stmt::For {
-            binding,
-            iterable,
-            body,
-        } => SourceStmt::For(binding.clone(), expression(iterable), block(body)),
-        k::Stmt::While { condition, body } => SourceStmt::While(expression(condition), block(body)),
-        k::Stmt::Break => SourceStmt::Break,
-        k::Stmt::Continue => SourceStmt::Continue,
-        k::Stmt::Return { value } => SourceStmt::Return(expression(value)),
-        k::Stmt::Throw { value } => SourceStmt::Throw(expression(value)),
-        k::Stmt::Print { value } => SourceStmt::Expression(call("print", vec![expression(value)])),
-        k::Stmt::Finish { value } => {
-            SourceStmt::Expression(call("finish", vec![expression(value)]))
-        }
-        k::Stmt::Fail { value } => SourceStmt::Expression(call("fail", vec![expression(value)])),
-        k::Stmt::Try(scope) => SourceStmt::Try {
-            body: block(&scope.body),
-            catch: scope
-                .catch
-                .as_ref()
-                .map(|catch| (catch.binding.clone(), block(&catch.body))),
-            finally: scope.finally.as_ref().map(block),
-        },
-    }
-}
-fn rhs(value: &k::Rhs) -> SourceExpr {
-    match value {
-        k::Rhs::Expr(value) => expression(value),
-        k::Rhs::Action(value) => action(value),
-    }
-}
-fn callee(value: &k::Callee) -> SourceExpr {
-    match value {
-        k::Callee::Declared(name) => call("declared", vec![text(name.as_str())]),
-        k::Callee::Value(name) => call("value", vec![text(name.as_str())]),
-        k::Callee::Library(id) => call("library", vec![text(id.to_string())]),
-    }
-}
-fn action(value: &k::Action) -> SourceExpr {
-    match value {
-        k::Action::Call {
-            callee: value,
-            args,
-        } => call(
-            "call",
-            vec![
-                callee(value),
-                SourceExpr::Array(args.iter().map(atom).collect()),
-            ],
-        ),
-        k::Action::Spawn {
-            callee: value,
-            args,
-        } => call(
-            "spawn",
-            vec![
-                callee(value),
-                SourceExpr::Array(args.iter().map(atom).collect()),
-            ],
-        ),
-        k::Action::Perform {
-            effect,
-            args,
-            result,
-        } => call(
-            "perform",
-            vec![
-                text(effect.as_str()),
-                SourceExpr::Array(args.iter().map(atom).collect()),
-                type_expr(result),
-            ],
-        ),
-        k::Action::Sleep { duration } => call("sleep", vec![atom(duration)]),
-        k::Action::Join { task } => call("join", vec![atom(task)]),
-        k::Action::JoinMany { mode, tasks } => call(
-            "joinMany",
-            vec![
-                text(match mode {
-                    k::JoinMode::All => "all",
-                    k::JoinMode::AllSettled => "all_settled",
-                    k::JoinMode::Race => "race",
-                    k::JoinMode::Any => "any",
-                }),
-                atom(tasks),
-            ],
-        ),
-        k::Action::Yield => call("yield", vec![]),
-        k::Action::Cancel { task } => call("cancel", vec![atom(task)]),
-    }
-}
-fn type_expr(value: &k::Type) -> SourceExpr {
-    // Type serialization has no fallible/custom serializer.
-    call(
-        "type",
-        vec![text(
-            serde_json::to_string(value).unwrap_or_else(|_| unreachable!("kernel types serialize")),
-        )],
-    )
-}
-fn atom(value: &k::Atom) -> SourceExpr {
-    match value {
-        k::Atom::Variable(name) => SourceExpr::Variable(name.clone()),
-        k::Atom::Literal(value) => literal(value),
-    }
-}
-fn literal(value: &k::Literal) -> SourceExpr {
-    match value {
-        k::Literal::Null => SourceExpr::Null,
-        k::Literal::Absent => call("absent", vec![]),
-        k::Literal::Bool(value) => SourceExpr::Bool(*value),
-        k::Literal::Int(value) => call("int", vec![text(value.to_string())]),
-        k::Literal::Float(value) => call("float", vec![text(value.to_string())]),
-        k::Literal::Text(value) => text(value.clone()),
-        k::Literal::Bytes(value) => call("bytes", vec![text(value.to_hex())]),
-        k::Literal::Function(name) => call("function", vec![text(name.as_str())]),
-    }
-}
-fn member(value: &k::Member) -> SourceExpr {
-    match value {
-        k::Member::Field { target, field } => {
-            call("field", vec![expression(target), text(field.clone())])
-        }
-        k::Member::Index { target, index } => {
-            call("index", vec![expression(target), expression(index)])
+            ..Default::default()
+        });
+        nested.json(value);
+        if let Some(error) = nested.error {
+            self.refuse(error);
+        } else {
+            self.json(&nested.source);
         }
     }
-}
-fn expression(value: &k::Expr) -> SourceExpr {
-    match value {
-        k::Expr::Literal(value) => literal(value),
-        k::Expr::Variable(name) => SourceExpr::Variable(name.clone()),
-        k::Expr::Tuple(items) => call("tuple", items.iter().map(expression).collect()),
-        k::Expr::List(items) => call("list", items.iter().map(expression).collect()),
-        k::Expr::Set(items) => call("set", items.iter().map(expression).collect()),
-        k::Expr::Map(items) => call(
-            "map",
-            items
-                .iter()
-                .map(|entry| {
-                    SourceExpr::Array(vec![expression(&entry.key), expression(&entry.value)])
+    pub fn json(&mut self, value: &(impl serde::Serialize + ?Sized)) {
+        if let Err(error) = serde_json::to_writer(&mut *self, value) {
+            self.error
+                .get_or_insert_with(|| PrintError::Invalid(error.to_string()));
+        }
+    }
+    pub fn begin_node(&mut self, root: Option<&Unit>) {
+        if let Some(frames) = &mut self.frames {
+            let site = if let Some(unit) = root {
+                Site::new(unit.clone(), vec![])
+            } else {
+                let Some(parent) = frames.last_mut() else {
+                    self.refuse(PrintError::Invalid("map child has no root".into()));
+                    return;
+                };
+                let site = parent.site.child(parent.child);
+                parent.child += 1;
+                site
+            };
+            frames.push(Frame {
+                site,
+                start: self.source.len(),
+                child: 0,
+            });
+            #[cfg(test)]
+            {
+                self.map_work += 1;
+            }
+        }
+    }
+    pub fn end_node(&mut self) {
+        if let Some(frames) = &mut self.frames {
+            let Some(frame) = frames.pop() else {
+                self.refuse(PrintError::Invalid("unbalanced map spans".into()));
+                return;
+            };
+            let end = self.source.len();
+            let (ranges, implicit) = if end == frame.start {
+                (vec![], Some(end))
+            } else {
+                (
+                    vec![crate::Span {
+                        start: frame.start,
+                        end,
+                    }],
+                    None,
+                )
+            };
+            if let Some(sites) = &mut self.sites {
+                sites.push(SourceSite {
+                    site: frame.site,
+                    ranges,
+                    implicit,
+                });
+            } else {
+                self.refuse(PrintError::Invalid("missing map collector".into()));
+            }
+        }
+    }
+    pub fn finish(
+        self,
+        document: &Document,
+        format: SourceFormat,
+    ) -> Result<PrintedSource, PrintError> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        let source_map = self
+            .sites
+            .map(|sites| -> Result<_, PrintError> {
+                Ok(SourceMap {
+                    source: Sha256::digest(self.source.as_bytes()).into(),
+                    document: document.identity()?,
+                    format,
+                    sites,
                 })
-                .collect(),
-        ),
-        k::Expr::Record(items) => call(
-            "record",
-            items
-                .iter()
-                .map(|entry| {
-                    SourceExpr::Array(vec![text(entry.field.clone()), expression(&entry.value)])
-                })
-                .collect(),
-        ),
-        k::Expr::Member(value) => member(value),
-        k::Expr::Closure(value) => function_expr(&value.params, &value.body),
-        k::Expr::Call { function, args } => call(
-            "invoke",
-            vec![
-                text(function.to_string()),
-                SourceExpr::Array(args.iter().map(expression).collect()),
-            ],
-        ),
-        k::Expr::Clock => call("clock", vec![]),
-        k::Expr::Random => call("random", vec![]),
-        k::Expr::Read(value) => call(
-            "read",
-            vec![expression(&value.handle), expression(&value.request)],
-        ),
+            })
+            .transpose()?;
+        Ok(PrintedSource {
+            source: self.source,
+            format,
+            source_map,
+        })
+    }
+}
+impl std::io::Write for SourceWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let text = std::str::from_utf8(bytes).map_err(std::io::Error::other)?;
+        self.write(text);
+        if self.error.is_some() {
+            return Err(std::io::Error::other("source byte budget"));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// G-SOURCE-MAP-OFF: even root Site allocation is optional.
+    #[test]
+    fn disabled_collector_does_zero_map_work() {
+        for enabled in [false, true] {
+            let mut writer = SourceWriter::new(PrintOptions {
+                source_map: enabled,
+                ..Default::default()
+            });
+            writer.begin_node(Some(&Unit::Main));
+            writer.write("{");
+            writer.begin_node(None);
+            writer.write("k.yield();");
+            writer.end_node();
+            writer.write("}");
+            writer.end_node();
+            assert_eq!(writer.map_work, if enabled { 2 } else { 0 });
+        }
     }
 }

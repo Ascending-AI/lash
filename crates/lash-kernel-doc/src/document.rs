@@ -96,6 +96,11 @@ impl Document {
         digest("lash-kernel-document", self).map(DocumentId::from_bytes)
     }
 
+    /// Complete canonical document bytes, using the identity encoder (K-ID-003).
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        crate::canonical::canonical_bytes(self)
+    }
+
     pub fn to_json(&self) -> Result<String, EncodeError> {
         to_json(self)
     }

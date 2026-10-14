@@ -24,6 +24,11 @@ mod tests;
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+pub use intrinsics::compile_generated;
+pub use lash_kernel_dialect::{
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
+    SourceSite,
+};
 pub use package::define_helpers;
 pub use printer::print;
 
@@ -94,12 +99,17 @@ pub fn lower_workflow_with_limits(
     environment: &Environment<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    if let Some(lowered) = intrinsics::lower(
-        source,
-        environment,
-        lash_kernel_doc::KernelDataLimits::standard(),
-    ) {
-        return lowered;
+    if intrinsics::source_probe(source).0 {
+        let document = compile_generated(source, GeneratedSourceLimits::default())?;
+        let mut annotations =
+            lash_kernel_doc::Annotations::new(document.identity().map_err(|error| {
+                Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None)
+            })?);
+        annotations.dialect = Some("typescript".into());
+        return Ok(Lowered {
+            document,
+            annotations,
+        });
     }
     lower::check_binding_names(
         environment
@@ -110,39 +120,6 @@ pub fn lower_workflow_with_limits(
     )?;
     let program = adapter::parse_workflow(source, limits)?;
     lower::workflow(&program, source, environment)
-}
-
-/// Reads exact kernel text: the reserved source surface a printer writes
-/// ([`print`]), with kernel semantics and no dialect helper. It is a trusted
-/// host entry: kernel text can state forms no cell may write, `finish`
-/// among them, so nothing a model wrote is read through it. [`lower`] never
-/// selects it.
-///
-/// # Errors
-///
-/// The diagnostic of source that is not exact kernel text.
-pub fn lower_kernel_text(
-    source: &str,
-    environment: &Environment<'_>,
-) -> Result<Lowered, Diagnostic> {
-    lower_kernel_text_with_limits(
-        source,
-        environment,
-        lash_kernel_doc::KernelDataLimits::standard(),
-    )
-}
-pub fn lower_kernel_text_with_limits(
-    source: &str,
-    environment: &Environment<'_>,
-    limits: lash_kernel_doc::KernelDataLimits,
-) -> Result<Lowered, Diagnostic> {
-    intrinsics::lower(source, environment, limits).unwrap_or_else(|| {
-        Err(Diagnostic::new(
-            DiagnosticCode::InvalidAst,
-            "the source is not exact kernel text",
-            None,
-        ))
-    })
 }
 
 /// Reads `source` as the dialect's syntax and lowers nothing: what a host

@@ -27,7 +27,7 @@ the version it last saved:
   committed end. Every run event names a site of that document.
 
 TypeScript is a read-only lens: the source pane shows what the kernel
-printer (`WorkflowDocument::typescript()`) spells for the document. Nothing
+exact generated-source printer (`WorkflowDocument::typescript()`) spells for the document. The [format v1 contract](../../docs/design/generated-source-format.md) preserves its complete canonical bytes and documents how to re-export old generated text. Nothing
 is imported from source.
 
 The page in `frontend/index.html` is a renderer of that contract: the

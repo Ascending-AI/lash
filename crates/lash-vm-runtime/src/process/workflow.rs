@@ -126,7 +126,7 @@ impl WorkflowDocument {
         }
     }
 
-    /// The document as TypeScript that lowers back to the same behaviour,
+    /// The document as TypeScript that reconstructs its complete canonical bytes,
     /// or the printer's typed refusal of a document it cannot spell.
     ///
     /// # Errors
@@ -134,7 +134,9 @@ impl WorkflowDocument {
     /// The printer's diagnostic.
     #[cfg(feature = "typescript")]
     pub fn typescript(&self) -> Result<String, lash_kernel_dialect::Diagnostic> {
-        lash_dialect_typescript::print(&self.document)
+        lash_dialect_typescript::print(&self.document, Default::default())
+            .map(|printed| printed.source)
+            .map_err(Into::into)
     }
 
     /// What the execution overlay's reducer reads of this document: its
