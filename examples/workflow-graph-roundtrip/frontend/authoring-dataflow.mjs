@@ -1,4 +1,4 @@
-import { actionOf, siteKey, statementsIn } from "./authoring-projection.mjs";
+import { siteKey, statementsIn } from "./authoring-projection.mjs";
 
 export function typeName(type) {
   if (!type) return "Any";
@@ -51,6 +51,20 @@ export function constantValue(expr) {
       return { known: true, value: values.map((v) => v.value) };
   }
   return { known: false };
+}
+export function constantText(value, depth = 0) {
+  if (Object.is(value, -0)) return "-0";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  const array = Array.isArray(value);
+  const entries = array
+    ? value.map((item) => constantText(item, depth + 1))
+    : Object.entries(value).map(
+        ([key, item]) =>
+          `${JSON.stringify(key)}: ${constantText(item, depth + 1)}`,
+      );
+  const [open, close] = array ? ["[", "]"] : ["{", "}"];
+  if (!entries.length) return open + close;
+  return `${open}\n${entries.map((entry) => "  ".repeat(depth + 1) + entry).join(",\n")}\n${"  ".repeat(depth)}${close}`;
 }
 export function expressionName(expr) {
   const literal = constantValue(expr);
@@ -447,6 +461,26 @@ function inputSteps(workflow, port, value) {
 
 export function planInputEdit(workflow, port, value) {
   return inputSteps(workflow, port, value).map((step) => step.direct);
+}
+
+export function planConstantPromotion(workflow, port, value, name) {
+  if (!constantValue(value).known)
+    throw Error(
+      "Only constants can become named values. Keep connected values and expressions at their original evaluation site.",
+    );
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name))
+    throw Error("Use a name starting with a letter or underscore.");
+  if (workflow.dataflow.bindings.some((binding) => binding.name === name))
+    throw Error("Choose a new value name.");
+  return [
+    {
+      insert_statement: {
+        at: { block: port.context.block, before: port.context.statement },
+        statement: { let: { name, value: { expr: value } } },
+      },
+    },
+    ...planInputEdit(workflow, port, { variable: name }),
+  ];
 }
 
 // The source remains a normal step. Termination is a separate canonical statement.

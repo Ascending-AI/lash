@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  project,
+  actionOf,
   startPosition,
   appendPosition,
   recordInput,
   conditionValue,
 } from "./authoring-projection.mjs";
+import { buildDataflow } from "./authoring-dataflow.mjs";
 const site = (path) => ({ unit: { function: "demo" }, path });
 const row = (path, block, statement) => ({
   site: site(path),
@@ -34,12 +35,28 @@ const message = (name) => ({
 function workflow(statements, body) {
   return {
     statements,
+    dataflow: {
+      bindings: [],
+      expressions: [],
+      parameters: [],
+      returns: [],
+      assignments: [],
+      actions: statements
+        .filter((s) => actionOf(s))
+        .map((s) => ({
+          site: site([...s.site.path, 0]),
+          statement: s.site,
+          block: s.block,
+          args: [],
+          available: [],
+          resultType: "any",
+        })),
+    },
     document: {
       functions: { demo: { body: body ?? statements.map((s) => s.statement) } },
     },
   };
 }
-const describe = (s) => ({ s });
 
 test("an unused closure is not executed or chosen as the entry insertion scope", () => {
   const hidden = message("input");
@@ -55,12 +72,15 @@ test("an unused closure is not executed or chosen as the entry insertion scope",
     row([1], [], { return: { value: { literal: "null" } } }),
   ];
   const w = workflow(rows, [declaration, rows[2].statement]);
-  assert.deepEqual(project(w, site([]), describe), []);
+  assert.deepEqual(
+    buildDataflow(w, site([])).nodes.map((node) => node.s),
+    [rows[0], rows[2]],
+  );
   assert.deepEqual(startPosition(w, site([])), {
     block: site([]),
     before: site([0]),
   });
-  assert.equal(project(w, site([0, 0, 0]), describe)[0].s, rows[1]);
+  assert.equal(buildDataflow(w, site([0, 0, 0])).nodes[0].s, rows[1]);
 });
 
 test("a library call is opaque regardless of its display name", () => {
@@ -82,8 +102,13 @@ test("a library call is opaque regardless of its display name", () => {
   const w = workflow([source, conversion, effect]);
   w.document.manifest = { functions: { opaque: "ts.boundary" } };
   assert.equal(recordInput(w, effect), undefined);
-  assert.equal(project(w, site([]), describe).length, 2);
+  const projected = buildDataflow(w, site([])).nodes;
+  assert.deepEqual(
+    projected.filter((node) => node.kind === "action").map((node) => node.s),
+    [conversion, effect],
+  );
   w.document.manifest.functions.opaque = "unrelated.transform";
+  assert.deepEqual(buildDataflow(w, site([])).nodes, projected);
   assert.equal(recordInput(w, effect), undefined);
 });
 
@@ -135,7 +160,10 @@ test("empty scopes are insertable and global additions precede a terminal statem
     block: site([]),
     before: terminal.site,
   });
-  assert.equal(project(w, site([]), describe).length, 1);
+  assert.deepEqual(
+    buildDataflow(w, site([])).nodes.map((node) => node.s),
+    [branch, terminal],
+  );
 });
 
 // Kernel unit statements serialize as strings, unlike payload-bearing statements.
@@ -144,7 +172,10 @@ test("break and continue end their scope without throwing or appending unreachab
     const end = row([0, 1, 0], [0, 1], kind);
     const hidden = row([0, 1, 1], [0, 1], message("input"));
     const w = workflow([end, hidden]);
-    assert.deepEqual(project(w, site([0, 1]), describe), []);
+    assert.deepEqual(
+      buildDataflow(w, site([0, 1])).nodes.map((node) => node.s),
+      [end],
+    );
     assert.deepEqual(appendPosition(w, site([0, 1])), {
       block: site([0, 1]),
       before: end.site,

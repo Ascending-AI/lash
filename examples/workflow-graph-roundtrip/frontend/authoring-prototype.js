@@ -2,12 +2,14 @@ import {
   buildDataflow,
   availableName,
   planInputEdit,
+  planConstantPromotion,
   planEndAfter,
   encodeValue as expression,
   sourceOptions,
   typeName,
   expressionName,
   constantValue,
+  constantText,
   fieldsOf,
 } from "./authoring-dataflow.mjs";
 import {
@@ -1194,11 +1196,6 @@ function newNode(effect) {
   save.onclick = () =>
     action(async () => {
       const values = read();
-      let i = 1;
-      const names = new Set(
-        workflow.statements.map((s) => s.statement.let?.name),
-      );
-      while (names.has("step_" + i)) i++;
       await applyVisual([
         {
           effect: {
@@ -1206,7 +1203,7 @@ function newNode(effect) {
             effect,
             args: [expression(values)],
             result: "any",
-            binding: "step_" + i,
+            binding: availableName(workflow, "step"),
           },
         },
       ]);
@@ -1348,9 +1345,8 @@ function constantControl(parent, label, type, value, id, config = {}) {
       if (config.min !== undefined) input.min = config.min;
       if (config.max !== undefined) input.max = config.max;
     }
-    input.value = scalar
-      ? String(value ?? defaultValue(type))
-      : JSON.stringify(value ?? defaultValue(type), null, 2);
+    const initial = value ?? defaultValue(type);
+    input.value = type === "text" ? initial : constantText(initial);
   }
   input.id = id;
   parent.append(caption, input);
@@ -1422,31 +1418,6 @@ function renderInvocationInputs(container) {
     });
   container.append(save);
 }
-function typeCompatible(expected, actual) {
-  if (!expected || !actual || expected === "any" || actual === "any")
-    return true;
-  if (JSON.stringify(expected) === JSON.stringify(actual)) return true;
-  if (expected === "number" && ["int", "float"].includes(actual)) return true;
-  if (expected?.union)
-    return expected.union.some((t) => typeCompatible(t, actual));
-  if (actual?.union)
-    return actual.union.every((t) => typeCompatible(expected, t));
-  if (expected === "text" && actual?.enum) return true;
-  if (expected?.enum && actual === "text") return true;
-  if (expected?.enum && actual?.enum)
-    return actual.enum.every((v) => expected.enum.includes(v));
-  if (expected?.list && actual?.list)
-    return typeCompatible(expected.list, actual.list);
-  if (expected?.record && actual?.record) {
-    return fieldsOf(expected).every((field) => {
-      const match = fieldsOf(actual).find((f) => f.name === field.name);
-      return match
-        ? typeCompatible(field.ty, match.ty)
-        : field.optional || !!actual.record.rest;
-    });
-  }
-  return false;
-}
 function freshBinding(base = "value") {
   return availableName(workflow, base);
 }
@@ -1459,10 +1430,6 @@ function connectPort(port, source) {
     if (!(port.available ?? []).includes(source.binding))
       throw Error(
         "This value is not available at the selected input. Choose a value in scope that is defined before this step.",
-      );
-    if (!typeCompatible(port.acceptsType ?? port.type, source.type))
-      throw Error(
-        `Cannot connect ${typeName(source.type)} to ${typeName(port.type)}.`,
       );
     await applyVisual(replacePort(port, source.expression));
     connecting = undefined;
@@ -1504,8 +1471,10 @@ function openPort(node, port) {
   container.append(modeLabel, mode);
   const editor = el("div", "mapping-editor");
   container.append(editor);
+  const details = el("details", "promote-value");
   let read;
   function draw() {
+    details.hidden = mode.value !== "constant";
     editor.replaceChildren();
     if (mode.value === "constant") {
       const hostConfig = node.info.fields?.find((f) => f[0] === port.name)?.[3];
@@ -1580,23 +1549,16 @@ function openPort(node, port) {
       options.forEach((option, index) => {
         const item = el("option", null, option.label);
         item.value = String(index);
-        item.disabled = !typeCompatible(
-          port.acceptsType ?? port.type,
-          option.type,
-        );
         select.append(item);
       });
-      const first = options.findIndex((o) =>
-        typeCompatible(port.acceptsType ?? port.type, o.type),
-      );
-      select.value = String(current >= 0 ? current : first);
+      select.value = String(current >= 0 ? current : options.length ? 0 : -1);
       editor.append(
         label,
         select,
         el(
           "p",
           "help",
-          "Only values visible at this input are selectable. Any means the type is not known statically.",
+          "Only values visible at this input are selectable. Lash checks the connection when you save. Any means the type is not known statically.",
         ),
       );
       read = () => {
@@ -1605,8 +1567,6 @@ function openPort(node, port) {
           throw Error(
             "No source is available. Define a value before this step.",
           );
-        if (!typeCompatible(port.acceptsType ?? port.type, option.type))
-          throw Error("The selected types do not match.");
         return option.expression;
       };
     } else {
@@ -1632,8 +1592,7 @@ function openPort(node, port) {
   const save = el("button", "primary save-node", "Save mapping");
   save.onclick = () => action(() => applyVisual(replacePort(port, read())));
   container.append(save);
-  const details = el("details", "promote-value");
-  details.append(el("summary", null, "Make this a named value"));
+  details.append(el("summary", null, "Make this constant a named value"));
   const nameLabel = el("label", null, "Value name");
   nameLabel.htmlFor = "value-name";
   const name = el("input");
@@ -1645,22 +1604,8 @@ function openPort(node, port) {
   promote.onclick = () =>
     action(async () => {
       const binding = name.value.trim();
-      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(binding))
-        throw Error("Use a name starting with a letter or underscore.");
-      if (workflow.dataflow.bindings.some((b) => b.name === binding))
-        throw Error("Choose a new value name.");
-      const changes = [
-        {
-          direct: {
-            insert_statement: {
-              at: { block: port.context.block, before: port.context.statement },
-              statement: { let: { name: binding, value: { expr: read() } } },
-            },
-          },
-        },
-        ...replacePort(port, { variable: binding }),
-      ];
-      await applyVisual(changes);
+      const changes = planConstantPromotion(workflow, port, read(), binding);
+      await applyVisual(changes.map((direct) => ({ direct })));
       const created = workflow.dataflow.bindings.find(
         (item) => item.name === binding,
       );

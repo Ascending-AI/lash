@@ -4,6 +4,8 @@ import {
   encodeValue,
   constantValue,
   planEndAfter,
+  planConstantPromotion,
+  constantText,
 } from "./authoring-dataflow.mjs";
 test("editing an integral Float constant preserves its numeric kind, including inside typed records", () => {
   assert.deepEqual(encodeValue(1, "float"), { literal: { float: "1.0" } });
@@ -58,4 +60,55 @@ test("ending at an output preserves the producer and later code in its lexical b
       },
     },
   ]);
+});
+
+test("constant editor text preserves negative zero through an unchanged scalar or structured save", () => {
+  assert.deepEqual(encodeValue(Number(constantText(-0)), "float"), {
+    literal: { float: "-0.0" },
+  });
+  const value = { weight: -0, items: [-0, 2], label: "-0" };
+  const read = JSON.parse(constantText(value));
+  assert.deepEqual(read, value);
+  assert.ok(Object.is(read.weight, -0));
+  assert.ok(Object.is(read.items[0], -0));
+});
+
+test("promotion cannot snapshot a connected or computed While condition outside its loop", () => {
+  const unit = { function: "demo" };
+  const port = {
+    target: { expression: { unit, path: [1, 0] } },
+    context: { block: { unit, path: [] }, statement: { unit, path: [1] } },
+  };
+  const workflow = { dataflow: { bindings: [{ id: 0, name: "proceed" }] } };
+  const original = structuredClone(workflow);
+  for (const value of [
+    { variable: "proceed" },
+    { call: { function: "condition", args: [] } },
+  ]) {
+    assert.throws(
+      () => planConstantPromotion(workflow, port, value, "condition_value"),
+      /Only constants/,
+    );
+  }
+  assert.deepEqual(workflow, original);
+  const value = { literal: { bool: true } };
+  assert.deepEqual(
+    planConstantPromotion(workflow, port, value, "condition_value"),
+    [
+      {
+        insert_statement: {
+          at: { block: port.context.block, before: port.context.statement },
+          statement: {
+            let: { name: "condition_value", value: { expr: value } },
+          },
+        },
+      },
+      {
+        replace_expression: {
+          expression: port.target.expression,
+          with: { variable: "condition_value" },
+        },
+      },
+    ],
+  );
 });

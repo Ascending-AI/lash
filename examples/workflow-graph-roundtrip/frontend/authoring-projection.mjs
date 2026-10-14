@@ -21,33 +21,6 @@ export function appendPosition(workflow, block) {
   const end = statementsIn(workflow, block).find((s) => terminal(s.statement));
   return { block, ...(end ? { before: end.site } : {}) };
 }
-export function project(workflow, block, describe) {
-  const nodes = [];
-  for (const s of statementsIn(workflow, block)) {
-    if (s.statement.if) {
-      const branch = (index) =>
-        project(
-          workflow,
-          { unit: s.site.unit, path: [...(s.site.path ?? []), index] },
-          describe,
-        );
-      nodes.push({
-        ...describe(s),
-        branch: true,
-        children: [branch(1), branch(2)],
-      });
-    } else if (
-      actionOf(s) ||
-      s.statement.try ||
-      s.statement.for ||
-      s.statement.while
-    ) {
-      nodes.push(describe(s));
-    }
-    if (terminal(s.statement)) break;
-  }
-  return nodes;
-}
 function references(value, name) {
   if (!value || typeof value !== "object") return 0;
   return (
