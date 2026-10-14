@@ -542,7 +542,7 @@ mod tests {
         let binding = retired_only
             .manifest
             .bindings
-            .remove(lash_vm_runtime::TOOL_BINDING_KEY)
+            .remove(lash_core::facade_support::TOOL_BINDING_KEY)
             .expect("with_tool_binding wrote the canonical key");
         retired_only
             .manifest

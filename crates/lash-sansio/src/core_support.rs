@@ -24,6 +24,15 @@ use crate::{
     ToolContract, ToolDefinition, ToolFailure, ToolFailureClass, ToolId, ToolManifest, ToolValue,
 };
 
+/// The one manifest key a tool binding lives under.
+///
+/// The key is lash's internal projection onto the manifest's opaque `bindings`
+/// map: hosts never read or write it. The binding it holds names a module path
+/// and operation, not a source language; each dialect spells that binding in
+/// its own syntax (ADR 0096).
+#[doc(hidden)]
+pub const TOOL_BINDING_KEY: &str = "lash.tool";
+
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
 ///
 /// This is an internal cross-crate seam. Durable identity owners still own the

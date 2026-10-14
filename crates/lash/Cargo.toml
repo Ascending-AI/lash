@@ -121,9 +121,9 @@ worker = ["codemode", "dep:lash-vm-worker"]
 sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store", "dep:sqlx", "tokio/rt", "tokio/time", "tokio/macros"]
 s3 = ["dep:lash-s3-store"]
-openai = ["dep:lash-provider-openai", "dep:lash-llm-transport"]
-anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
-google = ["dep:lash-provider-google", "dep:lash-llm-transport"]
+openai = ["dep:lash-provider-openai", "dep:lash-llm-transport", "http-transport"]
+anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport", "http-transport"]
+google = ["dep:lash-provider-google", "dep:lash-llm-transport", "http-transport"]
 mcp = ["dep:lash-plugin-mcp"]
 # The TypeScript front end and printer in the host's own process
 # (`lash::typescript`, `WorkflowDocument::typescript`), with no helper

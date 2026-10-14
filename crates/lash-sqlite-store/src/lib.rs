@@ -204,6 +204,7 @@ pub struct SqliteStore {
 
 impl SqliteStore {
     /// Replace the process-local enqueue nonce seed for deterministic fixtures.
+    #[cfg(any(test, feature = "testing"))]
     pub fn with_commit_count_seed_for_testing(mut self, seed: u64) -> Self {
         self.commit_count = AtomicU64::new(seed);
         self
@@ -451,17 +452,6 @@ fn process_encode_json<T: serde::Serialize>(
     serde_json::to_string(value).map_err(|err| {
         lash_core_execution::PluginError::Session(format!("failed to encode process row: {err}"))
     })
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum PersistedArtifactKind {
-    CheckpointManifest,
-    CheckpointComponent,
-    KernelDocument,
-    ProcessExecutionEnv,
-    ProcessDefinition,
-    ToolMaterial,
-    TurnPrelude,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

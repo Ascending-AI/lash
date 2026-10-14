@@ -1,0 +1,28 @@
+error[E0638]: `..` required with struct marked as non-exhaustive
+ --> tests/ui/turn_snapshots_require_rest_patterns.rs:2:9
+  |
+2 |     let lash::TurnOutput { result, activities } = output;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: add `..` at the end of the field list to ignore all other fields
+  |
+2 |     let lash::TurnOutput { result, activities , .. } = output;
+  |                                               ++++
+
+error[E0638]: `..` required with struct marked as non-exhaustive
+  --> tests/ui/turn_snapshots_require_rest_patterns.rs:3:9
+   |
+ 3 |       let lash::TurnReport {
+   |  _________^
+ 4 | |         outcome,
+ 5 | |         usage,
+ 6 | |         llm_calls,
+...  |
+13 | |         source,
+14 | |     } = result;
+   | |_____^
+   |
+help: add `..` at the end of the field list to ignore all other fields
+   |
+14 |     , .. } = result;
+   |     ++++

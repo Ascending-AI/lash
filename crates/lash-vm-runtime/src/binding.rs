@@ -2,7 +2,8 @@
 //! manifest carries, validated and resolved to the path a document performs
 //! it under.
 
-pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+use lash_core::facade_support::TOOL_BINDING_KEY;
+pub use lash_core::{ToolBinding, ToolDefinitionBindingExt};
 
 /// A failure while decoding or resolving a tool binding.
 #[non_exhaustive]

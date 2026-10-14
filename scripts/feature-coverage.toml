@@ -652,3 +652,14 @@ commands = [
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "provider-wire-fixtures", "--locked"],
   ["cargo", "check", "-p", "agent-workbench", "--all-targets", "--no-default-features", "--features", "e2e-tools", "--locked"],
 ]
+
+# FIG-6267: each provider closes its injected transport contract without
+# another facade feature or any development dependency in the resolution.
+[[lane]]
+name = "provider-signatures"
+features = []
+commands = [
+  ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "openai", "--locked"],
+  ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "anthropic", "--locked"],
+  ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "google", "--locked"],
+]

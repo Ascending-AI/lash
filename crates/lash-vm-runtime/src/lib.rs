@@ -25,7 +25,7 @@ mod process_plugin;
 mod projection;
 
 pub use binding::{
-    ResolvedToolBinding, TOOL_BINDING_KEY, ToolBinding, ToolBindingError, ToolBindingResolutionExt,
+    ResolvedToolBinding, ToolBinding, ToolBindingError, ToolBindingResolutionExt,
     ToolDefinitionBindingExt, ToolManifestBindingExt, required_tool_binding,
     required_tool_executable,
 };

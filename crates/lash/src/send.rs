@@ -539,22 +539,27 @@ impl std::future::IntoFuture for SendBuilder {
 /// clear (ADR 0109 §9).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
 pub enum SendOutcome {
     /// An explicitly completed host task, read from its operation receipt.
+    #[non_exhaustive]
     OperationSettled {
         run: TurnId,
         outcome: Box<lash_core::runtime::PluginOperationCommandOutcome>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
+    #[non_exhaustive]
     Settled {
         run: TurnId,
         output: Box<TurnOutput>,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
+    #[non_exhaustive]
     Parked {
         parked: ParkedTurn,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
+    #[non_exhaustive]
     Stalled {
         stalled: StalledDelivery,
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
@@ -563,6 +568,7 @@ pub enum SendOutcome {
     /// of it committed (ADR 0069 §6): the run's recorded terminal answer. A
     /// shift the engine refused before any run took the input answers its
     /// refusal the same way, with no `run`.
+    #[non_exhaustive]
     Refused {
         run: Option<TurnId>,
         refusal: Box<lash_core::RuntimeError>,
@@ -571,6 +577,7 @@ pub enum SendOutcome {
     /// The input was withdrawn before any run took it. Its withdrawal stays
     /// on record, so a send under the same id answers this withdrawal and
     /// runs nothing.
+    #[non_exhaustive]
     Withdrawn {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
@@ -581,6 +588,7 @@ pub enum SendOutcome {
     /// accepted as new when the session is live. A host that lost a send's
     /// response re-sends the same id with the same content rather than reading this answer
     /// ([`SendBuilder::id`]).
+    #[non_exhaustive]
     NotAccepted {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },

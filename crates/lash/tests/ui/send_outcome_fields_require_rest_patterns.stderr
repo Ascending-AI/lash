@@ -1,0 +1,10 @@
+error[E0638]: `..` required with variant marked as non-exhaustive
+ --> tests/ui/send_outcome_fields_require_rest_patterns.rs:3:9
+  |
+3 |         lash::SendOutcome::Withdrawn { gaps } => { let _ = gaps; }
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: add `..` at the end of the field list to ignore all other fields
+  |
+3 |         lash::SendOutcome::Withdrawn { gaps , .. } => { let _ = gaps; }
+  |                                             ++++

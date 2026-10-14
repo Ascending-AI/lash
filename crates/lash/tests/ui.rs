@@ -46,6 +46,10 @@ mod rlm_facade_boundary_types_are_public;
 fn facade_compile_time_contracts() {
     let t = trybuild::TestCases::new();
 
+    t.compile_fail("tests/ui/operational_enums_require_future_cases.rs");
+    t.compile_fail("tests/ui/turn_snapshots_require_rest_patterns.rs");
+    t.compile_fail("tests/ui/send_outcome_fields_require_rest_patterns.rs");
+
     t.compile_fail("tests/ui/transcript_part_kind_is_not_matchable.rs");
     t.compile_fail("tests/ui/transcript_reply_marker_is_not_host_mintable.rs");
     t.compile_fail("tests/ui/transcript_entry_id_is_opaque.rs");

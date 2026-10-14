@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::core_support::TOOL_BINDING_KEY;
 use crate::sync::MutexExt;
 use crate::{
     JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
@@ -1515,14 +1516,6 @@ impl ToolDefinition {
     }
 }
 
-/// The one manifest key a tool binding lives under.
-///
-/// The key is lash's internal projection onto the manifest's opaque `bindings`
-/// map: hosts never read or write it. The binding it holds names a module path
-/// and operation, not a source language; each dialect spells that binding in
-/// its own syntax (ADR 0096).
-pub const TOOL_BINDING_KEY: &str = "lash.tool";
-
 /// Dialect-agnostic binding that makes a host tool callable as a module
 /// operation during code-mode execution. Which dialect executes the call is
 /// lash's decision; the host supplies the module path, operation, and optional
@@ -1566,7 +1559,7 @@ impl ToolBinding {
 /// The one host-facing setter for a tool's executable binding.
 ///
 /// The manifest key the binding is written under
-/// ([`TOOL_BINDING_KEY`]) is lash's own projection onto the opaque
+/// (`lash.tool`) is lash's own projection onto the opaque
 /// `bindings` map: hosts never read or write it, and no dialect choice is
 /// exposed or implied by calling this setter.
 pub trait ToolDefinitionBindingExt {

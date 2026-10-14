@@ -1,0 +1,21 @@
+[package]
+name = "provider-signatures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash.workspace = true
+
+[features]
+default = []
+openai = ["lash/openai"]
+anthropic = ["lash/anthropic"]
+google = ["lash/google"]

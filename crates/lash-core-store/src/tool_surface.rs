@@ -229,7 +229,7 @@ pub fn effect_path_of(manifest: &crate::ToolManifest) -> Option<String> {
     let binding: lash_sansio::ToolBinding = serde_json::from_value(
         manifest
             .bindings
-            .get(lash_sansio::TOOL_BINDING_KEY)?
+            .get(lash_sansio::core_support::TOOL_BINDING_KEY)?
             .clone(),
     )
     .ok()?;

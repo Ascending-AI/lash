@@ -1455,6 +1455,13 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0322"
         }
     },
+    "provider-signatures": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash": "//crates/lash:lash"
+        }
+    },
     "rlm-smoke-host": {
         "build": {},
         "dev": {

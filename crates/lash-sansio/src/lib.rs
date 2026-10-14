@@ -132,11 +132,10 @@ pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
     Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExtraKeys, LimitCause, ModelTool,
     ObjectShape, ParkBound, ProcessParamShape, ProcessShape, RegistrationRefused, SchemaShape,
-    ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
-    ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds, ToolContract, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolId, ToolManifest, ToolModule,
-    ToolOutputContract, ToolPresentationConfig, X_LASH_KEYWORD, XLashParam, XLashSignature,
-    XLashType, is_named_type_reference, schema_for,
+    ShapeConstraints, ShapeField, ShapeKind, ShapeRow, ToolArgumentProjectionPolicy, ToolBinding,
+    ToolBound, ToolBounds, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery,
+    ToolDraft, ToolId, ToolManifest, ToolModule, ToolOutputContract, ToolPresentationConfig,
+    X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType, is_named_type_reference, schema_for,
 };
 pub use tool_declaration::{
     DeclarationRefusal, FinishDeclaration, OutcomeShape, ToolDeclaration, TurnControlKind,

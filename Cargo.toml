@@ -67,6 +67,7 @@ members = [
     "examples/toolbench",
     "examples/workflow-graph-roundtrip",
     "examples/integrator-contract",
+    "examples/provider-signatures",
     "examples/delegation",
     "examples/mcp-events",
     "examples/e2e-consumer",

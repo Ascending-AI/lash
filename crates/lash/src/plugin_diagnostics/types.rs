@@ -207,6 +207,7 @@ pub struct ObligationEvidencePage {
     pub observed_revision: Option<StateRevision>,
 }
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DiagnosticError {
     #[error(transparent)]
     Durable(#[from] lash_core::durable_port::DurableError),

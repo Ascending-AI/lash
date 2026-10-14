@@ -58,6 +58,7 @@ pub(crate) fn fresh_turn_id() -> TurnId {
 /// turns; this report remains the named run's result. For state as of a
 /// settled run, use [`DurableSession::read_run`](crate::DurableSession::read_run).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct TurnReport {
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
     /// — read it with [`TurnReport::cancellation`]. Runtime and provider
@@ -212,6 +213,7 @@ impl TurnReport {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct TurnOutput {
     /// Final settled report for the turn.
     pub result: TurnReport,
@@ -220,6 +222,15 @@ pub struct TurnOutput {
 }
 
 impl TurnOutput {
+    /// Combine a settled report with the activities collected by its observer.
+    ///
+    /// The activities describe that observer's view; they need not include
+    /// every activity the run emitted. The report keeps its original source
+    /// and authoritative outcome.
+    pub fn new(result: TurnReport, activities: Vec<TurnActivity>) -> Self {
+        Self { result, activities }
+    }
+
     /// See [`TurnReport::status`].
     pub fn status(&self) -> crate::TurnStatus {
         self.result.status()

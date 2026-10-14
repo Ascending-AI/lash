@@ -56,24 +56,31 @@ fn main() {
 fn inspect_send(outcome: lash::SendOutcome) {
     let _ = outcome.status();
     match outcome {
-        lash::SendOutcome::OperationSettled { run, outcome, gaps } => {
+        lash::SendOutcome::OperationSettled {
+            run, outcome, gaps, ..
+        } => {
             let _ = (run, outcome, gaps);
         }
-        lash::SendOutcome::Settled { run, output, gaps } => {
+        lash::SendOutcome::Settled {
+            run, output, gaps, ..
+        } => {
             let _ = (run, output, gaps);
         }
-        lash::SendOutcome::Parked { parked, gaps } => {
+        lash::SendOutcome::Parked { parked, gaps, .. } => {
             let _ = (parked, gaps);
         }
-        lash::SendOutcome::Stalled { stalled, gaps } => {
+        lash::SendOutcome::Stalled { stalled, gaps, .. } => {
             let _ = (stalled, gaps);
         }
-        lash::SendOutcome::Refused { run, refusal, gaps } => {
+        lash::SendOutcome::Refused {
+            run, refusal, gaps, ..
+        } => {
             let _ = (run, refusal, gaps);
         }
-        lash::SendOutcome::Withdrawn { gaps } | lash::SendOutcome::NotAccepted { gaps } => {
+        lash::SendOutcome::Withdrawn { gaps, .. } | lash::SendOutcome::NotAccepted { gaps, .. } => {
             let _ = gaps;
         }
+        _ => {}
     }
 }
 

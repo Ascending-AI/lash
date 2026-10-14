@@ -133,7 +133,7 @@ impl SimEngine {
             Err(err) => Err(err),
         };
         let activities = std::mem::take(&mut *collected.activities.lock_recover());
-        Ok(report.map(|result| lash::TurnOutput { result, activities }))
+        Ok(report.map(|result| lash::TurnOutput::new(result, activities)))
     }
 }
 
@@ -150,7 +150,7 @@ pub async fn settle_handle(
     };
     let report = handle.output_into(&collected).await;
     let activities = std::mem::take(&mut *collected.activities.lock_recover());
-    report.map(|result| lash::TurnOutput { result, activities })
+    report.map(|result| lash::TurnOutput::new(result, activities))
 }
 
 /// The activity a turn streamed, kept for its output and forwarded live.

@@ -5,7 +5,7 @@ use lash_core::{ToolFailure, ToolOutcome};
 mod selected_tools;
 mod selection;
 mod static_provider;
-pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+pub use lash_core::{ToolBinding, ToolDefinitionBindingExt};
 pub use selected_tools::{
     SelectedToolsPlugin, SetToolSelection, ToolSelectionConfig, ToolSelectionOwner,
 };

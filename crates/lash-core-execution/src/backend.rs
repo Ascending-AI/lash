@@ -39,7 +39,11 @@ impl std::fmt::Display for StoreBindingId {
 }
 
 /// Why a durable backend was not built.
+///
+/// New failure kinds may be added. Each named variant retains its complete
+/// identifying payload so backend assemblers can construct these typed causes.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum DurableBuildError {
     /// Two process engines declare one kind.
     #[error("two process engines declare kind `{kind}`")]

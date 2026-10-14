@@ -150,6 +150,8 @@ pub mod facade_support {
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;
+    #[doc(hidden)]
+    pub use lash_sansio::core_support::TOOL_BINDING_KEY;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.
@@ -481,16 +483,16 @@ pub use lash_sansio::{
     OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
     ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RetainedValue, RunId,
     SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TerminationMode,
-    TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding,
-    ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation,
-    ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase,
-    ToolCheckReply, ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration,
-    ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure,
-    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
-    ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue, ToolView,
-    ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId,
-    TurnOutputSource, TurnReply, ValueMismatch, ValueShape, ValueShapeLimits,
+    SchemaProjectionPolicy, SessionAppendNode, TerminationMode, TextProjectionMetadata,
+    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
+    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
+    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
+    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
+    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl,
+    TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply, ValueMismatch, ValueShape,
+    ValueShapeLimits,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,

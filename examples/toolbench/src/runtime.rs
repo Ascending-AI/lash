@@ -296,10 +296,7 @@ async fn run_turn(
         .context("run toolbench turn")?;
     let decisions = lash::rlm::recorded_extraction_decisions(session.read_view().active_events())?;
     Ok((
-        lash::TurnOutput {
-            result,
-            activities: telemetry.activities(),
-        },
+        lash::TurnOutput::new(result, telemetry.activities()),
         decisions,
     ))
 }

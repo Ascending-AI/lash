@@ -10,11 +10,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use lash_core::ToolManifest;
+use lash_core::facade_support::TOOL_BINDING_KEY;
 use serde_json::Value;
 
-use lash_vm_runtime::{
-    ResolvedToolBinding, TOOL_BINDING_KEY, ToolBinding, ToolBindingResolutionExt,
-};
+use lash_vm_runtime::{ResolvedToolBinding, ToolBinding, ToolBindingResolutionExt};
 
 pub const DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT: usize = 100;
 pub const DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT: usize = 50;
