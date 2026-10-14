@@ -211,11 +211,15 @@ impl KernelMachine {
             bindings: classification.carried,
             functions: self.functions,
         })?;
+        let mut not_carried = classification.dropped;
+        // Metadata tree keys are bounded digests; public diagnostics retain
+        // their semantic name order independently of those storage keys.
+        not_carried.sort();
         Ok(Finished {
             result,
             finish,
             carry: Some(carry),
-            not_carried: classification.dropped,
+            not_carried,
         })
     }
 }

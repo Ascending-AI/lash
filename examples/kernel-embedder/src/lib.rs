@@ -5,10 +5,15 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, FunctionRegistry, Handle, Integer, Timestamp, parse_document};
 use lash_kernel_vm::{
-    Bindings, Bounds, EffectRequest, End, Host, Machine, Outcome, PreparedLibrary, Program,
-    Request, Start, Step, Target,
+    Bounds, CellStart, EffectRequest, End, Host, Machine, Outcome, PreparedLibrary, Program,
+    Request, Step, Target,
 };
 
+mod pages;
+use lash_kernel_doc::heap::{LogicalBytes, PageId};
+use lash_kernel_state::paged::{
+    AllocationCensus, EditEpoch, PagedHeap, SealBudget, SemanticHeap, census_impl::Census,
+};
 /// Two children request effects before their parent joins them.
 pub const FAN_OUT: &str = include_str!("../fan-out.kernel");
 
@@ -43,6 +48,7 @@ pub fn embed<M: Machine>(
     environment.effects = document.manifest.effects.clone();
     lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
     let program = Program {
+        release: PageId([7; 32]),
         document: Arc::new(document),
         library: PreparedLibrary::new(registry),
     };
@@ -54,14 +60,22 @@ pub fn embed<M: Machine>(
         requests_per_park: 32,
         join_members: 32,
     };
+    let source = pages::Source::default();
+    let heap = PagedHeap::fresh(Box::new(source.clone()), EditEpoch(1));
+    let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory))
+        .map_err(|e| e.to_string())?;
     let mut machine = M::start(
         program.clone(),
         bounds,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: PageId([9; 32]),
+            modes: Default::default(),
         },
+        Box::new(source.clone()),
+        Box::new(census),
     )
     .map_err(|e| e.to_string())?;
     let mut host = Output::default();
@@ -88,8 +102,30 @@ pub fn embed<M: Machine>(
             }
             Step::Parked(park) => {
                 parks += 1;
-                let state = machine.export().map_err(|e| e.to_string())?;
-                machine = M::import(program.clone(), bounds, state).map_err(|e| e.to_string())?;
+                let sealed = machine
+                    .seal(SealBudget {
+                        pages: u64::MAX,
+                        bytes: u64::MAX,
+                    })
+                    .map_err(|e| e.to_string())?
+                    .ok_or("unbounded seal incomplete")?;
+                let heap = PagedHeap::open_header(
+                    sealed.root.heap,
+                    Box::new(source.clone()),
+                    EditEpoch(2),
+                )
+                .map_err(|e| e.to_string())?;
+                let census = Census::restore(heap.certificate(), LogicalBytes(bounds.memory))
+                    .map_err(|e| e.to_string())?;
+                machine = M::open(
+                    program.clone(),
+                    bounds,
+                    &sealed.root,
+                    Vec::new(),
+                    Box::new(source.clone()),
+                    Box::new(census),
+                )
+                .map_err(|e| e.to_string())?;
                 resumes += 1;
                 for request in park.requests.into_iter().rev() {
                     match request {

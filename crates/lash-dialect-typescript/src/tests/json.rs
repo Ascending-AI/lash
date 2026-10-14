@@ -9,9 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
-use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Program, RunError, Start, Step, Target,
-};
+use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
 
 use super::machine;
 
@@ -196,6 +194,7 @@ fn program() -> &'static Program {
         document.manifest.functions =
             lash_kernel_check::requirements(&document, registry.as_ref()).functions;
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document),
             library: lash_kernel_vm::PreparedLibrary::new(registry),
         }
@@ -246,16 +245,18 @@ struct Ran {
 }
 
 fn run(entry: &str, case: &Case) -> Ran {
-    let start = Start {
+    let start = CellStart {
         target: Target::Entry(Name::new(entry)),
         args: vec![
             case.value.clone(),
             Datum::Int(Integer::from(i64::from(case.mode))),
             Datum::List(case.tail.clone()),
         ],
-        bindings: Bindings::default(),
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
     };
-    let mut machine = KernelMachine::start(program().clone(), BOUNDS, start)
+    let mut machine = super::pages::start(program().clone(), BOUNDS, start)
         .unwrap_or_else(|error| panic!("{error}"));
     let mut console = Console::default();
     let step = machine
@@ -635,7 +636,6 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
 fn smith_values() -> Vec<Datum> {
     use arbitrary::{Arbitrary, Unstructured};
     use lash_kernel_conformance::smith::Smith;
-    use lash_kernel_doc::Value;
     use lash_kernel_vm::{Outcome, Request};
 
     let mut values = Vec::new();
@@ -643,24 +643,33 @@ fn smith_values() -> Vec<Datum> {
         let mut bits = Bits(seed + 1);
         let bytes: Vec<u8> = (0..512).map(|_| bits.next() as u8).collect();
         let smith = Smith::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
-        let mut bindings = Bindings::default();
-        bindings.variables.insert(
+        let session = super::pages::Session::seeded([(
             Name::new("projection"),
-            Value::Handle(Arc::new(Handle {
+            Datum::Handle(Handle {
                 kind: "smith".into(),
                 id: "projection".into(),
-            })),
-        );
-        let start = Start {
+            }),
+        )]);
+        let start = CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings,
+            owner: super::pages::OWNER,
+            session: session.root.clone(),
+            modes: Default::default(),
         };
         let program = Program {
+            release: super::pages::RELEASE,
             document: Arc::new(smith.document),
             library: machine::prepared().clone(),
         };
-        let mut machine = KernelMachine::start(program, BOUNDS, start).unwrap();
+        let mut machine = super::pages::with_source(
+            program,
+            BOUNDS,
+            start,
+            lash_kernel_vm::Layout::default(),
+            &session.source,
+        )
+        .unwrap();
         let mut console = Console::default();
         loop {
             match machine.run(&mut console, u64::MAX).unwrap() {

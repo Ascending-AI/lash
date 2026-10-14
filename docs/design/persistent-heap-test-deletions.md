@@ -81,3 +81,18 @@ certification machinery; it delegates to the real heap.
 
 | `crates/lash-dialect-python/src/tests/machine.rs::arithmetic_successors_and_held_previous_definitions_resume_exactly` | `tests::machine::paged_arithmetic_keeps_held_definitions_and_exact_charge` executes sealed S4 checkpoints with the real S7 census; old whole-state JSON export/import oracle removed |
 | `crates/lash-dialect-python/src/tests/machine.rs::integer_facts_resume_a_parked_loop_exactly` | `tests::machine::paged_integer_loop_keeps_facts_across_await` checks compiler facts and exact effects through sealed S4 checkpoints |
+
+Conformance's `check_migration`/`MigrationCheck` and synthetic-next feature
+membership are deleted under owner ruling 337494. The integrator re-expresses
+release-change survival at S8 `classify_carry`/`adopt`. Document/definition
+version refusals and all recorded observations retain their original oracles.
+
+| `crates/lash-kernel-conformance/src/migration_laws.rs::a_run_parked_at_any_park_resumes_under_the_next_kernel_version_as_it_would_have_run` | integrator-owned S8 law: parked run survival across release changes (owner ruling 337494); whole-state ParkedRun subject deleted |
+
+| `crates/lash-kernel-conformance/src/migration_laws.rs::a_run_parked_in_a_library_body_is_refused_with_the_site_it_stands_on` | integrator-owned S8 law: unmappable old runtime coordinates are refused (owner ruling 337494); whole-state ParkedRun subject deleted |
+
+| `crates/lash-kernel-conformance/src/migration_laws.rs::a_function_saved_under_one_version_is_migrated_and_called_under_the_next` | integrator-owned S8 law: saved captures survive a release change (owner ruling 337494); whole-state ParkedRun subject deleted |
+
+| `crates/lash-dialect-typescript/src/tests/machine.rs::numeric_entry_saved_functions_accept_later_unknown_calls` | `saved::laws` uses frozen capture bundles; `numeric_recursive_calls_admit_once_and_account_real_work` pins generic numeric entry behavior; old SavedFunction JSON grammar removed |
+
+| `crates/lash-dialect-typescript/src/tests/positional.rs::a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly` | `a_paged_positional_stack_resumes_with_a_new_layout` reads the S4 frame tree's 62-frame summary and resumes in Layout(17); old flat JSON roundtrip assertion deleted |

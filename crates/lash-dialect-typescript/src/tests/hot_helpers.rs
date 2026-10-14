@@ -6,9 +6,7 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
-use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Program, RunError, Start, Step, Target,
-};
+use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
 
 use super::machine;
 
@@ -244,6 +242,7 @@ fn program() -> &'static Program {
         document.manifest.functions =
             lash_kernel_check::requirements(&document, registry.as_ref()).functions;
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document),
             library: machine::prepared().clone(),
         }
@@ -292,12 +291,14 @@ struct Ran {
 }
 
 fn run(entry: &str, value: &Datum, mode: u16) -> Ran {
-    let start = Start {
+    let start = CellStart {
         target: Target::Entry(Name::new(entry)),
         args: vec![value.clone(), Datum::Int(Integer::from(i64::from(mode)))],
-        bindings: Bindings::default(),
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
     };
-    let mut machine = KernelMachine::start(program().clone(), BOUNDS, start)
+    let mut machine = super::pages::start(program().clone(), BOUNDS, start)
         .unwrap_or_else(|error| panic!("{error}"));
     let mut console = Console::default();
     let step = machine
@@ -602,19 +603,25 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
         ))
         .unwrap();
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document),
             library: library.clone(),
         }
     };
     let run = |program: Program, value: Datum, relay: bool| {
-        let mut machine = KernelMachine::start(
+        let source = super::pages::Source::default();
+        let mut machine = super::pages::with_source(
             program.clone(),
             BOUNDS,
-            Start {
+            CellStart {
                 target: Target::Entry(Name::new("key")),
                 args: vec![value],
-                bindings: Bindings::default(),
+                session: None,
+                owner: super::pages::OWNER,
+                modes: Default::default(),
             },
+            lash_kernel_vm::Layout::default(),
+            &source,
         )
         .unwrap();
         if !relay {
@@ -627,8 +634,13 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
                 .unwrap()
             {
                 Step::Slice => {
-                    let state = machine.export().unwrap();
-                    machine = KernelMachine::import(program.clone(), BOUNDS, state).unwrap();
+                    super::pages::reopen(
+                        &mut machine,
+                        &program,
+                        BOUNDS,
+                        &source,
+                        lash_kernel_vm::Layout::default(),
+                    );
                 }
                 Step::Ended(end) => return (end, machine.meters().charged, machine.work()),
                 other => panic!("a key never parks: {other:?}"),

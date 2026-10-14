@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Site, Timestamp, Unit, parse_document,
 };
 use lash_kernel_vm::{
-    Bindings, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step, Target,
+    CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Step, Target,
 };
 
 use crate::{Case, CaseBounds, Shard};
@@ -54,24 +54,29 @@ fn main(path: &[u32]) -> Site {
 
 fn program(case: &Case, registry: Arc<FunctionRegistry>) -> Program {
     Program {
+        release: crate::pages::RELEASE,
         document: Arc::new(parse_document(&case.document).expect("case document")),
         library: PreparedLibrary::new(registry),
     }
 }
 
-fn start(program: Program, bounds: CaseBounds, bindings: Bindings) -> KernelMachine {
+fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) -> KernelMachine {
     let mut admission = lash_kernel_check::Environment::new(program.library.registry().as_ref());
     admission.effects = program.document.manifest.effects.clone();
-    admission.bindings = bindings.variables.keys().cloned().collect();
+    admission.bindings = session.names();
     lash_kernel_check::admit(&program.document, &admission).expect("admit protocol document");
     KernelMachine::start(
         program,
         bounds.into(),
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings,
+            session: session.root.clone(),
+            owner: crate::pages::OWNER,
+            modes: Default::default(),
         },
+        Box::new(session.source.clone()),
+        session.census(bounds.memory),
     )
     .expect("start protocol document")
 }

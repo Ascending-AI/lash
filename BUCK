@@ -1056,7 +1056,6 @@ test_suite(
         "//crates/lash-http-transport:lash-http-transport__unit_test",
         "//crates/lash-kernel-check:lash-kernel-check__unit_test",
         "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__unit_test",
         "//crates/lash-kernel-doc:test_batch",
         "//crates/lash-kernel-edit:test_batch",
@@ -2524,9 +2523,7 @@ test_suite(
         "//crates/lash-kernel-check:lash-kernel-check__metadata[check]",
         "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0__metadata[check]",
         "//crates/lash-kernel-conformance:lash-kernel-conformance__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_ccfe0110__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_eda87cff__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14__rust_test__metadata[check]",
+        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_67862a99__metadata[check]",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__metadata[check]",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c__metadata[check]",
         "//crates/lash-kernel-doc:lash-kernel-doc__metadata[check]",
@@ -3260,8 +3257,7 @@ test_suite(
         "//examples/agent-workbench:agent-workbench__unit_test__fv_fda67d6e__rust_test__metadata[check]",
         "//examples/delegation:delegation__fv_0bed4503__metadata[check]",
         "//examples/delegation:delegation__fv_b0919f98__metadata[check]",
-        "//examples/delegation:delegation__fv_f114f9fd__metadata[check]",
-        "//examples/kernel-embedder:kernel-embedder__fv_1ee03a8a__metadata[check]"
+        "//examples/delegation:delegation__fv_f114f9fd__metadata[check]"
 ],
     visibility = ["PUBLIC"],
 )
@@ -3506,9 +3502,7 @@ test_suite(
         "//crates/lash-kernel-check:lash-kernel-check__metadata[check]",
         "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0__metadata[check]",
         "//crates/lash-kernel-conformance:lash-kernel-conformance__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_ccfe0110__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_eda87cff__metadata[check]",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14__rust_test__metadata[check]",
+        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_67862a99__metadata[check]",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__metadata[check]",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c__metadata[check]",
         "//crates/lash-kernel-doc:lash-kernel-doc__metadata[check]",
@@ -4242,8 +4236,7 @@ test_suite(
         "//examples/agent-workbench:agent-workbench__unit_test__fv_fda67d6e__rust_test__metadata[check]",
         "//examples/delegation:delegation__fv_0bed4503__metadata[check]",
         "//examples/delegation:delegation__fv_b0919f98__metadata[check]",
-        "//examples/delegation:delegation__fv_f114f9fd__metadata[check]",
-        "//examples/kernel-embedder:kernel-embedder__fv_1ee03a8a__metadata[check]"
+        "//examples/delegation:delegation__fv_f114f9fd__metadata[check]"
 ],
     visibility = ["PUBLIC"],
 )
@@ -4257,7 +4250,6 @@ test_suite(
         "//crates/lash-core-store:lash-core-store__unit_test__fv_5d569b32",
         "//crates/lash-core-store:lash-core-store__unit_test__fv_666756f0",
         "//crates/lash-core-store:lash-core-store__unit_test__fv_d25c3114",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14",
         "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_a61bbca2",
         "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_9bfdd311",
         "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_fef7dea5",

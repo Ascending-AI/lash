@@ -99,6 +99,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         }
     },
@@ -131,6 +132,7 @@ PACKAGE_DEPS = {
             "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0313",
             "serde_yaml": "//third-party/rust:p0322",
@@ -1086,7 +1088,6 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
-            "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0313",

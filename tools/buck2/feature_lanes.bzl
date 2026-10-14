@@ -237,9 +237,7 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//crates/lash-kernel-check:lash-kernel-check",
     "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0",
     "//crates/lash-kernel-conformance:lash-kernel-conformance",
-    "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_ccfe0110",
-    "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_eda87cff",
-    "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14",
+    "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_67862a99",
     "//crates/lash-kernel-dialect:lash-kernel-dialect",
     "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c",
     "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -974,7 +972,6 @@ FEATURE_LANE_COMPILE_TARGETS = [
     "//examples/delegation:delegation__fv_0bed4503",
     "//examples/delegation:delegation__fv_b0919f98",
     "//examples/delegation:delegation__fv_f114f9fd",
-    "//examples/kernel-embedder:kernel-embedder__fv_1ee03a8a",
 ]
 
 FEATURE_LANE_TEST_TARGETS = [
@@ -984,7 +981,6 @@ FEATURE_LANE_TEST_TARGETS = [
     "//crates/lash-core-store:lash-core-store__unit_test__fv_5d569b32",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_666756f0",
     "//crates/lash-core-store:lash-core-store__unit_test__fv_d25c3114",
-    "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_a61bbca2",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_9bfdd311",
     "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_fef7dea5",
@@ -1426,9 +1422,7 @@ FEATURE_LANES = {
         "//crates/lash-kernel-check:lash-kernel-check",
         "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0",
         "//crates/lash-kernel-conformance:lash-kernel-conformance",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_ccfe0110",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_eda87cff",
-        "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test__fv_625bfe14",
+        "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_67862a99",
         "//crates/lash-kernel-dialect:lash-kernel-dialect",
         "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_00ec9f8c",
         "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1491,7 +1485,6 @@ FEATURE_LANES = {
         "//crates/lash-vm-worker:lash-vm-worker__fv_652d5f04",
         "//crates/lash:kernel_two_build_claim__test__fv_d2d3684a",
         "//crates/lash:lash__fv_ecd94bad",
-        "//examples/kernel-embedder:kernel-embedder__fv_1ee03a8a",
     ],
     "language-testing-features": [
         "//crates/lash-core-effect:lash-core-effect__fv_3dab681d",

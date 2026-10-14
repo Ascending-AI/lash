@@ -6,8 +6,7 @@ use lash_kernel_dialect::{Environment, NamedLibrary, Printer};
 use lash_kernel_doc as k;
 use lash_kernel_edit::{Draft, Edit, Position, Transaction};
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program, Request, Start,
-    Step, Target,
+    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
 
 use crate::TypeScript;
@@ -39,8 +38,9 @@ impl Host for Observer {
     }
 }
 fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (End, Vec<String>) {
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document.clone()),
             library: library.clone(),
         },
@@ -52,10 +52,12 @@ fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (En
             requests_per_park: 100,
             join_members: 100,
         },
-        Start {
+        CellStart {
             target,
             args: vec![],
-            bindings: Default::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
         },
     )
     .unwrap();

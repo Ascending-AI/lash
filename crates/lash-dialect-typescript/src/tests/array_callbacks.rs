@@ -12,8 +12,8 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionCatalog, FunctionId, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, Start, Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, Step, Target,
 };
 
 const BEFORE: &str = include_str!("array_callbacks_before.kernel");
@@ -148,19 +148,34 @@ struct Observed {
 /// statement and moves to a machine imported afresh from its export, at
 /// every slice and every park.
 fn observe(program: Program, relay: bool) -> Observed {
-    let start = Start {
+    let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
     };
-    let mut machine = KernelMachine::start(program.clone(), BOUNDS, start).unwrap();
+    let source = super::pages::Source::default();
+    let mut machine = super::pages::with_source(
+        program.clone(),
+        BOUNDS,
+        start,
+        lash_kernel_vm::Layout::default(),
+        &source,
+    )
+    .unwrap();
     let mut console = Console::default();
     let mut requests = Vec::new();
     let slice = if relay { 0 } else { u64::MAX };
     let hop = |machine: &mut KernelMachine| {
         if relay {
-            let parked = machine.export().unwrap();
-            *machine = KernelMachine::import(program.clone(), BOUNDS, parked).unwrap();
+            super::pages::reopen(
+                machine,
+                &program,
+                BOUNDS,
+                &source,
+                lash_kernel_vm::Layout::default(),
+            );
         }
     };
     loop {
@@ -209,6 +224,7 @@ fn lowered(kernel: &Kernel, source: &str) -> Program {
     let lowered =
         crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));
     Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: kernel.prepared.clone(),
     }
@@ -449,6 +465,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
             );
             let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
             Program {
+                release: super::pages::RELEASE,
                 document: Arc::new(document),
                 library: kernel.prepared.clone(),
             }
@@ -491,13 +508,15 @@ fn direct_map_calls_account_for_their_work_and_resume_at_every_statement() {
         console.log(generic(m, await echo('key')));
     "#,
     );
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         program.clone(),
         BOUNDS,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
         },
     )
     .unwrap();
@@ -554,13 +573,15 @@ fn primitive_method_regions_charge_only_executed_work_and_resume_exactly() {
         await finish([a, b, c, d, e, f, text.trim('ignored')]);
     "#;
     let program = lowered(after(), source);
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         program.clone(),
         BOUNDS,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
         },
     )
     .unwrap();

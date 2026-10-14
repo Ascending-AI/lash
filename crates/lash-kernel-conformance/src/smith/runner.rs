@@ -2,15 +2,34 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp, Value};
-use lash_kernel_state::ParkedRun;
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_state::paged::CheckpointRoot;
 use lash_kernel_vm::{
-    Bindings, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request, Start,
+    CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
 };
 
 use super::{Smith, library};
 use crate::HarnessError;
+
+/// Exact canonical checkpoint grammar, independent of transient layout.
+#[derive(Clone, Debug)]
+pub struct Checkpoint(pub CheckpointRoot);
+impl PartialEq for Checkpoint {
+    fn eq(&self, other: &Self) -> bool {
+        lash_kernel_doc::graph_tokens::encode_body(&self.0)
+            == lash_kernel_doc::graph_tokens::encode_body(&other.0)
+    }
+}
+fn seal<M: Machine>(machine: &mut M) -> Result<Checkpoint, HarnessError> {
+    Ok(Checkpoint(
+        machine
+            .seal(crate::pages::BUDGET)
+            .map_err(fault)?
+            .ok_or_else(|| fault("unbounded seal incomplete"))?
+            .root,
+    ))
+}
 
 /// Full observation at one return, including the canonical state at slices
 /// and parks. Code caches and host cancellation probes are not observations.
@@ -19,8 +38,8 @@ pub struct Observation {
     pub step: Step,
     pub meters: Meters,
     pub saved_memory: Option<u64>,
-    pub after_deliveries: Option<ParkedRun>,
-    pub parked: Option<ParkedRun>,
+    pub after_deliveries: Option<Checkpoint>,
+    pub parked: Option<Checkpoint>,
     pub host_calls: Vec<HostCall>,
     pub deliveries: Vec<Delivered>,
 }
@@ -103,25 +122,20 @@ fn fault(error: impl std::fmt::Display) -> HarnessError {
 
 fn program(smith: &Smith) -> Program {
     Program {
+        release: crate::pages::RELEASE,
         document: Arc::new(smith.document.clone()),
         library: library().prepared.clone(),
     }
 }
 
-fn start() -> Start {
-    let mut bindings = Bindings::default();
-    bindings.variables.insert(
+fn session() -> crate::pages::Session {
+    crate::pages::Session::seeded([(
         Name::new("projection"),
-        Value::Handle(Arc::new(Handle {
+        Datum::Handle(Handle {
             kind: "smith".into(),
             id: "projection".into(),
-        })),
-    );
-    Start {
-        target: Target::Main,
-        args: Vec::new(),
-        bindings,
-    }
+        }),
+    )])
 }
 
 #[derive(Debug, PartialEq)]
@@ -130,7 +144,7 @@ enum Execution<O> {
     Ran(Vec<O>),
 }
 
-fn observe<M: Machine<Parked = ParkedRun>>(
+fn observe<M: Machine>(
     smith: &Smith,
     slices: &[u64],
     rebuild: bool,
@@ -142,7 +156,22 @@ fn observe<M: Machine<Parked = ParkedRun>>(
         ));
     }
     let program = program(smith);
-    let mut machine = match M::start(program.clone(), smith.schedule.bounds, start()) {
+    let session = session();
+    let source = &session.source;
+    let start = CellStart {
+        owner: crate::pages::OWNER,
+        target: Target::Main,
+        args: Vec::new(),
+        session: session.root.clone(),
+        modes: Default::default(),
+    };
+    let mut machine = match M::start(
+        program.clone(),
+        smith.schedule.bounds,
+        start,
+        Box::new(source.clone()),
+        session.census(smith.schedule.bounds.memory),
+    ) {
         Ok(machine) => machine,
         Err(refusal) => return Ok(Execution::Refused(refusal)),
     };
@@ -163,7 +192,7 @@ fn observe<M: Machine<Parked = ParkedRun>>(
         let parked = if ended || !save {
             None
         } else {
-            Some(machine.export().map_err(fault)?)
+            Some(seal(&mut machine)?)
         };
         let mut observation = Observation {
             meters,
@@ -179,7 +208,8 @@ fn observe<M: Machine<Parked = ParkedRun>>(
             && let Some(parked) = &observation.parked
         {
             machine =
-                M::import(program.clone(), smith.schedule.bounds, parked.clone()).map_err(fault)?;
+                crate::pages::open::<M>(program.clone(), smith.schedule.bounds, &parked.0, source)
+                    .map_err(fault)?;
         }
         if let Step::Parked(park) = &observation.step {
             let mut requests: Vec<_> = park.requests.iter().collect();
@@ -208,7 +238,7 @@ fn observe<M: Machine<Parked = ParkedRun>>(
                     .push(machine.deliver(wait, outcome).map_err(fault)?);
             }
             let parked = if save {
-                Some(machine.export().map_err(fault)?)
+                Some(seal(&mut machine)?)
             } else {
                 None
             };
@@ -216,8 +246,13 @@ fn observe<M: Machine<Parked = ParkedRun>>(
                 && smith.schedule.rebuild[index % smith.schedule.rebuild.len()]
                 && let Some(parked) = &parked
             {
-                machine = M::import(program.clone(), smith.schedule.bounds, parked.clone())
-                    .map_err(fault)?;
+                machine = crate::pages::open::<M>(
+                    program.clone(),
+                    smith.schedule.bounds,
+                    &parked.0,
+                    source,
+                )
+                .map_err(fault)?;
             }
             observation.after_deliveries = parked;
         }
@@ -232,11 +267,9 @@ fn observe<M: Machine<Parked = ParkedRun>>(
 }
 
 /// Same schedule, two machines: every Step (including Slice), every meter,
-/// host call, delivery result and exported state must agree. This seam will
+/// host call, delivery result and sealed state must agree. This seam will
 /// admit the compiled implementation when it exists.
-pub fn compare<A: Machine<Parked = ParkedRun>, B: Machine<Parked = ParkedRun>>(
-    smith: &Smith,
-) -> Result<(), HarnessError> {
+pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
     let a = observe::<A>(smith, &smith.schedule.slices, false, true)?;
     let b = observe::<B>(smith, &smith.schedule.slices, true, true)?;
@@ -287,19 +320,17 @@ pub(super) fn check_slices(smith: &Smith) -> Result<(), HarnessError> {
     Ok(())
 }
 
-// Export performs a collection. A different number of slices therefore
-// gives different collection opportunities, and terminal garbage bytes are
-// not a cross-schedule invariant. At parks, compare the collected memory and
-// complete canonical state. Same-schedule tier comparisons above retain the
-// original Meters at *every* return, including terminal and slice returns.
+// Same-schedule comparisons retain the original meters at every return.
+// Cross-schedule comparisons join host observations across slices and compare
+// complete canonical checkpoints at parks, with exact charge and task counts.
 #[derive(Debug, PartialEq)]
 struct ScheduleReturn {
     step: Step,
     charged: u64,
     live_tasks: u32,
     saved_memory: Option<u64>,
-    parked: Option<ParkedRun>,
-    after_deliveries: Option<ParkedRun>,
+    parked: Option<Checkpoint>,
+    after_deliveries: Option<Checkpoint>,
     host_calls: Vec<HostCall>,
     deliveries: Vec<Delivered>,
 }

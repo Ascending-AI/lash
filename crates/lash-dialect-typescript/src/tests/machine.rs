@@ -4,7 +4,7 @@
 //! epoch per stretch between deliveries, with the outcomes delivered into
 //! it, the tool calls and sleeps it requested and the lines it printed.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::Environment;
@@ -13,8 +13,8 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, RunError, Start, Step, Target, WaitId,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, RunError, Step, Target, WaitId,
 };
 use serde::Deserialize;
 
@@ -205,11 +205,11 @@ pub(crate) enum Ended {
 /// Lowers `source` as a first cell and runs it to its end, answering only
 /// `finish`: the value it ended with.
 pub(crate) fn end(source: &str) -> Ended {
-    end_with_bindings(source, Bindings::default())
+    end_with_bindings(source, super::pages::Session::default())
 }
 
 /// Runs a cell with kernel session data supplied by the law.
-pub(crate) fn end_with_bindings(source: &str, bindings: Bindings) -> Ended {
+pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -> Ended {
     let (mut machine, text) = start_with_bindings(source, bindings);
     let mut finished_with = None;
     loop {
@@ -247,15 +247,18 @@ pub(crate) fn end_of_entry(
 ) -> (Vec<String>, Datum) {
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(document),
         library: prepared().clone(),
     };
-    let start = Start {
+    let start = CellStart {
         target: Target::Entry(Name::new(entry)),
         args,
-        bindings: Bindings::default(),
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
     };
-    let mut machine = KernelMachine::start(program, BOUNDS, start)
+    let mut machine = super::pages::start(program, BOUNDS, start)
         .unwrap_or_else(|error| panic!("{error}\n{text}"));
     let mut console = Console::default();
     let mut asked = Vec::new();
@@ -283,13 +286,13 @@ pub(crate) fn end_of_entry(
 /// Lowers `source` as a first cell and starts a machine on it. Gives the
 /// machine and the document's kernel text.
 fn start(source: &str) -> (KernelMachine, String) {
-    start_with_bindings(source, Bindings::default())
+    start_with_bindings(source, super::pages::Session::default())
 }
 
-fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String) {
+fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMachine, String) {
     let library = super::library();
     let effects = effects();
-    let bindings = values.variables.keys().cloned().collect::<BTreeSet<_>>();
+    let bindings = values.names();
     let environment = Environment {
         tool_roots: &std::collections::BTreeSet::new(),
         library,
@@ -304,16 +307,25 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
         panic!("{invalid}\n{text}");
     }
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: prepared().clone(),
     };
-    let start = Start {
+    let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: values,
+        session: values.root.clone(),
+        owner: super::pages::OWNER,
+        modes: Default::default(),
     };
-    let machine =
-        KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
+    let machine = super::pages::with_source(
+        program,
+        BOUNDS,
+        start,
+        lash_kernel_vm::Layout::default(),
+        &values.source,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     (machine, text)
 }
 
@@ -369,6 +381,7 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
 /// source facts nor operand metadata may be required by resumed execution.
 fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(
             super::lower_with_effects(source)
                 .expect("law source")
@@ -376,7 +389,21 @@ fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, 
         ),
         library: prepared().clone(),
     };
-    let (mut machine, _) = start(source);
+    let source_pages = super::pages::Source::default();
+    let mut machine = super::pages::with_source(
+        program.clone(),
+        BOUNDS,
+        CellStart {
+            owner: super::pages::OWNER,
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            modes: Default::default(),
+        },
+        lash_kernel_vm::Layout::default(),
+        &source_pages,
+    )
+    .unwrap();
     if !restore {
         machine.count_work();
     }
@@ -387,13 +414,12 @@ fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, 
             .run(&mut Console::default(), slice)
             .expect("law run");
         if restore && matches!(step, Step::Slice | Step::Parked(_)) {
-            let bytes = serde_json::to_vec(&machine.export().expect("export")).expect("serialize");
-            let parked = serde_json::from_slice(&bytes).expect("deserialize");
-            machine = KernelMachine::import(program.clone(), BOUNDS, parked).expect("import");
-            assert_eq!(
-                bytes,
-                serde_json::to_vec(&machine.export().expect("re-export")).expect("serialize"),
-                "K-MACH-008: import preserves the exact safe point"
+            super::pages::reopen(
+                &mut machine,
+                &program,
+                BOUNDS,
+                &source_pages,
+                lash_kernel_vm::Layout::default(),
             );
             imports += 1;
         }
@@ -548,98 +574,6 @@ fn numeric_entry_loop_resumes_with_identical_result_and_charge() {
     assert_eq!(plain.0, Datum::Float(lash_kernel_doc::Float::new(3.0)));
     let guarded = source.replace("let s = 0", "const escaped = step; let s = 0");
     assert_eq!(plain_record_resume(&guarded, u64::MAX, true).0, plain.0);
-}
-
-/// TS-NUMERIC-SAVED: saved code retains its generic entry semantics for
-/// later cells, even though its originating cell called it with a float.
-#[test]
-fn numeric_entry_saved_functions_accept_later_unknown_calls() {
-    let source = "function step(n) { return n + 1; } step(1);";
-    let lowered = super::lower_with_effects(source).expect("source");
-    let (mut machine, _) = start(source);
-    let Step::Ended(End::Finished(finished)) =
-        machine.run(&mut Console::default(), u64::MAX).expect("run")
-    else {
-        panic!("end")
-    };
-    let (saved, refused) = lash_kernel_dialect::save(
-        lash_kernel_dialect::Left {
-            document: &lowered.document,
-            carried: &finished.bindings.variables,
-            carried_objects: &finished.bindings.objects,
-            closures: &finished.closures.variables,
-            closure_objects: &finished.closures.objects,
-            not_carried: &finished.not_carried,
-            controls: super::controls(),
-            annotations: Some(&lowered.annotations),
-            values: &crate::function_values(),
-        },
-        &BTreeSet::new(),
-    );
-    assert!(refused.is_empty(), "{refused:?}");
-    let function = saved
-        .get(&Name::new("step"))
-        .expect("saved step")
-        .function
-        .clone();
-    let bytes = serde_json::to_vec(&function).expect("encode");
-    let restored = serde_json::from_slice(&bytes).expect("decode");
-    assert_eq!(function, restored);
-    let functions = BTreeMap::from([(Name::new("step"), restored)]);
-    let bindings = BTreeSet::from([Name::new("step")]);
-    let effects = effects();
-    let environment = Environment {
-        library: super::library(),
-        effects: &effects,
-        tool_roots: &BTreeSet::new(),
-        controls: super::controls(),
-        bindings: &bindings,
-        functions: &functions,
-    };
-    let next = crate::lower(
-        "await finish(JSON.stringify([step('2'), Number.isNaN(step()), step(2)]));",
-        &environment,
-    )
-    .expect("next cell");
-    let program = Program {
-        document: Arc::new(next.document),
-        library: prepared().clone(),
-    };
-    let mut machine = KernelMachine::start(
-        program,
-        BOUNDS,
-        Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Bindings {
-                variables: BTreeMap::from([(Name::new("step"), lash_kernel_doc::Value::Absent)]),
-                ..Default::default()
-            },
-        },
-    )
-    .expect("next start");
-    let next_step = machine
-        .run(&mut Console::default(), u64::MAX)
-        .expect("next run");
-    let Step::Parked(park) = next_step else {
-        panic!("finish park: {next_step:?}")
-    };
-    let [Request::Effect(effect)] = park.requests.as_slice() else {
-        panic!("finish effect")
-    };
-    assert_eq!(
-        effect.args,
-        vec![Datum::Text("[\"21\",true,3]".to_string())]
-    );
-    machine
-        .deliver(effect.wait, Outcome::Completed(Datum::Null))
-        .expect("finish reply");
-    assert!(matches!(
-        machine
-            .run(&mut Console::default(), u64::MAX)
-            .expect("finish"),
-        Step::Ended(End::Finished(_))
-    ));
 }
 
 /// TS-STABLE-PATH: a closed ancestor traversal is paid once per loop,
