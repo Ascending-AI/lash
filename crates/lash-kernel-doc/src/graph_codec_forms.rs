@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, nested, variant};
+use super::{invalid, variant};
 use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use crate::{
     Action, Annotations, Atom, Bytes, Callee, Catch, Closure, Document, DocumentId, Expr, Float,
@@ -63,7 +63,7 @@ impl TokenCodec for Type {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0..=9 | 18 => Some(0),
                 10..=17 | 19 | 20 => Some(1),
@@ -506,7 +506,7 @@ impl TokenCodec for Expr {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0..=8 | 12 => Some(1),
                 9 => Some(2),
@@ -652,7 +652,7 @@ impl TokenCodec for Stmt {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0 | 1 | 6 => Some(2),
                 2 | 3 | 9..=14 => Some(1),
@@ -876,7 +876,7 @@ impl TokenCodec for serde_json::Value {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0 => Some(0),
                 1..=5 => Some(1),
@@ -976,7 +976,7 @@ impl TokenCodec for Formula {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             Ok(
                 match variant(input, |variant| (variant <= 8).then_some(1))? {
                     0 => Self::Constant(input.unsigned()?),

@@ -1,7 +1,6 @@
 //! Library-function definitions (`K-LIB-001`).
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -184,21 +183,11 @@ impl Formula {
 impl FunctionDefinition {
     /// The function's identity (`K-ID-002`).
     pub fn identity(&self) -> Result<FunctionId, EncodeError> {
-        #[cfg(test)]
-        if let Some(prepared) = IDENTITY_TEST_CACHE.with(|cache| {
-            cache
-                .borrow_mut()
-                .as_mut()
-                .map(|cache| cache.identity(self))
-        }) {
-            return prepared;
-        }
-        static PREPARATIONS: OnceLock<Mutex<IdentityPreparations>> = OnceLock::new();
-        PREPARATIONS
-            .get_or_init(|| Mutex::new(IdentityPreparations::default()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .identity(self)
+        let canonical = canonical_bytes(self)?;
+        Ok(FunctionId::from_bytes(digest_bytes(
+            "lash-kernel-function",
+            &canonical,
+        )))
     }
 
     /// Whether the definition states a native implementation: the property
@@ -230,83 +219,4 @@ impl FunctionDefinition {
     ) -> Result<Self, DecodeError> {
         from_versioned_json_with_limits(text, limits)
     }
-}
-
-#[cfg(test)]
-std::thread_local! {
-    pub(crate) static IDENTITY_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-// Identity preparation is pure in every definition field. A full content
-// comparison, including kernel and native versions, precedes reuse; callers
-// still validate the current definition against their current catalog.
-const IDENTITY_BYTES: usize = 8 << 20;
-const IDENTITY_ENTRIES: usize = 256;
-
-struct PreparedIdentity {
-    definition: FunctionDefinition,
-    identity: FunctionId,
-    bytes: usize,
-}
-
-#[derive(Default)]
-struct IdentityPreparations {
-    entries: VecDeque<PreparedIdentity>,
-    bytes: usize,
-}
-
-impl IdentityPreparations {
-    fn identity(&mut self, definition: &FunctionDefinition) -> Result<FunctionId, EncodeError> {
-        if let Some(at) = self
-            .entries
-            .iter()
-            .position(|entry| entry.definition == *definition)
-            && let Some(entry) = self.entries.remove(at)
-        {
-            let identity = entry.identity;
-            self.entries.push_back(entry);
-            return Ok(identity);
-        }
-        #[cfg(test)]
-        IDENTITY_PREPARATIONS.with(|count| count.set(count.get() + 1));
-        let canonical = canonical_bytes(definition)?;
-        let identity = FunctionId::from_bytes(digest_bytes("lash-kernel-function", &canonical));
-        let bytes = canonical.len();
-        if bytes <= IDENTITY_BYTES {
-            while self.entries.len() >= IDENTITY_ENTRIES || self.bytes + bytes > IDENTITY_BYTES {
-                if let Some(previous) = self.entries.pop_front() {
-                    self.bytes -= previous.bytes;
-                }
-            }
-            self.entries.push_back(PreparedIdentity {
-                definition: definition.clone(),
-                identity,
-                bytes,
-            });
-            self.bytes += bytes;
-        }
-        Ok(identity)
-    }
-}
-
-#[cfg(test)]
-std::thread_local! {
-    static IDENTITY_TEST_CACHE: std::cell::RefCell<Option<IdentityPreparations>> = const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(test)]
-pub(crate) fn with_fresh_identity_preparations<T>(run: impl FnOnce() -> T) -> T {
-    struct Clear;
-    impl Drop for Clear {
-        fn drop(&mut self) {
-            IDENTITY_TEST_CACHE.with(|cache| {
-                cache.borrow_mut().take();
-            });
-        }
-    }
-    IDENTITY_TEST_CACHE.with(|cache| {
-        *cache.borrow_mut() = Some(IdentityPreparations::default());
-    });
-    let _clear = Clear;
-    run()
 }

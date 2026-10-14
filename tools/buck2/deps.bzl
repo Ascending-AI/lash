@@ -1035,11 +1035,21 @@ PACKAGE_DEPS = {
     "lash-internal-vm-worker": {
         "build": {},
         "dev": {
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "rmp_serde": "//third-party/rust:p0283",
-            "serde_bytes": "//third-party/rust:p0314"
+            "serde_bytes": "//third-party/rust:p0314",
+            "sqlx": "//third-party/rust:p0338",
+            "tokio": "//third-party/rust:p0377",
+            "tokio_util": "//third-party/rust:p0384"
         },
         "normal": {
+            "async_trait": "//third-party/rust:p0016",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
@@ -1054,6 +1064,7 @@ PACKAGE_DEPS = {
             "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",

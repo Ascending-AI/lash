@@ -6,7 +6,7 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 
 use super::*;
-use crate::graph_tokens::{CanonicalFault, decode_body, encode_body};
+use crate::graph_tokens::{CanonicalFault, DecodeDimension, decode_body, encode_body};
 use crate::tests::{catalog, every_form_corpus};
 use crate::{Annotations, Label, NodeAnnotation, parse_document};
 
@@ -274,4 +274,17 @@ fn a_host_kernel_data_policy_controls_recursive_decoding() {
         crate::Document::from_json_with_limits(&json, limits),
         Err(crate::DecodeError::TooDeep { limit: 1, .. })
     ));
+}
+
+/// ADR 0123: a decoder's guest nesting budget belongs to that decoder.
+#[test]
+fn independent_decoders_do_not_share_guest_depth() {
+    let bytes = encode_body(&TaskIdentity::Main);
+    let limits = crate::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let mut outer = TokenReader::new(&[]).with_data_limits(limits);
+    let result = outer.nested(|_| {
+        let mut inner = TokenReader::new(&bytes).with_data_limits(limits);
+        TaskIdentity::decode(&mut inner)
+    });
+    assert_eq!(result.unwrap(), TaskIdentity::Main);
 }

@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::graph::{GraphStateFailure, ReleaseGraph, admission, export_parked, import_parked};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeKind, check_envelope};
@@ -21,9 +22,6 @@ use lash_kernel_vm::{
     Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, Start, Step, Target,
 };
 use lash_vm_client::WorkerTuning;
-use lash_vm_client::graph::{
-    GraphStateFailure, ReleaseGraph, admission, export_parked, import_parked,
-};
 use lash_vm_protocol::{KernelRestoreRefusal, ParkedGraph, SealedGraphState, VmOwner};
 use lash_vm_releases::HeldManifests;
 

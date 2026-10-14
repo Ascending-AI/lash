@@ -531,6 +531,7 @@ pub struct TokenReader<'a> {
     limits: crate::KernelDataLimits,
     input: &'a [u8],
     pos: usize,
+    depth: u64,
     form: RefForm,
 }
 
@@ -547,6 +548,7 @@ impl<'a> TokenReader<'a> {
             limits: crate::KernelDataLimits::standard(),
             input,
             pos: 0,
+            depth: 0,
             form,
         }
     }
@@ -557,6 +559,25 @@ impl<'a> TokenReader<'a> {
     }
     pub fn decode_depth(&self) -> u64 {
         self.limits.decode_depth()
+    }
+
+    /// One recursive decode, counted only against this reader's budget.
+    pub(crate) fn nested<T>(
+        &mut self,
+        decode: impl FnOnce(&mut Self) -> Result<T, TokenError>,
+    ) -> Result<T, TokenError> {
+        self.depth += 1;
+        let result = if self.depth > self.decode_depth() {
+            Err(TokenError::Limit {
+                dimension: DecodeDimension::Depth,
+                actual: self.depth,
+                limit: self.decode_depth(),
+            })
+        } else {
+            decode(self)
+        };
+        self.depth -= 1;
+        result
     }
 
     /// Whether every byte was read.

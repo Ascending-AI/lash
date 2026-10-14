@@ -1098,11 +1098,11 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-internal-vm-runtime", "lash_vm_runtime", "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_91a81daa"),
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa",
     ],
     manifest_dir = "crates/lash-vm-runtime",
     package_name = "lash-internal-vm-runtime",
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa)"},
     tags = [
         "feature-lane",
         "manual",

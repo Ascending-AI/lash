@@ -182,13 +182,29 @@ pub enum WorkflowDocumentError {
 /// What a document is edited and admitted against: the effects the
 /// processes of its definitions would be offered, and the library
 /// functions the engine's workers hold.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WorkflowEnvironment {
     effects: std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature>,
     functions: Arc<FunctionRegistry>,
+    workers: lash_vm_client::service::Service,
+}
+
+impl std::fmt::Debug for WorkflowEnvironment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkflowEnvironment")
+            .field("effects", &self.effects)
+            .field("functions", &self.functions)
+            .finish_non_exhaustive()
+    }
 }
 
 impl WorkflowEnvironment {
+    /// The registered engine's worker pool, used for isolated source import.
+    pub fn worker_service(&self) -> &lash_vm_client::service::Service {
+        &self.workers
+    }
+
     /// The effects a document may perform, each with its signature.
     pub fn effects(&self) -> &std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature> {
         &self.effects
@@ -402,6 +418,7 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         Ok(lash_core::ProcessDocument::new(WorkflowEnvironment {
             effects: boundary.signatures(),
             functions: Arc::clone(&self.engine.functions),
+            workers: self.engine.workers.clone(),
         }))
     }
 

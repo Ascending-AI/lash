@@ -34,9 +34,13 @@ run state lives in a `static`, `thread_local!`, `OnceLock` or
 - `scripts/check-vm-static-state.py` refuses a static in a `lash-kernel-*`,
   `lash-dialect-*` or `lash-ext-*` crate, `lash-regress`, `lash-vm-runtime`
   or the worker crate unless `scripts/vm-static-state-allowlist.txt` names it
-  with a reason. The allowlist holds build tables projected from constant
-  lists, test-only counters and parent-side telemetry. A stale or unreasoned
-  entry is also refused.
+  with a reason. The inventory follows production modules from crate roots;
+  cfg(test), testing-only items and the conformance harness crate are excluded.
+  The allowlist holds guest-free build tables and opt-in diagnostic counters.
+  A stale or unreasoned entry is also refused. Function identities hash the
+  caller's definition without retaining it globally; binary decode depth
+  belongs to each TokenReader. `//:vm_static_state` and `//:vm_parent_paths`
+  execute in `//:main_tests`; `//:vm_guard_laws` pins production scoping.
 - The function registry a worker assembles at startup (the kernel library,
   the machine's functions, each extension's and each dialect's helpers) is
   fixed before the first document arrives and holds no guest data.
@@ -215,8 +219,9 @@ delivery in any order (`store`), the loop that drives a machine through its
 parks (`KernelBroker`), and number-exact effect values (`value`). The broker
 does not know where the machine lives: it drives a `DrivenMachine` that a
 `Machines` starts or resumes. Lash's is a machine in a pooled worker
-(`lash-vm-client`'s `machine` module); `InProcess` is one in the parent, for
-embedders that choose no isolation and for laws.
+(`lash-vm-client`'s `machine` module); `lash-vm-worker::in_process::InProcess` is the testing-only adapter for
+broker laws. Machine construction and graph import/export adapters live in
+the worker crate, alongside source import.
 
 - **Every effect is brokered.** `KernelEffects` admits each request against
   the run's bindings before any tool runs. A refused request takes no
@@ -234,7 +239,7 @@ embedders that choose no isolation and for laws.
   is committed state, not a worker, so a pool of one slot completes a cell
   that awaits a process it started.
 
-Laws: `crates/lash-vm-broker/tests/park_matrix.rs`
+Laws: `crates/lash-vm-worker/tests/park_matrix.rs`
 (`a_run_of_three_tasks_resumes_from_its_parks_at_every_cut_on_sqlite_memory`,
 `committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers`),
 the ledger and ceiling laws in `crates/lash-vm-broker/src/kernel`, and in

@@ -26,8 +26,8 @@ pub mod value;
 
 pub use ledger::{AdmittedEffect, EffectLedger, LedgerRefusal, PendingEffect, Standing};
 pub use run::{
-    DrivenMachine, InProcess, InProcessMachine, KernelBroker, KernelCeilings, KernelEffects,
-    KernelEnd, KernelFailure, Machines, park_bound,
+    DrivenMachine, KernelBroker, KernelCeilings, KernelEffects, KernelEnd, KernelFailure, Machines,
+    park_bound,
 };
 pub use store::{
     AdmitAs, AdmittedCall, Checkpoint, EFFECT_CANCELLED, EFFECT_FAILED, EFFECT_INTERRUPTED,

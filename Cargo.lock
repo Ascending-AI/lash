@@ -2820,6 +2820,7 @@ dependencies = [
 name = "lash-internal-vm-worker"
 version = "0.0.0-dev"
 dependencies = [
+ "async-trait",
  "dhat",
  "lash-dialect-python",
  "lash-dialect-typescript",
@@ -2828,6 +2829,12 @@ dependencies = [
  "lash-ext-url-whatwg",
  "lash-internal-core-execution",
  "lash-internal-core-store",
+ "lash-internal-durable",
+ "lash-internal-durable-test",
+ "lash-internal-postgres-store",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-library",
  "lash-internal-vm-protocol",
@@ -2845,7 +2852,10 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "sqlx",
  "thiserror",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

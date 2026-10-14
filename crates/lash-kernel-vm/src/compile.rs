@@ -244,6 +244,7 @@ impl PreparedLibrary {
             .collect();
         shuffler.shuffle(layout, &mut units);
 
+        let no_bindings = NO_BINDINGS;
         let mut compiler = Compiler::new(
             layout,
             shuffler,
@@ -251,7 +252,7 @@ impl PreparedLibrary {
                 lib_of: &lib_of,
                 listed: None,
             },
-            &NO_BINDINGS,
+            &no_bindings,
             Base::default(),
         );
         let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
@@ -775,7 +776,7 @@ enum Declared {
 }
 
 /// The session bindings a library body declares: none.
-static NO_BINDINGS: BTreeSet<Name> = BTreeSet::new();
+const NO_BINDINGS: BTreeSet<Name> = BTreeSet::new();
 
 /// How a compiled call names a library function.
 #[derive(Clone, Copy)]

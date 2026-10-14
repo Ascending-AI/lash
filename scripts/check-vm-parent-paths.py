@@ -25,33 +25,12 @@ WORKER = "lash-vm-worker"
 KERNEL_SET = re.compile(r"^lash-(kernel|dialect|ext)-")
 DIALECT_ENTRY = r"(?:lower(?:_[a-z_]+)?|parse|Parser)"
 ENTRY = re.compile(
-    rf"\b(?:KernelMachine|Machine)::(?:start|import)\s*\(|\blash_dialect_[a-z]+::{DIALECT_ENTRY}\b"
+    rf"\b(?:KernelMachine|Machine)::(?:start|import)(?:_[a-z_]+)?\s*\(|\blash_dialect_[a-z]+::{DIALECT_ENTRY}\b"
 )
 IMPORT = re.compile(
     rf"\buse\s+lash_dialect_[a-z]+::[^;]*\b{DIALECT_ENTRY}\b[^;]*;"
     r"|\buse\s+lash_kernel_vm::[^;]*\bKernelMachine\b[^;]*;"
 )
-TEST_CFG = re.compile(r'#\s*\[\s*cfg\s*\((?:test|feature\s*=\s*"testing"|any\(\s*test\s*,\s*feature\s*=\s*"testing"\s*\))\)\s*\]')
-
-
-def production(text: str) -> str:
-    lines = static.strip_comments(text)
-    clean = "\n".join(lines)
-    # Remove an entire cfg(test/testing) item, including inline modules and impls.
-    # Attributes are read from the source because string stripping hides testing.
-    for match in reversed(list(TEST_CFG.finditer(text))):
-        start = text[:match.start()].count("\n")
-        depth = 0
-        opened = False
-        end = start
-        for end in range(start,len(lines)):
-            for char in lines[end]:
-                if char == "{": depth += 1; opened = True
-                elif char == "}": depth -= 1
-                elif char == ";" and not opened: opened = True
-            if opened and depth == 0: break
-        for index in range(start,end+1): lines[index] = " " * len(lines[index])
-    return "\n".join(lines)
 
 
 def check(root: Path) -> list[str]:
@@ -63,7 +42,13 @@ def check(root: Path) -> list[str]:
             continue
         if any(part in {"testing", "tests", "lib_tests"} or part.endswith("_tests.rs") or part == "tests.rs" for part in path.parts):
             continue
-        text = production(path.read_text())
+        raw = path.read_text()
+        # Most parent files name no forbidden entry point. Avoid lexing their
+        # full Rust source; candidates still receive the complete cfg/literal
+        # treatment before any finding is emitted.
+        if not ENTRY.search(raw) and not IMPORT.search(raw):
+            continue
+        text = "\n".join(static.strip_comments(static.production(raw)))
         for match in [*ENTRY.finditer(text), *IMPORT.finditer(text)]:
             line = text[:match.start()].count("\n")+1
             problems.append(f"{relative}:{line}: {match.group().strip()} belongs in lash-vm-worker")

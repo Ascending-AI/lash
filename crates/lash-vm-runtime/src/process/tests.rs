@@ -533,7 +533,7 @@ mod format_carry {
         Request, Start, Step, Target, WaitId,
     };
     use lash_vm_broker::kernel::state::{
-        OpenedRun, ReleaseGraph, WholeState, capture_whole, import_whole_state, open_whole,
+        OpenedRun, ReleaseGraph, WholeState, capture_whole, open_whole,
     };
     use lash_vm_releases::{HeldManifests, HeldReleases, HelperRelease, ReleasedFunction};
 
@@ -793,21 +793,16 @@ mod format_carry {
             opened.release, parked.r1,
             "a format carry must not select R2"
         );
-        let (mut machine, release) = import_whole_state(
+        let mut machine = KernelMachine::import_with_data_limits(
             Program {
                 document: Arc::new(parked.plan.rewritten.document),
                 library: PreparedLibrary::new(parked.library.clone()),
             },
             parked.bounds,
-            carried.root,
-            &carried.nodes,
-            admitted,
-            &parked.releases,
-            &parked.library,
-            limits,
+            opened.run,
+            limits.kernel_data,
         )
         .expect("the retained release resumes the carried state");
-        assert_eq!(release, parked.r1);
         machine
             .deliver(parked.wait, Outcome::Elapsed)
             .expect("the same wait settles");

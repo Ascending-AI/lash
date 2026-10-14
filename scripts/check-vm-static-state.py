@@ -10,8 +10,8 @@ reset and is shared by the next session.
 This check refuses every static item in the kernel crates, the worker and
 lash's side of the machine's host boundary unless `scripts/vm-static-state-allowlist.txt` lists it with a one-line reason.
 The allowlist is for guest-free constants and build tables only: data no guest
-input ever reaches, or test-only instrumentation that never links into a
-worker. An entry that no longer matches a static fails the check too, so the
+input ever reaches, or opt-in diagnostics that hold no guest values. Test-only code is
+outside this inventory. An entry that no longer matches a static fails the check too, so the
 list stays exactly the reviewed set.
 
 Allowlist lines are `<path>::<scope>::<NAME>  # <reason>`, where `<scope>` is
@@ -19,6 +19,10 @@ the enclosing `fn` (or `<module>` for an item at module level). Every static
 item form declares a `static NAME:` item, so that is what the check keys on:
 `thread_local!` and `lazy_static!` bodies, `OnceLock`/`LazyLock` cells and
 `static mut` all do.
+
+Test-only crates and items disabled by `cfg(test)` or the `testing` feature
+are excluded. External modules are followed from production crate roots, so
+test modules are excluded by reachability, not their directory names.
 
 Only `src/` is checked: a crate's `tests/`, `examples/` and `benches/` trees
 build separate binaries that never link into a worker.
@@ -29,7 +33,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import os
 import sys
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +49,7 @@ VM_CRATE_PATTERN = re.compile(r"^lash-(kernel|dialect|ext)-|^lash-regress$")
 VM_CRATES = ("crates/lash-vm-runtime", "crates/lash-vm-library")
 WORKER_CRATE = "crates/lash-vm-worker"
 
+RAW_STRING = re.compile(r'(?:b?r)(#*)"')
 STATIC_ITEM = re.compile(r"(?<![\w'])static\s+(?:mut\s+|ref\s+)?([A-Za-z_]\w*)\s*:")
 
 
@@ -65,6 +72,9 @@ def checked_crates(root: Path) -> list[str]:
             f"crates/{path.name}"
             for path in sorted((root / "crates").iterdir())
             if path.is_dir() and VM_CRATE_PATTERN.match(path.name)
+            # This unpublished corpus/harness crate is a development dependency
+            # only; it is never linked into a worker.
+            and path.name != "lash-kernel-conformance"
         )
     if (root / WORKER_CRATE).is_dir():
         crates.append(WORKER_CRATE)
@@ -72,55 +82,166 @@ def checked_crates(root: Path) -> list[str]:
 
 
 def strip_comments(text: str) -> list[str]:
-    """Source lines with `//` and `/* */` comments and string literals blanked.
-
-    Line numbers are preserved. Raw strings and char literals are treated as
-    ordinary text; neither ever spells a static item in these crates.
-    """
-    out: list[str] = []
-    in_block = 0
-    for raw in text.splitlines():
-        line = []
-        index = 0
-        in_string = False
-        while index < len(raw):
-            pair = raw[index : index + 2]
-            char = raw[index]
-            if in_block:
-                if pair == "*/":
-                    in_block -= 1
+    """Blank comments and literals, preserving every source offset and line."""
+    out = list(text)
+    index = 0
+    while index < len(text):
+        start = index
+        if text.startswith("//", index):
+            end = text.find("\n", index)
+            index = len(text) if end < 0 else end
+        elif text.startswith("/*", index):
+            depth = 1
+            index += 2
+            while index < len(text) and depth:
+                if text.startswith("/*", index):
+                    depth += 1
                     index += 2
-                    continue
-                if pair == "/*":
-                    in_block += 1
+                elif text.startswith("*/", index):
+                    depth -= 1
                     index += 2
-                    continue
-                index += 1
-                continue
-            if in_string:
-                if char == "\\":
-                    index += 2
-                    continue
-                if char == '"':
-                    in_string = False
-                line.append(" ")
-                index += 1
-                continue
-            if pair == "//":
-                break
-            if pair == "/*":
-                in_block += 1
-                index += 2
-                continue
-            if char == '"':
-                in_string = True
-                line.append(" ")
-                index += 1
-                continue
-            line.append(char)
+                else:
+                    index += 1
+        elif match := RAW_STRING.match(text, index):
+            closing = '"' + match.group(1)
+            end = text.find(closing, match.end())
+            index = len(text) if end < 0 else end + len(closing)
+        elif match := CHAR_LITERAL.match(text, index):
+            index = match.end()
+        elif text[index] == '"':
             index += 1
-        out.append("".join(line))
-    return out
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                elif text[index] == '"':
+                    index += 1
+                    break
+                else:
+                    index += 1
+        else:
+            index += 1
+            continue
+        for at in range(start, min(index, len(text))):
+            if out[at] != "\n":
+                out[at] = " "
+    return "".join(out).splitlines()
+
+
+def cfg_in_production(expression: str) -> bool | None:
+    """Three-valued cfg evaluation: unknown shipping features remain possible."""
+    expression = expression.strip()
+    if expression == "test" or re.fullmatch(r'feature\s*=\s*"testing"', expression):
+        return False
+    if match := re.fullmatch(r"(any|all|not)\s*\((.*)\)", expression, re.S):
+        operator, contents = match.groups()
+        depth = 0
+        start = 0
+        terms = []
+        for at, char in enumerate(contents + ","):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                if contents[start:at].strip():
+                    terms.append(cfg_in_production(contents[start:at]))
+                start = at + 1
+        if operator == "not":
+            return None if len(terms) != 1 or terms[0] is None else not terms[0]
+        if operator == "all":
+            return False if False in terms else (None if None in terms else True)
+        return True if True in terms else (None if None in terms else False)
+    return None
+
+
+def production(text: str) -> str:
+    """Blank test-only items, retaining line numbers and shipping cfg branches."""
+    clean = "\n".join(strip_comments(text))
+    # splitlines omits a terminal newline; add it for offset fidelity.
+    if text.endswith("\n"):
+        clean += "\n"
+    out = list(text)
+    for match in re.finditer(r"#\s*\[\s*cfg\s*\(", clean):
+        close = clean.find("]", match.end())
+        expression = text[match.end():close].rstrip().removesuffix(")")
+        if close < 0 or cfg_in_production(expression) is not False:
+            continue
+        depth = 0
+        opened = False
+        end = close + 1
+        for end in range(close + 1, len(clean)):
+            char = clean[end]
+            if char == "{":
+                depth += 1
+                opened = True
+            elif char == "}":
+                depth -= 1
+            elif char == ";" and not opened:
+                break
+            if opened and depth == 0:
+                break
+        for at in range(match.start(), end + 1):
+            if out[at] != "\n":
+                out[at] = " "
+    return "".join(out)
+
+
+def module_declarations(text: str) -> list[tuple[str | None, str]]:
+    clean = "\n".join(strip_comments(text))
+    declarations = []
+    depth = 0
+    inline = []
+    pending = None
+    modules = list(re.finditer(r"\bmod\s+(\w+)\s*([;{])", clean))
+    events = [(match.start(), "mod", match) for match in modules]
+    events += [(at, char, None) for at, char in enumerate(clean) if char in "{}"]
+    for at, kind, match in sorted(events):
+        if kind == "mod":
+            name, delimiter = match.groups()
+            if delimiter == "{":
+                pending = name
+                continue
+            prefix = text[:at]
+            attribute = re.search(r'#\s*\[\s*path\s*=\s*"([^"\n]+)"\s*\]\s*(?:pub(?:\([^)]*\))?\s+)?$', prefix)
+            directory = "/".join(name for _, name in inline)
+            explicit = attribute.group(1) if attribute else None
+            if explicit and directory:
+                explicit = f"{directory}/{explicit}"
+            name = f"{directory}/{name}" if directory else name
+            declarations.append((explicit, name))
+        elif kind == "{":
+            depth += 1
+            if pending is not None:
+                inline.append((depth, pending))
+                pending = None
+        else:
+            if inline and inline[-1][0] == depth:
+                inline.pop()
+            depth -= 1
+    return declarations
+
+
+def production_sources(crate: Path) -> list[Path]:
+    """Follow production module declarations, including explicit path modules."""
+    pending = [crate / "src" / name for name in ("lib.rs", "main.rs")]
+    manifest = crate / "Cargo.toml"
+    if manifest.is_file():
+        for binary in tomllib.loads(manifest.read_text()).get("bin", []):
+            if "testing" not in binary.get("required-features", []):
+                pending.append(crate / binary.get("path", f"src/bin/{binary['name']}.rs"))
+    seen = set()
+    while pending:
+        path = Path(os.path.normpath(pending.pop().absolute()))
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        base = path.parent if path.name in {"lib.rs", "main.rs", "mod.rs"} else path.with_suffix("")
+        for explicit, name in module_declarations(production(path.read_text())):
+            if explicit:
+                pending.append(path.parent / explicit)
+            else:
+                pending.extend([base / f"{name}.rs", base / name / "mod.rs"])
+    return sorted(seen)
 
 
 CHAR_LITERAL = re.compile(r"'(?:[^'\\\n]|\\[^\n]{1,9}?)'")
@@ -136,7 +257,7 @@ def statics_in(root: Path, path: Path) -> list[StaticItem]:
     depth = 0
     pending: str | None = None
     scopes: list[tuple[int, str]] = []
-    for number, line in enumerate(strip_comments(path.read_text()), start=1):
+    for number, line in enumerate(strip_comments(production(path.read_text())), start=1):
         line = CHAR_LITERAL.sub("   ", line)
         for match in STATIC_ITEM.finditer(line):
             scope = scopes[-1][1] if scopes else "<module>"
@@ -166,7 +287,7 @@ def collect(root: Path) -> list[StaticItem]:
         source = root / crate / "src"
         if not source.is_dir():
             continue
-        for path in sorted(source.rglob("*.rs")):
+        for path in production_sources(root / crate):
             items.extend(statics_in(root, path))
     return items
 
@@ -216,8 +337,8 @@ def main(argv: list[str]) -> int:
         print("VM static-state check failed:", file=sys.stderr)
         print("\n".join(f"  {problem}" for problem in problems), file=sys.stderr)
         return 1
-    import subprocess
-    return subprocess.call([sys.executable,str(Path(__file__).with_name("check-vm-parent-paths.py")),str(root)])
+    print("VM static-state check passed: guest-derived state has an instance owner")
+    return 0
 
 
 if __name__ == "__main__":

@@ -47,6 +47,46 @@ impl Service {
         }
     }
 
+    /// Lower a whole authored TypeScript workflow under the host's source limits.
+    /// Generated workflows use [`Self::compile_generated`] independently.
+    pub async fn import_typescript_workflow(
+        &self,
+        source: &str,
+        environment: &lash_kernel_dialect::Environment<'_>,
+        max_bytes: usize,
+        max_nesting: usize,
+    ) -> Result<lash_kernel_dialect::Lowered, SourceServiceError> {
+        let response = self
+            .request_accounted(Request::ImportTypeScriptWorkflow {
+                source: source.to_owned(),
+                effects: environment.effects.clone(),
+                tool_roots: environment.tool_roots.clone(),
+                controls: environment.controls.clone(),
+                max_bytes,
+                max_nesting,
+            })
+            .await?;
+        match response {
+            Response::Lowered {
+                document,
+                annotations,
+                ..
+            } => {
+                let document = std::str::from_utf8(&document)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                let annotations = std::str::from_utf8(&annotations)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                Ok(lash_kernel_dialect::Lowered {
+                    document: Document::from_json(document)
+                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
+                    annotations: lash_kernel_doc::Annotations::from_json(annotations)
+                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
+                })
+            }
+            other => Err(refused(other)),
+        }
+    }
+
     /// Decode exact generated source without resolving or admitting its
     /// dependencies. A host may then compare `Document::canonical_bytes()`
     /// and separately admit the document against its execution environment.

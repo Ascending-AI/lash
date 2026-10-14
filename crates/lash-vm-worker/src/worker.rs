@@ -7,12 +7,12 @@ use std::time::Instant;
 
 use crate::PoolError;
 use crate::embedding::Embedding;
+use crate::graph::{self, GraphStateFailure};
 use crate::host::{Wire, WireHost};
 use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal, NodeKind};
 use lash_kernel_doc::{Datum, Document};
 use lash_kernel_vm::{Bounds, KernelMachine, Machine, Program, Step};
-use lash_vm_client::graph::{self, GraphStateFailure};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};

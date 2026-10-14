@@ -317,9 +317,17 @@ impl HostArtifacts {
         // may hold several definitions with one label; only authored lowering
         // needs to resolve those labels before admission.
         if crate::typescript::is_generated_workflow(source) {
-            let document = match crate::typescript::compile_generated(source, Default::default()) {
+            let document = match checked
+                .worker_service()
+                .compile_generated(
+                    source,
+                    lash_kernel_dialect::SourceFormat::TypeScriptV1,
+                    Default::default(),
+                )
+                .await
+            {
                 Ok(document) => document,
-                Err(error) => return Ok(WorkflowImport::Refused(vec![error.into()])),
+                Err(error) => return crate::workflow::typescript::source_refusal(error),
             };
             let identity = match document.identity() {
                 Ok(identity) => identity,
@@ -375,12 +383,14 @@ impl HostArtifacts {
             bindings: &std::collections::BTreeSet::new(),
             functions: &std::collections::BTreeMap::new(),
         };
-        Ok(crate::workflow::typescript::import(
+        crate::workflow::typescript::import(
+            checked.worker_service(),
             source,
             &dialect,
             &checked.checker(),
             limits,
-        ))
+        )
+        .await
     }
 
     /// Admit the document `draft` holds as the definition of its entry

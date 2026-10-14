@@ -2,7 +2,7 @@
 //! errors and charges are created beside the operation that implements them.
 
 use std::cmp::Ordering;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use lash_kernel_doc::{
     ErrorValue, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity,
@@ -628,12 +628,10 @@ const _: () = {
     }
 };
 
-/// A kind's name, as `kind` answers it. Each name is made once and shared
-/// by every call that answers it.
+/// A kind's name, as `kind` answers it, from the immutable kind table.
 fn kind_name(kind: ValueKind) -> Value {
-    static NAMES: LazyLock<[Arc<str>; 19]> =
-        LazyLock::new(|| KIND_NAMES.map(|(_, name)| Arc::from(name)));
-    Value::Text(Arc::clone(&NAMES[kind as usize]))
+    const NAMES: [(ValueKind, &str); 19] = KIND_NAMES;
+    Value::Text(Arc::from(NAMES[kind as usize].1))
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the

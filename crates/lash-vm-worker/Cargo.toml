@@ -54,6 +54,8 @@ test = false
 workspace = true
 
 [dependencies]
+lash-vm-broker = { workspace = true }
+async-trait = { workspace = true }
 dhat = { version = "0.3", optional = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }
@@ -82,6 +84,15 @@ serde_json = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+tokio-util = { workspace = true }
+lash-sansio = { workspace = true }
+lash-durable = { workspace = true }
+lash-durable-test = { workspace = true }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+lash-sqlite-store = { workspace = true }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+lash-core-execution = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing", "dialect-typescript", "dialect-python"] }
 rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }

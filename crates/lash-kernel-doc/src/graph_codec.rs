@@ -24,7 +24,6 @@
 //! A decoder refuses every other spelling, and refuses nesting deeper than
 //! [`MAX_DECODE_DEPTH`] before it can exhaust the stack.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -32,8 +31,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
 
 use crate::graph_tokens::{
-    CodecVariant, DecodeDimension, TokenCodec, TokenError, TokenReader, TokenWriter,
-    check_ascending,
+    CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
 };
 use crate::{
     Bytes, ClosureObject, Datum, DocumentId, EffectIdentity, ErrorDatum, ErrorValue, Float,
@@ -71,30 +69,6 @@ impl TokenCodec for FrozenDatum {
         TokenReader::expect_fields(fields, 1)?;
         Datum::decode(input).map(Self)
     }
-}
-
-thread_local! {
-    static DEPTH: Cell<u64> = const { Cell::new(0) };
-}
-
-/// Runs one nested decode under the depth bound.
-fn nested<T>(limit: u64, decode: impl FnOnce() -> Result<T, TokenError>) -> Result<T, TokenError> {
-    let depth = DEPTH.with(|depth| {
-        let next = depth.get() + 1;
-        depth.set(next);
-        next
-    });
-    let result = if depth > limit {
-        Err(TokenError::Limit {
-            dimension: DecodeDimension::Depth,
-            actual: depth,
-            limit,
-        })
-    } else {
-        decode()
-    };
-    DEPTH.with(|cell| cell.set(depth - 1));
-    result
 }
 
 fn unsupported(variant: u32) -> TokenError {
@@ -431,7 +405,7 @@ impl TokenCodec for TaskIdentity {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             Ok(
                 match variant(input, |variant| match variant {
                     0 => Some(0),
@@ -609,7 +583,7 @@ impl TokenCodec for Value {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0 | 1 => Some(0),
                 2..=18 => Some(1),
@@ -761,7 +735,7 @@ impl TokenCodec for Datum {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        nested(input.decode_depth(), || {
+        input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0 | 1 => Some(0),
                 2..=16 => Some(1),

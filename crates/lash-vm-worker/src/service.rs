@@ -53,6 +53,63 @@ pub(crate) fn perform(
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             },
         },
+        Request::ImportTypeScriptWorkflow {
+            source,
+            effects,
+            tool_roots,
+            controls,
+            max_bytes,
+            max_nesting,
+        } => {
+            #[cfg(feature = "dialect-typescript")]
+            {
+                if !embedding.installs("typescript") {
+                    Response::UnknownDialect {
+                        dialect: "typescript".into(),
+                    }
+                } else {
+                    let lowered =
+                        lash_dialect_typescript::SourceLimits::new(max_bytes, max_nesting)
+                            .and_then(|limits| {
+                                lash_dialect_typescript::lower_workflow_with_limits(
+                                    &source,
+                                    &lash_kernel_dialect::Environment {
+                                        library: embedding.library(),
+                                        effects: &effects,
+                                        tool_roots: &tool_roots,
+                                        controls: &controls,
+                                        bindings: &Default::default(),
+                                        functions: &Default::default(),
+                                    },
+                                    limits,
+                                )
+                            });
+                    match lowered {
+                        Ok(lowered) => Response::Lowered {
+                            document: encoded(lowered.document.to_json())?,
+                            annotations: encoded(lowered.annotations.to_json())?,
+                            function_values: None,
+                            reads: Default::default(),
+                        },
+                        Err(diagnostic) => Response::DialectRefused(refusal(diagnostic.into())),
+                    }
+                }
+            }
+            #[cfg(not(feature = "dialect-typescript"))]
+            {
+                let _ = (
+                    source,
+                    effects,
+                    tool_roots,
+                    controls,
+                    max_bytes,
+                    max_nesting,
+                );
+                Response::UnknownDialect {
+                    dialect: "typescript".into(),
+                }
+            }
+        }
         Request::Print {
             format,
             document,

@@ -32,6 +32,7 @@
 /// kernel library alone, which every dialect's release holds.
 const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
 
+use lash_vm_worker::in_process::InProcess;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -66,8 +67,8 @@ use lash_vm_broker::kernel::graph::{
 };
 use lash_vm_broker::kernel::{
     AdmitAs, DrivenMachine as _, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, EndSave,
-    InProcess, KernelBroker, KernelCeilings, KernelEffects, KernelEnd, Machines as _, ParkSave,
-    ParkedState, SessionGraph, Settled, datum_to_json,
+    KernelBroker, KernelCeilings, KernelEffects, KernelEnd, Machines as _, ParkSave, ParkedState,
+    SessionGraph, Settled, datum_to_json,
 };
 use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,

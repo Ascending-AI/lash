@@ -5,6 +5,11 @@ use lash_sansio::SessionId;
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
 pub enum EmbedError {
+    /// A workflow source operation failed in the registered worker service.
+    #[cfg(feature = "typescript")]
+    #[error(transparent)]
+    WorkflowSource(lash_vm_client::service::SourceServiceError),
+
     /// Missing, mismatched or undecodable recorded process environment; the
     /// structured cause and reference stay available to the host.
     #[error(transparent)]
@@ -453,6 +458,12 @@ impl EmbedError {
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
         match self {
+            #[cfg(feature = "typescript")]
+            Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
+                error.clone().into_runtime_error().is_retryable()
+            }
+            #[cfg(feature = "typescript")]
+            Self::WorkflowSource(_) => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
@@ -542,6 +553,12 @@ impl EmbedError {
     ///   structured causes.
     pub fn is_terminal(&self) -> bool {
         match self {
+            #[cfg(feature = "typescript")]
+            Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
+                error.clone().into_runtime_error().is_terminal()
+            }
+            #[cfg(feature = "typescript")]
+            Self::WorkflowSource(_) => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin

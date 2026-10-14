@@ -1322,6 +1322,9 @@ jobs:
       - name: Check VM static state
         run: python3 scripts/check-vm-static-state.py
 
+      - name: Check VM parent paths
+        run: python3 scripts/check-vm-parent-paths.py
+
   unicode-tests:
     name: Test deferred Unicode suites
     runs-on: ubuntu-24.04

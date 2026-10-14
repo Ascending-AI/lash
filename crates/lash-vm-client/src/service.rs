@@ -38,6 +38,15 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
         reads: BTreeSet<EffectName>,
     },
+    /// Lower host-authored whole TypeScript workflows in the worker.
+    ImportTypeScriptWorkflow {
+        source: String,
+        effects: BTreeMap<EffectName, Signature>,
+        tool_roots: BTreeSet<Name>,
+        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        max_bytes: usize,
+        max_nesting: usize,
+    },
     /// Print `document` (its JSON encoding) in the selected generated format.
     Print {
         format: lash_kernel_dialect::SourceFormat,
@@ -293,6 +302,7 @@ impl Default for Service {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkerPath {
     Lower,
+    ImportWorkflow,
     Print,
     CompileGenerated,
     /// A run of a document's `main`.
@@ -465,6 +475,7 @@ pub mod runtime_ops {
             self.record_worker(
                 match &request {
                     Request::Lower { .. } => WorkerPath::Lower,
+                    Request::ImportTypeScriptWorkflow { .. } => WorkerPath::ImportWorkflow,
                     Request::Print { .. } => WorkerPath::Print,
                     Request::CompileGenerated { .. } => WorkerPath::CompileGenerated,
                 },

@@ -24,7 +24,9 @@ python3 scripts/dev-test.py
 `//:workspace_tests` adds developer-deferred binaries and is the complete PR
 partition. `//:main_tests` is the scheduled full run on main: it adds every
 hermetic manual and PR-deferred test, including feature-check test binaries,
-direct-rustc UI fixtures at each feature resolution and facade completeness.
+direct-rustc UI fixtures at each feature resolution, facade completeness and
+VM static-state/parent-path source inventories (`//:vm_static_state`,
+`//:vm_parent_paths`, with production-scoping laws in `//:vm_guard_laws`).
 Only tests requiring external services or credentials stay outside that suite;
 its generated membership, exclusions and UI harness replacements are recorded
 in `tools/buck2/target-inventory.json`. None is every correctness gate.

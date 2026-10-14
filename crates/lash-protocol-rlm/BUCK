@@ -796,12 +796,12 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-internal-protocol-rlm", "lash_protocol_rlm", "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_2e924194"),
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa",
     ],
     manifest_dir = "crates/lash-protocol-rlm",
     package_name = "lash-internal-protocol-rlm",
     shard_count = 8,
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa)"},
     tags = [
         "feature-lane",
         "manual",

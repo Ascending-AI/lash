@@ -65,4 +65,4 @@
 //crates/lash-postgres-store:schema_constraints__test__fv_84c7d55b
 //crates/lash-postgres-store:schema_drift__test
 //crates/lash-postgres-store:schema_drift__test__fv_84c7d55b
-//crates/lash-vm-broker:park_matrix__test
+//crates/lash-vm-worker:park_matrix__test

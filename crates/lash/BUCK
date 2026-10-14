@@ -4841,14 +4841,14 @@ lash_rust_feature_test(
     ],
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa",
     ],
     library = "//crates/lash:lash__fv_04c905fd",
     library_crate_name = "lash",
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_70901a1b)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_bbb418aa)"},
     tags = [
         "feature-lane",
         "manual",

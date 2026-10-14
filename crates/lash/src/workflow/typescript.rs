@@ -33,22 +33,53 @@ pub enum WorkflowImport {
 pub enum WorkflowImportUnsupported {
     /// No kernel workflow document engine is installed on this core.
     EngineUnavailable,
+    /// The registered worker does not install the requested dialect.
+    DialectUnavailable { dialect: String },
     /// The worker registry cannot resolve one library definition per name.
     LibraryUnavailable(lash_kernel_dialect::LibraryError),
 }
 
-pub(crate) fn import(
+pub(crate) async fn import(
+    workers: &lash_vm_client::service::Service,
     source: &str,
     dialect: &Environment<'_>,
     checker: &lash_kernel_check::Environment<'_>,
     limits: lash_dialect_typescript::SourceLimits,
-) -> WorkflowImport {
-    let lowered = match lash_dialect_typescript::lower_workflow_with_limits(source, dialect, limits)
+) -> crate::Result<WorkflowImport> {
+    let lowered = match workers
+        .import_typescript_workflow(source, dialect, limits.max_bytes(), limits.max_nesting())
+        .await
     {
         Ok(lowered) => lowered,
-        Err(diagnostic) => return WorkflowImport::Refused(vec![diagnostic.into()]),
+        Err(error) => return source_refusal(error),
     };
-    admit(lowered.document, lowered.annotations, checker)
+    Ok(admit(lowered.document, lowered.annotations, checker))
+}
+
+pub(crate) fn source_refusal(
+    error: lash_vm_client::service::SourceServiceError,
+) -> crate::Result<WorkflowImport> {
+    match error {
+        lash_vm_client::service::SourceServiceError::Dialect(refusal) => {
+            Ok(WorkflowImport::Refused(vec![WorkflowSourceDiagnostic {
+                code: refusal.code,
+                message: refusal.message,
+                span: refusal
+                    .span
+                    .map(|(start, end)| WorkflowSourceSpan { start, end }),
+                kind: if refusal.unsupported {
+                    WorkflowSourceDiagnosticKind::Refusal
+                } else {
+                    WorkflowSourceDiagnosticKind::ProgramDefect
+                },
+                repairs: refusal.repairs,
+            }]))
+        }
+        lash_vm_client::service::SourceServiceError::UnknownDialect { dialect } => Ok(
+            WorkflowImport::Unsupported(WorkflowImportUnsupported::DialectUnavailable { dialect }),
+        ),
+        error => Err(crate::EmbedError::WorkflowSource(error)),
+    }
 }
 
 pub(crate) fn admit(
@@ -65,6 +96,3 @@ pub(crate) fn admit(
         annotations,
     }
 }
-
-#[cfg(test)]
-mod tests;

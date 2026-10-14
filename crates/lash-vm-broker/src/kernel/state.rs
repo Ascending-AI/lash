@@ -1,8 +1,8 @@
 //! A kernel run as checkpoint graph state (FIG-5887 §3, §4, §9): the one
 //! adapter between a machine and the graph's canonical nodes.
 //!
-//! The worker exports a park through [`export_parked`] and resumes one
-//! through [`import_parked`]; it alone decodes guest frames. A run's end is
+//! The worker owns the machine export and import adapters; it alone
+//! decodes guest frames into a running machine. A run's end is
 //! written by [`export_end`] and read back by [`read_end`]. Every node is
 //! staged through the store's graph module, which places text and bytes over
 //! the inline bound in shared leaves and streams a structure too large for
@@ -22,20 +22,14 @@ use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
     GraphStaging, NodeId, NodeKind, NodeSource, StoredNode, check_envelope,
 };
-use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
-use lash_kernel_doc::{Datum, EffectIdentity, FrozenDatum, FunctionId, FunctionRegistry};
-use lash_kernel_state::{
-    AdmittedRequest, AdmittedWait, KernelWhole, ParkedRun, TerminalWhole, WholeError,
-};
-use lash_kernel_vm::{
-    Bounds, End, ImportError, KernelMachine, Program, TerminalError, WholeExportError,
-    WholeImportError, terminal_end, terminal_whole,
-};
+use lash_kernel_doc::graph_tokens::ChildRef;
+use lash_kernel_doc::{Datum, FrozenDatum, FunctionId};
+use lash_kernel_state::{AdmittedWait, KernelWhole, ParkedRun, TerminalWhole, WholeError};
+use lash_kernel_vm::{End, TerminalError, terminal_end, terminal_whole};
 use lash_vm_protocol::{
-    EncodedPayload, GraphNodeBytes, GraphRoot, KernelRestoreRefusal, ParkedGraph, SealedGraphState,
-    VmOwner,
+    EncodedPayload, GraphNodeBytes, GraphRoot, KernelRestoreRefusal, SealedGraphState, VmOwner,
 };
-use lash_vm_releases::{HeldManifests, ReleaseRefusal};
+use lash_vm_releases::HeldManifests;
 
 /// Why a run's graph state was not written or not read.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -276,57 +270,6 @@ impl WholeState {
     }
 }
 
-/// The run's state at this park as graph state: a KernelWhole that pins
-/// `release` and belongs to `binding`, with every node it needs but the
-/// release's, staged within `bound` envelope bytes.
-///
-/// # Errors
-///
-/// [`GraphStateFailure::Unwritable`] off a park; a graph refusal past
-/// `bound` or a node bound.
-pub fn export_parked(
-    machine: &mut KernelMachine,
-    owner: VmOwner,
-    binding: &OwnerBinding,
-    release: ChildRef,
-    document: &str,
-    bound: u64,
-) -> Result<SealedGraphState, GraphStateFailure> {
-    export_whole_state(machine, binding, release, bound).map(|state| state.sealed(owner, document))
-}
-
-/// [`export_parked`], unsealed: the state a machine in this process writes.
-///
-/// # Errors
-///
-/// As [`export_parked`].
-pub fn export_whole_state(
-    machine: &mut KernelMachine,
-    binding: &OwnerBinding,
-    release: ChildRef,
-    bound: u64,
-) -> Result<WholeState, GraphStateFailure> {
-    let mut staging = staging(bound);
-    let owner_ref = staging.encode_value(NodeKind::OWNER_BINDING, binding)?;
-    let whole = machine
-        .export_whole(release, owner_ref.child_ref(), |datum| {
-            freeze(&mut staging, datum)
-        })
-        .map_err(|error| match error {
-            WholeExportError::Whole(WholeError::Frozen(refusal)) => {
-                GraphStateFailure::Graph(refusal)
-            }
-            other => GraphStateFailure::Unwritable(other.to_string()),
-        })?;
-    let root = staging.encode_value(NodeKind::KERNEL_WHOLE, &whole)?;
-    Ok(WholeState::staged(
-        staging,
-        root,
-        NodeKind::KERNEL_WHOLE,
-        whole.kernel,
-    ))
-}
-
 /// A parked run as the kernel's own structure, outside any machine: what a
 /// migration or an adoption carries.
 #[derive(Clone, Debug, PartialEq)]
@@ -467,159 +410,6 @@ fn thaw(decoder: &mut GraphDecoder<'_>, child: ChildRef) -> Result<Datum, GraphR
 fn malformed(problem: impl ToString) -> KernelRestoreRefusal {
     KernelRestoreRefusal::Malformed {
         problem: problem.to_string(),
-    }
-}
-
-/// The machine a parked graph state resumes in: the state's KernelWhole and
-/// its frozen outcomes read within `limits`, its pinned release admitted
-/// against the releases this build holds (whose nodes it reads beside the
-/// state's) and `registry`'s functions and natives, and every wait's request
-/// taken from its admission.
-///
-/// Returns the machine and the release manifest the run pins, which its
-/// next export pins again.
-///
-/// # Errors
-///
-/// A graph refusal of a node, or the kernel's typed refusal: the release
-/// manifest, a helper or a native the run needs, a wait no admission
-/// matches, or the machine's own import refusal.
-pub fn import_parked(
-    program: Program,
-    bounds: Bounds,
-    parked: &ParkedGraph,
-    releases: &ReleaseGraph,
-    registry: &FunctionRegistry,
-    limits: DecodeLimits,
-) -> Result<(KernelMachine, ChildRef), GraphStateFailure> {
-    let nodes = Nodes::of(&parked.state, &limits)?;
-    let mut admitted = Vec::with_capacity(parked.admissions.len());
-    for admission in &parked.admissions {
-        admitted.push(decode_body::<AdmittedWait>(&admission.0).map_err(malformed)?);
-    }
-    import_whole_state(
-        program,
-        bounds,
-        NodeId(parked.state.root().id),
-        &nodes.0,
-        admitted,
-        releases,
-        registry,
-        limits,
-    )
-}
-
-/// [`import_parked`] from a state's unsealed nodes and its admitted waits:
-/// the machine a parked root resumes in this process.
-///
-/// # Errors
-///
-/// As [`import_parked`].
-#[expect(clippy::too_many_arguments, reason = "one resume's whole input")]
-pub fn import_whole_state(
-    program: Program,
-    bounds: Bounds,
-    root: NodeId,
-    nodes: &BTreeMap<NodeId, EncodedNode>,
-    admitted: Vec<AdmittedWait>,
-    releases: &ReleaseGraph,
-    registry: &FunctionRegistry,
-    limits: DecodeLimits,
-) -> Result<(KernelMachine, ChildRef), GraphStateFailure> {
-    let source = Layered {
-        state: nodes,
-        release: &releases.nodes,
-    };
-    let mut decoder = GraphDecoder::new(&source, limits);
-    let whole: KernelWhole = decoder.decode(root, NodeKind::KERNEL_WHOLE)?;
-    decoder.child_kind(root, NodeId(whole.owner.0), &[NodeKind::OWNER_BINDING])?;
-    // The pinned release answers for the helpers a release holds; a
-    // function of a package the embedding installed is its registry's,
-    // which the import checks.
-    let required: BTreeSet<_> = program
-        .document
-        .manifest
-        .functions
-        .keys()
-        .filter(|function| releases.manifests.releases(function))
-        .copied()
-        .collect();
-    releases
-        .manifests
-        .admit(&whole.release, &required, |function| {
-            registry
-                .get(function)
-                .map(|registered| registered.native.is_some())
-        })
-        .map_err(|refusal| match refusal {
-            ReleaseRefusal::ReleaseMismatch { pinned } => KernelRestoreRefusal::ReleaseMismatch {
-                pinned: NodeId(pinned.0).to_hex(),
-            },
-            ReleaseRefusal::MissingHelper { function } => KernelRestoreRefusal::MissingHelper {
-                function: function.to_string(),
-            },
-            ReleaseRefusal::MissingNative { function } => KernelRestoreRefusal::MissingNative {
-                function: function.to_string(),
-            },
-        })?;
-    let mut admissions: BTreeMap<EffectIdentity, AdmittedRequest> = BTreeMap::new();
-    for admitted in admitted {
-        if admissions
-            .insert(admitted.identity.clone(), admitted.request)
-            .is_some()
-        {
-            return Err(
-                malformed(format!("effect {:?} is admitted twice", admitted.identity)).into(),
-            );
-        }
-    }
-    let release = whole.release;
-    KernelMachine::import_whole_with_data_limits(
-        program,
-        bounds,
-        whole,
-        limits.kernel_data,
-        |child| thaw(&mut decoder, child),
-        |identity| admissions.get(identity).cloned(),
-    )
-    .map_err(|error| match error {
-        WholeImportError::Whole(WholeError::Frozen(refusal)) => GraphStateFailure::Graph(refusal),
-        WholeImportError::Whole(WholeError::AdmissionMissing(identity)) => {
-            KernelRestoreRefusal::AdmissionUnresolved {
-                effect: format!("{identity:?}"),
-            }
-            .into()
-        }
-        WholeImportError::Whole(WholeError::AdmissionMismatch(identity)) => {
-            KernelRestoreRefusal::AdmissionMismatch {
-                effect: format!("{identity:?}"),
-            }
-            .into()
-        }
-        WholeImportError::Whole(WholeError::Unpublished(wait)) => {
-            malformed(format!("wait {wait:?} was never handed out")).into()
-        }
-        WholeImportError::Import(error) => restore_refusal(error).into(),
-    })
-    .map(|machine| (machine, release))
-}
-
-fn restore_refusal(error: ImportError) -> KernelRestoreRefusal {
-    match error {
-        ImportError::NotAdmitted(reason) => KernelRestoreRefusal::NotAdmitted {
-            reason: reason.to_string(),
-        },
-        ImportError::DocumentMismatch { parked, given } => KernelRestoreRefusal::DocumentMismatch {
-            parked: parked.to_string(),
-            given: given.to_string(),
-        },
-        ImportError::KernelVersion { parked, supported } => {
-            KernelRestoreRefusal::KernelVersion { parked, supported }
-        }
-        ImportError::MissingFunction { function } => KernelRestoreRefusal::MissingFunction {
-            function: function.to_string(),
-        },
-        other => malformed(other),
     }
 }
 

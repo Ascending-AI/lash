@@ -945,7 +945,9 @@ def main_test_inventory(inventory: dict, outputs: dict[pathlib.Path, str]) -> No
         "lash_rust_unit_test", "lash_rust_integration_test",
         "lash_rust_feature_test", "ui_fixtures_test", "facade_completeness_test",
     }
-    targets = set()
+    # Source inventories are outside Cargo's test model. Declare their
+    # membership explicitly so the hourly run cannot omit these boundaries.
+    targets = {"//:vm_static_state", "//:vm_parent_paths", "//:vm_guard_laws"}
     exclusions = {}
     replacements = {}
     units = {unit["label"]: unit for unit in inventory["feature_lane_units"]}
@@ -1022,6 +1024,7 @@ def root_buck(inventory: dict) -> str:
             GENERATED_HEADER,
             'load("//tools/buck2:schema_checks.bzl", "schema_check", "schema_check_group", "schema_documents")\n\n',
             'load("//tools/buck2:source_tree.bzl", "lash_workspace_sources")\n\n',
+            'load("//tools/buck2:vm_guard_test.bzl", "vm_guard_test")\n\n',
             suite("workspace_compile", inventory["workspace_build_targets"]),
             suite("workspace_check", inventory["workspace_check_targets"]),
             suite("facade_production_check", inventory["facade_production_check_targets"]),
@@ -1042,7 +1045,22 @@ def root_buck(inventory: dict) -> str:
             suite("feature_lane_tests", inventory["feature_lane_test_targets"]),
         ]
     )
-    return aggregates + '''
+    guards = "".join(
+        'vm_guard_test(\n'
+        f'    name = "{name}",\n    guard = "{guard}",\n'
+        '    manifests = ' + json.dumps([f"//{pathlib.PurePosixPath(package['manifest']).parent}:Cargo.toml" for package in inventory["packages"]], indent=8) + ',\n'
+        '    srcs = [\n'
+        '        "scripts/check-vm-static-state.py",\n'
+        '        "scripts/check-vm-parent-paths.py",\n'
+        '        "scripts/vm-static-state-allowlist.txt",\n'
+        '        "scripts/run-vm-guard.py",\n'
+        '        "scripts/test_vm_guards.py",\n'
+        '    ],\n    visibility = ["PUBLIC"],\n)\n\n'
+        for name, guard in [("vm_static_state", "static_state"),
+                            ("vm_parent_paths", "parent_paths"),
+                            ("vm_guard_laws", "laws")]
+    )
+    return aggregates + guards + '''
 filegroup(
     name = "host_schemas",
     srcs = glob(["schemas/host/*/*.schema.json"]),

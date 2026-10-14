@@ -1124,3 +1124,57 @@ fn bootstrap_uses_the_builds_allowance_without_extending_live_silence() {
         assert!(silent_ms >= 1_000, "the default startup watchdog waited");
     }
 }
+
+/// ADR 0123: authored workflow import uses the worker, including source limits
+/// and front-end refusals. No parent lowering alternative is available.
+#[test]
+fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
+    HOST_DIALECTS.set("typescript");
+    let workers = service::Service::new(config("normal")).with_worker_receipts();
+    let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard()).expect("embedding");
+    let effects = Default::default();
+    let roots = Default::default();
+    let controls = Default::default();
+    let bindings = Default::default();
+    let functions = Default::default();
+    let environment = lash_kernel_dialect::Environment {
+        library: embedding.library(),
+        effects: &effects,
+        tool_roots: &roots,
+        controls: &controls,
+        bindings: &bindings,
+        functions: &functions,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let source = "export async function digest(inbox: string) { return inbox; }";
+        let lowered = workers
+            .import_typescript_workflow(source, &environment, 1024, 28)
+            .await
+            .expect("workflow import");
+        assert!(lowered.document.entries.contains_key(&Name::new("digest")));
+        let refused = workers
+            .import_typescript_workflow(source, &environment, 1, 28)
+            .await;
+        assert!(matches!(
+            refused,
+            Err(service::SourceServiceError::Dialect(_))
+        ));
+        let malformed = workers
+            .import_typescript_workflow("export const broken = ;", &environment, 1024, 28)
+            .await;
+        let Err(service::SourceServiceError::Dialect(refusal)) = malformed else {
+            panic!("syntax is refused");
+        };
+        assert!(refusal.span.is_some());
+    });
+    let receipts = workers.worker_receipts();
+    assert_eq!(receipts.len(), 3);
+    assert!(receipts.iter().all(
+        |receipt| receipt.path == service::WorkerPath::ImportWorkflow
+            && receipt.pid != std::process::id()
+    ));
+}
