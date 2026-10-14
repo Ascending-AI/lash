@@ -9,4 +9,5 @@ mod forms;
 mod layout;
 mod observe;
 mod paged;
+mod stream;
 mod tasks;
