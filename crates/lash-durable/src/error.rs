@@ -83,6 +83,11 @@ pub enum DurableError {
     /// The store failed.
     #[error(transparent)]
     Store(StoreFailure),
+    /// A stored record this build refuses to read, with the store's typed
+    /// refusal: a session state generation it does not serve, say. No
+    /// retry clears it (FIG-6209).
+    #[error(transparent)]
+    StoreRefused(lash_core_store::store::StoreRefusal),
     /// The commit's checkpoint graph, or a graph read, was refused: a node
     /// that is not canonical, a reference to a node neither staged nor
     /// stored, a root over its bound, a commit over its budget, a read past

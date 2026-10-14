@@ -20,8 +20,10 @@
 //! so the last commit's `requires` is computed from every record before it.
 //! A stored `requires` that disagrees with the records it is read against
 //! is reported, never taken as truth: the commit writes what the records
-//! owe. A process's advance folds its driver's steps into the same
-//! [`RecordedWork`].
+//! owe. A commit that leaves the head in place never decodes it: when the
+//! turn's records owe nothing, what the head owes is the `requires` the
+//! claim found, carried unchanged (FIG-6209). A process's advance folds its
+//! driver's steps into the same [`RecordedWork`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -120,6 +122,10 @@ pub struct ExecutionDebts {
 pub struct RecordedWork {
     registry: RegistryKind,
     uses: BTreeMap<ObligationSite, BTreeSet<ObligationToken>>,
+    /// What the session's head owes when its claim did not read it: the
+    /// `requires` the claim found, carried unchanged until a commit
+    /// publishes the head. It names no record, so no use lists it.
+    carried_head: BTreeSet<String>,
 }
 
 impl RecordedWork {
@@ -129,6 +135,7 @@ impl RecordedWork {
         Self {
             registry: RegistryKind::Session,
             uses: BTreeMap::new(),
+            carried_head: BTreeSet::new(),
         }
     }
 
@@ -139,31 +146,23 @@ impl RecordedWork {
         let mut work = Self {
             registry: RegistryKind::Process,
             uses: BTreeMap::new(),
+            carried_head: BTreeSet::new(),
         };
         work.put(ObligationSite::Environment, environment);
         work
     }
 
-    /// The outstanding work `session`'s committed records hold: the config
-    /// change its head owes, read from `heads`, its unfinished turn's
-    /// unsettled calls and the answer its phase retains, and the calls and
-    /// committed matches of each of its cells that is parked. The phase's
-    /// graph read is bounded by `phase_limits`, every other by `limits`.
+    /// The outstanding work `session`'s committed records hold, for
+    /// diagnostics: the config change its head owes, read from `heads`, its
+    /// unfinished turn's unsettled calls and the answer its phase retains,
+    /// and the calls and committed matches of each of its cells that is
+    /// parked. Every graph read is bounded by `limits`, which also bounds
+    /// their aggregate, and each row read by `max_rows`.
     ///
     /// # Errors
     ///
-    /// A read's refusal, or a record that does not decode.
-    pub async fn read_session(
-        reads: &dyn DurableReads,
-        heads: &dyn crate::store::SessionCommitStore,
-        session: &crate::SessionId,
-        limits: DecodeLimits,
-        phase_limits: DecodeLimits,
-    ) -> Result<Self, DurableError> {
-        Self::read_session_using(reads, heads, session, limits, phase_limits, None).await
-    }
-
-    /// The same traversal for diagnostics, with a row and aggregate byte budget.
+    /// A read's refusal, a record that does not decode, or a read past its
+    /// bounds.
     pub async fn read_session_within(
         reads: &dyn DurableReads,
         heads: &dyn crate::store::SessionCommitStore,
@@ -171,7 +170,10 @@ impl RecordedWork {
         limits: DecodeLimits,
         max_rows: usize,
     ) -> Result<Self, DurableError> {
-        Self::read_session_using(reads, heads, session, limits, limits, Some(max_rows)).await
+        let mut work = Self::read_head(heads, session).await?;
+        work.read_turn_into(reads, session, limits, limits, Some(max_rows))
+            .await?;
+        Ok(work)
     }
 
     /// The work `session`'s head alone owes: the config change it has not
@@ -179,7 +181,9 @@ impl RecordedWork {
     ///
     /// # Errors
     ///
-    /// The head's read refused.
+    /// The head's read refused, with its cause: a typed refusal such as an
+    /// unsupported generation, a head that does not decode, or a transient
+    /// fault of the store.
     pub async fn read_head(
         heads: &dyn crate::store::SessionCommitStore,
         session: &crate::SessionId,
@@ -188,12 +192,7 @@ impl RecordedWork {
         let head = heads
             .load_session_head_meta(session)
             .await
-            .map_err(|error| {
-                DurableError::Store(lash_durable::StoreFailure {
-                    kind: lash_durable::StoreFailureKind::Unavailable,
-                    message: format!("the session's head does not read: {error}"),
-                })
-            })?;
+            .map_err(head_unread)?;
         work.apply_head(
             head.and_then(|head| head.config.undelivered_change)
                 .as_deref(),
@@ -201,17 +200,36 @@ impl RecordedWork {
         Ok(work)
     }
 
-    async fn read_session_using(
+    /// The work `session`'s unfinished turn owes, its head unread: its
+    /// unsettled calls, the answer its phase retains and its parked cells'
+    /// calls and committed matches. The phase's graph read is bounded by
+    /// `phase_limits`, every other by `limits`.
+    ///
+    /// # Errors
+    ///
+    /// A read's refusal, or a record that does not decode.
+    pub(crate) async fn read_turn(
         reads: &dyn DurableReads,
-        heads: &dyn crate::store::SessionCommitStore,
+        session: &crate::SessionId,
+        limits: DecodeLimits,
+        phase_limits: DecodeLimits,
+    ) -> Result<Self, DurableError> {
+        let mut work = Self::session();
+        work.read_turn_into(reads, session, limits, phase_limits, None)
+            .await?;
+        Ok(work)
+    }
+
+    async fn read_turn_into(
+        &mut self,
+        reads: &dyn DurableReads,
         session: &crate::SessionId,
         mut limits: DecodeLimits,
         phase_limits: DecodeLimits,
         max_rows: Option<usize>,
-    ) -> Result<Self, DurableError> {
-        let mut work = Self::read_head(heads, session).await?;
+    ) -> Result<(), DurableError> {
         let Some(turn) = reads.turn(session).await? else {
-            return Ok(work);
+            return Ok(());
         };
         if let Some(root) = turn.phase.checkpoint() {
             let graph = reads
@@ -224,7 +242,7 @@ impl RecordedWork {
                     phase_limits,
                 )
                 .await?;
-            work.apply_phase(&graph, root, phase_limits)?;
+            self.apply_phase(&graph, root, phase_limits)?;
             if max_rows.is_some() {
                 consume_limits(&mut limits, &graph.nodes)?;
             }
@@ -238,7 +256,7 @@ impl RecordedWork {
                     .await?
             }
         };
-        work.apply_facts(&facts)?;
+        self.apply_facts(&facts)?;
         if max_rows.is_some() {
             consume_limits(&mut limits, &facts.nodes)?;
         }
@@ -265,19 +283,19 @@ impl RecordedWork {
                         .await?
                 }
             };
-            work.apply_facts(&facts)?;
+            self.apply_facts(&facts)?;
             if max_rows.is_some() {
                 consume_limits(&mut limits, &facts.nodes)?;
             }
             let graph = reads
                 .hydrate(RootOwner::Exec(cell.exec.clone()), Some(cell.root), limits)
                 .await?;
-            work.apply_root(&cell.exec, &graph, cell.root, limits)?;
+            self.apply_root(&cell.exec, &graph, cell.root, limits)?;
             if max_rows.is_some() {
                 consume_limits(&mut limits, &graph.nodes)?;
             }
         }
-        Ok(work)
+        Ok(())
     }
 
     /// Every outstanding use, by record.
@@ -301,10 +319,30 @@ impl RecordedWork {
         self.uses
             .values()
             .flatten()
+            .map(ObligationToken::as_str)
+            .chain(self.carried_head.iter().map(String::as_str))
             .collect::<BTreeSet<_>>()
             .into_iter()
-            .map(|token| token.as_str().to_owned())
+            .map(str::to_owned)
             .collect()
+    }
+
+    /// Whether no record this work read owes anything.
+    fn owes_nothing(&self) -> bool {
+        self.uses.is_empty() && self.carried_head.is_empty()
+    }
+
+    /// This work, with what its session's head owes taken as `head`, the
+    /// `requires` its claim found: the head is not read.
+    fn carrying_head(mut self, head: &[String]) -> Self {
+        self.carried_head = head.iter().cloned().collect();
+        self
+    }
+
+    /// This work, with what its session's head owes as `head` read it.
+    fn with_head(mut self, head: Self) -> Self {
+        self.uses.extend(head.uses);
+        self
     }
 
     /// How `stored` differs from what the work requires; `None` when it is
@@ -515,8 +553,10 @@ impl RecordedWork {
     }
 
     /// Take what `change`, the config change a session's head owes, owes:
-    /// each observer it records, and nothing a change it replaced owed.
+    /// each observer it records, and nothing a change it replaced owed,
+    /// read or carried.
     fn apply_head(&mut self, change: Option<&crate::UndeliveredConfigChange>) {
+        self.carried_head.clear();
         self.uses
             .retain(|site, _| !matches!(site, ObligationSite::ConfigChange { .. }));
         if let Some(change) = change {
@@ -603,6 +643,25 @@ impl NodeSource for StagedNodes<'_> {
     }
 }
 
+/// A refused read of a session's head, as the port reports it: a typed
+/// refusal stays one, a fault of the substrate stays transient, and any
+/// other answer is a head this build does not decode, which no retry
+/// clears (FIG-6209).
+fn head_unread(error: crate::StoreError) -> DurableError {
+    if let Some(refusal) = crate::store::StoreRefusal::of_store_error(&error) {
+        return DurableError::StoreRefused(refusal);
+    }
+    let kind = match &error {
+        crate::StoreError::Contended => lash_durable::StoreFailureKind::Contended,
+        error if error.is_transient() => lash_durable::StoreFailureKind::Unavailable,
+        _ => lash_durable::StoreFailureKind::Corrupt,
+    };
+    DurableError::Store(lash_durable::StoreFailure {
+        kind,
+        message: format!("the session's head does not read: {error}"),
+    })
+}
+
 fn corrupt(record: &str, reason: &str) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
         kind: lash_durable::StoreFailureKind::Corrupt,
@@ -665,8 +724,8 @@ impl SessionObligations {
     /// `requires` its records leave the session owing written into it when
     /// they change. A transaction whose writer set its requirements keeps
     /// them. Commits through one ledger are serialized. The session's
-    /// records are read through `read` when the ledger does not know them:
-    /// only its head's when `tx` ends its turn.
+    /// records are read through `read` when the ledger does not know them
+    /// ([`Self::read`]).
     ///
     /// # Errors
     ///
@@ -680,7 +739,7 @@ impl SessionObligations {
         commit: F,
     ) -> Result<T, DurableError>
     where
-        R: FnOnce(crate::SessionId, ReadScope) -> ReadFut,
+        R: Fn(crate::SessionId, ReadScope) -> ReadFut,
         ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
         F: FnOnce(ActorTx) -> Fut,
         Fut: std::future::Future<Output = Result<T, DurableError>>,
@@ -701,18 +760,9 @@ impl SessionObligations {
         if !RecordedWork::touches(&tx) {
             return commit(tx).await;
         }
-        let ends_turn = RecordedWork::ends_turn(&tx);
         let mut next = match state.work.take() {
             Some(work) => work,
-            // A commit that ends the turn and publishes the head states all
-            // the session owes after it.
-            None if ends_turn && RecordedWork::writes_head(&tx) => RecordedWork::session(),
-            None if ends_turn => read(self.session.clone(), ReadScope::Head).await?,
-            None => {
-                let work = read(self.session.clone(), ReadScope::Session).await?;
-                self.report(&work, state.written.as_deref());
-                work
-            }
+            None => self.read(read, &tx, state.written.as_deref()).await?,
         };
         next.apply(
             &tx,
@@ -736,6 +786,62 @@ impl SessionObligations {
         Ok(committed)
     }
 
+    /// The session's outstanding work before `tx`, read through `read`; the
+    /// store holds `written` requirements when they are known.
+    ///
+    /// The head is read only when `tx` leaves it in place and the turn's
+    /// records owe something: a commit that publishes the head states what
+    /// it owes, and when the turn's records owe nothing, all the session
+    /// owes is the head's, which is `written`, carried unchanged. A commit
+    /// that ends the turn reads its records only for that, and reads the
+    /// head when they do not read; an unstarted turn ends on a head that
+    /// does not read (FIG-6209).
+    ///
+    /// # Errors
+    ///
+    /// A read's refusal, with its cause.
+    async fn read<R, ReadFut>(
+        &self,
+        read: R,
+        tx: &ActorTx,
+        written: Option<&[String]>,
+    ) -> Result<RecordedWork, DurableError>
+    where
+        R: Fn(crate::SessionId, ReadScope) -> ReadFut,
+        ReadFut: std::future::Future<Output = Result<RecordedWork, DurableError>>,
+    {
+        let session = || self.session.clone();
+        let writes_head = RecordedWork::writes_head(tx);
+        if RecordedWork::ends_turn(tx) {
+            // A commit that ends the turn and publishes the head states all
+            // the session owes after it.
+            if writes_head {
+                return Ok(RecordedWork::session());
+            }
+            // What the turn owes goes with it; a turn whose records do not
+            // read leaves the head to say what the session owes.
+            if let Some(written) = written
+                && let Ok(turn) = read(session(), ReadScope::Turn).await
+                && turn.owes_nothing()
+            {
+                return Ok(turn.carrying_head(written));
+            }
+            return read(session(), ReadScope::Head).await;
+        }
+        let turn = read(session(), ReadScope::Turn).await?;
+        if writes_head {
+            return Ok(turn);
+        }
+        match written {
+            Some(written) if turn.owes_nothing() => Ok(turn.carrying_head(written)),
+            written => {
+                let work = turn.with_head(read(session(), ReadScope::Head).await?);
+                self.report(&work, written);
+                Ok(work)
+            }
+        }
+    }
+
     /// Report `written`, the requirements the store holds, when it is not
     /// what `work`, the records it was read against, owe.
     fn report(&self, work: &RecordedWork, written: Option<&[String]>) {
@@ -753,10 +859,10 @@ impl SessionObligations {
 /// What of a session's records a [`SessionObligations`] reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ReadScope {
-    /// Every outstanding record ([`RecordedWork::read_session`]).
-    Session,
-    /// Its head's alone ([`RecordedWork::read_head`]): the commit ends the
-    /// turn, whose records owe nothing after it.
+    /// Its unfinished turn's records, the head unread
+    /// ([`RecordedWork::read_turn`]).
+    Turn,
+    /// Its head's alone ([`RecordedWork::read_head`]).
     Head,
 }
 

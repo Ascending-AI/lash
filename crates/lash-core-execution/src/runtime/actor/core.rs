@@ -435,20 +435,16 @@ impl ActorContext {
         // Boxed: the ledger's read and commit would otherwise inline into
         // every caller's future.
         Box::pin(obligations.commit(
-            |session, scope| async move {
-                use super::claim_obligations::{ReadScope, RecordedWork};
-                match scope {
-                    ReadScope::Session => {
-                        RecordedWork::read_session(
-                            reads,
-                            heads.as_ref(),
-                            &session,
-                            limits,
-                            phase_limits,
-                        )
-                        .await
+            |session, scope| {
+                let heads = Arc::clone(&heads);
+                async move {
+                    use super::claim_obligations::{ReadScope, RecordedWork};
+                    match scope {
+                        ReadScope::Turn => {
+                            RecordedWork::read_turn(reads, &session, limits, phase_limits).await
+                        }
+                        ReadScope::Head => RecordedWork::read_head(heads.as_ref(), &session).await,
                     }
-                    ReadScope::Head => RecordedWork::read_head(heads.as_ref(), &session).await,
                 }
             },
             staged,

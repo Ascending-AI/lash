@@ -1,7 +1,8 @@
 //! The claim-obligation reducer's laws over hand-built transactions
 //! (FIG-6089): one token stays required until the last of its uses
-//! settles, and commits through one claim write their requirements in the
-//! order they land (FIG-6075 R-11).
+//! settles, commits through one claim write their requirements in the
+//! order they land (FIG-6075 R-11), and a commit that leaves the head in
+//! place does not read it (FIG-6209).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -184,4 +185,70 @@ async fn the_last_commit_to_land_writes_requirements_from_every_record_before_it
     release.send(()).unwrap();
     assert_eq!(settle.await.unwrap(), Some(Vec::new()));
     assert_eq!(admit.await.unwrap(), Some(vec![token("j")]));
+}
+
+/// FIG-6209: an unstarted turn refused because its session's head does not
+/// read ends without the head being read again. Its commit leaves the
+/// requirements the claim found, all the head's, exactly as they were, and
+/// the next commit still owes them.
+#[tokio::test]
+async fn a_refused_unstarted_turn_on_an_unreadable_head_keeps_the_heads_requirements() {
+    let ledger = SessionObligations::claimed(session(), &[token("k")]);
+    let scopes = std::sync::Mutex::new(Vec::new());
+    let read = |_: SessionId, scope: ReadScope| {
+        scopes.lock().unwrap().push(scope);
+        async move {
+            match scope {
+                // The unstarted turn owes nothing.
+                ReadScope::Turn => Ok(RecordedWork::session()),
+                ReadScope::Head => Err(lash_durable::DurableError::StoreRefused(
+                    crate::store::StoreRefusal::SessionStateVersionUnsupported {
+                        found: 0,
+                        current: 1,
+                    },
+                )),
+            }
+        }
+    };
+    let mut refusing = opened();
+    refusing.write(lash_durable::DomainWrite::Turn(
+        lash_durable::domain::TurnWrite::Terminal {
+            session: session(),
+            run: TurnId::try_from("t".to_owned()).unwrap(),
+            cause: Box::new(crate::store::RunTerminalCause::Refused {
+                refusal: crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionStateVersionUnsupported,
+                    "session state version 0 is unsupported",
+                )
+                .into(),
+            }),
+            head_revision: None,
+        },
+    ));
+    let refused = ledger
+        .commit(read, staged(), refusing, |tx| async move {
+            Ok(tx.requires().map(<[String]>::to_vec))
+        })
+        .await
+        .expect("the refusal commits");
+    assert_eq!(refused, None, "the head's requirements stand unchanged");
+    assert_eq!(
+        *scopes.lock().unwrap(),
+        [ReadScope::Turn],
+        "the head is not read"
+    );
+    let (admit, _) = admitting(1, vec![draft("y", "j")]);
+    let admitted = ledger
+        .commit(unread, staged(), admit, |tx| async move {
+            Ok(tx.requires().map(<[String]>::to_vec))
+        })
+        .await
+        .unwrap();
+    let mut owed = vec![token("j"), token("k")];
+    owed.sort();
+    assert_eq!(
+        admitted,
+        Some(owed),
+        "the head's requirement is not dropped"
+    );
 }
