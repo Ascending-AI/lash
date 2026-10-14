@@ -179,5 +179,10 @@
         "tests/snapshots/*.snap"
       ]
     }
+  },
+  "third-party/vendored/lash-rmcp": {
+    "compile_data": [
+      "README.md"
+    ]
   }
 }

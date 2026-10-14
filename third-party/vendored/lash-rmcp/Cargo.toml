@@ -12,20 +12,20 @@
 [package]
 edition = "2024"
 rust-version = "1.88"
-name = "rmcp"
-version = "3.5.1"
+name = "lash-rmcp"
+version.workspace = true
 build = "build.rs"
 autolib = false
 autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Rust SDK for Model Context Protocol"
+description = "Lash-owned Rust SDK for Model Context Protocol, based on rmcp 3.5.1"
 homepage = "https://github.com/modelcontextprotocol/rust-sdk"
-documentation = "https://docs.rs/rmcp"
+documentation = "https://docs.rs/lash-rmcp"
 readme = "README.md"
 license = "Apache-2.0"
-repository = "https://github.com/modelcontextprotocol/rust-sdk/"
+repository = "https://github.com/Ascending-AI/lash"
 
 [package.metadata.docs.rs]
 features = [

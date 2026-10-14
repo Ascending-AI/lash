@@ -1194,14 +1194,14 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # `cargo fmt --all --check` and the same `--all-targets` clippy the local
+      # `python3 scripts/format_workspace.py --check` and the same `--all-targets` clippy the local
       # `just push-gate` runs, plus the two boundary guards that otherwise gate
       # nothing.
       # The clippy feature set mirrors the `check` workspace lane so the
       # dependency graph resolves identically.
       - name: Check formatting
         run: |
-          cargo fmt --all --check
+          python3 scripts/format_workspace.py --check
           # include!d files escape cargo fmt's module walk. The scoped scan
           # finds every one under the scopes it covers, so a new include! is
           # checked the moment it exists rather than when someone remembers to
@@ -1269,7 +1269,7 @@ jobs:
         if: needs.plan.outputs.buck2_trusted != 'true'
         run: |
           # shellcheck disable=SC2086
-          cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
+          cargo clippy --workspace --all-targets --locked --exclude lash-rmcp ${LASH_CI_FEATURES} -- -D warnings
 
       # `cargo check --workspace --all-targets` never exercises the
       # package-only `--no-default-features` resolution, and the repo-gates

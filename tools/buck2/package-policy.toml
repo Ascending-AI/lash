@@ -634,3 +634,10 @@ compile_data = ["//crates/lash-kernel-dialect:source_wire_declarations"]
 
 [filegroups.lash-kernel-dialect]
 source_wire_declarations = { srcs = ["src/imperative.rs", "src/diagnostic.rs"] }
+
+# Complete upstream SDK tests are retained for upstream merge validation.
+[[rule]]
+packages = ["lash-rmcp"]
+kinds = ["unit-test", "test"]
+tags = ["manual"]
+reason = "vendored SDK upstream suite; run explicitly when merging an upstream release"

@@ -13,6 +13,7 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 
+import clippy_policy
 import feature_variants
 import vm_worker_runfiles
 
@@ -1638,6 +1639,12 @@ def generated(
         json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n"
     )
     labels = [target for package in inventory for target in package["targets"]]
+    lint_labels = {
+        target["label"]
+        for package in inventory
+        if clippy_policy.is_lash_owned(ROOT / package["manifest"], ROOT)
+        for target in package["targets"]
+    }
     executable_tests = [
         target
         for target in labels
@@ -1660,6 +1667,7 @@ def generated(
             for target in labels
             if target["label"] is not None
             and target["kind"] != "custom-build"
+            and target["label"] in lint_labels
         ),
         # One rust_doc target per library crate: the `cargo doc --workspace`
         # shape as cached Buck2 actions.

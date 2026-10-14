@@ -81,5 +81,3 @@ export_file(name = "test_shard_weights", src = "test-shard-weights.json", mode =
 export_file(name = "target_inventory", src = "target-inventory.json", mode = "reference", visibility = ["PUBLIC"])
 export_file(name = "ui_fixtures_runner.py", src = "ui_fixtures_runner.py", visibility = ["PUBLIC"])
 export_file(name = "run_binary.sh", src = "run_binary.sh", visibility = ["PUBLIC"])
-
-export_file(name = "rmcp_header_laws.rs", src = "rmcp_header_laws.rs", visibility = ["PUBLIC"])

@@ -68,4 +68,4 @@ Any type that implements the [`Transport`](crate::transport::Transport) trait ca
 
 ## License
 
-This project is licensed under the terms specified in the repository's [LICENSE](../../LICENSE) file.
+This project is licensed under the terms specified in the repository's [LICENSE](LICENSE) file.

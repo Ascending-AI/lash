@@ -1,9 +1,27 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -15,2 +15,2 @@
+-name = "rmcp"
+-version = "3.5.1"
++name = "lash-rmcp"
++version.workspace = true
+@@ -23 +23 @@
+-description = "Rust SDK for Model Context Protocol"
++description = "Lash-owned Rust SDK for Model Context Protocol, based on rmcp 3.5.1"
+@@ -25 +25 @@
+-documentation = "https://docs.rs/rmcp"
++documentation = "https://docs.rs/lash-rmcp"
+@@ -28 +28 @@
+-repository = "https://github.com/modelcontextprotocol/rust-sdk/"
++repository = "https://github.com/Ascending-AI/lash"
+--- a/README.md
++++ b/README.md
+@@ -71 +71 @@
+-This project is licensed under the terms specified in the repository's [LICENSE](../../LICENSE) file.
++This project is licensed under the terms specified in the repository's [LICENSE](LICENSE) file.
 --- a/src/transport/common/mcp_headers.rs
 +++ b/src/transport/common/mcp_headers.rs
-@@ -99,78 +99,128 @@
-         )
- }
- 
+@@ -102,2 +102,19 @@
 -/// Top-level properties carrying an `x-mcp-header` annotation, as `(property, header)` pairs.
 -fn param_header_annotations(input_schema: &JsonObject) -> Vec<(String, String)> {
 +/// Properties-chain annotations, as `(argument path, header)` pairs.
@@ -25,7 +43,7 @@
 +            }
 +        }
 +    }
-     let mut out = Vec::new();
+@@ -105,9 +122 @@
 -    if let Some(Value::Object(props)) = input_schema.get("properties") {
 -        for (prop, schema) in props {
 -            if let Some(Value::String(header)) = schema.get("x-mcp-header")
@@ -36,9 +54,7 @@
 -        }
 -    }
 +    collect(input_schema, &mut Vec::new(), &mut out);
-     out
- }
- 
+@@ -117,5 +126,9 @@
 -/// Validates the `x-mcp-header` annotations in a tool input schema.
 -///
 -/// Annotations must be non-empty RFC 9110 tokens, case-insensitively unique,
@@ -53,8 +69,7 @@
 +/// Validates annotations reached solely through `properties`, rejecting all others.
 +/// Names must be non-empty RFC 9110 tokens, case-insensitively unique across
 +/// the schema, and attached to primitive (`string`/`integer`/`boolean`) properties.
- #[cfg(feature = "client-side-sse")]
- pub(crate) fn validate_param_header_annotations(input_schema: &JsonObject) -> Result<(), String> {
+@@ -124,28 +137,17 @@
 -    let Some(Value::Object(props)) = input_schema.get("properties") else {
 -        return Ok(());
 -    };
@@ -100,12 +115,11 @@
 +                return Err(format!("property `{prop}`: x-mcp-header must not be empty"));
 +            }
 +            if !header.chars().all(is_tchar) {
-                 return Err(format!(
+@@ -153,2 +155 @@
 -                    "property `{prop}`: x-mcp-header requires a primitive type \
 -                     (string/integer/boolean), got {other:?}"
 +                    "property `{prop}`: x-mcp-header `{header}` is not a valid HTTP token"
-                 ));
-             }
+@@ -157,6 +158,47 @@
 -        }
 -    }
 -    Ok(())
@@ -159,7 +173,7 @@
 +}
 +
 +/// Annotations below any other keyword are not statically reachable.
- #[cfg(feature = "client-side-sse")]
+@@ -164,4 +206,4 @@
 -fn reject_nested_annotations(schema: &Value, path: &str) -> Result<(), String> {
 -    if let Some(Value::Object(nested)) = schema.get("properties") {
 -        for (key, value) in nested {
@@ -168,11 +182,10 @@
 +    match value {
 +        Value::Object(object) => {
 +            if object.contains_key("x-mcp-header") {
-                 return Err(format!(
+@@ -169 +211 @@
 -                    "property `{path}.{key}`: x-mcp-header is not supported on nested properties"
 +                    "schema `{path}`: x-mcp-header is not reachable solely through properties"
-                 ));
-             }
+@@ -172,2 +214,10 @@
 -            reject_nested_annotations(value, &format!("{path}.{key}"))?;
 -        }
 +            for (key, child) in object {
@@ -185,46 +198,22 @@
 +            }
 +        }
 +        _ => {}
-     }
-     Ok(())
- }
-@@ -240,8 +290,8 @@
-         && let (Some(schema), Some(arguments)) =
-             (tool_schema, params.and_then(|p| p.get("arguments")))
-     {
+@@ -243,2 +293,2 @@
 -        for (prop, header) in param_header_annotations(schema) {
 -            let Some(arg) = arguments.get(&prop) else {
 +        for (path, header) in param_header_annotations(schema) {
 +            let Some(arg) = argument_at_path(arguments, &path) else {
-                 continue;
-             };
-             let Some(encoded) = primitive_to_string(arg).map(|s| encode_header_value(&s)) else {
-@@ -297,10 +347,11 @@
-         && let Some(schema) = tool_schema
-     {
-         let arguments = params.and_then(|p| p.get("arguments"));
+@@ -300 +350 @@
 -        for (prop, header) in param_header_annotations(schema) {
 +        for (path, header) in param_header_annotations(schema) {
-             let full = format!("{HEADER_MCP_PARAM_PREFIX}{header}");
-             let header_value = header_str(headers, &full)?;
+@@ -303 +353,2 @@
 -            let arg = arguments.and_then(|a| a.get(&prop));
 +            let prop = path.join(".");
 +            let arg = arguments.and_then(|a| argument_at_path(a, &path));
-             let body_value = arg.filter(|v| !v.is_null()).and_then(primitive_to_string);
- 
-             match (header_value, body_value) {
-@@ -537,13 +588,92 @@
-         }
- 
-         #[test]
+@@ -540 +591 @@
 -        fn rejects_nested_annotation() {
 +        fn accepts_nested_properties_annotation() {
-             let schema = schema_with(json!({
-                 "outer": {
-                     "type": "object",
-                     "properties": { "inner": { "type": "string", "x-mcp-header": "Inner" } }
-                 }
-             }));
+@@ -546,0 +598,79 @@
 +            assert!(validate_param_header_annotations(&schema).is_ok());
 +        }
 +
@@ -304,13 +293,7 @@
 +            let schema = schema_with(
 +                json!({"region":{"type":"string", "x-mcp-header":"Region"}, "location":{"properties":{"region":{"type":"string", "x-mcp-header":"rEgIoN"}}}}),
 +            );
-             assert!(validate_param_header_annotations(&schema).is_err());
-         }
-     }
-@@ -589,6 +719,66 @@
-                     .map(String::as_str),
-                 Some("us-west1")
-             );
+@@ -591,0 +722,60 @@
 +        }
 +    }
 +
@@ -371,6 +354,3 @@
 +                unexpected.insert("Mcp-Param-Region", HeaderValue::from_static("unexpected"));
 +                assert!(validate_request_headers(&unexpected, &request, Some(&schema)).is_err());
 +            }
-         }
-     }
- 

@@ -41,34 +41,13 @@ Key features:
 
 ## Embedding
 
-For a git dependency with MCP support, add the following to your host's
-workspace-root `Cargo.toml`. The package is named `lash-runtime`; the dependency
-alias lets your code import it as `lash`.
+The SDK package is named `lash-runtime`; alias it as `lash` in your dependencies
+and enable the `mcp` feature for MCP support.
 
-```toml
-[dependencies]
-lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash", rev = "deec25438cd5f28c41aabe7dc8859a1badfeff40", features = ["mcp"] }
-
-[patch.crates-io]
-rmcp = { git = "https://github.com/Ascending-AI/lash", rev = "deec25438cd5f28c41aabe7dc8859a1badfeff40" }
-```
-
-The pinned revision contains Lash's rmcp 3.5.1 fix for nested `x-mcp-header`
-annotations reached solely through `properties`, including exact-path HTTP
-header mirroring. When selecting a newer Lash revision, use the same revision
-in both entries. Cargo finds `rmcp` at `third-party/patched/rmcp` in the git
-repository; no `path` key is needed.
-
-Cargo ignores `[patch]` entries in dependency workspaces, so the host must
-carry this patch even when depending on Lash by path or crates.io, or using
-`lash-internal-plugin-mcp` directly. Without it, pristine rmcp 3.5.1 silently
-drops tools with nested annotations from `tools/list`: those tools are missing
-from discovery. See the [upstream issue](https://github.com/modelcontextprotocol/rust-sdk/issues/1354).
-Once rmcp releases the fix, update to that release and delete the host's `rmcp`
-stanza from `[patch.crates-io]`.
-
-Verify the selected source with `cargo tree -i rmcp`; it should show rmcp from
-`https://github.com/Ascending-AI/lash` at the pinned revision.
+Lash owns its MCP SDK as the publishable `lash-rmcp` dependency, based on
+upstream rmcp 3.5.1. Every embedder gets the nested `x-mcp-header` fix through
+that dependency. See the [ownership and upstream merge note](third-party/vendored/lash-rmcp/OWNERSHIP.md)
+for the maintained diff and release procedure.
 
 ## What survives a crash
 

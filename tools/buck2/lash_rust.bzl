@@ -2,7 +2,7 @@
 
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load(":buildscript_manifest.bzl", "buildscript_manifest", "buildscript_sources")
-load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LINT_FLAGS", "first_party_clippy_configuration")
+load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LINT_FLAGS", "LINTED_WORKSPACE_PACKAGES", "first_party_clippy_configuration")
 load(":deps.bzl", "PACKAGE_DEPS")
 load(":exec_sizes.bzl", "HELPER_BUDGET")
 load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
@@ -63,7 +63,8 @@ def _rustc_flags(package_name, declared_features, extra = []):
         "//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],
         "DEFAULT": [],
     })
-    return FIRST_PARTY_RUST_LINT_FLAGS + FIRST_PARTY_CLIPPY_LINT_FLAGS + [
+    lint_flags = FIRST_PARTY_RUST_LINT_FLAGS + FIRST_PARTY_CLIPPY_LINT_FLAGS if package_name in LINTED_WORKSPACE_PACKAGES else []
+    return lint_flags + [
         "--check-cfg=cfg(docsrs,test)",
         "--check-cfg=cfg(feature,values({}))".format(feature_values),
     ] + profile + extra + judged

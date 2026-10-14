@@ -631,19 +631,6 @@ def patched_path_rules(content: str, resolved: dict) -> tuple[str, dict[pathlib.
             return rule + "(\n" + block + "\n)\n"
 
         content = re.sub(r"(third_party_rust_library|third_party_rust_binary|third_party_buildscript_run)\(\n(.*?)\n\)\n", replace, content, flags=re.S)
-    if any(package["name"] == "rmcp" and not package.get("source") for package in resolved["packages"]):
-        content += """
-load("@root//tools/buck2:third_party.bzl", "third_party_header_laws")
-
-third_party_header_laws(
-    name = "rmcp_header_laws",
-    srcs = [
-        "//tools/buck2:rmcp_header_laws.rs",
-        "//third-party/patched/rmcp:crate_sources",
-    ],
-    deps = [":http-1", ":base64-0.23", ":serde_json-1"],
-)
-"""
     return content, outputs
 
 
@@ -1485,7 +1472,7 @@ def main() -> int:
             "version": package["version"],
             "directory": pathlib.Path(package["manifest_path"]).parent.relative_to(ROOT).as_posix(),
             "library": targets[(package["name"], package["version"])],
-            "tests": ["//third-party/rust:rmcp_header_laws"] if package["name"] == "rmcp" else [],
+            "tests": [],
         }
         for package in derived["packages"]
         if not package.get("source") and package["name"] != "lash-buck2-third-party"

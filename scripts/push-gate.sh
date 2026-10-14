@@ -162,7 +162,7 @@ scoped() {
 
 run_formatting_gates() {
   step "Formatting"
-  cargo fmt --all --check
+  python3 scripts/format_workspace.py --check
   python3 scripts/check_included_file_formatting.py
   rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 }
@@ -170,7 +170,7 @@ run_formatting_gates() {
 run_clippy_gate() {
   step "Clippy"
   # shellcheck disable=SC2086
-  cargo clippy --workspace --all-targets --locked ${ci_features} -- -D warnings
+  cargo clippy --workspace --all-targets --locked --exclude lash-rmcp ${ci_features} -- -D warnings
 }
 
 # Guards whose inputs are Rust sources, the crate-adjacent schema artefacts

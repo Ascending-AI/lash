@@ -14,7 +14,7 @@ if [[ "${1:-}" == --local || "${1:-}" == --shared ]]; then
 fi
 # Formatting and the separately pinned Miri interpreter retain named recipes.
 case "${1:-}" in
-  fmt) shift; exec cargo fmt --all "$@" ;;
+  fmt) shift; exec python3 "$repo/scripts/format_workspace.py" "$@" ;;
   miri) shift; exec bash "$repo/scripts/append-vec-miri.sh" "$@" ;;
 esac
 if [[ "${1:-}" == check ]]; then

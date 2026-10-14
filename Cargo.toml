@@ -1,7 +1,8 @@
 [workspace]
 # Local gate scratch packages (including Miri's sysroot) are standalone.
-exclude = ["fuzz", ".kiln", "third-party/patched/rmcp"]
+exclude = ["fuzz", ".kiln"]
 members = [
+    "third-party/vendored/lash-rmcp",
     "crates/lash-render",
     "crates/lash-sansio",
     "crates/lash-trace",
@@ -77,6 +78,7 @@ members = [
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.
 default-members = [
+    "third-party/vendored/lash-rmcp",
     "crates/lash-render",
     "crates/lash-core-ids",
     "crates/lash-store-sql",
@@ -262,7 +264,7 @@ pretty_assertions = "1"
 reqwest = { version = "0.13", default-features = false }
 rmp-serde = "1.3.1"
 ryu-js = "=1.0.3"
-rmcp = { version = "3.5.1", default-features = false }
+rmcp = { package = "lash-rmcp", path = "third-party/vendored/lash-rmcp", version = "=0.0.0-dev", default-features = false }
 schemars = "1.2.2"
 serde = "1"
 serde_bytes = "0.11"
@@ -405,6 +407,3 @@ debug = "line-tables-only"
 
 [profile.judged.package."*"]
 opt-level = 2
-
-[patch.crates-io]
-rmcp = { path = "third-party/patched/rmcp" }
