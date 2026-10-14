@@ -2297,3 +2297,6 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
     }
     deployment.core.shutdown().await.unwrap();
 }
+
+#[path = "core_node_processes/read_tools.rs"]
+mod read_tools;

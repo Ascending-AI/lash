@@ -75,7 +75,9 @@ async fn deployment_preflight_requires_process_host_port() {
             Ok(())
         }
         fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, lash_core::PluginError> {
-            let mut reg = PluginRegistrar::<()>::for_process("needs-reads");
+            let mut reg = PluginRegistrar::<(), crate::plugins::registries::Process>::for_process(
+                "needs-reads",
+            );
             reg.require(ServiceKind::GrantedSessionReads);
             Ok(ProcessRecipe::new("needs-reads", reg, |_| {
                 panic!("unavailable host cannot bind")

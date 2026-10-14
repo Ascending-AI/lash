@@ -273,7 +273,7 @@ pub fn prompt_catalog(
     for (id, register) in plugins {
         let mut recipe = crate::plugin::PluginRegistrar::new(id);
         register(&mut recipe)?;
-        entries.extend(recipe.descriptors(id, crate::plugin::RegistryKind::Session));
+        entries.extend(recipe.descriptors(id));
         let owner = crate::RuntimeOwner::Session("prompt-fixture".into());
         let state = crate::plugin::PluginStateView::bind(&owner, id, std::sync::Arc::default());
         let mut reg = crate::plugin::BoundRegistrar::new(id.into());

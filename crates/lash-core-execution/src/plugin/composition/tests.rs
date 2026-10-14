@@ -5,127 +5,92 @@ use std::collections::BTreeSet;
 
 const KEYED_TOOL: &str = "tool:keyed";
 
-/// REGISTRATION-IS-INVENTORY: a turn callback is part of installed code.
-#[test]
-fn registration_is_inventory() {
-    use super::super::prompt::{
-        OfferedTools, PromptFamilySection, PromptSectionFamilySpec, PromptSectionSource,
-        PromptWrapSpec, PromptWrapTarget,
-    };
-    use crate::prompt_sections::PromptWrapKey;
-    #[derive(Clone)]
-    struct Owner(Arc<std::sync::atomic::AtomicUsize>);
-    impl SessionPlugin for Owner {
-        fn id(&self) -> &'static str {
-            "test_protocol"
-        }
+use super::super::prompt::{
+    OfferedTools, PromptFamilySection, PromptSectionFamilySpec, PromptSectionSource,
+    PromptWrapSpec, PromptWrapTarget,
+};
+use crate::prompt_sections::PromptWrapKey;
+
+#[derive(Clone)]
+struct Owner(Arc<std::sync::atomic::AtomicUsize>);
+impl SessionPlugin for Owner {
+    fn id(&self) -> &'static str {
+        "test_protocol"
     }
-    #[async_trait::async_trait]
-    impl CodeExecutorPlugin for Owner {
-        async fn execute_code(
-            &self,
-            _: crate::RuntimeExecutionContext<'_>,
-            _: crate::ExecRequest,
-        ) -> Result<crate::ExecResponse, crate::SessionError> {
-            Err(crate::SessionError::Protocol(
-                "inventory fixture executes no code".into(),
-            ))
-        }
-        async fn frame_switch_carries(
-            &self,
-            _: ProtocolSessionContext<'_>,
-            _: &crate::FrameNodeId,
-            _: &[crate::SessionAppendNode],
-        ) -> Result<Vec<crate::ArtifactName>, crate::SessionError> {
-            Ok(Vec::new())
-        }
+}
+#[async_trait::async_trait]
+impl CodeExecutorPlugin for Owner {
+    async fn execute_code(
+        &self,
+        _: crate::RuntimeExecutionContext<'_>,
+        _: crate::ExecRequest,
+    ) -> Result<crate::ExecResponse, crate::SessionError> {
+        Err(crate::SessionError::Protocol(
+            "inventory fixture executes no code".into(),
+        ))
     }
-    impl AssistantProseProjectorPlugin for Owner {
-        fn project_assistant_prose(&self, text: &str) -> String {
-            text.to_owned()
-        }
+    async fn frame_switch_carries(
+        &self,
+        _: ProtocolSessionContext<'_>,
+        _: &crate::FrameNodeId,
+        _: &[crate::SessionAppendNode],
+    ) -> Result<Vec<crate::ArtifactName>, crate::SessionError> {
+        Ok(Vec::new())
     }
-    #[async_trait::async_trait]
-    impl ContextPressureHook for Owner {
-        fn id(&self) -> &'static str {
-            "pressure"
-        }
-        async fn decide(
-            &self,
-            _: &ContextPressureContext<'_>,
-        ) -> Result<ContextPressureDecision, ContextError> {
-            Ok(ContextPressureDecision::Continue)
-        }
+}
+impl AssistantProseProjectorPlugin for Owner {
+    fn project_assistant_prose(&self, text: &str) -> String {
+        text.to_owned()
     }
-    #[async_trait::async_trait]
-    impl ContextCompactor for Owner {
-        fn id(&self) -> &'static str {
-            "compact"
-        }
-        async fn compact(
-            &self,
-            _: &CompactionContext<'_>,
-        ) -> Result<Option<ContextCompaction>, ContextError> {
-            Ok(None)
-        }
+}
+#[async_trait::async_trait]
+impl ContextPressureHook for Owner {
+    fn id(&self) -> &'static str {
+        "pressure"
     }
-    impl AttachmentOmissionPolicy for Owner {
-        fn id(&self) -> &'static str {
-            "omit"
-        }
-        fn omissions(
-            &self,
-            _: &AttachmentOmissionContext,
-            _: &[crate::Message],
-        ) -> Result<BTreeSet<HistoryPartId>, PluginError> {
-            Ok(BTreeSet::new())
-        }
+    async fn decide(
+        &self,
+        _: &ContextPressureContext<'_>,
+    ) -> Result<ContextPressureDecision, ContextError> {
+        Ok(ContextPressureDecision::Continue)
     }
-    impl PromptSectionSource for Owner {
-        fn sections(&self, _: &OfferedTools) -> Vec<PromptFamilySection> {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Vec::new()
-        }
+}
+#[async_trait::async_trait]
+impl ContextCompactor for Owner {
+    fn id(&self) -> &'static str {
+        "compact"
     }
-    struct Config;
-    impl ConfigOwner for Config {
-        type Create = serde_json::Value;
-        type Recorded = serde_json::Value;
-        type Refusal = String;
-        type RunOptions = NoRunOptions;
-        fn create(
-            &self,
-            input: Option<Self::Create>,
-        ) -> Result<Option<Self::Recorded>, Self::Refusal> {
-            Ok(input)
-        }
-        fn validate(
-            &self,
-            _: &Self::Recorded,
-            _: Option<&Self::Recorded>,
-            _: &CandidateFacts<'_>,
-        ) -> Result<(), Self::Refusal> {
-            Ok(())
-        }
-        fn apply_run_options(
-            &self,
-            _: &Self::Recorded,
-            options: Self::RunOptions,
-        ) -> Result<Self::Recorded, Self::Refusal> {
-            match options {}
-        }
+    async fn compact(
+        &self,
+        _: &CompactionContext<'_>,
+    ) -> Result<Option<ContextCompaction>, ContextError> {
+        Ok(None)
     }
-    #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-    struct Command;
-    impl ConfigCommand for Command {
-        type Owner = Config;
-        type Output = ();
-        const NAME: &'static str = "set";
+}
+impl AttachmentOmissionPolicy for Owner {
+    fn id(&self) -> &'static str {
+        "omit"
     }
-    let constructions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let expansions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let mut reg = PluginRegistrar::<Owner>::new("test_protocol");
-    crate::testing::register_inventory_protocol(&mut reg).unwrap();
+    fn omissions(
+        &self,
+        _: &AttachmentOmissionContext,
+        _: &[crate::Message],
+    ) -> Result<BTreeSet<HistoryPartId>, PluginError> {
+        Ok(BTreeSet::new())
+    }
+}
+impl PromptSectionSource for Owner {
+    fn sections(&self, _: &OfferedTools) -> Vec<PromptFamilySection> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Vec::new()
+    }
+}
+
+/// A session plugin that declares one contribution of every callback slot,
+/// every prompt kind, a state reducer and an extension; its provider
+/// `tools`' handle.
+fn every_contribution(reg: &mut PluginRegistrar<Owner>) -> ToolProviderHandle {
+    crate::testing::register_inventory_protocol(reg).unwrap();
     reg.turn()
         .before(crate::hook_key!("before"), |_, _| {
             Ok(Arc::new(|_| Box::pin(async { Ok(Default::default()) })))
@@ -208,16 +173,6 @@ fn registration_is_inventory() {
             Ok(Arc::new(crate::testing::EmptyToolProvider))
         })
         .unwrap();
-    assert!(
-        matches!(
-            reg.tools()
-                .provider(crate::tool_provider_key!("tools"), |_, _| Ok(Arc::new(
-                    crate::testing::EmptyToolProvider
-                ))),
-            Err(PluginError::Registration(_))
-        ),
-        "declared provider addresses are unique"
-    );
     struct NoReads;
     #[async_trait::async_trait]
     impl crate::ToolReads for NoReads {
@@ -335,6 +290,61 @@ fn registration_is_inventory() {
     .unwrap();
     reg.extension("owner-extension", |_, _| Ok(serde_json::Value::Null))
         .unwrap();
+    provider_handle
+}
+
+/// REGISTRATION-IS-INVENTORY: a turn callback is part of installed code.
+#[test]
+fn registration_is_inventory() {
+    struct Config;
+    impl ConfigOwner for Config {
+        type Create = serde_json::Value;
+        type Recorded = serde_json::Value;
+        type Refusal = String;
+        type RunOptions = NoRunOptions;
+        fn create(
+            &self,
+            input: Option<Self::Create>,
+        ) -> Result<Option<Self::Recorded>, Self::Refusal> {
+            Ok(input)
+        }
+        fn validate(
+            &self,
+            _: &Self::Recorded,
+            _: Option<&Self::Recorded>,
+            _: &CandidateFacts<'_>,
+        ) -> Result<(), Self::Refusal> {
+            Ok(())
+        }
+        fn apply_run_options(
+            &self,
+            _: &Self::Recorded,
+            options: Self::RunOptions,
+        ) -> Result<Self::Recorded, Self::Refusal> {
+            match options {}
+        }
+    }
+    #[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+    struct Command;
+    impl ConfigCommand for Command {
+        type Owner = Config;
+        type Output = ();
+        const NAME: &'static str = "set";
+    }
+    let constructions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let expansions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut reg = PluginRegistrar::<Owner>::new("test_protocol");
+    let provider_handle = every_contribution(&mut reg);
+    assert!(
+        matches!(
+            reg.tools()
+                .provider(crate::tool_provider_key!("tools"), |_, _| Ok(Arc::new(
+                    crate::testing::EmptyToolProvider
+                ))),
+            Err(PluginError::Registration(_))
+        ),
+        "declared provider addresses are unique"
+    );
     let count = Arc::clone(&constructions);
     let family = Arc::clone(&expansions);
     let mut recipe = PluginRecipe::new("test_protocol", reg, move |_, _| {
@@ -719,7 +729,7 @@ fn prompt_metadata_comes_from_frozen_inventory() {
         .unwrap();
     let inventory = InstalledInventory {
         scope: InventoryScope::Deployment(RegistryKind::Session),
-        entries: reg.descriptors("prompt-metadata", RegistryKind::Session),
+        entries: reg.descriptors("prompt-metadata"),
         readiness: vec![ContributionReadiness::Ready; 3],
         stateless: Default::default(),
     };
@@ -728,7 +738,7 @@ fn prompt_metadata_comes_from_frozen_inventory() {
         inventory: Some(Arc::new(inventory)),
         ..Default::default()
     };
-    let registry = super::super::runtime_impl::build_tool_registry(&contributions).unwrap();
+    let registry = super::super::runtime_impl::build_tool_registry(&mut contributions).unwrap();
     let composition = ExecutionComposition::new(&mut contributions, registry);
     assert_eq!(composition.prompt_catalog().sections(), expected.sections());
     assert_eq!(composition.prompt_catalog().families(), expected.families());
@@ -953,4 +963,318 @@ async fn reordering_provider_registrations_changes_nothing_recorded_or_executed(
         );
         assert_eq!(executed, serde_json::json!("served"));
     }
+}
+
+/// PROCESS-ADMITS-WHAT-IT-RUNS (FIG-6273): the contribution table admits a
+/// callback slot in a process exactly when a process runs it. What a
+/// process runs comes from its own wiring, not a list: a plugin that binds
+/// one callback of every slot is consumed as a process consumes its
+/// components' bound contributions, and the slots it takes are the slots it
+/// runs. A process that refused a slot it runs (`ToolReads`, FIG-6273) or
+/// admitted one it drops fails here.
+#[test]
+fn a_process_admits_exactly_the_callback_slots_it_runs() {
+    let mut reg = PluginRegistrar::<Owner>::new("test_protocol");
+    every_contribution(&mut reg);
+    let state = Arc::new(std::sync::Mutex::new(
+        crate::plugin::state::PluginStateRegistry::from_snapshot(None),
+    ));
+    let mut bound = BoundRegistrar::for_process("test_protocol".to_owned());
+    reg.bind(
+        &Owner(Arc::default()),
+        &PluginStateView::detached("test_protocol", state),
+        &mut bound,
+    )
+    .expect("every contribution binds");
+    let mut contributions = bound.contributions;
+    assert_eq!(
+        contributions.callback_slots(),
+        CallbackSlot::ALL.iter().copied().collect::<BTreeSet<_>>(),
+        "the fixture binds one callback of every slot"
+    );
+    crate::plugin::process_components::ProcessParts::consume(&mut contributions)
+        .expect("the process parts build");
+    let left = contributions.callback_slots();
+    for slot in CallbackSlot::ALL {
+        let runs = !left.contains(slot);
+        let admitted = crate::plugin::registries::admits(
+            &ContributionKind::Callback(*slot),
+            &ContributionDetails::Callback {
+                stream_state_from: None,
+            },
+            RegistryKind::Process,
+        );
+        assert_eq!(
+            admitted, runs,
+            "{slot:?}: a process runs it: {runs}; the table admits it in a process: {admitted}"
+        );
+    }
+}
+
+const LOOKUP_TOOL: &str = "tool:lookup";
+
+/// The `Read` tool `lookup`: what a knowledge base says about a topic.
+fn lookup_definition() -> crate::ToolDefinition {
+    use lash_sansio::ToolDefinitionBindingExt as _;
+    crate::ToolDefinition::raw(
+        LOOKUP_TOOL,
+        "lookup",
+        "Looks a topic up.",
+        serde_json::json!({ "type": "object" }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_execution_policy(crate::ExecutionPolicy::Read)
+    .with_tool_binding(lash_sansio::ToolBinding::new(["tools"], "lookup"))
+}
+
+/// What the knowledge base says about the topic `args` names.
+fn looked_up(args: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "topic": args["topic"], "says": "durable" })
+}
+
+/// The provider of `lookup`, counting the calls its body answers.
+struct Knowledge {
+    bodies: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for Knowledge {
+    fn tool_manifests(
+        &self,
+        _config: &crate::OwnerConfigView,
+    ) -> std::result::Result<Vec<crate::ToolManifest>, crate::PluginError> {
+        Ok(vec![lookup_definition().manifest()])
+    }
+
+    fn resolve_manifest_by_id(
+        &self,
+        id: &crate::ToolId,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<crate::ToolManifest> {
+        (id.as_str() == LOOKUP_TOOL).then(|| lookup_definition().manifest())
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &crate::OwnerConfigView,
+    ) -> Option<Arc<crate::ToolContract>> {
+        (name == "lookup").then(|| Arc::new(lookup_definition().contract()))
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.bodies
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::ToolOutcome::ok(looked_up(call.args)).into()
+    }
+}
+
+/// The reader of `lookup`, counting the reads it answers.
+struct KnowledgeReads {
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::ToolReads for KnowledgeReads {
+    async fn read(&self, call: crate::ReadCall<'_>) -> Result<serde_json::Value, crate::ReadError> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(looked_up(call.args))
+    }
+}
+
+/// How often `lookup`'s body and its reader answered.
+#[derive(Clone, Default)]
+struct Answered {
+    bodies: Arc<std::sync::atomic::AtomicUsize>,
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Answered {
+    fn registration(&self) -> crate::ToolProviderRegistration {
+        crate::ToolProviderRegistration::new(Arc::new(Knowledge {
+            bodies: Arc::clone(&self.bodies),
+        }))
+        .with_reads(Arc::new(KnowledgeReads {
+            reads: Arc::clone(&self.reads),
+        }))
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        (
+            self.bodies.load(std::sync::atomic::Ordering::SeqCst),
+            self.reads.load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+}
+
+/// A process component declared through a process registrar: `lookup`'s
+/// provider with its reader.
+struct TypedKnowledge {
+    id: &'static str,
+    answered: Answered,
+}
+
+impl ProcessComponentFactory for TypedKnowledge {
+    fn declaration(&self) -> ProcessComponentDeclaration {
+        ProcessComponentDeclaration::initial(self.id, FormatVersion::ONE).expect("a component id")
+    }
+
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<()>()
+    }
+
+    fn validate(
+        &self,
+        _entry: &crate::ProcessComponentEntry,
+        _env: &crate::ProcessEnv,
+    ) -> Result<(), crate::ProcessEnvRefusal> {
+        Ok(())
+    }
+
+    fn recipe(self: Arc<Self>) -> Result<ProcessRecipe, PluginError> {
+        let mut reg =
+            PluginRegistrar::<(), crate::plugin::registries::Process>::for_process(self.id);
+        let answered = self.answered.clone();
+        reg.tools()
+            .provider_with_reads(crate::tool_provider_key!("tools"), move |_, _| {
+                Ok(answered.registration())
+            })?;
+        Ok(ProcessRecipe::new(self.id, reg, |_| Ok(Arc::new(()))))
+    }
+}
+
+/// PROCESS-READS-THROUGH-ITS-READER (FIG-6273, ADR 0144): a process
+/// component whose `Read` tool's provider registers a reader installs,
+/// whether it is declared through a process registrar or offered as a
+/// session plugin's spec, and the process its environment links the tool
+/// in routes a read of it to that reader, answered inline: the reader
+/// answers, and no tool body runs.
+#[tokio::test]
+async fn a_process_components_read_tool_reads_through_its_reader() {
+    let typed = Answered::default();
+    let spec = Answered::default();
+    let components: [(&'static str, Arc<dyn ProcessComponentFactory>, &Answered); 2] = [
+        (
+            "knowledge-typed",
+            Arc::new(TypedKnowledge {
+                id: "knowledge-typed",
+                answered: typed.clone(),
+            }),
+            &typed,
+        ),
+        (
+            "knowledge-spec",
+            Arc::new(
+                StaticPluginFactory::new(
+                    PluginDeclaration::initial("knowledge-spec"),
+                    PluginSpec::new().with_tool_provider_registration(
+                        crate::tool_provider_key!("tools"),
+                        spec.registration(),
+                    ),
+                )
+                .as_component(FormatVersion::ONE)
+                .expect("a provider with its reader is a process component"),
+            ),
+            &spec,
+        ),
+    ];
+    for (id, factory, answered) in components {
+        let key = crate::ProcessConfigKey::<()>::new(id, FormatVersion::ONE);
+        let mut registry = ProcessComponentRegistry::new();
+        registry
+            .register(factory, key)
+            .expect("the component registers");
+        let env = Arc::new(
+            crate::ProcessEnv::builder(crate::MaxToolCalls::new(16))
+                .component(key, &())
+                .link_tool(
+                    key.tool_provider(crate::tool_provider_key!("tools")),
+                    &lookup_definition(),
+                )
+                .build()
+                .expect("the environment builds"),
+        );
+        let composition = registry
+            .compose(&env, None)
+            .expect("the component composes");
+        let (tools, _) = composition
+            .linked_tools(
+                &env,
+                crate::RuntimeOwner::Process(crate::ProcessId::fixture("reader")),
+                &PluginExtensions::default(),
+                BTreeSet::new(),
+            )
+            .expect("the linked tools build");
+        let config = crate::OwnerConfigView::components(Arc::clone(&env));
+        let route = tools
+            .read_route(&crate::ToolId::from(LOOKUP_TOOL), &config)
+            .expect("the read routes to the component's reader");
+        let args = serde_json::json!({ "topic": "lash" });
+        let answer = route
+            .read(
+                &args,
+                &config,
+                &tokio_util::sync::CancellationToken::new(),
+                std::time::Instant::now() + std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("the reader answers");
+        assert_eq!(answer, looked_up(&args), "{id}");
+        assert_eq!(answered.counts(), (0, 1), "{id}: one read, no body");
+    }
+}
+
+/// TABLE-JUDGES-DATA (FIG-6273): what reaches a registry as data rather
+/// than through its typed registrar is judged by the same contribution
+/// table. A session plugin's spec offered as a process component is
+/// refused for the session-only slot it fills, and a process prompt
+/// section that renders for a turn is refused where it is declared.
+#[test]
+fn the_contribution_table_judges_declarations_that_arrive_as_data() {
+    let turn_hooked = StaticPluginFactory::new(
+        PluginDeclaration::initial("turn-hooked"),
+        PluginSpec::new().with_before_turn(
+            crate::hook_key!("before"),
+            Arc::new(|_| Box::pin(async { Ok(Default::default()) })),
+        ),
+    );
+    let Err(PluginError::Registration(refusal)) = turn_hooked.as_component(FormatVersion::ONE)
+    else {
+        panic!("a before-turn hook is no process contribution");
+    };
+    assert_eq!(
+        refusal,
+        "process component `turn-hooked` cannot supply Callback(BeforeTurn)"
+    );
+
+    let section = |purposes: Vec<crate::prompt_sections::PromptPurpose>| {
+        ProcessComponentSpec::new()
+            .with_prompt_section(
+                PromptSectionSpec::new(
+                    PromptSectionKey::new("section").unwrap(),
+                    PromptPlacement::InitialInstructions,
+                )
+                .purposes(purposes),
+                Arc::new(|_: &PromptInput<'_>| {
+                    Ok::<_, super::super::prompt::PromptRenderError>(SectionText::text("section"))
+                }),
+            )
+            .recipe("sectioned")
+    };
+    assert!(
+        section(vec![crate::prompt_sections::PromptPurpose::Direct {
+            name: "summary".into()
+        }])
+        .is_ok(),
+        "a direct section is a process contribution"
+    );
+    assert!(
+        matches!(
+            section(vec![crate::prompt_sections::PromptPurpose::Turn]),
+            Err(PluginError::Registration(refusal)) if refusal.contains("cannot supply PromptSection")
+        ),
+        "a process has no turn to prepare"
+    );
 }

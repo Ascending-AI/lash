@@ -123,6 +123,7 @@ pub use protocol::{
     ProtocolSessionRestoreView, StoredCell, TranscriptDecoderPlugin,
 };
 mod recipe;
+pub mod registries;
 mod service_bindings;
 pub use config_observers::{ConfigChangeDelivery, RetiredConfigObservers, is_lifecycle_observer};
 pub use recipe::{

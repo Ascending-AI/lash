@@ -558,7 +558,7 @@ impl PluginHost {
                 plugins,
                 mut contributions,
             } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
-            let registry = build_tool_registry(&contributions)?;
+            let registry = build_tool_registry(&mut contributions)?;
             let session_extensions =
                 PluginExtensions::from_contributions(contributions.extensions.clone());
             session.retains_state.store(
@@ -876,8 +876,11 @@ impl PluginHost {
     }
 }
 
+/// The tool registry `contributions`' providers route through. It takes the
+/// deferred provider and the readers, which only the registry serves; the
+/// providers stay for the execution composition.
 pub(crate) fn build_tool_registry(
-    contributions: &PluginContributions,
+    contributions: &mut PluginContributions,
 ) -> Result<Arc<crate::ToolRegistry>, PluginError> {
     let providers = contributions
         .tool_providers
@@ -886,12 +889,11 @@ pub(crate) fn build_tool_registry(
         .collect();
     let deferred = contributions
         .deferred_provider
-        .as_ref()
-        .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)));
-    let reads = contributions
-        .tool_reads
-        .iter()
-        .map(|registered| (registered.identity.clone(), Arc::clone(&registered.hook)))
+        .take()
+        .map(|registered| (registered.identity, registered.hook));
+    let reads = std::mem::take(&mut contributions.tool_reads)
+        .into_iter()
+        .map(|registered| (registered.identity, registered.hook))
         .collect();
     crate::ToolRegistry::from_tool_registrations(providers, deferred, reads)
         .map(Arc::new)

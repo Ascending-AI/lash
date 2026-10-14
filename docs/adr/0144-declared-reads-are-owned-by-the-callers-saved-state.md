@@ -58,6 +58,11 @@ call that is not planned as a read (§3). On the recorded route a `Read` call
 that was interrupted runs again at its ordinal, and a reported failure is
 never retried.
 
+A workflow process never reads inline: its `perform` of a `Read` tool is a
+linked effect, admitted and executed as a durable process step like any
+other, because a step's result must stay stable across replay and only a code
+cell, which reruns as a whole, may read again.
+
 ### 3. A cell plans its reads, and owes their providers
 
 When a cell is lowered, its read plan is the set of effects its `main`

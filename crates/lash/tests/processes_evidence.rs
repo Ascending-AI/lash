@@ -770,7 +770,7 @@ mod named_component_laws {
             self: Arc<Self>,
         ) -> Result<lash::plugins::ProcessRecipe, lash_core::plugin::PluginError> {
             let mut reg =
-                lash::plugins::PluginRegistrar::<Self>::for_process(self.declaration().id.as_str());
+                lash::plugins::PluginRegistrar::<Self, lash::plugins::registries::Process>::for_process(self.declaration().id.as_str());
             let key = lash::hook_key!("record");
             let check = |this: &Self, _: &lash::plugins::PluginStateView| {
                 let id = this.key.component().to_owned();

@@ -736,6 +736,11 @@ pub mod plugins {
         PromptCatalog, PromptCatalogSnapshot, PromptSectionFamilyInfo, PromptSectionInfo,
         ProtocolPromptFacts,
     };
+    /// Which registry a [`PluginRegistrar`] declares for, as a type
+    /// (`Session` or `Process`), and the contribution table that decides
+    /// which of its methods each registry offers and judges descriptors
+    /// offered to another registry (FIG-6273).
+    pub use lash_core::plugin::registries;
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the
     /// final result.

@@ -20,7 +20,6 @@ use lash_core_store::run_spec::{CapabilityRef, SlotId};
 use super::prompt::{PromptSection, PromptSectionSpec};
 use super::registrar::PluginContributions;
 use super::*;
-use crate::prompt_sections::PromptPurpose;
 use crate::{ProcessId, SessionId, ToolProvider};
 
 /// What a component declares about itself: its id and formats for stored state and config.
@@ -224,7 +223,7 @@ impl ProcessComponentPorts {
 /// Ergonomic static component entries in the shared registration model.
 #[derive(Clone, Default)]
 pub struct ProcessComponentSpec {
-    pub(crate) registrations: PluginRegistrar<()>,
+    pub(crate) registrations: PluginRegistrar<(), registries::Process>,
     pub(crate) errors: Vec<PluginError>,
 }
 impl ProcessComponentSpec {
@@ -434,7 +433,6 @@ impl ProcessComponentRegistry {
             )));
         }
         let mut recipe = Arc::clone(&factory).recipe()?;
-        validate_process_entries(&recipe.entries)?;
         if recipe
             .entries
             .iter()
@@ -820,18 +818,13 @@ impl ProcessComponentRegistry {
             contributions = reg.contributions;
             owners.push(id);
         }
-        let registry =
-            super::runtime_impl::build_tool_registry(&contributions).map_err(|error| {
-                ProcessEnvRefusal::ComponentBuildFailed {
-                    id: owners.last().cloned().unwrap_or_default(),
-                    reason: error.to_string(),
-                }
-            })?;
-        Ok(BuiltComponents {
-            owners,
-            contributions,
-            registry,
-        })
+        let parts = ProcessParts::consume(&mut contributions).map_err(|error| {
+            ProcessEnvRefusal::ComponentBuildFailed {
+                id: owners.last().cloned().unwrap_or_default(),
+                reason: error.to_string(),
+            }
+        })?;
+        Ok(BuiltComponents { owners, parts })
     }
 
     /// The execution composition `env`'s components make for `process`
@@ -872,27 +865,18 @@ impl ProcessComponentRegistry {
         let state = Arc::new(std::sync::Mutex::new(
             state::PluginStateRegistry::from_snapshot(Some(snapshot)),
         ));
-        let BuiltComponents {
-            owners,
-            mut contributions,
-            registry,
-        } = self.contributions(env, process, &state)?;
+        let BuiltComponents { owners, parts } = self.contributions(env, process, &state)?;
         if let Some(process) = process
-            && let Some(inventory) = &contributions.inventory
+            && let Some(inventory) = &parts.inventory
         {
             self.materialized_inventories
                 .observe(&crate::RuntimeOwner::Process(process.clone()), inventory);
         }
-        let reducers = std::mem::take(&mut contributions.state_reducers);
-        let composition = Arc::new(ExecutionComposition::new(
-            &mut contributions,
-            Arc::clone(&registry),
-        ));
         Ok(ProcessComposition {
-            composition,
-            registry,
+            composition: Arc::new(parts.composition),
+            registry: parts.registry,
             owners,
-            reducers,
+            reducers: parts.reducers,
             formats: env
                 .components()
                 .iter()
@@ -910,8 +894,31 @@ impl ProcessComponentRegistry {
 
 struct BuiltComponents {
     owners: Vec<String>,
-    contributions: PluginContributions,
+    parts: ProcessParts,
+}
+
+/// What a process runs of its components' bound contributions: the tool
+/// registry their providers, deferred provider and readers route through,
+/// the execution composition (the catalog contributors, the four tool
+/// hooks, the presentation pipeline and the prompt sections), and the state
+/// reducers. It takes exactly what it runs and leaves the rest.
+pub(super) struct ProcessParts {
+    inventory: Option<Arc<InstalledInventory>>,
     registry: Arc<crate::ToolRegistry>,
+    composition: ExecutionComposition,
+    reducers: BTreeMap<String, BTreeMap<String, StateReducer>>,
+}
+
+impl ProcessParts {
+    pub(super) fn consume(contributions: &mut PluginContributions) -> Result<Self, PluginError> {
+        let registry = super::runtime_impl::build_tool_registry(contributions)?;
+        Ok(Self {
+            inventory: contributions.inventory.clone(),
+            reducers: std::mem::take(&mut contributions.state_reducers),
+            composition: ExecutionComposition::new(contributions, Arc::clone(&registry)),
+            registry,
+        })
+    }
 }
 
 /// What a process's components make: its execution composition, the tool
@@ -1223,9 +1230,8 @@ impl StaticPluginFactory {
     ///
     /// # Errors
     ///
-    /// The spec fills a field no process consumes (anything but providers,
-    /// catalog contributors, the four tool hooks, presentation steps and
-    /// state reducers), or the id is refused.
+    /// The spec declares a contribution the contribution table does not
+    /// admit in a process ([`registries`]), or the id is refused.
     pub fn as_component(
         &self,
         format_version: FormatVersion,
@@ -1235,9 +1241,10 @@ impl StaticPluginFactory {
             return Err(error.clone());
         }
         let declaration = self.plugin_declaration();
-        let registrations = spec.registrations.clone();
-        let recipe = ProcessRecipe::from_spec(declaration.id.as_str(), registrations.clone());
-        validate_process_entries(&recipe.entries)?;
+        let registrations = spec
+            .registrations
+            .clone()
+            .admitted_in::<registries::Process>(declaration.id.as_str())?;
         Ok(StaticProcessComponent {
             declaration: ProcessComponentDeclaration::initial(
                 declaration.id.as_str(),
@@ -1257,11 +1264,9 @@ impl StaticProcessComponent {
         if let Some(error) = self.spec.errors.first() {
             return Err(error.clone());
         }
-        self.spec.registrations.provider_handle(
-            self.declaration.id.as_str(),
-            RegistryKind::Process,
-            key,
-        )
+        self.spec
+            .registrations
+            .provider_handle(self.declaration.id.as_str(), key)
     }
 }
 
@@ -1291,40 +1296,4 @@ impl ProcessComponentFactory for StaticProcessComponent {
     fn recipe(self: Arc<Self>) -> std::result::Result<ProcessRecipe, crate::plugin::PluginError> {
         self.spec.clone().recipe(self.declaration.id.as_str())
     }
-}
-
-fn validate_process_entries(entries: &[ContributionDescriptor]) -> Result<(), PluginError> {
-    for entry in entries {
-        if entry.registry != RegistryKind::Process {
-            return Err(PluginError::Registration(
-                "process recipe declared a session address".into(),
-            ));
-        }
-        let allowed = match &entry.kind {
-            ContributionKind::Callback(slot) => matches!(
-                slot,
-                lash_core_store::tool_run::CallbackSlot::ToolProvider
-                    | lash_core_store::tool_run::CallbackSlot::ToolCatalog
-                    | lash_core_store::tool_run::CallbackSlot::ToolArgsTransform
-                    | lash_core_store::tool_run::CallbackSlot::ToolArgsCheck
-                    | lash_core_store::tool_run::CallbackSlot::ToolResultTransform
-                    | lash_core_store::tool_run::CallbackSlot::ToolResultCheck
-                    | lash_core_store::tool_run::CallbackSlot::PresentationPresenter
-                    | lash_core_store::tool_run::CallbackSlot::PresentationStep
-            ),
-            ContributionKind::PromptSection => {
-                matches!(&entry.details, ContributionDetails::PromptSection(spec) if spec.purposes.iter().all(|purpose| matches!(purpose, PromptPurpose::Direct { .. })))
-            }
-            ContributionKind::StateReducer | ContributionKind::ConfigNamespace => true,
-            _ => false,
-        };
-        if !allowed {
-            return Err(PluginError::Registration(format!(
-                "process component `{}` cannot supply {:?}",
-                entry.key.owner(),
-                entry.kind
-            )));
-        }
-    }
-    Ok(())
 }

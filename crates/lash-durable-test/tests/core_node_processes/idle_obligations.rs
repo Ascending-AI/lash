@@ -578,8 +578,10 @@ impl lash::process::ProcessComponentFactory for FormatWrite {
         }
     }
     fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
-        let mut reg =
-            lash::plugins::PluginRegistrar::<StateWrite>::for_process(WRITE_COMPONENT.component());
+        let mut reg = lash::plugins::PluginRegistrar::<
+            StateWrite,
+            lash::plugins::registries::Process,
+        >::for_process(WRITE_COMPONENT.component());
         reg.tools()
             .provider(lash::tool_provider_key!("tools"), |this, _| {
                 Ok(Arc::new(lash::tools::StaticToolProvider::new(

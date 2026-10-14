@@ -3,6 +3,9 @@ use super::prompt::{
     PromptSectionFamilySpec, PromptSectionId, PromptSectionSpec, PromptWrapId, PromptWrapSpec,
 };
 use super::registrar::BoundRegistrar;
+use super::registries::{
+    Admits, CallbackContribution, Contribution, Process, Registry, Session, contribution,
+};
 use super::*;
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_run::CallbackSlot;
@@ -136,61 +139,104 @@ impl<T> Clone for Registration<T> {
         }
     }
 }
-/// A pure list of typed contributions. Every entry contains its descriptor
-/// and the binder that supplies its declared implementation.
-pub struct PluginRegistrar<T = ()> {
+/// A pure list of typed contributions for the registry `R`. Every entry
+/// contains its descriptor and the binder that supplies its declared
+/// implementation. A method exists only for the registries the contribution
+/// table admits its contribution in ([`super::registries`]).
+pub struct PluginRegistrar<T = (), R = Session> {
     entries: Vec<Registration<T>>,
     owner: Option<String>,
-    registry: RegistryKind,
+    registry: std::marker::PhantomData<fn() -> R>,
     pub requirements: Requirements,
 }
-impl<T> Clone for PluginRegistrar<T> {
+impl<T, R> Clone for PluginRegistrar<T, R> {
     fn clone(&self) -> Self {
         Self {
             owner: self.owner.clone(),
-            registry: self.registry,
+            registry: std::marker::PhantomData,
             entries: self.entries.clone(),
             requirements: self.requirements.clone(),
         }
     }
 }
-impl Default for PluginRegistrar<()> {
+impl<R: Registry> Default for PluginRegistrar<(), R> {
     fn default() -> Self {
-        Self {
-            owner: None,
-            registry: RegistryKind::Session,
-            entries: Vec::new(),
-            requirements: Requirements::default(),
-        }
+        Self::owned(None)
     }
 }
-impl<T: Send + Sync + 'static> PluginRegistrar<T> {
+impl<T: Send + Sync + 'static> PluginRegistrar<T, Session> {
+    /// A session plugin's registrar, owned by `owner`.
     pub fn new(owner: &str) -> Self {
+        Self::owned(Some(owner.into()))
+    }
+}
+impl<T: Send + Sync + 'static> PluginRegistrar<T, Process> {
+    /// A process component's registrar, owned by `owner`.
+    pub fn for_process(owner: &str) -> Self {
+        Self::owned(Some(owner.into()))
+    }
+}
+impl<T, R: Registry> PluginRegistrar<T, R> {
+    fn owned(owner: Option<String>) -> Self {
         Self {
-            owner: Some(owner.into()),
-            registry: RegistryKind::Session,
+            owner,
+            registry: std::marker::PhantomData,
             entries: Vec::new(),
             requirements: Requirements::default(),
-        }
-    }
-    pub fn for_process(owner: &str) -> Self {
-        Self {
-            registry: RegistryKind::Process,
-            ..Self::new(owner)
         }
     }
 
+    /// These declarations as `Into`'s, each judged by the contribution
+    /// table: what a spec declared for one registry and offered to another
+    /// (a session plugin's spec as a process component) arrives as data.
+    pub(crate) fn admitted_in<Into: Registry>(
+        self,
+        owner: &str,
+    ) -> Result<PluginRegistrar<T, Into>, PluginError> {
+        let mut entries = self.entries;
+        for entry in &mut entries {
+            let descriptor = &mut entry.descriptor;
+            if !super::registries::admits(&descriptor.kind, &descriptor.details, Into::KIND) {
+                return Err(refused(Into::KIND, Some(owner), &descriptor.kind));
+            }
+            descriptor.registry = Into::KIND;
+        }
+        Ok(PluginRegistrar {
+            entries,
+            owner: self.owner,
+            registry: std::marker::PhantomData,
+            requirements: self.requirements,
+        })
+    }
+}
+fn refused(registry: RegistryKind, owner: Option<&str>, kind: &ContributionKind) -> PluginError {
+    let installer = match registry {
+        RegistryKind::Session => "session plugin",
+        RegistryKind::Process => "process component",
+    };
+    PluginError::Registration(match owner {
+        Some(owner) => format!("{installer} `{owner}` cannot supply {kind:?}"),
+        None => format!("a {installer} cannot supply {kind:?}"),
+    })
+}
+impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
     pub fn require(&mut self, service: ServiceKind) {
         self.requirements.services.insert(service);
     }
-    fn add(
+    fn add<C: Contribution>(
         &mut self,
-        kind: ContributionKind,
         mut key: ContributionKey,
         priority: Option<i32>,
         details: ContributionDetails,
         bind: EntryBinder<T>,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<C>,
+    {
+        let kind = C::KIND;
+        if !super::registries::admits(&kind, &details, R::KIND) {
+            return Err(refused(R::KIND, self.owner.as_deref(), &kind));
+        }
         if let Some(owner) = &self.owner {
             key.set_owner(owner);
         }
@@ -220,7 +266,7 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
             .map_err(|_| PluginError::Registration("too many registrations".into()))?;
         self.entries.push(Registration {
             descriptor: ContributionDescriptor {
-                registry: RegistryKind::Session,
+                registry: R::KIND,
                 kind,
                 key,
                 registration_order,
@@ -231,20 +277,22 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
         });
         Ok(())
     }
-    fn callback(
+    fn callback<C: CallbackContribution>(
         &mut self,
-        slot: CallbackSlot,
         key: Option<HookKey>,
         priority: Option<i32>,
         details: ContributionDetails,
         bind: EntryBinder<T>,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<C>,
+    {
+        let slot = C::SLOT;
         let key = key.map_or_else(
             || slot.key_prefix().to_owned(),
             |key| format!("{}:{key}", slot.key_prefix()),
         );
-        self.add(
-            ContributionKind::Callback(slot),
+        self.add::<C>(
             ContributionKey::Callback(PluginCallbackIdentity {
                 owner: String::new(),
                 key,
@@ -261,10 +309,12 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::StateReducer>,
+    {
         let name = name.into();
-        self.add(
-            ContributionKind::StateReducer,
+        self.add::<contribution::StateReducer>(
             ContributionKey::Named {
                 owner: String::new(),
                 key: name.clone(),
@@ -283,10 +333,12 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::Extension>,
+    {
         let id = id.into();
-        self.add(
-            ContributionKind::Extension,
+        self.add::<contribution::Extension>(
             ContributionKey::Named {
                 owner: String::new(),
                 key: id.clone(),
@@ -304,22 +356,17 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
             }),
         )
     }
-    pub fn prompt(&mut self) -> PromptRecipeRegistrations<'_, T> {
+    pub fn prompt(&mut self) -> PromptRecipeRegistrations<'_, T, R> {
         PromptRecipeRegistrations { reg: self }
     }
-    pub fn operations(&mut self) -> OperationRecipeRegistrations<'_, T> {
+    pub fn operations(&mut self) -> OperationRecipeRegistrations<'_, T, R> {
         OperationRecipeRegistrations { reg: self }
     }
-    pub(crate) fn descriptors(
-        &self,
-        owner: &str,
-        registry: RegistryKind,
-    ) -> Vec<ContributionDescriptor> {
+    pub(crate) fn descriptors(&self, owner: &str) -> Vec<ContributionDescriptor> {
         self.entries
             .iter()
             .map(|entry| {
                 let mut descriptor = entry.descriptor.clone();
-                descriptor.registry = self.owner.as_ref().map_or(registry, |_| self.registry);
                 descriptor
                     .key
                     .set_owner(self.owner.as_deref().unwrap_or(owner));
@@ -330,14 +377,12 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
     pub(crate) fn provider_handle(
         &self,
         owner: &str,
-        registry: RegistryKind,
         key: ToolProviderKey,
     ) -> Result<ToolProviderHandle, PluginError> {
-        let handle = ToolProviderHandle::new(registry, owner, key);
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
         let identity = handle.callback_identity();
-        if self.descriptors(owner, registry).iter().any(|entry| {
-            entry.registry == registry
-                && entry.kind == ContributionKind::Callback(CallbackSlot::ToolProvider)
+        if self.descriptors(owner).iter().any(|entry| {
+            entry.kind == ContributionKind::Callback(CallbackSlot::ToolProvider)
                 && entry.key == ContributionKey::Callback(identity.clone())
         }) {
             Ok(handle)
@@ -362,13 +407,14 @@ impl<T: Send + Sync + 'static> PluginRegistrar<T> {
 }
 macro_rules! keyed_facet {
     ($facet:ident, $method:ident, $( $name:ident : $slot:ident => $ty:ty ),+ $(,)?) => {
-        pub struct $facet<'a, T = ()> { reg: &'a mut PluginRegistrar<T> }
-        impl<T: Send + Sync + 'static> PluginRegistrar<T> {
-            pub fn $method(&mut self) -> $facet<'_, T> { $facet { reg: self } }
+        pub struct $facet<'a, T = (), R = Session> { reg: &'a mut PluginRegistrar<T, R> }
+        impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
+            pub fn $method(&mut self) -> $facet<'_, T, R> { $facet { reg: self } }
         }
-        impl<T: Send + Sync + 'static> $facet<'_, T> {
-            $(pub fn $name(self, key: HookKey, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError> {
-                self.reg.callback(CallbackSlot::$slot, Some(key), None, ContributionDetails::Callback { stream_state_from: None },
+        impl<T: Send + Sync + 'static, R: Registry> $facet<'_, T, R> {
+            $(pub fn $name(self, key: HookKey, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError>
+            where R: Admits<contribution::$slot> {
+                self.reg.callback::<contribution::$slot>(Some(key), None, ContributionDetails::Callback { stream_state_from: None },
                     Arc::new(move |owner, state, reg| reg.$method().$name(key, binder(owner, state)?)))
             })+
         }
@@ -382,11 +428,12 @@ keyed_facet!(OutputRegistrations, output, stream: AssistantStream => AssistantSt
 keyed_facet!(ToolResultRegistrations, tool_results, presentation_step: PresentationStep => ToolPresentationStep);
 macro_rules! singleton {
     ($facet:ident, $method:ident, $( $name:ident : $slot:ident => $ty:ty ),+ $(,)?) => {
-        pub struct $facet<'a, T = ()> { reg: &'a mut PluginRegistrar<T> }
-        impl<T: Send + Sync + 'static> PluginRegistrar<T> { pub fn $method(&mut self) -> $facet<'_, T> { $facet { reg: self } } }
-        impl<T: Send + Sync + 'static> $facet<'_, T> {
-            $(pub fn $name(self, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError> {
-                self.reg.callback(CallbackSlot::$slot, None, None, ContributionDetails::Callback { stream_state_from: None },
+        pub struct $facet<'a, T = (), R = Session> { reg: &'a mut PluginRegistrar<T, R> }
+        impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> { pub fn $method(&mut self) -> $facet<'_, T, R> { $facet { reg: self } } }
+        impl<T: Send + Sync + 'static, R: Registry> $facet<'_, T, R> {
+            $(pub fn $name(self, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError>
+            where R: Admits<contribution::$slot> {
+                self.reg.callback::<contribution::$slot>(None, None, ContributionDetails::Callback { stream_state_from: None },
                     Arc::new(move |owner, state, reg| reg.$method().$name(binder(owner, state)?)))
             })+
         }
@@ -394,7 +441,7 @@ macro_rules! singleton {
 }
 singleton!(ProtocolRegistrations, protocol, session: ProtocolSession => Arc<dyn ProtocolSessionPlugin>, protocol_driver: ProtocolDriver => Arc<dyn ProtocolDriverPlugin>);
 singleton!(ExecutionRegistrations, execution, code_executor: CodeExecutor => Arc<dyn CodeExecutorPlugin>);
-impl<T: Send + Sync + 'static> OutputRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> OutputRegistrations<'_, T, R> {
     pub fn response(
         self,
         key: HookKey,
@@ -403,9 +450,11 @@ impl<T: Send + Sync + 'static> OutputRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::AssistantResponse,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::AssistantResponse>,
+    {
+        self.reg.callback::<contribution::AssistantResponse>(
             Some(key),
             None,
             ContributionDetails::Callback { stream_state_from },
@@ -424,9 +473,11 @@ impl<T: Send + Sync + 'static> OutputRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::AssistantProseProjector,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::AssistantProseProjector>,
+    {
+        self.reg.callback::<contribution::AssistantProseProjector>(
             None,
             None,
             ContributionDetails::Callback {
@@ -439,16 +490,18 @@ impl<T: Send + Sync + 'static> OutputRegistrations<'_, T> {
         )
     }
 }
-impl<T: Send + Sync + 'static> ToolResultRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> ToolResultRegistrations<'_, T, R> {
     pub fn presenter(
         self,
         binder: impl Fn(&T, &PluginStateView) -> Result<ToolPresentationPresenter, PluginError>
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::PresentationPresenter,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PresentationPresenter>,
+    {
+        self.reg.callback::<contribution::PresentationPresenter>(
             None,
             None,
             ContributionDetails::Callback {
@@ -458,15 +511,15 @@ impl<T: Send + Sync + 'static> ToolResultRegistrations<'_, T> {
         )
     }
 }
-pub struct ContextRegistrations<'a, T = ()> {
-    reg: &'a mut PluginRegistrar<T>,
+pub struct ContextRegistrations<'a, T = (), R = Session> {
+    reg: &'a mut PluginRegistrar<T, R>,
 }
-impl<T: Send + Sync + 'static> PluginRegistrar<T> {
-    pub fn context(&mut self) -> ContextRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
+    pub fn context(&mut self) -> ContextRegistrations<'_, T, R> {
         ContextRegistrations { reg: self }
     }
 }
-impl<T: Send + Sync + 'static> ContextRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> ContextRegistrations<'_, T, R> {
     pub fn pressure(
         self,
         key: HookKey,
@@ -475,9 +528,11 @@ impl<T: Send + Sync + 'static> ContextRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::ContextPressure,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::ContextPressure>,
+    {
+        self.reg.callback::<contribution::ContextPressure>(
             Some(key),
             Some(priority),
             ContributionDetails::Callback {
@@ -496,9 +551,11 @@ impl<T: Send + Sync + 'static> ContextRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::ContextCompactor,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::ContextCompactor>,
+    {
+        self.reg.callback::<contribution::ContextCompactor>(
             Some(key),
             Some(priority),
             ContributionDetails::Callback {
@@ -517,9 +574,11 @@ impl<T: Send + Sync + 'static> ContextRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::AttachmentOmission,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::AttachmentOmission>,
+    {
+        self.reg.callback::<contribution::AttachmentOmission>(
             Some(key),
             Some(priority),
             ContributionDetails::Callback {
@@ -532,15 +591,15 @@ impl<T: Send + Sync + 'static> ContextRegistrations<'_, T> {
         )
     }
 }
-pub struct ToolRegistrations<'a, T = ()> {
-    reg: &'a mut PluginRegistrar<T>,
+pub struct ToolRegistrations<'a, T = (), R = Session> {
+    reg: &'a mut PluginRegistrar<T, R>,
 }
-impl<T: Send + Sync + 'static> PluginRegistrar<T> {
-    pub fn tools(&mut self) -> ToolRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
+    pub fn tools(&mut self) -> ToolRegistrations<'_, T, R> {
         ToolRegistrations { reg: self }
     }
 }
-impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub fn provider(
         self,
         key: ToolProviderKey,
@@ -548,11 +607,14 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<ToolProviderHandle, PluginError> {
+    ) -> Result<ToolProviderHandle, PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
         let owner = self.reg.owner.clone().ok_or_else(|| {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
-        let handle = ToolProviderHandle::new(self.reg.registry, owner, key);
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
         self.record_provider(key, binder)?;
         Ok(handle)
     }
@@ -568,11 +630,14 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<ToolProviderHandle, PluginError> {
+    ) -> Result<ToolProviderHandle, PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
         let owner = self.reg.owner.clone().ok_or_else(|| {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
-        let handle = ToolProviderHandle::new(self.reg.registry, owner, key);
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
         self.record_provider_with_reads(key, binder)?;
         Ok(handle)
     }
@@ -583,9 +648,11 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::ToolProvider,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
+        self.reg.callback::<contribution::ToolProvider>(
             Some(HookKey::__literal(key.as_str())),
             None,
             ContributionDetails::Callback {
@@ -596,8 +663,7 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
             }),
         )?;
         // The reader binds with its provider, above: this entry declares it.
-        self.reg.callback(
-            CallbackSlot::ToolReads,
+        self.reg.callback::<contribution::ToolReads>(
             Some(HookKey::__literal(key.as_str())),
             None,
             ContributionDetails::Callback {
@@ -613,9 +679,11 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::ToolProvider,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
+        self.reg.callback::<contribution::ToolProvider>(
             Some(HookKey::__literal(key.as_str())),
             None,
             ContributionDetails::Callback {
@@ -634,11 +702,14 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<ToolProviderHandle, PluginError> {
+    ) -> Result<ToolProviderHandle, PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
         let owner = self.reg.owner.clone().ok_or_else(|| {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
-        let handle = ToolProviderHandle::new(self.reg.registry, owner, key);
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
         self.record_deferred(key, binder)?;
         Ok(handle)
     }
@@ -652,9 +723,11 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.callback(
-            CallbackSlot::ToolProvider,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
+        self.reg.callback::<contribution::ToolProvider>(
             Some(HookKey::__literal(key.as_str())),
             None,
             ContributionDetails::Callback {
@@ -664,10 +737,10 @@ impl<T: Send + Sync + 'static> ToolRegistrations<'_, T> {
         )
     }
 }
-pub struct PromptRecipeRegistrations<'a, T = ()> {
-    reg: &'a mut PluginRegistrar<T>,
+pub struct PromptRecipeRegistrations<'a, T = (), R = Session> {
+    reg: &'a mut PluginRegistrar<T, R>,
 }
-impl<T: Send + Sync + 'static> PromptRecipeRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> PromptRecipeRegistrations<'_, T, R> {
     pub fn section(
         self,
         spec: PromptSectionSpec,
@@ -678,9 +751,11 @@ impl<T: Send + Sync + 'static> PromptRecipeRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.add(
-            ContributionKind::PromptSection,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PromptSection>,
+    {
+        self.reg.add::<contribution::PromptSection>(
             ContributionKey::PromptSection(PromptSectionId::new(String::new(), spec.key.clone())),
             None,
             ContributionDetails::PromptSection(spec.clone()),
@@ -699,9 +774,11 @@ impl<T: Send + Sync + 'static> PromptRecipeRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.add(
-            ContributionKind::PromptFamily,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PromptFamily>,
+    {
+        self.reg.add::<contribution::PromptFamily>(
             ContributionKey::PromptFamily(PromptSectionId::new(String::new(), spec.prefix.clone())),
             None,
             ContributionDetails::PromptFamily(spec.clone()),
@@ -720,9 +797,11 @@ impl<T: Send + Sync + 'static> PromptRecipeRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
-        self.reg.add(
-            ContributionKind::PromptWrapper,
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::PromptWrapper>,
+    {
+        self.reg.add::<contribution::PromptWrapper>(
             ContributionKey::PromptWrapper(PromptWrapId {
                 owner: String::new(),
                 key: spec.key.clone(),
@@ -735,10 +814,10 @@ impl<T: Send + Sync + 'static> PromptRecipeRegistrations<'_, T> {
         )
     }
 }
-pub struct OperationRecipeRegistrations<'a, T = ()> {
-    reg: &'a mut PluginRegistrar<T>,
+pub struct OperationRecipeRegistrations<'a, T = (), R = Session> {
+    reg: &'a mut PluginRegistrar<T, R>,
 }
-impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
+impl<T: Send + Sync + 'static, R: Registry> OperationRecipeRegistrations<'_, T, R> {
     #[cfg(test)]
     pub(crate) fn query(
         self,
@@ -747,14 +826,16 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         + Send
         + Sync
         + 'static,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::Operation>,
+    {
         let def = PluginOperationDef::from_spec(spec.clone(), PluginOperationKind::Query);
         let key = ContributionKey::Callback(PluginCallbackIdentity {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -769,6 +850,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         binder: impl Fn(&T, &PluginStateView) -> Result<F, PluginError> + Send + Sync + 'static,
     ) -> Result<(), PluginError>
     where
+        R: Admits<contribution::Operation>,
         Op: PluginQuery,
         F: Fn(PluginQueryContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
@@ -781,8 +863,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -797,6 +878,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         binder: impl Fn(&T, &PluginStateView) -> Result<F, PluginError> + Send + Sync + 'static,
     ) -> Result<(), PluginError>
     where
+        R: Admits<contribution::Operation>,
         Op: PluginCommand,
         F: Fn(PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>>
@@ -811,8 +893,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -827,6 +908,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         binder: impl Fn(&T, &PluginStateView) -> Result<F, PluginError> + Send + Sync + 'static,
     ) -> Result<(), PluginError>
     where
+        R: Admits<contribution::Operation>,
         Op: PluginTask,
         F: Fn(PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<PluginOperationOutcome<Op::Output>, Op::Error>>
@@ -839,8 +921,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -855,6 +936,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         binder: impl Fn(&T, &PluginStateView) -> Result<F, PluginError> + Send + Sync + 'static,
     ) -> Result<(), PluginError>
     where
+        R: Admits<contribution::Operation>,
         Op: PluginCommand,
         F: Fn(PluginCommandContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
@@ -867,8 +949,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -883,6 +964,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
         binder: impl Fn(&T, &PluginStateView) -> Result<F, PluginError> + Send + Sync + 'static,
     ) -> Result<(), PluginError>
     where
+        R: Admits<contribution::Operation>,
         Op: PluginTask,
         F: Fn(PluginTaskContext, Op::Args) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<Op::Output, Op::Error>> + Send + 'static,
@@ -893,8 +975,7 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -904,17 +985,16 @@ impl<T: Send + Sync + 'static> OperationRecipeRegistrations<'_, T> {
             }),
         )
     }
-    pub(crate) fn register(
-        self,
-        operation: PluginOperationRegistration,
-    ) -> Result<(), PluginError> {
+    pub(crate) fn register(self, operation: PluginOperationRegistration) -> Result<(), PluginError>
+    where
+        R: Admits<contribution::Operation>,
+    {
         let def = operation.def().clone();
         let key = ContributionKey::Callback(PluginCallbackIdentity {
             owner: String::new(),
             key: format!("{}:{}", CallbackSlot::Operation.key_prefix(), def.name),
         });
-        self.reg.add(
-            ContributionKind::Callback(CallbackSlot::Operation),
+        self.reg.add::<contribution::Operation>(
             key,
             None,
             ContributionDetails::Operation(def),
@@ -1117,7 +1197,7 @@ impl PluginRecipe {
         + Sync
         + 'static,
     ) -> Self {
-        let entries = registrations.descriptors(owner, RegistryKind::Session);
+        let entries = registrations.descriptors(owner);
         let requirements = registrations.requirements.clone();
         Self {
             owner: owner.into(),
@@ -1183,7 +1263,7 @@ impl PluginRecipe {
             factory_extensions: Vec::new(),
             engines: Vec::new(),
             transcript_decoder: None,
-            entries: registrations.descriptors(id, RegistryKind::Session),
+            entries: registrations.descriptors(id),
             requirements: registrations.requirements.clone(),
             stateless: false,
             bind: Arc::new(move |context, state, reg| {
@@ -1217,8 +1297,9 @@ type ComponentOwnerBinder = Arc<
         + Sync,
 >;
 
-/// A component's declarations share the session registration model; process
-/// restrictions are checked from descriptors before its owner is bound.
+/// A component's declarations share the session registration model through
+/// a process registrar, which offers only what the contribution table
+/// admits in a process.
 pub struct ProcessRecipe {
     pub(crate) entries: Vec<ContributionDescriptor>,
     pub requirements: Requirements,
@@ -1227,14 +1308,14 @@ pub struct ProcessRecipe {
 impl ProcessRecipe {
     pub fn new<T: Send + Sync + 'static>(
         owner: &str,
-        registrations: PluginRegistrar<T>,
+        registrations: PluginRegistrar<T, Process>,
         binder: impl Fn(&ProcessComponentContext<'_>) -> Result<Arc<T>, PluginError>
         + Send
         + Sync
         + 'static,
     ) -> Self {
         Self {
-            entries: registrations.descriptors(owner, RegistryKind::Process),
+            entries: registrations.descriptors(owner),
             requirements: registrations.requirements.clone(),
             bind: Arc::new(move |context, state, reg| {
                 let owner = binder(context)?;
@@ -1242,7 +1323,7 @@ impl ProcessRecipe {
             }),
         }
     }
-    pub(crate) fn from_spec(owner: &str, registrations: PluginRegistrar<()>) -> Self {
+    pub(crate) fn from_spec(owner: &str, registrations: PluginRegistrar<(), Process>) -> Self {
         Self::new(owner, registrations, |_| Ok(Arc::new(())))
     }
     pub(crate) fn bind(

@@ -1,0 +1,30 @@
+error[E0277]: the `lash::plugins::registries::Process` registry does not install `lash::plugins::registries::contribution::BeforeTurn` contributions
+  --> tests/ui/process_registrars_offer_only_process_contributions.rs:11:10
+   |
+11 |         .before(lash::hook_key!("before"), |_, _| unreachable!());
+   |          ^^^^^^ not offered to a `lash::plugins::registries::Process` registrar
+   |
+   = help: the trait `Admits<lash::plugins::registries::contribution::BeforeTurn>` is not implemented for `lash::plugins::registries::Process`
+   = note: the contribution table in the plugin `registries` module lists where each contribution may be installed
+   = help: `lash::plugins::registries::Process` implements trait `Admits<C>`:
+             Admits<lash::plugins::registries::contribution::ConfigNamespace>
+             Admits<lash::plugins::registries::contribution::PresentationPresenter>
+             Admits<lash::plugins::registries::contribution::PresentationStep>
+             Admits<lash::plugins::registries::contribution::PromptSection>
+             Admits<lash::plugins::registries::contribution::StateReducer>
+             Admits<lash::plugins::registries::contribution::ToolArgsCheck>
+             Admits<lash::plugins::registries::contribution::ToolArgsTransform>
+             Admits<lash::plugins::registries::contribution::ToolCatalog>
+           and $N others
+note: required by a bound in `TurnRegistrations::<'_, T, R>::before`
+  --> $WORKSPACE/crates/lash-core-execution/src/plugin/recipe.rs
+   |
+   |             where R: Admits<contribution::$slot> {
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `TurnRegistrations::<'_, T, R>::before`
+...
+   | keyed_facet!(TurnRegistrations, turn, before: BeforeTurn => BeforeTurnHook, after: AfterTurn => AfterTurnHook, checkpoint: Checkpoint => CheckpointHook);
+   | --------------------------------------------------------------------------------------------------------------------------------------------------------
+   | |                                     |
+   | |                                     required by a bound in this associated function
+   | in this macro invocation
+   = note: this error originates in the macro `keyed_facet` (in Nightly builds, run with -Z macro-backtrace for more info)

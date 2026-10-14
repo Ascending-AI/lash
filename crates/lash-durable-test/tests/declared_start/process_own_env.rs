@@ -245,7 +245,9 @@ impl lash::process::ProcessComponentFactory for ProbeComponent {
 
     fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash_core::PluginError> {
         let mut reg =
-            lash::plugins::PluginRegistrar::<Self>::for_process(self.declaration().id.as_str());
+            lash::plugins::PluginRegistrar::<Self, lash::plugins::registries::Process>::for_process(
+                self.declaration().id.as_str(),
+            );
         reg.tools()
             .provider(lash::tool_provider_key!("tools"), |this, _| {
                 Ok(Arc::clone(&this.tools))

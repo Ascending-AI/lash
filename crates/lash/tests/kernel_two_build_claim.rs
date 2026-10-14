@@ -1774,8 +1774,10 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
     }
 
     fn recipe(self: Arc<Self>) -> Result<lash::plugins::ProcessRecipe, lash::plugins::PluginError> {
-        let mut registrations =
-            lash::plugins::PluginRegistrar::<Self>::for_process(HOLD.component());
+        let mut registrations = lash::plugins::PluginRegistrar::<
+            Self,
+            lash::plugins::registries::Process,
+        >::for_process(HOLD.component());
         registrations
             .tools()
             .provider(lash::tool_provider_key!("body"), |owner, _| {

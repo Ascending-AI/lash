@@ -793,9 +793,10 @@ impl lash_core::plugin::ProcessComponentFactory for StateComponent {
             world: Arc<World>,
             view: Option<lash::plugins::PluginStateView>,
         }
-        let mut reg = lash_core::plugin::PluginRegistrar::<Bound>::for_process(
-            self.declaration().id.as_str(),
-        );
+        let mut reg = lash_core::plugin::PluginRegistrar::<
+            Bound,
+            lash_core::plugin::registries::Process,
+        >::for_process(self.declaration().id.as_str());
         reg.tools()
             .provider(lash::tool_provider_key!("state"), |this, _| {
                 Ok(Arc::new(StateTools {

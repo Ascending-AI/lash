@@ -148,6 +148,119 @@ pub(crate) struct PluginContributions {
     pub(crate) prompt: super::prompt::PromptRegistry,
 }
 
+impl PluginContributions {
+    /// The callback slots these bound contributions hold, by the collection
+    /// each slot binds into. Every collection is named, so a new one cannot
+    /// go unaccounted.
+    #[cfg(test)]
+    pub(crate) fn callback_slots(&self) -> std::collections::BTreeSet<CallbackSlot> {
+        let Self {
+            inventory: _,
+            extensions: _,
+            state_retaining_plugins: _,
+            state_reducers: _,
+            tool_providers,
+            tool_reads,
+            deferred_provider,
+            tool_catalog_contributors,
+            before_turn_hooks,
+            tool_args_transforms,
+            tool_args_checks,
+            tool_result_transforms,
+            tool_result_checks,
+            after_turn_hooks,
+            checkpoint_hooks,
+            assistant_stream_hooks,
+            assistant_response_hooks,
+            assistant_stream_finished_hooks,
+            assistant_stream_state_pairs: _,
+            presentation_steps,
+            presentation_presenter,
+            runtime_event_hooks,
+            plugin_operations,
+            attachment_omission_policies,
+            context_compactors,
+            context_pressure_hooks,
+            protocol_session,
+            protocol_driver,
+            code_executor,
+            assistant_prose_projector,
+            prompt: _,
+        } = self;
+        [
+            (
+                !tool_providers.is_empty() || deferred_provider.is_some(),
+                CallbackSlot::ToolProvider,
+            ),
+            (!tool_reads.is_empty(), CallbackSlot::ToolReads),
+            (
+                !tool_catalog_contributors.is_empty(),
+                CallbackSlot::ToolCatalog,
+            ),
+            (!before_turn_hooks.is_empty(), CallbackSlot::BeforeTurn),
+            (
+                !tool_args_transforms.is_empty(),
+                CallbackSlot::ToolArgsTransform,
+            ),
+            (!tool_args_checks.is_empty(), CallbackSlot::ToolArgsCheck),
+            (
+                !tool_result_transforms.is_empty(),
+                CallbackSlot::ToolResultTransform,
+            ),
+            (
+                !tool_result_checks.is_empty(),
+                CallbackSlot::ToolResultCheck,
+            ),
+            (!after_turn_hooks.is_empty(), CallbackSlot::AfterTurn),
+            (!checkpoint_hooks.is_empty(), CallbackSlot::Checkpoint),
+            (
+                !assistant_stream_hooks.is_empty(),
+                CallbackSlot::AssistantStream,
+            ),
+            (
+                !assistant_response_hooks.is_empty(),
+                CallbackSlot::AssistantResponse,
+            ),
+            (
+                !assistant_stream_finished_hooks.is_empty(),
+                CallbackSlot::AssistantStreamFinished,
+            ),
+            (
+                !presentation_steps.is_empty(),
+                CallbackSlot::PresentationStep,
+            ),
+            (
+                presentation_presenter.is_some(),
+                CallbackSlot::PresentationPresenter,
+            ),
+            (!runtime_event_hooks.is_empty(), CallbackSlot::RuntimeEvent),
+            (!plugin_operations.is_empty(), CallbackSlot::Operation),
+            (
+                !attachment_omission_policies.is_empty(),
+                CallbackSlot::AttachmentOmission,
+            ),
+            (
+                !context_compactors.is_empty(),
+                CallbackSlot::ContextCompactor,
+            ),
+            (
+                !context_pressure_hooks.is_empty(),
+                CallbackSlot::ContextPressure,
+            ),
+            (protocol_session.is_some(), CallbackSlot::ProtocolSession),
+            (protocol_driver.is_some(), CallbackSlot::ProtocolDriver),
+            (code_executor.is_some(), CallbackSlot::CodeExecutor),
+            (
+                assistant_prose_projector.is_some(),
+                CallbackSlot::AssistantProseProjector,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(held, slot)| held.then_some(slot))
+        .collect()
+    }
+}
+
 pub(crate) struct BoundRegistrar {
     registry: RegistryKind,
     pub(crate) contributions: PluginContributions,

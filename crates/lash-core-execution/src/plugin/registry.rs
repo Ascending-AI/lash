@@ -1020,9 +1020,7 @@ impl StaticPluginFactory {
         if let Some(error) = self.spec.errors.first() {
             return Err(error.clone());
         }
-        self.spec
-            .registrations
-            .provider_handle(self.id(), super::RegistryKind::Session, key)
+        self.spec.registrations.provider_handle(self.id(), key)
     }
     pub(crate) fn spec(&self) -> &PluginSpec {
         &self.spec
