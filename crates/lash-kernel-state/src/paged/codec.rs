@@ -166,8 +166,7 @@ impl TokenCodec for EndedRecord {
         })
     }
 }
-record!(TaskRecord { identity: TaskIdentity, state: TaskStateRecord, joiners: Vec<JoinerRecord>, observed: bool, passed: bool,
-    failed: bool, occurrences: KeyedRoot, frames: SequenceRoot });
+
 impl TokenCodec for JoinerRecord {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -317,7 +316,7 @@ impl TokenCodec for EndedTask {
         })
     }
 }
-record!(FrameRecord { statement: Site, bindings: Vec<BindingRecord>, loops: Vec<LoopRecord>, finally: Vec<FinallyRecord>, held: HeldRecord });
+
 record!(BindingRecord {
     name: Name,
     declared: Site,
@@ -357,7 +356,7 @@ record!(FinallyRecord {
     entered: EnteredRecord
 });
 units!(EnteredRecord { Normal = 0, Throw = 1, Return = 2, Break = 3, Continue = 4 });
-record!(HeldRecord { iterated: Vec<Value>, departing: Vec<Value>, arguments: Option<Vec<Value>> });
+
 record!(WaitRecord {
     wait: u64,
     task: TaskId,
@@ -424,4 +423,4 @@ impl TokenCodec for CommittedOutcomeRecord {
         })
     }
 }
-record!(ListJoinRecord { joiner: TaskId, mode: JoinMode, members: Vec<TaskId> });
+record!(ListJoinRecord { joiner: TaskId, mode: JoinMode, members: tree::Tree<TaskId> });

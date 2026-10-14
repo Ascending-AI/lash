@@ -64,19 +64,9 @@ impl ObjectHead {
     }
 }
 pub fn value_cost(value: &Value) -> u64 {
-    16u64.saturating_add(match value {
-        Value::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
-        Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
-        Value::Text(v) => v.summary.utf8_bytes,
-        Value::Bytes(v) => v.len,
-        Value::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
-        Value::Tuple(v) => v.summary.cost.0,
-        Value::Error(v) => v.cost.0,
-        Value::Function(v) => v.as_str().len() as u64,
-        Value::Handle(v) => (v.kind.len() + v.id.len()) as u64,
-        _ => 0,
-    })
+    lash_kernel_doc::heap_values::local_cost(value)
 }
+
 impl Cell for Value {
     fn cost(&self) -> u64 {
         value_cost(self)
@@ -405,7 +395,7 @@ pub mod execution {
     use lash_kernel_doc::{Name, TaskId, TaskIdentity};
 
     #[derive(Clone)]
-    pub struct FramePage {
+    pub struct FrameRecord {
         pub statement: Site,
         pub bindings: Tree<BindingRecord>,
         pub loops: Tree<LoopRecord>,
@@ -415,7 +405,7 @@ pub mod execution {
         pub arguments: Option<Tree<Value>>,
     }
     #[derive(Clone)]
-    pub struct TaskPage {
+    pub struct TaskRecord {
         pub identity: TaskIdentity,
         pub state: TaskStateRecord,
         pub result_retained: bool,
@@ -424,9 +414,9 @@ pub mod execution {
         pub passed: bool,
         pub failed: bool,
         pub occurrences: Tree<u64>,
-        pub frames: Tree<FramePage>,
+        pub frames: Tree<FrameRecord>,
     }
-    impl FramePage {
+    impl FrameRecord {
         pub fn fresh(statement: Site) -> Self {
             Self {
                 statement,
@@ -469,6 +459,20 @@ pub mod execution {
             0
         }
     }
+    impl Cell for ListJoinRecord {
+        fn cost(&self) -> u64 {
+            0
+        }
+        fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
+            self.members.seal(access, work)
+        }
+        fn children(&self, out: &mut Vec<PageRef>) {
+            out.extend(self.members.page());
+        }
+        fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
+            self.members.grants(children)
+        }
+    }
     impl Cell for BindingRecord {
         fn task_edges(&self) -> u64 {
             match &self.value {
@@ -494,7 +498,7 @@ pub mod execution {
             Ok(())
         }
     }
-    impl Cell for FramePage {
+    impl Cell for FrameRecord {
         fn task_edges(&self) -> u64 {
             self.bindings.task_edges()
                 + self.iterated.task_edges()
@@ -540,7 +544,7 @@ pub mod execution {
             Ok(())
         }
     }
-    impl Cell for TaskPage {
+    impl Cell for TaskRecord {
         fn task_edges(&self) -> u64 {
             self.frames.task_edges()
                 + match &self.state {
@@ -594,7 +598,7 @@ pub mod execution {
             Ok(())
         }
     }
-    impl TokenCodec for FramePage {
+    impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
             out.seq(7);
             self.statement.encode(out);
@@ -619,7 +623,7 @@ pub mod execution {
         }
     }
 
-    impl TokenCodec for TaskPage {
+    impl TokenCodec for TaskRecord {
         fn encode(&self, out: &mut TokenWriter) {
             out.seq(9);
             self.identity.encode(out);
@@ -643,7 +647,7 @@ pub mod execution {
                 passed: <bool>::decode(input)?,
                 failed: <bool>::decode(input)?,
                 occurrences: <Tree<u64>>::decode(input)?,
-                frames: <Tree<FramePage>>::decode(input)?,
+                frames: <Tree<FrameRecord>>::decode(input)?,
             })
         }
     }
@@ -686,7 +690,9 @@ impl PagedHeap {
         if frozen.summary.entities == 0 {
             return Ok(family);
         }
-        self.admit(frozen.summary.cost.0, &[])?;
+        let credit = self.outstanding_reserved().min(frozen.summary.cost.0);
+        self.admit(frozen.summary.cost.0 - credit, &[])?;
+        self.reserved -= credit;
         let mut membership = Tree::new(false);
         if frozen.summary.entities != 0 {
             membership.write(
@@ -712,24 +718,17 @@ impl PagedHeap {
             extent: frozen.summary.entities,
             membership: keyed(&membership),
         };
-        if let Some(census) = &mut self.census {
-            census
-                .added(frozen.summary.cost, frozen.summary.entities)
-                .map_err(census_fault)?;
-            self.accounting = census.certificate();
-        } else {
-            self.accounting.upper.0 = self
-                .accounting
-                .upper
-                .0
-                .checked_add(frozen.summary.cost.0)
-                .ok_or_else(|| HeapFault::Malformed("family cost overflow".into()))?;
-            self.accounting.entities = self
-                .accounting
-                .entities
-                .checked_add(frozen.summary.entities)
-                .ok_or_else(|| HeapFault::Malformed("family population overflow".into()))?;
-        }
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("family has no census".into()))?;
+        census
+            .changed(LogicalBytes(credit), LogicalBytes(0))
+            .map_err(census_fault)?;
+        census
+            .added(frozen.summary.cost, frozen.summary.entities)
+            .map_err(census_fault)?;
+        self.accounting = census.certificate();
         if !frozen.summary.data_only {
             self.population.closure_entities = self
                 .population
@@ -891,43 +890,54 @@ impl PagedHeap {
             .census
             .take()
             .ok_or_else(|| HeapFault::Malformed("session root has no census".into()))?;
-        let decision = census.reserve(LogicalBytes(after.saturating_sub(before)));
-        self.session = bindings;
-        self.population.task_edges = self
-            .population
-            .task_edges
-            .checked_sub(old_tasks)
-            .and_then(|v| v.checked_add(new_tasks))
-            .ok_or_else(|| HeapFault::Malformed("binding task-edge population overflow".into()))?;
-        self.header = None;
-        let result = match decision {
-            ReservationDecision::Granted(_) => census
-                .changed(LogicalBytes(before), LogicalBytes(after))
-                .map_err(census_fault)
-                .map_err(HeapWriteError::from),
-            ReservationDecision::NeedsPrecision(_) => {
-                let registers = self.statement_roots().to_vec();
-                let reserved = self.outstanding_reserved();
-                match census.refine(
-                    self,
-                    &TransientRoots {
-                        registers: &registers,
-                        pinned: &[],
-                        native_args: &[],
-                        fresh: &[],
-                        reserved: LogicalBytes(reserved),
-                    },
-                    PendingReservation {
-                        bytes: LogicalBytes(0),
-                        overflowed: false,
-                    },
-                ) {
-                    Ok(RefinedDecision::Granted(_)) => Ok(()),
-                    Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
-                    Err(error) => Err(census_fault(error).into()),
+        let credit = self.reserved.min(after.saturating_sub(before));
+        let decision = census.reserve(LogicalBytes(
+            after.saturating_sub(before).saturating_sub(credit),
+        ));
+        let result = (|| {
+            census
+                .changed(LogicalBytes(credit), LogicalBytes(0))
+                .map_err(census_fault)?;
+            self.reserved -= credit;
+            self.session = bindings;
+            self.population.task_edges = self
+                .population
+                .task_edges
+                .checked_sub(old_tasks)
+                .and_then(|v| v.checked_add(new_tasks))
+                .ok_or_else(|| {
+                    HeapFault::Malformed("binding task-edge population overflow".into())
+                })?;
+            self.header = None;
+            match decision {
+                ReservationDecision::Granted(_) => census
+                    .changed(LogicalBytes(before), LogicalBytes(after))
+                    .map_err(census_fault)
+                    .map_err(HeapWriteError::from),
+                ReservationDecision::NeedsPrecision(_) => {
+                    let registers = self.statement_roots().to_vec();
+                    let reserved = self.outstanding_reserved();
+                    match census.refine(
+                        self,
+                        &TransientRoots {
+                            registers: &registers,
+                            pinned: &[],
+                            native_args: &[],
+                            fresh: &[],
+                            reserved: LogicalBytes(reserved),
+                        },
+                        PendingReservation {
+                            bytes: LogicalBytes(0),
+                            overflowed: false,
+                        },
+                    ) {
+                        Ok(RefinedDecision::Granted(_)) => Ok(()),
+                        Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
+                        Err(error) => Err(census_fault(error).into()),
+                    }
                 }
             }
-        };
+        })();
         self.accounting = census.certificate();
         self.census = Some(census);
         result

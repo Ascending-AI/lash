@@ -331,6 +331,7 @@ pub enum NativeError {
 ///
 /// Implemented by the paged heap (layer hp-heap, FIG-6188).
 pub trait NativeHeap {
+    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
     fn data_depth_limit(&self) -> usize;
     fn value_depth_limit(&self) -> usize;
     fn len(&self, object: EntityId) -> Result<u64, HeapFault>;

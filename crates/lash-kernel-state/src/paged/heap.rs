@@ -211,7 +211,7 @@ pub trait SemanticHeap: NativeHeap {
 
     /// Guest equality of two values (`K-VAL` equality rules); can read
     /// pages.
-    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault>;
+
     /// A legal key's normal form, or `None` when `value` is not a legal key
     /// (`K-KEY-001`).
     fn normal_key(&self, value: &Value) -> Result<Option<NormalKey>, HeapFault>;

@@ -35,9 +35,9 @@ pub use heap::{
 };
 pub use root::{
     BindingRecord, BoundRecord, CheckpointRoot, CommittedOutcomeRecord, EndedRecord, EndedTask,
-    EnteredRecord, FinallyRecord, FrameRecord, HeapRoot, HeldRecord, IncomingRecord, JoinerRecord,
-    KeyedRoot, ListJoinRecord, LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskRecord,
-    TaskStateRecord, WaitKindRecord, WaitRecord, WaitStateRecord,
+    EnteredRecord, FinallyRecord, HeapRoot, IncomingRecord, JoinerRecord, KeyedRoot,
+    ListJoinRecord, LoopRecord, RootStatus, SavedMeters, SequenceRoot, TaskStateRecord,
+    WaitKindRecord, WaitRecord, WaitStateRecord,
 };
 pub use source::{PageAnswer, PageBody, PageKind, PageSource};
 
@@ -54,3 +54,5 @@ mod laws {
     pub mod heap;
     pub mod root;
 }
+
+pub use directory::execution::{FrameRecord, TaskRecord};

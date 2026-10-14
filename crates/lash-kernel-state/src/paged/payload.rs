@@ -266,6 +266,9 @@ pub fn offset(
 }
 
 impl NativeHeap for PagedHeap {
+    fn equal(&self, a: &Value, b: &Value) -> Result<bool, HeapFault> {
+        self.equal_values(a, b)
+    }
     fn data_depth_limit(&self) -> usize {
         128
     }

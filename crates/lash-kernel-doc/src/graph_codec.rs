@@ -1071,8 +1071,20 @@ pub mod heap_values {
         let family = declared.or(family);
         let task_edges = u64::decode(input)?;
         if let Payload::Resident(value) = &data {
-            if task_count(value) != task_edges {
-                return Err(invalid("error task-edge summary mismatch"));
+            if task_count(value) != task_edges
+                || nesting(value) + 1 != depth
+                || contains_edges(value) != has_edges
+            {
+                return Err(invalid("error edge/depth summary mismatch"));
+            }
+            let expected = kind
+                .summary
+                .utf8_bytes
+                .checked_add(message.summary.utf8_bytes)
+                .and_then(|v| v.checked_add(local_cost(value)))
+                .ok_or_else(|| invalid("error cost overflow"))?;
+            if expected != cost.0 {
+                return Err(invalid("error cost summary mismatch"));
             }
         }
         Ok(ErrorRef {
@@ -1134,8 +1146,17 @@ pub mod heap_values {
                     n.checked_add(task_count(v))
                         .ok_or_else(|| invalid("tuple task-edge overflow"))
                 })?;
-                if count != summary.task_edges {
-                    return Err(invalid("tuple task-edge summary mismatch"));
+                let cost = values.iter().try_fold(0u64, |n, v| {
+                    n.checked_add(local_cost(v))
+                        .ok_or_else(|| invalid("tuple cost overflow"))
+                })?;
+                let depth = values.iter().map(nesting).max().unwrap_or(0) + 1;
+                if count != summary.task_edges
+                    || cost != summary.cost.0
+                    || depth != summary.depth
+                    || values.iter().any(contains_edges) != summary.has_edges
+                {
+                    return Err(invalid("tuple aggregate mismatch"));
                 }
                 Payload::Resident(Arc::from(values))
             }
@@ -1259,6 +1280,41 @@ pub mod heap_values {
         })
     }
 
+    /// LocalCostV1 prices immutable data at each holding location.
+    pub fn local_cost(value: &Value) -> u64 {
+        16u64.saturating_add(match value {
+            Value::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
+            Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
+            Value::Text(v) => v.summary.utf8_bytes,
+            Value::Bytes(v) => v.len,
+            Value::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
+            Value::Tuple(v) => v.summary.cost.0,
+            Value::Error(v) => v.cost.0,
+            Value::Function(v) => v.as_str().len() as u64,
+            Value::Handle(v) => (v.kind.len() + v.id.len()) as u64,
+            _ => 0,
+        })
+    }
+    fn nesting(value: &Value) -> u32 {
+        match value {
+            Value::Tuple(t) => t.summary.depth,
+            Value::Error(e) => e.depth,
+            _ => 0,
+        }
+    }
+    fn contains_edges(value: &Value) -> bool {
+        matches!(
+            value,
+            Value::List(_)
+                | Value::Map(_)
+                | Value::Set(_)
+                | Value::Record(_)
+                | Value::Closure(_)
+                | Value::Task(_)
+                | Value::Ref(_)
+        ) || matches!(value, Value::Tuple(t) if t.summary.has_edges)
+            || matches!(value, Value::Error(e) if e.has_edges)
+    }
     pub fn task_count(value: &Value) -> u64 {
         match value {
             Value::Task(_) | Value::Ref(Identity::Task(_)) => 1,
