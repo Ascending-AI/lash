@@ -279,10 +279,6 @@ pub enum SingletonPresentationError {
 /// the admitted execution running it ends without an outcome.
 #[async_trait::async_trait]
 pub trait SingletonToolHandlers: Send + Sync {
-    /// Live-only MCP publication bypasses the recorded attempt stream.
-    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        None
-    }
     /// The session whose read-only snapshots and declared commands this Run uses.
     fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
         None

@@ -210,29 +210,36 @@ and provisional node observations continue through each process's recovering
 observation feed; the fleet cursor is separate from its observation cursor.
 
 
-MCP server observations are live facts on the executing node. Registering the
-MCP plugin routes progress and explicitly correlated logs automatically to the
-executing session's `SessionObservationStreamItem::Mcp`. `McpProgress` names the
-server, Lash tool call ID and attempt, and forwards progress, optional total
-and optional message. `McpLog` retains severity, logger and JSON data. A log
-without protocol correlation and `McpListChanged` go to the plugin's
-`observe_server(server)` subscription, which the host opens once per server.
-Tools, resources and prompts have distinct list-change kinds; these notices do
-not start turns or enter the process lifecycle feed.
+Tool calls publish live progress and logs through a separate tool-live lane.
+A host reads `core.tool_live().subscribe(ToolLiveFilter::Owner(owner)).await`
+for a session frame or process, or uses `ToolLiveFilter::Call(address)` for one
+card. `CallAddress` includes the admitted `ExecutionOwner`, Lash call ID and
+attempt. Every emission carries that address and a stable producer epoch and
+ordinal. `ToolLiveFact::Progress` forwards the gauge, optional total and
+message; `Log` forwards severity, optional logger and JSON data.
 
-`McpObservationPolicy` bounds each observer's pending facts independently per
-server. The default is 128 logs, 64 progress identities, 64 server keys and
-64 KiB per fact; the hard maxima are 4096, 1024, 256 and 1 MiB respectively.
-Hosts set a validated policy through `McpPluginFactoryBuilder::observation_policy`.
-Pending progress coalesces to the latest notification for each call and attempt.
-Excess logs and oversized facts produce typed dropped counts. Excess server
-keys use the anonymous omission counter rather than retaining unbounded names.
-A reader can see more facts over time by draining its bounded queue.
+Any tool, including a host-executed tool, gets the sealed publisher from
+`AttemptContext::live()`. It bypasses the attempt recorder and never enters
+history or process lifecycle facts. Its authoritative tool outcome is unchanged
+by observation or store failure. The MCP plugin maps progress tokens and
+request-correlated messages onto this same lane. Uncorrelated server logs go to
+tracing on the executing node; list changes maintain the plugin catalogue.
 
-These facts have no serialization or write path into the journal, lifecycle
-feed or replay cache, including PostgreSQL's replay cache. Each subscription
-starts with an `Unavailable` MCP gap because no live history survives a
-reconnect. A different node has its own live feed and exposes the same gap;
-cross-node MCP fan-out is outside this contract. The recorded tool outcome
-remains authoritative. Lash forwards MCP server facts only; hosts own progress
-for tools they execute themselves.
+`LashCoreBuilder::tool_live_policy` sets validated per-owner publisher bounds.
+The defaults are 64 events and 16 logs per 100 ms interval, 256 KiB including
+in-flight work, 64 KiB per fact and 128 call slots. Hard maxima are 4096 events,
+1024 logs, 16 MiB, 1 MiB and 4096 calls. Progress keeps one latest pending value
+per call; the completion fence seals the publisher and schedules its final
+admitted gauge. Typed `Omitted` payloads count coalescing, admission overflow,
+oversized facts, late notifications and failed publication. MCP correlation
+has its own `McpRoutePolicy`, defaults of 128 routes and a two-second grace,
+and never evicts a live route for a later registration.
+
+The session and process replay stores retain tool facts in their own event
+class: 2048 events, 8 MiB and 120 seconds per owner by default, separately from
+turn text and node history. PostgreSQL transports this class through unlogged
+tables and each replay store's replica listener; SQLite hosts retain the
+single-process window. `subscribe_after(filter, Some(cursor))` resumes within
+that class's window. A typed `Gap` names `Trimmed` or `Unavailable` and the
+cursor from which the class continues. It has no ordering relationship to
+session or process observation streams, and is never merged into them.

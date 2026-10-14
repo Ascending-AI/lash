@@ -68,3 +68,22 @@ CREATE UNLOGGED TABLE IF NOT EXISTS process_replay_dedupe (
     position bigint NOT NULL,
     PRIMARY KEY (process_id, identity)
 );
+
+-- Tool-live is a separate provisional class; its window never trims history.
+CREATE UNLOGGED TABLE IF NOT EXISTS process_replay_tool_head (
+    owner text PRIMARY KEY,
+    incarnation text NOT NULL,
+    tail bigint NOT NULL,
+    touched_at timestamptz NOT NULL
+);
+CREATE UNLOGGED TABLE IF NOT EXISTS process_replay_tool_log (
+    owner text NOT NULL,
+    position bigint NOT NULL,
+    producer_epoch text NOT NULL,
+    ordinal bigint NOT NULL,
+    payload bytea NOT NULL,
+    bytes bigint NOT NULL,
+    published_at timestamptz NOT NULL,
+    PRIMARY KEY (owner, position),
+    UNIQUE (owner, producer_epoch, ordinal)
+);

@@ -459,9 +459,6 @@ impl<'run> ProductionToolHandlers<'run> {
 
 #[async_trait::async_trait]
 impl SingletonToolHandlers for ProductionToolHandlers<'_> {
-    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        self.context.mcp_publisher()
-    }
     fn execution_policy(&self, call: &SingletonToolCall) -> ExecutionPolicy {
         self.calls
             .lock_recover()

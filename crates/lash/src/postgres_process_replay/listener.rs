@@ -17,7 +17,11 @@ pub(super) async fn run(shared: Arc<Shared>) {
         .listener
         .run(
             || async { Ok::<_, lash_core::ProcessReplayStoreError>(()) },
-            |payload| shared.ring(&payload.map_or_else(Doorbell::all, Doorbell::unpack)),
+            |payload| {
+                if !shared.tool_live.notification(payload) {
+                    shared.ring(&payload.map_or_else(Doorbell::all, Doorbell::unpack));
+                }
+            },
             db_error("listen"),
         )
         .await;

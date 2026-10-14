@@ -60,6 +60,7 @@ impl InMemoryProcessReplayStoreConfig {
 
 #[derive(Debug)]
 pub struct InMemoryProcessReplayStore {
+    tool_live: Arc<crate::ToolLiveMemoryWindow>,
     work_limits: lash_trace::ObservationWorkLimits,
     replay_incarnation_id: String,
     config: InMemoryProcessReplayStoreConfig,
@@ -77,6 +78,7 @@ impl InMemoryProcessReplayStore {
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
+            tool_live: Arc::new(crate::ToolLiveMemoryWindow::default()),
             work_limits: lash_trace::ObservationWorkLimits::standard(),
             replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
             config,
@@ -116,6 +118,7 @@ impl InMemoryProcessReplayStore {
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn clone_preserving_history(&self) -> Self {
         Self {
+            tool_live: self.tool_live.clone(),
             work_limits: self.work_limits,
             replay_incarnation_id: self.replay_incarnation_id.clone(),
             config: self.config.clone(),
@@ -189,6 +192,10 @@ impl InMemoryProcessReplayStore {
 
 #[async_trait::async_trait]
 impl ProcessReplayStore for InMemoryProcessReplayStore {
+    fn tool_live_window(&self) -> Option<Arc<dyn crate::ToolLiveReplay>> {
+        Some(self.tool_live.clone())
+    }
+
     /// One publication at a time, since every one takes the store's lock;
     /// each of at most a quarter of a process's window, so one batch never
     /// displaces what a subscriber has yet to read of the batch before it.

@@ -54,6 +54,7 @@ impl RuntimeSessionServices {
             Arc::new(crate::ChronologicalProjection::default()),
             crate::TurnContext::default(),
         )
+        .with_tool_live(core.tool_live.clone())
         .with_tool_fault_retry(core.control.pacing.tool_fault_retry)
         .with_turn_phase_probe(self.current.turn_phase_probe.clone())
         .with_fleet_format(core.session_store_factory().fleet_format())

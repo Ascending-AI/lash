@@ -153,11 +153,12 @@ impl LashRuntime {
     pub(super) async fn from_host_state(
         policy: SessionPolicy,
         host: RuntimeHost,
-        services: RuntimeServices,
+        mut services: RuntimeServices,
         mut state: RuntimeSessionState,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
         runtime_lease_executor_id: String,
     ) -> Result<Self, SessionError> {
+        services.tool_live = host.core.tool_live.clone();
         services
             .plugins
             .require_runtime_owner()

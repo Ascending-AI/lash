@@ -73,6 +73,7 @@ async fn execute_once_with_authority<'run>(
 ) -> crate::ToolAttemptOutcome {
     match build_attempt_context(&tool_context, authority.manifest()).await {
         Ok(attempt_context) => {
+            let _completion_fence = attempt_context.live().fence();
             execute_attempt_body(context, authority.manifest(), prepared, &attempt_context).await
         }
         Err(result) => result.into(),

@@ -136,3 +136,5 @@ mod header_path_tests;
 mod observation_tests;
 
 mod observations;
+
+pub use observations::{McpRoutePolicy, McpRoutePolicyError};

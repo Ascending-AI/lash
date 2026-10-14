@@ -270,14 +270,6 @@ struct ResolvedToolTarget {
 }
 
 impl McpConnectionPool {
-    /// Subscribe once to a server's unsolicited logs and list notifications.
-    /// The initial gap states that this node keeps no notification history.
-    pub fn observe_server(&self, server: &str) -> lash_core::McpLiveSubscription {
-        self.host_services
-            .observations
-            .subscribe_server(server.into())
-    }
-
     pub fn empty() -> Self {
         Self::empty_with_host_services(McpHostServices::default())
     }

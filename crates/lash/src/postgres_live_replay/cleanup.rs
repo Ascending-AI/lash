@@ -25,6 +25,9 @@ pub(super) async fn run(shared: Arc<Shared>) {
     loop {
         tokio::time::sleep(shared.config.cleanup_interval + jitter(shared.config.cleanup_jitter))
             .await;
+        if let Err(error) = shared.tool_live.cleanup().await {
+            tracing::warn!(%error, "tool-live window cleanup failed");
+        }
         if let Err(error) = clean(&shared).await {
             tracing::warn!(%error, "live replay cleanup failed; the next pass retries");
         }

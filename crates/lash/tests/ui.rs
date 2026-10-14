@@ -36,6 +36,8 @@
 mod durable_builder_without_advanced;
 #[path = "ui/facade_boundary_types_are_public.rs"]
 mod facade_boundary_types_are_public;
+#[path = "ui/observation_enums_match_without_mcp.rs"]
+mod observation_enums_match_without_mcp;
 #[path = "ui/process_surface_types_are_public.rs"]
 mod process_surface_types_are_public;
 #[cfg(feature = "rlm")]

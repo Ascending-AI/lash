@@ -93,6 +93,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     ) -> Self {
         let facts = dispatch.facts.clone();
         Self {
+            tool_live: Arc::new(crate::ToolLive::default()),
             tool_fault_retry: crate::runtime::PollPacing::fault_standard(),
             dispatch,
             tool_material_store: None,

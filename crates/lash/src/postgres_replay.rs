@@ -15,6 +15,7 @@ use sqlx::postgres::PgListener;
 use tokio::sync::watch;
 
 pub(crate) mod schema;
+pub(crate) mod tool_live;
 
 pub(crate) struct Listener {
     pool: sqlx::PgPool,
@@ -113,6 +114,12 @@ pub(crate) struct BellGuard<K: Eq + Hash> {
     bells: Bells<K>,
     key: K,
     receiver: watch::Receiver<u64>,
+}
+
+impl<K> Clone for Bells<K> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
 }
 
 impl<K> Default for Bells<K> {

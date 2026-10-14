@@ -92,7 +92,6 @@ pub enum PostgresLiveReplayError {
 /// PostgreSQL database. Plug it in with
 /// [`LashCoreBuilder::live_replay_store`](crate::LashCoreBuilder::live_replay_store).
 pub struct PostgresLiveReplayStore {
-    mcp_observations: Arc<lash_core::McpObservationHub>,
     shared: Arc<Shared>,
     publisher: mpsc::UnboundedSender<publisher::PublishRequest>,
     tasks: Vec<JoinHandle<()>>,
@@ -108,6 +107,7 @@ impl std::fmt::Debug for PostgresLiveReplayStore {
 
 /// What the store's tasks and subscriptions share.
 struct Shared {
+    tool_live: Arc<crate::postgres_replay::tool_live::ToolClass>,
     /// Publication, reads, cleanup and reloads.
     pool: sqlx::PgPool,
     listener: Listener,
@@ -240,6 +240,12 @@ impl PostgresLiveReplayStore {
         let sql = Statements::new(&policy.data.schema);
         let incarnation = schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
+            tool_live: Arc::new(crate::postgres_replay::tool_live::ToolClass::new(
+                pool.clone(),
+                &policy.data.schema,
+                "live_replay",
+                sql.channel.clone(),
+            )),
             pool,
             listener: Listener::new(
                 listener_pool,
@@ -256,7 +262,6 @@ impl PostgresLiveReplayStore {
         });
         let (publisher, requests) = mpsc::unbounded_channel();
         let store = Self {
-            mcp_observations: Arc::new(lash_core::McpObservationHub::default()),
             tasks: vec![
                 tokio::spawn(publisher::run(Arc::clone(&shared), requests)),
                 tokio::spawn(listener::run(Arc::clone(&shared))),
@@ -328,9 +333,10 @@ impl Drop for PostgresLiveReplayStore {
 
 #[async_trait::async_trait]
 impl LiveReplayStore for PostgresLiveReplayStore {
-    fn mcp_observations(&self) -> Option<Arc<lash_core::McpObservationHub>> {
-        Some(Arc::clone(&self.mcp_observations))
+    fn tool_live_window(&self) -> Option<Arc<dyn lash_core::ToolLiveReplay>> {
+        Some(self.shared.tool_live.clone())
     }
+
     async fn publish(
         &self,
         session_id: &SessionId,
@@ -428,5 +434,12 @@ impl LiveReplayStore for PostgresLiveReplayStore {
 
     async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         cleanup::trim(&self.shared, session_id).await
+    }
+}
+
+impl PostgresLiveReplayStore {
+    pub fn with_tool_live_retention(self, retention: lash_core::ToolLiveRetention) -> Self {
+        self.shared.tool_live.retention(retention);
+        self
     }
 }

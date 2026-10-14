@@ -32,6 +32,7 @@ impl RuntimeDataLimits {
 /// session-store factory and the process-definition registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
+    pub tool_live: Arc<crate::ToolLive>,
     pub data_limits: RuntimeDataLimits,
     /// Working budgets shared by this host's observation surfaces.
     pub observation_work_limits: lash_trace::ObservationWorkLimits,
@@ -372,6 +373,7 @@ impl RuntimeHostConfig {
             turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
+            tool_live: Arc::new(crate::ToolLive::default()),
             observation_work_limits: lash_trace::ObservationWorkLimits::standard(),
             clock,
         }

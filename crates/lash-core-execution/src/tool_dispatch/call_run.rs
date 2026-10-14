@@ -385,10 +385,7 @@ impl<'a> AdmittedToolCall<'a> {
             }));
         }
         let limits = self.handlers.trace_limits();
-        let recorder = AttemptStreamRecorder::start(
-            limits.attempt_stream_bytes,
-            self.handlers.mcp_publisher(),
-        );
+        let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
         let outcome = self
             .handlers
             .execute(SingletonAttempt {

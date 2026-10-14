@@ -56,9 +56,6 @@ impl RuntimeExecutionTracing {
 }
 
 impl RuntimeExecutionContext<'_> {
-    pub(crate) fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        self.dispatch.observer.mcp_publisher()
-    }
     /// A fresh observation cursor for one emission lane of this execution —
     /// keyed under the dispatch's per-call key when one is installed
     /// ([`ToolDispatchContext::observation_keyed`]), else the enclosing
@@ -244,5 +241,12 @@ impl RuntimeExecutionContext<'_> {
     /// context, or `None` when no code block is executing.
     pub(in crate::session) fn code_block_graph_key(&self) -> Option<String> {
         self.code_block_graph_key.clone()
+    }
+}
+
+impl RuntimeExecutionContext<'_> {
+    pub fn with_tool_live(mut self, lane: Arc<crate::ToolLive>) -> Self {
+        self.tool_live = lane;
+        self
     }
 }

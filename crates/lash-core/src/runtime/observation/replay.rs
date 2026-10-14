@@ -652,8 +652,8 @@ pub enum SessionObservationSubscription {
 /// to decide between a subscription and a gap: the feed awaits both.
 #[async_trait::async_trait]
 pub trait LiveReplayStore: Send + Sync {
-    /// Node-local live-only side of the feed. Never calls a replay write.
-    fn mcp_observations(&self) -> Option<Arc<crate::McpObservationHub>> {
+    /// Independent tool-live event class, with its own retention and cursor.
+    fn tool_live_window(&self) -> Option<Arc<dyn crate::ToolLiveReplay>> {
         None
     }
 
@@ -759,7 +759,7 @@ impl InMemoryLiveReplayStoreConfig {
 
 #[derive(Debug)]
 pub struct InMemoryLiveReplayStore {
-    mcp_observations: Arc<crate::McpObservationHub>,
+    tool_live: Arc<crate::ToolLiveMemoryWindow>,
     work_limits: lash_trace::ObservationWorkLimits,
     replay_incarnation_id: String,
     config: InMemoryLiveReplayStoreConfig,
@@ -790,7 +790,7 @@ impl InMemoryLiveReplayStore {
 
     pub fn with_clock(config: InMemoryLiveReplayStoreConfig, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
-            mcp_observations: Arc::new(crate::McpObservationHub::default()),
+            tool_live: Arc::new(crate::ToolLiveMemoryWindow::default()),
             work_limits: lash_trace::ObservationWorkLimits::standard(),
             replay_incarnation_id: uuid::Uuid::new_v4().to_string(),
             config,
@@ -844,7 +844,7 @@ impl InMemoryLiveReplayStore {
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn clone_preserving_history(&self) -> Self {
         Self {
-            mcp_observations: Arc::new(crate::McpObservationHub::default()),
+            tool_live: Arc::new(crate::ToolLiveMemoryWindow::default()),
             replay_incarnation_id: self.replay_incarnation_id.clone(),
             config: self.config.clone(),
             work_limits: self.work_limits,
@@ -1060,8 +1060,8 @@ impl InMemoryLiveReplayStore {
 
 #[async_trait::async_trait]
 impl LiveReplayStore for InMemoryLiveReplayStore {
-    fn mcp_observations(&self) -> Option<Arc<crate::McpObservationHub>> {
-        Some(Arc::clone(&self.mcp_observations))
+    fn tool_live_window(&self) -> Option<Arc<dyn crate::ToolLiveReplay>> {
+        Some(self.tool_live.clone())
     }
     async fn publish(
         &self,

@@ -115,8 +115,6 @@ impl QueryPlugins {
 
 #[derive(Clone)]
 pub struct RuntimeObservation {
-    /// Whether this deployment serves the MCP plugin's live observations.
-    pub mcp_observations_enabled: bool,
     pub session_id: SessionId,
     pub revision: SessionRevision,
     pub cursor: SessionCursor,
@@ -184,13 +182,6 @@ impl RuntimeObservation {
             None
         };
         Self {
-            mcp_observations_enabled: runtime
-                .services
-                .plugins
-                .host()
-                .factories()
-                .iter()
-                .any(|factory| factory.id() == "mcp"),
             session_id: runtime.session_id().clone(),
             revision,
             cursor,

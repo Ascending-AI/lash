@@ -62,3 +62,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS live_replay_log_activity
 CREATE UNIQUE INDEX IF NOT EXISTS live_replay_log_span
     ON live_replay_log (session_id, activity_key, activity_first)
     WHERE activity_key IS NOT NULL;
+
+-- Tool-live is a separate provisional class; its window never trims history.
+CREATE UNLOGGED TABLE IF NOT EXISTS live_replay_tool_head (
+    owner text PRIMARY KEY,
+    incarnation text NOT NULL,
+    tail bigint NOT NULL,
+    touched_at timestamptz NOT NULL
+);
+CREATE UNLOGGED TABLE IF NOT EXISTS live_replay_tool_log (
+    owner text NOT NULL,
+    position bigint NOT NULL,
+    producer_epoch text NOT NULL,
+    ordinal bigint NOT NULL,
+    payload bytea NOT NULL,
+    bytes bigint NOT NULL,
+    published_at timestamptz NOT NULL,
+    PRIMARY KEY (owner, position),
+    UNIQUE (owner, producer_epoch, ordinal)
+);

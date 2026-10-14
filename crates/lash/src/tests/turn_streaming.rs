@@ -16,6 +16,7 @@ mod control_and_cancel;
 mod observations;
 mod publication_gap;
 mod rlm_streaming;
+mod tool_live;
 
 /// How much stack an RLM law's thread gets: a cell's interpreter runs deep.
 #[cfg(feature = "rlm")]

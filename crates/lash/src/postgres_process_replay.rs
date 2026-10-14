@@ -112,6 +112,7 @@ impl std::fmt::Debug for PostgresProcessReplayStore {
 
 /// What the store's tasks and subscriptions share.
 struct Shared {
+    tool_live: Arc<crate::postgres_replay::tool_live::ToolClass>,
     /// Publication, reads and cleanup.
     pool: sqlx::PgPool,
     listener: Listener,
@@ -202,6 +203,12 @@ impl PostgresProcessReplayStore {
         let sql = Statements::new(&policy.data.schema);
         schema::ensure_incarnation(&pool, &sql).await?;
         let shared = Arc::new(Shared {
+            tool_live: Arc::new(crate::postgres_replay::tool_live::ToolClass::new(
+                pool.clone(),
+                &policy.data.schema,
+                "process_replay",
+                sql.channel.clone(),
+            )),
             pool,
             listener: Listener::new(
                 listener_pool,
@@ -290,6 +297,10 @@ impl Drop for PostgresProcessReplayStore {
 
 #[async_trait::async_trait]
 impl ProcessReplayStore for PostgresProcessReplayStore {
+    fn tool_live_window(&self) -> Option<Arc<dyn lash_core::ToolLiveReplay>> {
+        Some(self.shared.tool_live.clone())
+    }
+
     /// As many publications at once as the publisher runs transactions;
     /// each of at most what one tick gathers and a quarter of a process's
     /// window, so one batch never displaces what a subscriber has yet to
@@ -395,5 +406,12 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
         schema::rotate(&self.shared.pool, &self.shared.sql, true).await?;
         self.shared.ring(&Doorbell::all());
         Ok(())
+    }
+}
+
+impl PostgresProcessReplayStore {
+    pub fn with_tool_live_retention(self, retention: lash_core::ToolLiveRetention) -> Self {
+        self.shared.tool_live.retention(retention);
+        self
     }
 }

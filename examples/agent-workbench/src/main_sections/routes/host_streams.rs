@@ -174,7 +174,6 @@ async fn forward_session_observations_until_shutdown(
             break;
         };
         match item {
-            Ok(SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_)) => {}
             Ok(SessionObservationStreamItem::Event(event)) => {
                 let cursor = event.cursor.to_string();
                 let observed = Box::new(ObservationEnvelope::new(ObservationEvent::from_core(

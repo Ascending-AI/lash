@@ -24,11 +24,17 @@ pub(super) async fn run(shared: Arc<Shared>) {
             || reload(&shared),
             |payload| match payload {
                 Some(payload) => {
+                    if shared.tool_live.notification(Some(payload)) {
+                        return;
+                    }
                     let doorbells = unpack_doorbells(payload);
                     shared.ring_mirror(&doorbells);
                     shared.ring_sessions(&doorbells);
                 }
-                None => shared.ring_all(),
+                None => {
+                    shared.tool_live.notification(None);
+                    shared.ring_all();
+                }
             },
             db_error("listen"),
         )

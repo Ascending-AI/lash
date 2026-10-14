@@ -404,11 +404,6 @@ pub mod observe {
         facade_support::SessionObservation, facade_support::SessionObservationSubscription,
         facade_support::SessionResume,
     };
-    pub use lash_core::{
-        McpCallIdentity, McpList, McpLiveItem, McpLivePublisher, McpLiveSubscription, McpLogLevel,
-        McpObservation, McpObservationGap, McpObservationHub, McpObservationKind,
-        McpObservationPolicy, McpObservationPolicyError,
-    };
 }
 
 /// Tool definitions, providers, and execution types.
@@ -1496,3 +1491,10 @@ pub mod transcript {
 
 /// Presentation cuts for runtime value replies and raw transcript errors.
 pub use lash_core::session_model::RuntimeOutputCuts;
+
+pub use lash_core::tool_live::{
+    CallAddress, ToolLive, ToolLiveCursor, ToolLiveEmission, ToolLiveEmissionId, ToolLiveError,
+    ToolLiveFact, ToolLiveFilter, ToolLiveGapReason, ToolLiveItem, ToolLiveLogLevel,
+    ToolLiveMemoryWindow, ToolLiveOmission, ToolLivePayload, ToolLivePolicy, ToolLivePolicyError,
+    ToolLivePublisher, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
+};

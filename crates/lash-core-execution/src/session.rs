@@ -594,7 +594,8 @@ impl Session {
             Arc::clone(&self.services.attachment_store),
             chronological_projection,
             turn_context,
-        ))
+        )
+        .with_tool_live(self.services.tool_live.clone()))
         .map(|context| {
             context.with_fleet_format(
                 self.services

@@ -51,3 +51,21 @@ table process_replay_sentinel
   column watermark bigint not-null
   persistence unlogged
   primary-key (singleton)
+table process_replay_tool_head
+  column incarnation text not-null
+  column owner text not-null
+  column tail bigint not-null
+  column touched_at timestamp with time zone not-null
+  persistence unlogged
+  primary-key (owner)
+table process_replay_tool_log
+  column bytes bigint not-null
+  column ordinal bigint not-null
+  column owner text not-null
+  column payload bytea not-null
+  column position bigint not-null
+  column producer_epoch text not-null
+  column published_at timestamp with time zone not-null
+  persistence unlogged
+  primary-key (owner, position)
+  unique (ordinal, owner, producer_epoch)

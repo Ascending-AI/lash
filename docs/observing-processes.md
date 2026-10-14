@@ -481,3 +481,12 @@ events stay with the OS process that produced them.
 A store implementation keeps the obligations on the `ProcessReplayStore`
 trait; `lash_conformance::process_replay_tests!` certifies them with the same
 replay laws the session store passes.
+
+Tool progress and logs use the separate tool-live subscription. A workflow view
+reads `core.tool_live().subscribe(ToolLiveFilter::Owner(ExecutionOwner::Process {
+process_id })).await`; a tool card filters by its full `CallAddress` instead.
+Each emission identifies the process owner, call ID, attempt, producer epoch
+and ordinal. Its independent provisional window replays on reconnect or
+reports its own typed gap. On PostgreSQL a subscriber on any replica receives
+the facts. Tool traffic consumes none of the process node-history window, and
+these facts never enter the process lifecycle stream or durable history.

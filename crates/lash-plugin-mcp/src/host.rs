@@ -212,8 +212,7 @@ pub trait McpRootsProvider: Send + Sync + 'static {
 /// Optional server-to-client handlers shared by every connection in a pool.
 #[derive(Clone, Default)]
 pub(crate) struct McpHostServices {
-    pub(crate) observations: Arc<lash_core::McpObservationHub>,
-    pub(crate) observation_policy: lash_core::McpObservationPolicy,
+    pub(crate) route_policy: crate::observations::McpRoutePolicy,
     pub(crate) sampling: Option<Arc<dyn McpSamplingHandler>>,
     pub(crate) elicitation: Option<McpElicitationService>,
     pub(crate) roots: Option<Arc<dyn McpRootsProvider>>,
@@ -323,8 +322,7 @@ impl LashMcpClientHandler {
         Self {
             observations: Arc::new(Mutex::new(crate::observations::Routes::new(
                 server_name,
-                &services.observations,
-                services.observation_policy,
+                services.route_policy,
             ))),
             server_name: server_name.to_string(),
             client_info,
@@ -485,25 +483,11 @@ impl ClientHandler for LashMcpClientHandler {
         self.observations.lock().await.log(params, context);
     }
 
-    async fn on_resource_list_changed(&self, _: NotificationContext<RoleClient>) {
-        self.observations
-            .lock()
-            .await
-            .changed(lash_core::McpList::Resources);
-    }
+    async fn on_resource_list_changed(&self, _: NotificationContext<RoleClient>) {}
 
-    async fn on_prompt_list_changed(&self, _: NotificationContext<RoleClient>) {
-        self.observations
-            .lock()
-            .await
-            .changed(lash_core::McpList::Prompts);
-    }
+    async fn on_prompt_list_changed(&self, _: NotificationContext<RoleClient>) {}
 
     async fn on_tool_list_changed(&self, context: NotificationContext<RoleClient>) {
-        self.observations
-            .lock()
-            .await
-            .changed(lash_core::McpList::Tools);
         if let Some(changes) = &self.tool_changes {
             let id = context
                 .extensions

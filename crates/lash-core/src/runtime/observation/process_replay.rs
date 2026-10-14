@@ -722,6 +722,11 @@ impl ProcessReplayPublishLimits {
 ///   continuity, so no cursor replays cleanly across it.
 #[async_trait::async_trait]
 pub trait ProcessReplayStore: Send + Sync {
+    /// Independent tool-live event class, with its own retention and cursor.
+    fn tool_live_window(&self) -> Option<Arc<dyn crate::ToolLiveReplay>> {
+        None
+    }
+
     /// Assign `events` the process's next positions, in order, make them
     /// replay-visible, notify subscribers in position order, and answer the
     /// published events. Redeliveries are dropped, so the answer may be

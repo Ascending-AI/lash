@@ -131,9 +131,18 @@ impl McpConnectionPool {
                         options,
                     )
                     .await;
-                if let Ok(handle) = &sent {
-                    routes.register(handle.progress_token.clone(), handle.id.clone(), context);
-                }
+                let mut route_lease = if let Ok(handle) = &sent {
+                    routes
+                        .register(handle.progress_token.clone(), handle.id.clone(), context)
+                        .then(|| {
+                            crate::observations::RouteLease::new(
+                                handler.observations.clone(),
+                                handle.id.clone(),
+                            )
+                        })
+                } else {
+                    None
+                };
                 drop(routes);
                 let response = match sent {
                     Ok(handle) => {
@@ -162,6 +171,9 @@ impl McpConnectionPool {
                     Err(err) => Err(err),
                 };
 
+                if let Some(lease) = &mut route_lease {
+                    lease.finish().await;
+                }
                 match response? {
                     result @ ServerResult::CallToolResult(_) => return Ok(result),
                     result @ (ServerResult::InputRequiredResult(_)

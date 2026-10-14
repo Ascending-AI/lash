@@ -104,6 +104,7 @@ pub(super) enum ChronologicalRead {
 
 #[derive(Clone)]
 pub struct RuntimeExecutionContext<'run> {
+    pub(crate) tool_live: Arc<crate::ToolLive>,
     tool_fault_retry: crate::runtime::PollPacing,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
     tool_material_store: Option<Arc<dyn crate::store::ToolMaterialStore>>,
@@ -475,6 +476,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<RuntimeExecutionContext<'static>> {
         Some(RuntimeExecutionContext {
+            tool_live: self.tool_live.clone(),
             tool_fault_retry: self.tool_fault_retry,
             dispatch: Arc::new(self.dispatch.to_static()?),
             tool_material_store: self.tool_material_store.clone(),

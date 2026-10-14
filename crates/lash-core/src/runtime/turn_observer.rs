@@ -62,7 +62,6 @@ use framing::{Frames, Queued};
 #[derive(Clone)]
 pub(in crate::runtime) struct TurnObserver {
     queue: Arc<ObservationQueue>,
-    mcp_publisher: Option<crate::McpLivePublisher>,
     /// The physical turn this publisher's activities are addressed to.
     turn: Option<TurnId>,
     /// The host's session sink discards everything, so session events are
@@ -194,20 +193,11 @@ impl TurnObserver {
             Self {
                 queue: Arc::clone(&queue),
                 turn: None,
-                mcp_publisher: None,
                 quiet_sessions,
                 quiet_activities,
             },
             TurnObservations { queue },
         )
-    }
-
-    pub(in crate::runtime) fn with_mcp_publisher(
-        mut self,
-        publisher: Option<crate::McpLivePublisher>,
-    ) -> Self {
-        self.mcp_publisher = publisher;
-        self
     }
 
     /// A publisher onto the same queue whose activities are addressed to
@@ -422,9 +412,6 @@ impl TurnObservations {
 /// is published synchronously, and every activity it yields takes its id from
 /// its `(replay key, ordinal)`, never from a random source.
 impl ObservationSink for TurnObserver {
-    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        self.mcp_publisher.clone()
-    }
     fn observe(&self, observation: ShiftObservation) {
         let ShiftObservation {
             key,

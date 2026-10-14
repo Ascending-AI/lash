@@ -17,6 +17,7 @@ mod retired_observers;
 mod runtime_host_config;
 mod session_deletion;
 pub use session_deletion::SessionDeleteCompletion;
+mod tool_live;
 mod work_drivers;
 
 pub use drain::{DeploymentDrainStatus, NodeDrainError, NodeDrainReport};
@@ -695,6 +696,7 @@ impl LashCore {
 
 /// Builder for configuring lash core over one [`Backend`].
 pub struct LashCoreBuilder {
+    tool_live_policy: lash_core::ToolLivePolicy,
     output_cuts: Option<crate::RuntimeOutputCuts>,
     prompt_render_pool: Option<Arc<lash_core::plugin::prompt::PromptRenderPool>>,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -804,6 +806,7 @@ impl LashCoreBuilder {
             recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
+            tool_live_policy: lash_core::ToolLivePolicy::default(),
             live_replay_store: None,
             process_replay_store: None,
             serves_sessions: Self::STANDARD_SERVE_SESSIONS,
@@ -1242,7 +1245,7 @@ impl LashCoreBuilder {
             .data_retention
             .take()
             .ok_or(EmbedError::MissingDataRetention)?;
-        let core = self
+        let mut core = self
             .resolve_runtime_host_config(lash_core::facade_support::DataRetentionConfig {
                 attachments: data_retention.attachments,
                 session_revisions: data_retention.session_revisions,
@@ -1266,6 +1269,11 @@ impl LashCoreBuilder {
                 .with_work_limits(core.observation_work_limits),
             )
         });
+        core.tool_live = Arc::new(lash_core::ToolLive::new(
+            live_replay_store.tool_live_window(),
+            process_replay_store.tool_live_window(),
+            self.tool_live_policy,
+        ));
         let language_observation_publisher = Arc::new(
             crate::language_observation::LanguageObservationPublisher::new(
                 Arc::clone(&process_replay_store),

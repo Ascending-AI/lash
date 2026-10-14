@@ -83,6 +83,7 @@ impl PluginOperationInvokeError {
 
 #[derive(Clone)]
 pub struct RuntimeServices {
+    pub tool_live: Arc<crate::ToolLive>,
     pub plugins: Arc<PluginSession>,
 
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
@@ -218,6 +219,7 @@ impl RuntimeServices {
         process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         Self {
+            tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 
             attachment_store,
@@ -262,6 +264,7 @@ impl PersistentRuntimeServices {
         process_env_store: Arc<dyn crate::ProcessEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
+            tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 
             attachment_store,

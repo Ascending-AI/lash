@@ -56,6 +56,8 @@ use crate::support::{
 #[derive(Clone)]
 pub(crate) struct FeedSource {
     work_limits: lash_trace::ObservationWorkLimits,
+    #[cfg(test)]
+    rebuild_barrier: Option<Arc<tokio::sync::Notify>>,
     session_id: SessionId,
     store: lash_core::store::SessionStore,
     live_replay: Arc<dyn LiveReplayStore>,
@@ -75,6 +77,8 @@ impl FeedSource {
         let observation = resident.observe();
         Self {
             work_limits,
+            #[cfg(test)]
+            rebuild_barrier: None,
             published_heads,
             session_id: observation.session_id().clone(),
             transcript_decoders: observation.read_view.transcript_decoders().clone(),
@@ -382,6 +386,10 @@ impl FeedSource {
         requested: &SessionCursor,
         reason: LiveReplayGapReason,
     ) -> Result<(SessionObservation, LiveReplayGap)> {
+        #[cfg(test)]
+        if let Some(barrier) = &self.rebuild_barrier {
+            barrier.notified().await;
+        }
         let snapshot = self.snapshot().await?;
         let latest_revision = self.requested_revision(&snapshot.cursor)?;
         let gap = LiveReplayGap {
@@ -505,7 +513,6 @@ impl AppliedEventIds {
     /// identity is new, and a commit clears the window it settles.
     fn admit(&mut self, item: &SessionObservationStreamItem) -> bool {
         match item {
-            SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_) => true,
             SessionObservationStreamItem::Gap { .. } => {
                 self.clear();
                 true
@@ -552,13 +559,6 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<SessionObserva
 impl SessionObservationStream {
     pub(crate) fn new(source: FeedSource, cursor: SessionCursor) -> Self {
         let limits = source.work_limits;
-        let mcp = source.resident.observe().mcp_observations_enabled.then(|| {
-            source
-                .live_replay
-                .mcp_observations()
-                .unwrap_or_default()
-                .subscribe_session(source.session_id.clone())
-        });
         Self {
             cursor: cursor.clone(),
             state: Some(Box::new(FeedState {
@@ -567,7 +567,6 @@ impl SessionObservationStream {
                 done: false,
                 delivered: None,
                 live: None,
-                mcp,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -660,7 +659,6 @@ struct FeedState {
     /// established it: a `Committed` at or before it is a redelivery.
     delivered: Option<SessionRevision>,
     live: Option<LiveReplaySubscription>,
-    mcp: Option<lash_core::McpLiveSubscription>,
 }
 
 impl FeedState {
@@ -671,19 +669,7 @@ impl FeedState {
     async fn next(
         mut self: Box<Self>,
     ) -> (Box<Self>, Option<Result<SessionObservationStreamItem>>) {
-        let item = if let Some(mut mcp) = self.mcp.take() {
-            let item = tokio::select! {
-                item = mcp.next() => item.map(|item| Ok(match item {
-                    lash_core::McpLiveItem::Observation(fact) => SessionObservationStreamItem::Mcp(fact),
-                    lash_core::McpLiveItem::Gap(reason) => SessionObservationStreamItem::McpGap(reason),
-                })),
-                item = self.step() => item,
-            };
-            self.mcp = Some(mcp);
-            item
-        } else {
-            self.step().await
-        };
+        let item = self.step().await;
         if matches!(item, None | Some(Err(_))) {
             self.done = true;
         }
@@ -801,4 +787,89 @@ pub(crate) fn live_replay_error(err: LiveReplayStoreError) -> EmbedError {
         RuntimeErrorCode::LiveReplay,
         err.to_string(),
     ))
+}
+
+#[cfg(test)]
+mod cancellation_law {
+    use super::*;
+    use crate::tests::*;
+
+    /// A consumed divergence must complete its durable rebuild while tool
+    /// traffic arrives; dropping the read loses the only commit notification.
+    #[tokio::test]
+    async fn divergence_rebuild_completes_under_concurrent_tool_live_traffic() -> Result<()> {
+        let core = explicit_ephemeral_facets(crate::LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(
+            crate::testing::TestProvider::builder()
+                .kind("embed-test")
+                .complete(|_| async { Ok(lash_core::llm::types::LlmResponse::default()) })
+                .build()
+                .into_handle(),
+            mock_llm_profile_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+        let id = SessionId::from("tool-live-divergence");
+        let session = core.session(id.clone()).created().await.open().await?;
+        let snapshot = session.observe().snapshot().await?;
+        let mut feed = session
+            .observe()
+            .subscribe_and_recover(snapshot.cursor.clone());
+        let barrier = Arc::new(tokio::sync::Notify::new());
+        let state = feed.state.as_mut().expect("unpolled feed");
+        state.source.rebuild_barrier = Some(barrier.clone());
+        state.delivered = Some(SessionRevision::new(0));
+        state.live = Some(LiveReplaySubscription::new(
+            vec![Arc::new(
+                SessionObservationEvent::new(
+                    None,
+                    SessionCursor::new("divergence", &id, SessionRevision::new(2), 1),
+                    SessionObservationEventPayload::Committed {
+                        base_revision: SessionRevision::new(1),
+                        entries: Vec::new(),
+                    },
+                )
+                .expect("valid divergence event"),
+            )],
+            futures_util::stream::pending(),
+        ));
+        let owner = lash_core::ExecutionOwner::SessionFrame {
+            session_id: id,
+            agent_frame_id: lash_core::FrameNodeId::new("live-frame").expect("frame"),
+        };
+        let mut live = core
+            .tool_live()
+            .subscribe(lash_core::ToolLiveFilter::Owner(owner.clone()))
+            .await
+            .expect("tool lane");
+        let publisher = core.tool_live().publisher_for_test(lash_core::CallAddress {
+            owner,
+            call_id: lash_core::ToolCallId::fixture("fixture-call"),
+            attempt: 1,
+        });
+        assert!(futures_util::poll!(feed.next()).is_pending());
+        publisher.publish(lash_core::ToolLiveFact::Progress {
+            progress: 1.0,
+            total: None,
+            message: None,
+        });
+        publisher.finish();
+        let _ = live
+            .next()
+            .await
+            .expect("concurrent tool traffic")
+            .expect("tool emission");
+        assert!(
+            futures_util::poll!(feed.next()).is_pending(),
+            "tool traffic cancelled the durable divergence rebuild"
+        );
+        barrier.notify_one();
+        assert!(matches!(
+            feed.next().await,
+            Some(Ok(SessionObservationStreamItem::Gap { .. }))
+        ));
+        core.shutdown().await?;
+        Ok(())
+    }
 }

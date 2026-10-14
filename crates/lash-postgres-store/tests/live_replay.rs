@@ -683,100 +683,103 @@ async fn a_followed_session_idle_past_max_age_keeps_its_window() {
     );
 }
 
-/// MCP-LIVE-ONLY: a protocol call's observations bypass PostgreSQL's replay
-/// cache. Another node and a reconnect see a gap, never cached MCP facts.
+/// TOOL-LIVE-REPLICAS: both execution owners use their replay store's tool
+/// class, and subscribers on another replica receive full call identities.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mcp_call_observations_never_write_the_postgres_replay_cache() {
+async fn session_and_process_tool_progress_reach_subscribers_on_another_replica() {
     use futures_util::StreamExt;
-    use lash::observe::{McpLiveItem, McpObservation};
+    use lash::postgres::{PostgresProcessReplayStore, ProcessReplayPolicy};
+    use lash_core::{
+        CallAddress, ExecutionOwner, ProcessReplayStore, ToolLive, ToolLiveFact, ToolLiveFilter,
+        ToolLiveItem, ToolLivePayload,
+    };
     let database = IsolatedDatabase::create(&required_database_url()).await;
     let schema = fresh_schema();
-    let first = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config(&schema))
+    let mut config = config(&schema);
+    let process_schema = format!("process_replay_{}", uuid::Uuid::new_v4().simple());
+    let mut process = ProcessReplayPolicy::default();
+    process.data.schema = process_schema.clone();
+    process.data.schema_mode = ReplaySchemaMode::Install;
+    process.data.publish_tick = Duration::from_millis(1);
+    process.data.publish_concurrency = 2;
+    process.pool.max_connections = 3;
+    config.process_replay = Some(process);
+    let a_session = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config)
         .await
-        .unwrap();
-    let second = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config(&schema))
+        .expect("session A");
+    let b_session = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config)
         .await
-        .unwrap();
-    let session = SessionId::from("mcp-live-only");
-    let cursor = first.current_cursor(&session, SessionRevision::new(0));
-    let hub = first.mcp_observations().unwrap();
-    let mut local = hub.subscribe_session(session.clone());
-    let _ = local.next().await;
-    let mut remote = second
-        .mcp_observations()
-        .unwrap()
-        .subscribe_session(session.clone());
-    assert!(matches!(remote.next().await, Some(McpLiveItem::Gap(_))));
-    let script = r#"
-import json,sys
-for line in sys.stdin:
-    m=json.loads(line)
-    if m.get('method')=='server/discover':
-        r={'supportedVersions':['2026-07-28'],'resultType':'complete','ttlMs':0,'cacheScope':'private','capabilities':{'tools':{}},'serverInfo':{'name':'fixture','version':'1'}}
-    elif m.get('method')=='tools/list':
-        r={'resultType':'complete','ttlMs':0,'cacheScope':'private','tools':[{'name':'work','inputSchema':{'type':'object'}}]}
-    elif m.get('method')=='tools/call':
-        t=m['params']['_meta']['progressToken']
-        print(json.dumps({'jsonrpc':'2.0','method':'notifications/progress','params':{'progressToken':t,'progress':3,'total':3}}),flush=True)
-        print(json.dumps({'jsonrpc':'2.0','method':'notifications/message','params':{'level':'info','data':{'fixture':'mcp-cache-law'},'_meta':{'progressToken':t}}}),flush=True)
-        r={'content':[{'type':'text','text':'ok'}]}
-    else: continue
-    print(json.dumps({'jsonrpc':'2.0','id':m['id'],'result':r}),flush=True)
-"#;
-    let factory = lash::mcp::McpPluginFactory::new(std::collections::BTreeMap::from([(
-        "fixture".into(),
-        lash::mcp::McpServerConfig::stdio(lash::mcp::McpStdioTransport::new(
-            "python3",
-            vec!["-u".into(), "-c".into(), script.into()],
-        )),
-    )]))
-    .await
-    .unwrap();
-    let context =
-        lash_core::testing::mock_attempt_context().with_mcp_publisher(hub.session(session.clone()));
-    let output = factory
-        .pool()
-        .call_tool(
-            factory.pool().advertised_tools()[0].name(),
-            &serde_json::json!({}),
-            &context,
-        )
-        .await;
-    assert!(output.is_success(), "{output:?}");
-    let mut progress = false;
-    let mut log = false;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !progress || !log {
-            match local.next().await.unwrap() {
-                McpLiveItem::Observation(McpObservation::McpProgress { .. }) => progress = true,
-                McpLiveItem::Observation(McpObservation::McpLog { .. }) => log = true,
-                other => panic!("unexpected live fact {other:?}"),
-            }
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(
-        first.current_cursor(&session, SessionRevision::new(0)),
-        cursor,
-        "MCP facts allocate no replay position"
+        .expect("session B");
+    let a_process = PostgresProcessReplayStore::connect(&endpoints(database.url()), &config)
+        .await
+        .expect("process A");
+    let b_process = PostgresProcessReplayStore::connect(&endpoints(database.url()), &config)
+        .await
+        .expect("process B");
+    let a = ToolLive::new(
+        a_session.tool_live_window(),
+        a_process.tool_live_window(),
+        Default::default(),
     );
-    for store in [&first, &second] {
-        let LiveReplayOutcome::Replayed(events) = store.replay_after_cursor(&cursor).await.unwrap()
-        else {
-            panic!("empty replay");
+    let b = ToolLive::new(
+        b_session.tool_live_window(),
+        b_process.tool_live_window(),
+        Default::default(),
+    );
+    for owner in [
+        ExecutionOwner::SessionFrame {
+            session_id: SessionId::from("replica-call"),
+            agent_frame_id: lash_core::FrameNodeId::new("frame").expect("frame"),
+        },
+        ExecutionOwner::Process {
+            process_id: lash_core::ProcessId::fixture("replica-process"),
+        },
+    ] {
+        let address = CallAddress {
+            owner: owner.clone(),
+            call_id: lash_core::ToolCallId::fixture("replica-tool"),
+            attempt: 2,
         };
-        assert!(events.is_empty(), "no MCP observation row is stored");
+        let mut feed = b
+            .subscribe(ToolLiveFilter::Owner(owner))
+            .await
+            .expect("subscribe B");
+        let call = a.publisher_for_test(address.clone());
+        call.publish(ToolLiveFact::Progress {
+            progress: 3.0,
+            total: Some(3.0),
+            message: Some("replica marker".into()),
+        });
+        call.finish();
+        let item = tokio::time::timeout(Duration::from_secs(5), feed.next())
+            .await
+            .expect("replica delivery")
+            .expect("item")
+            .expect("read");
+        let ToolLiveItem::Emission { cursor, emission } = item else {
+            panic!("progress, not a gap");
+        };
+        assert_eq!(emission.address, address);
+        assert!(matches!(
+            emission.payload,
+            ToolLivePayload::Fact {
+                fact: ToolLiveFact::Progress { progress: 3.0, .. }
+            }
+        ));
+        assert!(!emission.id.producer_epoch.is_empty());
+        assert!(emission.id.ordinal > 0);
+        // Reconnect on B continues only this event class's cursor.
+        let mut replay = b
+            .subscribe_after(ToolLiveFilter::Call(address), Some(cursor))
+            .await
+            .expect("reconnect");
+        assert!(futures_util::poll!(replay.next()).is_pending());
     }
-    assert!(
-        futures_util::poll!(remote.next()).is_pending(),
-        "no cross-node live fan-out"
-    );
-    let mut reconnected = hub.subscribe_session(session);
-    assert!(matches!(
-        reconnected.next().await,
-        Some(McpLiveItem::Gap(_))
-    ));
-    assert!(futures_util::poll!(reconnected.next()).is_pending());
-    factory.pool().shutdown_all().await;
+    let pool = sqlx::PgPool::connect(database.url())
+        .await
+        .expect("catalog pool");
+    let logged: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=ANY($1) AND c.relname LIKE '%_tool_%' AND c.relkind='r' AND c.relpersistence <> 'u'")
+        .bind(vec![schema.clone(), process_schema]).fetch_one(&pool).await.expect("logged tables");
+    assert_eq!(logged, 0, "no tool-live row has a logged table to enter");
+    pool.close().await;
 }

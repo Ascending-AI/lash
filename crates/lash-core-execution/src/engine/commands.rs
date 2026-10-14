@@ -7,11 +7,6 @@ use super::context::ShiftObservation;
 /// Where a step body publishes observations.
 pub trait ObservationSink: Send + Sync {
     fn observe(&self, observation: ShiftObservation);
-
-    /// Node-local MCP publication, outside recorded observations.
-    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        None
-    }
 }
 
 /// An [`ObservationSink`] that drops every observation, for shift paths that
@@ -52,9 +47,6 @@ impl<F> ObservationSink for GatedObservationSink<F>
 where
     F: Fn() -> bool + Send + Sync,
 {
-    fn mcp_publisher(&self) -> Option<crate::McpLivePublisher> {
-        (self.open)().then(|| self.inner.mcp_publisher()).flatten()
-    }
     fn observe(&self, observation: ShiftObservation) {
         if (self.open)() {
             self.inner.observe(observation);

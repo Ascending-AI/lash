@@ -80,8 +80,6 @@ async fn follow(
             match &item {
                 SessionObservationStreamItem::Event(event) => event.cursor.as_str().to_owned(),
                 SessionObservationStreamItem::Gap { .. } => "feed-gap".into(),
-                SessionObservationStreamItem::Mcp(_) => "mcp".into(),
-                SessionObservationStreamItem::McpGap(_) => "mcp-gap".into(),
             },
             "ok",
             start,
@@ -97,7 +95,6 @@ async fn follow(
                 }
             }
             SessionObservationStreamItem::Gap { .. } => delivered.gaps += 1,
-            SessionObservationStreamItem::Mcp(_) | SessionObservationStreamItem::McpGap(_) => {}
         }
     }
     Ok(())
