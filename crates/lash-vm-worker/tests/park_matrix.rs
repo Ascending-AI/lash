@@ -327,6 +327,7 @@ struct ParkScenario {
     drive: Drive,
     program: Program,
     tier: Tier,
+    first_claimant: Option<&'static str>,
     keep: Mutex<Option<lash_postgres_store::testing::IsolatedDatabase>>,
 }
 
@@ -363,8 +364,17 @@ impl Scenario for ParkScenario {
             .commit_mail(create, CREATE)
             .await
             .map_err(|error| error.to_string())?;
-        nodes.start("a");
-        nodes.start("b");
+        if let Some(first) = self.first_claimant {
+            nodes.start(first);
+            // Let the sole claimant finish its initial store work before
+            // introducing its competitor. A scripted fault may stop it;
+            // quiescing also lets the other node start and recover that cut.
+            nodes.quiesce().await;
+            nodes.start(if first == "a" { "b" } else { "a" });
+        } else {
+            nodes.start("a");
+            nodes.start("b");
+        }
         Ok(())
     }
 
@@ -1024,12 +1034,13 @@ impl lash_core_store::checkpoint_graph::TokenCodec for LawHostPart {
 /// settlement (`cell.inject`) and the end (`cell.snapshot`).
 async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: Tier) {
     let program = program(NumberPolicy::Float);
-    let report = Matrix::new()
+    let report = park_matrix()
         .run(|| ParkScenario {
             shared: Arc::default(),
             drive: Drive::Broker,
             program: program.clone(),
             tier,
+            first_claimant: None,
             keep: Mutex::default(),
         })
         .await;
@@ -1056,6 +1067,58 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
     );
 }
 
+fn park_matrix() -> Matrix {
+    // PostgreSQL can give either node the actor. Plan the commit occurrence
+    // across nodes so that changing the claimant cannot strand a cut.
+    Matrix::new().across_nodes()
+}
+
+/// FIG-6254: the census belongs to the commits, even when every fault
+/// cell's first claimant differs from the uncut run's.
+async fn every_park_cut_is_reached_when_b_claims_before_a(tier: Tier) {
+    let program = program(NumberPolicy::Float);
+    let runs = AtomicUsize::new(0);
+    let report = park_matrix()
+        .run(|| ParkScenario {
+            shared: Arc::default(),
+            drive: Drive::Broker,
+            program: program.clone(),
+            tier,
+            first_claimant: Some(if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                "a"
+            } else {
+                "b"
+            }),
+            keep: Mutex::default(),
+        })
+        .await;
+    let first_claim = report
+        .baseline
+        .iter()
+        .find(|write| {
+            write.point.label == CommitLabel::CLAIM
+                && matches!(
+                    write.stored,
+                    lash_durable_test::Stored::Committed { effective: true }
+                )
+        })
+        .expect("the baseline claimed the actor");
+    assert_eq!(first_claim.node.as_ref(), "a");
+    assert!(!report.cells.is_empty(), "the matrix must plan cuts");
+    for cell in &report.cells {
+        if cell.point.kind == lash_durable_test::WriteKind::Actor {
+            assert!(
+                cell.trace.contains("b:claim#1@0 committed"),
+                "b must claim first in the reordered cell: {} {}\n{}",
+                cell.point,
+                cell.fault,
+                cell.trace
+            );
+        }
+    }
+    report.assert_held();
+}
+
 /// The delivery law and the number law, under each bare-number policy: the
 /// effect-value path is the same under both, because it decodes nothing.
 async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers(tier: Tier) {
@@ -1068,6 +1131,7 @@ async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numb
                 drive: Drive::TwoOrders,
                 program: program.clone(),
                 tier,
+                first_claimant: None,
                 keep: Mutex::default(),
             })
             .await
@@ -1077,6 +1141,11 @@ async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numb
 
 // Each tier mounts the same kernel laws; PostgreSQL selection requires a service.
 mod sqlite_memory {
+    #[tokio::test]
+    async fn every_park_cut_is_reached_when_b_claims_before_a() {
+        super::every_park_cut_is_reached_when_b_claims_before_a(super::Tier::SqliteMemory).await;
+    }
+
     #[tokio::test]
     async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut() {
         super::a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(
@@ -1094,6 +1163,12 @@ mod sqlite_memory {
     }
 }
 mod postgres {
+    #[tokio::test]
+    #[ignore = "requires hermetic PostgreSQL through kiln gate"]
+    async fn every_park_cut_is_reached_when_b_claims_before_a() {
+        super::every_park_cut_is_reached_when_b_claims_before_a(super::Tier::Postgres).await;
+    }
+
     #[tokio::test]
     #[ignore = "requires hermetic PostgreSQL through kiln gate"]
     async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut() {
