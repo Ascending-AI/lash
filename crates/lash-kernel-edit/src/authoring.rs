@@ -56,12 +56,16 @@ pub enum Operation {
 /// The complete iterator is collected before names are reserved. Operations
 /// lower in their supplied order; the same draft and operations produce the
 /// same transaction. Generated-name spelling is not part of this contract.
+/// Name reservation covers this supplied batch; callers own any additional
+/// edits they append to or change in the returned transaction.
 ///
 /// All targets address the base document. A later operation can reference an
 /// earlier effect's named output when lexical scope permits, but newly inserted
 /// statements have targetable sites only after applying this transaction.
 /// Planning performs no admission: [`Draft::apply`] checks targets, scope and
 /// types once for the complete transaction and refuses it without mutation.
+/// Its diagnostic indices name the expanded canonical edits, including any
+/// generated argument bindings, rather than the input operations.
 #[must_use]
 pub fn plan(draft: &Draft, operations: impl IntoIterator<Item = Operation>) -> Transaction {
     let operations: Vec<_> = operations.into_iter().collect();

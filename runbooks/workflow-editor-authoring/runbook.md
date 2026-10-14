@@ -60,9 +60,10 @@ and correspondence mapping the edited expression. The TypeScript and Kernel
 document panes must now show the new greeting. Save `03-edited.json` and
 `03-edited.png`.
 
-The Rust helper law separately checks a helper/direct/helper batch, fresh
-names across the complete batch, base-document anchors, and atomic refusal.
-The visual **Add step** flow must use that same planner/admission path.
+The `lash-kernel-edit` authoring law separately checks a helper/direct/helper
+batch, fresh names across the complete batch, base-document anchors, and atomic
+refusal. The visual **Add step** flow must use the public
+`lash::workflow::authoring::plan` API and the same admission path.
 
 ## 4. Run and approve
 

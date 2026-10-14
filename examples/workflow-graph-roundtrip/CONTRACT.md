@@ -85,6 +85,16 @@ A refused transaction is HTTP 422 `edit_refused` with
 `details.diagnostics: [{ edit, site, message }]`, and the saved version is
 unchanged.
 
+`POST /workflow/plan` accepts this example's `steps` request vocabulary:
+`{ "direct": <Edit> }` or `{ "effect": { at, effect, args, result, binding } }`.
+The adapter converts these to `lash::workflow::authoring::Operation` and calls
+`plan` before admitting the transaction against a cloned draft. It returns the
+canonical transaction and preview without changing the saved version. Send the
+returned edits to `/workflow/edits` to save against that same version.
+The HTTP operation format belongs to this example; the public authoring API
+defines no additional serialization protocol. Planning refusals are HTTP 422
+`plan_refused`, with diagnostic indices into the expanded canonical edits.
+
 ## Running
 
 `POST /run` answers an SSE stream. Each `run_event` is:

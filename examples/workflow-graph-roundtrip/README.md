@@ -1,10 +1,11 @@
 # Visual workflow editor
 
 This example demonstrates a visual editor over Lash's canonical workflow
-documents and typed edits. The optional pure planner lives in `src/authoring.rs`;
-`src/authoring_http.rs` and `frontend/index.html` are its host. It is an example
-of composing helpers with direct edits, not a supported SDK or a second document
-model. No new production API or wire compatibility contract is introduced.
+documents and typed edits. It consumes the public
+`lash::workflow::authoring::{Operation, plan}` API to compose higher-level
+helpers with direct edits. `src/authoring_http.rs` and `frontend/index.html`
+own the transport and presentation; the planner lives in `lash-kernel-edit`.
+Both paths produce the same canonical transaction and use the same admission.
 
 From an isolated Kiln fork, run:
 
@@ -44,7 +45,7 @@ compiler. It deliberately does not infer a high-level form for arbitrary compute
 inputs. Node positions are derived, not persistent user layout.
 
 **Advanced** contains TypeScript import/export, the kernel document, and the
-original helper/direct-edit transaction experiment. Queue a direct edit between
+helper/direct-edit transaction inspector. Queue a direct edit between
 two helpers, preview their combined transaction, then apply it. The preview
 validates a cloned draft without publishing. Generated statements remain
 available to direct edits. Import validates before replacing the document and
@@ -80,7 +81,7 @@ Scope inputs expose enclosing bindings without turning them into workflow entry
 parameters. Running always invokes the entry.
 
 Add-step forms support the mocked Gmail, web search, message and status actions.
-The helper chooses a fresh result binding for each visual insertion. A rejected
+The editor chooses a fresh result binding for each visual insertion. A rejected
 edit preserves the saved document and reports the error in the current panel.
 
 Return and Finish are actual terminal statements. Return exits the current
@@ -99,20 +100,46 @@ Editing an existing terminal's result mapping changes only its value; it does
 not move termination earlier or skip intervening effects. The shortcut emits
 ordinary canonical edits and adds no kernel or dialect behavior.
 
-## API experiment
+## Public authoring API
 
-`plan(&Draft, Vec<Step>)` produces an ordinary `Transaction`. `Step::Effect`
+`lash::workflow::authoring::plan(&draft, operations)` produces an ordinary
+`Transaction` from an array, vector or iterator of `Operation`s.
+`Operation::InsertEffect`
 accepts a base-document position, effect name, expression arguments, result
-type and explicit result binding. `Step::Direct` accepts any existing `Edit`.
+type and explicit result binding. `Operation::Edit` accepts any existing `Edit`.
 Computed arguments become visible bindings before the effect statement.
 Generated temporary names avoid names throughout the base and complete batch.
 The planner performs no I/O, publication, admission or runtime execution.
 
+```rust
+use lash::workflow::authoring::{Operation, plan};
+use lash::workflow::document::{EffectName, Name, Type};
+
+// The host supplies a draft, insertion position, input expression and raw edit.
+let transaction = plan(&draft, [
+    Operation::InsertEffect {
+        at: insertion,
+        effect: EffectName::new("research.search")?,
+        args: vec![search_input],
+        result: Type::Any,
+        binding: Name::new("evidence"),
+    },
+    Operation::Edit(raw_edit),
+]);
+let applied = draft.apply(&transaction, &environment)?;
+```
+
 The same helpers accept documents imported from TypeScript or changed by direct
 edits. Hosts retain their own templates, HTTP contracts, revisions, layout and
-publication policy. The production candidate would belong alongside
-`lash-kernel-edit`, exposed through `lash::workflow`; this example leaves it local until a separate library proposal establishes its
-supported API. Host layout and presentation do not belong in that library.
+publication policy. The example converts its private HTTP request enum to the
+public operations. Those operations are Rust construction values, with no new
+wire format; the returned `Transaction` retains its existing serialization.
+Host layout and presentation do not belong in the authoring API.
+
+Admission diagnostics index the flattened canonical edits, including generated
+argument bindings. Temporary-name spelling is an implementation detail. Name
+reservation covers the batch supplied to `plan`; if a host later changes the
+returned transaction, it owns the effects of those additional edits.
 
 All edit targets are sites in the transaction's base document. Original nodes
 remain targetable after preceding insertions in the same batch. A newly inserted

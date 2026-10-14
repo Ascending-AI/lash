@@ -6,7 +6,6 @@
 //! lash's execution overlay of the document's sites.
 
 use lash::sync::MutexExt;
-pub mod authoring;
 mod authoring_http;
 mod catalog;
 mod contract;

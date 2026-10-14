@@ -159,15 +159,43 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     .await;
     assert_eq!(unchanged["identity"], opened["identity"]);
 
+    // The host previews public authoring operations, then submits their
+    // ordinary transaction through the same edit/admission route.
+    let planned = answer(
+        client
+            .post(format!("{base}/workflow/plan"))
+            .json(&json!({"version": opened["version"], "steps": [
+                {"direct": {"replace_expression": {
+                    "expression": literal,
+                    "with": {"literal": {"text": "Edited as a kernel document"}},
+                }}},
+                {"effect": {
+                    "at": {"block": {"unit": {"function": "onboarding"}, "path": []}, "before": bound["site"]},
+                    "effect": "display.show_message",
+                    "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],
+                    "result": "null",
+                    "binding": "extra_message",
+                }},
+            ]}))
+            .send()
+            .await
+            .expect("preview authoring operations"),
+    )
+    .await;
+    let still_saved = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("get after preview"),
+    )
+    .await;
+    assert_eq!(still_saved["identity"], opened["identity"]);
+    assert_eq!(still_saved["version"], opened["version"]);
     let edited = answer(
         client
             .post(format!("{base}/workflow/edits"))
-            .json(&json!({"version": opened["version"], "edits": [
-                {"replace_expression": {
-                    "expression": literal,
-                    "with": {"literal": {"text": "Edited as a kernel document"}},
-                }},
-            ]}))
+            .json(&json!({"version": opened["version"], "edits": planned["transaction"]["edits"]}))
             .send()
             .await
             .expect("edits"),
@@ -194,7 +222,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         survivors
             .iter()
             .filter(|survivor| survivor["edited"] == true)
-            .map(|survivor| &survivor["to"])
+            .map(|survivor| &survivor["from"])
             .eq([&literal]),
         "the correspondence marks the replaced literal alone as edited"
     );
@@ -224,8 +252,11 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     }
     assert_eq!(
         last.display.messages,
-        ["Edited as a kernel document"],
-        "the run showed the edited message"
+        [
+            "Added through public authoring",
+            "Edited as a kernel document"
+        ],
+        "the run showed the helper's input and the directly edited message"
     );
     assert_eq!(last.display.progress, 100.0);
     assert_eq!(

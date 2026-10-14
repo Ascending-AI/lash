@@ -1,15 +1,15 @@
-//! Throwaway HTTP adapter for the authoring seam experiment.
+//! Example-owned HTTP adapter for Lash's public authoring API.
 //! The planner knows no HTTP, revisions, template catalog or publication policy.
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
+use lash::workflow::authoring::{Operation, plan};
 use lash::workflow::document::{EffectName, Expr, Name, Type};
 use lash::workflow::edit::{Correspondence, Draft, Edit, Position, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::authoring::{Step, plan};
 use crate::{AppState, ErrorResponse, WorkflowView, runtime};
 
 #[derive(Serialize)]
@@ -134,17 +134,17 @@ pub(crate) enum StepInput {
     },
 }
 
-impl From<StepInput> for Step {
+impl From<StepInput> for Operation {
     fn from(value: StepInput) -> Self {
         match value {
-            StepInput::Direct(edit) => Self::Direct(edit),
+            StepInput::Direct(edit) => Self::Edit(edit),
             StepInput::Effect {
                 at,
                 effect,
                 args,
                 result,
                 binding,
-            } => Self::Effect {
+            } => Self::InsertEffect {
                 at,
                 effect,
                 args,
@@ -179,7 +179,7 @@ pub(crate) async fn preview(
     check_version(request.version, current.version)?;
     let transaction = plan(
         &current.draft,
-        request.steps.into_iter().map(Step::from).collect(),
+        request.steps.into_iter().map(Operation::from),
     );
     let applied = current
         .draft
