@@ -455,6 +455,45 @@ impl TurnServices for RuntimeTurnServices {
         )
         .await;
     }
+
+    /// Published at the session's durable head, which the turn has not
+    /// moved: the revision its drive would have published at.
+    async fn publish_model_call(
+        &self,
+        cx: &ActorContext,
+        row: &TurnRow,
+        record: &crate::LlmCallRecord,
+    ) -> Result<(), TurnError> {
+        let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
+        let activity =
+            crate::runtime::turn_driver::model_call_activity(&controller, &row.run, record);
+        let factory = cx.backend().session_store_factory();
+        let revision = match crate::SessionCommitStore::load_session_head_meta(
+            factory.as_ref(),
+            &row.session,
+        )
+        .await
+        {
+            Ok(head) => head.as_ref().map_or(
+                crate::SessionRevision::new(0),
+                crate::SessionRevision::of_durable_head,
+            ),
+            // The live stream is best effort: a reader that misses the
+            // record reads the store.
+            Err(error) => {
+                tracing::warn!(session_id = %row.session, %error, "a session's head was not read for its model call's record");
+                return Ok(());
+            }
+        };
+        LiveActivity {
+            live: self.runtimes.live_replay(),
+            session: row.session.clone(),
+            revision,
+        }
+        .publish(Some(&row.run), activity)
+        .await;
+        Ok(())
+    }
 }
 
 /// The host's batching, as the session's runtime holds it, over the

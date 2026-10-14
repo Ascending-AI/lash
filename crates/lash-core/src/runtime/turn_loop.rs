@@ -23,7 +23,10 @@ fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
 /// physical turn `turn_id` admitted under `controller`'s scope (ADR 0105 §1:
 /// `(replay key, ordinal)` is the identity). Frames of one logical turn share
 /// the scope's journal key, so `turn_id` and `lane` keep each physical turn's
-/// lanes distinct.
+/// lanes distinct. A lane whose content its key fixes (the turn's start, its
+/// admission's inputs, one model call's record) is published under one id
+/// by every owner; one that sequences a drive's work names the drive in
+/// `lane` ([`ActorContext::next_drive`]).
 pub(in crate::runtime) fn turn_observation_cursor(
     scoped_effect_controller: &ActorContext,
     turn_id: &TurnId,

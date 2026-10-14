@@ -41,7 +41,7 @@ mod output_boundary;
 use lash_durable::DomainWrite;
 use lash_durable::DurableError;
 use lash_durable::domain::{
-    ModelCallId, PromptCallKey, PromptWrite, RunSeq, SessionMailWrite, TurnWrite,
+    ModelCallId, PhaseAdvance, PromptCallKey, PromptWrite, RunSeq, SessionMailWrite, TurnWrite,
 };
 use output_boundary::OutputBoundary;
 
@@ -464,7 +464,10 @@ pub async fn run_phases(
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
-                        phase: UnfinishedPhase::requested(pin.clone(), checkpoint),
+                        phase: PhaseAdvance::Model {
+                            pin: pin.clone(),
+                            checkpoint,
+                        },
                         iteration: current,
                     }));
                     // The turn's first phase commit exports the admission
@@ -527,7 +530,12 @@ pub async fn run_phases(
                         .turn_cancel
                         .filter(|request| request.mode == crate::TurnCancelMode::Immediate)
                     {
-                        drive.settle_cancelled_answer(cx, id).await?;
+                        turn_cancel::settle_answer(
+                            cx,
+                            services,
+                            turn_cancel::AnsweredPhase::Driven(drive.as_mut(), id),
+                        )
+                        .await?;
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
                         return stop(cx, services, &row, Some(request), stopped, heads).await;
                     }
@@ -580,7 +588,7 @@ pub async fn run_phases(
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
-                        phase: UnfinishedPhase::Tools {
+                        phase: PhaseAdvance::Tools {
                             run: cell,
                             checkpoint,
                         },
@@ -747,7 +755,7 @@ pub async fn run_phases(
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),
                     run: run.clone(),
-                    phase: UnfinishedPhase::Tools {
+                    phase: PhaseAdvance::Tools {
                         run: RunSeq(id.0),
                         checkpoint,
                     },

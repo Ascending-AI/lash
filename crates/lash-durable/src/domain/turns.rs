@@ -55,18 +55,72 @@ pub enum ModelCall {
     },
 }
 
-impl UnfinishedPhase {
-    /// A model phase whose pinned call is in flight: the phase
-    /// `model.start` commits.
+/// The phase a turn advances to ([`TurnWrite::Advance`]): a model call
+/// `model.start` admits, or a tool round or code cell `model.done` admits.
+/// An advance never carries a receipt: the model phase it writes is always
+/// [`ModelCall::Requested`], and only [`TurnWrite::Answer`] records one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PhaseAdvance {
+    /// A model call is admitted, its request pinned before its first byte.
+    Model {
+        /// The pinned call.
+        pin: ModelPin,
+        /// The PhaseRoot that re-delivers the call.
+        checkpoint: NodeId,
+    },
+    /// A tool round or a code cell is admitted and its bodies may run.
+    Tools {
+        /// The round's run.
+        run: RunSeq,
+        /// The PhaseRoot that re-delivers the round.
+        checkpoint: NodeId,
+    },
+}
+
+impl PhaseAdvance {
+    /// The stored spelling and its argument, as [`UnfinishedPhase::stored`]
+    /// spells the phase the advance leaves.
     #[must_use]
-    pub fn requested(pin: ModelPin, checkpoint: NodeId) -> Self {
-        Self::Model {
-            pin,
-            checkpoint,
-            call: ModelCall::Requested,
+    pub fn stored(&self) -> (&'static str, Option<u64>) {
+        match self {
+            Self::Model { pin, .. } => ("model", Some(u64::from(pin.attempt))),
+            Self::Tools { run, .. } => ("tools", Some(run.0)),
         }
     }
 
+    /// The checkpoint a restore resumes the advanced turn from.
+    #[must_use]
+    pub fn checkpoint(&self) -> NodeId {
+        match self {
+            Self::Model { checkpoint, .. } | Self::Tools { checkpoint, .. } => *checkpoint,
+        }
+    }
+
+    /// The pinned model call; `Some` exactly for a model phase.
+    #[must_use]
+    pub fn model(&self) -> Option<&ModelPin> {
+        match self {
+            Self::Model { pin, .. } => Some(pin),
+            Self::Tools { .. } => None,
+        }
+    }
+}
+
+impl From<PhaseAdvance> for UnfinishedPhase {
+    /// The phase the advance leaves the turn in.
+    fn from(advance: PhaseAdvance) -> Self {
+        match advance {
+            PhaseAdvance::Model { pin, checkpoint } => Self::Model {
+                pin,
+                checkpoint,
+                call: ModelCall::Requested,
+            },
+            PhaseAdvance::Tools { run, checkpoint } => Self::Tools { run, checkpoint },
+        }
+    }
+}
+
+impl UnfinishedPhase {
     /// The stored spelling and its argument: a model call's attempt or a
     /// tool round's run.
     #[must_use]
@@ -254,10 +308,9 @@ pub enum TurnWrite {
     },
     /// Move an unfinished turn to `phase`. A model phase admits its pin's
     /// call, which becomes the turn's latest, [`ModelCall::Requested`]:
-    /// only [`Self::Answer`] records a receipt, and the phase's `call` is
-    /// not written. Any other phase keeps the turn's call count. Every
-    /// phase consumes the turn's receipt: the row drops it and its root
-    /// goes. Refused with
+    /// only [`Self::Answer`] records a receipt. Any other phase keeps the
+    /// turn's call count. Every phase consumes the turn's receipt: the row
+    /// drops it and its root goes. Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Advance {
@@ -266,7 +319,7 @@ pub enum TurnWrite {
         /// The run.
         run: TurnId,
         /// The new phase.
-        phase: UnfinishedPhase,
+        phase: PhaseAdvance,
         /// The protocol iteration.
         iteration: u32,
     },

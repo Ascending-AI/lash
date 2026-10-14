@@ -194,6 +194,9 @@ impl World {
 enum Answer {
     /// Text, streamed in three deltas: [`ANSWERS`] by send.
     Text,
+    /// Text answered whole, never streamed: [`ANSWERS`] by send. Its
+    /// derivation publishes its parts from the receipt.
+    Unstreamed,
     /// A call to [`WRITE`] beside text, then `done`.
     Tool,
     /// A TypeScript cell that calls [`WRITE`] with its send's marker, then
@@ -242,6 +245,13 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                             lash_core::llm::transport::TransportRetryVerdict::NotRetryable,
                         ));
                     }
+                    Answer::Unstreamed => LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: marker.to_owned(),
+                            response_meta: None,
+                        }],
+                        ..LlmResponse::default()
+                    },
                     Answer::Text => {
                         let (head, tail) = marker.split_at(4);
                         let (middle, tail) = tail.split_at(6);
@@ -770,9 +780,9 @@ impl Deployment {
             .clone()
     }
 
-    /// The sealed model-call records the session's live feed published
-    /// after `cursor`: what any host following it is handed, once each.
-    async fn published_calls(&self, cursor: &lash_core::SessionCursor) -> usize {
+    /// The turn activity the session's live feed published after `cursor`:
+    /// what any host following it is handed, once each.
+    async fn published(&self, cursor: &lash_core::SessionCursor) -> Vec<lash_core::TurnEvent> {
         use lash::observe::{LiveReplayStore as _, SessionObservationEventPayload};
         let Ok(lash_core::LiveReplayOutcome::Replayed(events)) =
             self.live_replay.replay_after_cursor(cursor).await
@@ -781,11 +791,22 @@ impl Deployment {
         };
         events
             .iter()
-            .filter(|event| {
-                matches!(&event.payload,
-                    SessionObservationEventPayload::TurnActivity(activity)
-                    if matches!(activity.event, lash_core::TurnEvent::ModelCallRecorded { .. }))
+            .filter_map(|event| match &event.payload {
+                SessionObservationEventPayload::TurnActivity(activity) => {
+                    Some(activity.event.clone())
+                }
+                _ => None,
             })
+            .collect()
+    }
+
+    /// The sealed model-call records the session's live feed published
+    /// after `cursor`.
+    async fn published_calls(&self, cursor: &lash_core::SessionCursor) -> usize {
+        self.published(cursor)
+            .await
+            .iter()
+            .filter(|event| matches!(event, lash_core::TurnEvent::ModelCallRecorded { .. }))
             .count()
     }
 
@@ -1668,4 +1689,104 @@ async fn an_after_step_cancel_at_a_failed_receipt_ends_as_the_uncut_run_at_every
         lash::TurnCancelMode::AfterStep,
     )
     .await;
+}
+
+/// FIG-6274: a node that serves only the session's `Immediate` cancel ends
+/// an answered model phase as every other path does, publishing the paid
+/// call's sealed record once. A dies as the receipt of a call whose stream
+/// it finishes commits; B's build cannot finish that stream, so it claims
+/// the session for the cancel alone and ends the turn from its rows.
+#[tokio::test]
+async fn a_cancel_only_node_ending_an_answered_phase_publishes_the_record_once() {
+    let deployment = Deployment::new(
+        Setup::new(Answer::Text, Hooks::All).b_on_its_own_core(Hooks::StreamAndResponse),
+        |script| {
+            script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::CommitThenAbort);
+        },
+    )
+    .await;
+    let handle = deployment.send().await;
+    deployment
+        .until("A dies with its receipt", |deployment| {
+            deployment.cut(CommitLabel::MODEL_ANSWER)
+        })
+        .await;
+    handle
+        .cancel()
+        .mode(lash::TurnCancelMode::Immediate)
+        .await
+        .expect("the cancel is requested");
+    deployment.take_over().await;
+    deployment.settle().await;
+    assert!(
+        claimed_by(&deployment, "b"),
+        "the cancel-only node ended the turn:\n{}",
+        deployment.nodes.script().rendered_trace()
+    );
+    let cursor = handle.cursor().clone();
+    let output = handle.output().await.expect("the turn settles");
+    assert_eq!(output.status(), lash::TurnStatus::Cancelled);
+    assert_eq!(
+        deployment.world.sends(),
+        1,
+        "the paid answer is bought once"
+    );
+    assert_eq!(
+        deployment.published_calls(&cursor).await,
+        1,
+        "the paid call's record is published once"
+    );
+    deployment.end();
+}
+
+/// The usage and response-part observations the session's live feed
+/// published for a turn whose answer was never streamed: uncut, or with A
+/// killed as its receipt commits and B deriving it.
+async fn derived_observations(cut: bool) -> Vec<String> {
+    let deployment = Deployment::new(Setup::new(Answer::Unstreamed, Hooks::All), |script| {
+        if cut {
+            script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::CommitThenAbort);
+        }
+    })
+    .await;
+    let handle = deployment.send().await;
+    if cut {
+        deployment
+            .until("A dies with its receipt", |deployment| {
+                deployment.cut(CommitLabel::MODEL_ANSWER)
+            })
+            .await;
+        deployment.take_over().await;
+    }
+    deployment.settle().await;
+    let cursor = handle.cursor().clone();
+    handle.output().await.expect("the turn settles");
+    let observed = deployment
+        .published(&cursor)
+        .await
+        .into_iter()
+        .filter_map(|event| match event {
+            lash_core::TurnEvent::Usage { usage, .. } => Some(format!("usage {usage:?}")),
+            lash_core::TurnEvent::StreamBlock(block) => Some(format!("part {block:?}")),
+            _ => None,
+        })
+        .collect();
+    deployment.end();
+    observed
+}
+
+/// FIG-6274: a successor's derivation publishes every observation it makes.
+/// A dies as the receipt of an answer it never streamed commits, after it
+/// published its own activity; B restores the turn and derives the receipt.
+/// The feed holds the answer's parts and its usage as the uncut run's does:
+/// none is dropped as a repeat of an id A published.
+#[tokio::test]
+async fn a_successors_usage_and_parts_all_reach_the_feed() {
+    let uncut = derived_observations(false).await;
+    assert!(
+        uncut.iter().any(|observed| observed.starts_with("usage"))
+            && uncut.iter().any(|observed| observed.starts_with("part")),
+        "the uncut run publishes the answer's usage and parts: {uncut:#?}"
+    );
+    assert_eq!(derived_observations(true).await, uncut);
 }

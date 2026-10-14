@@ -283,7 +283,7 @@ impl Activation for PoisonFirst {
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session(),
                 run: run(),
-                phase: UnfinishedPhase::Tools {
+                phase: lash_durable::domain::PhaseAdvance::Tools {
                     run: lash_durable::domain::RunSeq(1),
                     checkpoint,
                 },

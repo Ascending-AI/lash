@@ -263,7 +263,7 @@ pub(super) async fn run(
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),
-                phase: UnfinishedPhase::Tools { run, checkpoint },
+                phase: lash_durable::domain::PhaseAdvance::Tools { run, checkpoint },
                 iteration,
             }));
             if *unsettled {

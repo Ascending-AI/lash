@@ -65,9 +65,9 @@ pub use session_mail::{
 };
 pub use snapshots::SnapshotRev;
 pub use turns::{
-    ModelCall, ModelPin, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite, StoredValues,
-    TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace, TurnNamespaceWrite, TurnRow,
-    TurnWrite, UnfinishedPhase,
+    ModelCall, ModelPin, PhaseAdvance, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite,
+    StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace, TurnNamespaceWrite,
+    TurnRow, TurnWrite, UnfinishedPhase,
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, StoredWait, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId,

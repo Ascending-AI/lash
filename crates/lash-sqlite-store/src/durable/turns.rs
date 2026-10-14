@@ -188,7 +188,7 @@ pub(super) fn apply(
                         stored,
                         argument.map(integer::<i64>).transpose()?,
                         i64::from(*iteration),
-                        phase.checkpoint().map(|checkpoint| checkpoint.to_hex()),
+                        phase.checkpoint().to_hex(),
                         pin.map(|pin| pin.request_ref.as_str()),
                         pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
@@ -200,8 +200,8 @@ pub(super) fn apply(
                 .optional()?;
             match advanced {
                 Some(()) => {
-                    let next = phase.checkpoint().map(|checkpoint| checkpoint.to_hex());
-                    if let Some(old) = replaced.filter(|old| Some(old) != next.as_ref()) {
+                    let next = phase.checkpoint().to_hex();
+                    if let Some(old) = replaced.filter(|old| *old != next) {
                         commit.retired.stored(old);
                     }
                     if let Some(answer) = consumed {

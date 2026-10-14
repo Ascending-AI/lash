@@ -150,6 +150,25 @@ pub trait TurnServices: Send + Sync {
     /// before it published the commit. Commits nothing.
     async fn announce_head(&self, _cx: &ActorContext, _session: &SessionId) {}
 
+    /// Publish `record`, the sealed model-call record of the receipt
+    /// `row`'s model phase holds, on the session's live stream under the id
+    /// a drive that settles the receipt publishes it with: what a node that
+    /// holds no drive of the turn publishes when the turn's cancel ends its
+    /// answered phase (FIG-6274). Services with no live stream publish
+    /// nothing. Commits nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the turn's scope cannot be admitted.
+    async fn publish_model_call(
+        &self,
+        _cx: &ActorContext,
+        _row: &TurnRow,
+        _record: &crate::LlmCallRecord,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
+
     /// Propose the trace admission of `run`, the turn `cx` admits: the
     /// scope its `turn.admit` commit retains, and the candidate that commit
     /// settles (FIG-5395). `None` when the services trace nothing.
@@ -1221,6 +1240,38 @@ pub enum TurnAdmitRefusal {
     OpenTurnExists(SessionId),
 }
 
+/// The paid answer of receipt `root`, which `row`'s model phase names.
+///
+/// # Errors
+///
+/// [`TurnRestoreError`] when the receipt does not read or decode.
+pub(super) async fn paid_answer(
+    cx: &ActorContext,
+    row: &TurnRow,
+    root: lash_durable::domain::checkpoint_graph::NodeId,
+) -> Result<ModelAnswer, TurnRestoreError> {
+    let limits = cx.backend().config().settings().graph_reads.owner();
+    let graph = cx
+        .durable_reads()?
+        .hydrate(
+            lash_durable::domain::graph::RootOwner::ModelAnswer {
+                session: row.session.clone(),
+                run: row.run.clone(),
+            },
+            Some(root),
+            limits,
+        )
+        .await?;
+    lash_core_execution::runtime::actor::model_receipt::ModelReceipt::<ModelAnswer>::load(
+        &graph, root, limits,
+    )
+    .map(|receipt| receipt.answer)
+    .map_err(|reason| TurnRestoreError::Undecodable {
+        run: row.run.clone(),
+        reason,
+    })
+}
+
 /// Why a turn could not be restored from its rows.
 #[derive(Debug, thiserror::Error)]
 pub enum TurnRestoreError {
@@ -1415,34 +1466,6 @@ impl<'a> TurnRestore<'a> {
         self.row
     }
 
-    /// The receipt `root` the turn's row names beside its model phase.
-    async fn receipt(
-        &self,
-        root: lash_durable::domain::checkpoint_graph::NodeId,
-    ) -> Result<ModelAnswer, TurnRestoreError> {
-        let limits = self.cx.backend().config().settings().graph_reads.owner();
-        let graph = self
-            .cx
-            .durable_reads()?
-            .hydrate(
-                lash_durable::domain::graph::RootOwner::ModelAnswer {
-                    session: self.row.session.clone(),
-                    run: self.row.run.clone(),
-                },
-                Some(root),
-                limits,
-            )
-            .await?;
-        lash_core_execution::runtime::actor::model_receipt::ModelReceipt::<ModelAnswer>::load(
-            &graph, root, limits,
-        )
-        .map(|receipt| receipt.answer)
-        .map_err(|reason| TurnRestoreError::Undecodable {
-            run: self.row.run.clone(),
-            reason,
-        })
-    }
-
     /// What the turn's checkpoint records for preparing the resumed turn:
     /// its before-turn callback decisions, its retained trace scope and its
     /// run's recorded configuration, so no before-turn callback runs, no
@@ -1500,7 +1523,7 @@ impl<'a> TurnRestore<'a> {
             UnfinishedPhase::Model {
                 call: ModelCall::Answered { receipt },
                 ..
-            } => Some(self.receipt(*receipt).await?),
+            } => Some(paid_answer(self.cx, row, *receipt).await?),
             UnfinishedPhase::Admitted
             | UnfinishedPhase::Model {
                 call: ModelCall::Requested,

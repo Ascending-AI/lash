@@ -1,7 +1,7 @@
 //! A turn's model call identity (P1, FIG-5255; ADR 0133 §6).
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
-use crate::domain::{ModelCall, ModelPin, RunSeq, TurnWrite, UnfinishedPhase};
+use crate::domain::{ModelCall, ModelPin, PhaseAdvance, RunSeq, TurnWrite, UnfinishedPhase};
 use crate::{DomainWrite, DurableInstant, DurableStore};
 use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
 use lash_sansio::{SessionId, TurnId};
@@ -30,13 +30,11 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
     let nodes = &nodes;
     let commit = |write: TurnWrite| async move {
         let mut tx = store.begin(actor, epoch).await?;
-        if let TurnWrite::Advance { phase, .. } = &write
-            && let Some(checkpoint) = phase.checkpoint()
-        {
+        if let TurnWrite::Advance { phase, .. } = &write {
             let node = nodes
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get(&checkpoint)
+                .get(&phase.checkpoint())
                 .cloned();
             tx.stage(node);
         }
@@ -52,7 +50,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             .insert(root, node);
         root
     };
-    let model = |call: u32, attempt: u32| UnfinishedPhase::Model {
+    let model = |call: u32, attempt: u32| PhaseAdvance::Model {
         pin: ModelPin {
             call,
             attempt,
@@ -61,9 +59,8 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             stream_from: format!("stream-{call}"),
         },
         checkpoint: checkpoint(&format!("checkpoint-{call}-{attempt}")),
-        call: ModelCall::Requested,
     };
-    let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
+    let advance = |phase: PhaseAdvance| TurnWrite::Advance {
         session: id.clone(),
         run: run.clone(),
         phase,
@@ -98,7 +95,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
         (model(1, 1), (1, Some(1)), "the first call"),
         (model(1, 2), (1, Some(1)), "the first call's resend"),
         (
-            UnfinishedPhase::Tools {
+            PhaseAdvance::Tools {
                 run: RunSeq(1),
                 checkpoint: checkpoint("round"),
             },
@@ -116,6 +113,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             "{name} read back {read_back:?}, not {expected:?}"
         );
         let stored = store.turn(id).await?.map(|row| row.phase);
+        let phase = UnfinishedPhase::from(phase);
         ensure!(
             stored.as_ref() == Some(&phase),
             "{name} stored {stored:?}, not {phase:?}"
@@ -217,7 +215,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     );
 
     let (checkpoint, checkpoint_node) = super::tagged_node("receipt-phase");
-    let model = UnfinishedPhase::Model {
+    let model = PhaseAdvance::Model {
         pin: ModelPin {
             call: 1,
             attempt: 1,
@@ -226,9 +224,8 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
             stream_from: "stream-1".to_owned(),
         },
         checkpoint,
-        call: ModelCall::Requested,
     };
-    let advance = |phase: UnfinishedPhase| TurnWrite::Advance {
+    let advance = |phase: PhaseAdvance| TurnWrite::Advance {
         session: id.clone(),
         run: run.clone(),
         phase,
@@ -236,15 +233,12 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     };
     commit(advance(model.clone()), Some(checkpoint_node)).await?;
     ensure!(
-        row().await?.phase == model && retired(receipt().await),
+        row().await?.phase == UnfinishedPhase::from(model.clone()) && retired(receipt().await),
         "a model phase held a receipt before one was recorded"
     );
     commit(answer(first), Some(first_node)).await?;
     let answered = row().await?;
-    let UnfinishedPhase::Model {
-        pin, checkpoint, ..
-    } = model.clone()
-    else {
+    let PhaseAdvance::Model { pin, checkpoint } = model.clone() else {
         unreachable!("the phase is a model phase");
     };
     ensure!(
@@ -273,7 +267,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
 
     let (round, round_node) = super::tagged_node("receipt-round");
     commit(
-        advance(UnfinishedPhase::Tools {
+        advance(PhaseAdvance::Tools {
             run: RunSeq(1),
             checkpoint: round,
         }),
@@ -292,7 +286,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
 
     let (next, next_node) = super::tagged_node("receipt-next-phase");
     commit(
-        advance(UnfinishedPhase::Model {
+        advance(PhaseAdvance::Model {
             pin: ModelPin {
                 call: 2,
                 attempt: 1,
@@ -301,7 +295,6 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
                 stream_from: "stream-2".to_owned(),
             },
             checkpoint: next,
-            call: ModelCall::Requested,
         }),
         Some(next_node),
     )

@@ -422,7 +422,7 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::text(stored),
                 Value::Int(argument.map(integer::<i64>).transpose()?),
                 Value::int(i64::from(*iteration)),
-                Value::Text(phase.checkpoint().map(|checkpoint| checkpoint.to_hex())),
+                Value::text(phase.checkpoint().to_hex()),
                 Value::Text(pin.map(|pin| pin.request_ref.clone())),
                 Value::Int(pin.map(|pin| pin.deadline.0)),
                 Value::int(epoch.0),

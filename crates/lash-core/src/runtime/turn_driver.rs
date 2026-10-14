@@ -24,6 +24,7 @@ pub(in crate::runtime) use trace::TurnPhaseSpan;
 
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
+pub(in crate::runtime) use handlers::model_call_activity;
 pub(super) use trace::protocol_step_trace_event;
 
 pub(super) struct RuntimeTurnDriver<'a> {

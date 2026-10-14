@@ -1966,11 +1966,10 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         deadline: lash_durable::DurableInstant(i64::MAX),
         stream_from: "pinned-stream".to_owned(),
     };
-    let phase = UnfinishedPhase::requested(pin, checkpoint);
     let advance = TurnWrite::Advance {
         session: session(),
         run: run(),
-        phase,
+        phase: lash_durable::domain::PhaseAdvance::Model { pin, checkpoint },
         iteration: 0,
     };
     tx.write(DomainWrite::Turn(advance));

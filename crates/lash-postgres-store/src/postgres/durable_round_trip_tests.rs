@@ -13,8 +13,8 @@ use lash_core_store::checkpoint_graph::{
     TokenWriter, TypedBody,
 };
 use lash_durable::domain::{
-    DomainWrite, ExecKey, ExecRootWrite, ModelPin, Ordinal, OwnerKey, RunFactKind, RunFactWrite,
-    RunSeq, SessionMailWrite, SnapshotRev, TurnWrite, UnfinishedPhase,
+    DomainWrite, ExecKey, ExecRootWrite, ModelPin, Ordinal, OwnerKey, PhaseAdvance, RunFactKind,
+    RunFactWrite, RunSeq, SessionMailWrite, SnapshotRev, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{
     ActorKey, ActorTx, CommitLabel, DurableReads as _, DurableStore as _, Epoch, FormatSet, MailTx,
@@ -151,8 +151,8 @@ fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
     tx.write(DomainWrite::Turn(TurnWrite::Advance {
         session: owned.session.clone(),
         run: run.clone(),
-        phase: UnfinishedPhase::requested(
-            ModelPin {
+        phase: PhaseAdvance::Model {
+            pin: ModelPin {
                 call,
                 attempt: 1,
                 request_ref: "request".to_owned(),
@@ -160,7 +160,7 @@ fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
                 stream_from: "stream".to_owned(),
             },
             checkpoint,
-        ),
+        },
         iteration: 0,
     }));
 }

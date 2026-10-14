@@ -392,7 +392,15 @@ impl LashRuntime {
             opener_state: crate::session::OpenerState::default(),
             children_stop: CancellationToken::new(),
             model_stop_error: Default::default(),
-            turn_observations: turn_observation_cursor(&controller, run, "shift"),
+            // The shift lane sequences what this drive does from where it
+            // starts, so it is keyed by the drive: a successor, or a later
+            // drive of this owner, never reuses an id an earlier drive
+            // published (FIG-6274).
+            turn_observations: turn_observation_cursor(
+                &controller,
+                run,
+                &format!("shift@{}", controller.next_drive()),
+            ),
             trace: turn_trace,
             admitted_body: None,
             model_attempt: 1,

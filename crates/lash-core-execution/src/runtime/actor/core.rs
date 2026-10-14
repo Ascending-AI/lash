@@ -97,6 +97,9 @@ pub(super) struct Inner {
     /// A claimed session's claim obligations, which every commit through
     /// the context derives its `requires` from (S7); none otherwise.
     obligations: Option<super::claim_obligations::SessionObligations>,
+    /// The turn drives built under the context, which
+    /// [`ActorContext::next_drive`] numbers.
+    drives: AtomicU32,
 }
 
 impl std::fmt::Debug for ActorContext {
@@ -141,6 +144,7 @@ impl ActorContext {
                 probe,
                 dues: Dues::new(),
                 obligations: None,
+                drives: AtomicU32::new(0),
             }),
             scope: Scope::new(admitted),
         }
@@ -180,6 +184,7 @@ impl ActorContext {
                             owned.requires(),
                         )
                     }),
+                drives: AtomicU32::new(0),
             }),
             scope: Scope::new(admitted),
         }
@@ -209,6 +214,7 @@ impl ActorContext {
                 probe: Arc::new(lash_durable::NoProbe),
                 dues: Dues::new(),
                 obligations: None,
+                drives: AtomicU32::new(0),
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
         }
@@ -244,6 +250,17 @@ impl ActorContext {
     #[must_use]
     pub fn epoch(&self) -> Epoch {
         self.inner.epoch
+    }
+
+    /// A fresh drive of a turn under this context: the epoch the actor is
+    /// owned under and the drive's ordinal among those its claim built. No
+    /// other drive of the actor, on this owner or another, is named alike,
+    /// so a lane whose ordinals restart with each drive is keyed by it and
+    /// never reuses an id another drive published (FIG-6274).
+    #[must_use]
+    pub fn next_drive(&self) -> String {
+        let ordinal = self.inner.drives.fetch_add(1, Ordering::Relaxed);
+        format!("{}.{ordinal}", self.inner.epoch.0)
     }
 
     /// The node's clock now, for live enforcement (local timers for

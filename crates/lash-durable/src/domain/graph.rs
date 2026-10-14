@@ -541,16 +541,14 @@ impl DomainWrite {
                 run,
                 phase,
                 ..
-            }) => one(phase.checkpoint().and_then(|checkpoint| {
-                change(
-                    RootOwner::TurnPhase {
-                        session: session.clone(),
-                        run: run.clone(),
-                    },
-                    None,
-                    Some(checkpoint),
-                )
-            })),
+            }) => one(change(
+                RootOwner::TurnPhase {
+                    session: session.clone(),
+                    run: run.clone(),
+                },
+                None,
+                Some(phase.checkpoint()),
+            )),
             Self::Turn(TurnWrite::Answer {
                 session,
                 run,

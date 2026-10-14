@@ -28,8 +28,8 @@ use crate::domain::graph::{
 use crate::domain::graph_commit::measure_owner_commit;
 use crate::domain::namespace_value::NamespaceValue;
 use crate::domain::{
-    CellId, DomainRefusal, ExecKey, Ordinal, OwnerKey, RunSeq, SnapshotRev, StoredNamespaceWrite,
-    StoredValues, TurnWrite, UnfinishedPhase,
+    CellId, DomainRefusal, ExecKey, Ordinal, OwnerKey, PhaseAdvance, RunSeq, SnapshotRev,
+    StoredNamespaceWrite, StoredValues, TurnWrite,
 };
 use crate::{ActorKey, DomainWrite, DurableError, DurableStore, Epoch};
 
@@ -549,7 +549,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     let advance = DomainWrite::Turn(TurnWrite::Advance {
         session: owner.session.clone(),
         run: run.clone(),
-        phase: UnfinishedPhase::Tools {
+        phase: PhaseAdvance::Tools {
             run: RunSeq(0),
             checkpoint: phase0,
         },
@@ -603,7 +603,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             session: owner.session.clone(),
             run: run.clone(),
             phase: if model {
-                UnfinishedPhase::Model {
+                PhaseAdvance::Model {
                     pin: crate::domain::ModelPin {
                         call: 1,
                         attempt: 1,
@@ -612,10 +612,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                         stream_from: "graph-roots-stream".into(),
                     },
                     checkpoint: phase_root,
-                    call: crate::domain::ModelCall::Requested,
                 }
             } else {
-                UnfinishedPhase::Tools {
+                PhaseAdvance::Tools {
                     run: RunSeq(0),
                     checkpoint: phase_root,
                 }
@@ -668,7 +667,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 Some(DomainWrite::Turn(TurnWrite::Advance {
                     session: owner.session.clone(),
                     run: run.clone(),
-                    phase: UnfinishedPhase::Tools {
+                    phase: PhaseAdvance::Tools {
                         run: RunSeq(0),
                         checkpoint: root,
                     },

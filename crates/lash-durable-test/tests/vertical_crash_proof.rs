@@ -1860,7 +1860,7 @@ impl Activation for StaleCheckpoint {
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session(),
                 run: row.run.clone(),
-                phase: UnfinishedPhase::Tools {
+                phase: lash_durable::domain::PhaseAdvance::Tools {
                     run: *run,
                     checkpoint,
                 },

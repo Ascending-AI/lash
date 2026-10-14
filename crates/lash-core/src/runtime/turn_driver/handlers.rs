@@ -7,7 +7,15 @@ impl RuntimeTurnDriver<'_> {
         observer: &TurnObserver,
         record: crate::LlmCallRecord,
     ) {
-        observe_model_call(&mut self.turn_observations, observer, &record);
+        self.turn_observations.observe(
+            observer,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
+                event: TurnEvent::ModelCallRecorded {
+                    record: record.clone(),
+                },
+            },
+        );
         self.llm_calls.push(record);
     }
 
@@ -176,7 +184,7 @@ impl RuntimeTurnDriver<'_> {
                 },
         } = answer;
         self.model_attempt = attempt;
-        self.record_llm_outcome(machine, id, &result, call_record, event_tx)?;
+        self.record_llm_outcome(&result, call_record, event_tx);
         // Whether the hooks run at all is the plan recorded with the
         // completion (ADR 0105 §1), never the response hooks installed now:
         // a restore after a hook was added or removed derives as its first
@@ -241,7 +249,7 @@ impl RuntimeTurnDriver<'_> {
             stream,
         } = answer;
         self.model_attempt = attempt;
-        self.record_llm_outcome(machine, id, &result, call_record, event_tx)?;
+        self.record_llm_outcome(&result, call_record, event_tx);
         if let Err(error) = self.finish_recorded_stream(&stream.capsule).await {
             tracing::warn!(
                 session_id = %self.session_id,
@@ -262,20 +270,15 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    /// Record the outcome of the machine's model call `id` on the turn: the
+    /// Record the outcome of the machine's model call on the turn: the
     /// failure evidence of an unsuccessful one, then the call's sealed
-    /// record. The record is observed on a lane of the call's own, so every
-    /// owner that records it, the one that sent the call or one that
-    /// restored its receipt, publishes it under one identity, which the
-    /// live feed publishes once (FIG-3753).
+    /// record, published on the call's own lane ([`model_call_activity`]).
     fn record_llm_outcome(
         &mut self,
-        machine: &TurnMachine,
-        id: crate::sansio::EffectId,
         result: &Result<LlmResponse, crate::LlmCallError>,
         call_record: Option<crate::LlmCallRecord>,
         event_tx: &TurnObserver,
-    ) -> Result<(), RuntimeError> {
+    ) {
         if let (Err(error), Some(record)) = (result, call_record.as_ref()) {
             let sealed_attempt_count = self
                 .llm_calls
@@ -294,16 +297,13 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            let invocation = self
-                .turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)
-                .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-            let mut cursor = crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(
-                format!("{}:record", invocation.effect_replay_key()),
-            ));
-            observe_model_call(&mut cursor, event_tx, &call_record);
+            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
+                &self.scoped_effect_controller,
+                &self.turn_id,
+                &call_record,
+            )));
             self.llm_calls.push(call_record);
         }
-        Ok(())
     }
 
     /// Answer the machine's model call `id` with `result`, the response it
@@ -857,21 +857,29 @@ pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Optio
         .map(crate::EffectAddress::graph_key)
 }
 
-/// Observe a model call's sealed `record` through `cursor`.
-fn observe_model_call(
-    cursor: &mut crate::engine::ObservationCursor,
-    observer: &TurnObserver,
+/// Model call `record`, sealed, as the activity of turn `turn` admitted
+/// under `controller`'s scope. It is the one observation of the call's own
+/// lane, keyed by its call id: every owner that records it (the one that
+/// sent the call, one that derived or settled its receipt, or a node that
+/// ended its turn from the rows alone) publishes it under one id, which the
+/// live feed publishes once (FIG-3753, FIG-6274).
+pub(in crate::runtime) fn model_call_activity(
+    controller: &ActorContext,
+    turn: &crate::TurnId,
     record: &crate::LlmCallRecord,
-) {
-    cursor.observe(
-        observer,
-        crate::engine::ObservedEvent::Activity {
-            correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
-            event: TurnEvent::ModelCallRecorded {
-                record: record.clone(),
-            },
-        },
+) -> crate::TurnActivity {
+    let lane = crate::runtime::turn_loop::turn_observation_cursor(
+        controller,
+        turn,
+        &format!("model-call:{}", record.call_id.0),
     );
+    crate::TurnActivity {
+        id: TurnActivityId::observed(lane.key(), 0),
+        correlation_id: TurnActivityId::new(record.call_id.0.clone()),
+        event: TurnEvent::ModelCallRecorded {
+            record: record.clone(),
+        },
+    }
 }
 
 #[cfg(test)]
