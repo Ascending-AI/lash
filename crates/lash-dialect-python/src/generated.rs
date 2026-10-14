@@ -1,11 +1,12 @@
 //! Direct decoder of Python generated-source v1; no authored lowering or library.
 //! The paired generic rule inventory is docs/design/generated-source-python.md.
 use crate::GeneratedSourceCode as Code;
-use lash_kernel_dialect::{Diagnostic, GeneratedSourceLimits, PrintError, check_document_depth};
+use lash_kernel_dialect::{
+    Diagnostic, GeneratedSourceLimits, PrintError, check_document_depth, check_metadata_uniqueness,
+};
 use lash_kernel_doc as k;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
-mod metadata;
 
 fn error(code: Code, message: impl Into<String>) -> Diagnostic {
     Diagnostic {
@@ -1080,7 +1081,7 @@ fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
             }
         }
     }
-    metadata::check(text).map_err(|e| format_error(e.to_string()))?;
+    check_metadata_uniqueness(text).map_err(|e| format_error(e.to_string()))?;
     let mut decoder = serde_json::Deserializer::from_str(text);
     decoder.disable_recursion_limit();
     let value = T::deserialize(&mut decoder).map_err(|e| format_error(e.to_string()))?;

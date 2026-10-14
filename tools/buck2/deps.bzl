@@ -153,8 +153,7 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0318",
             "swc_common": "//third-party/rust:p0357",
             "swc_ecma_ast": "//third-party/rust:p0358",
-            "swc_ecma_parser": "//third-party/rust:p0359",
-            "thiserror": "//third-party/rust:p0371"
+            "swc_ecma_parser": "//third-party/rust:p0359"
         }
     },
     "lash-e2e": {

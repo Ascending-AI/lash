@@ -46,7 +46,12 @@ impl<'de> Visitor<'de> for Unique {
         Ok(Self)
     }
 }
-pub(super) fn check(text: &str) -> Result<(), serde_json::Error> {
+/// Reject duplicate object fields anywhere in generated-source JSON metadata.
+///
+/// Run this before serde decoding, which would erase duplicate fields. The
+/// caller must bound JSON nesting before this recursive check and owns diagnostic
+/// conversion; the check also rejects trailing input.
+pub fn check_metadata_uniqueness(text: &str) -> Result<(), serde_json::Error> {
     let mut decoder = serde_json::Deserializer::from_str(text);
     decoder.disable_recursion_limit();
     Unique::deserialize(&mut decoder)?;

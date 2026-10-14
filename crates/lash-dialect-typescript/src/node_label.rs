@@ -67,30 +67,6 @@ pub(crate) fn is_label_comment(text: &str) -> bool {
             .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
 }
 
-/// `None` means the text has no spelling: it would close the comment, span
-/// lines, or — for a title — swallow the description separator, so a render
-/// followed by a parse would not return what went in.
-#[expect(dead_code, reason = "the printer spells a label with it")]
-pub(crate) fn render_label_comment(title: &str, description: Option<&str>) -> Option<String> {
-    let title = title.trim();
-    let description = description.map(str::trim).filter(|text| !text.is_empty());
-    if title.is_empty() || title.contains(SEPARATOR) || !is_renderable(title) {
-        return None;
-    }
-    if description.is_some_and(|description| !is_renderable(description)) {
-        return None;
-    }
-    Some(match description {
-        Some(description) => format!("/** {TAG} {title} {SEPARATOR} {description} */"),
-        None => format!("/** {TAG} {title} */"),
-    })
-}
-
-#[expect(dead_code, reason = "the printer spells a label with it")]
-fn is_renderable(text: &str) -> bool {
-    !text.contains('\n') && !text.contains('\r') && !text.contains("*/")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

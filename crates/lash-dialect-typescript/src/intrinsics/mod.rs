@@ -4,7 +4,7 @@
 //! implicit receiver, coercion, async wrapper or temporary is introduced.
 use std::collections::BTreeMap;
 
-use lash_kernel_dialect::{GeneratedSourceLimits, check_document_depth};
+use lash_kernel_dialect::{GeneratedSourceLimits, check_document_depth, check_metadata_uniqueness};
 use lash_kernel_doc as k;
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as s;
@@ -13,7 +13,6 @@ use swc_ecma_parser::{Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod expressions;
-mod metadata;
 mod readable;
 mod statements;
 
@@ -460,7 +459,7 @@ fn decode<T: serde::de::DeserializeOwned>(
             None,
         ));
     }
-    metadata::check(text).map_err(|error| format_error(error.to_string()))?;
+    check_metadata_uniqueness(text).map_err(|error| format_error(error.to_string()))?;
     let mut decoder = serde_json::Deserializer::from_str(text);
     decoder.disable_recursion_limit();
     let value = T::deserialize(&mut decoder).map_err(|error| format_error(error.to_string()))?;
