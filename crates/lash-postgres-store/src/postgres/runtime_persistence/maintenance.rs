@@ -33,8 +33,8 @@ impl StoreMaintenance for PostgresStore {
 
 impl PostgresStore {
     async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         // The session's write lock, which every enqueue takes before it
         // interns a spec, taken before any row this pass deletes: an
         // admission that reuses a spec row commits its input before the
@@ -103,12 +103,12 @@ impl PostgresStore {
     /// commits counts into `report` as it commits.
     async fn gc_unreachable_blobs(&self, report: &mut GcReport) -> Result<(), StoreError> {
         let graph_error = |refusal| StoreError::Backend(format!("{refusal}"));
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         // A host collection is what ends `until_gc`'s hold: release every
         // revision no head, pin or retention window keeps, peeling what
         // they held, in an ordinary guarded transaction of its own.
         {
-            let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
             let released = crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             report.deleted_blob_count += released;
@@ -117,7 +117,8 @@ impl PostgresStore {
         // only the rows it deletes, so commits beside it progress.
         let mut after = String::new();
         loop {
-            let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
             let (last, gone) =
                 crate::durable::audit_page(&mut tx, &after, crate::durable::AUDIT_PAGE)
                     .await
@@ -129,6 +130,7 @@ impl PostgresStore {
                 None => break,
             }
         }
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let (roots, blobs) = crate::durable::graph_counts(&mut connection)
             .await
             .map_err(graph_error)?;

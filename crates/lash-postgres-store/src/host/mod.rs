@@ -382,7 +382,10 @@ impl TransactionPrelude {
         &self,
         pool: &PgPool,
     ) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
-        crate::observed_sql::control(&self.begin, pool.begin_with(self.begin.to_string())).await
+        crate::observed_sql::control(&self.begin, async {
+            crate::guarded_tx::begin_pooled(pool.acquire().await?, self.begin.to_string()).await
+        })
+        .await
     }
 
     /// Begin a guarded transaction on a connection the caller holds.

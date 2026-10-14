@@ -932,8 +932,8 @@ impl RunStore for PostgresStore {
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::begin_guarded(connection, &self.fence).await?;
         let end = end_refused_run_tx(&mut tx, session_id, run, refusal, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
@@ -946,8 +946,8 @@ impl RunStore for PostgresStore {
         at_ms: u64,
     ) -> Result<RunEndOutcome, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::begin_guarded(connection, &self.fence).await?;
         let end = end_command_run_tx(&mut tx, session_id, run, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
@@ -1006,8 +1006,8 @@ impl RunStore for PostgresStore {
         run: &TurnId,
         inputs: &[InputId],
     ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::begin_guarded(connection, &self.fence).await?;
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         bind_run_inputs_conn(&mut tx, session_id, run, inputs).await?;
         tx.commit().await.map_err(store_sqlx_error)

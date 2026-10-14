@@ -25,8 +25,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
     ) -> Result<Vec<lash_core_execution::PendingTurnInput>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -82,10 +82,13 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
-            .await
-            .map_err(store_sqlx_error)?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::observed_sql::control(
+            "BEGIN",
+            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
+        )
+        .await
+        .map_err(store_sqlx_error)?;
         // Open and admitted rows, and the rows a checkpoint accepted into a
         // running run, read in one snapshot and listed in `enqueue_seq`
         // order (FIG-4044). The isolation level must precede every other
@@ -189,8 +192,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         targets: &[lash_core_execution::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -226,8 +229,8 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         session_id: &SessionId,
         anchor: &lash_core_execution::PendingTurnInputCancelTarget,
     ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;

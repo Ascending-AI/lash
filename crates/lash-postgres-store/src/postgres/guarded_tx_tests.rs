@@ -335,3 +335,53 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
     );
     assert_eq!(storage.fleet_format().version(), NEXT);
 }
+
+/// FIG-6208: cancelling a pooled BEGIN while its fence waits must not return
+/// an untracked server transaction to the next snapshot reader.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelling_a_fenced_begin_leaves_the_pool_ready_for_a_snapshot() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .connect(database.url())
+        .await
+        .expect("one pooled connection");
+    let held = HeldFinalize::begin(storage.pool(), storage.fleet_format().version())
+        .await
+        .expect("hold the fence exclusive");
+    let writer = tokio::spawn({
+        let pool = pool.clone();
+        let fence = storage.fence.clone();
+        let prelude = fence.prelude().clone();
+        async move { super::begin_durable(&pool, &fence, &prelude).await }
+    });
+    until_a_lock_waiter(&storage).await;
+    writer.abort();
+    assert!(
+        writer
+            .await
+            .err()
+            .expect("the waiting writer was cancelled")
+            .is_cancelled()
+    );
+    drop(held);
+    let connection = pool
+        .acquire()
+        .await
+        .expect("reacquire the cancelled BEGIN's connection");
+    let mut snapshot = sqlx::Transaction::begin(connection, None)
+        .await
+        .expect("start a fresh snapshot");
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *snapshot)
+        .await
+        .expect("the previous BEGIN left no queried transaction behind");
+    snapshot.rollback().await.expect("close the snapshot");
+    pool.close().await;
+}

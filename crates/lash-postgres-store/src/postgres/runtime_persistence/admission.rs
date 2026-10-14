@@ -36,8 +36,8 @@ pub(crate) async fn admit_at_checkpoint_postgres(
         .checkpoint_write_transaction_count
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let session_id = &request.session_id;
-    let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
-    let mut tx = begin_guarded(&mut *connection, &store.fence).await?;
+    let connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
+    let mut tx = begin_guarded(connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)
@@ -78,10 +78,13 @@ pub(crate) async fn open_session_command_run_postgres(
     store: &crate::PostgresStore,
     session_id: &SessionId,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-    let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
-    let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
-        .await
-        .map_err(store_sqlx_error)?;
+    let connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
+    let mut tx = crate::observed_sql::control(
+        "BEGIN",
+        crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
+    )
+    .await
+    .map_err(store_sqlx_error)?;
     let (mut batches, candidates) = scan_queued_work_candidates_tx(
         &mut tx,
         session_id,

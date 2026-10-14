@@ -506,6 +506,7 @@ pub(crate) fn window(
     } else {
         lash_core_execution::SessionGraph::default()
     };
+    let graph = windows.attach(session, graph);
     SessionWindowRead::new(
         session.clone(),
         revision,

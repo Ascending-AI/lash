@@ -1709,9 +1709,11 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             })
             .collect::<Vec<_>>();
         assert_eq!(outputs.len(), 1, "one recorded tool accounting event");
-        let output = serde_json::to_string(outputs[0]).unwrap();
-        assert!(output.contains("omitted_bytes"));
-        assert!(!output.contains(&"x".repeat(80_000)));
+        assert_eq!(
+            *outputs[0],
+            lash_core::ToolCallOutput::finish(payload.clone()),
+            "the accounting event retains the complete terminal payload"
+        );
         let checkpoint_id = accounted
             .iter()
             .find_map(|effect| match effect {

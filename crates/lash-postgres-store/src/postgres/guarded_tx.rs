@@ -57,6 +57,7 @@ use lash_core_execution::store::plugin_writers::{
     PluginPublication, PluginWriterRanges, PluginWriterRegistration,
 };
 use lash_core_execution::{FleetFormat, StoreError};
+use sqlx::pool::PoolConnection;
 use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
 
 use crate::change_feed::TurnChange;
@@ -559,6 +560,7 @@ pub(crate) enum GuardedEntry<'c, 'p> {
     /// A checkout of its own, which the transaction owns: it outlives the
     /// borrow of the pool.
     Pool(&'p PgPool),
+    Pooled(PoolConnection<Postgres>),
     Connection(&'c mut PgConnection),
 }
 
@@ -574,13 +576,41 @@ impl<'c> From<&'c mut PgConnection> for GuardedEntry<'c, 'c> {
     }
 }
 
+impl From<PoolConnection<Postgres>> for GuardedEntry<'_, '_> {
+    fn from(connection: PoolConnection<Postgres>) -> Self {
+        Self::Pooled(connection)
+    }
+}
+
+/// SQLx records transaction depth only after BEGIN acknowledges. Keep the
+/// pooled connection owned until that acknowledgement even if its caller
+/// cancels during the fence wait. The completed transaction then drops with
+/// a tracked rollback before the pool can hand it to another reader.
+pub(crate) async fn begin_pooled(
+    connection: PoolConnection<Postgres>,
+    statement: String,
+) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    let begun =
+        tokio::spawn(async move { Transaction::begin(connection, Some(statement.into())).await });
+    match begun.await {
+        Ok(result) => result,
+        // Preserve a direct BEGIN's unwind: the activation's panic budget,
+        // rather than the transient store retry, owns a driver panic.
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(sqlx::Error::Protocol(format!(
+            "joining pooled BEGIN: {error}"
+        ))),
+    }
+}
+
 impl<'c> GuardedEntry<'c, '_> {
     /// Begin with `statement`, the prelude's fenced `BEGIN`.
     async fn begin_with(self, statement: String) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
         let shape = statement.clone();
         crate::observed_sql::control(&shape, async {
             match self {
-                Self::Pool(pool) => pool.begin_with(statement).await,
+                Self::Pool(pool) => begin_pooled(pool.acquire().await?, statement).await,
+                Self::Pooled(connection) => begin_pooled(connection, statement).await,
                 Self::Connection(connection) => {
                     sqlx::Connection::begin_with(connection, statement).await
                 }
@@ -643,7 +673,7 @@ pub(crate) async fn begin_durable(
         .await
         .map_err(store_sqlx_error)?;
     crate::observed_sql::transaction_started();
-    let begin = Transaction::begin(connection, Some(prelude.fenced().to_owned().into()));
+    let begin = begin_pooled(connection, prelude.fenced().to_owned());
     // Observed under its own text: the fence lock's wait counts as a lock
     // wait.
     let tx = crate::observed_sql::control(prelude.fenced(), begin)

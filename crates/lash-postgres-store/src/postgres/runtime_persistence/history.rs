@@ -554,6 +554,7 @@ pub(crate) async fn window_conn(
     } else {
         lash_core_execution::SessionGraph::default()
     };
+    let window = windows.attach(session_id, window);
     let read = SessionWindowRead::new(
         session_id.clone(),
         revision,

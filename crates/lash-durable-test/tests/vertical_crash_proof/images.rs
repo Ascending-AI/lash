@@ -149,9 +149,15 @@ pub(super) async fn resume(image: &'static images::Image, protocol: Protocol) ->
     if restores != 1 {
         violations.push(format!("the turn was restored {restores} times, not once"));
     }
+    let terminal = resumed
+        .backend()
+        .session_store_factory()
+        .run_terminal(&session(), &run())
+        .await
+        .expect("the resumed run's terminal reads");
     assert!(
         violations.is_empty(),
-        "the session image's resume:\n  {}\n{}",
+        "the session image's resume:\n  {}\nterminal: {terminal:?}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );

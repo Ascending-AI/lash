@@ -9,8 +9,8 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -26,8 +26,8 @@ impl PostgresStore {
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -44,8 +44,8 @@ impl PostgresStore {
         session_id: &SessionId,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -109,10 +109,13 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
-            .await
-            .map_err(store_sqlx_error)?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::observed_sql::control(
+            "BEGIN",
+            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
+        )
+        .await
+        .map_err(store_sqlx_error)?;
         crate::observed_sql::query(
             crate::connection_sql::connection_sql()
                 .begin_repeatable_read_read_only
@@ -148,10 +151,13 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
-            .await
-            .map_err(store_sqlx_error)?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::observed_sql::control(
+            "BEGIN",
+            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
+        )
+        .await
+        .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
@@ -193,10 +199,13 @@ impl PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
-            .await
-            .map_err(store_sqlx_error)?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = crate::observed_sql::control(
+            "BEGIN",
+            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
+        )
+        .await
+        .map_err(store_sqlx_error)?;
         // One snapshot for the batch rows and their item rows; see
         // `list_queued_work`.
         crate::observed_sql::query(

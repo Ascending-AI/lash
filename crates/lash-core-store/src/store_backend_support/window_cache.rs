@@ -267,34 +267,37 @@ impl WindowCacheRead {
         leaf_generation: u64,
         bytes: u64,
     ) -> SessionGraph {
-        let Some(anchor) = window.anchor() else {
-            return window.clone();
-        };
         let mut entries = self.cache.entries.lock_recover();
         if entries.invalidation != self.invalidation {
-            return window.clone();
+            drop(entries);
+            return self.attach(session, window.clone());
         }
-        if let Some(held) = entries.by_session.get(session)
-            && let Some(held_anchor) = held.window.anchor()
-        {
-            let newer = if held_anchor.frame_node_id == anchor.frame_node_id {
-                leaf_generation > held.leaf_generation
-            } else {
-                anchor.generation > held_anchor.generation
+        if let Some(held) = entries.by_session.get(session) {
+            let newer = match (window.anchor(), held.window.anchor()) {
+                (None, _) => false,
+                (Some(_), None) => true,
+                (Some(anchor), Some(held_anchor)) => {
+                    if held_anchor.frame_node_id == anchor.frame_node_id {
+                        leaf_generation > held.leaf_generation
+                    } else {
+                        anchor.generation > held_anchor.generation
+                    }
+                }
             };
             if !newer {
-                let mut graph = window.clone();
-                graph.set_read_owner(held.readers.upgrade());
-                return graph;
+                drop(entries);
+                return self.attach(session, window.clone());
             }
         }
         let readers = entries
             .by_session
             .get(session)
-            .map(|entry| entry.readers.clone());
+            .map(|entry| entry.readers.clone())
+            .unwrap_or_default();
         entries.remove(session);
         if bytes > self.cache.budget_bytes {
-            return window.clone();
+            drop(entries);
+            return self.attach(session, window.clone());
         }
         while entries.bytes + bytes > self.cache.budget_bytes {
             let Some(oldest) = entries
@@ -307,16 +310,6 @@ impl WindowCacheRead {
             };
             entries.remove(&oldest);
         }
-        let readers = readers
-            .and_then(|readers| readers.upgrade())
-            .unwrap_or_else(|| {
-                Arc::new(WindowReaders {
-                    cache: Arc::downgrade(&self.cache),
-                    session: session.clone(),
-                })
-            });
-        let mut graph = window.clone();
-        graph.set_read_owner(Some(Arc::clone(&readers)));
         let mut cached = window.clone();
         cached.set_read_owner(None);
         let used = entries.tick();
@@ -328,9 +321,62 @@ impl WindowCacheRead {
                 leaf_generation,
                 bytes,
                 used,
-                readers: Arc::downgrade(&readers),
+                readers,
             },
         );
+        drop(entries);
+        self.attach(session, window.clone())
+    }
+
+    /// Attach every returned graph to its session's reader lease, including
+    /// the empty head an open session holds before its first turn. The same
+    /// lease keeps later anchored windows warm until the last reader drops.
+    /// A read invalidated by deletion owns its result without retaining it.
+    pub fn attach(&self, session: &SessionId, mut graph: SessionGraph) -> SessionGraph {
+        let mut entries = self.cache.entries.lock_recover();
+        let retain = entries.invalidation == self.invalidation;
+        let readers = retain
+            .then(|| {
+                entries
+                    .by_session
+                    .get(session)
+                    .and_then(|entry| entry.readers.upgrade())
+                    .or_else(|| {
+                        graph
+                            .read_owner()
+                            .as_ref()
+                            .filter(|owner| {
+                                owner.session == *session
+                                    && owner.cache.ptr_eq(&Arc::downgrade(&self.cache))
+                            })
+                            .cloned()
+                    })
+            })
+            .flatten()
+            .unwrap_or_else(|| {
+                Arc::new(WindowReaders {
+                    cache: Arc::downgrade(&self.cache),
+                    session: session.clone(),
+                })
+            });
+        if retain {
+            let used = entries.tick();
+            let entry = entries
+                .by_session
+                .entry(session.clone())
+                .or_insert_with(|| Entry {
+                    window: SessionGraph::default(),
+                    leaf_generation: 0,
+                    bytes: 0,
+                    used,
+                    readers: Weak::new(),
+                });
+            entry.readers = Arc::downgrade(&readers);
+        }
+        // Replacing a graph's previous lease can drop its last reader, whose
+        // destructor takes this lock. Ownership is changed only after unlock.
+        drop(entries);
+        graph.set_read_owner(Some(readers));
         graph
     }
 }
@@ -338,6 +384,66 @@ impl WindowCacheRead {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6208: opening the empty head owns the same lease as its first
+    /// committed window, even after the turn's own reader drops at idle.
+    #[test]
+    fn an_empty_reader_keeps_the_first_anchored_window_warm_until_it_drops() {
+        let mut state = crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
+            crate::TurnBudget::Unbounded,
+            crate::MaxToolCalls::new(16),
+            crate::NoProgressBudget::bounded(12),
+        ));
+        state.ensure_agent_frame_initialized();
+        let leaf = state
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("frame leaf");
+        let graph = SessionGraph::from_window(
+            state
+                .session_graph
+                .nodes
+                .iter()
+                .map(|node| (**node).clone())
+                .collect(),
+            leaf.clone(),
+            WindowAnchor {
+                frame_node_id: crate::FrameNodeId::new(leaf.clone()).expect("frame"),
+                generation: 0,
+                external_parent: None,
+                previous_frame_node_id: None,
+            },
+        )
+        .expect("window");
+        let cache = Arc::new(WindowCache::new(1024));
+        let empty = cache
+            .read()
+            .remember(&state.session_id, &SessionGraph::default(), 0, 0);
+        assert!(
+            empty.read_owner().is_some(),
+            "an empty reader owns the session lease"
+        );
+        assert_eq!(cache.entries.lock_recover().bytes, 0);
+        let anchored = cache.read().remember(&state.session_id, &graph, 0, 512);
+        drop(anchored);
+        assert_eq!(
+            cache.entries.lock_recover().bytes,
+            512,
+            "the open empty reader keeps the first window warm"
+        );
+        // A read of the earlier empty head cannot replace the newest window.
+        let earlier = cache
+            .read()
+            .remember(&state.session_id, &SessionGraph::default(), 0, 0);
+        assert_eq!(cache.entries.lock_recover().bytes, 512);
+        drop(earlier);
+        drop(empty);
+        assert!(
+            cache.entries.lock_recover().by_session.is_empty(),
+            "last-reader drop releases the window"
+        );
+    }
 
     /// FIG-6168: a reader of the pre-close database snapshot may finish
     /// decoding after close; it must not resurrect the closed cache entry.
