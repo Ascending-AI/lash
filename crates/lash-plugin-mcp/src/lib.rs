@@ -12,9 +12,22 @@
 //!
 //! Lash carries a patch to rmcp 3.5.1 for nested `x-mcp-header` annotations
 //! reached solely through `properties`, including exact-path HTTP header mirroring.
+//! Cargo ignores patches in dependency workspaces. Hosts using this plugin by
+//! git, path or crates.io must add this to their workspace-root `Cargo.toml`:
+//!
+//! ```toml
+//! [patch.crates-io]
+//! rmcp = { git = "https://github.com/Ascending-AI/lash", rev = "deec25438cd5f28c41aabe7dc8859a1badfeff40" }
+//! ```
+//!
+//! This revision contains the fix; when depending on a newer Lash git revision,
+//! use that same revision for the patch. Cargo finds the `rmcp` package at
+//! `third-party/patched/rmcp` in the repository without a `path` key.
+//! Without the host patch, pristine rmcp 3.5.1 silently drops tools with nested
+//! annotations from `tools/list`, so those tools are missing from discovery.
 //! See <https://github.com/modelcontextprotocol/rust-sdk/issues/1354>.
-//! Remove the patch and its `[patch.crates-io]` entry once a released rmcp
-//! contains the fix.
+//! Once rmcp releases the fix, update to that release and delete the host's
+//! `rmcp` stanza from `[patch.crates-io]`.
 //!
 //! Stdio receives retain partial lines across cancellation by the SDK service
 //! loop. Framing and message compatibility use the SDK codec.

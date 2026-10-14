@@ -39,6 +39,37 @@ Key features:
 
 > **Alpha:** works today, API still moving fast — pin to an exact `=0.1.0-alpha.N` version when you embed.
 
+## Embedding
+
+For a git dependency with MCP support, add the following to your host's
+workspace-root `Cargo.toml`. The package is named `lash-runtime`; the dependency
+alias lets your code import it as `lash`.
+
+```toml
+[dependencies]
+lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash", rev = "deec25438cd5f28c41aabe7dc8859a1badfeff40", features = ["mcp"] }
+
+[patch.crates-io]
+rmcp = { git = "https://github.com/Ascending-AI/lash", rev = "deec25438cd5f28c41aabe7dc8859a1badfeff40" }
+```
+
+The pinned revision contains Lash's rmcp 3.5.1 fix for nested `x-mcp-header`
+annotations reached solely through `properties`, including exact-path HTTP
+header mirroring. When selecting a newer Lash revision, use the same revision
+in both entries. Cargo finds `rmcp` at `third-party/patched/rmcp` in the git
+repository; no `path` key is needed.
+
+Cargo ignores `[patch]` entries in dependency workspaces, so the host must
+carry this patch even when depending on Lash by path or crates.io, or using
+`lash-internal-plugin-mcp` directly. Without it, pristine rmcp 3.5.1 silently
+drops tools with nested annotations from `tools/list`: those tools are missing
+from discovery. See the [upstream issue](https://github.com/modelcontextprotocol/rust-sdk/issues/1354).
+Once rmcp releases the fix, update to that release and delete the host's `rmcp`
+stanza from `[patch.crates-io]`.
+
+Verify the selected source with `cargo tree -i rmcp`; it should show rmcp from
+`https://github.com/Ascending-AI/lash` at the pinned revision.
+
 ## What survives a crash
 
 Lash recovers from committed state. These guarantees require acknowledged
