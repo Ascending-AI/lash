@@ -124,26 +124,44 @@ async fn a_process_holding_no_call_to_an_unserved_provider_still_runs(tier: Tier
         |request| request,
     )
     .await;
+    // The write's body running is not its settlement: until the process's
+    // sleep commits, the write is unsettled and the process requires its
+    // provider, which the bare node does not serve.
     tokio::time::timeout(Duration::from_secs(60), async {
-        while world.writes.lock().unwrap().is_empty() {
+        loop {
+            let record = backend
+                .process_registry()
+                .get_process(&process)
+                .await
+                .expect("the process is read")
+                .expect("the process exists");
+            assert!(
+                !record.is_terminal(),
+                "the process ended before its sleep: {record:?}"
+            );
+            if record
+                .waits()
+                .iter()
+                .any(|wait| matches!(wait.kind, lash_core::WaitKind::Sleep { .. }))
+            {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("the write runs within a minute");
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    .expect("the write settles and the process sleeps within a minute");
+    assert_eq!(world.writes.lock().unwrap().len(), 1, "the write ran");
     first.shutdown().await.expect("the first node stops");
     drop(first);
     assert!(
-        backend
+        !backend
             .process_registry()
             .get_process(&process)
             .await
             .expect("the process is read")
-            .is_some_and(|record| !matches!(
-                record.lifecycle,
-                lash_core::ProcessLifecycleState::Terminal { .. }
-            )),
+            .expect("the process exists")
+            .is_terminal(),
         "the process sleeps when its first node stops"
     );
 

@@ -312,9 +312,10 @@ async fn next_call(entered: &mut mpsc::UnboundedReceiver<usize>) -> usize {
 
 /// A turn no user started (a `continue_as` follow-on, which the session's
 /// engine runs on its own) renders the connected accounts the host recorded,
-/// a build that resumes it after a drain serves the render the turn recorded
-/// even though the live accounts changed meanwhile, and a later such turn
-/// renders the accounts the host recorded since.
+/// a build that resumes it after a drain derives its answered call from the
+/// call's receipt and renders its next call with the accounts the run
+/// recorded even though the live accounts changed meanwhile, and a later
+/// such turn renders the accounts the host recorded since.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
     const FOLLOW_ON: &str = "<typescript>\nawait control.continue_as({ task: \"observe the accounts\" });\n</typescript>";
@@ -382,11 +383,13 @@ async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
     );
 
     // Live data the host never recorded changes while the turn is parked;
-    // the old build then hands the session over at its next committed
-    // phase, and a new build over the same stores resumes the turn.
+    // the parked call then answers, the old build hands the session over at
+    // the call's receipt, and a new build over the same stores resumes the
+    // turn from it.
     mail_world
         .add_account("unrecorded")
         .expect("change live data before the resume");
+    let live = connected_accounts_prompt(&mail_world);
     let drain = tokio::spawn({
         let core = old.state.core.clone();
         async move { core.drain().await }
@@ -406,7 +409,7 @@ async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
     assert_eq!(
         next_call(&mut entered).await,
         2,
-        "the new build resumes the follow-on"
+        "the new build resumes the follow-on at its next call"
     );
 
     let _ = delete_account(AxumPath("fresh".to_string()), State(new.state.clone()))
@@ -447,10 +450,16 @@ async fn a_non_user_turn_records_fresh_accounts_context_and_replays_it() {
         instructions(1).contains(&recorded),
         "a non-user turn must render the recorded accounts context"
     );
-    assert_eq!(
-        instructions(1),
-        instructions(2),
-        "the resumed turn must serve its recorded render after live data changed"
+    // The answered call is derived from its receipt and never bought again
+    // (FIG-6230): the resumed turn's next call is its own.
+    assert_eq!(seen[2].scope.turn, seen[1].scope.turn);
+    assert_ne!(
+        seen[2].scope.request_id, seen[1].scope.request_id,
+        "the resumed turn must not send its answered call again"
+    );
+    assert!(
+        instructions(2).contains(&recorded) && !instructions(2).contains(&live),
+        "the resumed turn must render the accounts its run recorded after live data changed"
     );
     assert!(
         instructions(4).contains(&later),

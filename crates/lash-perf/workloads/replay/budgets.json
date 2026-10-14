@@ -183,6 +183,13 @@
       "why": "about twice today's standard turn"
     },
     {
+      "workload": "chat-short",
+      "metric": "sql_rows_written",
+      "check": "per_turn_median",
+      "max": 250,
+      "why": "247 rows: 203 before FIG-6230, plus 22 for each of the turn's two model.answer receipts (actor fence 1, turn_phases 1, the receipt's phase root and checkpoint node with their 8 edges, and the model.start root it replaces reclaimed with its 8 edges)"
+    },
+    {
       "workload": "ts-codemode",
       "metric": "sql_statements",
       "check": "per_turn_median",
