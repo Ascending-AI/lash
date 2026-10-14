@@ -123,7 +123,7 @@ impl Marks {
             .and_then(|n| n.checked_add(self.blocks.len() * size_of::<Block>()))
             .and_then(|n| n.checked_add(self.work_list.capacity() * size_of::<Key>()))
             .and_then(|n| n.checked_add(self.roots_bytes))
-            .and_then(|n| n.checked_add(BATCH * (size_of::<EntityId>() + size_of::<TaskId>())))
+            .and_then(|n| n.checked_add(2 * BATCH * (size_of::<EntityId>() + size_of::<TaskId>())))
             .and_then(|n| n.checked_add(additional))
             .ok_or_else(|| exhausted(HostResource::TraceBudget))?;
         if bytes > self.limits.trace_memory_budget {
@@ -168,7 +168,10 @@ impl Marks {
             }
             self.blocks.insert(key, Box::default());
         }
-        let block = self.blocks.get_mut(&key).expect("inserted bitmap block");
+        let block = self
+            .blocks
+            .get_mut(&key)
+            .ok_or_else(|| HeapFault::Malformed("inserted bitmap block is absent".into()))?;
         if block.seen[word] & bit != 0 {
             return Ok(());
         }
@@ -282,6 +285,26 @@ pub(super) fn trace(
     let mut roots = Vec::new();
     graph.persistent_roots(&mut |value| {
         marks.tick()?;
+        // Direct identities stream into the bitmap. Only immutable
+        // descriptors needing the graph's summary reader wait in scratch.
+        let identity = match value {
+            Value::List(entity)
+            | Value::Map(entity)
+            | Value::Set(entity)
+            | Value::Record(entity)
+            | Value::Closure(entity) => Some(Identity::Object(*entity)),
+            Value::Task(task) => Some(Identity::Task(*task)),
+            Value::Ref(identity) => Some(*identity),
+            _ => None,
+        };
+        if let Some(identity) = identity {
+            return marks.mark(identity);
+        }
+        match value {
+            Value::Tuple(tuple) if tuple.summary.has_edges => {}
+            Value::Error(error) if error.has_edges => {}
+            _ => return Ok(()),
+        }
         if roots.len() == roots.capacity() {
             let next = roots.capacity().max(4) * 2;
             marks.budget(next * size_of::<Value>())?;
@@ -305,6 +328,7 @@ pub(super) fn trace(
         .chain(transient.pinned)
         .chain(transient.native_args)
     {
+        marks.tick()?;
         reachable = add(reachable, graph.value_cost(value)?.0)?;
         marks.edges(|out| graph.value_edges(value, out))?;
     }
@@ -314,7 +338,10 @@ pub(super) fn trace(
     }
     let mut entities = 0_u64;
     while let Some(key) = marks.work_list.pop() {
-        let block = marks.blocks.get_mut(&key).expect("queued bitmap block");
+        let block = marks
+            .blocks
+            .get_mut(&key)
+            .ok_or_else(|| malformed("queued bitmap block is absent"))?;
         let pending = std::mem::take(&mut block.pending);
         block.queued = false;
         for (word, mut bits) in pending.into_iter().enumerate() {

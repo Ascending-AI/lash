@@ -149,7 +149,7 @@ impl Graph {
     ) -> Result<u64, HeapFault> {
         let answer = self.source.read(&[page])?.pop().unwrap();
         let cost = u64::from_le_bytes(answer.tokens[..8].try_into().unwrap());
-        for row in answer.tokens[8..].chunks_exact(17) {
+        for row in answer.tokens[8..].as_chunks::<17>().0 {
             let family = u64::from_le_bytes(row[1..9].try_into().unwrap());
             let ordinal = u64::from_le_bytes(row[9..].try_into().unwrap());
             out(if row[0] == 0 {
@@ -292,10 +292,10 @@ impl CensusGraph for Graph {
 #[test]
 fn an_unreachable_cycle_never_fails_an_allocation() {
     let mut graph = Graph::default();
-    graph.object(0, 32, &[edge(1)]);
-    graph.object(1, 32, &[edge(0)]);
-    let mut census = Census::restore(certificate(64, 2), LogicalBytes(64)).unwrap();
-    let pending = pressured(&mut census, 64);
+    graph.object(0, 48, &[edge(1)]);
+    graph.object(1, 48, &[edge(0)]);
+    let mut census = Census::restore(certificate(96, 2), LogicalBytes(112)).unwrap();
+    let pending = pressured(&mut census, 112);
     assert!(matches!(
         census.refine(&mut graph, &empty(), pending).unwrap(),
         RefinedDecision::Granted(_)
@@ -316,17 +316,21 @@ fn the_verdict_is_the_same_warm_evicted_and_reopened() {
                 (2, 160, 160, 32)
             }
             1 => {
-                base.object(0, 32, &[edge(1)]);
-                base.object(1, 32, &[edge(0)]);
-                (2, 64, 64, 64)
+                base.object(0, 48, &[edge(1)]);
+                base.object(1, 48, &[edge(0)]);
+                (2, 96, 112, 112)
             }
             _ => {
                 for n in 0..4096 {
                     let next = [edge(n + 1)];
-                    base.object(n, 32, if n == 4095 { &[] } else { &next });
+                    base.object(
+                        n,
+                        if n == 4095 { 32 } else { 48 },
+                        if n == 4095 { &[] } else { &next },
+                    );
                 }
                 base.roots = vec![Value::List(id(2048))];
-                (4096, 131088, 65584, 32)
+                (4096, 196608, 196608, 98304)
             }
         };
         let saved = certificate(upper, count);
@@ -385,8 +389,9 @@ fn refinement_counts_registers_native_args_and_reservations() {
         fresh: &[id(2)],
         reserved: LogicalBytes(40),
     };
-    let mut census = Census::restore(certificate(2048, 6), LogicalBytes(416)).unwrap();
-    let pending = pressured(&mut census, 80);
+    let mut census = Census::restore(certificate(1296, 6), LogicalBytes(1416)).unwrap();
+    census.changed(LogicalBytes(0), LogicalBytes(120)).unwrap();
+    let pending = pressured(&mut census, 1057);
     let decision = census.refine(&mut graph, &transient, pending).unwrap();
     // Five objects once, one result once, the persistent root and three
     // transient holding locations plus
@@ -409,24 +414,55 @@ fn a_large_partially_shared_detach_frees_only_the_dead_part() {
     let mut graph = Graph::default();
     for n in 0..8192 {
         let next = [edge(n + 1)];
-        graph.object(n, 32, if n == 8191 { &[] } else { &next });
+        graph.object(
+            n,
+            if n == 8191 { 32 } else { 48 },
+            if n == 8191 { &[] } else { &next },
+        );
     }
     graph.roots = vec![Value::List(id(0)), Value::List(id(4096))];
-    let mut census = Census::restore(certificate(262176, 8192), LogicalBytes(131120)).unwrap();
+    let mut census = Census::restore(certificate(393232, 8192), LogicalBytes(393232)).unwrap();
     graph.roots.remove(0);
     census.changed(LogicalBytes(16), LogicalBytes(0)).unwrap();
-    let pending = pressured(&mut census, 32);
+    let pending = pressured(&mut census, 196624);
     assert!(matches!(
         census.refine(&mut graph, &empty(), pending).unwrap(),
         RefinedDecision::Granted(_)
     ));
     assert_eq!(graph.swept, 4096);
-    assert_eq!(census.certificate().upper, LogicalBytes(131088));
+    assert_eq!(census.certificate().upper, LogicalBytes(196608));
     assert!(graph.directory.keys().all(|entity| entity.ordinal >= 4096));
 }
 
 #[test]
 fn an_interrupted_refinement_is_infrastructure() {
+    let mut scalars = Graph::default();
+    let args = [Value::Null];
+    let scalar_roots = TransientRoots {
+        registers: &[],
+        pinned: &[],
+        native_args: &args,
+        fresh: &[],
+        reserved: LogicalBytes(0),
+    };
+    let mut scalar_census = Census::restore(certificate(0, 0), LogicalBytes(16)).unwrap();
+    scalar_census
+        .changed(LogicalBytes(0), LogicalBytes(16))
+        .unwrap();
+    scalar_census
+        .set_trace_limits(TraceLimits {
+            work: 0,
+            ..TraceLimits::default()
+        })
+        .unwrap();
+    let request = pressured(&mut scalar_census, 1);
+    assert!(matches!(
+        scalar_census.refine(&mut scalars, &scalar_roots, request),
+        Err(CensusFault::Heap(HeapFault::Exhausted {
+            resource: HostResource::HostWork
+        }))
+    ));
+    assert_eq!(scalar_census.certificate().refinements, 0);
     let mut graph = Graph::default();
     graph.object(0, 32, &[edge(1)]);
     graph.object(1, 32, &[]);
@@ -503,13 +539,14 @@ fn census_garbage_stays_within_the_logical_bound() {
 }
 
 /// Dense summary generator keeps the measuring fixture independent of
-/// retained object payloads. A wide edge page streams directly into bits.
+/// retained object payloads. A wide edge summary streams directly into bits.
 struct Dense {
     count: u64,
+    roots: u64,
 }
 impl CensusGraph for Dense {
     fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
-        Ok(LogicalBytes(16))
+        Ok(LogicalBytes(16 * self.roots))
     }
     fn value_cost(&mut self, _: &Value) -> Result<LogicalBytes, HeapFault> {
         Ok(LogicalBytes(16))
@@ -526,11 +563,20 @@ impl CensusGraph for Dense {
         &mut self,
         visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        visit(&Value::List(id(0)))
+        for _ in 0..self.roots {
+            visit(&Value::List(id(0)))?;
+        }
+        Ok(())
     }
     fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
         Ok((entity.ordinal < self.count).then_some(EntityCost {
-            local: LogicalBytes(32),
+            local: LogicalBytes(
+                32 + if entity.ordinal == 0 {
+                    (self.count - 1) * 16
+                } else {
+                    0
+                },
+            ),
             has_edges: entity.ordinal == 0,
         }))
     }
@@ -570,9 +616,59 @@ impl CensusGraph for Dense {
 
 #[test]
 fn exceeding_the_trace_budget_is_host_only_and_raising_it_preserves_the_verdict() {
+    // Both the fetched census batch and the deletion batch coexist.
+    // Reserving just one buffer silently exceeds this host quota.
+    let mut graph = Graph::default();
+    for n in 0..128 {
+        graph.object(n, 32, &[]);
+    }
+    let saved = certificate(4096, 128);
+    let mut census = Census::restore(saved, saved.upper).unwrap();
+    census
+        .set_trace_limits(TraceLimits {
+            trace_memory_budget: 2000,
+            ..TraceLimits::default()
+        })
+        .unwrap();
+    let request = pressured(&mut census, 32);
+    assert!(matches!(
+        census.refine(&mut graph, &empty(), request),
+        Err(CensusFault::Heap(HeapFault::Exhausted {
+            resource: HostResource::TraceBudget
+        }))
+    ));
+    assert_eq!(census.certificate(), saved);
+    assert_eq!(graph.swept, 0);
+    census.set_trace_limits(TraceLimits::default()).unwrap();
+    assert!(matches!(
+        census.refine(&mut graph, &empty(), request).unwrap(),
+        RefinedDecision::Granted(_)
+    ));
+    assert_eq!(graph.swept, 128);
+
+    // Aliased identity roots need one bitmap, not a copied root inventory.
+    let mut graph = Dense {
+        count: 1,
+        roots: 1_000_000,
+    };
+    let saved = certificate(16_000_032, 1);
+    let mut census = Census::restore(saved, saved.upper).unwrap();
+    census
+        .set_trace_limits(TraceLimits {
+            trace_memory_budget: 4096,
+            ..TraceLimits::default()
+        })
+        .unwrap();
+    let request = pressured(&mut census, 32);
+    assert!(
+        matches!(census.refine(&mut graph, &empty(), request).unwrap(),
+        RefinedDecision::Refused { reachable } if reachable == saved.upper)
+    );
+    assert!(census.last_trace_stats().budget_peak <= 4096);
+
     for count in [1_000_000, 10_000_000] {
-        let saved = certificate(count * 32 + 16, count);
-        let mut graph = Dense { count };
+        let saved = certificate(count * 48, count);
+        let mut graph = Dense { count, roots: 1 };
         let mut census = Census::restore(saved, saved.upper).unwrap();
         census
             .set_trace_limits(TraceLimits {
