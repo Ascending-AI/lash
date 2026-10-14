@@ -102,6 +102,7 @@ fn a_stored_effect_fact_is_read_inside_the_fleet_read_window() {
         effect_summary_request(),
         ProcessEffectOmissions::new(
             std::collections::BTreeMap::from([("node".to_string(), counts)]),
+            8,
             fleet,
         )
         .append_request("omissions"),

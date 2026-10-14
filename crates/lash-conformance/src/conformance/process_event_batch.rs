@@ -87,6 +87,7 @@ fn summary() -> Vec<ProcessEventAppendRequest> {
                 },
             )]
             .into(),
+            8,
             lash_core::FleetFormat::current(),
         )
         .append_request("batch-law:omissions"),
@@ -409,6 +410,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
             },
         )]
         .into(),
+        8,
         lash_core::FleetFormat::current(),
     )
     .append_request("boundary-law:omissions");

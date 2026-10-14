@@ -64,7 +64,7 @@ pub use definition_store::{
     DefinitionAcquisition, ProcessDefinitionStore, ResolvedProcessDefinition,
 };
 pub use effect_summary::{
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    MAX_PROCESS_EFFECT_OCCURRENCES, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
     PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeReport,
     ProcessEffectOccurrence, ProcessEffectOmissions, ProcessEffectOmittedCounts,
     ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,

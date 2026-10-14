@@ -108,6 +108,8 @@ pub enum DurableFormat {
     ScopeStoragePayload,
     /// The runtime-owned durable effect-summary events a process's log
     /// carries (`process.effect_outcome`, `process.effect_omissions`).
+    /// The 1.0 baseline accepts recorded cuts from 0 through 4096; the
+    /// host default is 64, and the run pins its cut in its first transition.
     ProcessEffectReport,
     /// The identity bytes a retried append request must reproduce. Identity,
     /// not a stored stamp — see [`FormatProbe::IdentityOnly`].

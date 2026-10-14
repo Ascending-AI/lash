@@ -1090,7 +1090,7 @@ pub mod process {
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
         DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
         LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-        MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
+        MAX_PROCESS_EFFECT_OCCURRENCES, MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork,
         PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE, ProcessAwaitOutput,
         ProcessChangeBounds, ProcessChangeCursor, ProcessDefinition, ProcessDefinitionDraft,
         ProcessDefinitionDraftError, ProcessDefinitionError, ProcessDefinitionId,

@@ -408,7 +408,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             .expect("record differential invocation start");
     }
     // Ten occurrences of one node: the writer records the first
-    // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
+    // fixture cut of eight one by one and counts the rest, by
     // class, in one omission record.
     // Occurrences and omissions name the same structural site (ADR 0100 R4).
     let effect_node_id = lash_sansio::effect_identity_fixture("repeated-node", 1)
@@ -424,7 +424,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         } else {
             lash_core::ProcessEffectOutcomeClass::Success
         };
-        if occurrence > lash_core::PROCESS_EFFECT_OCCURRENCE_CAP {
+        if occurrence > 8 {
             omitted.record(class);
             continue;
         }
@@ -443,6 +443,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     }
     let omissions = lash_core::ProcessEffectOmissions::new(
         std::collections::BTreeMap::from([(effect_node_id.clone(), omitted)]),
+        8,
         lash_core::FleetFormat::current(),
     );
     // The run commits its summary at its boundaries (FIG-3571): a bare

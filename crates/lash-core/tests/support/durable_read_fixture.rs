@@ -193,6 +193,7 @@ fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
                 cancelled: 0,
             },
         )]),
+        8,
         lash_core::FleetFormat::current(),
     )
 }

@@ -1,4 +1,14 @@
-//! Optional working-memory and diagnostic cuts, independent of wire ceilings.
+//! Host-selected working-memory and diagnostic cuts.
+
+/// Hard maximum for individually recorded effect occurrences per process node.
+pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;
+
+/// A host selected an evidence cut outside the supported range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TraceLimitsError {
+    #[error("process effect occurrence limit {actual} exceeds maximum {maximum}")]
+    ProcessEffectOccurrencesExceeded { actual: u64, maximum: u64 },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TraceLimits {
@@ -20,7 +30,8 @@ pub struct TraceLimits {
     /// remembers none, so every model call reports its composition.
     pub composition_sessions: usize,
     /// Per-node effect occurrences recorded individually. Values above the
-    /// fixed wire ceiling (eight) resolve to eight; zero summarizes every occurrence.
+    /// hard maximum of [`MAX_PROCESS_EFFECT_OCCURRENCES`] (4096) are refused
+    /// at configuration; zero summarizes every occurrence. The default is 64.
     pub process_effect_occurrences: u64,
     /// Characters retained from a trace diagnostic before its omission annotation.
     pub diagnostic_error_chars: usize,
@@ -30,10 +41,21 @@ pub struct TraceLimits {
 }
 
 impl TraceLimits {
+    /// Refuse unsupported evidence cuts before the runtime accepts them.
+    pub fn validate(self) -> Result<(), TraceLimitsError> {
+        if self.process_effect_occurrences > MAX_PROCESS_EFFECT_OCCURRENCES {
+            return Err(TraceLimitsError::ProcessEffectOccurrencesExceeded {
+                actual: self.process_effect_occurrences,
+                maximum: MAX_PROCESS_EFFECT_OCCURRENCES,
+            });
+        }
+        Ok(())
+    }
+
     /// Standard preset: 256 held observations, 256 KiB attempt streams,
     /// 2048-byte diff values, eight summary paths, 64 KiB failure output,
     /// 2048-byte provider bodies, eight fingerprint generations, 1024
-    /// remembered session compositions, eight process
+    /// remembered session compositions, 64 process
     /// occurrences, 4000 diagnostic characters and a 4 MiB plugin-state warning. These are existing
     /// operational choices; no workload measurements justify their exact values.
     pub const fn standard() -> Self {
@@ -46,7 +68,7 @@ impl TraceLimits {
             provider_request_body_json_bytes: 2048,
             composition_fingerprint_generations: 8,
             composition_sessions: 1024,
-            process_effect_occurrences: 8,
+            process_effect_occurrences: 64,
             diagnostic_error_chars: 4000,
             plugin_state_warn_bytes: 4 * 1024 * 1024,
         }

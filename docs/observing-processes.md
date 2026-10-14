@@ -83,11 +83,14 @@ effect that is not a tool call. Keep that identity for correlation rather than t
 call id as Lash's call identity. The occurrence's `replay_key` makes a
 repeated append idempotent; it is not a substitute for the typed call id.
 
-Individual effect records have a per-node ceiling of eight
-(`PROCESS_EFFECT_OCCURRENCE_CAP`). A host may lower the retained cut with
-`TraceLimits::process_effect_occurrences`; zero summarizes all occurrences,
-and values above eight resolve to eight. The process pins its cut when it
-first advances. Effects beyond the cut still execute: only their individual
+Hosts choose individual effect records per node with
+`TraceLimits::process_effect_occurrences`: the default is 64 and the hard
+maximum is 4096 (`MAX_PROCESS_EFFECT_OCCURRENCES`). Zero summarizes all
+occurrences. Configuration above the maximum returns a typed
+`TraceLimitsError::ProcessEffectOccurrencesExceeded`, through
+`EmbedError::TraceLimits` when building a core. The process pins its cut when
+it first advances; replay and redrive use that recorded cut even if the
+host changes its configuration. Effects beyond the cut still execute: only their individual
 evidence is omitted. `ProcessEffectOmissions` records the effective
 `occurrence_cap` and each node's omitted success, failure and cancellation
 counts in the terminal transaction. An omitted occurrence cannot be

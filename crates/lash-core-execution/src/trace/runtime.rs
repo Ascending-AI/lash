@@ -117,10 +117,14 @@ impl TraceRuntime {
     }
 
     /// Configure capacities and cuts without installing an observer.
-    #[must_use]
-    pub fn with_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
+    /// Refuse unsupported cuts before accepting the host configuration.
+    pub fn with_limits(
+        mut self,
+        limits: lash_trace::TraceLimits,
+    ) -> Result<Self, lash_trace::TraceLimitsError> {
+        limits.validate()?;
         Arc::make_mut(&mut self.parts).limits = limits;
-        self
+        Ok(self)
     }
 
     pub fn level(&self) -> TraceLevel {

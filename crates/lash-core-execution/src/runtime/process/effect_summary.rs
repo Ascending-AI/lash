@@ -11,19 +11,20 @@ use super::events::ProcessEventAppendRequest;
 /// `process.effect_*` kinds, their strict payloads, the per-node occurrence
 /// cap and the failure-code mappings a recorded outcome carries. Changing any
 /// of them changes what a redrive re-derives for an already-written record, so
-/// it takes a new version.
+/// the 1.0 baseline is updated in place before the version freeze ends.
 ///
 /// version_guard(
 ///     file(
 ///         cover(
 ///             PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-///             PROCESS_EFFECT_OCCURRENCE_CAP, "struct ProcessEffectOccurrence",
+///             MAX_PROCESS_EFFECT_OCCURRENCES, "struct ProcessEffectOccurrence",
 ///             "struct ProcessEffectOmissions", "fn append_request", "fn decode",
 ///             "fn tool_failure_code", "fn effect_outcome_payload_schema",
 ///             "fn effect_omissions_payload_schema",
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
+///     items(path = "crates/lash-trace/src/limits.rs", MAX_PROCESS_EFFECT_OCCURRENCES, TraceLimits),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
@@ -62,8 +63,8 @@ pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOutcome.as_str();
 
 /// Runtime-owned event counting, per node and outcome class, the occurrences
-/// settled after the node's first [`PROCESS_EFFECT_OCCURRENCE_CAP`], which
-/// were not recorded one by one.
+/// settled after the node's recorded cut, bounded by
+/// [`MAX_PROCESS_EFFECT_OCCURRENCES`], which were not recorded one by one.
 /// Committed once, as the penultimate event of the run's terminal batch (after
 /// its pending occurrences, before its terminal event), under the same
 /// recovery contract as [`PROCESS_EFFECT_OUTCOME_EVENT_TYPE`].
@@ -71,10 +72,10 @@ pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOmissions.as_str();
 
 /// How many effect occurrences of one node are recorded one by one, across
-/// every site of the node: the fixed validated wire ceiling.
-/// The host may choose a smaller evidence cut through `TraceLimits`; the
+/// every site of the node: the hard maximum of 4096.
+/// The host chooses an evidence cut through `TraceLimits` (default 64); the
 /// driver pins that cut in its first transition and omissions record it.
-pub const PROCESS_EFFECT_OCCURRENCE_CAP: u64 = 8;
+pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = lash_trace::MAX_PROCESS_EFFECT_OCCURRENCES;
 
 /// Terminal class of a recorded effect occurrence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,15 +296,18 @@ impl TryFrom<ProcessEffectOmissionsFields> for ProcessEffectOmissions {
 }
 
 impl ProcessEffectOmissions {
+    /// Build a summary with the cut recorded by its run, independent of
+    /// the current host configuration.
     pub fn new(
         nodes: BTreeMap<String, ProcessEffectOmittedCounts>,
+        occurrence_cap: u64,
         fleet_format: crate::FleetFormat,
     ) -> Self {
         Self {
             vocabulary_version: fleet_format.writer_version(lash_core_store::surface_format!(
                 PROCESS_EVENT_VOCABULARY_VERSION
             )),
-            occurrence_cap: PROCESS_EFFECT_OCCURRENCE_CAP,
+            occurrence_cap,
             nodes,
         }
     }
@@ -343,9 +347,9 @@ impl ProcessEffectOmissions {
     }
 
     fn check(&self) -> Result<(), ProcessEffectReportError> {
-        if self.occurrence_cap > PROCESS_EFFECT_OCCURRENCE_CAP {
+        if self.occurrence_cap > MAX_PROCESS_EFFECT_OCCURRENCES {
             return Err(ProcessEffectReportError::UnsupportedOccurrenceCap {
-                expected: PROCESS_EFFECT_OCCURRENCE_CAP,
+                expected: MAX_PROCESS_EFFECT_OCCURRENCES,
                 actual: self.occurrence_cap,
             });
         }
@@ -433,7 +437,7 @@ pub struct ProcessEffectNodeReport {
 /// The per-node effect table a reader rebuilds from a process's event log.
 ///
 /// The bound is the writer's: the log holds at most
-/// [`PROCESS_EFFECT_OCCURRENCE_CAP`] occurrence records per node, across all
+/// [`MAX_PROCESS_EFFECT_OCCURRENCES`] occurrence records per node, across all
 /// of the node's sites, plus one omission record, and this fold only folds
 /// them. Its input is the log
 /// itself, whose replay keys are unique; the result does not depend on page
@@ -614,7 +618,7 @@ pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
         "required": ["vocabulary_version", "occurrence_cap", "nodes"],
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
-            "occurrence_cap": { "type": "integer", "minimum": 0, "maximum": PROCESS_EFFECT_OCCURRENCE_CAP },
+            "occurrence_cap": { "type": "integer", "minimum": 0, "maximum": MAX_PROCESS_EFFECT_OCCURRENCES },
             "nodes": {
                 "type": "object",
                 "minProperties": 1,

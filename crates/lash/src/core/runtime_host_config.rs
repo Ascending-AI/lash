@@ -33,13 +33,13 @@ impl LashCoreBuilder {
             data_retention,
         )
         .with_provider_file_cache(self.provider_file_cache);
-        let core = self.apply_core_overrides(core);
+        let core = self.apply_core_overrides(core)?;
         core.control.relay_policy().validate()?;
         core.control.commit_admission.validate()?;
         Ok(core)
     }
 
-    fn apply_core_overrides(&mut self, mut core: RuntimeHostConfig) -> RuntimeHostConfig {
+    fn apply_core_overrides(&mut self, mut core: RuntimeHostConfig) -> Result<RuntimeHostConfig> {
         core.durability.attachment_store = Arc::new(
             core.durability
                 .attachment_store
@@ -65,7 +65,7 @@ impl LashCoreBuilder {
         core.observation_work_limits = self.observation_work_limits;
         core.data_limits = self.data_limits;
         if let Some(limits) = self.trace_limits.take() {
-            core.tracing = core.tracing.clone().with_limits(limits);
+            core.tracing = core.tracing.clone().with_limits(limits)?;
         }
         if let Some(level) = self.trace_level.take() {
             core.tracing = core.tracing.clone().with_level(level);
@@ -94,7 +94,7 @@ impl LashCoreBuilder {
         if let Some(filter) = self.process_tool_visibility_filter.take() {
             core.control.process_tool_visibility_filter = Some(filter);
         }
-        core
+        Ok(core)
     }
 }
 

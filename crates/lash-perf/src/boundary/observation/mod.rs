@@ -433,7 +433,8 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
 /// outcomes stop at the effect summary's occurrence cap, so the facts are
 /// spread over as many step sites as that takes.
 pub(super) fn commit_document(commits: usize) -> String {
-    let cap = usize::try_from(lash::process::PROCESS_EFFECT_OCCURRENCE_CAP).unwrap_or(8);
+    let cap = usize::try_from(lash::tracing::TraceLimits::standard().process_effect_occurrences)
+        .unwrap_or(64);
     loop_document(commits.min(cap), commits.div_ceil(cap))
 }
 

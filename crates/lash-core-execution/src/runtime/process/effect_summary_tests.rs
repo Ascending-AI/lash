@@ -121,7 +121,7 @@ fn decode_refuses_other_versions_and_unknown_fields() {
     // A task's occurrences of a site count from 0 (`K-EFF-002`), with no
     // ceiling of their own: the per-node cap is the writer's count of what
     // it recorded.
-    let beyond = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
+    let beyond = MAX_PROCESS_EFFECT_OCCURRENCES + 1;
     assert_eq!(
         ProcessEffectOccurrence::decode(
             occurrence("node", beyond).append_request().fact.payload(),
@@ -136,7 +136,7 @@ fn decode_refuses_other_versions_and_unknown_fields() {
 
 #[test]
 fn omission_records_are_strict() {
-    let empty = ProcessEffectOmissions::new(BTreeMap::new(), crate::FleetFormat::current());
+    let empty = ProcessEffectOmissions::new(BTreeMap::new(), 8, crate::FleetFormat::current());
     assert!(matches!(
         ProcessEffectOmissions::decode(
             empty.append_request("omissions").fact.payload(),
@@ -148,10 +148,15 @@ fn omission_records_are_strict() {
     counts.record(ProcessEffectOutcomeClass::Failure);
     let mut omissions = ProcessEffectOmissions::new(
         BTreeMap::from([("node".to_string(), counts)]),
+        8,
         crate::FleetFormat::current(),
     );
-    for cap in 0..=PROCESS_EFFECT_OCCURRENCE_CAP {
+    let schema = effect_omissions_payload_schema();
+    for cap in 0..=MAX_PROCESS_EFFECT_OCCURRENCES {
         omissions.occurrence_cap = cap;
+        schema
+            .validate(&omissions.append_request("omissions").fact.payload())
+            .unwrap();
         let decoded = ProcessEffectOmissions::decode(
             omissions.append_request("omissions").fact.payload(),
             crate::FleetFormat::current(),
@@ -159,7 +164,12 @@ fn omission_records_are_strict() {
         .unwrap();
         assert_eq!(decoded.occurrence_cap, cap);
     }
-    omissions.occurrence_cap = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
+    omissions.occurrence_cap = MAX_PROCESS_EFFECT_OCCURRENCES + 1;
+    assert!(
+        schema
+            .validate(&omissions.append_request("omissions").fact.payload())
+            .is_err()
+    );
     assert!(matches!(
         ProcessEffectOmissions::decode(
             omissions.append_request("omissions").fact.payload(),
@@ -181,6 +191,7 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         occurrence("node-a", 1).append_request(),
         ProcessEffectOmissions::new(
             BTreeMap::from([(node_key("node-a"), counts)]),
+            8,
             crate::FleetFormat::current(),
         )
         .append_request("omissions"),
@@ -279,7 +290,7 @@ fn effect_identifiers_and_positive_omissions_match_the_host_schemas() {
         ] {
             let allowed = !node.is_empty() && counts.total() > 0;
             let typed =
-                ProcessEffectOmissions::new(BTreeMap::from([(node.to_owned(), counts)]), fleet);
+                ProcessEffectOmissions::new(BTreeMap::from([(node.to_owned(), counts)]), 8, fleet);
             let payload = serde_json::to_value(&typed).unwrap();
             assert_eq!(schema.validate(&payload).is_ok(), allowed, "{payload}");
             assert_eq!(typed.admit(fleet).is_ok(), allowed);

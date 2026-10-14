@@ -85,6 +85,29 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
     }
 }
 
+/// The hundred-effect count laws need no database-thread interleavings.
+/// Inline SQLite calls use the same stores and transactions without a
+/// host-thread scheduling round trip for every database operation.
+async fn effect_stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + Send>>) {
+    match tier {
+        Tier::SqliteMemory => (
+            Arc::new(
+                lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+                    lash_sqlite_store::SqliteStoreSetOptions {
+                        inline_calls: true,
+                        ..lash_sqlite_store::SqliteStoreSetOptions::memory()
+                    },
+                    Arc::new(lash::runtime::SystemClock),
+                )
+                .await
+                .expect("an inline SQLite memory store opens"),
+            ),
+            Vec::new(),
+        ),
+        Tier::Postgres => stores(tier).await,
+    }
+}
+
 /// What a process event sink attached to a node's registry heard.
 #[derive(Clone, Default)]
 struct Heard(Arc<Mutex<Vec<lash::process::ProcessEvent>>>);
@@ -116,11 +139,32 @@ fn core(
     world: &Arc<World>,
     boot: &str,
 ) -> (lash::Backend, lash::LashCore) {
+    let (backend, builder) = core_builder(stores, engine, world, None);
+    let core = builder.build(owner(boot)).expect("the core builds");
+    (backend, core)
+}
+
+fn owner(boot: &str) -> lash::persistence::LeaseOwnerIdentity {
+    lash::persistence::LeaseOwnerIdentity::opaque(
+        lash::persistence::LeaseOwnerId::new("lifecycle-events-deployment"),
+        lash::persistence::LeaseIncarnationId::new(boot),
+    )
+}
+
+fn core_builder(
+    stores: &Arc<dyn StoreSet>,
+    engine: Advance,
+    world: &Arc<World>,
+    refuse_at: Option<u64>,
+) -> (lash::Backend, lash::LashCoreBuilder) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
-        .process_engine(Arc::new(ScriptEngine { advance: engine }))
+        .process_engine(Arc::new(ScriptEngine {
+            advance: engine,
+            refuse_at,
+        }))
         .build()
         .expect("the backend assembles");
-    let core = lash::LashCore::standard_builder(backend.clone())
+    let builder = lash::LashCore::standard_builder(backend.clone())
         .tools(lash::tool_provider_key!("tools"), write_tool(world))
         .process_component(
             lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world)),
@@ -130,13 +174,8 @@ fn core(
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            lash::persistence::LeaseOwnerId::new("lifecycle-events-deployment"),
-            lash::persistence::LeaseIncarnationId::new(boot),
-        ))
-        .expect("the core builds");
-    (backend, core)
+        .delta_coalescing(lash::DeltaCoalescing::recommended());
+    (backend, builder)
 }
 
 // --- the engine ---------------------------------------------------------------
@@ -149,6 +188,7 @@ type Advance = fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::
 
 struct ScriptEngine {
     advance: Advance,
+    refuse_at: Option<u64>,
 }
 
 fn infra(error: impl std::fmt::Display) -> lash_core::ProcessInfraError {
@@ -246,6 +286,9 @@ impl lash_core::ProcessEngine for ScriptEngine {
         } else {
             serde_json::from_slice(&state.bytes).map_err(infra)?
         };
+        if self.refuse_at.is_some() && script.as_u64() == self.refuse_at {
+            return Err(infra("the fixture engine needs repair before redrive"));
+        }
         let action = (self.advance)(&mut script, event);
         Ok((
             lash_core::EngineState {
@@ -460,8 +503,12 @@ fn of_type<'a>(
 
 const NODE: &str = "node.write";
 
-/// How many writes [`effects_advance`] issues: one more than a node records.
-const NODE_WRITES: u64 = lash_core::PROCESS_EFFECT_OCCURRENCE_CAP + 1;
+/// A hundred visits to the same node exercise the default evidence cut.
+const NODE_WRITES: u64 = 100;
+
+// These laws each run a full hundred-effect deployment. Serialize that
+// fixture work so parallel libtest runs keep each process's deadline useful.
+static EFFECT_LAW_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The identity of the `n`-th write of [`NODE`], from 0: the one site of
 /// the node, at its `n`-th occurrence.
@@ -502,12 +549,16 @@ fn effects_advance(
 
 /// Each committed step outcome that names an effect node is one
 /// `process.effect_outcome` of that node at its exact site, keyed by its
-/// call. A site records `PROCESS_EFFECT_OCCURRENCE_CAP` occurrences; a later
-/// one is counted in the omissions record committed just before the terminal.
+/// call. By default a node records 64 of 100 visits, with the other 36
+/// counted in the omissions record committed just before the terminal.
 async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
-    let (stores, _keep) = stores(tier).await;
+    let _guard = EFFECT_LAW_GUARD.lock().await;
+    let (stores, _keep) = effect_stores(tier).await;
     let world = Arc::new(World::default());
-    let (backend, core) = core(&stores, effects_advance, &world, "effects");
+    let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
+    let core = builder
+        .build(owner("effects"))
+        .expect("default evidence cut");
     let process = start(&core).await;
     ended(&core, &process).await;
 
@@ -523,9 +574,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
             .collect();
     let recorded: Vec<lash_sansio::EffectIdentity> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
-    let first_cap: Vec<_> = (0..lash_core::PROCESS_EFFECT_OCCURRENCE_CAP)
-        .map(node_site)
-        .collect();
+    let first_cap: Vec<_> = (0..64).map(node_site).collect();
     assert_eq!(
         recorded, first_cap,
         "the site's first cap occurrences: {events:#?}"
@@ -547,8 +596,9 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     let omitted = lash_core::ProcessEffectOmissions::decode(omissions[0].fact.payload(), fleet)
         .expect("the omissions decode");
     let node = node_site(0).site.to_string();
-    assert_eq!(omitted.nodes[&node].success, 1);
-    assert_eq!(omitted.nodes[&node].total(), 1);
+    assert_eq!(omitted.occurrence_cap, 64);
+    assert_eq!(omitted.nodes[&node].success, 36);
+    assert_eq!(omitted.nodes[&node].total(), 36);
     let terminal = events.last().expect("the log ends");
     assert_eq!(terminal.fact.event_type(), "process.completed");
     assert_eq!(
@@ -563,6 +613,150 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 }
 
 on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
+
+/// FIG-6249: a host can retain every visit to a node above the standard cut.
+async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
+    let _guard = EFFECT_LAW_GUARD.lock().await;
+    let (stores, _keep) = effect_stores(tier).await;
+    let world = Arc::new(World::default());
+    let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
+    let core = builder
+        .trace_limits(lash::tracing::TraceLimits {
+            process_effect_occurrences: 200,
+            ..Default::default()
+        })
+        .build(owner("configured-200"))
+        .expect("valid evidence cut");
+    let process = start(&core).await;
+    ended(&core, &process).await;
+    assert_effect_cut(&log(&backend, &process).await, 200);
+    assert_eq!(world.writes.lock().unwrap().len(), 100);
+}
+
+on_every_tier!(a_configured_200_cut_records_all_100_effect_occurrences);
+
+/// FIG-6249: configuration refuses unsupported cuts with their typed cause.
+#[tokio::test]
+async fn a_configured_5000_cut_is_refused_typed() {
+    use lash::tracing::{TraceLimits, TraceLimitsError};
+    let limits = TraceLimits {
+        process_effect_occurrences: 5000,
+        ..Default::default()
+    };
+    let refusal = TraceLimitsError::ProcessEffectOccurrencesExceeded {
+        actual: 5000,
+        maximum: 4096,
+    };
+    let runtime = lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock));
+    assert!(matches!(runtime.clone().with_limits(limits), Err(error) if error == refusal));
+    for cap in [0, 4096] {
+        assert!(
+            runtime
+                .clone()
+                .with_limits(TraceLimits {
+                    process_effect_occurrences: cap,
+                    ..limits
+                })
+                .is_ok()
+        );
+    }
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
+    let (_, builder) = core_builder(&stores, effects_advance, &Arc::new(World::default()), None);
+    assert!(
+        matches!(builder.trace_limits(limits).build(owner("invalid-cut")),
+        Err(lash::EmbedError::TraceLimits(error)) if error == refusal)
+    );
+}
+
+/// FIG-6249: redrive retains the run's first cut after the host changes it.
+async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
+    let _guard = EFFECT_LAW_GUARD.lock().await;
+    let (stores, _keep) = effect_stores(tier).await;
+    let world = Arc::new(World::default());
+    let (_, builder) = core_builder(&stores, effects_advance, &world, Some(20));
+    let first = builder
+        .trace_limits(lash::tracing::TraceLimits {
+            process_effect_occurrences: 64,
+            ..Default::default()
+        })
+        .build(owner("before-redrive"))
+        .expect("first host");
+    let process = start(&first).await;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let record = first.processes().get(&process).await.unwrap().unwrap();
+            if let lash_core::ProcessParkState::Parked(reason) = record.park {
+                assert!(matches!(
+                    reason,
+                    lash_core::ProcessParkReason::AdvanceRefused { .. }
+                ));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the run parks after its first transition");
+    first.shutdown().await.expect("first host stops");
+    let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
+    let second = builder
+        .trace_limits(lash::tracing::TraceLimits {
+            process_effect_occurrences: 16,
+            ..Default::default()
+        })
+        .build(owner("after-redrive"))
+        .expect("replacement host");
+    assert!(
+        second
+            .processes()
+            .redrive(&process, "effect cut law")
+            .await
+            .expect("redrive")
+    );
+    ended(&second, &process).await;
+    assert_effect_cut(&log(&backend, &process).await, 64);
+    assert_eq!(
+        world.writes.lock().unwrap().len(),
+        100,
+        "redrive repeats no settled effect"
+    );
+}
+
+on_every_tier!(redrive_uses_the_recorded_64_cut_under_a_16_cut_host);
+
+fn assert_effect_cut(events: &[lash::process::ProcessEvent], cap: u64) {
+    let outcomes = of_type(events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE);
+    let retained = NODE_WRITES.min(cap);
+    assert_eq!(u64::try_from(outcomes.len()).unwrap(), retained);
+    for (n, event) in outcomes.iter().enumerate() {
+        let outcome = lash_core::ProcessEffectOccurrence::decode(
+            event.fact.payload(),
+            lash_core::FleetFormat::current(),
+        )
+        .unwrap();
+        assert_eq!(outcome.at, node_site(u64::try_from(n).unwrap()));
+    }
+    let omissions = of_type(events, lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE);
+    if retained == NODE_WRITES {
+        assert!(omissions.is_empty(), "all occurrences were retained");
+    } else {
+        assert_eq!(omissions.len(), 1);
+        let omitted = lash_core::ProcessEffectOmissions::decode(
+            omissions[0].fact.payload(),
+            lash_core::FleetFormat::current(),
+        )
+        .unwrap();
+        assert_eq!(omitted.occurrence_cap, cap);
+        assert_eq!(
+            omitted.nodes[&node_site(0).site.to_string()].success,
+            NODE_WRITES - retained
+        );
+        assert_eq!(
+            omitted.nodes[&node_site(0).site.to_string()].total(),
+            NODE_WRITES - retained
+        );
+    }
+}
 
 /// D-TOOLRECORD: both tool calls join from durable effect occurrences after
 /// the deployment and its SQLite file store have been reopened (FIG-5550).
@@ -730,7 +924,10 @@ impl Fleet {
         let backend = lash_core_execution::Backend::assemble(lash_core_execution::BackendParts {
             stores: Arc::new(stores),
             settings: lash_core_execution::DurableSettings::default(),
-            engines: vec![Arc::new(ScriptEngine { advance })],
+            engines: vec![Arc::new(ScriptEngine {
+                advance,
+                refuse_at: None,
+            })],
             providers: Arc::new(lash_core_execution::NoProjectionProviders),
             formats: Vec::new(),
         })

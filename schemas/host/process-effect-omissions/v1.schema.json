@@ -60,7 +60,7 @@
       "type": "object"
     },
     "occurrence_cap": {
-      "maximum": 8,
+      "maximum": 4096,
       "minimum": 0,
       "type": "integer"
     },

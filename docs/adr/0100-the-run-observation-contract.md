@@ -101,8 +101,11 @@ Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
 
 ### R4: durable per-effect summary
 
-Result incorporation records the first `PROCESS_EFFECT_OCCURRENCE_CAP`, 8,
-occurrences per effect node, counted across the node's sites. Each contains
+Result incorporation records the host-selected first
+`TraceLimits::process_effect_occurrences` occurrences per effect node, counted
+across the node's sites: default 64, hard maximum
+`MAX_PROCESS_EFFECT_OCCURRENCES = 4096`. Configuration above the maximum is
+refused typed. The first transition pins the chosen cut for replay and redrive. Each contains
 node id, its site's occurrence, the site and loop context, operation,
 outcome class, optional code, a typed `call_id` for tool effects, and idempotency
 key, with no payload, timing, or attempt. The call id joins to the retained
@@ -187,7 +190,7 @@ The pre-1.0 freeze governs changes in place.
 | Kernel document | `KERNEL_VERSION` in the manifest, `KERNEL_DOCUMENT_SCHEMA_VERSION` in the store | Version checked before shape against the fleet read window; derived facts regenerate rather than upcast | Every object closed (`K-DOC-004`) |
 | Trace records and events | `TRACE_SCHEMA_VERSION = 36` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
 | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, occurrence, wait, mismatch, and fact variants refused |
-| Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
+| Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Recorded occurrence cuts 0–4096 accepted; default writer cut 64, pinned per run. Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
 
 The owners and fences are in `crates/lash-kernel-doc/src/document.rs`,
 `crates/lash-vm-runtime/src/formats.rs`,

@@ -49,8 +49,8 @@ pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, O
 pub use lash_trace::{
     CONTENT_POLICY_OMISSION, FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings,
     FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, StderrTraceSink,
-    TeeTraceSink, TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceSink,
-    TraceToolCallOutcome, TraceToolCallOutput,
+    TeeTraceSink, TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceLimitsError,
+    TraceSink, TraceToolCallOutcome, TraceToolCallOutput,
 };
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a

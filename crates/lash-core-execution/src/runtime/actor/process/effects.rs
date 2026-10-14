@@ -122,9 +122,11 @@ pub(super) fn record_omitted_effects(
     if driver.omitted_effects.is_empty() {
         return;
     }
-    let mut omissions =
-        crate::runtime::process::ProcessEffectOmissions::new(driver.omitted_effects.clone(), fleet);
-    omissions.occurrence_cap = driver.effect_occurrence_cap;
+    let omissions = crate::runtime::process::ProcessEffectOmissions::new(
+        driver.omitted_effects.clone(),
+        driver.effect_occurrence_cap,
+        fleet,
+    );
     append_event(
         tx,
         process,

@@ -756,10 +756,7 @@ impl ProcessActivation {
             }
         };
         if matches!(event, EngineEvent::Started { .. }) {
-            driver.effect_occurrence_cap = self
-                .trace_limits
-                .process_effect_occurrences
-                .min(crate::runtime::process::PROCESS_EFFECT_OCCURRENCE_CAP);
+            driver.effect_occurrence_cap = self.trace_limits.process_effect_occurrences;
             driver.cancel_grace_ms =
                 u64::try_from(engine.cancel_grace().as_millis()).unwrap_or(u64::MAX);
         }

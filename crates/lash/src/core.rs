@@ -1055,6 +1055,8 @@ impl LashCoreBuilder {
 
     /// Configure trace working capacities, evidence cuts and plugin-state warnings.
     /// Defaults to [`crate::tracing::TraceLimits::standard`]. No sink is installed.
+    /// Building refuses process occurrence cuts above 4096 with
+    /// [`EmbedError::TraceLimits`].
     pub fn trace_limits(mut self, limits: crate::tracing::TraceLimits) -> Self {
         self.trace_limits = Some(limits);
         self

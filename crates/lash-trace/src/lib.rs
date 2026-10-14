@@ -23,7 +23,9 @@
 //! between export and its record; other diagnostics are best effort and may be
 //! lost or repeated after a crash. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
 mod limits;
-pub use limits::{ObservationWorkLimits, TraceLimits};
+pub use limits::{
+    MAX_PROCESS_EFFECT_OCCURRENCES, ObservationWorkLimits, TraceLimits, TraceLimitsError,
+};
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
