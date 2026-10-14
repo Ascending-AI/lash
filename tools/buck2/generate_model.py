@@ -970,11 +970,6 @@ def library_compile_data(package_name: str, library_name: str) -> list[str]:
     return target_policy(package_name, "lib", library_name).compile_data
 
 
-def unit_test_compile_data(package_name: str, library_name: str) -> list[str]:
-    """Sandbox inputs the unit-test compile of one package needs."""
-    return target_policy(package_name, "unit-test", library_name).compile_data
-
-
 def target_support(
     package: dict,
     targets: list[dict],

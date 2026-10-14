@@ -53,7 +53,7 @@ if [[ "$requested_lane" == sim-search:* ]]; then
   sim_search_shard="${requested_lane#sim-search:}"
 fi
 
-areas=(store process trigger effect-host protocol provider sim)
+areas=(store process effect-host protocol provider sim)
 area_is_known=0
 for known_area in "${areas[@]}"; do
   if [ "$area" = "$known_area" ]; then
@@ -63,7 +63,7 @@ for known_area in "${areas[@]}"; do
 done
 if [ "$area" != "all" ] && [ "$area_is_known" -ne 1 ]; then
   echo "Unknown confidence area '${area}'." >&2
-  echo "Areas: store, process, trigger, effect-host, protocol, provider, sim" >&2
+  echo "Areas: store, process, effect-host, protocol, provider, sim" >&2
   exit 2
 fi
 if [ -n "$sim_search_shard" ] && [ "$area" != "all" ] && [ "$area" != "sim" ]; then
@@ -106,7 +106,6 @@ else
   case "$area" in
     store) selected_packages=(lash-internal-sqlite-store lash-internal-postgres-store) ;;
     process) selected_packages=(lash-internal-core-execution lash-internal-core-worker) ;;
-    trigger) selected_packages=(lash-internal-core-execution) ;;
     effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
     provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-sansio) ;;
     protocol) selected_packages=(lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
@@ -121,13 +120,6 @@ else
         --file 'crates/lash-core-execution/src/runtime/work/*.rs'
         --file 'crates/lash-core-execution/src/session/process_handles.rs'
         --file 'crates/lash-core-execution/src/tool_provider/process*.rs'
-      )
-      ;;
-    trigger)
-      area_mutation_file_args=(
-        --file 'crates/lash-core-execution/src/triggers.rs'
-        --file 'crates/lash-core-execution/src/triggers/**/*.rs'
-        --file 'crates/lash-core-execution/src/plugin/trigger_registry.rs'
       )
       ;;
     effect-host)
@@ -434,7 +426,7 @@ Selectors:
                fast:sim-unit-perf-guards, fast:sim-generated,
                fast:minimizer-fixtures, fast:summary
   Full shards: sim-search:<i>/<n>
-  Areas:       store, process, trigger, effect-host, protocol, provider, sim
+  Areas:       store, process, effect-host, protocol, provider, sim
 
 Composition:
   Append exactly one area to a depth lane, for example fast+area:store or
@@ -442,7 +434,7 @@ Composition:
   the area explicitly filters conformance, differential, coverage, and
   mutation work to that surface. Existing unscoped lanes retain their full
   effective scope. Fast shards may also be area-qualified when the shard owns
-  that surface, for example fast:fault-matrix+area:trigger. sim-search is a
+  that surface, for example fast:fault-matrix+area:process. sim-search is a
   full-depth shard and may only compose with area:sim.
   Area-qualified artifacts are isolated below the selected lane or shard at
   areas/<surface>/, so they cannot overwrite evidence from an unscoped run.
@@ -528,7 +520,6 @@ confidence_schedule_table=(
   "fast:all|process|scenario-harnesses|runtime persistence, session graph, runtime, and agent scenarios|"
   "fast:all|protocol|scenario-harnesses|Standard and RLM protocol scenarios|"
   "fast:all|process|fault-matrix|runtime state machine and durable process fault matrix|"
-  "fast:all|trigger|fault-matrix|trigger delivery fault matrix|"
   "fast:all|effect-host|fault-matrix|inline await-event cancellation conformance|"
   "fast:all|protocol|fault-matrix|Lash VM property suite|"
   "fast:all|provider|fault-matrix|transport properties and provider failure evidence|"
@@ -540,7 +531,6 @@ confidence_schedule_table=(
   "fast:scenario-harnesses|process|scenario-harnesses|runtime persistence, session graph, runtime, and agent scenarios|"
   "fast:scenario-harnesses|protocol|scenario-harnesses|Standard and RLM protocol scenarios|"
   "fast:fault-matrix|process|fault-matrix|runtime state machine and durable process fault matrix|"
-  "fast:fault-matrix|trigger|fault-matrix|trigger delivery fault matrix|"
   "fast:fault-matrix|effect-host|fault-matrix|inline await-event cancellation conformance|"
   "fast:fault-matrix|protocol|fault-matrix|Lash VM property suite|"
   "fast:fault-matrix|provider|fault-matrix|transport properties and provider failure evidence|"
@@ -552,7 +542,6 @@ confidence_schedule_table=(
   "sim-search|sim|sim-search|deterministic simulation search shard at full budgets|"
   "default|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_current_contention,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
-  "default|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "default|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -560,7 +549,6 @@ confidence_schedule_table=(
   "broad|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|store|postgres-conformance|bounded Postgres conformance and dynamic backend differential|postgres_conformance"
   "broad|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
-  "broad|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "broad|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -569,7 +557,6 @@ confidence_schedule_table=(
   "full|store|scenario-harnesses|store contracts, SQLite faults, local backend conformance, contention, and Postgres conformance|backend_contention,postgres_conformance,env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|store|postgres-conformance|full Postgres conformance and dynamic backend differential|postgres_conformance"
   "full|process|scenario-harnesses|runtime persistence, session graph, runtime scenarios, and process fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
-  "full|trigger|fault-matrix|trigger delivery fault matrix|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|effect-host|fault-matrix|inline await-event cancellation conformance|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|protocol|scenario-harnesses|protocol scenarios and property suites|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
   "full|provider|fault-matrix|provider transport, failure, and exclusion evidence|env_gated_lanes,full_lane_prerequisites,coverage_summary,mutation_evidence"
@@ -1127,14 +1114,6 @@ run_state_machine_and_fault_matrix() {
   if area_selected effect-host; then
     step "Effect-host await-event session-cancel conformance (SQLite memory)"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory effect_host
-  fi
-
-  if area_selected trigger; then
-    step "Durable trigger fault-matrix evidence"
-    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
-      trigger_capture_route_and_compaction_refusal_matrix
-    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
-      trigger_delivery_recovery
   fi
 
   if area_selected store; then

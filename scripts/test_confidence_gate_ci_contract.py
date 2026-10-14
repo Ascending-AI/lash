@@ -455,7 +455,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             expected_selectors,
             {row.split("|", 1)[0] for row in rows},
         )
-        areas = ("store", "process", "trigger", "effect-host", "protocol", "provider", "sim")
+        areas = ("store", "process", "effect-host", "protocol", "provider", "sim")
         matrix = {
             (row.split("|", 4)[0], row.split("|", 4)[1])
             for row in rows
@@ -536,11 +536,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             for line in table_body.splitlines()
             if line.strip().startswith('"')
         ]
-        areas = ("store", "process", "trigger", "effect-host", "protocol", "provider", "sim")
+        areas = ("store", "process", "effect-host", "protocol", "provider", "sim")
         cases = (
             ("default+area:store", "default", "all", "store"),
             ("broad+area:store", "broad", "all", "store"),
-            ("fast:fault-matrix+area:trigger", "fast", "fault-matrix", "trigger"),
+            ("fast:fault-matrix+area:process", "fast", "fault-matrix", "process"),
             ("fast:sim-generated", "fast", "sim-generated", "all"),
         )
 
@@ -1319,7 +1319,6 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
         lanes = {
             "full+area:store",
             "full+area:process",
-            "full+area:trigger",
             "full+area:effect-host",
             "full+area:protocol",
             "full+area:provider",
@@ -1706,9 +1705,9 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for snippet in (
             "fast+area:store",
             "full+area:effect-host",
-            "fast:fault-matrix+area:trigger",
+            "fast:fault-matrix+area:process",
             "sim-search:<i>/<n>",
-            "store, process, trigger, effect-host, protocol, provider, sim",
+            "store, process, effect-host, protocol, provider, sim",
         ):
             self.assertIn(snippet, gate)
 
@@ -1744,31 +1743,34 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             self.assertEqual(shard_plan.returncode, 0, shard_plan.stderr)
             self.assertIn("search shard 3/9", shard_plan.stdout)
 
-            trigger_plan = subprocess.run(
-                ["bash", str(GATE), "--dry-run", "full+area:trigger"],
-                cwd=ROOT,
-                env={**os.environ, **env},
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(trigger_plan.returncode, 0, trigger_plan.stderr)
-            self.assertIn("source filters:", trigger_plan.stdout)
-            self.assertIn("crates/lash-core-execution/src/triggers", trigger_plan.stdout)
-
-            invalid = subprocess.run(
-                ["bash", str(GATE), "--dry-run", "fast+area:unknown"],
-                cwd=ROOT,
-                env={**os.environ, **env},
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(invalid.returncode, 2)
-            self.assertIn(
-                "Areas: store, process, trigger, effect-host, protocol, provider, sim",
-                invalid.stderr,
-            )
+            for selector in (
+                "default+area:trigger",
+                "broad+area:trigger",
+                "full+area:trigger",
+                "fast+area:trigger",
+                "fast:fault-matrix+area:trigger",
+                "fast+area:unknown",
+            ):
+                with self.subTest(selector=selector):
+                    invalid = subprocess.run(
+                        ["bash", str(GATE), "--dry-run", selector],
+                        cwd=ROOT,
+                        env={**os.environ, **env},
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(invalid.returncode, 2)
+                    self.assertIn(
+                        f"Unknown confidence area '{selector.split('area:')[1]}'.",
+                        invalid.stderr,
+                    )
+                    self.assertIn(
+                        "Areas: store, process, effect-host, protocol, provider, sim",
+                        invalid.stderr,
+                    )
+                    self.assertEqual(invalid.stdout, "")
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
 
     def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")
