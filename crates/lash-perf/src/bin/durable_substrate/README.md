@@ -177,7 +177,9 @@ exclusive plan CPU cost. Trace admission/export uses the production OpenTelemetr
 adapter with a local in-memory exporter and omitted content.
 
 The maintained `READ-COST-MODEL` law checks exact owner labels and fact counts;
-timing has no threshold. Both dialects run in the law. The Python release-pin refusal discovered by
+timing has no threshold. The cacheable law runs all 32 populations on fresh
+SQLite memory stores with one shared worker service and two runtime threads.
+Both dialects run in the law. The Python release-pin refusal discovered by
 this benchmark was fixed by FIG-6186 before its final measurement. The dated
 [measurement report](../../../../../docs/perf/declared-reads-2026-10-13.md)
 records that gap.
@@ -281,8 +283,11 @@ Add `--heap-walk checkpoint`, `--heap-walk resume` or `--heap-walk carry` to
 inject a deliberate retained-graph walk at the corresponding seam. The hook
 visits object entries and immutable payload bytes, preserves values and charge,
 and reports `probe_units`. It requires the testing worker build, and is disabled
-unless requested. The harness law runs all scenarios at the two smallest H,
-then verifies an H-proportional injected count at each of the three locations:
+unless requested. The harness law runs all scenarios at the two smallest H
+on fresh SQLite memory stores, reusing workers with the same probe configuration,
+then verifies an H-proportional injected count at each of the three locations.
+Every interval still requires worker release/reset and exactly one owner park;
+the command-line baseline keeps fresh file databases and worker pools per sample:
 
 ```sh
 kiln test //crates/lash-perf:durable-substrate__bin__unit_test \

@@ -239,14 +239,10 @@ async fn sample(
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
-    let recorder = Arc::new(super::recorder::Recorder::default());
-    let stores = super::recorder::RecordingStores::new(
-        Arc::new(stores),
-        "heap-meter",
-        Arc::clone(&recorder),
-        "sqlite",
-    );
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
+    sample_with_stores(worker_service(worker, probe), stores, scenario, h, probe).await
+}
+
+fn worker_service(worker: &Path, probe: Option<&str>) -> lash::vm::WorkerService {
     let mut config = lash::vm::WorkerService::subprocess(worker).config().clone();
     config.entry.args.push("--count-heap-work".to_owned());
     if let Some(probe) = probe {
@@ -255,7 +251,24 @@ async fn sample(
     config.deadlines.compute = LIMIT;
     config.deadlines.serialization = LIMIT;
     config.deadlines.cumulative_cpu = LIMIT;
-    let service = lash::vm::WorkerService::new(config);
+    lash::vm::WorkerService::new(config)
+}
+
+async fn sample_with_stores(
+    service: lash::vm::WorkerService,
+    stores: lash_sqlite_store::SqliteStoreSet,
+    scenario: &str,
+    h: usize,
+    probe: Option<&str>,
+) -> Result<Vec<Row>> {
+    let recorder = Arc::new(super::recorder::Recorder::default());
+    let stores = super::recorder::RecordingStores::new(
+        Arc::new(stores),
+        "heap-meter",
+        Arc::clone(&recorder),
+        "sqlite",
+    );
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
     let pool = service.pool()?;
     let session_id = lash::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
     let meter = Arc::new(Meter {
@@ -512,12 +525,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn six_scenarios_count_released_worker_work_and_see_heap_walks() {
         let worker = std::env::var_os("LASH_VM_WORKER").expect("worker runfile");
-        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        // The law counts work at released-worker seams, independently of
+        // fsync latency or cold process startup. Keep the full size matrix.
+        let service = super::worker_service(Path::new(&worker), None);
         for scenario in super::SCENARIOS {
             for h in [100, 1000] {
-                super::sample(
-                    Path::new(&worker),
-                    &dir.path().join(format!("{scenario}-{h}.sqlite")),
+                super::sample_with_stores(
+                    service.clone(),
+                    lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
                     scenario,
                     h,
                     None,
@@ -531,12 +547,13 @@ mod tests {
             ("resume", "list-update"),
             ("carry", "next-cell"),
         ] {
+            let service = super::worker_service(Path::new(&worker), Some(probe));
             let mut rows = Vec::new();
             for h in [100, 1000] {
                 rows.extend(
-                    super::sample(
-                        Path::new(&worker),
-                        &dir.path().join(format!("{probe}-{h}.sqlite")),
+                    super::sample_with_stores(
+                        service.clone(),
+                        lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
                         scenario,
                         h,
                         Some(probe),
@@ -552,6 +569,7 @@ mod tests {
                 "{probe} walk was not H-proportional: {rows:?}"
             );
         }
+        eprintln!("HEAP-METER: 18 populations in {:?}", started.elapsed());
     }
     use std::path::Path;
 }

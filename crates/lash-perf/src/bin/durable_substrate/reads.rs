@@ -206,12 +206,12 @@ fn projection_seed(python: bool) -> Result<lash::rlm::RlmSeed> {
     })
 }
 
-async fn stores(
-    run: &Run<'_>,
-) -> Result<(
+type ReadStores = (
     Arc<dyn StoreSet>,
     Option<lash_postgres_store::PostgresStorage>,
-)> {
+);
+
+async fn stores(run: &Run<'_>) -> Result<ReadStores> {
     match &run.database {
         Database::Sqlite(path) => Ok((
             Arc::new(
@@ -396,13 +396,33 @@ async fn measure(
     variant: Variant,
     workers: lash::vm::WorkerService,
 ) -> Result<()> {
+    measure_with_stores(
+        run,
+        python,
+        traced,
+        payload,
+        variant,
+        workers,
+        stores(run).await?,
+    )
+    .await
+}
+
+async fn measure_with_stores(
+    run: &Run<'_>,
+    python: bool,
+    traced: bool,
+    payload: usize,
+    variant: Variant,
+    workers: lash::vm::WorkerService,
+    (inner, storage): ReadStores,
+) -> Result<()> {
     let dialect = if python { "python" } else { "typescript" };
     let id = format!("{dialect}-{}-{payload}-{traced}", variant.name());
     eprintln!(
         "read population {id}, {} fresh-session samples",
         run.samples
     );
-    let (inner, storage) = stores(run).await?;
     let recorder = Arc::new(Recorder::default());
     let recorded = Arc::new(RecordingStores::new(
         inner,
@@ -630,8 +650,10 @@ async fn measure(
 #[cfg(test)]
 mod tests {
     /// READ-COST-MODEL: the maintained production-facade matrix asserts the
-    /// exact per-call commit/fact counts on FULL SQLite in both dialects.
-    #[tokio::test(flavor = "multi_thread")]
+    /// exact per-call commit/fact counts on SQLite memory in both dialects.
+    /// Worker preparation is shared, as in the command-line matrix; every
+    /// population still has its own fresh store and owning transactions.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fifty_dependent_reads_obey_the_cost_model() {
         let fixture = tempfile::tempdir().unwrap();
         let report = crate::support::Report::open(&fixture.path().join("reads.jsonl")).unwrap();
@@ -651,17 +673,25 @@ mod tests {
         let benchmark = std::path::PathBuf::from(
             std::env::var_os("LASH_READ_BENCH_WORKER").expect("benchmark worker runfile"),
         );
+        let workers = lash::vm::WorkerService::subprocess(&benchmark);
+        let started = std::time::Instant::now();
         for python in [false, true] {
             for traced in [false, true] {
                 for payload in super::PAYLOADS {
                     for variant in super::Variant::ALL {
-                        super::measure(
+                        super::measure_with_stores(
                             &run,
                             python,
                             traced,
                             payload,
                             variant,
-                            lash::vm::WorkerService::subprocess(&benchmark),
+                            workers.clone(),
+                            (
+                                std::sync::Arc::new(
+                                    lash_sqlite_store::SqliteStoreSet::memory().await.unwrap(),
+                                ),
+                                None,
+                            ),
                         )
                         .await
                         .unwrap();
@@ -669,5 +699,6 @@ mod tests {
                 }
             }
         }
+        eprintln!("READ-COST-MODEL: 32 populations in {:?}", started.elapsed());
     }
 }

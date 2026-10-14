@@ -837,9 +837,14 @@ async fn durable_retries_end_within_the_operation_deadline() {
 /// a dead connection is the read's own statement failing on it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_read_on_a_connection_the_server_closed_answers_from_a_live_one() {
+    // Own the only work connection. Neither a transient connection belonging
+    // to another role nor pool retirement can race the server-side close.
+    let mut config = crate::testing::work_pool_of(1);
+    config.roles.work.idle_timeout = None;
+    config.roles.work.max_lifetime = None;
     let Some((database, storage)) = storage(
         "a_read_on_a_connection_the_server_closed_answers_from_a_live_one",
-        &crate::testing::fixture_config(),
+        &config,
     )
     .await
     else {
@@ -856,20 +861,41 @@ async fn a_read_on_a_connection_the_server_closed_answers_from_a_live_one() {
     let mut server = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())
         .await
         .expect("the server's own connection");
-    let closed: Vec<bool> = sqlx::query_scalar(
-        "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity
-         WHERE datname = current_database() AND pid <> pg_backend_pid()",
-    )
-    .fetch_all(&mut server)
+    let mut connection = store
+        .pools
+        .work
+        .acquire()
+        .await
+        .expect("the work connection");
+    let pid = backend_pid(&mut connection).await;
+    drop(connection);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while store.pools.work.num_idle() != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
     .await
-    .expect("the server closes the store's connections");
-    assert!(
-        !closed.is_empty() && closed.iter().all(|closed| *closed),
-        "the server closed every pooled connection: {closed:?}"
-    );
+    .expect("the work connection is idle before the server closes it");
+    let closed: bool = sqlx::query_scalar("SELECT pg_terminate_backend($1, 5000)")
+        .bind(pid)
+        .fetch_one(&mut server)
+        .await
+        .expect("the server closes the owned work connection");
+    assert!(closed, "the owned work backend exited");
     let read = store
         .turn(&session)
         .await
         .expect("the read answers from a live connection");
     assert_eq!(read, None);
+    let mut live = store
+        .pools
+        .work
+        .acquire()
+        .await
+        .expect("the live work connection");
+    assert_ne!(
+        backend_pid(&mut live).await,
+        pid,
+        "the read replaced the closed backend"
+    );
 }
