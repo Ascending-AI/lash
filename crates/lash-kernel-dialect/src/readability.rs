@@ -82,10 +82,42 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     .source_map
                     .as_ref()
                     .ok_or("printer omitted requested map")?;
+                let mut expected = std::collections::BTreeSet::new();
+                for (unit, root) in
+                    std::iter::once((k::Unit::Main, k::Node::Block(&case.document.main))).chain(
+                        case.document.functions.iter().map(|(name, function)| {
+                            (
+                                k::Unit::Function(name.clone()),
+                                k::Node::Block(&function.body),
+                            )
+                        }),
+                    )
+                {
+                    let mut stack = vec![(k::Site::new(unit, vec![]), root)];
+                    while let Some((site, node)) = stack.pop() {
+                        for (index, child) in node.children().into_iter().enumerate() {
+                            stack.push((site.child(index as u32), child));
+                        }
+                        expected.insert(site);
+                    }
+                }
+                let actual: std::collections::BTreeSet<_> =
+                    map.sites.iter().map(|entry| entry.site.clone()).collect();
+                if actual != expected || actual.len() != map.sites.len() {
+                    return Err("map does not cover every real kernel Site exactly once".into());
+                }
                 for mapped in &map.sites {
+                    if mapped.ranges.is_empty()
+                        && !matches!(site_node(&case.document, &mapped.site), Some(k::Node::Block(body)) if body.is_empty() && mapped.implicit.is_some_and(|offset| printed.source.is_char_boundary(offset)))
+                    {
+                        return Err("executable node has no source range".into());
+                    }
                     let node = site_node(&case.document, &mapped.site)
                         .ok_or("map names a nonexistent node")?;
                     for range in &mapped.ranges {
+                        if range.start >= range.end {
+                            return Err("mapped range is empty or reversed".into());
+                        }
                         let source = printed
                             .source
                             .get(range.start..range.end)
@@ -179,7 +211,7 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
 
 /// Seven realistic shapes shared by all dialects. Helper identities are
 /// deliberately foreign: decoding and readability require no installed library.
-pub fn corpus() -> Vec<Case> {
+pub fn corpus() -> Result<Vec<Case>, Diagnostic> {
     let programs = [
         (
             "three_effect_workflow",
@@ -202,10 +234,10 @@ main { finish null }"#,
             "recursion_with_helpers",
             r#"entry recurse(n: Any) -> Any
 fn recurse(n) {
- if n { let next = invoke recurse(false)
+ if n { let next = call recurse(false)
  return next } else { return n }
 }
-main { let answer = invoke recurse(true)
+main { let answer = call recurse(true)
 finish answer }"#,
         ),
         (
@@ -251,10 +283,10 @@ main { finish null }"#,
             r#"effect tools.lookup(query: Any) -> Any
 main {
  let query = "find source"
- let result = perform tools.lookup(query) as Any
- let records = [result]
+ let answer = perform tools.lookup(query) as Any
+ let records = [answer]
  for item in records { print item.title }
- finish result
+ finish answer
 }"#,
         ),
     ];
@@ -262,17 +294,20 @@ main {
         .into_iter()
         .map(|(name, program)| {
             let mut document = k::parse_document(&format!("kernel 1\nnumbers float\n{program}\n"))
-                .expect("readability corpus is valid kernel text");
+                .map_err(|error| corpus_error(error.to_string()))?;
             if name == "recursion_with_helpers" {
                 let id = k::FunctionId::from_bytes([23; 32]);
-                document
-                    .manifest
-                    .functions
-                    .insert(id, k::FunctionName::new("foreign.identity").unwrap());
+                document.manifest.functions.insert(
+                    id,
+                    k::FunctionName::new("foreign.identity")
+                        .map_err(|error| corpus_error(error.to_string()))?,
+                );
                 document
                     .functions
                     .get_mut(&k::Name::new("recurse"))
-                    .unwrap()
+                    .ok_or_else(|| {
+                        corpus_error("recursion fixture is missing its declaration".into())
+                    })?
                     .body
                     .insert(
                         0,
@@ -285,9 +320,19 @@ main {
                         },
                     );
             }
-            Case { name, document }
+            Ok(Case { name, document })
         })
         .collect()
+}
+
+fn corpus_error(message: String) -> Diagnostic {
+    Diagnostic {
+        code: "GENERATED_READABILITY_CORPUS".into(),
+        message,
+        span: None,
+        kind: crate::DiagnosticKind::ProgramDefect,
+        repairs: vec![],
+    }
 }
 
 fn site_node<'a>(document: &'a k::Document, site: &k::Site) -> Option<k::Node<'a>> {
@@ -360,6 +405,37 @@ mod tests {
         assert!(rejected.failures[0].contains("Block witness: no documented unavoidable reason"));
         dialect.unavoidable = &allowed;
         check(&cases, std::slice::from_ref(&dialect)).assert_passed();
+        let second = Dialect {
+            name: "second",
+            printer: &Witness,
+            decode,
+            generic,
+            unavoidable: &allowed,
+        };
+        let both = check(&cases, &[dialect, second]);
+        both.assert_passed();
+        assert_eq!(both.documents, 2);
+        assert_eq!(both.generic_forms.len(), 2);
+        let incomplete = [Case {
+            name: "incomplete",
+            document: k::Document::new(
+                k::NumberPolicy::Float,
+                vec![k::Stmt::Finish {
+                    value: k::Expr::Literal(k::Literal::Null),
+                }],
+            ),
+        }];
+        let mut dialect = Dialect {
+            name: "witness",
+            printer: &Witness,
+            decode,
+            generic,
+            unavoidable: &allowed,
+        };
+        assert!(
+            check(&incomplete, std::slice::from_ref(&dialect)).failures[0]
+                .contains("map does not cover every real kernel Site")
+        );
         dialect.decode = mutated_decode;
         let unequal = check(&cases, &[dialect]);
         assert_eq!(
