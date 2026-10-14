@@ -1160,6 +1160,12 @@ move that run's starting point. Fork ceilings constrain inherited ancestry,
 and each `HistoryNode::owner_session_id` identifies the stored row's owner.
 Product projection and cursor delivery to clients belong to the host.
 
+`committed_turns_with_tool_calls(after, limit)` pages the same committed turns
+with each returned turn's tool-call bodies decoded. Consume call bodies with
+the committed-turn page, or keep each call's turn address (`TurnToolCallRef`)
+for later `read_tool_call`/`read_tool_calls` reads; a bare call id cannot be
+resolved without scanning.
+
 [Facade history rustdoc](../../crates/lash/src/durable_session.rs),
 [typed pages and cursors](../../crates/lash-core-store/src/store/history.rs) and
 [ADR 0112 §6](../adr/0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md#6-load_ancestors)

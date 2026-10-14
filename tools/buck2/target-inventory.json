@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 72,
-  "cargo_target_count": 315,
+  "cargo_target_count": 314,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -63011,7 +63011,7 @@
       "//crates/lash:lash__fv_f107521c"
     ]
   },
-  "generated_label_count": 395,
+  "generated_label_count": 393,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -64375,7 +64375,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1391,
+  "metadata_target_count": 1390,
   "packages": [
     {
       "declared_features": [
@@ -69763,22 +69763,6 @@
       ],
       "targets": [
         {
-          "build_label": "//third-party/vendored/lash-rmcp:build_script",
-          "clippy_exempt": "the run action has no compile subtargets; its build.rs compile is linted as :build_script__build",
-          "kind": "custom-build",
-          "label": "//third-party/vendored/lash-rmcp:build_script"
-        },
-        {
-          "build_label": "//third-party/vendored/lash-rmcp:build_script__build",
-          "check_label": "//third-party/vendored/lash-rmcp:build_script__build__metadata[check]",
-          "clippy_label": "//third-party/vendored/lash-rmcp:build_script__build__clippy[clippy.txt]",
-          "kind": "custom-build-compile",
-          "label": "//third-party/vendored/lash-rmcp:build_script__build",
-          "tags": [
-            "manual"
-          ]
-        },
-        {
           "build_label": "//third-party/vendored/lash-rmcp:lash-rmcp[static]",
           "cargo": "rmcp",
           "check_label": "//third-party/vendored/lash-rmcp:lash-rmcp__metadata[check]",
@@ -71909,8 +71893,6 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
-    "//third-party/vendored/lash-rmcp:build_script",
-    "//third-party/vendored/lash-rmcp:build_script__build",
     "//third-party/vendored/lash-rmcp:lash-rmcp[static]",
     "//third-party/vendored/lash-rmcp:lash-rmcp__unit_test",
     "//third-party/vendored/lash-rmcp:test_cache_hints__test",
@@ -72351,7 +72333,6 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test__rust_test__metadata[check]",
     "//runbooks/rlm-smoke:rlm-smoke__metadata[check]",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test__rust_test__metadata[check]",
-    "//third-party/vendored/lash-rmcp:build_script__build__metadata[check]",
     "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c__metadata[check]",
     "//third-party/vendored/lash-rmcp:lash-rmcp__metadata[check]",
     "//third-party/vendored/lash-rmcp:lash-rmcp__unit_test__rust_test__metadata[check]",
@@ -73372,8 +73353,6 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
-    "//third-party/vendored/lash-rmcp:build_script",
-    "//third-party/vendored/lash-rmcp:build_script__build",
     "//third-party/vendored/lash-rmcp:lash-rmcp",
     "//third-party/vendored/lash-rmcp:lash-rmcp__unit_test",
     "//third-party/vendored/lash-rmcp:test_cache_hints__test",

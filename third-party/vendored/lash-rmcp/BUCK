@@ -16,71 +16,9 @@ load(
     "test_batch_budget",
 )
 
-lash_rust_build_script(
-    name = "build_script",
-    crate_features = [
-        "__reqwest",
-        "base64",
-        "client",
-        "client-side-sse",
-        "default",
-        "elicitation",
-        "macros",
-        "reqwest",
-        "schemars",
-        "server",
-        "server-side-http",
-        "tower",
-        "transport-async-rw",
-        "transport-io",
-        "transport-streamable-http-client",
-        "transport-streamable-http-client-reqwest",
-        "transport-streamable-http-server",
-        "transport-streamable-http-server-session",
-        "transport-worker",
-        "uuid",
-    ],
-    declared_features = [
-        "__reqwest",
-        "auth",
-        "auth-client-credentials-jwt",
-        "auth-enterprise-managed",
-        "base64",
-        "client",
-        "client-side-sse",
-        "default",
-        "elicitation",
-        "local",
-        "macros",
-        "request-state",
-        "reqwest",
-        "reqwest-native-tls",
-        "reqwest-tls-no-provider",
-        "schemars",
-        "server",
-        "server-side-http",
-        "tower",
-        "transport-async-rw",
-        "transport-child-process",
-        "transport-io",
-        "transport-streamable-http-client",
-        "transport-streamable-http-client-reqwest",
-        "transport-streamable-http-client-unix-socket",
-        "transport-streamable-http-server",
-        "transport-streamable-http-server-session",
-        "transport-worker",
-        "uuid",
-        "which-command",
-    ],
-    data = ["build.rs"] + glob(["src/**/*.rs"]),
-    manifest_dir = "third-party/vendored/lash-rmcp",
-    package_name = "lash-rmcp",
-    version = "0.0.0-dev",
-)
-
 lash_rust_library(
     name = "lash-rmcp",
-    build_script = ":build_script",
+    build_script = None,
     crate_features = [
         "__reqwest",
         "base64",
@@ -155,7 +93,7 @@ lash_rust_doc(
 
 lash_rust_unit_test(
     name = "lash-rmcp__unit_test",
-    build_script = ":build_script",
+    build_script = None,
     crate_features = [
         "__reqwest",
         "base64",
@@ -6302,7 +6240,7 @@ load(
 
 lash_rust_feature_library(
     name = "lash-rmcp__fv_32e54e6c",
-    build_script = ":build_script",
+    build_script = None,
     crate_features = [
         "__reqwest",
         "base64",
@@ -6375,7 +6313,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-rmcp__fv_97e0e442",
-    build_script = ":build_script",
+    build_script = None,
     crate_features = [
         "__reqwest",
         "base64",
@@ -6447,7 +6385,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-rmcp__fv_e2e7b48c",
-    build_script = ":build_script",
+    build_script = None,
     crate_features = [
         "__reqwest",
         "base64",

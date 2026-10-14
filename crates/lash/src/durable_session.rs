@@ -129,7 +129,10 @@ impl DurableSession {
 
     /// Read turn-addressed calls in input order, including duplicates. Each
     /// distinct named turn is decoded once; missing ids never scan other turns.
-    /// The retained ledgers remain the only source of call bodies.
+    /// The retained ledgers remain the only source of call bodies. Consume
+    /// call bodies with the committed-turn page, or keep each call's turn
+    /// address ([`TurnToolCallRef`](crate::TurnToolCallRef)) for these reads;
+    /// a bare call id cannot be resolved without scanning.
     pub async fn read_tool_calls(
         &self,
         calls: &[crate::TurnToolCallRef],
@@ -679,7 +682,11 @@ impl DurableSession {
 
     /// Read a committed-turn page with each returned turn's tool-call bodies.
     /// Only the page's turns are decoded, once each. The cursor and transcript
-    /// entries have the same meaning as [`Self::committed_turns`].
+    /// entries have the same meaning as [`Self::committed_turns`]. Consume the
+    /// page's call bodies as it arrives, or keep each call's turn address
+    /// ([`TurnToolCallRef`](crate::TurnToolCallRef)) for later
+    /// [`read_tool_calls`](Self::read_tool_calls); a bare call id cannot be
+    /// resolved without scanning.
     pub async fn committed_turns_with_tool_calls(
         &self,
         after: Option<&lash_core::store::CommittedTurnCursor>,

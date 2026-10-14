@@ -14,7 +14,6 @@ edition = "2024"
 rust-version = "1.88"
 name = "lash-rmcp"
 version.workspace = true
-build = "build.rs"
 autolib = false
 autobins = false
 autoexamples = false

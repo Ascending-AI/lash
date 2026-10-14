@@ -10,7 +10,10 @@ Upstream base: rmcp 3.5.1, rust-sdk commit
 `79437f291b2c44053d00dcd5db969fd0cca7c887`. The Apache-2.0 license and original
 attribution are retained. `Cargo.toml.orig` is the pristine upstream manifest.
 `rmcp.diff` records changes to the upstream manifest, README, fixture paths and
-header module against that release. Nested `x-mcp-header`
+header module against that release. Upstream's `build.rs` is deliberately
+dropped: it configured `core.hooksPath` two directories up, and a dependency
+must not install repository hooks. The manifest's `build` key goes with it.
+Nested `x-mcp-header`
 annotations reached solely through `properties` are validated and mirrored at
 their exact argument paths. Annotations reached through other keywords invalidate
 the tool. See https://github.com/modelcontextprotocol/rust-sdk/issues/1354.
@@ -27,7 +30,8 @@ and every SDK message-decoding behaviour law is retained.
 
 To merge an upstream release, unpack its entire crate, merge `rmcp.diff`, and
 retain the Lash package identity, workspace version, library name, ownership
-note and license/notice files. Keep all upstream behaviour tests and supporting files.
+note, license/notice files and the dropped hook-installing `build.rs`. Keep all
+upstream behaviour tests and supporting files.
 Refresh `rmcp.diff` against the pristine release, update the upstream base here,
 then run `kiln sync` and the header-path laws. Upstream's Cargo.lock is retained
 for comparison; the workspace Cargo.lock governs Lash builds and releases.

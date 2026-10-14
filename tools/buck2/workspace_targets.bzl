@@ -313,8 +313,6 @@ WORKSPACE_COMPILE_TARGETS = [
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
-    "//third-party/vendored/lash-rmcp:build_script",
-    "//third-party/vendored/lash-rmcp:build_script__build",
     "//third-party/vendored/lash-rmcp:lash-rmcp",
     "//third-party/vendored/lash-rmcp:lash-rmcp__unit_test",
     "//third-party/vendored/lash-rmcp:test_cache_hints__test",
