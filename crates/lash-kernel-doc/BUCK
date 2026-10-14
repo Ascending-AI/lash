@@ -92,6 +92,25 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "document_example__test",
+    crate_features = [],
+    crate_name = "document_example",
+    crate_root = "tests/document_example.rs",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-doc", "document_example", "//crates/lash-kernel-doc:document_example__test"),
+    extra_compile_data = [],
+    library = ":lash-kernel-doc",
+    library_crate_name = "lash_kernel_doc",
+    manifest_dir = "crates/lash-kernel-doc",
+    package_name = "lash-kernel-doc",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
@@ -99,6 +118,7 @@ lash_batch_test(
     budget = test_batch_budget("//crates/lash-kernel-doc:test_batch"),
     jobs = 2,
     tests = [
+        ":document_example__test",
         ":kernel_schema_generator__bin__unit_test",
         ":lash-kernel-doc__unit_test",
     ],

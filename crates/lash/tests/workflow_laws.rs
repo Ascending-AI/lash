@@ -3,6 +3,7 @@
 //! typed transactions, published again and run, on SQLite stores.
 #![expect(
     clippy::expect_used,
+    clippy::unwrap_used,
     clippy::panic,
     reason = "test target: these laws fail by panicking"
 )]
@@ -251,6 +252,16 @@ fn published(publish: WorkflowPublish) -> WorkflowPublication {
         WorkflowPublish::Published(publication) => *publication,
         other => panic!("the workflow publishes: {other:?}"),
     }
+}
+
+// The kernel-text example in `lash::workflow::document`'s module docs is
+// `src/workflow/document_example.rs`, included into the rustdoc verbatim;
+// this test is its compile-and-run proof.
+include!("../src/workflow/document_example.rs");
+
+#[test]
+fn the_document_module_docs_example_runs() {
+    document_example();
 }
 
 /// FIG-6124: publication and start staging expose their typed env refusal

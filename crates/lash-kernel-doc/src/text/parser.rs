@@ -19,6 +19,20 @@ use crate::validate::StatementForm;
 use crate::value::Bytes;
 
 /// Reads a document from kernel text.
+///
+/// A document is one whole workflow: the `kernel` and `numbers` header
+/// lines, an `entry` signature for each declared function a host may start,
+/// and `main`. [`print_document`] writes the canonical text that parses
+/// back to it. Statements end at the line; a `;` is a refusal that names
+/// its line and column:
+///
+/// ```rust
+#[doc = include_str!("document_example.rs")]
+/// ```
+///
+/// The example is `text/document_example.rs`, run by
+/// `tests/document_example.rs`; the workspace builds no doctests, so that
+/// test is its proof.
 pub fn parse_document(text: &str) -> Result<Document, ParseError> {
     parse_document_with_limits(text, crate::KernelDataLimits::standard())
 }

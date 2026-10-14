@@ -106,6 +106,22 @@ pub use typescript::{
 
 /// The kernel document: its statements, expressions, types, data, sites
 /// and identities, and its canonical encoding.
+///
+/// # Kernel text
+///
+/// A document is one whole workflow: the `kernel` and `numbers` header
+/// lines, an `entry` signature for each declared function a host may start,
+/// and `main`. [`parse_document`] reads one and [`print_document`] writes
+/// the canonical text that parses back to it. Statements end at the line;
+/// kernel text has no `;`:
+///
+/// ```rust
+#[doc = include_str!("workflow/document_example.rs")]
+/// ```
+///
+/// The example is `src/workflow/document_example.rs`, run by the
+/// `the_document_module_docs_example_runs` law in `tests/workflow_laws.rs`;
+/// the workspace builds no doctests, so that test is its proof.
 pub mod document {
     pub use lash_kernel_doc::*;
 }

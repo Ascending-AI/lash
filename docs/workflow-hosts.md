@@ -51,6 +51,11 @@ main {
 }
 ```
 
+A minimal whole-workflow example that compiles and runs — the import path,
+a parse, the printed round-trip and the typed refusal a wrong spelling gets
+— lives in the `lash::workflow::document` module docs and on
+`parse_document`.
+
 ### Sites
 
 Every node of a document has a `Site`: the unit it is in (`main`, a declared

@@ -296,6 +296,9 @@ A host changes a document through `lash-kernel-edit`. These rules fix what an ed
 
 ## Kernel text (`K-TEXT`)
 
+The `lash::workflow::document` module docs and `parse_document`'s carry a
+whole-document kernel-text example that compiles and runs.
+
 - **K-TEXT-001.** Kernel text is the one plain text notation for a document and for a definition. It writes behaviour only.
 - **K-TEXT-002.** Printing is canonical and parsing inverts it: for every document and definition within the nesting limit, parsing the printed text gives an equal value, and printing that gives the same text.
 - **K-TEXT-003.** Every statement begins with a keyword. A name spelled like a keyword, or not an identifier, is written between backticks. A library function is called by the name a `use name = @<identity>` line gives it, or as `@<identity>(…)` when no one line names it. A `#` begins a comment to the end of the line; white space is not significant.
