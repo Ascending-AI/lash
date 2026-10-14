@@ -615,3 +615,11 @@ compile_data = ["//examples/kernel-embedder:package_files"]
 packages = ["lash-runtime"]
 kinds = ["unit-test"]
 compile_data = ["//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]
+
+# The native corpus recorder owns this source membership, independently of
+# the helper-release build it must prepare inputs for.
+[[rule]]
+packages = ["lash-kernel-conformance"]
+kinds = ["example"]
+targets = ["native_corpus"]
+compile_data = ["//crates/lash-vm-releases:rust_sources"]

@@ -51,7 +51,7 @@ def wrapper_text() -> str:
 def wrapped_suites() -> list[tuple[str, str]]:
     """`(service expression, suite)` for every wrapped store-tests.sh call."""
     return re.findall(
-        r"bash scripts/ci/with-service\.sh \"?([^\"\s]+)\"? -- \\\n"
+        r"bash scripts/ci/with-service\.sh (?:--durable-postgres )?\"?([^\"\s]+)\"? -- \\\n"
         r"\s*bash scripts/ci/store-tests\.sh ([a-z0-9-]+)\s*$",
         workflow_text(),
         flags=re.MULTILINE,
@@ -374,6 +374,19 @@ class FakeDocker:
 
 
 class WithServiceBehaviour(unittest.TestCase):
+    def test_durable_postgres_enables_synchronous_wal_and_full_page_writes(self):
+        for service in ("pg", "pg17"):
+            with self.subTest(service=service), tempfile.TemporaryDirectory() as raw:
+                result, docker = self.run_wrapper(
+                    pathlib.Path(raw), ["--durable-postgres", service, "--", "true"]
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                published = [call for call in docker.logged() if call.startswith("run --detach")]
+                self.assertEqual(1, len(published))
+                for flag in ("fsync", "synchronous_commit", "full_page_writes"):
+                    self.assertIn(f"-c {flag}=on", published[0])
+                    self.assertNotIn(f"-c {flag}=off", published[0])
+
     def run_wrapper(
         self,
         directory: pathlib.Path,

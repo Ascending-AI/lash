@@ -44,3 +44,12 @@ thiserror.workspace = true
 lash-kernel-edit.workspace = true
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
+
+# Records native answers without building the release gate it is bootstrapping.
+blake3.workspace = true
+lash-ext-date-ecma.workspace = true
+lash-ext-url-whatwg.workspace = true
+
+[[example]]
+name = "native_corpus"
+path = "examples/native_corpus.rs"

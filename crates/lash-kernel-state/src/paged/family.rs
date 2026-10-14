@@ -89,7 +89,7 @@ pub struct DataOnlyCertificate {
 #[derive(Clone, Debug)]
 pub struct CarryClassification {
     /// Bindings carried as they are.
-    pub carried: Vec<Name>,
+    pub carried: KeyedRoot,
     /// Bindings dropped because they reach a closure or a task.
     pub dropped: Vec<Name>,
 }
@@ -97,8 +97,8 @@ pub struct CarryClassification {
 /// The roots a terminal cell's carry selects.
 #[derive(Clone, Debug)]
 pub struct CarryRoots {
-    pub bindings: Vec<(Name, Value)>,
-    pub functions: Vec<(Name, PageRef)>,
+    pub bindings: KeyedRoot,
+    pub functions: KeyedRoot,
 }
 
 /// How the paged heap reads a lazy family's untouched entity.
@@ -131,13 +131,10 @@ pub trait HeapLifecycle {
     fn instantiate(&mut self, frozen: &FrozenRef) -> Result<Value, HeapWriteError>;
     /// Classifies the bindings for carry in one union traversal with shared
     /// visited state, skipping it when the data-only certificate suffices.
-    fn classify_carry(
-        &mut self,
-        bindings: &[(Name, Value)],
-    ) -> Result<CarryClassification, HeapFault>;
+    fn classify_carry(&mut self, bindings: &KeyedRoot) -> Result<CarryClassification, HeapFault>;
     /// Seals the carry a terminal cell selects into a session root.
     fn carry(&mut self, roots: CarryRoots) -> Result<SessionRoot, HeapFault>;
     /// Opens a carried session for the next cell: the same entity
     /// identities, nothing renamed or loaded.
-    fn adopt(&mut self, session: &SessionRoot) -> Result<Vec<(Name, Value)>, HeapFault>;
+    fn adopt(&mut self, session: &SessionRoot) -> Result<KeyedRoot, HeapFault>;
 }

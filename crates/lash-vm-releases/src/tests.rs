@@ -502,11 +502,125 @@ fn a_missing_native_or_helper_refuses_resume() {
     );
 }
 
+#[path = "build/corpus.rs"]
+mod corpus;
+#[path = "build/inputs.rs"]
+mod inputs;
 #[path = "build/probe.rs"]
 mod probe;
+#[expect(
+    dead_code,
+    reason = "the laws record in memory; only the standalone recorder writes source"
+)]
+#[path = "build/record.rs"]
+mod record;
 
-/// FIG-6180, K-LIB-006/011: an equivalent prepared entry is the same
-/// native behavior, so installing it must not replace a pinned manifest.
+/// FIG-6182: a signed-zero regression must be observed by the release gate.
+#[test]
+fn native_corpus_observes_negative_zero() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, Value};
+    struct Native(bool);
+    impl NativeFunction for Native {
+        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+            let Value::Float(value) = call.args[0] else {
+                unreachable!()
+            };
+            Ok(Value::Bool(
+                self.0 && value.get() == 0.0 && value.get().is_sign_negative(),
+            ))
+        }
+    }
+    let registry = |changed| {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function probe(value: Float) -> Bool\nkernel 1\ncharge 1\nnative\n",
+                )
+                .unwrap(),
+                Some(std::sync::Arc::new(Native(changed))),
+            )
+            .unwrap();
+        registry
+    };
+    let mut recorded = corpus::Corpus::default();
+    recorded
+        .record_new(&registry(false), "test", "1.0")
+        .unwrap();
+    let error = recorded
+        .certify(&registry(true), "test", "1.0")
+        .unwrap_err();
+    assert!(error.contains("-0.0"), "{error}");
+}
+
+/// FIG-6182 / K-LIB-011: certification compares observations, preserves
+/// compatible anchors, and refuses a changed value, error, guard or reservation.
+#[test]
+fn native_corpus_certifies_answers_and_keeps_compatible_anchors() {
+    use lash_kernel_doc::{
+        ErrorValue, Float, NativeCall, NativeError, NativeFunction, Object, Value,
+    };
+    struct Native(u8);
+    impl NativeFunction for Native {
+        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+            let Value::Float(value) = call.args[0] else {
+                unreachable!()
+            };
+            if self.0 == 2 {
+                call.counter.spend(1)?;
+            }
+            if self.0 == 3 {
+                call.heap.reserve(1, 0)?;
+            }
+            if self.0 == 4 {
+                return Err(NativeError::Raised(ErrorValue::new(
+                    "changed_error",
+                    "edge",
+                )));
+            }
+            let value = if self.0 == 1 && value.get() == 0.0 && value.get().is_sign_negative() {
+                Float::new(0.0)
+            } else {
+                value
+            };
+            Ok(Value::List(
+                call.heap
+                    .allocate(Object::List(vec![Value::Float(value)]))?,
+            ))
+        }
+    }
+    let registry = |mode| {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        registry.register(lash_kernel_doc::parse_definition(
+            "function probe(value: Float) -> List(Float)\nkernel 1\ncharge size(result)\nnative\n"
+        ).unwrap(), Some(std::sync::Arc::new(Native(mode)))).unwrap();
+        registry
+    };
+    let mut corpus = corpus::Corpus::default();
+    let general = registry(0);
+    corpus.record_new(&general, "test", "1.0").unwrap();
+    let anchored = corpus.certify(&general, "test", "1.0").unwrap();
+    corpus.extend_generated(&general, "test", "1.0").unwrap();
+    let before = serde_json::to_vec(&corpus).unwrap();
+    // Reusing an identity for another release shares every input and answer.
+    corpus.record_new(&general, "test", "2.0").unwrap();
+    assert_eq!(anchored, corpus.certify(&general, "test", "2.0").unwrap());
+    assert_eq!(corpus.releases["test@1.0"], corpus.releases["test@2.0"]);
+    for mode in 1..=4 {
+        let changed = registry(mode);
+        let failure = corpus.certify(&changed, "test", "1.0").unwrap_err();
+        for detail in ["native `probe`", "input", "old", "new"] {
+            assert!(failure.contains(detail), "{failure}");
+        }
+        // The recorder is subject to the same gate; it cannot bless a regression.
+        assert!(corpus.record_new(&changed, "test", "1.0").is_err());
+    }
+    let original: corpus::Corpus = serde_json::from_slice(&before).unwrap();
+    assert_eq!(anchored, original.certify(&general, "test", "1.0").unwrap());
+}
+
+/// FIG-6180, K-LIB-006/011: an equivalent prepared entry is the same native
+/// behavior, so installing it must not replace a pinned release identity.
 #[test]
 fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
@@ -514,31 +628,33 @@ fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
     impl NativeFunction for Native {
         fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
             call.counter.spend(self.1)?;
-            match call.args[0] {
-                Value::Bool(value) => Ok(Value::Bool(!value)),
-                _ => unreachable!("the probe supplies the declared Bool"),
-            }
+            let Value::Bool(value) = call.args[0] else {
+                unreachable!()
+            };
+            Ok(Value::Bool(!value))
         }
         fn prepare(&self) -> Option<PreparedNative> {
             self.0
         }
     }
-    let registry = |prepared, counted_work| {
+    let registry = |prepared, spent| {
         let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        let definition = lash_kernel_doc::parse_definition(
-            "function probe(value: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n",
-        )
-        .unwrap();
         registry
             .register(
-                definition,
-                Some(std::sync::Arc::new(Native(prepared, counted_work))),
+                lash_kernel_doc::parse_definition(
+                    "function probe(value: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n",
+                )
+                .unwrap(),
+                Some(std::sync::Arc::new(Native(prepared, spent))),
             )
             .unwrap();
         registry
     };
     for counted_work in [0, 1] {
-        let general = probe::fingerprints(&registry(None, counted_work));
+        let mut recorded = corpus::Corpus::default();
+        let general = registry(None, counted_work);
+        recorded.record_new(&general, "test", "1.0").unwrap();
+        let identity = recorded.certify(&general, "test", "1.0").unwrap();
         for operation in ["negate / Bool", "equivalent renamed operation"] {
             let entries = [
                 PreparedNative {
@@ -555,8 +671,10 @@ fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
             ];
             for prepared in entries {
                 assert_eq!(
-                    general,
-                    probe::fingerprints(&registry(Some(prepared), counted_work)),
+                    identity,
+                    recorded
+                        .certify(&registry(Some(prepared), counted_work), "test", "1.0")
+                        .unwrap(),
                     "an equivalent answer or delegation keeps the pinned behavior"
                 );
             }
@@ -564,7 +682,7 @@ fn an_equivalent_prepared_entry_keeps_the_native_fingerprint() {
     }
 }
 
-/// K-LIB-011: changing only the prepared answer changes the release digest.
+/// K-LIB-011: changing only the prepared answer changes the release identity.
 #[test]
 fn native_fingerprint_covers_the_prepared_entry() {
     use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, PreparedNative, Value};
@@ -586,17 +704,44 @@ fn native_fingerprint_covers_the_prepared_entry() {
     }
     let registry = |answer| {
         let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        let definition = lash_kernel_doc::parse_definition(
-            "function probe() -> Bool\nkernel 1\ncharge 1\nnative\n",
-        )
-        .unwrap();
         registry
-            .register(definition, Some(std::sync::Arc::new(Native(answer))))
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function probe(value: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n",
+                )
+                .unwrap(),
+                Some(std::sync::Arc::new(Native(answer))),
+            )
             .unwrap();
         registry
     };
-    assert_ne!(
-        probe::fingerprints(&registry(true)),
-        probe::fingerprints(&registry(false))
-    );
+    let mut recorded = corpus::Corpus::default();
+    recorded.record_new(&registry(true), "test", "1.0").unwrap();
+    let error = recorded
+        .certify(&registry(false), "test", "1.0")
+        .unwrap_err();
+    assert!(error.contains("prepared_difference"), "{error}");
+}
+
+/// FIG-6182 / K-KEY-002: the certification heap must answer with the kernel's
+/// key equality, including numeric aliases and aliases nested inside tuples.
+#[test]
+fn native_corpus_heap_obeys_kernel_key_equality() {
+    use lash_kernel_doc::{Float, Integer, NativeHeap, Object, Value};
+    let integer = |value: i64| Value::Int(Integer::from(value));
+    let float = |value| Value::Float(Float::new(value));
+    let mut heap = probe::ProbeHeap::default();
+    let map = heap.object(Object::Map(vec![(integer(1), Value::Bool(true))]));
+    assert_eq!(heap.map_get(map, &float(1.0)), Some(Value::Bool(true)));
+    let zero = heap.object(Object::Set(vec![integer(0)]));
+    assert!(heap.set_contains(zero, &float(-0.0)));
+    let tuple = heap.object(Object::Set(vec![Value::Tuple(
+        vec![integer(1), float(f64::NAN)].into(),
+    )]));
+    assert!(heap.set_contains(
+        tuple,
+        &Value::Tuple(vec![float(1.0), float(f64::NAN)].into())
+    ));
+    let boundary = heap.object(Object::Set(vec![integer(i64::MAX)]));
+    assert!(!heap.set_contains(boundary, &float(i64::MAX as f64)));
 }

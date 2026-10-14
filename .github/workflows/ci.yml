@@ -1514,7 +1514,7 @@ jobs:
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh pg -- \
+          bash scripts/ci/with-service.sh --durable-postgres pg -- \
             bash scripts/ci/store-tests.sh pg-pool-wait
 
       # The simulator's backend-fault scenarios against a real PostgreSQL.

@@ -1,351 +1,213 @@
-//! What each native implementation answers, as one digest (FIG-5799).
-//!
-//! A native function's definition states its signature, charge and guard;
-//! the Rust code behind it is not part of its identity. A released helper
-//! set retains the native functions its bodies call by identity, so the
-//! build has to notice when the code behind an identity starts answering
-//! otherwise. The probe calls every native implementation of a registry
-//! with a fixed set of arguments drawn from its signature and hashes what
-//! each call answers: its value, its error, its guard or memory refusal,
-//! and the work it counted. A native is a function of its arguments
-//! (`K-LIB-006`), so the digest changes only when its code does, for an
-//! argument the probe tries.
-//!
-//! A prepared entry is another path to that same answer. Probe both paths,
-//! but only add its observation when it differs from the general call:
-//! installing an equivalent entry or delegating to the general call cannot
-//! change a pinned release's identity (FIG-6180). A changed answer or panic
-//! still changes the digest (`K-LIB-011`); operation labels are not behavior.
-//!
-//! The build script includes this file (`build.rs`): it fingerprints the
-//! registry the worker ships and compares the digests with the ones each
-//! released helper set recorded.
+//! Executes one recorded native call, including its prepared entry and bounds.
 
-use std::collections::BTreeMap;
+use lash_kernel_lib::Key;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::ops::ControlFlow;
 
 use lash_kernel_doc::{
-    Bytes, Element, ErrorValue, Float, FunctionId, FunctionRegistry, Integer, NativeCall,
-    NativeError, NativeHeap, Object, ObjectId, Timestamp, Type, Value, WorkCounter,
+    Element, ErrorValue, Measure, NativeCall, NativeError, NativeHeap, Object, ObjectId, Operand,
+    PreparedNative, RegisteredFunction, Value, WorkCounter,
 };
+use serde::{Deserialize, Serialize};
 
-/// How many argument lists one native is called with, at most.
-const CALLS: usize = 64;
-/// The work one probe call may count.
-const WORK: u64 = 100_000;
-/// The room one probe call may reserve, in the probe heap's units.
-const ROOM: u64 = 1 << 20;
-/// How deep a sample nests lists, maps, sets and records.
-const DEPTH: usize = 2;
-
-/// The digest of what every native implementation `registry` holds answers,
-/// by function, as lower-case hexadecimal.
-pub(crate) fn fingerprints(registry: &FunctionRegistry) -> BTreeMap<FunctionId, String> {
-    let quiet = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let fingerprints = registry
-        .iter()
-        .filter_map(|(function, registered)| {
-            let native = registered.native.as_ref()?;
-            Some((
-                *function,
-                fingerprint(function, registered, native.as_ref()),
-            ))
-        })
-        .collect();
-    std::panic::set_hook(quiet);
-    fingerprints
+/// A replayable heap snapshot, not a guest stored format. Object identities
+/// are retained, including the exact identities in the imported old inputs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Input {
+    pub args: Vec<Value>,
+    pub objects: Vec<Object>,
+    pub work: u64,
+    pub room: u64,
 }
 
-fn fingerprint(
-    function: &FunctionId,
-    registered: &lash_kernel_doc::RegisteredFunction,
-    native: &dyn lash_kernel_doc::NativeFunction,
-) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(function.as_bytes());
-    let prepared = native.prepare();
-    let params = &registered.definition.signature.params;
-    let mut heap = ProbeHeap::default();
-    let choices: Vec<Vec<Value>> = params
-        .iter()
-        .map(|param| {
-            let mut values = samples(&param.ty, &mut heap, DEPTH);
-            if param.optional {
-                values.push(Value::Absent);
-            }
-            values
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Answer {
+    pub outcome: String,
+    pub spent: u64,
+    pub charge: u64,
+    pub reservations: Vec<(u64, u64)>,
+    pub reserved: u64,
+    /// An equivalent prepared entry or delegation has no extra observation.
+    pub prepared_difference: Option<String>,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        clippy::expect_used,
+        reason = "certification only calls registry entries holding a native implementation"
+    )
+)]
+pub(crate) fn answer(
+    registered: &RegisteredFunction,
+    input: &Input,
+    prepared: Option<PreparedNative>,
+) -> Answer {
+    let native = registered.native.as_ref().expect("a registered native");
+    let mut heap = ProbeHeap {
+        objects: input.objects.clone(),
+        room: input.room,
+        ..Default::default()
+    };
+    let mut counter = WorkCounter::new(Some(input.work));
+    let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        native.call(NativeCall {
+            args: &input.args,
+            heap: &mut heap,
+            counter: &mut counter,
         })
-        .collect();
-    let objects = heap.objects.len();
-    for args in arguments(&choices) {
-        heap.objects.truncate(objects);
-        heap.reserved = 0;
-        let mut counter = WorkCounter::new(Some(WORK));
-        let answered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            native.call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut counter,
-            })
-        }));
-        let mut line = String::new();
-        match answered {
-            Ok(Ok(value)) => {
-                line.push_str("ok ");
-                heap.write(&value, DEPTH + 4, &mut line);
-            }
-            Ok(Err(NativeError::Raised(error))) => {
-                let _ = write!(line, "raised {} {}", error.kind, error.message);
-            }
-            Ok(Err(NativeError::Guard(guard))) => {
-                let _ = write!(line, "guard {}", guard.limit);
-            }
-            Ok(Err(NativeError::Memory)) => line.push_str("memory"),
-            Err(_) => line.push_str("panicked"),
+    }));
+    let mut outcome = String::new();
+    let result = match called {
+        Ok(Ok(value)) => {
+            outcome.push_str("ok ");
+            heap.write(&value, &mut outcome);
+            value
         }
-        let general_answer = line.clone();
-        let _ = writeln!(line, " spent {}", counter.spent());
-        hasher.update(line.as_bytes());
-        if let Some(prepared) = prepared {
-            let answer =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (prepared.entry)(&args)));
-            let mut prepared_line = String::new();
-            match answer {
+        Ok(Err(NativeError::Raised(error))) => {
+            let _ = write!(outcome, "raised {:?} {:?} ", error.kind, error.message);
+            heap.write(&error.data, &mut outcome);
+            Value::Absent
+        }
+        Ok(Err(NativeError::Guard(guard))) => {
+            let _ = write!(outcome, "guard {}", guard.limit);
+            Value::Absent
+        }
+        Ok(Err(NativeError::Memory)) => {
+            outcome.push_str("memory");
+            Value::Absent
+        }
+        Err(_) => {
+            outcome.push_str("panicked");
+            Value::Absent
+        }
+    };
+    let charge = registered
+        .definition
+        .charge
+        .evaluate(&mut |operand, measure| {
+            let value = match operand {
+                Operand::Result => &result,
+                Operand::Param(name) => registered
+                    .definition
+                    .signature
+                    .params
+                    .iter()
+                    .position(|param| &param.name == name)
+                    .and_then(|index| input.args.get(index))
+                    .unwrap_or(&Value::Absent),
+            };
+            heap.measure(value, measure)
+        });
+    // Prepared entries are another path to the same native answer. Operation
+    // labels and delegation do not change release identity; only a differing
+    // answer is recorded. Guarded calls use the counted general entry above.
+    let prepared_difference = prepared
+        .filter(|_| !outcome.starts_with("guard "))
+        .and_then(|prepared| {
+            let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (prepared.entry)(&input.args)
+            }));
+            let mut observed = String::new();
+            match called {
                 Ok(Some(value)) => {
-                    prepared_line.push_str("ok ");
-                    heap.write(&value, DEPTH + 4, &mut prepared_line);
+                    observed.push_str("ok ");
+                    heap.write(&value, &mut observed);
                 }
-                Ok(None) => continue,
-                Err(_) => prepared_line.push_str("panicked"),
+                Ok(None) => return None,
+                Err(_) => observed.push_str("panicked"),
             }
-            // Guarded calls always take the general entry, whose counted
-            // work remains in the digest above. A prepared entry has no
-            // counter, so compare its answer rather than inventing a zero
-            // guard count (notably for key.identity).
-            if prepared_line != general_answer {
-                hasher.update(b"prepared ");
-                hasher.update(prepared_line.as_bytes());
-            }
-        }
+            (observed != outcome).then_some(observed)
+        });
+    Answer {
+        outcome,
+        spent: counter.spent(),
+        charge,
+        reservations: heap.reservations,
+        reserved: heap.reserved,
+        prepared_difference,
     }
-    hasher.finalize().to_hex().to_string()
-}
-
-/// Up to [`CALLS`] argument lists from `choices`, one value per parameter:
-/// every combination when there are that few, the first parameter varying
-/// fastest.
-fn arguments(choices: &[Vec<Value>]) -> Vec<Vec<Value>> {
-    if choices.iter().any(Vec::is_empty) {
-        return Vec::new();
-    }
-    let total = choices
-        .iter()
-        .try_fold(1usize, |product, values| product.checked_mul(values.len()))
-        .unwrap_or(usize::MAX);
-    (0..total.min(CALLS))
-        .map(|mut index| {
-            choices
-                .iter()
-                .map(|values| {
-                    let value = values[index % values.len()].clone();
-                    index /= values.len();
-                    value
-                })
-                .collect()
-        })
-        .collect()
-}
-
-/// A few values of `ty`, the objects among them allocated in `heap`.
-fn samples(ty: &Type, heap: &mut ProbeHeap, depth: usize) -> Vec<Value> {
-    let int = |value: i64| Value::Int(Integer::from(value));
-    let float = |value: f64| Value::Float(Float::new(value));
-    match ty {
-        Type::Any => {
-            let mut values = vec![
-                Value::Null,
-                Value::Bool(true),
-                int(3),
-                float(-1.5),
-                Value::text("ab"),
-            ];
-            if depth > 0 {
-                let list = heap.object(Object::List(vec![int(1), Value::text("x")]));
-                values.push(Value::List(list));
-            }
-            values
-        }
-        Type::Null => vec![Value::Null],
-        Type::Absent => vec![Value::Absent],
-        Type::Bool => vec![Value::Bool(false), Value::Bool(true)],
-        Type::Int => vec![
-            int(0),
-            int(1),
-            int(-7),
-            Value::Int(Integer::new(beyond_a_word())),
-        ],
-        Type::Float => vec![float(0.0), float(-1.5), float(3.25), float(1e300)],
-        Type::Number => vec![int(2), float(0.5), int(-3)],
-        Type::Text => vec![
-            Value::text(""),
-            Value::text("a"),
-            Value::text("Hello, Wörld"),
-            Value::text("12.5"),
-        ],
-        Type::Bytes => vec![
-            Value::Bytes(Bytes::new(Vec::new())),
-            Value::Bytes(Bytes::new(vec![0x61, 0xff])),
-        ],
-        Type::Timestamp => vec![
-            Value::Timestamp(Timestamp {
-                nanoseconds: Integer::from(0),
-            }),
-            Value::Timestamp(Timestamp {
-                nanoseconds: Integer::from(1_700_000_000_123_456_789),
-            }),
-        ],
-        Type::Tuple(members) => {
-            let tuple: Option<Vec<Value>> = members
-                .iter()
-                .map(|member| samples(member, heap, depth).into_iter().next())
-                .collect();
-            tuple
-                .map(|tuple| vec![Value::Tuple(tuple.into())])
-                .unwrap_or_default()
-        }
-        Type::Enum(texts) => texts
-            .iter()
-            .take(3)
-            .map(|text| Value::text(text.as_str()))
-            .collect(),
-        Type::Error => vec![Value::Error(std::sync::Arc::new(ErrorValue::new(
-            "type_error",
-            "probe",
-        )))],
-        Type::Union(members) => members
-            .iter()
-            .flat_map(|member| samples(member, heap, depth).into_iter().take(2))
-            .collect(),
-        _ if depth == 0 => Vec::new(),
-        Type::List(item) => {
-            let items: Vec<Value> = samples(item, heap, depth - 1).into_iter().take(2).collect();
-            vec![
-                Value::List(heap.object(Object::List(Vec::new()))),
-                Value::List(heap.object(Object::List(items))),
-            ]
-        }
-        Type::Set(member) => {
-            let members: Vec<Value> = samples(member, heap, depth - 1)
-                .into_iter()
-                .take(1)
-                .collect();
-            vec![
-                Value::Set(heap.object(Object::Set(Vec::new()))),
-                Value::Set(heap.object(Object::Set(members))),
-            ]
-        }
-        Type::Map(map) => {
-            let keys = samples(&map.key, heap, depth - 1);
-            let values = samples(&map.value, heap, depth - 1);
-            let entries: Vec<(Value, Value)> = keys.into_iter().zip(values).take(1).collect();
-            vec![
-                Value::Map(heap.object(Object::Map(Vec::new()))),
-                Value::Map(heap.object(Object::Map(entries))),
-            ]
-        }
-        Type::Record(record) => {
-            let fields: Option<Vec<(String, Value)>> = record
-                .fields
-                .iter()
-                .filter(|field| !field.optional)
-                .map(|field| {
-                    samples(&field.ty, heap, depth - 1)
-                        .into_iter()
-                        .next()
-                        .map(|value| (field.name.clone(), value))
-                })
-                .collect();
-            fields
-                .map(|fields| vec![Value::Record(heap.object(Object::Record(fields)))])
-                .unwrap_or_default()
-        }
-        Type::Function(_) | Type::Task(_) | Type::Handle(_) => Vec::new(),
-    }
-}
-
-/// 2 to the 70th: an integer no machine word holds.
-fn beyond_a_word() -> i128 {
-    1_i128 << 70
 }
 
 /// The heap a probe call sees: objects by index, no collection, and a
 /// fixed room for what a call reserves.
 #[derive(Default)]
-struct ProbeHeap {
-    objects: Vec<Object>,
-    reserved: u64,
+pub(crate) struct ProbeHeap {
+    pub(crate) objects: Vec<Object>,
+    pub(crate) reserved: u64,
+    pub(crate) room: u64,
+    pub(crate) reservations: Vec<(u64, u64)>,
 }
 
 impl ProbeHeap {
-    fn object(&mut self, object: Object) -> ObjectId {
+    pub(crate) fn object(&mut self, object: Object) -> ObjectId {
         self.objects.push(object);
         ObjectId(self.objects.len() as u64 - 1)
     }
 
-    fn get(&self, object: ObjectId) -> Option<&Object> {
+    pub(crate) fn get(&self, object: ObjectId) -> Option<&Object> {
         usize::try_from(object.0)
             .ok()
             .and_then(|index| self.objects.get(index))
     }
 
-    /// `value` with every object it reaches spelled out, `depth` levels
-    /// deep.
-    fn write(&self, value: &Value, depth: usize, out: &mut String) {
-        let Some(object) = value.object().filter(|_| depth > 0) else {
-            let _ = write!(out, "{value:?}");
-            return;
+    /// A value's canonical stored scalars and all reached collection contents.
+    /// Object addresses are expanded; explicit identity references remain values.
+    #[cfg_attr(
+        not(test),
+        expect(
+            clippy::expect_used,
+            reason = "typed kernel scalars serialize and the object branch established its identity"
+        )
+    )]
+    fn json(&self, value: &Value, path: &mut BTreeSet<ObjectId>) -> serde_json::Value {
+        let values = |values: &[Value], path: &mut BTreeSet<ObjectId>| {
+            values
+                .iter()
+                .map(|value| self.json(value, path))
+                .collect::<Vec<_>>()
         };
-        let items = |values: &mut dyn Iterator<Item = &Value>, out: &mut String| {
-            for value in values {
-                self.write(value, depth - 1, out);
-                out.push(',');
-            }
-        };
-        match self.get(object) {
-            Some(Object::List(values)) => {
-                out.push('[');
-                items(&mut values.iter(), out);
-                out.push(']');
-            }
-            Some(Object::Set(values)) => {
-                out.push_str("set[");
-                items(&mut values.iter(), out);
-                out.push(']');
-            }
-            Some(Object::Map(entries)) => {
-                out.push('{');
-                items(
-                    &mut entries.iter().flat_map(|(key, value)| [key, value]),
-                    out,
-                );
-                out.push('}');
-            }
-            Some(Object::Record(fields)) => {
-                out.push('(');
-                for (name, value) in fields {
-                    let _ = write!(out, "{name}=");
-                    self.write(value, depth - 1, out);
-                    out.push(',');
+        match value {
+            Value::Tuple(items) => serde_json::json!({"tuple": values(items, path)}),
+            Value::Error(error) => serde_json::json!({"error": {
+                "kind": error.kind, "message": error.message, "data": self.json(&error.data, path),
+            }}),
+            _ if value.object().is_some() => {
+                let id = value.object().expect("the branch holds an object");
+                if !path.insert(id) {
+                    return serde_json::json!({"cyclic_object": id});
                 }
-                out.push(')');
+                let result = match (value, self.get(id)) {
+                    (Value::List(_), Some(Object::List(items))) => {
+                        serde_json::json!({"list": values(items, path)})
+                    }
+                    (Value::Set(_), Some(Object::Set(items))) => {
+                        serde_json::json!({"set": values(items, path)})
+                    }
+                    (Value::Map(_), Some(Object::Map(entries))) => {
+                        serde_json::json!({"map": entries.iter().map(|(key, value)|
+                        [self.json(key, path), self.json(value, path)]).collect::<Vec<_>>() })
+                    }
+                    (Value::Record(_), Some(Object::Record(fields))) => {
+                        serde_json::json!({"record": fields.iter().map(|(name, value)|
+                        (name, self.json(value, path))).collect::<Vec<_>>() })
+                    }
+                    (_, object) => {
+                        serde_json::json!({"invalid_object": {"value": value, "object": object}})
+                    }
+                };
+                path.remove(&id);
+                result
             }
-            Some(other) => {
-                let _ = write!(out, "{other:?}");
-            }
-            None => out.push_str("missing"),
+            _ => serde_json::to_value(value).expect("kernel scalars serialize"),
         }
+    }
+
+    fn write(&self, value: &Value, out: &mut String) {
+        out.push_str(&self.json(value, &mut BTreeSet::new()).to_string());
     }
 }
 
@@ -367,17 +229,21 @@ impl NativeHeap for ProbeHeap {
     }
 
     fn map_get(&self, map: ObjectId, key: &Value) -> Option<Value> {
+        let key = Key::new(key.clone()).ok()?;
         match self.get(map)? {
             Object::Map(entries) => entries
                 .iter()
-                .find(|(held, _)| held == key)
+                .find(|(held, _)| Key::new(held.clone()).ok().as_ref() == Some(&key))
                 .map(|(_, value)| value.clone()),
             _ => None,
         }
     }
 
     fn set_contains(&self, set: ObjectId, member: &Value) -> bool {
-        matches!(self.get(set), Some(Object::Set(members)) if members.contains(member))
+        let Ok(key) = Key::new(member.clone()) else {
+            return false;
+        };
+        matches!(self.get(set), Some(Object::Set(members)) if members.iter().any(|member| Key::new(member.clone()).ok().as_ref() == Some(&key)))
     }
 
     fn record_get(&self, record: ObjectId, field: &str) -> Option<Value> {
@@ -406,12 +272,60 @@ impl NativeHeap for ProbeHeap {
     }
 
     fn allocate(&mut self, object: Object) -> Result<ObjectId, NativeError> {
-        if matches!(object, Object::Closure(_) | Object::Variable(_)) {
-            return Err(NativeError::Raised(ErrorValue::new(
-                "type_error",
-                "a native function allocates lists, maps, sets and records",
-            )));
-        }
+        let object = match object {
+            Object::Map(entries) => {
+                let mut positions = HashMap::<Key, usize>::new();
+                let mut kept = Vec::<(Value, Value)>::new();
+                for (key, value) in entries {
+                    let normalized = Key::new(key.clone()).map_err(|_| {
+                        NativeError::Raised(ErrorValue::new(
+                            "type_error",
+                            "a key is not a legal key",
+                        ))
+                    })?;
+                    if let Some(index) = positions.get(&normalized) {
+                        kept[*index].1 = value;
+                    } else {
+                        positions.insert(normalized, kept.len());
+                        kept.push((key, value));
+                    }
+                }
+                Object::Map(kept)
+            }
+            Object::Set(members) => {
+                let mut seen = HashSet::new();
+                let mut kept = Vec::new();
+                for member in members {
+                    if seen.insert(Key::new(member.clone()).map_err(|_| {
+                        NativeError::Raised(ErrorValue::new(
+                            "type_error",
+                            "a key is not a legal key",
+                        ))
+                    })?) {
+                        kept.push(member);
+                    }
+                }
+                Object::Set(kept)
+            }
+            Object::Record(fields) => {
+                let mut kept = Vec::<(String, Value)>::new();
+                for (name, value) in fields {
+                    if let Some(field) = kept.iter_mut().find(|(field, _)| *field == name) {
+                        field.1 = value;
+                    } else {
+                        kept.push((name, value));
+                    }
+                }
+                Object::Record(kept)
+            }
+            Object::Closure(_) | Object::Variable(_) => {
+                return Err(NativeError::Raised(ErrorValue::new(
+                    "type_error",
+                    "a native function allocates lists, maps, sets and records",
+                )));
+            }
+            object => object,
+        };
         Ok(self.object(object))
     }
 
@@ -420,10 +334,84 @@ impl NativeHeap for ProbeHeap {
             .reserved
             .saturating_add(values.saturating_mul(16))
             .saturating_add(bytes);
-        if reserved > ROOM {
+        self.reservations.push((values, bytes));
+        if reserved > self.room {
             return Err(NativeError::Memory);
         }
         self.reserved = reserved;
         Ok(())
+    }
+}
+
+impl ProbeHeap {
+    fn size(&self, value: &Value) -> u64 {
+        1 + match value {
+            Value::Int(value) => value.bits().div_ceil(64),
+            Value::Text(value) => value.len() as u64,
+            Value::Bytes(value) => value.as_slice().len() as u64,
+            Value::Tuple(values) => values.len() as u64,
+            Value::Error(error) => (error.kind.len() + error.message.len()) as u64,
+            Value::Map(id) => 2 * self.len(*id) as u64,
+            Value::List(id) | Value::Set(id) | Value::Record(id) => self.len(*id) as u64,
+            _ => 0,
+        }
+    }
+
+    fn measure(&self, value: &Value, measure: Measure) -> u64 {
+        match measure {
+            Measure::Size => self.size(value),
+            Measure::Magnitude => match value {
+                Value::Int(value) if !value.is_negative() => {
+                    value.to_string().parse().unwrap_or(u64::MAX)
+                }
+                Value::Float(value) if value.get().is_finite() && value.get() >= 0.0 => {
+                    value.get() as u64
+                }
+                _ => 0,
+            },
+            Measure::DeepSize | Measure::NestedSize => {
+                let mut pending = vec![value.clone()];
+                let mut seen = BTreeSet::new();
+                let mut total = 0_u64;
+                let mut root = true;
+                while let Some(value) = pending.pop() {
+                    let nested = measure == Measure::NestedSize;
+                    if let Some(id) = value.object() {
+                        if nested {
+                            if !root {
+                                total = total.saturating_add(1);
+                            }
+                            root = false;
+                            continue;
+                        }
+                        if !seen.insert(id) {
+                            continue;
+                        }
+                        self.visit(id, &mut |element| {
+                            match element {
+                                Element::Item(value) | Element::Field { value, .. } => {
+                                    pending.push(value.clone())
+                                }
+                                Element::Entry { key, value } => {
+                                    pending.push(key.clone());
+                                    pending.push(value.clone());
+                                }
+                            }
+                            ControlFlow::Continue(())
+                        });
+                    }
+                    if !nested || !root {
+                        total = total.saturating_add(self.size(&value));
+                    }
+                    root = false;
+                    match value {
+                        Value::Tuple(values) => pending.extend(values.iter().cloned()),
+                        Value::Error(error) => pending.push(error.data.clone()),
+                        _ => {}
+                    }
+                }
+                total
+            }
+        }
     }
 }

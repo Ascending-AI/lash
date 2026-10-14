@@ -14,6 +14,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 
 [sites]
+"crates/lash-sqlite-store/src/tests.rs#cache_release_population" = { reads = 4, outputs = 0, kind = "evidence-read", reason = "The counted cache lifetime laws materialize the transcript before closing and dropping the last reader to pin graph and projection ownership (FIG-6168)." }
 "crates/lash/src/turn.rs#assistant_message" = { reads = 0, outputs = 1, kind = "output-read", reason = "assistant_message exposes programmatic execution results or provider data, not a transcript renderer." }
 "crates/lash/src/turn.rs#finished" = { reads = 0, outputs = 1, kind = "output-read", reason = "finished exposes the declared control tool and its completion value." }
 "crates/lash/src/tests/durable_session.rs#a_cell_at_its_tool_call_limit_can_still_finish" = { reads = 0, outputs = 1, kind = "output-read", reason = "Law 5 (FIG-5781) reads the settled finish value of a cell at its tool call limit." }

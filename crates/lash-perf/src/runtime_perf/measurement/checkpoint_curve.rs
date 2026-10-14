@@ -247,15 +247,22 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let mut extra_counters = BTreeMap::new();
     let mut metric_samples = BTreeMap::<String, Vec<f64>>::new();
     let mut metric_samples_ms = BTreeMap::<String, Vec<f64>>::new();
+    let edit_seed = run_id.as_u128() as usize;
+    let point_count = fixtures.len();
     for sample in 0..chat_turns {
         let turn_before_alloc = allocator_stats();
         let turn_before_memory = process_memory_sample();
         let turn_started = Instant::now();
         let mut phase_profile = BTreeMap::new();
-        for fixture in &mut fixtures {
+        for (point_index, fixture) in fixtures.iter_mut().enumerate() {
             append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
             let prefix = fixture.point.prefix();
-            fixture.fixture.assign(sample, sample).await?;
+            // The paired center points have identical shapes. Give each edit
+            // its own identity so the global immutable encoding cache cannot
+            // supply another point's already-materialized checkpoint. Retained
+            // large values still reuse their encodings (PC-LARGE-ONCE).
+            let edit = edit_seed.wrapping_add(sample * point_count + point_index);
+            fixture.fixture.assign(sample, edit).await?;
             let work_collector = lash_core::perf_witness::Collector::install()?;
             let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
                 "checkpoint_curve.capture",

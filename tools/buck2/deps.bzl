@@ -644,6 +644,7 @@ PACKAGE_DEPS = {
             "async_trait": "//third-party/rust:p0016",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
@@ -981,7 +982,8 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0371"
         },
         "dev": {
-            "blake3": "//third-party/rust:p0032"
+            "blake3": "//third-party/rust:p0032",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1068,8 +1070,11 @@ PACKAGE_DEPS = {
     "lash-kernel-conformance": {
         "build": {},
         "dev": {
+            "blake3": "//third-party/rust:p0032",
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
         },
         "normal": {
@@ -1091,6 +1096,7 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "serde": "//third-party/rust:p0313",
             "serde_json": "//third-party/rust:p0318",
             "thiserror": "//third-party/rust:p0371"

@@ -22,6 +22,7 @@ workspace = true
 
 [dependencies]
 lash-kernel-doc = { workspace = true }
+lash-kernel-state = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -55,4 +55,5 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-lib = { workspace = true }
 blake3 = { workspace = true }

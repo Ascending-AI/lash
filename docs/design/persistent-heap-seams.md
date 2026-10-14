@@ -176,6 +176,14 @@ open that two lanes would otherwise settle differently.
   Value cutover. hp-life owns the new outcome-delivery/instantiate call
   sites as well as lifecycle implementation. It starts on hp-heap's paged
   heap milestone and merges subsequent hp-heap commits.
+- **S8 (amended).** SessionRoot.heap is the heap-header PageRef. Frozen
+  occurrence heads are indexed once at freeze in an immutable keyed tree;
+  delivery opens its root and never rebuilds or scans that index.
+- **S8 (amended): paged binding carry.** CarryRoots holds binding and function
+  KeyedRoots. classify_carry takes a binding KeyedRoot and returns a carried
+  KeyedRoot plus dropped names. adopt returns and attaches a KeyedRoot. Bindings
+  use Tree<BindingRecord>; zero-forbidden classification reads no leaf. The
+  100k-separate-bindings no-op law counts O(1) pages. No Vec-based API remains.
 - **D-FRAME.** Persisted frames hold semantic coordinates only: the pending
   statement's `Site`, bindings by declaring site, loops (a map or set
   position is a `TableCursor`), `finally` departures and held values. This
@@ -324,6 +332,13 @@ Laws:
   - `a_missing_page_is_infrastructure_never_guest_absence`
   - `every_charge_is_the_same_on_the_paged_heap`, the KIR charge-bound
     differential re-run under even, odd and body layouts
+
+- **Ownership amended (2026-10-14, owner message 328022).** hp-heap owns
+  the running Machine's CellStart `adopt`, terminal `carry`, and frozen
+  outcome `freeze_datum`/`frozen_charge`/`instantiate` call sites alongside
+  its running-Machine rewrite. hp-life completes S8 lifecycle, frozen
+  saved functions and their layer laws; no VM callsite handoff is needed.
+  The integrator owns prepared saved-capture loading and composed reproof.
 
 ### S2 Identities
 
@@ -673,13 +688,13 @@ delivers an outcome.
 pub trait HeapLifecycle {
     fn freeze(&mut self, value: &Value, data_only: bool) -> Result<FrozenRef, HeapWriteError>;
     fn instantiate(&mut self, frozen: &FrozenRef) -> Result<Value, HeapWriteError>;
-    fn classify_carry(&mut self, bindings: &[(Name, Value)]) -> Result<CarryClassification, HeapFault>;
+    fn classify_carry(&mut self, bindings: &KeyedRoot) -> Result<CarryClassification, HeapFault>;
     fn carry(&mut self, roots: CarryRoots) -> Result<SessionRoot, HeapFault>;
-    fn adopt(&mut self, session: &SessionRoot) -> Result<Vec<(Name, Value)>, HeapFault>;
+    fn adopt(&mut self, session: &SessionRoot) -> Result<KeyedRoot, HeapFault>;
 }
 pub trait FamilyBase {
-    fn base_object(&mut self, entity: EntityId) -> Result<Option<ObjectInit>, HeapFault>;
-    fn member(&mut self, entity: EntityId) -> Result<bool, HeapFault>;
+    fn base_object(&mut self, entity: EntityId, frozen: &FrozenRef,
+        pages: &mut dyn PageSource) -> Result<Option<ObjectHead>, HeapFault>;
 }
 ```
 

@@ -115,6 +115,12 @@ deduplication. This witness is process-global: a curve installs an exclusive
 collector per measured sample, including any concurrent same-process graph work.
 Legacy hashes are SHA-256; graph-envelope hashes are domain-separated
 BLAKE3; the fixed domain prefix is excluded from hashed payload bytes. The checkpoint curve exposes raw sample vectors for these counters.
+An immutable-cache hit records zero envelope encodes and encoded bytes: zero
+means no materialization occurred. The checkpoint curve gives each run, point
+and sample a distinct edit identity, so paired center points measure fresh
+changed-state encodes while retained large values still reuse their images.
+Assignment finishes before the collector starts; capture through load is the
+measured window.
 The resident graph append curve also preserves each phase's raw latency vector;
 aggregate phase duration is no longer its only timing evidence. Completed frame
 curve fixtures are removed after their store handles have dropped.
