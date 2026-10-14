@@ -20,6 +20,8 @@ fn main() {
             },
             ToolLivePayload::Omitted { .. } => (),
         },
+        ToolLiveItem::OwnerOmitted { .. } => (),
+        ToolLiveItem::Fault { .. } => (),
         ToolLiveItem::Gap { .. } => (),
     };
 }

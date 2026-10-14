@@ -13,7 +13,7 @@ struct Window {
     incarnation: String,
     position: u64,
     bytes: usize,
-    events: VecDeque<(u64, Instant, usize, ToolLiveEmission)>,
+    events: VecDeque<(u64, Instant, usize, ToolLiveRecord)>,
     bell: watch::Sender<u64>,
     touched: Instant,
 }
@@ -89,12 +89,12 @@ impl Window {
                 floor
             }
         };
-        items.extend(self.events.iter().filter(|(at, ..)| *at > position).map(
-            |(at, _, _, emission)| ToolLiveItem::Emission {
-                cursor: cursor(*at),
-                emission: emission.clone(),
-            },
-        ));
+        items.extend(
+            self.events
+                .iter()
+                .filter(|(at, ..)| *at > position)
+                .map(|(at, _, _, record)| record.clone().into_item(cursor(*at))),
+        );
         items
     }
 }
@@ -111,7 +111,7 @@ impl ToolLiveMemoryWindow {
         }
     }
     fn key(owner: &ExecutionOwner) -> Result<String, ToolLiveError> {
-        serde_json::to_string(owner).map_err(|error| ToolLiveError::Transport(error.to_string()))
+        serde_json::to_string(owner).map_err(ToolLiveError::corrupt)
     }
     fn ensure<'a>(&self, state: &'a mut HashMap<String, Window>, key: String) -> &'a mut Window {
         state.retain(|_, window| {
@@ -134,20 +134,20 @@ impl ToolLiveReplay for ToolLiveMemoryWindow {
     async fn publish(
         &self,
         owner: &ExecutionOwner,
-        emissions: Vec<ToolLiveEmission>,
+        records: Vec<ToolLiveRecord>,
     ) -> Result<(), ToolLiveError> {
         let key = Self::key(owner)?;
         let mut state = self.state.lock_recover();
         let window = self.ensure(&mut state, key);
-        for emission in emissions {
-            let bytes = serde_json::to_vec(&emission)
-                .map_err(|error| ToolLiveError::Transport(error.to_string()))?
+        for record in records {
+            let bytes = serde_json::to_vec(&record)
+                .map_err(ToolLiveError::corrupt)?
                 .len();
             window.position += 1;
             window.bytes += bytes;
             window
                 .events
-                .push_back((window.position, Instant::now(), bytes, emission));
+                .push_back((window.position, Instant::now(), bytes, record));
         }
         window.touched = Instant::now();
         window.trim(self.retention);
@@ -190,14 +190,14 @@ impl ToolLiveReplay for ToolLiveMemoryWindow {
                         }
                         if receiver.changed().await.is_err() {
                             return Some((
-                                Err(ToolLiveError::Unavailable),
+                                Err(ToolLiveError::NotificationLost),
                                 (receiver, queue, after, true),
                             ));
                         }
                         let mut state = state.lock_recover();
                         let Some(window) = state.get_mut(&key) else {
                             return Some((
-                                Err(ToolLiveError::Unavailable),
+                                Err(ToolLiveError::NotificationLost),
                                 (receiver, queue, after, true),
                             ));
                         };

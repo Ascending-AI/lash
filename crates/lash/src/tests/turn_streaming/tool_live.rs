@@ -1,7 +1,7 @@
 //! TOOL-LIVE-HOST: host-executed tools publish without durable observations.
 use super::*;
 use futures_util::StreamExt;
-use lash_core::{ToolLiveFact, ToolLiveFilter, ToolLiveItem, ToolLivePayload};
+use lash_core::{ToolLiveFact, ToolLiveFilter, ToolLiveItem, ToolLiveOmission, ToolLivePayload};
 
 struct ProgressTools {
     address: Arc<StdMutex<Option<lash_core::CallAddress>>>,
@@ -24,6 +24,12 @@ impl ToolProvider for ProgressTools {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let live = call.context.live();
         *self.address.lock_recover() = Some(live.address().clone());
+        // An invalid gauge is counted, never stored, and changes nothing.
+        live.publish(ToolLiveFact::Progress {
+            progress: f64::NAN,
+            total: Some(100.0),
+            message: None,
+        });
         live.publish(ToolLiveFact::Progress {
             progress: 100.0,
             total: Some(100.0),
@@ -37,11 +43,24 @@ async fn a_host_executed_tool_publishes_progress_without_any_durable_tool_live_f
 {
     let address = Arc::new(StdMutex::new(None));
     let calls = Arc::new(AtomicUsize::new(0));
+    let results = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let observed = results.clone();
     let provider = crate::testing::TestProvider::builder()
         .kind("embed-test")
         .requires_streaming(true)
         .complete(move |request| {
             let call = calls.fetch_add(1, Ordering::SeqCst);
+            for block in request
+                .messages
+                .iter()
+                .flat_map(|message| message.blocks.iter())
+            {
+                if let lash_core::llm::types::LlmContentBlock::ToolResult { content, .. } = block {
+                    observed
+                        .lock_recover()
+                        .push(lash_core::facade_support::tool_result_text(content).into_owned());
+                }
+            }
             async move {
                 let part = if call == 0 {
                     LlmOutputPart::ToolCall {
@@ -95,22 +114,45 @@ async fn a_host_executed_tool_publishes_progress_without_any_durable_tool_live_f
         .subscribe(ToolLiveFilter::Call(address.clone()))
         .await
         .expect("subscribe");
-    loop {
-        if let ToolLiveItem::Emission { emission, .. } =
+    let (mut gauge, mut non_finite) = (false, false);
+    while !(gauge && non_finite) {
+        let ToolLiveItem::Emission { emission, .. } =
             feed.next().await.expect("fact").expect("read")
-            && let ToolLivePayload::Fact {
+        else {
+            continue;
+        };
+        assert_eq!(emission.address, address);
+        match emission.payload {
+            ToolLivePayload::Fact {
                 fact:
                     ToolLiveFact::Progress {
                         progress, message, ..
                     },
-            } = emission.payload
-        {
-            assert_eq!(emission.address, address);
-            assert_eq!(progress, 100.0);
-            assert_eq!(message.as_deref(), Some("tool-live-only-marker"));
-            break;
+            } => {
+                assert_eq!(progress, 100.0);
+                assert_eq!(message.as_deref(), Some("tool-live-only-marker"));
+                gauge = true;
+            }
+            ToolLivePayload::Omitted {
+                cause: ToolLiveOmission::NonFinite,
+                count,
+            } => {
+                assert_eq!(count, 1);
+                non_finite = true;
+            }
+            other => panic!("unexpected {other:?}"),
         }
     }
+    let results = results
+        .lock_recover()
+        .iter()
+        .map(|text| serde_json::from_str::<serde_json::Value>(text).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        [serde_json::json!({"ok": true})],
+        "the tool outcome is unchanged by the invalid gauge"
+    );
     assert!(
         !serde_json::to_string(&output.activities)
             .unwrap()
@@ -243,4 +285,139 @@ async fn tool_live_flood_never_trims_uncommitted_text_or_process_node_history() 
         lash_core::testing::process_observation_label(&events[0]),
         "kept-node"
     );
+}
+
+struct LongTool {
+    first: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+#[async_trait]
+impl ToolProvider for LongTool {
+    fn tool_manifests(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+        Ok(vec![app_tool_definition().manifest()])
+    }
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "app_lookup").then(|| Arc::new(app_tool_definition().contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let live = call.context.live();
+        live.publish(ToolLiveFact::Progress {
+            progress: 1.0,
+            total: Some(2.0),
+            message: Some("first long tool".into()),
+        });
+        self.first.notify_one();
+        self.release.notified().await;
+        live.publish(ToolLiveFact::Progress {
+            progress: 2.0,
+            total: Some(2.0),
+            message: None,
+        });
+        lash_core::ToolOutcome::ok(serde_json::json!({"ok":true})).into()
+    }
+}
+
+/// TOOL-LIVE-OWNER: a host learns a new session's tool-live owner from the
+/// facade before any turn commits, subscribes by it, and receives the first
+/// turn's first tool's progress while that tool still runs (figments
+/// feedback-14 b1).
+#[tokio::test]
+async fn a_host_subscribes_by_owner_before_the_first_committed_turn() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let part = if call == 0 {
+                    LlmOutputPart::ToolCall {
+                        call_id: "first-long-tool".into(),
+                        tool_name: "app_lookup".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }
+                } else {
+                    LlmOutputPart::Text {
+                        text: "done".into(),
+                        response_meta: None,
+                    }
+                };
+                if let Some(stream) = request.stream_events {
+                    stream.send(LlmStreamEvent::Part(part.clone()));
+                }
+                Ok(LlmResponse {
+                    parts: vec![part],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let tool = LongTool {
+        first: Arc::default(),
+        release: Arc::default(),
+    };
+    let (first, release) = (tool.first.clone(), tool.release.clone());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .tools(crate::tool_provider_key!("tools"), Arc::new(tool))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(SessionId::from("first-turn-owner"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let owner = session
+        .observe()
+        .tool_live_owner()
+        .await?
+        .expect("a new session has an owner before its first commit");
+    let mut owners = session.observe().tool_live_owners();
+    assert_eq!(owners.next().await.expect("current owner")?, owner);
+    let mut feed = core
+        .tool_live()
+        .subscribe(ToolLiveFilter::Owner(owner.clone()))
+        .await
+        .expect("subscribe");
+    let turn = session.send(TurnInput::text("run the long tool")).output();
+    let observe = async {
+        first.notified().await;
+        let mut released = false;
+        loop {
+            let ToolLiveItem::Emission { emission, .. } =
+                feed.next().await.expect("item").expect("read")
+            else {
+                continue;
+            };
+            assert_eq!(emission.address.owner, owner);
+            if let ToolLivePayload::Fact {
+                fact: ToolLiveFact::Progress { progress, .. },
+            } = emission.payload
+            {
+                if progress == 1.0 && !released {
+                    // Received while the tool still runs.
+                    released = true;
+                    release.notify_one();
+                } else if progress == 2.0 {
+                    assert!(released);
+                    break;
+                }
+            }
+        }
+    };
+    let (output, ()) = tokio::join!(turn, observe);
+    output?;
+    core.shutdown().await?;
+    Ok(())
 }

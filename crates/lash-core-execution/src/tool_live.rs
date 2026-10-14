@@ -10,9 +10,15 @@ use std::{
 };
 
 mod memory;
+mod policy;
 mod publisher;
 pub use memory::ToolLiveMemoryWindow;
-pub use publisher::ToolLivePublisher;
+pub use policy::{
+    TOOL_LIVE_COMPLETION_LINGER, TOOL_LIVE_ENVELOPE_BYTES, TOOL_LIVE_WRITE_TIMEOUT, ToolLivePolicy,
+    ToolLivePolicyBound, ToolLivePolicyError, ToolLivePolicyField, ToolLivePolicyRelation,
+    ToolLivePolicySnapshot, ToolLivePolicyValue, ToolLiveRetention,
+};
+pub use publisher::{ToolLiveDiagnostics, ToolLivePublisher};
 
 /// Immutable address of one admitted attempt. Routing is never inferred from
 /// a plugin name, an observer, or a server notification.
@@ -52,15 +58,27 @@ pub enum ToolLiveFact {
     },
 }
 
+/// Why facts were counted instead of delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolLiveOmission {
+    /// A newer progress value replaced one no write had carried yet.
     Coalesced,
+    /// A log found the owner's log budget full.
     OwnerBudget,
+    /// A fact over `fact_bytes`, or a progress record over `progress_bytes`.
     Oversized,
+    /// Publication after the call's completion fence.
     AfterCompletion,
+    /// Logs a failed or timed-out store write lost. Counted when the write
+    /// fails and delivered with the owner's next successful write.
     StoreFailed,
+    /// Call-scoped: the MCP plugin had no correlation route for the call.
+    /// Owner-scoped: a call of this owner got no publisher slot, so nothing
+    /// it publishes is delivered.
     RoutesFull,
+    /// A progress or total that is NaN or infinite; never stored.
+    NonFinite,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -77,11 +95,46 @@ pub struct ToolLiveEmissionId {
     pub ordinal: u64,
 }
 
+/// One fact, or one count of omitted facts, about one admitted call.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolLiveEmission {
     pub address: CallAddress,
     pub id: ToolLiveEmissionId,
     pub payload: ToolLivePayload,
+}
+
+/// Omissions no admitted call's address can carry: calls refused a
+/// publisher slot (`RoutesFull`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolLiveOwnerOmission {
+    pub owner: ExecutionOwner,
+    pub id: ToolLiveEmissionId,
+    pub cause: ToolLiveOmission,
+    pub count: u64,
+}
+
+/// The unit a publisher writes and a replay store retains.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum ToolLiveRecord {
+    Call(ToolLiveEmission),
+    Owner(ToolLiveOwnerOmission),
+}
+impl ToolLiveRecord {
+    pub fn id(&self) -> &ToolLiveEmissionId {
+        match self {
+            Self::Call(emission) => &emission.id,
+            Self::Owner(omission) => &omission.id,
+        }
+    }
+    /// The subscription item at `cursor`.
+    pub fn into_item(self, cursor: ToolLiveCursor) -> ToolLiveItem {
+        match self {
+            Self::Call(emission) => ToolLiveItem::Emission { cursor, emission },
+            Self::Owner(omission) => ToolLiveItem::OwnerOmitted { cursor, omission },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,11 +151,31 @@ pub enum ToolLiveGapReason {
     Unavailable,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// A retained record the subscription could not read. The feed continues
+/// after it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToolLiveReadFault {
+    /// The stored payload does not decode as a record.
+    CorruptPayload { detail: String },
+}
+
+/// One subscription item. Call filters receive their call's emissions and
+/// every owner-level item (owner omissions, faults and gaps).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolLiveItem {
     Emission {
         cursor: ToolLiveCursor,
         emission: ToolLiveEmission,
+    },
+    OwnerOmitted {
+        cursor: ToolLiveCursor,
+        omission: ToolLiveOwnerOmission,
+    },
+    Fault {
+        cursor: ToolLiveCursor,
+        fault: ToolLiveReadFault,
     },
     Gap {
         cursor: ToolLiveCursor,
@@ -112,12 +185,18 @@ pub enum ToolLiveItem {
 impl ToolLiveItem {
     pub fn cursor(&self) -> &ToolLiveCursor {
         match self {
-            Self::Emission { cursor, .. } | Self::Gap { cursor, .. } => cursor,
+            Self::Emission { cursor, .. }
+            | Self::OwnerOmitted { cursor, .. }
+            | Self::Fault { cursor, .. }
+            | Self::Gap { cursor, .. } => cursor,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+/// What a subscription reads: every item of one execution owner, or one
+/// call's emissions with the owner-level items.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolLiveFilter {
     Owner(ExecutionOwner),
     Call(CallAddress),
@@ -139,14 +218,38 @@ impl ToolLiveFilter {
     }
 }
 
+/// Boxed source of a transport fault.
+pub type ToolLiveFaultSource = Box<dyn std::error::Error + Send + Sync>;
+
+/// Why a subscription could not start or ended. Loss inside a working
+/// subscription is an item instead: a `Gap`, a `Fault`, or an `Omitted` count.
 #[derive(Debug, thiserror::Error)]
 pub enum ToolLiveError {
+    /// No transport is configured for the owner's kind.
     #[error("tool-live transport is unavailable")]
     Unavailable,
     #[error("tool-live cursor belongs to another owner")]
     WrongOwner,
-    #[error("tool-live transport: {0}")]
-    Transport(String),
+    /// The store refused or could not be reached. Reconnect with
+    /// `subscribe_after` from the last delivered cursor.
+    #[error("tool-live store is unavailable")]
+    StoreUnavailable(#[source] ToolLiveFaultSource),
+    /// A record could not be encoded for the store.
+    #[error("tool-live payload is corrupt")]
+    CorruptPayload(#[source] ToolLiveFaultSource),
+    /// The subscription's change notifications ended (the listener stopped,
+    /// or the owner's window was reclaimed). Reconnect from the last cursor;
+    /// the class reports a `Gap` if what it held is gone.
+    #[error("tool-live notifications were lost")]
+    NotificationLost,
+}
+impl ToolLiveError {
+    pub fn store(source: impl Into<ToolLiveFaultSource>) -> Self {
+        Self::StoreUnavailable(source.into())
+    }
+    pub fn corrupt(source: impl Into<ToolLiveFaultSource>) -> Self {
+        Self::CorruptPayload(source.into())
+    }
 }
 
 pub type ToolLiveSubscription = BoxStream<'static, Result<ToolLiveItem, ToolLiveError>>;
@@ -158,126 +261,13 @@ pub trait ToolLiveReplay: Send + Sync {
     async fn publish(
         &self,
         owner: &ExecutionOwner,
-        emissions: Vec<ToolLiveEmission>,
+        records: Vec<ToolLiveRecord>,
     ) -> Result<(), ToolLiveError>;
     async fn subscribe(
         &self,
         owner: &ExecutionOwner,
         after: Option<ToolLiveCursor>,
     ) -> Result<ToolLiveSubscription, ToolLiveError>;
-}
-
-/// Per-owner publisher admission, including the batch held by a stalled write.
-/// Defaults: 64 events/100 ms, 16 logs/interval, 256 KiB pending, 64 KiB/fact,
-/// 128 calls/owner. Hard maxima are 4096 events, 1024 logs, 16 MiB pending,
-/// 1 MiB/fact and 4096 calls; interval is 10 ms..60 s. Writes time out at 5 s.
-#[derive(Clone, Copy, Debug)]
-pub struct ToolLivePolicy {
-    pub(super) events: usize,
-    pub(super) logs: usize,
-    pub(super) bytes: usize,
-    pub(super) fact_bytes: usize,
-    pub(super) calls: usize,
-    pub(super) interval: Duration,
-}
-#[derive(Debug, thiserror::Error)]
-#[error("tool-live policy is outside its bounds")]
-pub struct ToolLivePolicyError;
-impl Default for ToolLivePolicy {
-    fn default() -> Self {
-        Self {
-            events: 64,
-            logs: 16,
-            bytes: 262144,
-            fact_bytes: 65536,
-            calls: 128,
-            interval: Duration::from_millis(100),
-        }
-    }
-}
-impl ToolLivePolicy {
-    pub fn new(
-        events: usize,
-        logs: usize,
-        bytes: usize,
-        fact_bytes: usize,
-        calls: usize,
-        interval: Duration,
-    ) -> Result<Self, ToolLivePolicyError> {
-        if !(2..=4096).contains(&events)
-            || logs > 1024
-            || logs >= events
-            || !(4096..=16777216).contains(&bytes)
-            || !(1024..=1048576).contains(&fact_bytes)
-            || fact_bytes > bytes / 2
-            || !(1..=4096).contains(&calls)
-            || !(Duration::from_millis(10)..=Duration::from_secs(60)).contains(&interval)
-        {
-            return Err(ToolLivePolicyError);
-        }
-        Ok(Self {
-            events,
-            logs,
-            bytes,
-            fact_bytes,
-            calls,
-            interval,
-        })
-    }
-}
-
-/// The tool class's retention does not consume either owner history window.
-/// Defaults: 2048 events, 8 MiB and 120 s per owner, 4096 resident owners.
-#[derive(Clone, Copy, Debug)]
-pub struct ToolLiveRetention {
-    pub(super) events: usize,
-    pub(super) bytes: usize,
-    pub(super) age: Duration,
-    pub(super) owners: usize,
-}
-impl Default for ToolLiveRetention {
-    fn default() -> Self {
-        Self {
-            events: 2048,
-            bytes: 8388608,
-            age: Duration::from_secs(120),
-            owners: 4096,
-        }
-    }
-}
-impl ToolLiveRetention {
-    pub fn events(&self) -> usize {
-        self.events
-    }
-    pub fn bytes(&self) -> usize {
-        self.bytes
-    }
-    pub fn age(&self) -> Duration {
-        self.age
-    }
-    pub fn owners(&self) -> usize {
-        self.owners
-    }
-    pub fn new(
-        events: usize,
-        bytes: usize,
-        age: Duration,
-        owners: usize,
-    ) -> Result<Self, ToolLivePolicyError> {
-        if !(1..=65536).contains(&events)
-            || !(4096..=67108864).contains(&bytes)
-            || !(Duration::from_millis(10)..=Duration::from_secs(3600)).contains(&age)
-            || !(1..=65536).contains(&owners)
-        {
-            return Err(ToolLivePolicyError);
-        }
-        Ok(Self {
-            events,
-            bytes,
-            age,
-            owners,
-        })
-    }
 }
 
 /// Core's host seam, with transport through the owning replay store.
@@ -343,6 +333,20 @@ impl ToolLive {
     pub fn publisher_for_test(&self, address: CallAddress) -> ToolLivePublisher {
         self.bind(address)
     }
+    pub fn policy(&self) -> &ToolLivePolicy {
+        &self.policy
+    }
+    /// The owner's publisher on this node, while any call of it holds a
+    /// publisher or its writes are still draining; `None` otherwise.
+    pub fn diagnostics(&self, owner: &ExecutionOwner) -> Option<ToolLiveDiagnostics> {
+        let key = serde_json::to_string(owner).unwrap_or_default();
+        let owner = self
+            .owners
+            .lock_recover()
+            .get(&key)
+            .and_then(Weak::upgrade)?;
+        Some(owner.diagnostics())
+    }
 
     /// Runtime admission binds the address once; tools receive only this
     /// sealed handle, which cannot publish for another call.
@@ -362,3 +366,7 @@ impl ToolLive {
         owner.bind(address)
     }
 }
+
+#[cfg(test)]
+#[path = "tool_live/wire_laws.rs"]
+mod wire_laws;

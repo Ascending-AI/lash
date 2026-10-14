@@ -783,3 +783,159 @@ async fn session_and_process_tool_progress_reach_subscribers_on_another_replica(
     assert_eq!(logged, 0, "no tool-live row has a logged table to enter");
     pool.close().await;
 }
+
+/// TOOL-LIVE-VALIDITY: a non-finite gauge is counted and never stored, and a
+/// retained row that does not decode is that one item's fault. Neither ends a
+/// subscription on another replica or hides the facts after it (figments
+/// feedback-14 a5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_invalid_tool_live_fact_never_poisons_a_replica_feed() {
+    use futures_util::StreamExt;
+    use lash_core::{
+        CallAddress, ExecutionOwner, ToolLive, ToolLiveFact, ToolLiveFilter, ToolLiveItem,
+        ToolLiveOmission, ToolLivePayload, ToolLiveReadFault, ToolLiveSubscription,
+    };
+    async fn next(feed: &mut ToolLiveSubscription) -> ToolLiveItem {
+        tokio::time::timeout(Duration::from_secs(5), feed.next())
+            .await
+            .expect("replica delivery")
+            .expect("the subscription stays open")
+            .expect("read")
+    }
+    fn gauge(item: &ToolLiveItem) -> Option<f64> {
+        match item {
+            ToolLiveItem::Emission { emission, .. } => match &emission.payload {
+                ToolLivePayload::Fact {
+                    fact: ToolLiveFact::Progress { progress, .. },
+                } => Some(*progress),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    let schema = fresh_schema();
+    let config = config(&schema);
+    let a_session = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config)
+        .await
+        .expect("session A");
+    let b_session = PostgresLiveReplayStore::connect(&endpoints(database.url()), &config)
+        .await
+        .expect("session B");
+    let a = ToolLive::new(a_session.tool_live_window(), None, Default::default());
+    let b = ToolLive::new(b_session.tool_live_window(), None, Default::default());
+    let owner = ExecutionOwner::SessionFrame {
+        session_id: SessionId::from("invalid-fact"),
+        agent_frame_id: lash_core::FrameNodeId::new("frame").expect("frame"),
+    };
+    let address = CallAddress {
+        owner: owner.clone(),
+        call_id: lash_core::ToolCallId::fixture("invalid-tool"),
+        attempt: 1,
+    };
+    let mut feed = b
+        .subscribe(ToolLiveFilter::Owner(owner.clone()))
+        .await
+        .expect("subscribe B");
+    let call = a.publisher_for_test(address.clone());
+    call.publish(ToolLiveFact::Progress {
+        progress: f64::NAN,
+        total: None,
+        message: None,
+    });
+    call.publish(ToolLiveFact::Progress {
+        progress: 1.0,
+        total: Some(f64::INFINITY),
+        message: None,
+    });
+    call.publish(ToolLiveFact::Progress {
+        progress: 1.0,
+        total: Some(3.0),
+        message: Some("valid".into()),
+    });
+    let (mut valid, mut non_finite) = (false, 0);
+    while !valid || non_finite != 2 {
+        let item = next(&mut feed).await;
+        match &item {
+            ToolLiveItem::Emission { emission, .. } => {
+                assert_eq!(emission.address, address);
+                match &emission.payload {
+                    ToolLivePayload::Omitted {
+                        cause: ToolLiveOmission::NonFinite,
+                        count,
+                    } => non_finite += count,
+                    _ => {
+                        assert_eq!(gauge(&item), Some(1.0));
+                        valid = true;
+                    }
+                }
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    // A row as an encoder that wrote NaN as null would have retained it.
+    let pool = sqlx::PgPool::connect(database.url())
+        .await
+        .expect("raw pool");
+    let key = serde_json::to_string(&owner).expect("owner key");
+    let corrupt = serde_json::json!({
+        "scope": "call",
+        "address": address,
+        "id": {"producer_epoch": "older-writer", "ordinal": 1},
+        "payload": {"kind": "fact", "fact": {"kind": "progress", "progress": null, "total": null, "message": null}},
+    });
+    let mut tx = pool.begin().await.expect("begin");
+    let tail: i64 = sqlx::query_scalar(&format!(
+        "SELECT tail FROM \"{schema}\".live_replay_tool_head WHERE owner=$1 FOR UPDATE"
+    ))
+    .bind(&key)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("head");
+    let payload = serde_json::to_vec(&corrupt).expect("payload");
+    sqlx::query(&format!("INSERT INTO \"{schema}\".live_replay_tool_log (owner, position, producer_epoch, ordinal, payload, bytes, published_at) VALUES ($1,$2,'older-writer',1,$3,$4,clock_timestamp())"))
+        .bind(&key).bind(tail + 1).bind(&payload).bind(i64::try_from(payload.len()).expect("bytes"))
+        .execute(&mut *tx).await.expect("corrupt row");
+    sqlx::query(&format!(
+        "UPDATE \"{schema}\".live_replay_tool_head SET tail=$2 WHERE owner=$1"
+    ))
+    .bind(&key)
+    .bind(tail + 1)
+    .execute(&mut *tx)
+    .await
+    .expect("tail");
+    tx.commit().await.expect("commit");
+    call.publish(ToolLiveFact::Progress {
+        progress: 3.0,
+        total: Some(3.0),
+        message: None,
+    });
+    call.finish();
+    let fault = next(&mut feed).await;
+    assert!(
+        matches!(
+            &fault,
+            ToolLiveItem::Fault {
+                cursor,
+                fault: ToolLiveReadFault::CorruptPayload { .. },
+            } if cursor.position == u64::try_from(tail + 1).expect("position")
+        ),
+        "{fault:?}"
+    );
+    assert_eq!(gauge(&next(&mut feed).await), Some(3.0));
+    // A fresh subscription reads past the retained bad row too.
+    let mut fresh = b
+        .subscribe(ToolLiveFilter::Call(address))
+        .await
+        .expect("fresh");
+    let mut faults = 0;
+    loop {
+        let item = next(&mut fresh).await;
+        faults += usize::from(matches!(item, ToolLiveItem::Fault { .. }));
+        if gauge(&item) == Some(3.0) {
+            break;
+        }
+    }
+    assert_eq!(faults, 1);
+    pool.close().await;
+}

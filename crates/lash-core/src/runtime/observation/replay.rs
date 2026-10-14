@@ -226,6 +226,18 @@ pub struct SessionObservation {
     pub cursor: SessionCursor,
 }
 
+impl SessionObservation {
+    /// The tool-live owner a call admitted at this head runs under: the
+    /// session on its execution frame, including the initial frame before
+    /// the first commit. Subscribe `ToolLiveFilter::Owner` with it.
+    pub fn tool_live_owner(&self) -> Option<crate::ExecutionOwner> {
+        Some(crate::ExecutionOwner::SessionFrame {
+            session_id: self.read_view.session_id().clone(),
+            agent_frame_id: self.read_view.execution_frame()?,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct SessionObservationEvent {

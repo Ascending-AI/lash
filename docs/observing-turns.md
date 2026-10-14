@@ -242,6 +242,7 @@ restart even when deletion history before that fence is gone. Process facts
 and provisional node observations continue through each process's recovering
 observation feed; the fleet cursor is separate from its observation cursor.
 
+## Tool progress and logs
 
 Tool calls publish live progress and logs through a separate tool-live lane.
 A host reads `core.tool_live().subscribe(ToolLiveFilter::Owner(owner)).await`
@@ -254,25 +255,111 @@ message; `Log` forwards severity, optional logger and JSON data.
 Any tool, including a host-executed tool, gets the sealed publisher from
 `AttemptContext::live()`. It bypasses the attempt recorder and never enters
 history or process lifecycle facts. Its authoritative tool outcome is unchanged
-by observation or store failure. The MCP plugin maps progress tokens and
-request-correlated messages onto this same lane. Uncorrelated server logs go to
-tracing on the executing node; list changes maintain the plugin catalogue.
+by observation or store failure: `publish` returns nothing and never awaits.
+The MCP plugin maps progress tokens and request-correlated messages onto this
+same lane. Uncorrelated server logs go to tracing on the executing node; list
+changes maintain the plugin catalogue.
 
-`LashCoreBuilder::tool_live_policy` sets validated per-owner publisher bounds.
-The defaults are 64 events and 16 logs per 100 ms interval, 256 KiB including
-in-flight work, 64 KiB per fact and 128 call slots. Hard maxima are 4096 events,
-1024 logs, 16 MiB, 1 MiB and 4096 calls. Progress keeps one latest pending value
-per call; the completion fence seals the publisher and schedules its final
-admitted gauge. Typed `Omitted` payloads count coalescing, admission overflow,
-oversized facts, late notifications and failed publication. MCP correlation
-has its own `McpRoutePolicy`, defaults of 128 routes and a two-second grace,
-and never evicts a live route for a later registration.
+### The session's owner before its first turn
+
+A session call runs under `ExecutionOwner::SessionFrame` for the frame it was
+admitted on. A new session already has that owner: its initial frame, which the
+first commit opens. `ObservableSession::tool_live_owner()` reads it from the
+durable head, so a host subscribes before it sends the first turn:
+
+```rust
+let session = core.session(id).created().await.open().await?;
+let owner = session.observe().tool_live_owner().await?.expect("frame");
+let mut feed = core.tool_live().subscribe(ToolLiveFilter::Owner(owner)).await?;
+let turn = session.send(TurnInput::text("fetch the report")).output();
+// Poll `feed` while `turn` runs: the first tool's progress arrives live.
+```
+
+A compaction or frame switch moves later calls to a new frame, and so to a new
+owner. `ObservableSession::tool_live_owners()` yields the current owner and
+then each owner a later commit moves the session to, whichever replica made it;
+subscribe again for each one. Cursors belong to one owner.
+
+### Items, filters and the wire
+
+`ToolLiveItem` is one of `Emission` (one fact, or one `Omitted` count, for one
+call), `OwnerOmitted` (a count no call's address can carry), `Fault` (a
+retained record that could not be read; the feed continues after it) or `Gap`.
+A `Call` filter receives its call's emissions and every owner-level item.
+`ToolLiveItem` and `ToolLiveFilter` serialize as JSON objects tagged by
+`kind` (`emission`, `owner_omitted`, `fault`, `gap`; `owner`, `call`), with
+the fields named as in Rust, so a host route can carry them unchanged.
+
+### Capacity
+
+`LashCoreBuilder::tool_live_policy` sets validated per-owner publisher bounds;
+`ToolLivePolicy::snapshot()` reads every configured and derived bound back.
+The defaults are 64 records and 16 logs per 100 ms interval, 512 KiB, 64 KiB
+per fact, 1 KiB per progress record and 128 calls. The owner's bytes are split
+three ways that never borrow from each other:
+
+- the final-gauge reserve, `calls × progress_bytes` (128 KiB). Admitting a
+  call admits its reservation, so its latest progress, and so its final gauge,
+  is never refused for space. Progress stays in its reservation after a write
+  and is not charged anywhere else;
+- the log budget, half the rest (192 KiB, at most `logs` waiting logs);
+- the write budget, the other half (192 KiB, at most `events` records), for
+  the batch a store write has in flight.
+
+Each record is charged its fact and call address serialized plus a 256-byte
+envelope (`TOOL_LIVE_ENVELOPE_BYTES`: scope, emission identity and payload
+tags). A write carries every waiting final first, round robin across calls,
+then logs, then omission counts; what does not fit waits for the next
+interval, so more finishing calls than one interval carries spread across
+intervals. The completion fence seals the publisher and writes its final
+progress again, even when an earlier interval carried it.
+
+A call is admitted only with a free slot. A sealed call whose writes are done
+keeps its slot for `TOOL_LIVE_COMPLETION_LINGER` (two seconds) after its last
+write and gives it up early when a new call needs it. A call that finds every
+slot held by a live or unwritten call is refused at admission: it publishes
+nothing, and the owner receives an `OwnerOmitted` `RoutesFull` count. That
+cause is owner-scoped; a call-scoped `RoutesFull` comes only from the MCP
+plugin's own route bound. Publication after the fence counts as
+`AfterCompletion` on the call's address for as long as the handle lives: once
+its slot retired, a late fact reopens an omission-only slot (or, with none
+free, counts as an owner `RoutesFull`).
+
+`ToolLive::diagnostics(owner)` and `ToolLivePublisher::diagnostics()` report
+the owner's live and sealed calls, reserved bytes, waiting progress and logs,
+the write in flight, pending omission counts, refusals and failed writes.
+`ToolLivePolicy::new` refuses a setting with a `ToolLivePolicyError` naming the
+field, the supplied value, and the range or relationship it broke
+(`LogsBelowEvents`, `ReserveWithinHalfBytes`, `FactWithinLogBudget`,
+`ProgressWithinFact`). MCP correlation has its own `McpRoutePolicy`, defaults
+of 128 routes and a two-second grace, and never evicts a live route for a later
+registration.
+
+### Loss, and how each kind shows
+
+- **Omitted publication** reaches the subscriber as counts. `Coalesced`: a
+  newer gauge replaced one no write had carried. `OwnerBudget`: the log budget
+  was full. `Oversized`: a fact over `fact_bytes`, or progress over
+  `progress_bytes`. `NonFinite`: a NaN or infinite progress or total, never
+  stored. `AfterCompletion` and `RoutesFull` as above. `StoreFailed` counts logs
+  a failed or timed-out write (five seconds) lost; progress and earlier counts
+  are written again next interval. These counts travel in the next successful
+  write, so a store that stays broken cannot deliver the count explaining it;
+  diagnostics show `failed_writes` at once.
+- **Lost windows** are `Gap` items: `Trimmed` when retention dropped what the
+  cursor needed, `Unavailable` when the class has a new incarnation or the
+  cursor is past it. The gap's cursor is where the class continues.
+- **Broken transport** ends a subscription with a `ToolLiveError`.
+  `StoreUnavailable` (with the store's error as source) and `NotificationLost`
+  are reconnectable: call `subscribe_after` with the last delivered cursor.
+  `CorruptPayload` is an encoding fault, `WrongOwner` a cursor for another
+  owner, `Unavailable` a core with no transport for that owner kind. A stored
+  record that does not decode is not an error: it is one `Fault` item.
 
 The session and process replay stores retain tool facts in their own event
 class: 2048 events, 8 MiB and 120 seconds per owner by default, separately from
 turn text and node history. PostgreSQL transports this class through unlogged
 tables and each replay store's replica listener; SQLite hosts retain the
 single-process window. `subscribe_after(filter, Some(cursor))` resumes within
-that class's window. A typed `Gap` names `Trimmed` or `Unavailable` and the
-cursor from which the class continues. It has no ordering relationship to
+that class's window. It has no ordering relationship to
 session or process observation streams, and is never merged into them.

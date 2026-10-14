@@ -904,8 +904,11 @@ pub use crate::backend::ProcessAuthorityReads;
 
 pub mod tool_live;
 pub use tool_live::{
-    CallAddress, ToolLive, ToolLiveCursor, ToolLiveEmission, ToolLiveEmissionId, ToolLiveError,
-    ToolLiveFact, ToolLiveFilter, ToolLiveGapReason, ToolLiveItem, ToolLiveLogLevel,
-    ToolLiveMemoryWindow, ToolLiveOmission, ToolLivePayload, ToolLivePolicy, ToolLivePolicyError,
-    ToolLivePublisher, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
+    CallAddress, TOOL_LIVE_COMPLETION_LINGER, TOOL_LIVE_ENVELOPE_BYTES, TOOL_LIVE_WRITE_TIMEOUT,
+    ToolLive, ToolLiveCursor, ToolLiveDiagnostics, ToolLiveEmission, ToolLiveEmissionId,
+    ToolLiveError, ToolLiveFact, ToolLiveFaultSource, ToolLiveFilter, ToolLiveGapReason,
+    ToolLiveItem, ToolLiveLogLevel, ToolLiveMemoryWindow, ToolLiveOmission, ToolLiveOwnerOmission,
+    ToolLivePayload, ToolLivePolicy, ToolLivePolicyBound, ToolLivePolicyError, ToolLivePolicyField,
+    ToolLivePolicyRelation, ToolLivePolicySnapshot, ToolLivePolicyValue, ToolLivePublisher,
+    ToolLiveReadFault, ToolLiveRecord, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
 };

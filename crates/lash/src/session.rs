@@ -1178,6 +1178,85 @@ impl ObservableSession {
         SessionObservationStream::new(self.feed_source(), cursor)
     }
 
+    /// The tool-live owner a call admitted at the durable head runs under.
+    ///
+    /// A session has an owner before its first turn commits: its initial
+    /// frame. Subscribe [`ToolLiveFilter::Owner`](crate::ToolLiveFilter) with
+    /// it before sending the first turn to receive that turn's first tool's
+    /// progress. A compaction or frame switch moves later calls to a new
+    /// owner; [`tool_live_owners`](Self::tool_live_owners) follows those
+    /// changes. `None` only for a legacy graph whose nodes carry no frame.
+    pub async fn tool_live_owner(&self) -> Result<Option<lash_core::ExecutionOwner>> {
+        Ok(self.snapshot().await?.tool_live_owner())
+    }
+
+    /// The current tool-live owner, then each owner a later commit moves the
+    /// session's calls to, whichever process made the commit. Resubscribe
+    /// the tool-live feed for each owner it yields.
+    pub fn tool_live_owners(
+        &self,
+    ) -> futures_util::stream::BoxStream<'static, Result<lash_core::ExecutionOwner>> {
+        use futures_util::StreamExt;
+        enum Follow {
+            Start,
+            Feed(
+                Box<SessionObservationStream>,
+                Option<lash_core::ExecutionOwner>,
+            ),
+            Done,
+        }
+        let session = self.clone();
+        futures_util::stream::unfold(Follow::Start, move |state| {
+            let session = session.clone();
+            async move {
+                let (mut feed, mut last) = match state {
+                    Follow::Done => return None,
+                    Follow::Feed(feed, last) => (feed, last),
+                    Follow::Start => {
+                        let observation = match session.snapshot().await {
+                            Ok(observation) => observation,
+                            Err(error) => return Some((Err(error), Follow::Done)),
+                        };
+                        let owner = observation.tool_live_owner();
+                        let feed =
+                            Box::new(session.subscribe_and_recover(observation.cursor.clone()));
+                        if let Some(owner) = owner {
+                            return Some((Ok(owner.clone()), Follow::Feed(feed, Some(owner))));
+                        }
+                        (feed, None)
+                    }
+                };
+                loop {
+                    let owner = match feed.next().await? {
+                        Err(error) => return Some((Err(error), Follow::Done)),
+                        Ok(SessionObservationStreamItem::Gap { observation, .. }) => {
+                            observation.tool_live_owner()
+                        }
+                        Ok(SessionObservationStreamItem::Event(event))
+                            if matches!(
+                                event.payload,
+                                lash_core::SessionObservationEventPayload::Committed { .. }
+                            ) =>
+                        {
+                            match session.snapshot().await {
+                                Ok(observation) => observation.tool_live_owner(),
+                                Err(error) => return Some((Err(error), Follow::Done)),
+                            }
+                        }
+                        Ok(SessionObservationStreamItem::Event(_)) => continue,
+                    };
+                    if let Some(owner) = owner
+                        && last.as_ref() != Some(&owner)
+                    {
+                        last = Some(owner.clone());
+                        return Some((Ok(owner), Follow::Feed(feed, last)));
+                    }
+                }
+            }
+        })
+        .boxed()
+    }
+
     pub fn session_id(&self) -> SessionId {
         SessionId::from(self.resident().session_id())
     }

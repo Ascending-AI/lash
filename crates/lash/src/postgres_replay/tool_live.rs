@@ -2,8 +2,8 @@
 use super::Bells;
 use futures_util::StreamExt;
 use lash_core::{
-    ExecutionOwner, ToolLiveCursor, ToolLiveEmission, ToolLiveError, ToolLiveGapReason,
-    ToolLiveItem, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
+    ExecutionOwner, ToolLiveCursor, ToolLiveError, ToolLiveGapReason, ToolLiveItem,
+    ToolLiveReadFault, ToolLiveRecord, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
 };
 use lash_sansio::sync::MutexExt;
 use sqlx::Row;
@@ -148,11 +148,15 @@ impl ToolClass {
             let at: i64 = row.get("position");
             if at > position {
                 let payload: Vec<u8> = row.get("payload");
-                let emission = serde_json::from_slice(&payload)
-                    .map_err(|error| ToolLiveError::Transport(error.to_string()))?;
-                items.push(ToolLiveItem::Emission {
-                    cursor: cursor(at),
-                    emission,
+                // One undecodable row is that item's fault; the feed goes on.
+                items.push(match serde_json::from_slice::<ToolLiveRecord>(&payload) {
+                    Ok(record) => record.into_item(cursor(at)),
+                    Err(error) => ToolLiveItem::Fault {
+                        cursor: cursor(at),
+                        fault: ToolLiveReadFault::CorruptPayload {
+                            detail: error.to_string(),
+                        },
+                    },
                 });
             }
         }
@@ -160,10 +164,10 @@ impl ToolClass {
     }
 }
 fn key(owner: &ExecutionOwner) -> Result<String, ToolLiveError> {
-    serde_json::to_string(owner).map_err(|error| ToolLiveError::Transport(error.to_string()))
+    serde_json::to_string(owner).map_err(ToolLiveError::corrupt)
 }
 fn db(error: sqlx::Error) -> ToolLiveError {
-    ToolLiveError::Transport(error.to_string())
+    ToolLiveError::store(error)
 }
 fn micros(retention: ToolLiveRetention) -> i64 {
     i64::try_from(retention.age().as_micros()).unwrap_or(i64::MAX)
@@ -174,7 +178,7 @@ impl ToolLiveReplay for ToolClass {
     async fn publish(
         &self,
         owner: &ExecutionOwner,
-        emissions: Vec<ToolLiveEmission>,
+        records: Vec<ToolLiveRecord>,
     ) -> Result<(), ToolLiveError> {
         let key = key(owner)?;
         self.ensure(&key).await?;
@@ -189,14 +193,14 @@ impl ToolLiveReplay for ToolClass {
         .await
         .map_err(db)?;
         let mut tail: i64 = row.get("tail");
-        for emission in emissions {
-            let payload = serde_json::to_vec(&emission)
-                .map_err(|error| ToolLiveError::Transport(error.to_string()))?;
+        for record in records {
+            let payload = serde_json::to_vec(&record).map_err(ToolLiveError::corrupt)?;
+            let id = record.id();
             tail = tail
                 .checked_add(1)
-                .ok_or_else(|| ToolLiveError::Transport("tool position exhausted".into()))?;
+                .ok_or_else(|| ToolLiveError::store("tool position exhausted"))?;
             sqlx::query(&format!("INSERT INTO {} (owner, position, producer_epoch, ordinal, payload, bytes, published_at) VALUES ($1,$2,$3,$4,$5,$6,clock_timestamp()) ON CONFLICT (owner,producer_epoch,ordinal) DO NOTHING", self.log))
-                .bind(&key).bind(tail).bind(&emission.id.producer_epoch).bind(i64::try_from(emission.id.ordinal).map_err(|error| ToolLiveError::Transport(error.to_string()))?)
+                .bind(&key).bind(tail).bind(&id.producer_epoch).bind(i64::try_from(id.ordinal).map_err(ToolLiveError::corrupt)?)
                 .bind(&payload).bind(i64::try_from(payload.len()).unwrap_or(i64::MAX)).execute(&mut *tx).await.map_err(db)?;
         }
         sqlx::query(&format!(
@@ -248,7 +252,7 @@ impl ToolLiveReplay for ToolClass {
                         }
                         if bell.receiver.changed().await.is_err() {
                             return Some((
-                                Err(ToolLiveError::Unavailable),
+                                Err(ToolLiveError::NotificationLost),
                                 (bell, queue, after, true),
                             ));
                         }

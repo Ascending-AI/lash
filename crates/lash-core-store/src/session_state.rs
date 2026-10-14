@@ -1076,14 +1076,8 @@ impl RuntimeSessionState {
 
     /// The session's initial frame: the one its first graph write opens, and
     /// so the frame a head no commit has given a graph stands on.
-    #[expect(
-        clippy::expect_used,
-        reason = "the initial frame material is a non-empty literal"
-    )]
     pub fn initial_frame_node_id(&self) -> crate::FrameNodeId {
-        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
-            .expect("the initial frame material is non-empty");
-        crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str())
+        crate::session_read_view::initial_frame_node_id(&self.session_id)
     }
 
     /// Re-open a still-unpersisted initial frame under the state's current

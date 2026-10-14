@@ -193,6 +193,21 @@ impl SessionReadView {
         self.0.current_frame.as_ref()
     }
 
+    /// The frame a tool admitted now executes on: the current frame, or,
+    /// before the session's first commit gives its graph a node, the initial
+    /// frame that commit opens. `None` only for a graph with nodes and no
+    /// frame.
+    pub fn execution_frame(&self) -> Option<crate::FrameNodeId> {
+        if let Some(frame) = &self.0.current_frame {
+            return Some(frame.clone());
+        }
+        let empty = match &self.0.graph {
+            SessionReadGraph::Owned(graph) => graph.leaf_node_id.is_none(),
+            SessionReadGraph::Derived { base_graph, .. } => base_graph.leaf_node_id.is_none(),
+        };
+        empty.then(|| initial_frame_node_id(self.session_id()))
+    }
+
     pub fn policy(&self) -> &SessionPolicy {
         &self.0.meta.policy
     }
@@ -387,4 +402,15 @@ pub enum SessionReadGraph {
         cache: OnceLock<crate::SessionGraph>,
         base_graph: Arc<crate::SessionGraph>,
     },
+}
+
+/// The frame a session's first graph write opens.
+#[expect(
+    clippy::expect_used,
+    reason = "the initial frame material is a non-empty literal"
+)]
+pub(crate) fn initial_frame_node_id(session_id: &crate::SessionId) -> crate::FrameNodeId {
+    let frame_key = crate::FrameKey::from_caller_material("initial-frame")
+        .expect("the initial frame material is non-empty");
+    crate::session_graph::frame_node_id(session_id, frame_key.as_str())
 }
