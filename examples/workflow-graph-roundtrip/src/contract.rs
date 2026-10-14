@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::document::{Document, Name, Site, Stmt};
 use lash::workflow::edit::{Correspondence, Edit};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,6 +47,8 @@ pub struct WorkflowView {
 #[serde(rename_all = "camelCase")]
 pub struct StatementView {
     pub site: Site,
+    /// Canonical payload for this site's inspector; clients need no AST walker.
+    pub statement: Stmt,
     /// The block the statement is in.
     pub block: Site,
     /// How many blocks enclose the statement inside the entry's body.

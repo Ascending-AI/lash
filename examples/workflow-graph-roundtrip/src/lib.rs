@@ -130,6 +130,15 @@ impl SavedWorkflow {
 /// The statements of entry `entry` in document order, nested blocks after
 /// the statement that holds them.
 fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
+    fn nested(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
+        if matches!(node, Node::Block(_)) {
+            block(node, at, depth, out);
+        } else {
+            for (index, child) in (0u32..).zip(node.children()) {
+                nested(child, &at.child(index), depth, out);
+            }
+        }
+    }
     fn block(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
         for (index, statement) in (0u32..).zip(node.children()) {
             let Node::Stmt(written) = statement else {
@@ -142,6 +151,7 @@ fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
                 .collect();
             out.push(StatementView {
                 site: site.clone(),
+                statement: written.clone(),
                 block: at.clone(),
                 depth,
                 summary: summary(written),
@@ -151,9 +161,7 @@ fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
                     .map(|(site, _)| site.clone()),
             });
             for (site, part) in parts {
-                if matches!(part, Node::Block(_)) {
-                    block(part, &site, depth + 1, out);
-                }
+                nested(part, &site, depth + 1, out);
             }
         }
     }
