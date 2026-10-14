@@ -169,24 +169,41 @@ impl Counting {
         };
     }
 
-    /// A step of `task` begins; `codes` are its frames' codes, outermost
-    /// first. Frames that ended without a return, as a task's do when it
-    /// ends, are closed here.
-    pub(crate) fn step(&mut self, task: usize, codes: impl ExactSizeIterator<Item = u32> + Clone) {
+    /// A step of `task` begins: `frames` is how many frames it has and
+    /// the codes of those the machine holds decoded, by index (`None`
+    /// when it holds none of the task). Frames that ended without a
+    /// return, as a task's do when it ends, are closed here, and a frame
+    /// whose code changed is closed and opened again. A frame below the
+    /// decoded ones keeps the code its call was counted under.
+    pub(crate) fn step(
+        &mut self,
+        task: usize,
+        frames: Option<(usize, impl Iterator<Item = (usize, u32)>)>,
+    ) {
         self.task = task;
-        if self.stack(task).entries.len() != codes.len() {
-            let keep = self
-                .stack(task)
-                .entries
-                .iter()
-                .zip(codes.clone())
-                .take_while(|(entry, code)| entry.code == *code)
-                .count();
-            while self.stack(task).entries.len() > keep {
+        if let Some((len, known)) = frames {
+            while self.stack(task).entries.len() > len {
                 self.close(task);
             }
-            for code in codes.skip(keep) {
-                self.open_frame(task, code, false);
+            for (index, code) in known.filter(|(index, _)| *index < len) {
+                if self
+                    .stack(task)
+                    .entries
+                    .get(index)
+                    .is_some_and(|entry| entry.code != code)
+                {
+                    while self.stack(task).entries.len() > index {
+                        self.close(task);
+                    }
+                }
+                // Frames entered before counting began: their codes are
+                // not known here, and they count nothing.
+                while self.stack(task).entries.len() < index {
+                    self.open_frame(task, u32::MAX, false);
+                }
+                if self.stack(task).entries.len() == index {
+                    self.open_frame(task, code, false);
+                }
             }
         }
         self.settle_owner();

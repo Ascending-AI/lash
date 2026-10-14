@@ -193,10 +193,13 @@ impl Tasks {
     }
     /// At a complete statement the canonical records are authoritative.
     /// Retire derived frames so the cache cannot grow with task history.
-    pub(super) fn cached_frames(&self, id: TaskId) -> Vec<&super::Frame> {
+    /// How many frames `id` has and those the cache holds, by index: the
+    /// top one, and those an inline call pins. `None` when the task is not
+    /// cached.
+    pub(super) fn cached_frames(&self, id: TaskId) -> Option<(usize, Vec<(usize, &super::Frame)>)> {
         self.cache
             .get(&id.0)
-            .map_or_else(Vec::new, |task| task.frames.cached())
+            .map(|task| (task.frames.len(), task.frames.cached()))
     }
     pub(super) fn evict(&mut self) -> Result<(), HeapFault> {
         self.roots()?;

@@ -7,5 +7,6 @@ mod census;
 pub(crate) mod embedder;
 mod forms;
 mod layout;
+mod observe;
 mod paged;
 mod tasks;

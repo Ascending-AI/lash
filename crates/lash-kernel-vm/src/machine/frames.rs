@@ -307,8 +307,12 @@ impl Frames {
     pub(super) fn pinned(&self) -> bool {
         self.cache.values().any(|frame| frame.inline)
     }
-    pub(super) fn cached(&self) -> Vec<&Frame> {
-        self.cache.values().collect()
+    /// The frames the cache holds, by their index in the stack.
+    pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
+        self.cache
+            .iter()
+            .map(|(index, frame)| (*index as usize, frame))
+            .collect()
     }
     pub(super) fn loop_coordinates(
         &mut self,

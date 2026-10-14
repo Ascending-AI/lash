@@ -137,12 +137,23 @@ impl KernelMachine {
         let frames = self.tasks.cached_frames(task);
         if let Some(work) = &mut observer.work {
             work.flush(self.charged, self.heap.next_ordinal());
-            work.step(task.0 as usize, frames.iter().map(|frame| frame.code.0));
+            work.step(
+                task.0 as usize,
+                frames.as_ref().map(|(len, known)| {
+                    (
+                        *len,
+                        known.iter().map(|(index, frame)| (*index, frame.code.0)),
+                    )
+                }),
+            );
         }
         if let Some(context) = &mut observer.context
             && context.task() != Some(task.0)
         {
-            context.republish(task.0, frames.iter().map(|frame| token(exe, frame)));
+            let known = frames
+                .as_ref()
+                .map_or(&[][..], |(_, known)| known.as_slice());
+            context.republish(task.0, known.iter().map(|(_, frame)| token(exe, frame)));
         }
     }
 }
