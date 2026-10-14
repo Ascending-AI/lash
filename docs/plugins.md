@@ -79,8 +79,12 @@ a recorded answer. These are reported as `NotRecordedAtCut`.
 Check replies have no retained attribution in the current baseline.
 Before-turn records name their owner without a callback key. Those branches
 report `AttributionNotRecorded`; the battery never guesses a callback from
-its installed roster. Empty state never excuses an unexecuted callback: it
-still reports `Unavailable { reason: NoScenario }`.
+its installed roster. Empty state never excuses an unexecuted callback.
+`NoScenario` means no author scenario was supplied. A scenario that reaches
+the cut without invoking its callback reports `ScenarioNotExercised`, with
+whether it was supplied and invocation counts before the cut and during reopen.
+For a deferred provider those counts are resolutions: a standard-protocol
+tool call does not exercise the resolver. Use the supporting RLM scenario below.
 MCP without a server fixture is explicit partial certification. RLM and kernel
 process factories need a backend-bound VM client and workers; their default
 scenario is `NeedsVmBackend`, outside this battery's cheap fixtures.

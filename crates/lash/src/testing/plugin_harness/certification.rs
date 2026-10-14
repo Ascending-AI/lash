@@ -23,10 +23,28 @@ impl std::fmt::Display for PluginLaw {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CertificationUnavailable {
+    /// No author scenario was supplied for a callback requiring one.
     NoScenario,
+    /// The scenario reached its cut without invoking this callback. Counts
+    /// exclude completed setup turns; `invocations_after_reopen` counts new
+    /// entries during reopen and continuation, rather than the cumulative total.
+    /// `supplied` distinguishes an author scenario from the automatic scenario.
+    /// For a deferred provider, entries count resolutions, not preparation or
+    /// execution of its selected tool. Standard protocol tool calls do not
+    /// resolve deferred paths; exercise them in an RLM cell under a supporting
+    /// protocol installed with [`PluginHarness::install_protocol`].
+    ScenarioNotExercised {
+        supplied: bool,
+        invocations_before_cut: u64,
+        invocations_after_reopen: u64,
+    },
     NeedsVmBackend,
-    MissingService { service: String },
-    MissingCredential { credential: String },
+    MissingService {
+        service: String,
+    },
+    MissingCredential {
+        credential: String,
+    },
     AttributionNotRecorded,
     NotRecordedAtCut,
     CounterUnavailable,
@@ -262,9 +280,8 @@ pub async fn certify_plugin_with(
         let attribution = attribution_law(&harness, &callback, &decisions).await?;
         harness.reopen_at_model_pause().await?;
         let restored = harness.plugin_state().await?;
-        let state_result = if invoked == 0 {
-            unavailable(CertificationUnavailable::NoScenario)
-        } else if state.plugins.get(factory.id()) != restored.plugins.get(factory.id()) {
+        let state_result = if state.plugins.get(factory.id()) != restored.plugins.get(factory.id())
+        {
             PluginLawResult::Failed {
                 message: "published namespace changed on fresh materialization".into(),
             }
@@ -287,9 +304,26 @@ pub async fn certify_plugin_with(
         )
         .await;
         let after = callback_entries(&harness, &callback);
-        let replay = if invoked == 0 {
-            unavailable(CertificationUnavailable::NoScenario)
-        } else if !recorded_at_cut(slot) {
+        if invoked == 0 {
+            let reason = CertificationUnavailable::ScenarioNotExercised {
+                supplied: scenario.is_some(),
+                invocations_before_cut: invoked,
+                invocations_after_reopen: after.0.saturating_sub(recorded.0),
+            };
+            for law in [
+                PluginLaw::ReplayInvokesNoRecordedCallback,
+                PluginLaw::StateSurvivesReopen,
+                PluginLaw::RecordedDecisionsStayAttributable,
+            ] {
+                reports.push(PluginLawReport {
+                    callback: callback.clone(),
+                    law,
+                    result: unavailable(reason.clone()),
+                });
+            }
+            continue;
+        }
+        let replay = if !recorded_at_cut(slot) {
             unavailable(CertificationUnavailable::NotRecordedAtCut)
         } else if after != recorded {
             PluginLawResult::Failed {

@@ -1166,6 +1166,74 @@ the committed-turn page, or keep each call's turn address (`TurnToolCallRef`)
 for later `read_tool_call`/`read_tool_calls` reads; a bare call id cannot be
 resolved without scanning.
 
+A host projector can consume ordinary committed pages without decoding call
+bodies. Retain each call's complete address alongside its transcript placement,
+scoped to the session. The projection rows, addresses and next cursor must commit
+in one host database transaction: a crash must not advance the cursor past an
+address that was never saved. In this example, `projection` and its transaction
+methods belong to the host; the page, transcript and address types are Lash APIs.
+
+```rust,ignore
+use lash::transcript::{TranscriptBlock, TranscriptItem};
+use lash::TurnToolCallRef;
+use std::num::NonZeroU32;
+
+let after = projection.cursor(session.session_id()).await?;
+let page = session.committed_turns(after.as_ref(), NonZeroU32::MIN).await?;
+let mut tx = projection.begin(session.session_id()).await?;
+for turn in &page.turns {
+    tx.apply_turn(turn).await?;
+    for entry in &turn.entries {
+        let call_ids: Vec<_> = match &entry.item {
+            TranscriptItem::Message(message) => message.blocks.iter().filter_map(|block| {
+                match block {
+                    TranscriptBlock::ToolCall { call_id, .. } => Some(call_id.clone()),
+                    _ => None,
+                }
+            }).collect(),
+            TranscriptItem::Cell(cell) => cell.calls.iter()
+                .filter_map(|call| call.call_id.clone()).collect(),
+            TranscriptItem::Suppressed(_) => Vec::new(),
+        };
+        for call_id in call_ids {
+            let address = TurnToolCallRef {
+                turn_id: turn.turn_id.clone(),
+                call_id,
+            };
+            tx.save_call_address(&entry.entry_id, &address).await?;
+        }
+    }
+}
+tx.save_cursor(&page.next).await?;
+tx.commit().await?;
+
+// A later reader loads the saved pairs and passes them unchanged.
+let addresses: Vec<TurnToolCallRef> = projection.call_addresses(session.session_id()).await?;
+let reads = session.read_tool_calls(&addresses).await?;
+for (address, read) in addresses.iter().zip(reads) {
+    match read {
+        lash::ToolCallRead::Settled { record } => render_tool_card(address, &record),
+        lash::ToolCallRead::NotFound { .. } => render_missing_call(address),
+        lash::ToolCallRead::NotYetSettled { .. } => render_pending_call(address),
+    }
+}
+```
+
+Here `session` is the same `DurableSession` for both reads. A saved address
+does not pin retention; handle `NotFound` when its ledger has been removed.
+For an immediate renderer that needs the bodies, opt into the enriched page
+and render each turn with its decoded calls instead:
+
+```rust,ignore
+let page = session
+    .committed_turns_with_tool_calls(after.as_ref(), NonZeroU32::MIN)
+    .await?;
+for committed in &page.turns {
+    render_turn(&committed.turn, &committed.tool_calls);
+}
+// Persist page.next with the host's consumed-page state after applying all turns.
+```
+
 [Facade history rustdoc](../../crates/lash/src/durable_session.rs),
 [typed pages and cursors](../../crates/lash-core-store/src/store/history.rs) and
 [ADR 0112 §6](../adr/0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md#6-load_ancestors)

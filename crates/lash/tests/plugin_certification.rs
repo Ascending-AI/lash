@@ -250,7 +250,11 @@ async fn unavailable_callbacks_are_partial_not_a_certification_pass() {
             == PluginLaw::ReplayInvokesNoRecordedCallback
             && report.result
                 == PluginLawResult::Unavailable {
-                    reason: CertificationUnavailable::NoScenario
+                    reason: CertificationUnavailable::ScenarioNotExercised {
+                        supplied: true,
+                        invocations_before_cut: 0,
+                        invocations_after_reopen: 0,
+                    }
                 }),
         "completed setup work must not invent replay evidence: {:?}",
         report.reports
@@ -308,6 +312,87 @@ async fn the_battery_names_the_state_law_for_an_over_limit_plugin() {
         message.contains("TooLarge") || message.contains("too_large"),
         "the typed cause stays readable: {message}"
     );
+}
+
+/// FIG-6247: an author scenario under standard cannot exercise an RLM resolver;
+/// its missing execution evidence must be distinguished from absent input.
+#[tokio::test]
+async fn supplied_but_unexercised_resolver_is_distinct_from_no_scenario() {
+    use lash::tools::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Resolver(Arc<AtomicUsize>);
+    #[lash::async_trait]
+    impl ToolProvider for Resolver {
+        fn tool_manifests(&self, _: &OwnerConfigView) -> Result<Vec<ToolManifest>, PluginError> {
+            Ok(Vec::new())
+        }
+        fn resolve_contract(&self, _: &str, _: &OwnerConfigView) -> Option<Arc<ToolContract>> {
+            None
+        }
+        async fn execute(&self, _: ToolCall<'_>) -> ToolAttemptOutcome {
+            panic!("the scenario must not execute the resolver as a tool")
+        }
+    }
+    #[lash::async_trait]
+    impl DeferredToolProvider for Resolver {
+        async fn resolve(
+            &self,
+            _: &DeferredResolveContext<'_>,
+            _: &[&str],
+        ) -> std::collections::BTreeMap<String, DeferredOutcome> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::collections::BTreeMap::new()
+        }
+    }
+    let resolutions = Arc::new(AtomicUsize::new(0));
+    let factory = Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial("unexercised-resolver"),
+        PluginSpec::new().with_deferred_provider(
+            lash::tool_provider_key!("deferred"),
+            Arc::new(Resolver(Arc::clone(&resolutions))),
+        ),
+    ));
+    let absent = certify_plugin(factory.clone()).await.unwrap();
+    assert_eq!(absent.verdict(), PluginCertificationVerdict::Partial);
+    assert_eq!(absent.reports.len(), 4);
+    for law in &absent.reports {
+        if law.law != PluginLaw::UnservedIsUnclaimable {
+            assert_eq!(
+                law.result,
+                PluginLawResult::Unavailable {
+                    reason: CertificationUnavailable::NoScenario,
+                }
+            );
+        }
+    }
+    let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
+        callback: PluginCallbackIdentity::tool_provider("unexercised-resolver", "deferred"),
+        tool: "tools.send_email",
+        args: serde_json::json!({}),
+        support: None,
+    });
+    let supplied = certify_plugin_with(factory, HostPolicy::standard(), &[scenario])
+        .await
+        .unwrap();
+    assert_eq!(resolutions.load(Ordering::SeqCst), 0);
+    assert_eq!(supplied.verdict(), PluginCertificationVerdict::Partial);
+    assert_eq!(supplied.reports.len(), 4);
+    for law in &supplied.reports {
+        if law.law != PluginLaw::UnservedIsUnclaimable {
+            assert_eq!(
+                law.result,
+                PluginLawResult::Unavailable {
+                    reason: CertificationUnavailable::ScenarioNotExercised {
+                        supplied: true,
+                        invocations_before_cut: 0,
+                        invocations_after_reopen: 0,
+                    },
+                },
+                "{law}"
+            );
+        }
+    }
 }
 
 /// DEFERRED-STATE-FREE-CERTIFICATION: the resolver selects a different,
