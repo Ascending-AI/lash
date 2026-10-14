@@ -735,6 +735,18 @@ pub enum TurnStop {
     },
 }
 
+/// The plugin boundary whose failure ended a turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginStage {
+    /// A plugin turn failure with no more specific hook boundary.
+    Turn,
+    /// The protocol's hook refused the turn before the model call.
+    BeforeLlmCall,
+    /// A plugin's assistant-stream contribution failed.
+    AssistantStream,
+}
+
 /// Lash-owned classification of an error that ended a turn. The code and
 /// safe detail are terminal evidence, independent of a follower's observations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -752,9 +764,10 @@ pub enum TurnErrorCode {
     ProviderRejected,
     ContentFiltered,
     ProviderPanicked,
-    PluginFailed,
-    /// A protocol hook refused the turn before any model request was sent.
-    ProtocolRefusedBeforeModelCall,
+    /// A plugin failure retains its boundary as part of its kind.
+    Plugin {
+        stage: PluginStage,
+    },
     /// Turn input failed normalization before provider work.
     InputRejected,
     /// The RLM protocol refused the model's cell.
@@ -786,8 +799,11 @@ impl TurnErrorCode {
             Self::ProviderRejected => "provider_rejected",
             Self::ContentFiltered => "content_filtered",
             Self::ProviderPanicked => "provider_panicked",
-            Self::PluginFailed => "plugin_failed",
-            Self::ProtocolRefusedBeforeModelCall => "protocol_refused_before_model_call",
+            Self::Plugin { stage } => match stage {
+                PluginStage::Turn => "plugin_failed",
+                PluginStage::BeforeLlmCall => "protocol_refused_before_model_call",
+                PluginStage::AssistantStream => "plugin_assistant_stream",
+            },
             Self::InputRejected => "input_rejected",
             Self::RlmProtocolRefused => "rlm_protocol_refused",
             Self::UnknownFailure => "unknown_failure",
@@ -815,10 +831,11 @@ impl TurnErrorCode {
             Self::ProviderRejected => "provider call failed",
             Self::ContentFiltered => "provider content filter refused the call",
             Self::ProviderPanicked => "provider implementation panicked",
-            Self::PluginFailed => "plugin hook failed",
-            Self::ProtocolRefusedBeforeModelCall => {
-                "protocol refused the turn before the model call"
-            }
+            Self::Plugin { stage } => match stage {
+                PluginStage::Turn => "plugin hook failed",
+                PluginStage::BeforeLlmCall => "protocol refused the turn before the model call",
+                PluginStage::AssistantStream => "plugin assistant stream hook failed",
+            },
             Self::InputRejected => "turn input normalization failed",
             Self::RlmProtocolRefused => "RLM protocol refused the model's cell",
             Self::UnknownFailure => "turn failed with an unknown origin",
@@ -865,8 +882,9 @@ impl TurnErrorCause {
     }
 
     /// Preserve the typed failure kind at the runtime stop decision. Each
-    /// kind has a distinct code; the envelope's optional code cannot replace
-    /// its origin. Unknown kinds retain no foreign spelling in the cause.
+    /// kind has a distinct code; plugin kinds retain their typed boundary.
+    /// The envelope's optional code cannot replace its origin. Unknown kinds
+    /// retain no foreign spelling in the cause.
     /// Observed messages and raw evidence never contribute to terminal detail.
     pub fn runtime(envelope: Option<&ErrorEnvelope>) -> Self {
         let code = match envelope {
@@ -874,10 +892,12 @@ impl TurnErrorCause {
                 TurnFailureKind::ExecutionEnvironment => TurnErrorCode::ExecutionEnvironment,
                 TurnFailureKind::InputValidation => TurnErrorCode::InputRejected,
                 TurnFailureKind::LlmProvider => TurnErrorCode::ProviderRejected,
-                TurnFailureKind::Plugin => TurnErrorCode::PluginFailed,
-                TurnFailureKind::ProtocolBeforeLlmCall => {
-                    TurnErrorCode::ProtocolRefusedBeforeModelCall
-                }
+                TurnFailureKind::Plugin => TurnErrorCode::Plugin {
+                    stage: PluginStage::Turn,
+                },
+                TurnFailureKind::ProtocolBeforeLlmCall => TurnErrorCode::Plugin {
+                    stage: PluginStage::BeforeLlmCall,
+                },
                 TurnFailureKind::RlmProtocol => TurnErrorCode::RlmProtocolRefused,
                 TurnFailureKind::RlmTurnOptions => TurnErrorCode::InvalidTurnOptions,
                 TurnFailureKind::Runtime => TurnErrorCode::RuntimeRefused,
@@ -900,7 +920,9 @@ impl TurnErrorCause {
         use crate::{LlmTerminalReason as Reason, ProviderFailureKind as Kind};
         let code = match code.and_then(FailureCode::turn_code) {
             Some(TurnFailureCode::ProviderPanicked) => TurnErrorCode::ProviderPanicked,
-            Some(TurnFailureCode::PluginAssistantStream) => TurnErrorCode::PluginFailed,
+            Some(TurnFailureCode::PluginAssistantStream) => TurnErrorCode::Plugin {
+                stage: PluginStage::AssistantStream,
+            },
             Some(TurnFailureCode::TaskJoinFailed) => TurnErrorCode::WorkerCrashed,
             Some(TurnFailureCode::EmptyResponse) => TurnErrorCode::InvalidResponse,
             _ if reason == Reason::ContentFilter => TurnErrorCode::ContentFiltered,
@@ -1231,6 +1253,60 @@ mod tests {
             }
         }
         assert_eq!(TurnErrorCause::runtime(None).code.code(), "runtime_refused");
+    }
+
+    /// FIG-6211: each typed plugin boundary survives terminal classification
+    /// and decoding, with only Lash-owned stage detail.
+    #[test]
+    fn plugin_terminal_kinds_keep_their_typed_stage_and_redaction() {
+        use super::{PluginStage, TurnErrorCause, TurnErrorCode, TurnFailureCode, TurnFailureKind};
+        let runtime = |kind, code| {
+            TurnErrorCause::runtime(Some(&super::make_error_envelope(
+                kind,
+                Some(code),
+                None,
+                "secret plugin message",
+                Some("secret plugin evidence".to_owned()),
+                super::RuntimeOutputCuts::standard(),
+            )))
+        };
+        let cases = [
+            (
+                runtime(
+                    TurnFailureKind::Plugin,
+                    TurnFailureCode::LifecycleHookFailed.into(),
+                ),
+                PluginStage::Turn,
+                "plugin_failed",
+            ),
+            (
+                runtime(
+                    TurnFailureKind::ProtocolBeforeLlmCall,
+                    TurnFailureCode::BeforeLlmCallFailed.into(),
+                ),
+                PluginStage::BeforeLlmCall,
+                "protocol_refused_before_model_call",
+            ),
+            (
+                TurnErrorCause::provider(
+                    ProviderFailureKind::Unknown,
+                    crate::LlmTerminalReason::ProviderError,
+                    Some(&TurnFailureCode::PluginAssistantStream.into()),
+                ),
+                PluginStage::AssistantStream,
+                "plugin_assistant_stream",
+            ),
+        ];
+        for (cause, stage, spelling) in cases {
+            assert_eq!(cause.code, TurnErrorCode::Plugin { stage });
+            assert_eq!(cause.code.code(), spelling);
+            let encoded = serde_json::to_string(&cause).unwrap();
+            assert!(!encoded.contains("secret"));
+            assert_eq!(
+                serde_json::from_str::<TurnErrorCause>(&encoded).unwrap(),
+                cause
+            );
+        }
     }
 
     #[test]

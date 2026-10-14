@@ -270,3 +270,104 @@ async fn protocol_before_model_refusal_keeps_its_specific_cause_after_crash_and_
     );
     assert!(!serde_json::to_string(cause).unwrap().contains(FOREIGN_TEXT));
 }
+
+/// FIG-6211: the terminal kind owns the failed plugin stage, independently of
+/// activity observations, and reopening the store returns the identical cause.
+#[tokio::test]
+async fn before_llm_call_plugin_failure_keeps_its_stage_after_store_reopen() {
+    let dir = tempfile::tempdir().expect("the store directory");
+    let path = dir.path().join("plugin-stage.db");
+    let clock = SimClock::new();
+    let hooks = Arc::new(AtomicUsize::new(0));
+    let session_id = lash::SessionId::from("plugin-stage");
+    let run = lash::TurnId::from("plugin-stage-run");
+    let committed = {
+        let stores = Arc::new(sim::file(&path, Arc::clone(&clock)).await);
+        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+        let backend = served::configured_backend(stores, sim::settings(), Vec::new());
+        let first = core(backend.clone(), Arc::clone(&hooks), "first");
+        let session = first
+            .session(session_id.clone())
+            .create(lash::SessionCreation::root(served::spec(1)))
+            .await
+            .expect("the session is created");
+        session
+            .send(lash::TurnInput::text("fail the before-call hook"))
+            .id(run.clone())
+            .await
+            .expect("the input is sent");
+        let owner = nodes(
+            Arc::clone(&database),
+            Arc::clone(&clock),
+            Script::new(),
+            &first,
+            &backend,
+        );
+        owner.start("a");
+        owner.quiesce().await;
+        let actor = ActorKey::session(session_id.as_str()).expect("the session actor");
+        while database
+            .actor(&actor)
+            .await
+            .expect("the actor reads")
+            .is_none_or(|snapshot| snapshot.state != ActorState::Idle)
+        {
+            assert!(
+                clock.logical_ms() < 600_000,
+                "the failed turn did not commit"
+            );
+            assert!(owner.step().await.is_some(), "the failed turn stalled");
+        }
+        let report = first
+            .session(session_id.clone())
+            .durable()
+            .await
+            .expect("the durable session opens")
+            .attach_id(run.clone())
+            .output()
+            .await
+            .expect("the committed terminal reads")
+            .result;
+        let cause = report.error_cause().expect("the terminal cause").clone();
+        owner.kill("a");
+        owner.quiesce().await;
+        cause
+    };
+    let stores = Arc::new(sim::file(&path, Arc::clone(&clock)).await);
+    let backend = served::configured_backend(stores, sim::settings(), Vec::new());
+    let cold = core(backend, Arc::clone(&hooks), "reopened");
+    let report = cold
+        .session(session_id)
+        .durable()
+        .await
+        .expect("the reopened session")
+        .attach_id(run)
+        .output()
+        .await
+        .expect("the reopened terminal reads")
+        .result;
+    assert_eq!(report.source, lash::ReportSource::Durable);
+    assert!(
+        report.errors.is_empty(),
+        "no activity contributes to the cause"
+    );
+    let reopened = report.error_cause().expect("the reopened terminal cause");
+    assert_eq!(reopened, &committed);
+    assert_eq!(hooks.load(Ordering::SeqCst), 1, "the hook never reruns");
+    assert_eq!(
+        reopened.code,
+        lash::TurnErrorCode::Plugin {
+            stage: lash::PluginStage::BeforeLlmCall
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(reopened).unwrap()["code"],
+        serde_json::json!({"plugin": {"stage": "before_llm_call"}}),
+        "the terminal kind must retain the typed plugin stage"
+    );
+    assert!(
+        !serde_json::to_string(reopened)
+            .unwrap()
+            .contains(FOREIGN_TEXT)
+    );
+}

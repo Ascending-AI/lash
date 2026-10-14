@@ -110,12 +110,12 @@ pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, CompletionCandidate, CompletionDisposition,
     ConversationRecord, DecidedCompletion, ErrorEnvelope, FailureCode, HostNamespace,
     InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole,
-    MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent,
-    RenderedPrompt, ReportedFailure, RetryProgress, SessionAppendNode, SessionHistoryRecord,
-    SessionStreamEvent, StoredDataCorruption, StreamMessageKind, TerminationMode,
-    TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnErrorCause, TurnErrorCode,
-    TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
+    MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, PluginStage,
+    ProtocolEvent, RenderedPrompt, ReportedFailure, RetryProgress, SessionAppendNode,
+    SessionHistoryRecord, SessionStreamEvent, StoredDataCorruption, StreamMessageKind,
+    TerminationMode, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnErrorCause,
+    TurnErrorCode, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
     messages_are_prompt_resume_safe, same_history_record, shared_parts,
 };
 pub use standard_batch::BatchResultRow;

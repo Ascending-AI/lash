@@ -397,7 +397,7 @@ pub mod facade_support {
     pub use lash_sansio::shared_parts;
     pub use lash_sansio::tool_result_text;
     pub use lash_sansio::visible_response_text_from_parts;
-    pub use lash_sansio::{TurnErrorCause, TurnErrorCode, TurnStop};
+    pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::JsonlTraceReadError;
     pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
