@@ -325,3 +325,50 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
         1
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn imported_parameterized_entries_can_run_with_named_inputs() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let before = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("workflow"),
+    )
+    .await;
+    let workflow = answer(
+        client
+            .post(format!("{base}/prototype/source"))
+            .json(&json!({
+                "version": before["version"], "entry": "echo",
+                "source": "export async function echo(message: string) { return message; }"
+            }))
+            .send()
+            .await
+            .expect("import parameterized source"),
+    )
+    .await;
+    let response = client
+        .post(format!("{base}/run"))
+        .json(&json!({
+            "version": workflow["version"], "inputs": {"message":"Named input from imported source"}
+        }))
+        .send()
+        .await
+        .expect("run imported entry");
+    assert!(response.status().is_success());
+    let body = response.text().await.expect("run events");
+    let terminal: RunEvent = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .last()
+        .map(|data| serde_json::from_str(data).expect("terminal event"))
+        .expect("run event");
+    assert_eq!(terminal.status, RunStatus::Succeeded);
+    assert_eq!(
+        terminal.output,
+        Some(json!("Named input from imported source"))
+    );
+}

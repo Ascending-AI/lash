@@ -107,15 +107,10 @@ pub(crate) async fn import_source(
             ));
         }
     };
-    let signature = document
-        .document()
-        .entries
-        .get(&request.entry)
-        .ok_or_else(|| ErrorResponse::invalid("entry", "Select an exported workflow function"))?;
-    if !signature.params.is_empty() {
+    if !document.document().entries.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
-            "This prototype runs entries without parameters",
+            "Select an exported workflow function",
         ));
     }
     let draft = Draft::open(document.document().clone(), Some(annotations))

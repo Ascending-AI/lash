@@ -1,7 +1,9 @@
 //! A derived, dialect-independent authoring view. IDs belong to one document
 //! identity; edits always address canonical sites, never these transient IDs.
 
-use lash::workflow::document::{Action, Atom, Document, Expr, Name, Node, Site, Type, Unit};
+use lash::workflow::document::{
+    Action, Atom, Document, Expr, Name, Node, Place, Site, Stmt, Type, Unit,
+};
 use lash::workflow::graph::{
     ActionNode, AtomNode, BindingId, BindingKind, CalleeNode, ExprNode, Graph, GraphNode,
     MemberNode, NodeId, NodeKind, Reference, ScopeId, StmtNode,
@@ -17,6 +19,7 @@ pub struct Dataflow {
     pub actions: Vec<ActionView>,
     pub parameters: Vec<usize>,
     pub returns: Vec<ReturnView>,
+    pub assignments: Vec<AssignmentView>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +51,7 @@ pub struct ExpressionView {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionView {
+    pub destination: Option<Place>,
     pub site: Site,
     pub statement: Site,
     pub block: Site,
@@ -67,10 +71,50 @@ pub struct ArgumentView {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReturnView {
+    pub callable: Site,
+    pub expected_type: Type,
     pub statement: Site,
     pub expression_site: Site,
     #[serde(rename = "type")]
     pub ty: Type,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentView {
+    pub statement: Site,
+    pub value_site: Site,
+    pub destination: Place,
+}
+
+fn return_contract(
+    document: &Document,
+    graph: &Graph,
+    node: &GraphNode,
+    entry: &Name,
+) -> (Site, Type) {
+    if !matches!(node.kind, NodeKind::Stmt(StmtNode::Finish { .. })) {
+        let mut parent = node.parent;
+        while let Some(id) = parent {
+            let ancestor = graph.node(id);
+            if matches!(ancestor.kind, NodeKind::Expr(ExprNode::Closure { .. })) {
+                let expected = match &ancestor.facet {
+                    Some(Type::Function(signature)) => signature.result.clone(),
+                    _ => Type::Any,
+                };
+                return (ancestor.site.clone(), expected);
+            }
+            parent = ancestor.parent;
+        }
+    }
+    (
+        Site::new(Unit::Function(entry.clone()), vec![]),
+        document
+            .entries
+            .get(entry)
+            .map(|signature| signature.result.clone())
+            .unwrap_or(Type::Any),
+    )
 }
 
 fn statement<'a>(graph: &'a Graph, mut node: &'a GraphNode) -> Site {
@@ -336,7 +380,12 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
                         }
                     })
                     .collect();
+                let destination = match document.node(&statement(graph, node)) {
+                    Some(Node::Stmt(Stmt::Assign { place, .. })) => Some(place.clone()),
+                    _ => None,
+                };
                 view.actions.push(ActionView {
+                    destination,
                     site: node.site.clone(),
                     statement: statement(graph, node),
                     block: block(graph, node.scope),
@@ -349,10 +398,22 @@ pub fn project(document: &Document, graph: &Graph, entry: &Name) -> Dataflow {
         }
         if let NodeKind::Stmt(StmtNode::Return { value } | StmtNode::Finish { value }) = node.kind {
             let expression = graph.node(value);
+            let (callable, expected_type) = return_contract(document, graph, node, entry);
             view.returns.push(ReturnView {
+                callable,
+                expected_type,
                 statement: node.site.clone(),
                 expression_site: expression.site.clone(),
                 ty: value_type(graph, expression, &binding_types),
+            });
+        }
+        if let NodeKind::Stmt(StmtNode::Assign { value, .. }) = node.kind
+            && let Some(Node::Stmt(Stmt::Assign { place, .. })) = document.node(&node.site)
+        {
+            view.assignments.push(AssignmentView {
+                statement: node.site.clone(),
+                value_site: graph.node(value).site.clone(),
+                destination: place.clone(),
             });
         }
     }
@@ -419,5 +480,59 @@ main { finish null }
         assert_eq!(tail.references, vec![replacement.id]);
         assert!(tail.available.contains(&replacement.id));
         assert!(!tail.available.contains(&params[0].id));
+    }
+    #[test]
+    fn returns_and_assignments_preserve_callable_and_write_identity() {
+        let document = parse_document(
+            r#"kernel 1
+numbers float
+effect demo.read() -> Text
+entry demo() -> Text
+fn demo() {
+  let state = "initial"
+  set state = perform demo.read() as Any
+  set state = "changed"
+  let record = {value: "initial"}
+  set record.value = state
+  set record["value"] = state
+  let nested = fn() { return state }
+  if true { return state }
+  return state
+}
+main { finish null }
+"#,
+        )
+        .expect("canonical state and return fixture");
+        let graph =
+            lash::workflow::graph::derive(&document, &FunctionRegistry::default()).expect("graph");
+        let view = project(&document, &graph, &Name::new("demo"));
+        assert_eq!(
+            view.assignments
+                .iter()
+                .map(|write| write.value_site.path.clone())
+                .collect::<Vec<_>>(),
+            vec![vec![1, 0], vec![2, 0], vec![4, 1], vec![5, 2]]
+        );
+        assert_eq!(
+            view.actions[0].destination,
+            Some(Place::Variable(Name::new("state")))
+        );
+        let nested = view
+            .returns
+            .iter()
+            .find(|output| output.callable.path == [6, 0])
+            .expect("closure return belongs to closure");
+        assert_eq!(nested.expected_type, Type::Any);
+        let entry_returns: Vec<_> = view
+            .returns
+            .iter()
+            .filter(|output| output.callable.path.is_empty())
+            .collect();
+        assert_eq!(entry_returns.len(), 2);
+        assert!(
+            entry_returns
+                .iter()
+                .all(|output| output.expected_type == Type::Text)
+        );
     }
 }
