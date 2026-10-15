@@ -1,5 +1,5 @@
-//! When a cell fails, its next prompt names the host calls it completed
-//! before it failed, with their durable ids and bounded results (FIG-6293).
+//! Only a failed cell's next prompt names its completed host calls with
+//! their durable ids and bounded results (FIG-6293, FIG-6338).
 //!
 //! Real RLM turns on the core's own node over a SQLite memory store set, in
 //! both dialects and on both channels. The model's next request is read as
@@ -11,6 +11,19 @@ use lash_core::llm::types::LlmResponse;
 
 type Requests = Arc<StdMutex<Vec<serde_json::Value>>>;
 type Responses = Arc<tokio::sync::Mutex<std::collections::VecDeque<LlmResponse>>>;
+
+fn message_strings<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(text) => found.push(text),
+        serde_json::Value::Array(items) => {
+            items.iter().for_each(|item| message_strings(item, found))
+        }
+        serde_json::Value::Object(map) => {
+            map.values().for_each(|item| message_strings(item, found))
+        }
+        _ => {}
+    }
+}
 
 /// A core whose sessions are created under `presentation`, answering from
 /// `responses` and recording each request's messages in `requests`.
@@ -57,22 +70,97 @@ fn core(
 /// The text in `messages` that carries a calls block, wherever the channel
 /// placed the observation.
 fn calls_observation(messages: &serde_json::Value) -> String {
-    fn strings<'a>(value: &'a serde_json::Value, found: &mut Vec<&'a str>) {
-        match value {
-            serde_json::Value::String(text) => found.push(text),
-            serde_json::Value::Array(items) => items.iter().for_each(|item| strings(item, found)),
-            serde_json::Value::Object(map) => map.values().for_each(|item| strings(item, found)),
-            _ => {}
-        }
-    }
     let mut found = Vec::new();
-    strings(messages, &mut found);
+    message_strings(messages, &mut found);
     let observations = found
         .into_iter()
         .filter(|text| text.contains("{\"completed_calls\":"))
         .collect::<Vec<_>>();
     assert_eq!(observations.len(), 1, "one cell lists its calls");
     observations[0].to_string()
+}
+
+/// FIG-6338: success keeps the concise operation/outcome feedback from
+/// before FIG-6293, without exposing durable ids or result summaries.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_cell_feedback_omits_completed_call_evidence() -> Result<()> {
+    for dialect in [
+        crate::rlm::CellDialect::typescript(),
+        crate::rlm::CellDialect::python(),
+    ] {
+        for channel in [
+            crate::rlm::RlmChannel::Cell,
+            crate::rlm::RlmChannel::NativeTool,
+        ] {
+            let case = format!("{} {channel:?}", dialect.name());
+            let code = if dialect.name() == "python" {
+                "found = await tools_app_lookup({})"
+            } else {
+                "const found = await tools.app_lookup({});"
+            };
+            let responses: Responses = Arc::new(tokio::sync::Mutex::new(
+                [
+                    control_cell_response(&dialect, channel, 0, code.to_string()),
+                    text_response("The lookup succeeded."),
+                ]
+                .into(),
+            ));
+            let requests: Requests = Arc::new(StdMutex::new(Vec::new()));
+            let running = core(
+                sqlite_memory_store_backend().await,
+                dialect.clone(),
+                channel,
+                crate::rlm::RlmPresentationConfig::standard(),
+                &responses,
+                &requests,
+            )?;
+            let session = running
+                .session(SessionId::fixture("successful-cell-call-feedback"))
+                .created()
+                .await
+                .open()
+                .await?;
+            let output = session
+                .send(TurnInput::text("look up once"))
+                .output()
+                .await?;
+            let lookup = output
+                .result
+                .tool_calls
+                .iter()
+                .find(|record| record.tool == "app_lookup")
+                .unwrap_or_else(|| panic!("{case}: the lookup completed"));
+            {
+                let requests = requests.lock_recover();
+                let mut texts = Vec::new();
+                message_strings(&requests[1], &mut texts);
+                assert!(
+                    texts.iter().all(|text| !text.contains("completed_calls")),
+                    "{case}: successful feedback has no completed_calls block: {texts:?}"
+                );
+                assert!(
+                    texts
+                        .iter()
+                        .all(|text| !text.contains(lookup.call_id.as_str())),
+                    "{case}: the durable call id stays out of successful feedback"
+                );
+                assert!(
+                    texts.iter().any(|text| {
+                        let operation = if dialect.name() == "python" {
+                            "tools_app_lookup"
+                        } else {
+                            "tools.app_lookup"
+                        };
+                        text.contains(&format!("Calls:\n- {operation} → ok"))
+                    }),
+                    "{case}: concise call feedback is preserved: {texts:?}"
+                );
+            }
+            drop(session);
+            running.shutdown().await?;
+        }
+    }
+    Ok(())
 }
 
 /// FIG-6293: a TypeScript and a Python cell each complete one host call and

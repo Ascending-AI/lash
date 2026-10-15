@@ -452,7 +452,7 @@ fn message_text(
 }
 
 /// The user observation message for a step: printed outputs (with re-fetch handles), images,
-/// executed calls with their ids and result summaries, what the cell did to the session's
+/// executed calls (with ids and result summaries after failure), what the cell did to the session's
 /// variables, error, and final value. Never empty.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
@@ -498,7 +498,7 @@ pub(crate) fn step_output_text(
             );
         }
     }
-    if !entry.calls.is_empty() {
+    if entry.result.is_failed() && !entry.calls.is_empty() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
@@ -509,6 +509,24 @@ pub(crate) fn step_output_text(
             presentation.prompt_max_tool_calls,
             presentation.call_feedback,
         );
+    } else if !entry.result.is_failed() {
+        let omitted = entry
+            .calls
+            .len()
+            .saturating_sub(presentation.prompt_max_tool_calls);
+        let calls = &entry.calls[omitted..];
+        if !calls.is_empty() {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("Calls:");
+            if omitted > 0 {
+                let _ = write!(out, "\n- … {omitted} earlier executed calls omitted");
+            }
+            for call in calls {
+                let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
+            }
+        }
     }
     if !entry.bindings.is_empty() {
         if !out.is_empty() {
