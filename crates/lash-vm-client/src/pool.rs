@@ -390,6 +390,9 @@ pub struct Checkout {
     /// The document the run executes, as the parent named it at `start`.
     document: Option<String>,
     printed: Vec<EncodedPayload>,
+    /// The document sites the run entered, as its run frames carried them,
+    /// when its start asked to observe them.
+    sites: Vec<EncodedPayload>,
     /// The run's heap bound, which also bounds what one exchange prints
     /// (FIG-4458).
     print_budget: u64,
@@ -426,6 +429,11 @@ impl Checkout {
     /// What the run printed since this was last called, in order.
     pub fn take_printed(&mut self) -> Vec<EncodedPayload> {
         std::mem::take(&mut self.printed)
+    }
+    /// The document sites the run entered since this was last called, as
+    /// the run frames carried them, in order.
+    pub fn take_sites(&mut self) -> Vec<EncodedPayload> {
+        std::mem::take(&mut self.sites)
     }
     pub fn lease(&self) -> ExecutionLease {
         self.outgoing.next_header_copy().lease
@@ -615,22 +623,28 @@ impl Checkout {
     }
 
     fn step(&mut self, message: WorkerMessage) -> Result<RunStep, PoolError> {
-        Ok(match message {
-            WorkerMessage::HostRead { id, kind, request } => {
-                RunStep::HostRead { id, kind, request }
-            }
+        let (step, sites) = match message {
+            WorkerMessage::HostRead {
+                id,
+                kind,
+                request,
+                sites,
+            } => (RunStep::HostRead { id, kind, request }, sites),
             WorkerMessage::Parked {
                 park,
                 meters,
                 state,
+                sites,
             } => {
                 self.staged = state;
-                RunStep::Parked { park, meters }
+                (RunStep::Parked { park, meters }, sites)
             }
-            WorkerMessage::Slice { meters } => RunStep::Slice { meters },
-            WorkerMessage::Ended { end, meters } => RunStep::Ended { end, meters },
+            WorkerMessage::Slice { meters, sites } => (RunStep::Slice { meters }, sites),
+            WorkerMessage::Ended { end, meters, sites } => (RunStep::Ended { end, meters }, sites),
             message => return Err(self.unexpected(Exchange::Run, &message)),
-        })
+        };
+        self.sites.extend(sites);
+        Ok(step)
     }
 
     /// Hands the machine one committed outcome, with the run's next slice:
@@ -1005,7 +1019,12 @@ impl Checkout {
                     self.printed.push(payload);
                 }
                 WorkerMessage::LimitExceeded { limit: exhausted } => return Err(limit(exhausted)),
-                WorkerMessage::HostRead { id, kind, request } => {
+                WorkerMessage::HostRead {
+                    id,
+                    kind,
+                    request,
+                    sites,
+                } => {
                     if request.0.len() as u64 > self.pool.config.protocol.max_effect_value_bytes {
                         return Err(limit(WorkerLimit::EffectValue {
                             size: request.0.len() as u64,
@@ -1013,7 +1032,12 @@ impl Checkout {
                         }));
                     }
                     self.pending = Some(id);
-                    return Ok(WorkerMessage::HostRead { id, kind, request });
+                    return Ok(WorkerMessage::HostRead {
+                        id,
+                        kind,
+                        request,
+                        sites,
+                    });
                 }
                 WorkerMessage::ExportedGraph { state } => {
                     let owner = self
@@ -1237,6 +1261,7 @@ pub mod runtime_ops {
                         owner: None,
                         document: None,
                         printed: Vec::new(),
+                        sites: Vec::new(),
                         print_budget: u64::MAX,
                         printed_bytes: 0,
                         execution_class: None,

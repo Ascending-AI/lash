@@ -44,6 +44,8 @@ struct Hosted {
     /// parent's `ExportGraph` takes it, failure included, as if the export
     /// ran then.
     staged: Option<Result<SealedGraphState, PoolError>>,
+    /// Whether the parent observes the document sites the run enters.
+    observe_sites: bool,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -570,6 +572,7 @@ impl<'embedding> Server<'embedding> {
             release,
             export: start.export,
             staged: None,
+            observe_sites: start.observe_sites,
         })
     }
     /// The content key is verified bytes rather than a claimed identity.
@@ -639,12 +642,16 @@ impl<'embedding> Server<'embedding> {
     /// Runs the machine one slice and says where the run stands. What it
     /// printed leaves first, in frames of its own.
     fn slice(&mut self, slice: u64, cancel: bool) -> Result<WorkerMessage, PoolError> {
+        let wire = self.wire()?;
+        let hosted = self.running()?;
         let mut host = WireHost {
-            wire: self.wire()?,
+            wire,
             cancel,
             printed: Vec::new(),
+            sites: hosted
+                .observe_sites
+                .then(crate::host::EnteredSites::default),
         };
-        let hosted = self.running()?;
         hosted.staged = None;
         let step = hosted
             .machine
@@ -683,18 +690,24 @@ impl<'embedding> Server<'embedding> {
         for payload in chunks {
             self.send(WorkerMessage::Printed { payload })?;
         }
+        let sites = match host.sites.as_mut() {
+            Some(sites) => sites.take()?,
+            None => None,
+        };
         let message = match step {
             Step::Parked(park) => WorkerMessage::Parked {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
                 state,
+                sites,
             },
-            Step::Slice => WorkerMessage::Slice { meters },
+            Step::Slice => WorkerMessage::Slice { meters, sites },
             Step::Ended(end) => {
                 let end: EndWire = self.end_state(&end)?;
                 WorkerMessage::Ended {
                     end: self.encode(PayloadKind::End, &end)?,
                     meters,
+                    sites,
                 }
             }
         };
@@ -816,6 +829,7 @@ impl<'embedding> Server<'embedding> {
                     park,
                     meters,
                     state: Some(state),
+                    sites,
                 },
                 bytes,
             ) if !bytes
@@ -827,6 +841,7 @@ impl<'embedding> Server<'embedding> {
                     park,
                     meters,
                     state: None,
+                    sites,
                 };
                 match encode_worker(&self.codec, header, parked) {
                     (
@@ -1017,6 +1032,7 @@ mod tests {
             ),
             bounds: config.run_bounds,
             export: None,
+            observe_sites: false,
         };
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {

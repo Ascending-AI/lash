@@ -7,7 +7,9 @@
 //! §9 rule 5): the parent drives it a slice at a time, answers its host
 //! reads, and can stop at any park and carry on in another process.
 
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::{
+    Datum, EffectIdentity, Float, Handle, Integer, Name, Timestamp, parse_document,
+};
 use lash_kernel_vm::{Bindings, Bound, End, Outcome, Request, RunError, Start as RunStart, Target};
 use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
 use lash_vm_client::*;
@@ -59,6 +61,7 @@ under_each_embedding!(
     a_typescript_cell_lowered_in_the_worker_parks_and_resumes,
     a_parked_run_is_refused_under_another_document,
     host_reads_are_answered_by_the_parent_and_prints_arrive_in_order,
+    an_observed_run_names_its_last_entered_site_on_its_next_frame,
     a_run_cancel_is_observed_where_a_slice_returns,
     a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
     worker_crash_mid_run_leaves_the_parent_running,
@@ -146,6 +149,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         ),
         bounds: bounds(),
         export: Some(binding()),
+        observe_sites: false,
     }
 }
 
@@ -260,6 +264,7 @@ fn killed_at_a_park_and_resumed(
                 }),
                 bounds: bounds(),
                 export: Some(binding()),
+                observe_sites: false,
             },
             identity,
             ExecutionClass::Cell,
@@ -343,6 +348,7 @@ main {{
                 }),
                 bounds: bounds(),
                 export: Some(binding()),
+                observe_sites: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -419,6 +425,7 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
         }),
         bounds: bounds(),
         export: Some(binding()),
+        observe_sites: false,
     };
     let mut refused = checkout(&pool);
     refused
@@ -531,6 +538,7 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
         from,
         bounds: bounds(),
         export: Some(binding()),
+        observe_sites: false,
     };
     let new_run = || python(fresh(&document, Target::Main, Vec::new()).from);
 
@@ -651,6 +659,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
                 }),
                 bounds: bounds(),
                 export: Some(binding()),
+                observe_sites: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -713,6 +722,7 @@ fn a_parked_run_is_refused_under_another_document() {
                 }),
                 bounds: bounds(),
                 export: Some(binding()),
+                observe_sites: false,
             },
             &other,
             ExecutionClass::Cell,
@@ -729,6 +739,61 @@ fn a_parked_run_is_refused_under_another_document() {
         ),
         "{refused:?}"
     );
+}
+
+/// FIG-6343: a run whose parent observes sites reports them on the run
+/// frames it already sends. Entering a site is no host read: the next frame
+/// names each task's last entered site, and a frame after no entry names
+/// none.
+fn an_observed_run_names_its_last_entered_site_on_its_next_frame() {
+    let pool = WorkerPool::new(config("")).expect("pool");
+    let (identity, document) = document(
+        r#"
+entry go(n: Any) -> Any
+fn same(value) { return value }
+fn go(n) {
+  for i in [1, 2] { let v = call same(i) }
+  let got = perform echo(n) as Any
+  return got
+}
+main { }"#,
+    );
+    let mut worker = checkout(&pool);
+    let mut start = fresh(&document, Target::Entry(Name::new("go")), vec![int(7)]);
+    start.observe_sites = true;
+    worker
+        .start(start, &identity, ExecutionClass::Process)
+        .expect("start");
+    let (wait, argument) = requested(worker.run(SLICE, false).expect("run"));
+    let entered: Vec<Vec<EffectIdentity>> = worker
+        .take_sites()
+        .iter()
+        .map(|payload| wire::decode(PayloadKind::Sites, payload).expect("sites"))
+        .collect();
+    let [entered] = &entered[..] else {
+        panic!("the park alone carries the sites: {entered:?}")
+    };
+    let [call] = &entered[..] else {
+        panic!("the task's last entry alone: {entered:?}")
+    };
+    assert_eq!(call.occurrence, 1, "the second call is the last entry");
+    assert_eq!(
+        call.loops
+            .iter()
+            .map(|iteration| iteration.iteration)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    worker.deliver(wait, completed(argument)).expect("deliver");
+    let end = ended(worker.run(SLICE, false).expect("run"));
+    assert!(
+        worker.take_sites().is_empty(),
+        "no site was entered after the park"
+    );
+    let End::Finished(finished) = end else {
+        panic!("the run finishes: {end:?}")
+    };
+    assert_eq!(finished.result, int(7));
 }
 
 /// Target 1: the machine's clock, random source and projection reads are
@@ -773,7 +838,6 @@ main { }"#,
             RunStep::HostRead { id, kind, request } => {
                 kinds.push(kind);
                 let answer = match kind {
-                    HostReadKind::EnterSite => wire::encode(PayloadKind::HostAnswer, &false),
                     HostReadKind::Projection => {
                         let read: ProjectionRead =
                             wire::decode(PayloadKind::HostRead, &request).expect("read");

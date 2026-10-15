@@ -19,6 +19,7 @@ fn request_frame() -> WorkerFrame {
             id: HostReadId(0),
             kind: HostReadKind::Projection,
             request: EncodedPayload(b"{\"op\":\"echo\"}".to_vec()),
+            sites: None,
         },
     }
 }

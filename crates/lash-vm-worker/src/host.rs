@@ -6,19 +6,21 @@
 //! the slice returns, and a run cancel is the flag the parent sent with the
 //! slice.
 use crate::worker::{Fences, cpu_nanos};
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Site, Timestamp};
+use lash_kernel_doc::{
+    Datum, EffectIdentity, EffectName, ErrorDatum, Handle, Site, TaskIdentity, Timestamp,
+};
 use lash_vm_client::wire::{self, EffectAnswer, EffectRead, ProjectionAnswer, ProjectionRead};
 use lash_vm_client::{
     PoolError,
     ipc::{FrameSource, write_frame},
 };
 use lash_vm_protocol::*;
+use std::collections::BTreeMap;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub(crate) struct Wire {
-    observe_sites: std::sync::atomic::AtomicBool,
     pipe: Mutex<UnixStream>,
     /// The worker's one inbound source: this wire and its server read the
     /// same socket.
@@ -41,7 +43,6 @@ impl Wire {
         value_bound: u64,
     ) -> Self {
         Self {
-            observe_sites: std::sync::atomic::AtomicBool::new(true),
             pipe: Mutex::new(pipe),
             inbound,
             codec,
@@ -71,11 +72,13 @@ impl Wire {
         }
         Ok(())
     }
-    /// One host read: a frame out, a frame back.
+    /// One host read: a frame out, a frame back. The read carries the
+    /// sites the run entered since its previous frame.
     pub(crate) fn read(
         &self,
         kind: HostReadKind,
         request: EncodedPayload,
+        sites: Option<EncodedPayload>,
     ) -> Result<EncodedPayload, PoolError> {
         self.bound(&request)?;
         let mut pipe = self
@@ -107,7 +110,15 @@ impl Wire {
                 work: None,
             },
         )?;
-        self.send(&mut pipe, WorkerMessage::HostRead { id, kind, request })?;
+        self.send(
+            &mut pipe,
+            WorkerMessage::HostRead {
+                id,
+                kind,
+                request,
+                sites,
+            },
+        )?;
         let bytes = self
             .inbound
             .lock()
@@ -162,6 +173,43 @@ pub(crate) struct WireHost {
     pub cancel: bool,
     /// What the slice printed, in order.
     pub printed: Vec<Datum>,
+    /// The sites entered since the run's previous frame, when the parent
+    /// observes them.
+    pub sites: Option<EnteredSites>,
+}
+
+/// Each task's last entered document site since the run's previous frame.
+/// The next run frame carries them, so observing a site costs no exchange:
+/// a stretch of pure compute names the last site each task entered.
+#[derive(Default)]
+pub(crate) struct EnteredSites {
+    last: BTreeMap<TaskIdentity, (u64, EffectIdentity)>,
+    entries: u64,
+}
+
+impl EnteredSites {
+    fn enter(&mut self, at: &EffectIdentity) {
+        self.entries += 1;
+        match self.last.get_mut(&at.task) {
+            Some(last) => *last = (self.entries, at.clone()),
+            None => {
+                self.last
+                    .insert(at.task.clone(), (self.entries, at.clone()));
+            }
+        }
+    }
+
+    /// The entries the next frame carries, in the order they were entered,
+    /// or none when no site was entered since the previous frame.
+    pub(crate) fn take(&mut self) -> Result<Option<EncodedPayload>, PoolError> {
+        if self.last.is_empty() {
+            return Ok(None);
+        }
+        let mut entered: Vec<_> = std::mem::take(&mut self.last).into_values().collect();
+        entered.sort_unstable_by_key(|(order, _)| *order);
+        let entered: Vec<EffectIdentity> = entered.into_iter().map(|(_, at)| at).collect();
+        wire::encode(PayloadKind::Sites, &entered).map(Some)
+    }
 }
 
 impl WireHost {
@@ -170,12 +218,16 @@ impl WireHost {
         reason = "broken worker IPC terminates the worker and cannot become a catchable guest error"
     )]
     fn exchange<T: serde::de::DeserializeOwned>(
-        &self,
+        &mut self,
         kind: HostReadKind,
         request: &impl serde::Serialize,
     ) -> T {
+        let sites = match self.sites.as_mut() {
+            Some(sites) => sites.take(),
+            None => Ok(None),
+        };
         wire::encode(PayloadKind::HostRead, request)
-            .and_then(|request| self.wire.read(kind, request))
+            .and_then(|request| self.wire.read(kind, request, sites?))
             .and_then(|answer| wire::decode(PayloadKind::HostAnswer, &answer))
             .unwrap_or_else(|error| {
                 self.wire.refuse(&error);
@@ -185,11 +237,13 @@ impl WireHost {
 }
 
 impl lash_kernel_vm::Host for WireHost {
-    fn enter_site(&mut self, at: &lash_kernel_doc::EffectIdentity) {
-        use std::sync::atomic::Ordering;
-        if self.wire.observe_sites.load(Ordering::Relaxed) {
-            let observing = self.exchange::<bool>(HostReadKind::EnterSite, at);
-            self.wire.observe_sites.store(observing, Ordering::Relaxed);
+    fn observes_sites(&self) -> bool {
+        self.sites.is_some()
+    }
+
+    fn enter_site(&mut self, at: &EffectIdentity) {
+        if let Some(sites) = self.sites.as_mut() {
+            sites.enter(at);
         }
     }
 

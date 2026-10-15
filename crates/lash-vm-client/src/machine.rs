@@ -43,12 +43,17 @@ pub fn kernel_reads() -> VersionRange {
 /// What a run reads from its host, answered in the parent.
 #[async_trait::async_trait]
 pub trait RunHost: Send + Sync {
-    /// A provisional site entry. It neither yields a task nor admits work.
-    /// Return true to continue receiving entries for this run, or false to
-    /// disable further site observations.
-    fn enter_site(&self, _at: &lash_kernel_doc::EffectIdentity) -> bool {
+    /// Whether the run reports the document sites it enters. The worker
+    /// carries them on the run frames it already sends, so observing them
+    /// adds no exchange.
+    fn observes_sites(&self) -> bool {
         false
     }
+
+    /// A provisional site entry: each task's last since the run's previous
+    /// frame, taken from the next one. It neither yields a task nor admits
+    /// work.
+    fn enter_site(&self, _at: &lash_kernel_doc::EffectIdentity) {}
 
     /// The time, read once for each `clock` call the run makes.
     async fn clock(&self) -> Result<Timestamp, ParentFault>;
@@ -219,6 +224,7 @@ impl RemoteMachines {
             export: Some(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
                 binding,
             ))),
+            observe_sites: self.host.observes_sites(),
         };
         let reservation = start_reservation(
             &start,
@@ -418,6 +424,20 @@ impl RemoteMachine {
         }
         Ok(())
     }
+
+    fn entered(&mut self) -> Result<(), KernelFailure> {
+        let Some(checkout) = self.checkout.as_mut() else {
+            return Ok(());
+        };
+        for payload in checkout.take_sites() {
+            let sites: Vec<lash_kernel_doc::EffectIdentity> =
+                wire::decode(PayloadKind::Sites, &payload).map_err(worker)?;
+            for at in &sites {
+                self.host.enter_site(at);
+            }
+        }
+        Ok(())
+    }
 }
 
 async fn answer(
@@ -426,10 +446,6 @@ async fn answer(
     request: &EncodedPayload,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
-        HostReadKind::EnterSite => {
-            let at = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
-            wire::encode(PayloadKind::HostAnswer, &host.enter_site(&at))
-        }
         HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &host.clock().await?),
         HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &host.random().await?),
         HostReadKind::Projection => {
@@ -459,6 +475,7 @@ impl DrivenMachine for RemoteMachine {
             .await?;
         loop {
             self.printed()?;
+            self.entered()?;
             match step {
                 RunStep::HostRead { id, kind, request } => {
                     let host = Arc::clone(&self.host);
@@ -582,6 +599,7 @@ mod reservation_tests {
                 join_members: u32::MAX,
             },
             export: Some(EncodedPayload(vec![0; 16 * 1024])),
+            observe_sites: true,
         };
         let actual = codec
             .encode_parent(&ParentFrame {

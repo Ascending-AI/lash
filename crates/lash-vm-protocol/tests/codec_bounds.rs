@@ -137,6 +137,7 @@ fn a_frame_is_encoded_into_one_allocation_of_its_size() {
             id: HostReadId(0),
             kind: HostReadKind::Projection,
             request: EncodedPayload(vec![b'x'; VALUE_BYTES]),
+            sites: None,
         },
     };
     let (bytes, allocated) = allocated_during(|| codec().encode_worker(&frame));

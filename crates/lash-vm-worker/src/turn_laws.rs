@@ -186,6 +186,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
                 cell: "cell".into(),
             },
         ))),
+        observe_sites: false,
     };
     let mut start = Some(Box::new(start));
     let mut deliveries = Vec::new();

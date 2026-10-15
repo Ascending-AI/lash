@@ -878,8 +878,9 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
     }
 }
 
-/// FIG-6323: entry into a document call is observable before its pure body
-/// runs. The process reducer keeps that last entry and counts repeated calls.
+/// FIG-6323: a stretch of pure compute names the last document call it
+/// entered, taken from the run's next frame (FIG-6343: no exchange of its
+/// own). The process reducer keeps that last entry and counts every call.
 #[tokio::test]
 async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
     use lash::process::{ProcessObservationEventPayload, ProcessObservationStreamItem};
@@ -966,12 +967,12 @@ main { finish null }
                 assert_eq!(row.occurrences, at.occurrence + 1);
                 assert_eq!(row.state, ProcessWorkflowSiteState::Running);
             }
-            if entries.len() == 2 {
+            if entries.contains(&1) {
                 break;
             }
         }
     }
-    assert_eq!(entries, [0, 1].into_iter().collect());
+    assert_eq!(entries.last(), Some(&1), "the last entry is named");
     core.shutdown().await.expect("shutdown");
 }
 

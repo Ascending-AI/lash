@@ -114,12 +114,13 @@ struct StepHost {
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
-    fn enter_site(&self, at: &lash_kernel_doc::EffectIdentity) -> bool {
+    fn observes_sites(&self) -> bool {
+        self.trace.is_some()
+    }
+
+    fn enter_site(&self, at: &lash_kernel_doc::EffectIdentity) {
         if let Some(trace) = &self.trace {
             trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
-            true
-        } else {
-            false
         }
     }
 

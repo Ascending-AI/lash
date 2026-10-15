@@ -283,6 +283,11 @@ pub struct Start {
     /// there and [`WorkerMessage::Parked`] carries it, so no separate
     /// [`ParentMessage::ExportGraph`] exchange asks for it (FIG-5921).
     pub export: Option<EncodedPayload>,
+    /// Whether the parent observes the document sites the run enters. When
+    /// it does, each run frame the worker sends ([`WorkerMessage::HostRead`],
+    /// `Parked`, `Slice` and `Ended`) carries the sites entered since the
+    /// previous one; no exchange of its own reports them.
+    pub observe_sites: bool,
 }
 
 /// One committed outcome, for the wait the machine named.
@@ -304,9 +309,6 @@ pub struct HostReadId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostReadKind {
-    /// Passive entry into a document execution site, answered with whether
-    /// the parent observes sites. A false answer disables further observations.
-    EnterSite,
     Clock,
     Random,
     /// A read through a projection handle: the payload names the handle and
@@ -411,6 +413,8 @@ pub enum WorkerMessage {
         id: HostReadId,
         kind: HostReadKind,
         request: EncodedPayload,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sites: Option<EncodedPayload>,
     },
     /// What the run printed, in order, with no authority.
     Printed {
@@ -425,16 +429,22 @@ pub enum WorkerMessage {
         park: EncodedPayload,
         meters: RunMeters,
         state: Option<SealedGraphState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sites: Option<EncodedPayload>,
     },
     /// The slice is spent and a task is still ready.
     Slice {
         meters: RunMeters,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sites: Option<EncodedPayload>,
     },
     /// The run is over. A fully received `Ended` wins over a later EOF or
     /// exit.
     Ended {
         end: EncodedPayload,
         meters: RunMeters,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sites: Option<EncodedPayload>,
     },
     /// The outcome was taken, or dropped when its wait had been
     /// withdrawn.

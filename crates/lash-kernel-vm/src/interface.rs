@@ -240,6 +240,11 @@ pub trait Host {
             "this host performs no read, and the run binds `{effect}` as one"
         )))
     }
+    /// Whether the host takes [`Host::enter_site`]. A host that does not
+    /// is never handed an entry, so the machine builds no identity for it.
+    fn observes_sites(&self) -> bool {
+        false
+    }
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
     fn enter_site(&mut self, _at: &EffectIdentity) {}

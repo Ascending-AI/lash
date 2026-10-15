@@ -55,8 +55,10 @@ impl KernelMachine {
             )
         {
             let occurrence = self.occurrence(task, stmt)?;
-            let identity = self.action_identity(task, exe, &action.site, occurrence)?;
-            host.enter_site(&identity);
+            if host.observes_sites() {
+                let identity = self.action_identity(task, exe, &action.site, occurrence)?;
+                host.enter_site(&identity);
+            }
         }
         match &action.kind {
             ActionKind::Call { callee, args } => {
@@ -449,7 +451,7 @@ impl KernelMachine {
             return Err(bound(Bound::LiveTasks, limit).into());
         }
         let occurrence = self.occurrence(task, stmt)?;
-        if !matches!(site.unit, lash_kernel_doc::Unit::Library(_)) {
+        if !matches!(site.unit, lash_kernel_doc::Unit::Library(_)) && host.observes_sites() {
             let at = self.action_identity(task, exe, site, occurrence)?;
             host.enter_site(&at);
         }
