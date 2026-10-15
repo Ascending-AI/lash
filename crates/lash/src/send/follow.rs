@@ -26,6 +26,7 @@
 
 use lash_sansio::core_support::RunIdCoreSupport;
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
@@ -105,7 +106,10 @@ impl Tap<'_> {
 struct Adoption {
     subject: Subject,
     run: Option<TurnId>,
-    buffered: VecDeque<(TurnId, TurnActivity)>,
+    // Before the durable binding is known, most replayed activities can
+    // belong to earlier runs. Share their records until adoption selects
+    // the ones to deliver, rather than copying every retained payload.
+    buffered: VecDeque<Arc<SessionObservationEvent>>,
     buffer_capacity: usize,
     collected: Vec<TurnActivity>,
     /// The turn of the last activity delivered.
@@ -151,9 +155,12 @@ impl Adoption {
         }
         self.run = Some(run);
         let buffered = std::mem::take(&mut self.buffered);
-        for (turn, activity) in buffered {
-            if self.adopts(&turn) {
-                self.deliver(turn, activity, tap).await;
+        for event in buffered {
+            if let (Some(turn), SessionObservationEventPayload::TurnActivity(activity)) =
+                (&event.turn_id, &event.payload)
+                && self.adopts(turn)
+            {
+                self.deliver(turn.clone(), activity.clone(), tap).await;
             }
         }
     }
@@ -165,7 +172,7 @@ impl Adoption {
     }
 
     /// One observation event. Answers whether it should wake a resolve.
-    async fn observe(&mut self, event: &SessionObservationEvent, tap: &mut Tap<'_>) -> bool {
+    async fn observe(&mut self, event: &Arc<SessionObservationEvent>, tap: &mut Tap<'_>) -> bool {
         match &event.payload {
             SessionObservationEventPayload::TurnActivity(activity) => {
                 let Some(turn) = event.turn_id.as_ref() else {
@@ -183,7 +190,7 @@ impl Adoption {
                     if self.buffered.len() >= self.buffer_capacity {
                         self.buffered.pop_front();
                     }
-                    self.buffered.push_back((turn.clone(), activity.clone()));
+                    self.buffered.push_back(Arc::clone(event));
                 }
                 applied
             }
@@ -884,4 +891,71 @@ pub(super) async fn durable_report(
         cancel_input_outcome,
         source: ReportSource::Durable,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-6386: an unbound follower must not copy the session's retained
+    /// activity payloads before it knows which run consumed its input.
+    #[tokio::test]
+    async fn unbound_adoption_shares_replay_payloads_until_the_run_is_known() {
+        let session = crate::SessionId::fixture("adoption-sharing");
+        let subject = Subject::Input(TurnInputAcceptanceReceipt {
+            input_id: crate::InputId::fixture("input"),
+            session_id: session.clone(),
+            source_key: None,
+            ingress: lash_core::TurnInputIngress::next_turn(),
+        });
+        let mut adoption = Adoption::new(&subject, 2);
+        let mut tap = Tap::Quiet;
+        let activity = |turn: &str, position| {
+            Arc::new(
+                SessionObservationEvent::new(
+                    Some(TurnId::fixture(turn)),
+                    SessionCursor::new(
+                        "incarnation",
+                        session.as_str(),
+                        SessionRevision::new(0),
+                        position,
+                    ),
+                    SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
+                        TurnEvent::CodeBlockCompleted {
+                            language: "typescript".to_owned(),
+                            prints: vec!["retained output".repeat(1024).into()],
+                            prints_retained: None,
+                            result: lash_core::CellOutcome::Completed,
+                            duration_ms: 1,
+                            tool_call_ids: Vec::new(),
+                            graph_key: None,
+                        },
+                    )),
+                )
+                .expect("valid replay cursor"),
+            )
+        };
+        let evicted = activity("earlier-run", 1);
+        let unrelated = activity("another-run", 2);
+        let selected = activity("consuming-run", 3);
+        for event in [&evicted, &unrelated, &selected] {
+            adoption.observe(event, &mut tap).await;
+            assert_eq!(
+                Arc::strong_count(event),
+                2,
+                "unadopted activity must share the replay record instead of copying its payload"
+            );
+        }
+        assert_eq!(Arc::strong_count(&evicted), 1, "the buffer remains bounded");
+        adoption
+            .adopt(TurnId::fixture("consuming-run"), &mut tap)
+            .await;
+        assert_eq!(Arc::strong_count(&unrelated), 1);
+        assert_eq!(Arc::strong_count(&selected), 1);
+        assert_eq!(adoption.collected.len(), 1);
+        let SessionObservationEventPayload::TurnActivity(expected) = &selected.payload else {
+            panic!("fixture is an activity")
+        };
+        assert_eq!(adoption.collected[0].id, expected.id);
+    }
 }
