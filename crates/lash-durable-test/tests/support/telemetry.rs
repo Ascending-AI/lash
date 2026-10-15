@@ -6,7 +6,8 @@
 //! owner whose acknowledged commit wrote its terminal (P1), so its closing
 //! record is published at most once across every owner, and exactly once
 //! unless that owner lost its acknowledgement or its life after the commit
-//! (D4's at-most-once window).
+//! (D4's at-most-once window). [`Telemetry::lost`] measures that window:
+//! each container no owner published, with the published spans it orphans.
 //!
 //! Each runtime installs two consumers ahead of the collector (L1(g)): a
 //! sink that panics on every third append and a flight recorder whose
@@ -17,7 +18,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -89,11 +90,12 @@ impl Telemetry {
 
     /// How publication broke across every owner (L1(c), (f), (g)): unless
     /// each failing consumer was offered every record the collector holds,
-    /// and every published parent is a span some owner published. Only
-    /// when `lossy` may a parent be missing, and only a container's whose
-    /// opening record was published: an owner lost its acknowledgement or
-    /// its life between that container's terminal commit and its close.
-    pub fn publication_violations(&self, lossy: bool) -> Vec<String> {
+    /// and every container some owner opened, and every published parent,
+    /// is a span some owner published. A container of a `losable` kind may
+    /// be [lost](Self::lost) instead, with its orphans: its owner lost its
+    /// acknowledgement or its life between the terminal commit and the
+    /// container's publication (D4).
+    pub fn publication_violations(&self, losable: &[TraceSpanKind]) -> Vec<String> {
         let published = self.published.lock_recover();
         let mut violations = Vec::new();
         for (consumer, offered) in [
@@ -107,33 +109,20 @@ impl Telemetry {
                 ));
             }
         }
-        let positions = || {
-            published
-                .iter()
-                .filter_map(|record| record.position.as_ref())
-        };
-        let closed: HashSet<_> = positions()
-            .filter(|position| position.publishes())
-            .map(|position| position.span.span_id())
-            .collect();
-        let opened: HashSet<_> = positions()
-            .filter(|position| position.role == SpanRole::Opens)
-            .map(|position| position.span.span_id())
-            .collect();
-        for position in positions() {
-            let Some(parent) = &position.parent else {
-                continue;
-            };
-            let parent = parent.span_id();
-            if closed.contains(&parent) || (lossy && opened.contains(&parent)) {
-                continue;
+        for lost in lost(&published) {
+            if !lost.kind.is_some_and(|kind| losable.contains(&kind)) {
+                violations.push(format!(
+                    "{lost}, which no owner published, and no cut lets it be lost"
+                ));
             }
-            violations.push(format!(
-                "a {:?} {:?} record names parent {parent:?}, which no owner published",
-                position.kind, position.role
-            ));
         }
         violations
+    }
+
+    /// Every container lost to D4's at-most-once window, with the published
+    /// records it orphans: what the crash matrix reports per cut.
+    pub fn lost(&self) -> Vec<Lost> {
+        lost(&self.published.lock_recover())
     }
 
     /// The collector of a process started after this one's: the same
@@ -267,6 +256,109 @@ impl Telemetry {
         }
         violations
     }
+}
+
+/// A span some owner opened as a container, or a published record names
+/// as its parent, that no owner published: the at-most-once loss of D4.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lost {
+    /// The span's kind, from its opening record; `None` when no owner
+    /// opened it.
+    pub kind: Option<TraceSpanKind>,
+    /// The kind of every published span (a closing or whole record) that
+    /// names it as its parent: the orphans, in publication order.
+    pub orphans: Vec<TraceSpanKind>,
+}
+
+impl std::fmt::Display for Lost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            Some(kind) => write!(f, "a {kind:?} container")?,
+            None => f.write_str("a span no owner opened")?,
+        }
+        let mut counts = Vec::<(TraceSpanKind, usize)>::new();
+        for kind in &self.orphans {
+            match counts.iter_mut().find(|(counted, _)| counted == kind) {
+                Some((_, count)) => *count += 1,
+                None => counts.push((*kind, 1)),
+            }
+        }
+        if counts.is_empty() {
+            return f.write_str(", orphaning no span");
+        }
+        let counts: Vec<_> = counts
+            .iter()
+            .map(|(kind, count)| format!("{count} {kind:?}"))
+            .collect();
+        write!(f, ", orphaning {} spans", counts.join(" + "))
+    }
+}
+
+/// Whether a span of `kind` is a container: closed by the owner of its
+/// terminal commit (§3.8's closer table), never by the execution that ran
+/// it.
+fn container(kind: TraceSpanKind) -> bool {
+    matches!(
+        kind,
+        TraceSpanKind::Agent
+            | TraceSpanKind::Tool
+            | TraceSpanKind::Cell
+            | TraceSpanKind::Process
+            | TraceSpanKind::ToolIntent
+    )
+}
+
+/// The spans of `published` some owner opened as a container, or a
+/// published record names as its parent, that no owner published, in the
+/// order they were first opened or named.
+fn lost(published: &[TraceRecord]) -> Vec<Lost> {
+    let positions = || {
+        published
+            .iter()
+            .filter_map(|record| record.position.as_ref())
+    };
+    let closed: HashSet<_> = positions()
+        .filter(|position| position.publishes())
+        .map(|position| position.span.span_id())
+        .collect();
+    let mut lost = HashMap::new();
+    let mut order = Vec::new();
+    for position in positions() {
+        if position.role == SpanRole::Opens
+            && container(position.kind)
+            && !closed.contains(&position.span.span_id())
+        {
+            let id = position.span.span_id();
+            let entry = lost.entry(id).or_insert_with(|| {
+                order.push(id);
+                Lost {
+                    kind: None,
+                    orphans: Vec::new(),
+                }
+            });
+            entry.kind.get_or_insert(position.kind);
+        }
+        let Some(parent) = position.parent.as_ref().map(TraceCarrier::span_id) else {
+            continue;
+        };
+        if closed.contains(&parent) {
+            continue;
+        }
+        let entry = lost.entry(parent).or_insert_with(|| {
+            order.push(parent);
+            Lost {
+                kind: None,
+                orphans: Vec::new(),
+            }
+        });
+        if position.publishes() {
+            entry.orphans.push(position.kind);
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|id| lost.remove(&id))
+        .collect()
 }
 
 /// The scope and span of `session`'s first turn, from its first published

@@ -205,12 +205,71 @@ its settlement. A successor that folds a committed terminal, a resend, a
 redrive and a reader of a retained terminal close nothing. Tracing adds no
 commit: there is no admission export to record.
 
-Publication is at most once. An owner that loses the acknowledgement, or
-its life, between a terminal commit and the container's publication loses
-that container, and its published children keep a parent id with no span.
-A crash after commit and before emission can lose an observation. A body that exports before its result commits can
-execute again and export a distinct attempt. There is no telemetry outbox.
-Trace delivery does not decide control flow or billing.
+### Publication, acceptance and delivery
+
+Container publication is at most once, and the owner whose acknowledged
+commit wrote the container's terminal owns it (P1). It is never repeated
+and never deduplicated: an at-least-once export would retain an obligation
+in the terminal commit and discharge it with one more commit per
+container, and an owner that died between publishing and discharging would
+export a second span with the same id, a second duration and a second
+metric sample. Lash keeps loss rather than duplication, and tracing adds no
+commit.
+
+- **Publication** is the owner's one call into the emitter for the closing
+  record. The engine's close path has no `.await` between the commit's
+  acknowledgement and that call. Publication still runs host code
+  synchronously: every sink's `append`, the flight recorder's snapshot
+  callback, and under `OtelTelemetry` the host's `OtelSpanEnricher` and
+  the SDK's span processors. Host code has no wall-clock bound, so
+  publication has none either.
+- **Sink acceptance** is per sink. Each `append` runs under its own panic
+  containment and counts its own failures, so a record one sink accepted
+  may be missing from another.
+- **Delivery** past a sink (an SDK batch processor, an exporter, a
+  backend) is the host's pipeline. Lash observes none of it.
+
+A container is lost in three cases:
+- its owner loses the terminal commit's acknowledgement;
+- its owner dies after the commit and before or during publication,
+  including while a host callback runs;
+- one consumer fails after publication: its own `append` fails or panics,
+  or the host pipeline drops the span. Each consumer fails independently.
+
+In the first two cases the next owner finds the terminal written and
+closes nothing. The container's published children keep a parent id that no span carries, and
+show as an orphan subtree. A crash after a commit and before an emission
+can lose an observation in the same way. There is no telemetry outbox, and
+trace delivery does not decide control flow or billing. A body that exports
+before its result commits can execute again, and then exports a distinct
+attempt.
+
+Host callbacks (sinks, the flight recorder's callback and the enricher)
+run with no engine lock held. They must not block on the engine or call
+back into the session or core that called them: no `send`, no admin call
+and no store read. A host that needs I/O hands the record to
+its own bounded queue.
+
+The tool crash laws (`crates/lash-durable-test/tests/tool_crash_laws.rs`,
+`publication_loss.rs`) measure the window. They cut a traced turn at its
+commits under every fault, resume it on the other node, and report per
+terminal label what each cut lost (L1(f)). Only a cut that lands a terminal
+commit and then loses its owner's acknowledgement (`ack-hidden`) or its
+life (`commit-then-abort`) loses anything, and it loses only the container
+that commit closes. A cut that fails before the commit, aborts before it,
+or pauses the owner as a zombie loses nothing: the successor writes the
+terminal and publishes. Measured on SQLite:
+
+| Terminal label | Lossy cut | Lost | Orphaned published spans |
+| --- | --- | --- | --- |
+| `turn.commit` | `ack-hidden`, `commit-then-abort` | `invoke_agent` | the turn's two model calls and its tool call, and in the cell turn its cell too |
+| `round.outcome+present+model.start` (a native call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
+| `round.outcome` (a cell's call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
+
+A cell span still publishes from the execution that ran it, so no cut loses
+it. Once a cell closes on the commit that consumes its answer, that commit
+joins the table. `process.terminal` (a process) and a tool intent's
+settlement follow the same rule, but this matrix does not cut them.
 
 ## Integration status
 

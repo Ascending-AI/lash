@@ -62,8 +62,9 @@
 //!   exactly once, and every record of the turn carries that admission's
 //!   trace. Its call's scope is admitted exactly once too, on that trace,
 //!   by its round's admission (FIG-5382), also when the owner was killed
-//!   after that admission committed, before it learned so. A code cell's
-//!   call is admitted exactly once in the same way, by its cell's admission.
+//!   after that admission committed, before it learned so; a cell's call
+//!   likewise, by its cell's. A container is lost only to a cut landing its
+//!   terminal commit and losing its owner (D4, L1(f), reported per label).
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -895,6 +896,8 @@ struct Crash {
     /// with.
     telemetry: telemetry::Telemetry,
     trace_adapter: bool,
+    /// What each cut of the matrix lost (D4), shared by every cell.
+    losses: publication_loss::Losses,
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
     /// The session opened for observation, and the updates of its
@@ -930,6 +933,7 @@ impl Crash {
             )),
             telemetry: telemetry::Telemetry::default(),
             trace_adapter: turn.traced(),
+            losses: publication_loss::Losses::default(),
             host: Mutex::default(),
             chat: Mutex::default(),
             keep: Mutex::default(),
@@ -1098,15 +1102,8 @@ impl Crash {
             violations.extend(self.finish_laws(nodes).await);
         }
         if self.trace_adapter {
-            // An owner that lost its acknowledgement or its life after a
-            // terminal commit loses that container's close (D4).
-            let lossy = cut
-                .is_some_and(|cut| matches!(cut.fault, Fault::CommitThenAbort | Fault::AckHidden));
-            violations.extend(self.telemetry.first_turn_violations(SESSION, lossy));
-            violations.extend(self.telemetry.publication_violations(lossy));
-            if self.turn != Turn::Plain {
-                violations.extend(self.telemetry.first_turn_tool_violations(SESSION, lossy));
-            }
+            let tools = self.turn != Turn::Plain;
+            violations.extend(self.losses.laws(&self.telemetry, cut, tools));
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -2172,12 +2169,14 @@ async fn prove_installed(
     } else {
         Matrix::new().labels(cut_labels)
     };
+    let losses = publication_loss::Losses::default();
     let report = matrix
         .faults(faults)
         .horizon(Duration::from_secs(600))
         .run_test(|| {
             let mut crash = Crash::new(turn, dialect, postgres_url.clone());
             crash.installed = installed;
+            crash.losses = losses.clone();
             crash
         })
         .await;
@@ -2189,6 +2188,9 @@ async fn prove_installed(
         labels.join(", ")
     );
     report.assert_held();
+    if turn.traced() {
+        losses.report(&format!("{turn:?}"), &report.labels(), faults);
+    }
     let expected = if cut_labels.is_empty() {
         // A cell's first save commits the model response that asked for it
         // (FIG-6000).
@@ -2297,7 +2299,7 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 /// span, admitted with its round, closes once on that trace, also when its
 /// owner was killed after the round's admission committed, before it
 /// learned so (FIG-5382). Span ids are unique across every owner's
-/// publications (L1(b)).
+/// publications (L1(b)); `turn.commit` measures D4's turn loss (L1(f)).
 async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
@@ -2307,6 +2309,7 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
         ],
     )
     .await;
@@ -2473,6 +2476,9 @@ mod turn_commit_bound;
 #[path = "tool_crash_laws/plugin_sections.rs"]
 mod plugin_sections;
 use plugin_sections::a_sectioned_round_cut_at_its_fused_commit_keeps_one_outcome_and_its_section;
+
+#[path = "tool_crash_laws/publication_loss.rs"]
+mod publication_loss;
 
 #[path = "tool_crash_laws/presentation_obligations.rs"]
 mod presentation_obligations;

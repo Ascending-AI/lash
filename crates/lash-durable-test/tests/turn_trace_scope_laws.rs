@@ -229,7 +229,7 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
         }
     }
     let mut violations = telemetry.first_turn_violations(&name, false);
-    violations.extend(telemetry.publication_violations(false));
+    violations.extend(telemetry.publication_violations(&[]));
     violations.extend(telemetry.first_turn_tool_violations(&name, false));
     world.shutdown().await;
     assert!(
@@ -445,7 +445,7 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     let output = world.send(&session, "after the takeover").await;
     served::assert_answered("the follow-up turn", &output);
     let mut violations = telemetry.first_turn_violations(&name, false);
-    violations.extend(telemetry.publication_violations(false));
+    violations.extend(telemetry.publication_violations(&[]));
     if let Lost::InCellCall = lost {
         violations.extend(telemetry.first_turn_tool_violations(&name, false));
     }
