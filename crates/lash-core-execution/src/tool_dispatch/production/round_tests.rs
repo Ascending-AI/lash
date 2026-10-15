@@ -24,6 +24,7 @@ fn resolved_finish(
         },
         launch: None,
         declaration,
+        output_schema: crate::JsonSchema::any(),
     };
     let parked = Material::journal_local(
         MaterialOwner::Run {

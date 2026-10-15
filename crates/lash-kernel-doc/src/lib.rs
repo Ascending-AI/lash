@@ -5,8 +5,9 @@
 //! that runs: the values, the type grammar, the forms, the document with its
 //! manifest and annotation layer, library-function definitions with the
 //! interface a native implementation satisfies, content-addressed
-//! identities, the JSON encoding, structural validation, and the kernel text
-//! notation. A host that only reads documents needs no other crate.
+//! identities, the JSON encoding, structural validation, the decoding of an
+//! inbound datum by a type, and the kernel text notation. A host that only
+//! reads documents needs no other crate.
 //!
 //! It depends on no other lash crate.
 
@@ -14,6 +15,8 @@ mod ast;
 mod canonical;
 mod codec_variants;
 mod data_limits;
+mod decode;
+pub use decode::{DecodeMismatch, Decoder};
 mod document;
 pub use data_limits::KernelDataLimits;
 mod function;

@@ -94,36 +94,55 @@ impl<'run> AtomicToolAttempt<'run> {
 /// every downstream difference between the two routes — the identifier guard,
 /// the execution binding, the source route, the attachment producer name — is
 /// a method on this value rather than a forked dispatch body.
-pub(super) enum AttemptAuthority<'grant> {
-    /// Tool Catalog membership admitted the call; the manifest was resolved by
-    /// the prepared tool id.
-    Catalog(Box<ToolManifest>),
+pub(super) enum AttemptAuthority<'a> {
+    /// Tool Catalog membership admitted the call; the definition was
+    /// resolved by the prepared tool id.
+    Catalog {
+        manifest: &'a ToolManifest,
+        contract: &'a crate::ToolContract,
+    },
     /// An execution grant admitted the call. The grant *is* the authority, so
     /// the catalog lookup is skipped entirely.
-    Granted(&'grant crate::ToolExecutionGrant),
+    Granted(&'a crate::ToolExecutionGrant),
 }
 
-impl<'grant> AttemptAuthority<'grant> {
+impl<'a> AttemptAuthority<'a> {
     /// A grant short-circuits the catalog lookup: out-of-catalog execution is
     /// the whole point of a grant, so a grant never has to be a catalog member.
     /// Without a grant, catalog membership is the only admission route, and a
     /// non-member resolves to `None`.
     pub(super) fn resolve(
-        context: &ToolDispatchContext<'_>,
+        context: &'a ToolDispatchContext<'_>,
         tool_id: &crate::ToolId,
-        grant: Option<&'grant crate::ToolExecutionGrant>,
+        grant: Option<&'a crate::ToolExecutionGrant>,
     ) -> Option<Self> {
         match grant {
             Some(grant) => Some(Self::Granted(grant)),
-            None => super::preparation::resolve_callable_manifest_by_id(context, tool_id)
-                .map(|manifest| Self::Catalog(Box::new(manifest))),
+            None => context
+                .tool_catalog
+                .tools
+                .iter()
+                .find(|tool| tool.manifest.id == *tool_id)
+                .map(|entry| Self::Catalog {
+                    manifest: &entry.manifest,
+                    contract: &entry.contract,
+                }),
         }
     }
 
-    pub(super) fn manifest(&self) -> &ToolManifest {
+    pub(super) fn manifest(&self) -> &'a ToolManifest {
         match self {
-            Self::Catalog(manifest) => manifest,
+            Self::Catalog { manifest, .. } => manifest,
             Self::Granted(grant) => grant.manifest(),
+        }
+    }
+
+    /// The contract the call was prepared under, which its success settles
+    /// against.
+    pub(super) fn contract(&self) -> &'a crate::ToolContract {
+        match self {
+            Self::Catalog { contract, .. } => contract,
+            Self::Granted(grant) => grant.contract(),
         }
     }
 
@@ -157,7 +176,7 @@ impl<'grant> AttemptAuthority<'grant> {
     /// completion context is cloned so a parking attempt keeps it.
     fn apply_execution_binding<'run>(&self, tool_context: ToolContext<'run>) -> ToolContext<'run> {
         match self {
-            Self::Catalog(_) => tool_context,
+            Self::Catalog { .. } => tool_context,
             Self::Granted(grant) => tool_context
                 .with_tool_execution_binding(grant.binding.clone())
                 .with_granted_provider(grant.provider.clone()),
@@ -168,15 +187,17 @@ impl<'grant> AttemptAuthority<'grant> {
 /// The failure an outcome its admitted declaration does not admit answers
 /// with. Typed by its [`crate::DeclarationRefusal`], so a host can tell an
 /// authoring defect from a tool's own failure.
-/// `result` settled as a call under `declaration`, after every result
-/// transform: a control call's result stays its control alone.
+/// `result` settled as a call under `declaration` and `contract`, after
+/// every result transform: a control call's result stays its control alone,
+/// and a success's value fits the contract's output schema.
 pub(super) fn settled_outcome(
     result: ToolOutcome,
     declaration: &crate::ToolDeclaration,
+    contract: &crate::ToolContract,
     tool_name: &str,
 ) -> ToolOutcome {
     match result.into_done_output() {
-        Ok(output) => match output.settled(declaration) {
+        Ok(output) => match output.settled(declaration, &contract.output_schema.canonical) {
             Ok(output) => ToolOutcome::from_output(output),
             Err(refusal) => declaration_refused(tool_name, refusal),
         },
@@ -214,7 +235,7 @@ fn body_state(
         return None;
     }
     let granted = match authority {
-        AttemptAuthority::Catalog(_) => None,
+        AttemptAuthority::Catalog { .. } => None,
         AttemptAuthority::Granted(grant) => Some(&grant.provider),
     };
     let proposal = context
@@ -298,6 +319,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
     };
     let tool_name = authority.manifest().name.clone();
     let declaration = authority.manifest().declaration().clone();
+    let contract = authority.contract();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
         return Ok(attempt_done(
             normalized_outcome(context, &ids, tool_name, args, failure).await,
@@ -324,14 +346,16 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .map(crate::ToolIntent::kind)
                 .collect();
             let (output, state) = result.into_parts();
-            let admitted = output.settled(&declaration).and_then(|output| {
-                declaration
-                    .admits(crate::OutcomeShape::Done {
-                        intents: &kinds,
-                        control: output.turn_control_kind(),
-                    })
-                    .map(|()| output)
-            });
+            let admitted = output
+                .settled(&declaration, &contract.output_schema.canonical)
+                .and_then(|output| {
+                    declaration
+                        .admits(crate::OutcomeShape::Done {
+                            intents: &kinds,
+                            control: output.turn_control_kind(),
+                        })
+                        .map(|()| output)
+                });
             match admitted {
                 Ok(output) => (ToolOutcome::from_output(output), intents, state),
                 // An undeclared intent is refused with the whole outcome, before
@@ -381,7 +405,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         result,
     ))
     .await;
-    let result = settled_outcome(result, &declaration, &tool_name);
+    let result = settled_outcome(result, &declaration, contract, &tool_name);
     let result = carry_body_state(context, state, result);
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;

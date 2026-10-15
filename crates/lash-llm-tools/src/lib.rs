@@ -500,8 +500,11 @@ mod tests {
         let manifest = provider
             .resolve_manifest("llm_query", &lash_core::OwnerConfigView::default())
             .expect("llm_query manifest resolves");
+        let contract = provider
+            .resolve_contract("llm_query", &lash_core::OwnerConfigView::default())
+            .expect("llm_query contract resolves");
         match provider
-            .execute(ToolCall::new(&manifest, args, context))
+            .execute(ToolCall::new(&manifest, &contract, args, context))
             .await
         {
             lash_core::ToolAttemptOutcome::Done { result, intents } => {

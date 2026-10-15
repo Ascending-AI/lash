@@ -49,9 +49,9 @@ struct ExactDispatchTools {
     executed: Arc<AtomicUsize>,
     /// Whether the provider resolves the tool's contract by name.
     contract_available: bool,
-    /// The execution bindings the body saw, when the law watches them.
-    observed_execution_bindings:
-        Option<Arc<std::sync::Mutex<Vec<Option<crate::ExecutionBinding>>>>>,
+    /// The execution binding and contract each call the body ran saw, when
+    /// the law watches them.
+    observed_calls: Option<ObservedCalls>,
 }
 
 #[async_trait::async_trait]
@@ -92,11 +92,11 @@ impl ToolProvider for ExactDispatchTools {
 
     async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
         self.executed.fetch_add(1, Ordering::SeqCst);
-        if let Some(bindings) = &self.observed_execution_bindings {
-            bindings
-                .lock()
-                .expect("the binding witness")
-                .push(call.context.tool_execution_binding().cloned());
+        if let Some(calls) = &self.observed_calls {
+            calls.lock().expect("the call witness").push((
+                call.context.tool_execution_binding().cloned(),
+                call.contract().clone(),
+            ));
         }
         ToolOutcome::ok(json!("host")).into()
     }
@@ -173,7 +173,7 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         contracts_resolved: Arc::clone(&contracts_resolved),
         executed: Arc::clone(&executed),
         contract_available: true,
-        observed_execution_bindings: None,
+        observed_calls: None,
     });
     let context = refusing_dispatch_context(provider_plugins(
         provider,
@@ -194,17 +194,18 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
 
 /// A grant the caller holds runs a tool the session's catalog does not list:
 /// the call prepares from the grant without resolving the provider's
-/// contract, runs once, and its body sees the grant's execution binding.
+/// contract, runs once, and its body sees the grant's execution binding and,
+/// as [`ToolCall::contract`], the grant's contract (FIG-6295 law 2).
 #[tokio::test]
 async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
-    let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_calls = ObservedCalls::default();
     let provider: Arc<dyn ToolProvider> = Arc::new(ExactDispatchTools {
         contracts_resolved: Arc::clone(&contracts_resolved),
         executed: Arc::clone(&executed),
         contract_available: false,
-        observed_execution_bindings: Some(Arc::clone(&observed_execution_bindings)),
+        observed_calls: Some(Arc::clone(&observed_calls)),
     });
     let context = refusing_dispatch_context(provider_plugins(
         provider,
@@ -220,6 +221,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         named_beta_tool("host_only"),
     )
     .with_execution_binding(Some(granted_binding()));
+    let grant_contract = grant.contract().clone();
     let pending = crate::sansio::PendingToolCall {
         call_id: lash_core_execution::ToolCallId::fixture("grant-call"),
         provider_call_id: None,
@@ -256,12 +258,14 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 1);
     assert_eq!(
-        *observed_execution_bindings
-            .lock()
-            .expect("the binding witness"),
-        vec![Some(granted_binding())]
+        *observed_calls.lock().expect("the call witness"),
+        vec![(Some(granted_binding()), grant_contract)]
     );
 }
+
+/// What each call a provider ran saw: its execution binding and contract.
+type ObservedCalls =
+    Arc<std::sync::Mutex<Vec<(Option<crate::ExecutionBinding>, crate::ToolContract)>>>;
 
 /// The binding the grant in these tests carries, in its provider's format.
 fn granted_binding() -> crate::ExecutionBinding {

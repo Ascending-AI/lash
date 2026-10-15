@@ -54,6 +54,7 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
     let lash_core::ToolAttemptOutcome::Done { result, .. } = grant
         .execute(lash_core::ToolCall::new(
             &original,
+            &lash_core::ToolContract::default(),
             &json!({}),
             &grant_context,
         ))
@@ -84,7 +85,12 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&restored);
     let context = fixture.attempt("mcp-cold-binding-law");
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
-        .execute(lash_core::ToolCall::new(&rebuilt, &json!({}), &context))
+        .execute(lash_core::ToolCall::new(
+            &rebuilt,
+            &lash_core::ToolContract::default(),
+            &json!({}),
+            &context,
+        ))
         .await
     else {
         panic!("binding refusal finishes inline")
@@ -169,7 +175,12 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
         let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&missing);
         let context = fixture.attempt("mcp-canonical-refusal-law");
         let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
-            .execute(lash_core::ToolCall::new(&original, &json!({}), &context))
+            .execute(lash_core::ToolCall::new(
+                &original,
+                &lash_core::ToolContract::default(),
+                &json!({}),
+                &context,
+            ))
             .await
         else {
             panic!("a missing canonical binding refuses inline")
@@ -196,7 +207,12 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
         }
         admitted.bindings.insert(key.into(), binding);
         let attempt = provider
-            .execute(lash_core::ToolCall::new(&admitted, &json!({}), &context))
+            .execute(lash_core::ToolCall::new(
+                &admitted,
+                &lash_core::ToolContract::default(),
+                &json!({}),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
             panic!("binding refusal must finish inline")
@@ -216,7 +232,12 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
         let mut admitted = original.clone();
         admitted.bindings.insert(key.into(), binding);
         let attempt = provider
-            .execute(lash_core::ToolCall::new(&admitted, &json!({}), &context))
+            .execute(lash_core::ToolCall::new(
+                &admitted,
+                &lash_core::ToolContract::default(),
+                &json!({}),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
             panic!("corrupt binding must finish inline")
@@ -235,7 +256,12 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
         .definition
         .manifest = replacement;
     let attempt = provider
-        .execute(lash_core::ToolCall::new(&original, &json!({}), &context))
+        .execute(lash_core::ToolCall::new(
+            &original,
+            &lash_core::ToolContract::default(),
+            &json!({}),
+            &context,
+        ))
         .await;
     let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
         panic!("a refreshed tool cannot replace an admitted binding")
@@ -300,7 +326,12 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
             _ => unreachable!("only the two declared unsupported modes"),
         }
         let attempt = provider
-            .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
+            .execute(lash_core::ToolCall::new(
+                &manifest,
+                &lash_core::ToolContract::default(),
+                &json!({}),
+                &context,
+            ))
             .await;
         let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
             panic!("unsupported work never becomes Deferred")
@@ -317,6 +348,7 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
     let attempt = grant
         .execute(lash_core::ToolCall::new(
             &original,
+            &lash_core::ToolContract::default(),
             &json!({}),
             &wrong_server,
         ))
@@ -388,7 +420,10 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
     let context = fixture.attempt("mcp-body-timeout-law");
     let args = json!({});
-    let request = provider.execute(lash_core::ToolCall::new(&manifest, &args, &context));
+    let contract = lash_core::ToolContract::default();
+    let request = provider.execute(lash_core::ToolCall::new(
+        &manifest, &contract, &args, &context,
+    ));
     tokio::pin!(request);
     assert!(futures_util::poll!(request.as_mut()).is_pending());
     mock.started(&pool).await;

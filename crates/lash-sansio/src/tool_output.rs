@@ -201,19 +201,24 @@ impl ToolCallOutput {
         self.as_turn_control().map(TurnControl::kind)
     }
 
-    /// This result as a call under `declaration` settles: the one check
-    /// every route a call's answer takes passes through, inline, cached,
-    /// deferred and after every result transform. A call that did not
-    /// succeed stays the failure it is and carries no turn control. A tool
-    /// that declares a turn control has no output: its success is null,
-    /// whatever its body or a result transform put beside the control. A
-    /// Finish's value is checked against the schema the declaration states,
-    /// and the settled Finish keeps that schema as the witness of the check.
+    /// This result as a call under `declaration` and `output_schema`
+    /// settles: the one check every route a call's answer takes passes
+    /// through, inline, cached, deferred and after every result transform.
+    /// A call that did not succeed stays the failure it is and carries no
+    /// turn control. A success's value is checked against the output schema
+    /// of the contract the call was admitted under, by the rule a code cell
+    /// decodes it by (`K-EFF-007`). A tool that declares a turn control has
+    /// no output: its success is null, whatever its body or a result
+    /// transform put beside the control. A Finish's value is checked against
+    /// the schema the declaration states, and the settled Finish keeps that
+    /// schema as the witness of the check.
     ///
     /// # Errors
     ///
     /// [`DeclarationRefusal::UndeclaredControl`](crate::DeclarationRefusal::UndeclaredControl):
     /// a control the declaration does not name.
+    /// [`DeclarationRefusal::OutputValueMismatch`](crate::DeclarationRefusal::OutputValueMismatch):
+    /// a success whose value `output_schema` does not admit.
     /// [`DeclarationRefusal::UndeclaredOutput`](crate::DeclarationRefusal::UndeclaredOutput):
     /// a tool that declares a turn control succeeded with a value and no
     /// control.
@@ -222,6 +227,7 @@ impl ToolCallOutput {
     pub fn settled(
         mut self,
         declaration: &crate::ToolDeclaration,
+        output_schema: &crate::JsonSchema,
     ) -> Result<Self, crate::DeclarationRefusal> {
         let ToolCallOutcome::Success(value) = &self.outcome else {
             if self.as_turn_control().is_some() {
@@ -235,6 +241,12 @@ impl ToolCallOutput {
             return Err(crate::DeclarationRefusal::UndeclaredControl { control });
         }
         if declaration.controls.is_empty() {
+            crate::result_fit::fit_result(output_schema, || self.value_for_projection()).map_err(
+                |mismatch| crate::DeclarationRefusal::OutputValueMismatch {
+                    output_schema: Box::new(output_schema.clone()),
+                    mismatch: Box::new(mismatch),
+                },
+            )?;
             return Ok(self);
         }
         if self.as_turn_control().is_none() && !value.to_json_value().is_null() {

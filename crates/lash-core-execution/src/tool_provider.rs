@@ -1349,23 +1349,34 @@ pub struct ToolPrepareCall<'a> {
 /// authorization token.
 pub struct ToolCall<'a> {
     manifest: &'a ToolManifest,
+    contract: &'a ToolContract,
     pub args: &'a serde_json::Value,
     pub context: &'a AttemptContext<'a>,
 }
 
 impl<'a> ToolCall<'a> {
     /// Only the runtime dispatcher builds these; the manifest is the coupling between stable
-    /// ID and provider-facing name.
+    /// ID and provider-facing name, and the contract is the one the call was prepared under.
     pub fn new(
         manifest: &'a ToolManifest,
+        contract: &'a ToolContract,
         args: &'a serde_json::Value,
         context: &'a AttemptContext<'a>,
     ) -> Self {
         Self {
             manifest,
+            contract,
             args,
             context,
         }
+    }
+
+    /// The contract the call was prepared under: its catalog entry's, or
+    /// for a deferred-resolution call its grant's, never re-resolved from
+    /// the current catalog. Its output schema is what the call's success
+    /// value is admitted against when it settles.
+    pub fn contract(&self) -> &'a ToolContract {
+        self.contract
     }
 
     /// The stable tool ID carried by the pinned manifest.

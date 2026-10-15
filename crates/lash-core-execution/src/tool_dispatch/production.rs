@@ -160,12 +160,16 @@ fn cause<T: Serialize>(kind: &str, value: &T) -> HookCause {
     }
 }
 /// The failure of a call whose outcome its tool's declaration refuses.
-fn declaration_refused(refusal: crate::DeclarationRefusal) -> ToolCallOutput {
+/// The failure an outcome of tool `tool_name` that its admitted
+/// declaration or contract does not admit answers with, naming the tool.
+fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolCallOutput {
     ToolCallOutput::failure(
         crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
             "tool_outcome_not_declared",
-            refusal.to_string(),
+            format!(
+                "tool `{tool_name}` returned an outcome its declaration does not admit: {refusal}"
+            ),
         )
         .with_cause(crate::ToolFailureCause::Declaration { refusal }),
     )
@@ -371,8 +375,11 @@ impl<'run> ProductionToolHandlers<'run> {
         let final_output = match transformed {
             Ok(candidate) => candidate
                 .into_output(control)
-                .settled(prepared.input.definition.manifest.declaration())
-                .unwrap_or_else(declaration_refused),
+                .settled(
+                    prepared.input.definition.manifest.declaration(),
+                    &prepared.input.definition.contract.output_schema.canonical,
+                )
+                .unwrap_or_else(|refusal| declaration_refused(&prepared.call.tool_name, refusal)),
             Err(failure) => ToolCallOutput::failure(*failure),
         };
         let outcome = retry::normalized_outcome(
@@ -684,9 +691,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
         let authority = match &prepared.input.grant {
             Some(grant) => atomic_attempt::AttemptAuthority::Granted(grant),
-            None => atomic_attempt::AttemptAuthority::Catalog(Box::new(
-                prepared.input.definition.manifest.clone(),
-            )),
+            None => atomic_attempt::AttemptAuthority::Catalog {
+                manifest: &prepared.input.definition.manifest,
+                contract: &prepared.input.definition.contract,
+            },
         };
         // The watch belongs inside X: replay consults X's recorded outcome,
         // rather than a live token when deciding whether A may publish state.
@@ -820,10 +828,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     })
                     .err();
                 if let Some(refusal) = refusal {
+                    let refused = declaration_refused(&prepared.call.tool_name, refusal);
                     let capture = self
                         .capture_output(
                             prepared,
-                            declaration_refused(refusal),
+                            refused,
                             crate::plugin::ToolHookOccurrence::Attempt {
                                 attempt: attempt.attempt,
                             },
@@ -934,18 +943,21 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 let (output, mut commands) = result.into_parts();
                 let mut intents = intents;
                 let declaration = prepared.input.definition.manifest.declaration();
-                let admitted = output.settled(declaration).and_then(|output| {
-                    declaration
-                        .admits(OutcomeShape::Done {
-                            intents: &intents
-                                .intents
-                                .iter()
-                                .map(crate::ToolIntent::kind)
-                                .collect::<Vec<_>>(),
-                            control: output.turn_control_kind(),
-                        })
-                        .map(|()| output)
-                });
+                let output_schema = &prepared.input.definition.contract.output_schema.canonical;
+                let admitted = output
+                    .settled(declaration, output_schema)
+                    .and_then(|output| {
+                        declaration
+                            .admits(OutcomeShape::Done {
+                                intents: &intents
+                                    .intents
+                                    .iter()
+                                    .map(crate::ToolIntent::kind)
+                                    .collect::<Vec<_>>(),
+                                control: output.turn_control_kind(),
+                            })
+                            .map(|()| output)
+                    });
                 let output = match admitted {
                     Ok(output) => output,
                     // Nothing an outcome its declaration refuses declared is
@@ -953,7 +965,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     Err(refusal) => {
                         commands = Default::default();
                         intents = Default::default();
-                        declaration_refused(refusal)
+                        declaration_refused(&prepared.call.tool_name, refusal)
                     }
                 };
                 let captured = self

@@ -228,6 +228,17 @@ pub enum DeclarationRefusal {
         value_schema: Box<crate::JsonSchema>,
         mismatch: Box<crate::ValueMismatch>,
     },
+    /// A success's value does not fit the output schema its tool's
+    /// contract states, by the rule a code cell decodes the value by
+    /// (`K-EFF-007`). The call fails: no caller, model or cell receives
+    /// the value.
+    #[error("its value does not fit the tool's output schema: {mismatch}")]
+    OutputValueMismatch {
+        /// The schema the value was checked against: the contract's the
+        /// call was admitted under.
+        output_schema: Box<crate::JsonSchema>,
+        mismatch: Box<crate::ValueMismatch>,
+    },
 }
 
 fn intent_position(kind: ToolIntentKind) -> usize {

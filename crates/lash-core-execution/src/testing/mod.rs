@@ -1516,11 +1516,14 @@ where
     P: crate::ToolProvider + ?Sized,
 {
     let context = ToolCallFixture::mock().attempt("test-turn");
-    let Some(manifest) = tool.resolve_manifest(name, &crate::plugin::OwnerConfigView::default())
-    else {
+    let config = crate::plugin::OwnerConfigView::default();
+    let (Some(manifest), Some(contract)) = (
+        tool.resolve_manifest(name, &config),
+        tool.resolve_contract(name, &config),
+    ) else {
         return crate::ToolOutcome::err_fmt(format!("unknown tool: {name}")).into();
     };
-    tool.execute(crate::ToolCall::new(&manifest, args, &context))
+    tool.execute(crate::ToolCall::new(&manifest, &contract, args, &context))
         .await
 }
 
@@ -1546,8 +1549,13 @@ where
         "test-turn",
         grant,
     );
-    tool.execute(crate::ToolCall::new(grant.manifest(), args, &context))
-        .await
+    tool.execute(crate::ToolCall::new(
+        grant.manifest(),
+        grant.contract(),
+        args,
+        &context,
+    ))
+    .await
 }
 
 pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTurn {

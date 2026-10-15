@@ -436,6 +436,7 @@ use fixtures::{LongTextTools, SurfacePluginFactory};
 pub(crate) mod harness;
 mod node_drain;
 mod output_retention;
+mod output_settlement;
 mod panic_containment;
 mod projection;
 #[cfg(feature = "rlm")]

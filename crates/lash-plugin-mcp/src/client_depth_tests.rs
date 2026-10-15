@@ -335,7 +335,12 @@ async fn execute(factory: &McpPluginFactory) -> lash_core::ToolOutcome {
     let prepared = crate::plugin::prepared_test_call(&provider, &manifest).await;
     let context = prepared.attempt("modern-input");
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
-        .execute(lash_core::ToolCall::new(&manifest, &json!({}), &context))
+        .execute(lash_core::ToolCall::new(
+            &manifest,
+            &lash_core::ToolContract::default(),
+            &json!({}),
+            &context,
+        ))
         .await
     else {
         panic!("inline attempt")

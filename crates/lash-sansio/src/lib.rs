@@ -22,6 +22,7 @@ pub mod module_artifact_refusal;
 pub mod plugin;
 pub mod profile;
 mod redacted;
+mod result_fit;
 mod retained_output;
 pub mod sansio;
 pub mod schema_contract;

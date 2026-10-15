@@ -234,7 +234,12 @@ async fn execute_with_manifest<P: ToolProvider>(
     context: &lash_core::AttemptContext<'_>,
 ) -> ToolOutcome {
     match provider
-        .execute(lash_core::ToolCall::new(manifest, args, context))
+        .execute(lash_core::ToolCall::new(
+            manifest,
+            &lash_core::ToolContract::default(),
+            args,
+            context,
+        ))
         .await
     {
         lash_core::ToolAttemptOutcome::Done { result, intents } => {

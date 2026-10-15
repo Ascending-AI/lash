@@ -65,13 +65,13 @@ macro_rules! attempt {
     ($tool:literal, $args:expr, $process:expr) => {{
         let context = attempt_context($process).attempt("declaration-scope");
         let tools = tools();
-        let manifest = crate::processes_tool_definitions(true)
+        let definition = crate::processes_tool_definitions(true)
             .into_iter()
             .find(|definition| definition.name() == $tool)
-            .expect("process-controls manifest resolves")
-            .manifest();
+            .expect("process-controls manifest resolves");
+        let (manifest, contract) = (definition.manifest(), definition.contract());
         tools
-            .execute(ToolCall::new(&manifest, &$args, &context))
+            .execute(ToolCall::new(&manifest, &contract, &$args, &context))
             .await
     }};
 }

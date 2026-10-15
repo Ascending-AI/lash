@@ -593,8 +593,13 @@ mod tests {
         let manifest = provider
             .resolve_manifest("continue_as", &lash_core::OwnerConfigView::default())
             .expect("continue_as manifest");
+        let contract = provider
+            .resolve_contract("continue_as", &lash_core::OwnerConfigView::default())
+            .expect("continue_as contract");
         match provider
-            .execute(lash_core::ToolCall::new(&manifest, args, &context))
+            .execute(lash_core::ToolCall::new(
+                &manifest, &contract, args, &context,
+            ))
             .await
         {
             lash_core::ToolAttemptOutcome::Done { result, intents } => {

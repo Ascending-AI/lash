@@ -311,7 +311,7 @@ impl KernelMachine {
         result: &Type,
     ) -> Eval<Value> {
         match host.perform(effect, args, site) {
-            Ok(Ok(answer)) => self.decode(exe, &answer, result),
+            Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),
             Ok(Err(error)) => {
                 let datum = Datum::Error(Box::new(error));
                 Err(Interrupt::Raise(self.decode(exe, &datum, &Type::Any)?))

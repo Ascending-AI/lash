@@ -12,7 +12,7 @@ use super::{
     LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
-use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
+use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
 use crate::heap::{Key, Obj, Table, value_bytes};
 use crate::interface::{Bound, Host, Outcome};
 use crate::observe::Event;
@@ -558,13 +558,15 @@ impl KernelMachine {
                 let awaiting = self.frame(task)?.awaiting;
                 let ty = awaiting.and_then(|stmt| match &exe.stmt(stmt).form {
                     Form::Action(action) => match &action.kind {
-                        crate::compile::ActionKind::Perform { result, .. } => Some(result),
+                        crate::compile::ActionKind::Perform { effect, result, .. } => {
+                            Some((effect, result))
+                        }
                         _ => None,
                     },
                     _ => None,
                 });
                 match ty {
-                    Some(ty) => self.decode(exe, &datum, ty),
+                    Some((effect, ty)) => self.decode_result(exe, &datum, ty, effect),
                     None => Err(fault("an outcome arrived at no `perform`").into()),
                 }
             }
@@ -595,17 +597,39 @@ impl KernelMachine {
         datum: &lash_kernel_doc::Datum,
         ty: &lash_kernel_doc::Type,
     ) -> Eval<Value> {
-        let decoder = Decoder {
+        self.decode_as(exe, datum, ty, "the result")
+    }
+
+    /// [`Self::decode`] of the result `effect` answered a `perform` with:
+    /// a raise that it does not fit names the effect.
+    pub(super) fn decode_result(
+        &mut self,
+        exe: &Executable,
+        datum: &lash_kernel_doc::Datum,
+        ty: &lash_kernel_doc::Type,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Eval<Value> {
+        self.decode_as(exe, datum, ty, &format!("the result of `{effect}`"))
+    }
+
+    fn decode_as(
+        &mut self,
+        exe: &Executable,
+        datum: &lash_kernel_doc::Datum,
+        ty: &lash_kernel_doc::Type,
+        what: &str,
+    ) -> Eval<Value> {
+        let decoder = lash_kernel_doc::Decoder {
             max_depth: self.heap.value_depth,
             policy: self.program.document.manifest.numbers,
             declared: &|name| exe.declared.contains_key(name),
         };
         let decoded = match decoder.decode(datum, ty) {
             Ok(decoded) => decoded,
-            Err(problem) => {
+            Err(mismatch) => {
                 return raise(
                     "effect_result",
-                    format!("the result does not fit the stated type: {problem}"),
+                    format!("{what} does not fit the stated type: {mismatch}"),
                 );
             }
         };

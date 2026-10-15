@@ -44,6 +44,9 @@ pub(super) struct ParkedCall {
     /// The declaration the call was admitted under: what its resolution
     /// settles against, whatever the session's catalog has become since.
     declaration: crate::ToolDeclaration,
+    /// The output schema of the contract the call was prepared under, which
+    /// its resolution's success value settles against.
+    output_schema: crate::JsonSchema,
 }
 
 impl ParkedCall {
@@ -243,6 +246,7 @@ impl ProductionToolHandlers<'_> {
             }
         }
         let declaration = definition.manifest.declaration().clone();
+        let output_schema = definition.contract.output_schema.canonical.clone();
         let singleton = self.admit_leaf(
             owner,
             &invocation,
@@ -292,6 +296,7 @@ impl ProductionToolHandlers<'_> {
                     completion: *completion,
                     launch: launch.map(|launch| *launch),
                     declaration,
+                    output_schema,
                 }),
                 store_local,
             ),
@@ -513,9 +518,10 @@ pub(super) fn member_body(
 /// The final answer of the member `call`, parked as `parked`, once one of
 /// its waits ended with `resolution`: a pure function of the resolution and
 /// the parked call its `Waiting` outcome recorded, settled as the
-/// declaration the park recorded says. Runs no body. A park that does not
-/// decode has no declaration to settle under, and answers a typed recovery
-/// failure rather than a result no declaration checked.
+/// declaration and output schema the park recorded say. Runs no body. A
+/// park that does not decode has no declaration to settle under, and
+/// answers a typed recovery failure rather than a result no declaration
+/// checked.
 pub(super) fn resolved_member(
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
@@ -536,8 +542,8 @@ pub(super) fn resolved_member(
         );
     };
     let output = parked_call_output(parked, resolution)
-        .settled(&recorded.declaration)
-        .unwrap_or_else(super::declaration_refused);
+        .settled(&recorded.declaration, &recorded.output_schema)
+        .unwrap_or_else(|refusal| super::declaration_refused(&call.tool_name, refusal));
     let mut completed = answered(call, output);
     // The launch receipt is the call's host-facing intent outcome; the
     // model sees the child's value only.
