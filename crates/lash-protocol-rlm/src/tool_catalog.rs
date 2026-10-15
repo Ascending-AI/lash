@@ -311,6 +311,7 @@ fn tool_signature_text(
     dialect.tool_signature(
         call_path,
         &contract.input_shape_with(&presentation.tools),
+        contract.input_schema.canonical.accepts_empty_object(),
         &contract.output_shape_with(&presentation.tools),
     )
 }
@@ -504,8 +505,8 @@ mod tests {
         boundary
             .offer_bound_tool(
                 &catalog.tools[0].manifest,
-                catalog.tools[0].contract.input_schema.canonical(),
-                catalog.tools[0].contract.output_schema.canonical(),
+                &catalog.tools[0].contract.input_schema.canonical,
+                &catalog.tools[0].contract.output_schema.canonical,
             )
             .expect("pinned contract binds as an effect");
         let signatures = boundary.signatures();
@@ -678,8 +679,8 @@ mod tests {
         boundary
             .offer_bound_tool(
                 &catalog.tools[0].manifest,
-                catalog.tools[0].contract.input_schema.canonical(),
-                catalog.tools[0].contract.output_schema.canonical(),
+                &catalog.tools[0].contract.input_schema.canonical,
+                &catalog.tools[0].contract.output_schema.canonical,
             )
             .expect("explicit binding binds as an effect");
         assert!(

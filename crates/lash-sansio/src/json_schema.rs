@@ -145,6 +145,14 @@ impl JsonSchema {
             })
     }
 
+    /// Whether the empty object is an instance of this schema: a tool whose
+    /// input schema accepts it may be called with its input omitted, and the
+    /// omitted input is exactly `{}`.
+    pub fn accepts_empty_object(&self) -> bool {
+        self.validator
+            .is_valid(&Value::Object(serde_json::Map::new()))
+    }
+
     pub fn object(
         properties: serde_json::Map<String, Value>,
         required: Vec<String>,
@@ -155,6 +163,19 @@ impl JsonSchema {
         }
         Self::admit(schema)
     }
+}
+
+/// The kernel signature a tool of admitted `input` and `output` schemas is
+/// performed under ([`lash_kernel_check::tool_signature`]): its input may be
+/// omitted exactly when the input schema accepts the empty object
+/// ([`JsonSchema::accepts_empty_object`]).
+#[must_use]
+pub fn tool_signature(input: &JsonSchema, output: &JsonSchema) -> lash_kernel_doc::Signature {
+    lash_kernel_check::tool_signature(
+        input.as_value(),
+        input.accepts_empty_object(),
+        output.as_value(),
+    )
 }
 
 impl Default for JsonSchema {

@@ -388,18 +388,18 @@ impl<'h> CellArgs<'h> {
     }
 
     pub(super) fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
-        // A tool takes its input as one record (`HostBoundary::offer_tool`).
-        match args {
-            [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
-            [input] => self
-                .entries
-                .leaving(input)
-                .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
-                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
-                .map(crate::projection::plain_json_for_transport)
-                .map_err(ArgsRefusal::NotJson),
-            more => Err(ArgsRefusal::Arity(more.len())),
-        }
+        lash_vm_runtime::tool_input(
+            args,
+            |input| {
+                self.entries
+                    .leaving(input)
+                    .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
+                    .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+                    .map(crate::projection::plain_json_for_transport)
+                    .map_err(ArgsRefusal::NotJson)
+            },
+            ArgsRefusal::Arity,
+        )
     }
 }
 

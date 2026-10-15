@@ -326,8 +326,8 @@ async fn link_cell(
             .offer_tool(
                 &path,
                 tool.manifest.id.clone(),
-                tool.contract.input_schema.canonical(),
-                tool.contract.output_schema.canonical(),
+                &tool.contract.input_schema.canonical,
+                &tool.contract.output_schema.canonical,
                 tool.manifest.declaration().controls.clone(),
             )
             .map_err(|error| surface(error.to_string()))?;

@@ -5,6 +5,7 @@
 mod finish_value;
 mod graph;
 mod python;
+mod tool_input;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

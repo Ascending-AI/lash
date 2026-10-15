@@ -73,9 +73,9 @@ pub fn check_links(
                 ),
             });
         }
-        let provided = lash_kernel_check::tool_signature(
-            link.surface.input_schema.canonical(),
-            link.surface.output_schema.canonical(),
+        let provided = lash_sansio::tool_signature(
+            &link.surface.input_schema.canonical,
+            &link.surface.output_schema.canonical,
         );
         let fit = fits.get(effect).copied().unwrap_or_default();
         let fits = match fit {

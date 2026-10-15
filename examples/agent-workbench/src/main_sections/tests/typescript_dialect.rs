@@ -89,14 +89,14 @@ fn workbench_effects(dialect: WorkbenchDialect) -> lash::vm::HostBoundary {
                 let contract = definition.contract();
                 (
                     definition.manifest().id.clone(),
-                    contract.input_schema.canonical().clone(),
-                    contract.output_schema.canonical().clone(),
+                    contract.input_schema.canonical.clone(),
+                    contract.output_schema.canonical.clone(),
                 )
             }
             None => (
                 lash::tools::ToolId::from(format!("tool:{}", path.replace('.', "/"))),
-                serde_json::json!({}),
-                serde_json::json!({}),
+                lash::schema::JsonSchema::any(),
+                lash::schema::JsonSchema::any(),
             ),
         };
         boundary

@@ -35,13 +35,17 @@ impl DialectPrompts for TypescriptPrompts {
         &self,
         call_path: &str,
         input: &lash_sansio::SchemaShape,
+        input_omittable: bool,
         output: &lash_sansio::SchemaShape,
     ) -> String {
         let input = types::render_schema_shape(input);
-        let input = if input == "Record<string, never>" {
-            "{}"
-        } else {
-            &input
+        // An omitted input is exactly `{}`: the default the call shows. A
+        // tool whose only input is `{}` is called with nothing.
+        let input = match (input.as_str(), input_omittable) {
+            ("Record<string, never>", true) => String::new(),
+            ("Record<string, never>", false) => "{}".to_owned(),
+            (_, true) => format!("{input} = {{}}"),
+            (_, false) => input,
         };
         let output = types::render_schema_shape(output);
         format!("{call_path}({input}): Promise<{output}>")

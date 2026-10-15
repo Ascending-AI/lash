@@ -193,8 +193,8 @@ impl crate::HostBoundary {
     pub fn offer_bound_tool(
         &mut self,
         manifest: &lash_core::ToolManifest,
-        input: &serde_json::Value,
-        output: &serde_json::Value,
+        input: &lash_sansio::JsonSchema,
+        output: &lash_sansio::JsonSchema,
     ) -> Result<(), ToolBindingError> {
         let binding = required_tool_executable(manifest)?;
         self.offer_tool(
@@ -240,8 +240,8 @@ impl crate::HostBoundary {
             boundary.offer_tool(
                 effect.as_str(),
                 link.tool().clone(),
-                link.surface.input_schema.canonical(),
-                link.surface.output_schema.canonical(),
+                &link.surface.input_schema.canonical,
+                &link.surface.output_schema.canonical,
                 link.surface.declaration.controls.clone(),
             )?;
         }
@@ -256,8 +256,8 @@ impl crate::HostBoundary {
             }
             boundary.offer_bound_tool(
                 &entry.manifest,
-                entry.contract.input_schema.canonical(),
-                entry.contract.output_schema.canonical(),
+                &entry.contract.input_schema.canonical,
+                &entry.contract.output_schema.canonical,
             )?;
         }
         Ok(boundary)

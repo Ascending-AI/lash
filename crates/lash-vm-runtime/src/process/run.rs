@@ -510,15 +510,16 @@ fn issue(
             message: format!("the host offers no effect `{}`", request.effect),
         };
     }
-    // A tool is one effect that takes its input as one record.
-    let input = match request.args.as_slice() {
-        [input] => effect_input(document, process, input),
-        args => Err(format!(
-            "the effect `{}` takes one input record, and {} arguments were passed",
-            request.effect,
-            args.len()
-        )),
-    };
+    let input = crate::tool_input(
+        &request.args,
+        |input| effect_input(document, process, input),
+        |count| {
+            format!(
+                "the effect `{}` takes one input record, and {count} arguments were passed",
+                request.effect
+            )
+        },
+    );
     match input {
         Ok(input) => Issued::Effect {
             wait,

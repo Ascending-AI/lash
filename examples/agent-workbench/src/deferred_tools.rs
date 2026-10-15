@@ -383,6 +383,7 @@ impl DeferredSearchResult {
             signature: dialect.tool_signature(
                 call_path,
                 &contract.input_shape(),
+                contract.input_schema.canonical.accepts_empty_object(),
                 &contract.output_shape(),
             ),
             description: definition.description().trim().to_string(),

@@ -137,9 +137,9 @@ pub fn performs(tools: &[crate::ToolDefinition]) -> crate::PerformedEffects {
         .map(|tool| {
             (
                 effect_of(tool),
-                lash_kernel_check::tool_signature(
-                    tool.contract.input_schema.canonical(),
-                    tool.contract.output_schema.canonical(),
+                lash_sansio::tool_signature(
+                    &tool.contract.input_schema.canonical,
+                    &tool.contract.output_schema.canonical,
                 ),
             )
         })

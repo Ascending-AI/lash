@@ -14,7 +14,9 @@ pub mod identity;
 pub mod json_decode;
 pub mod json_schema;
 mod run_aggregate;
-pub use json_schema::{InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch};
+pub use json_schema::{
+    InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch, tool_signature,
+};
 mod execution_budgets;
 pub mod llm;
 pub mod llm_profile;

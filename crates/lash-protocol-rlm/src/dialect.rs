@@ -103,8 +103,16 @@ pub trait DialectPrompts: Send + Sync + 'static {
 
     /// A catalog tool's callable signature, in this dialect's syntax. The
     /// shapes are the contract layer's reading of the tool's schemas; a
-    /// dialect spells them and reads no JSON Schema itself.
-    fn tool_signature(&self, call_path: &str, input: &SchemaShape, output: &SchemaShape) -> String;
+    /// dialect spells them and reads no JSON Schema itself. When
+    /// `input_omittable`, the tool's input schema accepts the empty object,
+    /// and a call may leave the input out to pass exactly `{}`.
+    fn tool_signature(
+        &self,
+        call_path: &str,
+        input: &SchemaShape,
+        input_omittable: bool,
+        output: &SchemaShape,
+    ) -> String;
 
     /// A schema shape as a type, in this dialect's syntax. Shared code calls
     /// it wherever a prompt shows the type of a field or of a required value.
@@ -1004,6 +1012,7 @@ mod tests {
             &self,
             call_path: &str,
             _input: &SchemaShape,
+            _input_omittable: bool,
             _output: &SchemaShape,
         ) -> String {
             call_path.to_string()

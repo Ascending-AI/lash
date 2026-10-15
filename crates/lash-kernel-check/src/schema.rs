@@ -28,14 +28,21 @@ pub fn result_type_of_schema(schema: &serde_json::Value) -> Type {
 }
 
 /// The signature a tool of `input` and `output` schemas is performed under:
-/// it takes its input as one record and gives its result open.
+/// it takes its input as one record and gives its result open. The input
+/// may be omitted when `input_omittable`, a fact the schema layer decides
+/// (the input schema accepts the empty object), and an omitted input is
+/// performed as `{}`.
 #[must_use]
-pub fn tool_signature(input: &serde_json::Value, output: &serde_json::Value) -> Signature {
+pub fn tool_signature(
+    input: &serde_json::Value,
+    input_omittable: bool,
+    output: &serde_json::Value,
+) -> Signature {
     Signature {
         params: vec![Param {
             name: Name::new("input"),
             ty: type_of_schema(input),
-            optional: false,
+            optional: input_omittable,
         }],
         result: result_type_of_schema(output),
     }

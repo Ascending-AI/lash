@@ -291,8 +291,8 @@ pub(crate) fn offer_deferred_matches(
         boundary
             .offer_bound_tool(
                 &definition.manifest,
-                definition.contract.input_schema.canonical(),
-                definition.contract.output_schema.canonical(),
+                &definition.contract.input_schema.canonical,
+                &definition.contract.output_schema.canonical,
             )
             .map_err(|source| DeferredResolutionError::Offer {
                 path: path.clone(),

@@ -769,6 +769,206 @@ async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
     world.shutdown().await;
 }
 
+/// The all-optional tool the omission law calls: no field is required, and
+/// one declares a default that an omitted input must not be given.
+const SEARCH: &str = "search";
+
+fn search_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:workflows_search",
+        SEARCH,
+        "Answers the input it was called with.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "query": { "type": "string" },
+                "limit": { "type": "integer", "default": 10 },
+            },
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("the search tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["workflows"], "search"))
+}
+
+/// The inputs the search tool was prepared and executed with, each execution
+/// with whether a process body made the call.
+#[derive(Default)]
+struct SearchInputs {
+    prepared: Mutex<Vec<serde_json::Value>>,
+    executed: Mutex<Vec<(bool, serde_json::Value)>>,
+}
+
+struct Search(Arc<SearchInputs>);
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Search {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![search_definition().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        (name == SEARCH).then(|| Arc::new(search_definition().contract()))
+    }
+
+    async fn prepare_tool_call(
+        &self,
+        call: lash_core::ToolPrepareCall<'_>,
+    ) -> Result<lash_core::PreparedToolCall, ToolOutcome> {
+        self.0
+            .prepared
+            .lock_recover()
+            .push(call.pending.args.clone());
+        Ok(lash_core::PreparedToolCall::identity(
+            call.tool_id,
+            call.pending,
+        ))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.0.executed.lock_recover().push((
+            call.context.enclosing_process().is_some(),
+            call.args.clone(),
+        ));
+        ToolOutcome::ok(serde_json::json!({ "seen": call.args })).into()
+    }
+}
+
+/// The component that serves the search tool to a process body.
+const SEARCH_COMPONENT: lash_core::ProcessConfigKey<()> =
+    lash_core::ProcessConfigKey::new("workflows-search", lash_core::FormatVersion::ONE);
+
+/// A core running RLM turns in `dialect` with the search tool, in its cells
+/// and in the processes they start.
+async fn search_world(
+    tier: Tier,
+    dialect: lash::rlm::CellDialect,
+    inputs: &Arc<SearchInputs>,
+) -> Option<World> {
+    let search: Arc<dyn lash_core::ToolProvider> = Arc::new(Search(Arc::clone(inputs)));
+    World::new(tier, move |backend| {
+        lash::LashCore::rlm_builder(
+            backend.clone(),
+            lash::rlm::RlmProtocolPluginFactory::new(
+                lash::rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash::rlm::RlmChannel::Cell)
+                    .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
+                    .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                dialect,
+            )
+            .with_worker_service(sim::untimed_workers()),
+        )
+        .plugin(Arc::new(
+            lash::process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[
+                    SEARCH_COMPONENT,
+                    lash::process_controls::PROCESS_CONTROLS_CONFIG,
+                ]),
+            ),
+        ))
+        .process_component(
+            Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::starter,
+                lash_core::testing::run_policy_naming(&[SEARCH_COMPONENT]),
+            )),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+        )
+        .process_component(
+            lash_core::testing::tool_component(SEARCH_COMPONENT, Arc::clone(&search)),
+            SEARCH_COMPONENT,
+        )
+        .plugin(lash_core::testing::tool_plugin(SEARCH_COMPONENT, search))
+    })
+    .await
+}
+
+/// FIG-6294: a tool whose input schema accepts `{}` may be called with its
+/// input omitted, and the omitted input is exactly `{}`: not null, not the
+/// schema's defaults. `workflows.search()` and `workflows.search({})` reach
+/// the provider's prepare and execute with the same input, and the guest
+/// reads the same answer from both: inline in a TypeScript and a Python
+/// cell, and in a TypeScript process whose body first parks on a durable
+/// sleep and resumes from its saved run. (A Python process body links no
+/// catalog tool: its effect `workflows_search` is not the binding's path.)
+async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
+    let typescript = (
+        lash::rlm::CellDialect::typescript(),
+        "const body = async () => {\n  \
+           await sleep(10);\n  \
+           return [await workflows.search(), await workflows.search({})];\n\
+         };\n\
+         const run = await processes.start({ definition: body });\n\
+         const cell = [await workflows.search(), await workflows.search({})];\n\
+         await control.finish({ cell: cell, process: await run });",
+        true,
+    );
+    let python = (
+        lash::rlm::CellDialect::python(),
+        "cell = [await workflows_search(), await workflows_search({})]\n\
+         await control_finish({'cell': cell})",
+        false,
+    );
+    for (dialect, source, process) in [typescript, python] {
+        let name = dialect.name().to_owned();
+        let inputs = Arc::new(SearchInputs::default());
+        let Some(world) = search_world(tier, dialect, &inputs).await else {
+            return;
+        };
+        let cell = served::response(vec![lash_core::llm::types::LlmOutputPart::Text {
+            text: format!("<{name}>\n{source}\n</{name}>"),
+            response_meta: None,
+        }]);
+        let output = world
+            .run(
+                &format!("omitted-input-{name}"),
+                served::spec(64),
+                vec![cell],
+            )
+            .await;
+        served::assert_answered(&format!("the {name} turn"), &output);
+        let empty = serde_json::json!({});
+        let answered = serde_json::json!([{ "seen": {} }, { "seen": {} }]);
+        let mut expected = serde_json::json!({ "cell": answered });
+        if process {
+            expected["process"] = answered;
+        }
+        assert_eq!(
+            output.finished().map(|(_, value)| value.clone()),
+            Some(expected),
+            "{name}: the guest reads one answer for an omitted and an empty input: {:?}",
+            world.requests(&format!("omitted-input-{name}"))
+        );
+        let calls = if process { 4 } else { 2 };
+        assert_eq!(
+            *inputs.prepared.lock_recover(),
+            vec![empty.clone(); calls],
+            "{name}: every call is prepared with exactly {{}}"
+        );
+        let mut executed = inputs.executed.lock_recover().clone();
+        executed.sort_by_key(|(in_process, _)| *in_process);
+        let mut expected = vec![(false, empty.clone()); 2];
+        if process {
+            expected.extend([(true, empty.clone()), (true, empty)]);
+        }
+        assert_eq!(
+            executed, expected,
+            "{name}: the cell's and the process's calls execute with exactly {{}}"
+        );
+        world.shutdown().await;
+    }
+}
+
 tiered_laws!(
     a_pruned_process_leaves_no_run_fact_or_wait,
     a_store_fault_after_prepare_never_settles_a_step,
@@ -777,4 +977,5 @@ tiered_laws!(
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
     process_tool_call_limit_staged_calls,
     typescript_process_body_resolves_journaled_clock_and_randomness,
+    omitted_tool_input_is_exactly_empty_object,
 );

@@ -54,10 +54,18 @@ impl DialectPrompts for PythonPrompts {
         Ok(name)
     }
 
-    fn tool_signature(&self, call_path: &str, input: &SchemaShape, output: &SchemaShape) -> String {
+    fn tool_signature(
+        &self,
+        call_path: &str,
+        input: &SchemaShape,
+        input_omittable: bool,
+        output: &SchemaShape,
+    ) -> String {
+        // An omitted input is exactly `{}`: the default the call shows.
         format!(
-            "async def {call_path}(input: {}) -> {}",
+            "async def {call_path}(input: {}{}) -> {}",
             render_shape(input),
+            if input_omittable { " = {}" } else { "" },
             render_shape(output)
         )
     }

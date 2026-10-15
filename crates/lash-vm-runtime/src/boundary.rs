@@ -65,15 +65,15 @@ impl HostBoundary {
         &mut self,
         name: &str,
         tool: ToolId,
-        input: &serde_json::Value,
-        output: &serde_json::Value,
+        input: &lash_sansio::JsonSchema,
+        output: &lash_sansio::JsonSchema,
         controls: lash_sansio::TurnControls,
     ) -> Result<(), BoundaryError> {
         self.offer(
             name,
             HostEffect {
                 tool,
-                signature: lash_kernel_check::tool_signature(input, output),
+                signature: lash_sansio::tool_signature(input, output),
                 controls,
             },
         )
@@ -124,6 +124,28 @@ impl HostBoundary {
     /// Whether the host answers reads through handles of `kind`.
     pub fn admits_handle(&self, kind: &str) -> bool {
         self.handles.contains(kind)
+    }
+}
+
+/// A tool call's input as the tool reads it, from the operands the call
+/// performs the tool with: a tool takes its input as one record
+/// ([`HostBoundary::offer_tool`]), and a call that omits it gives exactly
+/// the empty object, never null or the schema's defaults. Cells and
+/// processes both read a tool call's operands through this one rule.
+///
+/// # Errors
+///
+/// What `project` refuses for the one operand, or what `excess` makes of the
+/// count of more than one.
+pub fn tool_input<T, E>(
+    args: &[T],
+    project: impl FnOnce(&T) -> Result<serde_json::Value, E>,
+    excess: impl FnOnce(usize) -> E,
+) -> Result<serde_json::Value, E> {
+    match args {
+        [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
+        [input] => project(input),
+        more => Err(excess(more.len())),
     }
 }
 
@@ -223,8 +245,11 @@ mod tests {
             "hits": { "type": "integer" },
             "took_ms": { "type": "integer" },
         }));
-        let expected = lash_kernel_check::tool_signature(&input, &earlier);
-        let provided = lash_kernel_check::tool_signature(&input, &later);
+        let admit = |schema: &serde_json::Value| {
+            lash_sansio::JsonSchema::admit(schema.clone()).expect("an admissible schema")
+        };
+        let expected = lash_sansio::tool_signature(&admit(&input), &admit(&earlier));
+        let provided = lash_sansio::tool_signature(&admit(&input), &admit(&later));
         assert!(
             lash_kernel_check::signature_serves(&provided, &expected),
             "the added field fits the projected result"

@@ -253,9 +253,9 @@ impl crate::ProcessEngine for SearchEngine {
     ) -> Result<crate::PerformedEffects, crate::ProcessEnvRefusal> {
         Ok(std::collections::BTreeMap::from([(
             crate::EffectName::new("search.run").unwrap(),
-            lash_kernel_check::tool_signature(
-                tool().contract.input_schema.canonical(),
-                tool().contract.output_schema.canonical(),
+            lash_sansio::tool_signature(
+                &tool().contract.input_schema.canonical,
+                &tool().contract.output_schema.canonical,
             ),
         )]))
     }
