@@ -492,6 +492,14 @@ impl Embedder {
     /// in `layout` against a program compiled afresh, in which `pair.twice`
     /// runs natively or not. The root it opened.
     pub(crate) fn reopen(&mut self, layout: Layout, native_twice: bool) -> CheckpointRoot {
+        let (root, certificate) = self.checkpoint();
+        self.open_at(&root, certificate, layout, native_twice);
+        root
+    }
+
+    /// Seals the run whole, as a node commits it, leaving it running: the
+    /// root and the accounting another node opens it with.
+    pub(crate) fn checkpoint(&mut self) -> (CheckpointRoot, AccountingCertificate) {
         let sealed = self
             .machine
             .seal(SealBudget {
@@ -505,11 +513,22 @@ impl Embedder {
             &lash_kernel_doc::graph_tokens::encode_body(&sealed.root),
         )
         .unwrap();
+        (root, certificate)
+    }
+
+    /// Opens `root`, a checkpoint of this run, cold in another machine.
+    pub(crate) fn open_at(
+        &mut self,
+        root: &CheckpointRoot,
+        certificate: AccountingCertificate,
+        layout: Layout,
+        native_twice: bool,
+    ) {
         let (program, library) = self.program(native_twice);
         self.machine = KernelMachine::open_with_layout(
             program,
             self.bounds,
-            &root,
+            root,
             Vec::new(),
             Box::new(self.source.clone()),
             Box::new(
@@ -523,7 +542,6 @@ impl Embedder {
         )
         .unwrap();
         self.library = library;
-        root
     }
 
     /// Runs to the end. At each park it delivers the next request `order`

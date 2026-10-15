@@ -391,6 +391,24 @@ pub struct KernelMachine {
     observer: Option<Box<Observer>>,
     /// Statement starts in this run segment, never captured in parked state.
     ran: Vec<u64>,
+    /// What a law has the run do at each statement boundary (FIG-6318).
+    #[cfg(test)]
+    pub(crate) boundary: Option<Box<dyn FnMut(u64) -> Boundary>>,
+    #[cfg(test)]
+    boundaries: u64,
+}
+
+/// What a law's hook has the run do at a statement boundary (FIG-6318).
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Boundary {
+    Go,
+    /// A collection through the machine's collection point.
+    Collect,
+    /// A collection asked of the heap directly, with nothing published.
+    Unpublished,
+    /// The node dies here, mid-slice: the run ends with a host fault.
+    Kill,
 }
 
 impl KernelMachine {
@@ -563,6 +581,8 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        crate::perf_witness::publish();
         self.reconcile_sweep()?;
         let tasks = if coordinates {
             self.tasks.roots()?
@@ -578,13 +598,68 @@ impl KernelMachine {
                 &self.fresh,
             )
             .map_err(|e| self.heap_halt(e))?;
+        // A refinement the heap deferred while these roots were stale runs
+        // now that it can trace them (FIG-6318).
+        self.heap
+            .settle_precision()
+            .map_err(|e| self.heap_halt(e))?;
         self.reconcile_sweep()
+    }
+
+    /// The law's hook at a statement boundary: a forced collection, one
+    /// asked of the heap behind the machine's back, or the node's death.
+    #[cfg(test)]
+    fn at_boundary(&mut self) -> Result<(), MachineError> {
+        let at = self.boundaries;
+        self.boundaries += 1;
+        let Some(hook) = &mut self.boundary else {
+            return Ok(());
+        };
+        match hook(at) {
+            Boundary::Go => Ok(()),
+            Boundary::Collect => {
+                self.publish_holdings().map_err(machine_error)?;
+                self.heap.collect().map_err(MachineError::Heap)?;
+                self.reconcile_sweep().map_err(machine_error)
+            }
+            // The heap refuses to trace roots the run moved past; one it
+            // grants traced current roots.
+            Boundary::Unpublished => {
+                if self.heap.collect().is_ok() {
+                    self.reconcile_sweep().map_err(machine_error)?;
+                }
+                Ok(())
+            }
+            Boundary::Kill => {
+                self.ended = true;
+                Err(MachineError::Fault {
+                    problem: "the node died mid-slice".to_owned(),
+                })
+            }
+        }
+    }
+
+    /// The statement boundary's collection point: publishes what the run
+    /// holds when, and only when, a reservation since the last publication
+    /// needed a refinement the heap could not trace then (FIG-6318).
+    fn collect_owed(&mut self) -> Result<(), Halt> {
+        if self.heap.precision_owed() {
+            self.publish_holdings()?;
+        }
+        Ok(())
     }
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::step();
+        // What the run holds is published only where something can read
+        // it: the slice's yield, park, end or seal, a native call handed
+        // the heap, and the statement boundary after a reservation the
+        // heap could not refine. From here the installed roots are stale,
+        // and the heap defers any refinement until the next publication
+        // rather than trace them (FIG-6318).
+        self.heap.execution_roots_moved();
         if self.observer.is_some() {
             self.observe_step(task, exe);
         }
@@ -840,10 +915,19 @@ impl KernelMachine {
                         self.current = Some(task);
                         task
                     }
-                    None => return self.park(host),
+                    None => {
+                        self.publish_holdings().map_err(machine_error)?;
+                        return self.park(host);
+                    }
                 },
             };
-            match self.step(task, host, &exe) {
+            let mut stepped = self.step(task, host, &exe);
+            if matches!(stepped, Ok(()) | Err(Halt::Finish(_) | Halt::Fail(_)))
+                && let Err(halt) = self.collect_owed()
+            {
+                stepped = Err(halt);
+            }
+            match stepped {
                 Ok(()) => {}
                 Err(Halt::Fault(problem)) => {
                     self.ended = true;
@@ -885,18 +969,21 @@ impl KernelMachine {
                     return Ok(self.finish_with(end));
                 }
             }
-            self.publish_holdings().map_err(machine_error)?;
             self.regs.clear();
             self.pins.clear();
             self.fresh.clear();
             self.heap
                 .release_statement_roots()
                 .map_err(MachineError::Heap)?;
+            #[cfg(test)]
+            self.at_boundary()?;
             if let Some(end) = self.end.take() {
+                self.publish_holdings().map_err(machine_error)?;
                 return Ok(self.finish_with(end));
             }
             let more = self.current.is_some() || !self.ready.is_empty();
             if more && self.charged.saturating_sub(before) >= slice {
+                self.publish_holdings().map_err(machine_error)?;
                 if host.cancel_requested() {
                     return Ok(self.finish_with(End::Cancelled));
                 }

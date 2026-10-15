@@ -83,6 +83,10 @@ pub(super) fn start(
         ended: false,
         observer: None,
         ran: Vec::new(),
+        #[cfg(test)]
+        boundary: None,
+        #[cfg(test)]
+        boundaries: 0,
     };
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(

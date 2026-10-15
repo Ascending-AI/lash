@@ -127,11 +127,11 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// The memory anchor: accounts `bytes` more memory, collecting first
-    /// when the heap is due and ending the run when what is live does not
-    /// leave room.
+    /// The memory anchor: accounts `bytes` more memory, collecting when
+    /// the heap is due (at the statement's end, where the run publishes
+    /// what it holds) and ending the run when what is live does not leave
+    /// room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        self.publish_holdings()?;
         let transient = TransientRoots {
             registers: &self.regs,
             pinned: &self.pins.values,
@@ -145,7 +145,6 @@ impl KernelMachine {
     }
 
     pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
-        self.publish_holdings()?;
         let id = self
             .heap
             .allocate_object(object)
@@ -468,7 +467,6 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
             LibRun::Native(native) => {
-                self.publish_holdings()?;
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
@@ -503,12 +501,17 @@ impl KernelMachine {
                         })
                     })
                     .transpose()?;
+                // A native reserves before it builds, so its refinement
+                // runs at once, over what the run holds now: a deferred one
+                // would let it build past the bound first (FIG-6318).
+                self.publish_holdings()?;
                 let mut counter = WorkCounter::new(limit);
                 let answer = native.call(NativeCall {
                     args: &self.regs[args..end],
                     heap: &mut self.heap,
                     counter: &mut counter,
                 });
+                self.heap.execution_roots_moved();
                 self.observe(Event::GuardWork(counter.spent()));
                 match answer {
                     Ok(value) => {
