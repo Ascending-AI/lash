@@ -18,32 +18,29 @@ pub fn register(
     registry: &mut FunctionRegistry,
 ) -> Result<BTreeMap<String, FunctionId>, RegistryError> {
     let mut result = BTreeMap::new();
-    for (name, signature, charge, op) in [
+    for (signature, charge, op) in [
         (
-            "url.whatwg.parse",
             "(input: Text, base: Any) -> Any",
             "sum(32, size(input), deep(base), deep(result))",
-            Op::Parse,
+            Operation::Parse,
         ),
         (
-            "url.whatwg.update",
             "(href: Text, field: Text, value: Text) -> Any",
             "sum(32, size(href), size(field), size(value), deep(result))",
-            Op::Update,
+            Operation::Update,
         ),
         (
-            "url.whatwg.query_parse",
             "(input: Text) -> List(Any)",
             "sum(8, size(input), deep(result))",
-            Op::QueryParse,
+            Operation::QueryParse,
         ),
         (
-            "url.whatwg.query_stringify",
             "(pairs: List(Any)) -> Text",
             "sum(8, deep(pairs), size(result))",
-            Op::QueryStringify,
+            Operation::QueryStringify,
         ),
     ] {
+        let name = op.name();
         let definition = parse_definition(&format!(
             "function {name}{signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
         ))
@@ -55,13 +52,30 @@ pub fn register(
     }
     Ok(result)
 }
-#[derive(Clone, Copy)]
-enum Op {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operation {
     Parse,
     Update,
     QueryParse,
     QueryStringify,
 }
+impl Operation {
+    pub const ALL: [Self; 4] = [
+        Self::Parse,
+        Self::Update,
+        Self::QueryParse,
+        Self::QueryStringify,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Parse => "url.whatwg.parse",
+            Self::Update => "url.whatwg.update",
+            Self::QueryParse => "url.whatwg.query_parse",
+            Self::QueryStringify => "url.whatwg.query_stringify",
+        }
+    }
+}
+
 fn raise(message: &str) -> NativeError {
     NativeError::Raised(ErrorValue::new("type_error", message))
 }
@@ -150,7 +164,7 @@ fn record(call: &mut NativeCall<'_>, url: &Url) -> Result<Value, NativeError> {
         ]),
     )
 }
-impl NativeFunction for Op {
+impl NativeFunction for Operation {
     fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
         match self {
             Self::Parse => {

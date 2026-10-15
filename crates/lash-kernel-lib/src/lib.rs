@@ -8,7 +8,9 @@
 
 mod arithmetic;
 mod comparison;
+mod helpers;
 mod keys;
+pub use helpers::{KERNEL_NAME_FAMILIES, KernelHelper};
 mod math;
 mod numbers;
 mod numeric;

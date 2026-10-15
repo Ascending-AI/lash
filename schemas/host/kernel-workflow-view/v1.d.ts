@@ -189,7 +189,11 @@ export type Callee = ({
  * manifest names.
  */
 export type CalleeView = ({
-  "library": QualifiedName;
+  "library": {
+    "id": FunctionId;
+    "name": QualifiedName;
+    [key: string]: unknown;
+  };
 } | {
   "declared": Name;
 } | {

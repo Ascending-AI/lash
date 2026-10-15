@@ -50,6 +50,8 @@ mod release;
 mod releases;
 #[path = "src/sealed.rs"]
 mod sealed;
+#[path = "src/build/sets.rs"]
+mod sets;
 
 #[expect(
     dead_code,
@@ -82,6 +84,7 @@ fn main() -> Result<(), BuildError> {
     {
         let mut registry = FunctionRegistry::new();
         library::register_kernel(&mut registry)?;
+        write_kernel_set(&out, &registry)?;
         library::register_extensions(&mut registry)?;
         dialect(&out, declared::TYPESCRIPT, registry, |library| {
             Ok(lash_dialect_typescript::define_helpers(library)?)
@@ -91,6 +94,7 @@ fn main() -> Result<(), BuildError> {
     {
         let mut registry = FunctionRegistry::new();
         library::register_kernel(&mut registry)?;
+        write_kernel_set(&out, &registry)?;
         dialect(&out, declared::PYTHON, registry, |library| {
             Ok(lash_dialect_python::define_helpers(library)?)
         })?;
@@ -120,7 +124,18 @@ fn dialect(
         |file: &str, bytes: &[u8]| std::fs::write(out.join(format!("{dialect}_{file}")), bytes);
     let mut named = NamedLibrary::from_registry(&registry)?;
     let helpers = define(&mut named)?;
+    let ty = match dialect {
+        "typescript" => "TypeScriptHelper",
+        "python" => "PythonHelper",
+        _ => return Err("undeclared dialect".into()),
+    };
+    write(
+        "helpers.rs",
+        sets::enum_source(ty, helpers.iter().map(|f| f.name.as_str()))?.as_bytes(),
+    )?;
+    let helper_names: Vec<_> = helpers.iter().map(|helper| helper.name.clone()).collect();
     let validated = registry.validate_functions(helpers)?;
+    sets::validate(&registry, &helper_names, dialect == "typescript")?;
     write("helpers.json", &validated.to_json()?)?;
 
     let corpus = corpus::Corpus::recorded()?;
@@ -193,4 +208,16 @@ fn checkpoint_catalog(held: &releases::HeldReleases) -> Result<(Vec<u8>, Vec<u8>
         nodes.bytes(&node.bytes);
     }
     Ok((manifests.into_bytes(), nodes.into_bytes()))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a build script writes its OUT_DIR artifacts"
+)]
+fn write_kernel_set(out: &std::path::Path, registry: &FunctionRegistry) -> Result<(), BuildError> {
+    std::fs::write(
+        out.join("kernel_helpers.rs"),
+        sets::kernel_source(registry)?,
+    )?;
+    Ok(())
 }

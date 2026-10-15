@@ -681,3 +681,9 @@ message_schema_fixtures = { srcs = [
     "tests/test_message_schema/client_json_rpc_message_schema.json",
     "tests/test_message_schema/server_json_rpc_message_schema.json",
 ] }
+
+# Each library owns a reviewed helper-label side file, read without dialect code.
+[[rule]]
+packages = ["lash-helper-labels"]
+kinds = ["lib", "unit-test"]
+compile_data = ["//crates/lash-helper-labels:package_files"]

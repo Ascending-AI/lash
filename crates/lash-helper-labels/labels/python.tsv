@@ -1,0 +1,116 @@
+py.abs	Python abs
+py.add	Python add
+py.all	Python all
+py.any	Python any
+py.arg_missing	Python arg missing
+py.await	Python await
+py.await.result	Python await result
+py.chr	Python chr
+py.contains	Python contains
+py.delitem	Python delitem
+py.divmod	Python divmod
+py.enumerate	Python enumerate
+py.exc.args	Python exc args
+py.exc.cause	Python exc cause
+py.exc.check_cause	Python exc check cause
+py.exc.is_exception	Python exc is exception
+py.exc.matches	Python exc matches
+py.exc.name	Python exc name
+py.exc.new	Python exc new
+py.exc.reraise	Python exc reraise
+py.exc.throw	Python exc throw
+py.exc.with_cause	Python exc with cause
+py.extreme	Python extreme
+py.fail	Python fail
+py.float	Python float
+py.float_text	Python float text
+py.floordiv	Python floordiv
+py.format	Python format
+py.format.exponent	Python format exponent
+py.format.group	Python format group
+py.gather	Python gather
+py.getitem	Python getitem
+py.iadd	Python iadd
+py.index	Python index
+py.int	Python int
+py.is_number	Python is number
+py.isinstance	Python isinstance
+py.iter	Python iter
+py.iter_guard	Python iter guard
+py.iter_size	Python iter size
+py.length	Python length
+py.method.add	Python method add
+py.method.append	Python method append
+py.method.cancel	Python method cancel
+py.method.clear	Python method clear
+py.method.copy	Python method copy
+py.method.count	Python method count
+py.method.difference	Python method difference
+py.method.discard	Python method discard
+py.method.endswith	Python method endswith
+py.method.extend	Python method extend
+py.method.find	Python method find
+py.method.get	Python method get
+py.method.index	Python method index
+py.method.insert	Python method insert
+py.method.intersection	Python method intersection
+py.method.items	Python method items
+py.method.join	Python method join
+py.method.keys	Python method keys
+py.method.lower	Python method lower
+py.method.lstrip	Python method lstrip
+py.method.pop	Python method pop
+py.method.remove	Python method remove
+py.method.replace	Python method replace
+py.method.reverse	Python method reverse
+py.method.rstrip	Python method rstrip
+py.method.setdefault	Python method setdefault
+py.method.sort	Python method sort
+py.method.split	Python method split
+py.method.startswith	Python method startswith
+py.method.strip	Python method strip
+py.method.union	Python method union
+py.method.update	Python method update
+py.method.upper	Python method upper
+py.method.values	Python method values
+py.mod	Python mod
+py.mul	Python mul
+py.name_check	Python name check
+py.neg	Python neg
+py.no_attribute	Python no attribute
+py.number_text	Python number text
+py.number_underscores	Python number underscores
+py.operand_error	Python operand error
+py.ord	Python ord
+py.pos	Python pos
+py.pow	Python pow
+py.range	Python range
+py.reply	Python reply
+py.repr	Python repr
+py.reversed	Python reversed
+py.round	Python round
+py.set_op	Python set op
+py.setitem	Python setitem
+py.show	Python show
+py.sleep	Python sleep
+py.slice	Python slice
+py.sorted	Python sorted
+py.str	Python str
+py.sub	Python sub
+py.sum	Python sum
+py.task.bridge	Python task bridge
+py.task.run	Python task run
+py.text.decimal	Python text decimal
+py.text.printable	Python text printable
+py.text.whitespace	Python text whitespace
+py.text_of	Python text of
+py.text_repr	Python text repr
+py.to_dict	Python to dict
+py.to_list	Python to list
+py.to_set	Python to set
+py.to_tuple	Python to tuple
+py.truediv	Python truediv
+py.truth	Python truth
+py.type	Python type
+py.unpack	Python unpack
+py.zip	Python zip

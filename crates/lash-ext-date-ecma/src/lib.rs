@@ -21,33 +21,22 @@ pub fn register(
     registry: &mut FunctionRegistry,
 ) -> Result<BTreeMap<String, FunctionId>, RegistryError> {
     let mut result = BTreeMap::new();
-    for (name, signature, op) in [
-        (
-            "date.ecma.timestamp",
-            "(milliseconds: Float) -> Any",
-            Op::Timestamp,
-        ),
-        (
-            "date.ecma.milliseconds",
-            "(date: Any) -> Float",
-            Op::Milliseconds,
-        ),
-        ("date.ecma.parse", "(source: Text) -> Float", Op::Parse),
-        (
-            "date.ecma.format",
-            "(date: Any, format: Text) -> Text",
-            Op::Format,
-        ),
+    for (signature, op) in [
+        ("(milliseconds: Float) -> Any", Operation::Timestamp),
+        ("(date: Any) -> Float", Operation::Milliseconds),
+        ("(source: Text) -> Float", Operation::Parse),
+        ("(date: Any, format: Text) -> Text", Operation::Format),
     ] {
+        let name = op.name();
         let text = format!(
             "function {name}{signature}\nkernel 1\nerrors \"type_error\", \"RangeError\", \"TS_DATE_PARSE_NON_ISO\"\ncharge sum(32, deep(milliseconds), deep(date), size(source), size(format), size(result))\nnative\n"
         );
         // Each formula references only its own arguments.
         let charge = match op {
-            Op::Timestamp => "sum(32, size(milliseconds), deep(result))",
-            Op::Milliseconds => "sum(32, deep(date))",
-            Op::Parse => "sum(32, size(source))",
-            Op::Format => "sum(32, deep(date), size(format), size(result))",
+            Operation::Timestamp => "sum(32, size(milliseconds), deep(result))",
+            Operation::Milliseconds => "sum(32, deep(date))",
+            Operation::Parse => "sum(32, size(source))",
+            Operation::Format => "sum(32, deep(date), size(format), size(result))",
         };
         let text = text.replace(
             "sum(32, deep(milliseconds), deep(date), size(source), size(format), size(result))",
@@ -61,13 +50,30 @@ pub fn register(
     }
     Ok(result)
 }
-#[derive(Clone, Copy)]
-enum Op {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operation {
     Timestamp,
     Milliseconds,
     Parse,
     Format,
 }
+impl Operation {
+    pub const ALL: [Self; 4] = [
+        Self::Timestamp,
+        Self::Milliseconds,
+        Self::Parse,
+        Self::Format,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Timestamp => "date.ecma.timestamp",
+            Self::Milliseconds => "date.ecma.milliseconds",
+            Self::Parse => "date.ecma.parse",
+            Self::Format => "date.ecma.format",
+        }
+    }
+}
+
 fn raise(kind: &str, message: &str) -> NativeError {
     NativeError::Raised(ErrorValue::new(kind, message))
 }
@@ -84,7 +90,7 @@ fn milliseconds(value: &Value, call: &NativeCall<'_>) -> Result<f64, NativeError
         _ => Err(raise("type_error", "Date receiver required")),
     }
 }
-impl NativeFunction for Op {
+impl NativeFunction for Operation {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         let first = call
             .args

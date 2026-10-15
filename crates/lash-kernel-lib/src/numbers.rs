@@ -19,6 +19,7 @@ use crate::math::Math;
 use crate::numeric::{float_to_integer, integer_to_float};
 
 mod prepared;
+use crate::KernelHelper;
 use crate::raised;
 
 #[derive(Clone, Copy, Debug)]
@@ -88,7 +89,7 @@ struct NumericFunction {
 )]
 pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
     let mut functions = Vec::new();
-    let mut add = |name: &str,
+    let mut add = |name: KernelHelper,
                    domain: Domain,
                    operation: Operation,
                    params: Vec<Type>,
@@ -203,7 +204,7 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         }
         let definition = FunctionDefinition {
             kernel: KERNEL_VERSION,
-            name: QualifiedName::new(name).expect("fixed catalogue name is valid"),
+            name: QualifiedName::new(name.name()).expect("fixed catalogue name is valid"),
             signature: Signature {
                 params: param_defs,
                 result,
@@ -228,20 +229,21 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         ("float.", Domain::Float),
     ] {
         for (name, op) in [
-            ("add", Binary::Add),
-            ("sub", Binary::Sub),
-            ("mul", Binary::Mul),
-            ("div", Binary::Div),
-            ("div_floor", Binary::DivFloor),
-            ("div_trunc", Binary::DivTrunc),
-            ("rem_floor", Binary::RemFloor),
-            ("rem_trunc", Binary::RemTrunc),
-            ("pow", Binary::Pow),
-            ("min", Binary::Min),
-            ("max", Binary::Max),
+            (KernelHelper::H_add, Binary::Add),
+            (KernelHelper::H_sub, Binary::Sub),
+            (KernelHelper::H_mul, Binary::Mul),
+            (KernelHelper::H_div, Binary::Div),
+            (KernelHelper::H_div_ufloor, Binary::DivFloor),
+            (KernelHelper::H_div_utrunc, Binary::DivTrunc),
+            (KernelHelper::H_rem_ufloor, Binary::RemFloor),
+            (KernelHelper::H_rem_utrunc, Binary::RemTrunc),
+            (KernelHelper::H_pow, Binary::Pow),
+            (KernelHelper::H_min, Binary::Min),
+            (KernelHelper::H_max, Binary::Max),
         ] {
             add(
-                &format!("{prefix}{name}"),
+                KernelHelper::from_name(&format!("{prefix}{}", name.name()))
+                    .expect("declared numeric family"),
                 domain,
                 Operation::Binary(op),
                 vec![domain.ty(); 2],
@@ -253,19 +255,19 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
             );
         }
         for (name, op) in [
-            ("neg", Unary::Neg),
-            ("abs", Unary::Abs),
-            ("floor", Unary::Floor),
-            ("ceil", Unary::Ceil),
-            ("trunc", Unary::Trunc),
-            ("round_even", Unary::RoundEven),
-            ("round_away", Unary::RoundAway),
-            ("round_up", Unary::RoundUp),
-            ("sign", Unary::Sign),
-            ("is_finite", Unary::IsFinite),
-            ("is_infinite", Unary::IsInfinite),
-            ("is_nan", Unary::IsNan),
-            ("is_integer", Unary::IsInteger),
+            (KernelHelper::H_neg, Unary::Neg),
+            (KernelHelper::H_abs, Unary::Abs),
+            (KernelHelper::H_floor, Unary::Floor),
+            (KernelHelper::H_ceil, Unary::Ceil),
+            (KernelHelper::H_trunc, Unary::Trunc),
+            (KernelHelper::H_round_ueven, Unary::RoundEven),
+            (KernelHelper::H_round_uaway, Unary::RoundAway),
+            (KernelHelper::H_round_uup, Unary::RoundUp),
+            (KernelHelper::H_sign, Unary::Sign),
+            (KernelHelper::H_is_ufinite, Unary::IsFinite),
+            (KernelHelper::H_is_uinfinite, Unary::IsInfinite),
+            (KernelHelper::H_is_unan, Unary::IsNan),
+            (KernelHelper::H_is_uinteger, Unary::IsInteger),
         ] {
             let result = if matches!(
                 op,
@@ -276,7 +278,8 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
                 domain.ty()
             };
             add(
-                &format!("{prefix}{name}"),
+                KernelHelper::from_name(&format!("{prefix}{}", name.name()))
+                    .expect("declared numeric family"),
                 domain,
                 Operation::Unary(op),
                 vec![domain.ty()],
@@ -291,15 +294,16 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         ("float.", Domain::Float),
     ] {
         for (name, op) in [
-            ("eq", Operation::Eq),
-            ("lt", Operation::Lt),
-            ("le", Operation::Le),
-            ("gt", Operation::Gt),
-            ("ge", Operation::Ge),
-            ("compare", Operation::Compare),
+            (KernelHelper::H_eq, Operation::Eq),
+            (KernelHelper::H_lt, Operation::Lt),
+            (KernelHelper::H_le, Operation::Le),
+            (KernelHelper::H_gt, Operation::Gt),
+            (KernelHelper::H_ge, Operation::Ge),
+            (KernelHelper::H_compare, Operation::Compare),
         ] {
             add(
-                &format!("{prefix}{name}"),
+                KernelHelper::from_name(&format!("{prefix}{}", name.name()))
+                    .expect("declared numeric family"),
                 domain,
                 op,
                 vec![domain.ty(); 2],
@@ -312,39 +316,59 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         }
     }
     add(
-        "kind",
+        KernelHelper::H_kind,
         Domain::Any,
         Operation::Kind,
         vec![Type::Any],
         Type::Text,
     );
     add(
-        "same",
+        KernelHelper::H_same,
         Domain::Any,
         Operation::Same,
         vec![Type::Any; 2],
         Type::Bool,
     );
     add(
-        "ref",
+        KernelHelper::H_ref,
         Domain::Any,
         Operation::Ref,
         vec![Type::Any],
         Type::Any,
     );
     for (name, domain, op, result) in [
-        ("int.to_float", Domain::Int, Operation::ToFloat, Type::Float),
-        ("float.to_int", Domain::Float, Operation::ToInt, Type::Int),
         (
-            "num.to_float",
+            KernelHelper::H_int_dto_ufloat,
+            Domain::Int,
+            Operation::ToFloat,
+            Type::Float,
+        ),
+        (
+            KernelHelper::H_float_dto_uint,
+            Domain::Float,
+            Operation::ToInt,
+            Type::Int,
+        ),
+        (
+            KernelHelper::H_num_dto_ufloat,
             Domain::Number,
             Operation::ToFloat,
             Type::Float,
         ),
-        ("num.to_int", Domain::Number, Operation::ToInt, Type::Int),
-        ("num.to_text", Domain::Number, Operation::ToText, Type::Text),
         (
-            "float.to_text",
+            KernelHelper::H_num_dto_uint,
+            Domain::Number,
+            Operation::ToInt,
+            Type::Int,
+        ),
+        (
+            KernelHelper::H_num_dto_utext,
+            Domain::Number,
+            Operation::ToText,
+            Type::Text,
+        ),
+        (
+            KernelHelper::H_float_dto_utext,
             Domain::Float,
             Operation::ToText,
             Type::Text,
@@ -353,62 +377,62 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
         add(name, domain, op, vec![domain.ty()], result);
     }
     add(
-        "int.to_text",
+        KernelHelper::H_int_dto_utext,
         Domain::Any,
         Operation::IntText,
         vec![Type::Int, Type::Int],
         Type::Text,
     );
     add(
-        "int.parse",
+        KernelHelper::H_int_dparse,
         Domain::Any,
         Operation::IntParse,
         vec![Type::Text, Type::Int],
         Type::Int,
     );
     add(
-        "float.parse",
+        KernelHelper::H_float_dparse,
         Domain::Any,
         Operation::FloatParse,
         vec![Type::Text],
         Type::Float,
     );
     for (name, op) in [
-        ("acos", Math::Acos),
-        ("acosh", Math::Acosh),
-        ("asin", Math::Asin),
-        ("asinh", Math::Asinh),
-        ("atan", Math::Atan),
-        ("atanh", Math::Atanh),
-        ("cbrt", Math::Cbrt),
-        ("cos", Math::Cos),
-        ("cosh", Math::Cosh),
-        ("erf", Math::Erf),
-        ("erfc", Math::Erfc),
-        ("exp", Math::Exp),
-        ("exp2", Math::Exp2),
-        ("expm1", Math::Expm1),
-        ("gamma", Math::Gamma),
-        ("lgamma", Math::Lgamma),
-        ("log", Math::Log),
-        ("log2", Math::Log2),
-        ("log10", Math::Log10),
-        ("log1p", Math::Log1p),
-        ("sin", Math::Sin),
-        ("sinh", Math::Sinh),
-        ("sqrt", Math::Sqrt),
-        ("tan", Math::Tan),
-        ("tanh", Math::Tanh),
-        ("atan2", Math::Atan2),
-        ("hypot", Math::Hypot),
-        ("copysign", Math::CopySign),
-        ("nextafter", Math::NextAfter),
-        ("remainder", Math::Remainder),
-        ("pow", Math::Pow),
-        ("fma", Math::Fma),
+        (KernelHelper::H_math_dacos, Math::Acos),
+        (KernelHelper::H_math_dacosh, Math::Acosh),
+        (KernelHelper::H_math_dasin, Math::Asin),
+        (KernelHelper::H_math_dasinh, Math::Asinh),
+        (KernelHelper::H_math_datan, Math::Atan),
+        (KernelHelper::H_math_datanh, Math::Atanh),
+        (KernelHelper::H_math_dcbrt, Math::Cbrt),
+        (KernelHelper::H_math_dcos, Math::Cos),
+        (KernelHelper::H_math_dcosh, Math::Cosh),
+        (KernelHelper::H_math_derf, Math::Erf),
+        (KernelHelper::H_math_derfc, Math::Erfc),
+        (KernelHelper::H_math_dexp, Math::Exp),
+        (KernelHelper::H_math_dexp2, Math::Exp2),
+        (KernelHelper::H_math_dexpm1, Math::Expm1),
+        (KernelHelper::H_math_dgamma, Math::Gamma),
+        (KernelHelper::H_math_dlgamma, Math::Lgamma),
+        (KernelHelper::H_math_dlog, Math::Log),
+        (KernelHelper::H_math_dlog2, Math::Log2),
+        (KernelHelper::H_math_dlog10, Math::Log10),
+        (KernelHelper::H_math_dlog1p, Math::Log1p),
+        (KernelHelper::H_math_dsin, Math::Sin),
+        (KernelHelper::H_math_dsinh, Math::Sinh),
+        (KernelHelper::H_math_dsqrt, Math::Sqrt),
+        (KernelHelper::H_math_dtan, Math::Tan),
+        (KernelHelper::H_math_dtanh, Math::Tanh),
+        (KernelHelper::H_math_datan2, Math::Atan2),
+        (KernelHelper::H_math_dhypot, Math::Hypot),
+        (KernelHelper::H_math_dcopysign, Math::CopySign),
+        (KernelHelper::H_math_dnextafter, Math::NextAfter),
+        (KernelHelper::H_math_dremainder, Math::Remainder),
+        (KernelHelper::H_math_dpow, Math::Pow),
+        (KernelHelper::H_math_dfma, Math::Fma),
     ] {
         add(
-            &format!("math.{name}"),
+            name,
             Domain::Number,
             Operation::Math(op),
             vec![Type::Number; op.arity()],

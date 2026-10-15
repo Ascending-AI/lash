@@ -2183,6 +2183,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-helper-labels"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+]
+
+[[package]]
 name = "lash-internal-conformance"
 version = "0.0.0-dev"
 dependencies = [
@@ -2869,6 +2876,7 @@ dependencies = [
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
+ "lash-helper-labels",
  "lash-internal-core-store",
  "lash-kernel-dialect",
  "lash-kernel-doc",

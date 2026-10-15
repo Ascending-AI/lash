@@ -220,6 +220,13 @@ PACKAGE_DEPS = {
             "tokio_util": "//third-party/rust:p0388"
         }
     },
+    "lash-helper-labels": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc"
+        }
+    },
     "lash-internal-conformance": {
         "build": {},
         "dev": {
@@ -983,6 +990,7 @@ PACKAGE_DEPS = {
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
@@ -993,6 +1001,10 @@ PACKAGE_DEPS = {
         },
         "dev": {
             "blake3": "//third-party/rust:p0032",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {

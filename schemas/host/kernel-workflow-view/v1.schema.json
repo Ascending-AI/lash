@@ -482,7 +482,19 @@
           "additionalProperties": false,
           "properties": {
             "library": {
-              "$ref": "#/$defs/QualifiedName"
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
             }
           },
           "required": [

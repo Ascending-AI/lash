@@ -86,7 +86,7 @@ const PINNED_VIEW: &str = r#"dataflow:
   actions:
     {"args":[{"atom":{"variable":"to"},"binding":0,"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"callee":{"effect":"mail.send"},"kind":"perform","result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
     {"args":[{"atom":{"variable":"line"},"binding":2,"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"callee":{"effect":"log.write"},"kind":"perform","result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":"text.pad"},"kind":"call","result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":{"id":"c4d9bb90b9e1114bd9196a9014d9723a58d66becb5cbd9c5c60f5426e58fab63","name":"text.pad"}},"kind":"call","result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
     {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"call","result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
     {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"spawn","result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
     {"args":[{"atom":{"literal":{"int":"10"}},"name":"duration","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"kind":"sleep","result_type":"any","site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
@@ -189,7 +189,7 @@ fn the_view_of_a_branch_a_loop_a_try_and_two_effects_is_pinned() {
     );
     assert_eq!(
         wire["dataflow"]["actions"][2]["callee"],
-        serde_json::json!({"library": "text.pad"})
+        serde_json::json!({"library": {"id": function, "name": "text.pad"}})
     );
     assert_eq!(wire["dataflow"]["actions"][2]["args"][0]["name"], "items");
     assert_eq!(wire["dataflow"]["actions"][2]["args"][1]["name"], "count");

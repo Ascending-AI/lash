@@ -1,0 +1,307 @@
+abs	abs
+add	add
+bool.not	bool not
+bytes.compare	bytes compare
+bytes.concat	bytes concat
+bytes.from_octets	bytes from octets
+bytes.slice	bytes slice
+bytes.utf8_decode	bytes utf8 decode
+bytes.utf8_encode	bytes utf8 encode
+ceil	ceil
+collection.all	collection all
+collection.any	collection any
+collection.enumerate	collection enumerate
+collection.filter	collection filter
+collection.find	collection find
+collection.for_each	collection for each
+collection.function_check	collection function check
+collection.group_by	collection group by
+collection.holds_none	collection holds none
+collection.int_check	collection int check
+collection.map	collection map
+collection.range	collection range
+collection.reduce	collection reduce
+collection.sum	collection sum
+collection.unordered	collection unordered
+collection.zero_step	collection zero step
+collection.zip	collection zip
+compare	compare
+deref	deref
+div	div
+div_floor	div floor
+div_trunc	div trunc
+eq	eq
+error.new	error new
+float.abs	float abs
+float.add	float add
+float.ceil	float ceil
+float.compare	float compare
+float.div	float div
+float.div_floor	float div floor
+float.div_trunc	float div trunc
+float.eq	float eq
+float.floor	float floor
+float.ge	float ge
+float.gt	float gt
+float.is_finite	float is finite
+float.is_infinite	float is infinite
+float.is_integer	float is integer
+float.is_nan	float is nan
+float.le	float le
+float.lt	float lt
+float.max	float max
+float.min	float min
+float.mul	float mul
+float.neg	float neg
+float.parse	float parse
+float.pow	float pow
+float.rem_floor	float rem floor
+float.rem_trunc	float rem trunc
+float.round_away	float round away
+float.round_even	float round even
+float.round_up	float round up
+float.sign	float sign
+float.sub	float sub
+float.to_int	float to int
+float.to_text	float to text
+float.trunc	float trunc
+floor	floor
+format.decimal_parts	format decimal parts
+format.fixed	format fixed
+format.pad	format pad
+format.radix	format radix
+format.scientific	format scientific
+ge	ge
+gt	gt
+int.abs	int abs
+int.add	int add
+int.ceil	int ceil
+int.compare	int compare
+int.div	int div
+int.div_floor	int div floor
+int.div_trunc	int div trunc
+int.eq	int eq
+int.floor	int floor
+int.ge	int ge
+int.gt	int gt
+int.is_finite	int is finite
+int.is_infinite	int is infinite
+int.is_integer	int is integer
+int.is_nan	int is nan
+int.le	int le
+int.lt	int lt
+int.max	int max
+int.min	int min
+int.mul	int mul
+int.neg	int neg
+int.parse	int parse
+int.pow	int pow
+int.rem_floor	int rem floor
+int.rem_trunc	int rem trunc
+int.round_away	int round away
+int.round_even	int round even
+int.round_up	int round up
+int.sign	int sign
+int.sub	int sub
+int.to_float	int to float
+int.to_text	int to text
+int.trunc	int trunc
+is_finite	is finite
+is_infinite	is infinite
+is_integer	is integer
+is_nan	is nan
+json.classify	json classify
+json.parse	json parse
+json.render	json render
+json.stringify	json stringify
+key.identity	key identity
+kind	kind
+le	le
+list.at	list at
+list.check	list check
+list.clear	list clear
+list.concat	list concat
+list.contains	list contains
+list.copy	list copy
+list.copy_deep	list copy deep
+list.entries	list entries
+list.get	list get
+list.get_or	list get or
+list.index_of	list index of
+list.index_of_range	list index of range
+list.insert	list insert
+list.insert_index	list insert index
+list.keys	list keys
+list.len	list len
+list.pop	list pop
+list.push	list push
+list.remove	list remove
+list.set	list set
+list.slice	list slice
+list.sort	list sort
+list.values	list values
+lt	lt
+map.check	map check
+map.clear	map clear
+map.contains	map contains
+map.copy	map copy
+map.copy_deep	map copy deep
+map.entries	map entries
+map.get	map get
+map.insert	map insert
+map.keys	map keys
+map.len	map len
+map.remove	map remove
+map.set	map set
+map.values	map values
+math.acos	math acos
+math.acosh	math acosh
+math.asin	math asin
+math.asinh	math asinh
+math.atan	math atan
+math.atan2	math atan2
+math.atanh	math atanh
+math.cbrt	math cbrt
+math.copysign	math copysign
+math.cos	math cos
+math.cosh	math cosh
+math.erf	math erf
+math.erfc	math erfc
+math.exp	math exp
+math.exp2	math exp2
+math.expm1	math expm1
+math.fma	math fma
+math.gamma	math gamma
+math.hypot	math hypot
+math.lgamma	math lgamma
+math.log	math log
+math.log10	math log10
+math.log1p	math log1p
+math.log2	math log2
+math.nextafter	math nextafter
+math.pow	math pow
+math.remainder	math remainder
+math.sin	math sin
+math.sinh	math sinh
+math.sqrt	math sqrt
+math.tan	math tan
+math.tanh	math tanh
+max	max
+min	min
+mul	mul
+neg	neg
+num.abs	num abs
+num.add	num add
+num.ceil	num ceil
+num.compare	num compare
+num.div	num div
+num.div_floor	num div floor
+num.div_trunc	num div trunc
+num.eq	num eq
+num.floor	num floor
+num.ge	num ge
+num.gt	num gt
+num.is_finite	num is finite
+num.is_infinite	num is infinite
+num.is_integer	num is integer
+num.is_nan	num is nan
+num.le	num le
+num.lt	num lt
+num.max	num max
+num.min	num min
+num.mul	num mul
+num.neg	num neg
+num.pow	num pow
+num.rem_floor	num rem floor
+num.rem_trunc	num rem trunc
+num.round_away	num round away
+num.round_even	num round even
+num.round_up	num round up
+num.sign	num sign
+num.sub	num sub
+num.to_float	num to float
+num.to_int	num to int
+num.to_text	num to text
+num.trunc	num trunc
+pow	pow
+record.check	record check
+record.clear	record clear
+record.contains	record contains
+record.copy	record copy
+record.copy_deep	record copy deep
+record.entries	record entries
+record.get	record get
+record.keys	record keys
+record.len	record len
+record.remove	record remove
+record.set	record set
+record.values	record values
+record.with	record with
+record.without	record without
+ref	ref
+rem_floor	rem floor
+rem_trunc	rem trunc
+round_away	round away
+round_even	round even
+round_up	round up
+same	same
+set.check	set check
+set.clear	set clear
+set.contains	set contains
+set.copy	set copy
+set.copy_deep	set copy deep
+set.entries	set entries
+set.insert	set insert
+set.keys	set keys
+set.len	set len
+set.remove	set remove
+set.values	set values
+sign	sign
+sub	sub
+tasks.cancel_all	tasks cancel all
+tasks.unfinished	tasks unfinished
+tasks.wait_all	tasks wait all
+text.compare	text compare
+text.concat	text concat
+text.ends_with	text ends with
+text.find	text find
+text.from_code_points	text from code points
+text.from_utf16_units	text from utf16 units
+text.get	text get
+text.join	text join
+text.join_or_index	text join or index
+text.len	text len
+text.lower_u17_0_0	text lower u17 0 0
+text.normalize_u17_0_0	text normalize u17 0 0
+text.pad_end	text pad end
+text.pad_start	text pad start
+text.repeat	text repeat
+text.replace	text replace
+text.slice	text slice
+text.split	text split
+text.starts_with	text starts with
+text.to_code_points	text to code points
+text.to_utf16_units	text to utf16 units
+text.trim_end_u17_0_0	text trim end u17 0 0
+text.trim_set	text trim set
+text.trim_start_u17_0_0	text trim start u17 0 0
+text.trim_u17_0_0	text trim u17 0 0
+text.upper_u17_0_0	text upper u17 0 0
+text.utf16_compare	text utf16 compare
+text.utf16_find	text utf16 find
+text.utf16_get	text utf16 get
+text.utf16_len	text utf16 len
+text.utf16_slice	text utf16 slice
+trunc	trunc
+tuple.at	tuple at
+tuple.concat	tuple concat
+tuple.contains	tuple contains
+tuple.copy	tuple copy
+tuple.copy_deep	tuple copy deep
+tuple.entries	tuple entries
+tuple.get	tuple get
+tuple.index_of	tuple index of
+tuple.keys	tuple keys
+tuple.len	tuple len
+tuple.slice	tuple slice
+tuple.values	tuple values

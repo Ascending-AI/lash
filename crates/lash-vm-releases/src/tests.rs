@@ -745,3 +745,106 @@ fn native_corpus_heap_obeys_kernel_key_equality() {
     let boundary = heap.object(Object::Set(vec![integer(i64::MAX)]));
     assert!(!heap.set_contains(boundary, &float(i64::MAX as f64)));
 }
+
+/// Records the kernel's closed names from the actual registry for review.
+#[test]
+#[ignore = "explicit kernel catalog recorder"]
+#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
+fn record_kernel_helper_catalog() {
+    let root =
+        std::path::PathBuf::from(std::env::var("BUILD_WORKSPACE_DIRECTORY").expect("workspace"));
+    std::fs::write(
+        root.join("crates/lash-kernel-lib/src/helpers.rs"),
+        include_str!(concat!(env!("OUT_DIR"), "/kernel_helpers.rs")),
+    )
+    .unwrap();
+}
+
+/// HELP-SET / HELP-LABEL: release writes have the closed variants and one label.
+#[test]
+#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
+fn helper_sets_and_labels_cover_every_release_write_set() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let labels = lash_helper_labels::labels().unwrap();
+    let kernel_names: BTreeSet<_> = lash_kernel_lib::KernelHelper::ALL
+        .iter()
+        .map(|helper| helper.name())
+        .collect();
+    assert_eq!(kernel_names.len(), lash_kernel_lib::KernelHelper::ALL.len());
+    let families: BTreeSet<_> = kernel_names
+        .iter()
+        .map(|name| name.split_once('.').map_or("", |(family, _)| family))
+        .collect();
+    assert_eq!(
+        families,
+        lash_kernel_lib::KERNEL_NAME_FAMILIES
+            .iter()
+            .copied()
+            .collect()
+    );
+    let mut installed = BTreeMap::new();
+    for dialect in DIALECTS {
+        let held = dialect.held_releases().unwrap();
+        let mut expected: BTreeSet<_> = lash_kernel_lib::KernelHelper::ALL
+            .iter()
+            .map(|h| h.name())
+            .collect();
+        match dialect.dialect {
+            #[cfg(feature = "dialect-typescript")]
+            TYPESCRIPT => {
+                for helper in TypeScriptHelper::ALL {
+                    assert!(expected.insert(helper.name()));
+                }
+                for op in lash_ext_regex_ecma::Operation::ALL {
+                    assert!(expected.insert(op.name()));
+                }
+                for op in lash_ext_date_ecma::Operation::ALL {
+                    assert!(expected.insert(op.name()));
+                }
+                for op in lash_ext_url_whatwg::Operation::ALL {
+                    assert!(expected.insert(op.name()));
+                }
+            }
+            #[cfg(feature = "dialect-python")]
+            PYTHON => {
+                for helper in PythonHelper::ALL {
+                    assert!(expected.insert(helper.name()));
+                }
+            }
+            other => panic!("undeclared dialect {other}"),
+        }
+        for release in &held.retained {
+            let mut names = BTreeSet::new();
+            for id in &release.writes {
+                let f = release
+                    .functions
+                    .iter()
+                    .find(|f| &f.function == id)
+                    .unwrap();
+                let name = &f.definition.name;
+                assert!(names.insert(name.as_str()), "duplicate write name {name}");
+                assert!(
+                    !labels
+                        .get(name)
+                        .unwrap_or_else(|| panic!("unlabelled {name}"))
+                        .title
+                        .trim()
+                        .is_empty()
+                );
+                let key = (release.ordinal, name.clone());
+                if let Some(other) = installed.insert(key, *id) {
+                    assert_eq!(other, *id, "installed sets disagree on {name}");
+                }
+            }
+            // Retained versions may write older sets; the current definitions
+            // must be in bijection with the current generated variants.
+            if release.ordinal == held.retained.last().unwrap().ordinal {
+                assert_eq!(names, expected);
+            }
+        }
+    }
+    assert!(
+        !DIALECTS.is_empty(),
+        "the write-set law needs installed releases"
+    );
+}

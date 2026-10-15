@@ -376,6 +376,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-helper-labels:lash-helper-labels__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-http-transport:lash-http-transport__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-check:lash-kernel-check__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test": {"cpu_count": 2, "memory_kb": 524288},

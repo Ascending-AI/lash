@@ -1,0 +1,873 @@
+ts.add	TypeScript add
+ts.arguments	TypeScript arguments
+ts.array.argument	TypeScript array argument
+ts.array.at	TypeScript array at
+ts.array.bound	TypeScript array bound
+ts.array.callback	TypeScript array callback
+ts.array.concat	TypeScript array concat
+ts.array.construct	TypeScript array construct
+ts.array.copyWithin	TypeScript array copyWithin
+ts.array.dense	TypeScript array dense
+ts.array.entries	TypeScript array entries
+ts.array.every	TypeScript array every
+ts.array.fill	TypeScript array fill
+ts.array.filter	TypeScript array filter
+ts.array.find	TypeScript array find
+ts.array.findIndex	TypeScript array findIndex
+ts.array.findLast	TypeScript array findLast
+ts.array.findLastIndex	TypeScript array findLastIndex
+ts.array.flat	TypeScript array flat
+ts.array.flatMap	TypeScript array flatMap
+ts.array.flatten	TypeScript array flatten
+ts.array.forEach	TypeScript array forEach
+ts.array.from	TypeScript array from
+ts.array.generic_includes	TypeScript array generic includes
+ts.array.generic_indexOf	TypeScript array generic indexOf
+ts.array.generic_join	TypeScript array generic join
+ts.array.generic_lastIndexOf	TypeScript array generic lastIndexOf
+ts.array.includes	TypeScript array includes
+ts.array.indexOf	TypeScript array indexOf
+ts.array.integer	TypeScript array integer
+ts.array.is	TypeScript array is
+ts.array.is_array	TypeScript array is array
+ts.array.iterator	TypeScript array iterator
+ts.array.join	TypeScript array join
+ts.array.keys	TypeScript array keys
+ts.array.lastIndexOf	TypeScript array lastIndexOf
+ts.array.length	TypeScript array length
+ts.array.length_property	TypeScript array length property
+ts.array.map	TypeScript array map
+ts.array.match_length	TypeScript array match length
+ts.array.of	TypeScript array of
+ts.array.pop	TypeScript array pop
+ts.array.primitive	TypeScript array primitive
+ts.array.push	TypeScript array push
+ts.array.reduce	TypeScript array reduce
+ts.array.reduceRight	TypeScript array reduceRight
+ts.array.remove	TypeScript array remove
+ts.array.reusable_callback	TypeScript array reusable callback
+ts.array.reverse	TypeScript array reverse
+ts.array.search	TypeScript array search
+ts.array.searchable	TypeScript array searchable
+ts.array.set	TypeScript array set
+ts.array.shift	TypeScript array shift
+ts.array.slice	TypeScript array slice
+ts.array.slice_generic	TypeScript array slice generic
+ts.array.some	TypeScript array some
+ts.array.sort	TypeScript array sort
+ts.array.splice	TypeScript array splice
+ts.array.spread	TypeScript array spread
+ts.array.toLocaleString	TypeScript array toLocaleString
+ts.array.toReversed	TypeScript array toReversed
+ts.array.toSorted	TypeScript array toSorted
+ts.array.toSpliced	TypeScript array toSpliced
+ts.array.toString	TypeScript array toString
+ts.array.unshift	TypeScript array unshift
+ts.array.valueOf	TypeScript array valueOf
+ts.array.values	TypeScript array values
+ts.array.with	TypeScript array with
+ts.assign	TypeScript assign
+ts.await	TypeScript await
+ts.bit_and	TypeScript bit and
+ts.bit_not	TypeScript bit not
+ts.bit_or	TypeScript bit or
+ts.bit_xor	TypeScript bit xor
+ts.bitwise32	TypeScript bitwise32
+ts.boolean.convert	TypeScript boolean convert
+ts.boolean.toString	TypeScript boolean toString
+ts.boolean.valueOf	TypeScript boolean valueOf
+ts.boundary	TypeScript boundary
+ts.call_computed	TypeScript call computed
+ts.call_member	TypeScript call member
+ts.call_value	TypeScript call value
+ts.callable	TypeScript callable
+ts.console.json	TypeScript console json
+ts.console.log	TypeScript console log
+ts.date.UTC	TypeScript date UTC
+ts.date.call	TypeScript date call
+ts.date.construct	TypeScript date construct
+ts.date.day_from_year	TypeScript date day from year
+ts.date.getDate	TypeScript date getDate
+ts.date.getDay	TypeScript date getDay
+ts.date.getFullYear	TypeScript date getFullYear
+ts.date.getHours	TypeScript date getHours
+ts.date.getMilliseconds	TypeScript date getMilliseconds
+ts.date.getMinutes	TypeScript date getMinutes
+ts.date.getMonth	TypeScript date getMonth
+ts.date.getSeconds	TypeScript date getSeconds
+ts.date.getTime	TypeScript date getTime
+ts.date.getUTCDate	TypeScript date getUTCDate
+ts.date.getUTCDay	TypeScript date getUTCDay
+ts.date.getUTCFullYear	TypeScript date getUTCFullYear
+ts.date.getUTCHours	TypeScript date getUTCHours
+ts.date.getUTCMilliseconds	TypeScript date getUTCMilliseconds
+ts.date.getUTCMinutes	TypeScript date getUTCMinutes
+ts.date.getUTCMonth	TypeScript date getUTCMonth
+ts.date.getUTCSeconds	TypeScript date getUTCSeconds
+ts.date.is	TypeScript date is
+ts.date.local_unsupported	TypeScript date local unsupported
+ts.date.now	TypeScript date now
+ts.date.parse	TypeScript date parse
+ts.date.parts	TypeScript date parts
+ts.date.require	TypeScript date require
+ts.date.setDate	TypeScript date setDate
+ts.date.setFullYear	TypeScript date setFullYear
+ts.date.setHours	TypeScript date setHours
+ts.date.setMilliseconds	TypeScript date setMilliseconds
+ts.date.setMinutes	TypeScript date setMinutes
+ts.date.setMonth	TypeScript date setMonth
+ts.date.setSeconds	TypeScript date setSeconds
+ts.date.setTime	TypeScript date setTime
+ts.date.setUTCDate	TypeScript date setUTCDate
+ts.date.setUTCFullYear	TypeScript date setUTCFullYear
+ts.date.setUTCHours	TypeScript date setUTCHours
+ts.date.setUTCMilliseconds	TypeScript date setUTCMilliseconds
+ts.date.setUTCMinutes	TypeScript date setUTCMinutes
+ts.date.setUTCMonth	TypeScript date setUTCMonth
+ts.date.setUTCSeconds	TypeScript date setUTCSeconds
+ts.date.toISOString	TypeScript date toISOString
+ts.date.toJSON	TypeScript date toJSON
+ts.date.toString	TypeScript date toString
+ts.date.toUTCString	TypeScript date toUTCString
+ts.date.utc	TypeScript date utc
+ts.date.valueOf	TypeScript date valueOf
+ts.delete	TypeScript delete
+ts.div	TypeScript div
+ts.error.construct	TypeScript error construct
+ts.error.is_AggregateError	TypeScript error is AggregateError
+ts.error.is_Error	TypeScript error is Error
+ts.error.is_EvalError	TypeScript error is EvalError
+ts.error.is_RangeError	TypeScript error is RangeError
+ts.error.is_ReferenceError	TypeScript error is ReferenceError
+ts.error.is_SyntaxError	TypeScript error is SyntaxError
+ts.error.is_TypeError	TypeScript error is TypeError
+ts.error.is_URIError	TypeScript error is URIError
+ts.error.name	TypeScript error name
+ts.error.new_AggregateError	TypeScript error new AggregateError
+ts.error.new_Error	TypeScript error new Error
+ts.error.new_EvalError	TypeScript error new EvalError
+ts.error.new_RangeError	TypeScript error new RangeError
+ts.error.new_ReferenceError	TypeScript error new ReferenceError
+ts.error.new_SyntaxError	TypeScript error new SyntaxError
+ts.error.new_TypeError	TypeScript error new TypeError
+ts.error.new_URIError	TypeScript error new URIError
+ts.error.toString	TypeScript error toString
+ts.exotic.error_name	TypeScript exotic error name
+ts.exotic.get	TypeScript exotic get
+ts.exotic.iterate	TypeScript exotic iterate
+ts.exotic.set	TypeScript exotic set
+ts.exotic.to_primitive	TypeScript exotic to primitive
+ts.function.apply	TypeScript function apply
+ts.function.bind	TypeScript function bind
+ts.function.call	TypeScript function call
+ts.function.eval	TypeScript function eval
+ts.function.toString	TypeScript function toString
+ts.function_from_text	TypeScript function from text
+ts.ge	TypeScript ge
+ts.get	TypeScript get
+ts.get_computed	TypeScript get computed
+ts.gt	TypeScript gt
+ts.has	TypeScript has
+ts.has_own	TypeScript has own
+ts.hole_value	TypeScript hole value
+ts.identity	TypeScript identity
+ts.in	TypeScript in
+ts.is_nullish	TypeScript is nullish
+ts.is_primitive	TypeScript is primitive
+ts.iterate	TypeScript iterate
+ts.json.parse	TypeScript json parse
+ts.json.plain	TypeScript json plain
+ts.json.stringify	TypeScript json stringify
+ts.json.stringify_generic	TypeScript json stringify generic
+ts.keys	TypeScript keys
+ts.le	TypeScript le
+ts.list_index	TypeScript list index
+ts.loose_equals	TypeScript loose equals
+ts.loose_not_equals	TypeScript loose not equals
+ts.lt	TypeScript lt
+ts.map.call	TypeScript map call
+ts.map.clear	TypeScript map clear
+ts.map.construct	TypeScript map construct
+ts.map.delete	TypeScript map delete
+ts.map.entries	TypeScript map entries
+ts.map.forEach	TypeScript map forEach
+ts.map.get	TypeScript map get
+ts.map.groupBy	TypeScript map groupBy
+ts.map.has	TypeScript map has
+ts.map.is	TypeScript map is
+ts.map.key	TypeScript map key
+ts.map.keys	TypeScript map keys
+ts.map.set	TypeScript map set
+ts.map.size	TypeScript map size
+ts.map.value	TypeScript map value
+ts.map.values	TypeScript map values
+ts.math.E	TypeScript math E
+ts.math.LN10	TypeScript math LN10
+ts.math.LN2	TypeScript math LN2
+ts.math.LOG10E	TypeScript math LOG10E
+ts.math.LOG2E	TypeScript math LOG2E
+ts.math.PI	TypeScript math PI
+ts.math.SQRT1_2	TypeScript math SQRT1 2
+ts.math.SQRT2	TypeScript math SQRT2
+ts.math.abs	TypeScript math abs
+ts.math.acos	TypeScript math acos
+ts.math.acosh	TypeScript math acosh
+ts.math.asin	TypeScript math asin
+ts.math.asinh	TypeScript math asinh
+ts.math.atan	TypeScript math atan
+ts.math.atan2	TypeScript math atan2
+ts.math.atanh	TypeScript math atanh
+ts.math.cbrt	TypeScript math cbrt
+ts.math.ceil	TypeScript math ceil
+ts.math.clz32	TypeScript math clz32
+ts.math.cos	TypeScript math cos
+ts.math.cosh	TypeScript math cosh
+ts.math.exp	TypeScript math exp
+ts.math.expm1	TypeScript math expm1
+ts.math.floor	TypeScript math floor
+ts.math.fround	TypeScript math fround
+ts.math.hypot	TypeScript math hypot
+ts.math.imul	TypeScript math imul
+ts.math.log	TypeScript math log
+ts.math.log10	TypeScript math log10
+ts.math.log1p	TypeScript math log1p
+ts.math.log2	TypeScript math log2
+ts.math.max	TypeScript math max
+ts.math.min	TypeScript math min
+ts.math.pow	TypeScript math pow
+ts.math.random	TypeScript math random
+ts.math.round	TypeScript math round
+ts.math.sign	TypeScript math sign
+ts.math.sin	TypeScript math sin
+ts.math.sinh	TypeScript math sinh
+ts.math.sqrt	TypeScript math sqrt
+ts.math.tan	TypeScript math tan
+ts.math.tanh	TypeScript math tanh
+ts.math.trunc	TypeScript math trunc
+ts.member.E	TypeScript member E
+ts.member.EPSILON	TypeScript member EPSILON
+ts.member.LN10	TypeScript member LN10
+ts.member.LN2	TypeScript member LN2
+ts.member.LOG10E	TypeScript member LOG10E
+ts.member.LOG2E	TypeScript member LOG2E
+ts.member.MAX_SAFE_INTEGER	TypeScript member MAX SAFE INTEGER
+ts.member.MAX_VALUE	TypeScript member MAX VALUE
+ts.member.MIN_SAFE_INTEGER	TypeScript member MIN SAFE INTEGER
+ts.member.MIN_VALUE	TypeScript member MIN VALUE
+ts.member.NEGATIVE_INFINITY	TypeScript member NEGATIVE INFINITY
+ts.member.NaN	TypeScript member NaN
+ts.member.PI	TypeScript member PI
+ts.member.POSITIVE_INFINITY	TypeScript member POSITIVE INFINITY
+ts.member.SQRT1_2	TypeScript member SQRT1 2
+ts.member.SQRT2	TypeScript member SQRT2
+ts.member.UTC	TypeScript member UTC
+ts.member.abs	TypeScript member abs
+ts.member.acos	TypeScript member acos
+ts.member.acosh	TypeScript member acosh
+ts.member.add	TypeScript member add
+ts.member.all	TypeScript member all
+ts.member.allSettled	TypeScript member allSettled
+ts.member.any	TypeScript member any
+ts.member.append	TypeScript member append
+ts.member.apply	TypeScript member apply
+ts.member.asin	TypeScript member asin
+ts.member.asinh	TypeScript member asinh
+ts.member.assign	TypeScript member assign
+ts.member.at	TypeScript member at
+ts.member.atan	TypeScript member atan
+ts.member.atan2	TypeScript member atan2
+ts.member.atanh	TypeScript member atanh
+ts.member.bind	TypeScript member bind
+ts.member.call	TypeScript member call
+ts.member.canParse	TypeScript member canParse
+ts.member.catch	TypeScript member catch
+ts.member.cbrt	TypeScript member cbrt
+ts.member.ceil	TypeScript member ceil
+ts.member.charAt	TypeScript member charAt
+ts.member.charCodeAt	TypeScript member charCodeAt
+ts.member.clear	TypeScript member clear
+ts.member.clz32	TypeScript member clz32
+ts.member.codePointAt	TypeScript member codePointAt
+ts.member.concat	TypeScript member concat
+ts.member.constructor	TypeScript member constructor
+ts.member.copyWithin	TypeScript member copyWithin
+ts.member.cos	TypeScript member cos
+ts.member.cosh	TypeScript member cosh
+ts.member.create	TypeScript member create
+ts.member.debug	TypeScript member debug
+ts.member.defineProperties	TypeScript member defineProperties
+ts.member.defineProperty	TypeScript member defineProperty
+ts.member.delete	TypeScript member delete
+ts.member.difference	TypeScript member difference
+ts.member.endsWith	TypeScript member endsWith
+ts.member.entries	TypeScript member entries
+ts.member.error	TypeScript member error
+ts.member.every	TypeScript member every
+ts.member.exec	TypeScript member exec
+ts.member.exp	TypeScript member exp
+ts.member.expm1	TypeScript member expm1
+ts.member.fill	TypeScript member fill
+ts.member.filter	TypeScript member filter
+ts.member.finally	TypeScript member finally
+ts.member.find	TypeScript member find
+ts.member.findIndex	TypeScript member findIndex
+ts.member.findLast	TypeScript member findLast
+ts.member.findLastIndex	TypeScript member findLastIndex
+ts.member.flat	TypeScript member flat
+ts.member.flatMap	TypeScript member flatMap
+ts.member.floor	TypeScript member floor
+ts.member.forEach	TypeScript member forEach
+ts.member.freeze	TypeScript member freeze
+ts.member.from	TypeScript member from
+ts.member.fromCharCode	TypeScript member fromCharCode
+ts.member.fromCodePoint	TypeScript member fromCodePoint
+ts.member.fromEntries	TypeScript member fromEntries
+ts.member.fround	TypeScript member fround
+ts.member.get	TypeScript member get
+ts.member.getAll	TypeScript member getAll
+ts.member.getDate	TypeScript member getDate
+ts.member.getDay	TypeScript member getDay
+ts.member.getFullYear	TypeScript member getFullYear
+ts.member.getHours	TypeScript member getHours
+ts.member.getMilliseconds	TypeScript member getMilliseconds
+ts.member.getMinutes	TypeScript member getMinutes
+ts.member.getMonth	TypeScript member getMonth
+ts.member.getOwnPropertyDescriptor	TypeScript member getOwnPropertyDescriptor
+ts.member.getOwnPropertyDescriptors	TypeScript member getOwnPropertyDescriptors
+ts.member.getOwnPropertyNames	TypeScript member getOwnPropertyNames
+ts.member.getOwnPropertySymbols	TypeScript member getOwnPropertySymbols
+ts.member.getPrototypeOf	TypeScript member getPrototypeOf
+ts.member.getSeconds	TypeScript member getSeconds
+ts.member.getTime	TypeScript member getTime
+ts.member.getTimezoneOffset	TypeScript member getTimezoneOffset
+ts.member.getUTCDate	TypeScript member getUTCDate
+ts.member.getUTCDay	TypeScript member getUTCDay
+ts.member.getUTCFullYear	TypeScript member getUTCFullYear
+ts.member.getUTCHours	TypeScript member getUTCHours
+ts.member.getUTCMilliseconds	TypeScript member getUTCMilliseconds
+ts.member.getUTCMinutes	TypeScript member getUTCMinutes
+ts.member.getUTCMonth	TypeScript member getUTCMonth
+ts.member.getUTCSeconds	TypeScript member getUTCSeconds
+ts.member.groupBy	TypeScript member groupBy
+ts.member.has	TypeScript member has
+ts.member.hasOwn	TypeScript member hasOwn
+ts.member.hasOwnProperty	TypeScript member hasOwnProperty
+ts.member.hypot	TypeScript member hypot
+ts.member.imul	TypeScript member imul
+ts.member.includes	TypeScript member includes
+ts.member.indexOf	TypeScript member indexOf
+ts.member.info	TypeScript member info
+ts.member.intersection	TypeScript member intersection
+ts.member.is	TypeScript member is
+ts.member.isArray	TypeScript member isArray
+ts.member.isDisjointFrom	TypeScript member isDisjointFrom
+ts.member.isExtensible	TypeScript member isExtensible
+ts.member.isFinite	TypeScript member isFinite
+ts.member.isFrozen	TypeScript member isFrozen
+ts.member.isInteger	TypeScript member isInteger
+ts.member.isNaN	TypeScript member isNaN
+ts.member.isPrototypeOf	TypeScript member isPrototypeOf
+ts.member.isSafeInteger	TypeScript member isSafeInteger
+ts.member.isSealed	TypeScript member isSealed
+ts.member.isSubsetOf	TypeScript member isSubsetOf
+ts.member.isSupersetOf	TypeScript member isSupersetOf
+ts.member.join	TypeScript member join
+ts.member.keys	TypeScript member keys
+ts.member.lastIndexOf	TypeScript member lastIndexOf
+ts.member.length	TypeScript member length
+ts.member.localeCompare	TypeScript member localeCompare
+ts.member.log	TypeScript member log
+ts.member.log10	TypeScript member log10
+ts.member.log1p	TypeScript member log1p
+ts.member.log2	TypeScript member log2
+ts.member.map	TypeScript member map
+ts.member.match	TypeScript member match
+ts.member.matchAll	TypeScript member matchAll
+ts.member.max	TypeScript member max
+ts.member.message	TypeScript member message
+ts.member.min	TypeScript member min
+ts.member.name	TypeScript member name
+ts.member.normalize	TypeScript member normalize
+ts.member.now	TypeScript member now
+ts.member.of	TypeScript member of
+ts.member.padEnd	TypeScript member padEnd
+ts.member.padStart	TypeScript member padStart
+ts.member.parse	TypeScript member parse
+ts.member.parseFloat	TypeScript member parseFloat
+ts.member.parseInt	TypeScript member parseInt
+ts.member.pop	TypeScript member pop
+ts.member.pow	TypeScript member pow
+ts.member.preventExtensions	TypeScript member preventExtensions
+ts.member.propertyIsEnumerable	TypeScript member propertyIsEnumerable
+ts.member.prototype	TypeScript member prototype
+ts.member.push	TypeScript member push
+ts.member.race	TypeScript member race
+ts.member.random	TypeScript member random
+ts.member.raw	TypeScript member raw
+ts.member.reduce	TypeScript member reduce
+ts.member.reduceRight	TypeScript member reduceRight
+ts.member.reject	TypeScript member reject
+ts.member.repeat	TypeScript member repeat
+ts.member.replace	TypeScript member replace
+ts.member.replaceAll	TypeScript member replaceAll
+ts.member.resolve	TypeScript member resolve
+ts.member.reverse	TypeScript member reverse
+ts.member.round	TypeScript member round
+ts.member.seal	TypeScript member seal
+ts.member.search	TypeScript member search
+ts.member.set	TypeScript member set
+ts.member.setDate	TypeScript member setDate
+ts.member.setFullYear	TypeScript member setFullYear
+ts.member.setHours	TypeScript member setHours
+ts.member.setMilliseconds	TypeScript member setMilliseconds
+ts.member.setMinutes	TypeScript member setMinutes
+ts.member.setMonth	TypeScript member setMonth
+ts.member.setPrototypeOf	TypeScript member setPrototypeOf
+ts.member.setSeconds	TypeScript member setSeconds
+ts.member.setTime	TypeScript member setTime
+ts.member.setUTCDate	TypeScript member setUTCDate
+ts.member.setUTCFullYear	TypeScript member setUTCFullYear
+ts.member.setUTCHours	TypeScript member setUTCHours
+ts.member.setUTCMilliseconds	TypeScript member setUTCMilliseconds
+ts.member.setUTCMinutes	TypeScript member setUTCMinutes
+ts.member.setUTCMonth	TypeScript member setUTCMonth
+ts.member.setUTCSeconds	TypeScript member setUTCSeconds
+ts.member.shift	TypeScript member shift
+ts.member.sign	TypeScript member sign
+ts.member.sin	TypeScript member sin
+ts.member.sinh	TypeScript member sinh
+ts.member.size	TypeScript member size
+ts.member.slice	TypeScript member slice
+ts.member.some	TypeScript member some
+ts.member.sort	TypeScript member sort
+ts.member.splice	TypeScript member splice
+ts.member.split	TypeScript member split
+ts.member.sqrt	TypeScript member sqrt
+ts.member.startsWith	TypeScript member startsWith
+ts.member.stringify	TypeScript member stringify
+ts.member.substring	TypeScript member substring
+ts.member.symmetricDifference	TypeScript member symmetricDifference
+ts.member.tan	TypeScript member tan
+ts.member.tanh	TypeScript member tanh
+ts.member.test	TypeScript member test
+ts.member.then	TypeScript member then
+ts.member.toDateString	TypeScript member toDateString
+ts.member.toExponential	TypeScript member toExponential
+ts.member.toFixed	TypeScript member toFixed
+ts.member.toISOString	TypeScript member toISOString
+ts.member.toJSON	TypeScript member toJSON
+ts.member.toLocaleDateString	TypeScript member toLocaleDateString
+ts.member.toLocaleLowerCase	TypeScript member toLocaleLowerCase
+ts.member.toLocaleString	TypeScript member toLocaleString
+ts.member.toLocaleTimeString	TypeScript member toLocaleTimeString
+ts.member.toLocaleUpperCase	TypeScript member toLocaleUpperCase
+ts.member.toLowerCase	TypeScript member toLowerCase
+ts.member.toPrecision	TypeScript member toPrecision
+ts.member.toReversed	TypeScript member toReversed
+ts.member.toSorted	TypeScript member toSorted
+ts.member.toSpliced	TypeScript member toSpliced
+ts.member.toString	TypeScript member toString
+ts.member.toTimeString	TypeScript member toTimeString
+ts.member.toUTCString	TypeScript member toUTCString
+ts.member.toUpperCase	TypeScript member toUpperCase
+ts.member.trim	TypeScript member trim
+ts.member.trimEnd	TypeScript member trimEnd
+ts.member.trimStart	TypeScript member trimStart
+ts.member.trunc	TypeScript member trunc
+ts.member.union	TypeScript member union
+ts.member.unshift	TypeScript member unshift
+ts.member.valueOf	TypeScript member valueOf
+ts.member.values	TypeScript member values
+ts.member.warn	TypeScript member warn
+ts.member.with	TypeScript member with
+ts.method.add	TypeScript method add
+ts.method.append	TypeScript method append
+ts.method.apply	TypeScript method apply
+ts.method.at	TypeScript method at
+ts.method.bind	TypeScript method bind
+ts.method.call	TypeScript method call
+ts.method.catch	TypeScript method catch
+ts.method.charAt	TypeScript method charAt
+ts.method.charCodeAt	TypeScript method charCodeAt
+ts.method.clear	TypeScript method clear
+ts.method.codePointAt	TypeScript method codePointAt
+ts.method.concat	TypeScript method concat
+ts.method.copyWithin	TypeScript method copyWithin
+ts.method.delete	TypeScript method delete
+ts.method.difference	TypeScript method difference
+ts.method.endsWith	TypeScript method endsWith
+ts.method.entries	TypeScript method entries
+ts.method.every	TypeScript method every
+ts.method.exec	TypeScript method exec
+ts.method.fill	TypeScript method fill
+ts.method.filter	TypeScript method filter
+ts.method.finally	TypeScript method finally
+ts.method.find	TypeScript method find
+ts.method.findIndex	TypeScript method findIndex
+ts.method.findLast	TypeScript method findLast
+ts.method.findLastIndex	TypeScript method findLastIndex
+ts.method.flat	TypeScript method flat
+ts.method.flatMap	TypeScript method flatMap
+ts.method.forEach	TypeScript method forEach
+ts.method.get	TypeScript method get
+ts.method.getAll	TypeScript method getAll
+ts.method.getDate	TypeScript method getDate
+ts.method.getDay	TypeScript method getDay
+ts.method.getFullYear	TypeScript method getFullYear
+ts.method.getHours	TypeScript method getHours
+ts.method.getMilliseconds	TypeScript method getMilliseconds
+ts.method.getMinutes	TypeScript method getMinutes
+ts.method.getMonth	TypeScript method getMonth
+ts.method.getSeconds	TypeScript method getSeconds
+ts.method.getTime	TypeScript method getTime
+ts.method.getTimezoneOffset	TypeScript method getTimezoneOffset
+ts.method.getUTCDate	TypeScript method getUTCDate
+ts.method.getUTCDay	TypeScript method getUTCDay
+ts.method.getUTCFullYear	TypeScript method getUTCFullYear
+ts.method.getUTCHours	TypeScript method getUTCHours
+ts.method.getUTCMilliseconds	TypeScript method getUTCMilliseconds
+ts.method.getUTCMinutes	TypeScript method getUTCMinutes
+ts.method.getUTCMonth	TypeScript method getUTCMonth
+ts.method.getUTCSeconds	TypeScript method getUTCSeconds
+ts.method.has	TypeScript method has
+ts.method.hasOwnProperty	TypeScript method hasOwnProperty
+ts.method.includes	TypeScript method includes
+ts.method.indexOf	TypeScript method indexOf
+ts.method.intersection	TypeScript method intersection
+ts.method.isDisjointFrom	TypeScript method isDisjointFrom
+ts.method.isPrototypeOf	TypeScript method isPrototypeOf
+ts.method.isSubsetOf	TypeScript method isSubsetOf
+ts.method.isSupersetOf	TypeScript method isSupersetOf
+ts.method.join	TypeScript method join
+ts.method.keys	TypeScript method keys
+ts.method.lastIndexOf	TypeScript method lastIndexOf
+ts.method.localeCompare	TypeScript method localeCompare
+ts.method.map	TypeScript method map
+ts.method.match	TypeScript method match
+ts.method.matchAll	TypeScript method matchAll
+ts.method.normalize	TypeScript method normalize
+ts.method.padEnd	TypeScript method padEnd
+ts.method.padStart	TypeScript method padStart
+ts.method.pop	TypeScript method pop
+ts.method.propertyIsEnumerable	TypeScript method propertyIsEnumerable
+ts.method.push	TypeScript method push
+ts.method.reduce	TypeScript method reduce
+ts.method.reduceRight	TypeScript method reduceRight
+ts.method.repeat	TypeScript method repeat
+ts.method.replace	TypeScript method replace
+ts.method.replaceAll	TypeScript method replaceAll
+ts.method.reverse	TypeScript method reverse
+ts.method.search	TypeScript method search
+ts.method.set	TypeScript method set
+ts.method.setDate	TypeScript method setDate
+ts.method.setFullYear	TypeScript method setFullYear
+ts.method.setHours	TypeScript method setHours
+ts.method.setMilliseconds	TypeScript method setMilliseconds
+ts.method.setMinutes	TypeScript method setMinutes
+ts.method.setMonth	TypeScript method setMonth
+ts.method.setSeconds	TypeScript method setSeconds
+ts.method.setTime	TypeScript method setTime
+ts.method.setUTCDate	TypeScript method setUTCDate
+ts.method.setUTCFullYear	TypeScript method setUTCFullYear
+ts.method.setUTCHours	TypeScript method setUTCHours
+ts.method.setUTCMilliseconds	TypeScript method setUTCMilliseconds
+ts.method.setUTCMinutes	TypeScript method setUTCMinutes
+ts.method.setUTCMonth	TypeScript method setUTCMonth
+ts.method.setUTCSeconds	TypeScript method setUTCSeconds
+ts.method.shift	TypeScript method shift
+ts.method.slice	TypeScript method slice
+ts.method.some	TypeScript method some
+ts.method.sort	TypeScript method sort
+ts.method.splice	TypeScript method splice
+ts.method.split	TypeScript method split
+ts.method.startsWith	TypeScript method startsWith
+ts.method.substring	TypeScript method substring
+ts.method.symmetricDifference	TypeScript method symmetricDifference
+ts.method.test	TypeScript method test
+ts.method.then	TypeScript method then
+ts.method.toDateString	TypeScript method toDateString
+ts.method.toExponential	TypeScript method toExponential
+ts.method.toFixed	TypeScript method toFixed
+ts.method.toISOString	TypeScript method toISOString
+ts.method.toJSON	TypeScript method toJSON
+ts.method.toLocaleDateString	TypeScript method toLocaleDateString
+ts.method.toLocaleLowerCase	TypeScript method toLocaleLowerCase
+ts.method.toLocaleString	TypeScript method toLocaleString
+ts.method.toLocaleTimeString	TypeScript method toLocaleTimeString
+ts.method.toLocaleUpperCase	TypeScript method toLocaleUpperCase
+ts.method.toLowerCase	TypeScript method toLowerCase
+ts.method.toPrecision	TypeScript method toPrecision
+ts.method.toReversed	TypeScript method toReversed
+ts.method.toSorted	TypeScript method toSorted
+ts.method.toSpliced	TypeScript method toSpliced
+ts.method.toString	TypeScript method toString
+ts.method.toTimeString	TypeScript method toTimeString
+ts.method.toUTCString	TypeScript method toUTCString
+ts.method.toUpperCase	TypeScript method toUpperCase
+ts.method.trim	TypeScript method trim
+ts.method.trimEnd	TypeScript method trimEnd
+ts.method.trimStart	TypeScript method trimStart
+ts.method.union	TypeScript method union
+ts.method.unshift	TypeScript method unshift
+ts.method.valueOf	TypeScript method valueOf
+ts.method.values	TypeScript method values
+ts.method.with	TypeScript method with
+ts.mul	TypeScript mul
+ts.neg	TypeScript neg
+ts.not	TypeScript not
+ts.nothing	TypeScript nothing
+ts.number.EPSILON	TypeScript number EPSILON
+ts.number.MAX_SAFE_INTEGER	TypeScript number MAX SAFE INTEGER
+ts.number.MAX_VALUE	TypeScript number MAX VALUE
+ts.number.MIN_SAFE_INTEGER	TypeScript number MIN SAFE INTEGER
+ts.number.MIN_VALUE	TypeScript number MIN VALUE
+ts.number.NEGATIVE_INFINITY	TypeScript number NEGATIVE INFINITY
+ts.number.NaN	TypeScript number NaN
+ts.number.POSITIVE_INFINITY	TypeScript number POSITIVE INFINITY
+ts.number.convert	TypeScript number convert
+ts.number.digit	TypeScript number digit
+ts.number.global_isFinite	TypeScript number global isFinite
+ts.number.global_isNaN	TypeScript number global isNaN
+ts.number.isFinite	TypeScript number isFinite
+ts.number.isInteger	TypeScript number isInteger
+ts.number.isNaN	TypeScript number isNaN
+ts.number.isSafeInteger	TypeScript number isSafeInteger
+ts.number.layout	TypeScript number layout
+ts.number.parse	TypeScript number parse
+ts.number.parseFloat	TypeScript number parseFloat
+ts.number.parseInt	TypeScript number parseInt
+ts.number.parse_decimal	TypeScript number parse decimal
+ts.number.parse_int	TypeScript number parse int
+ts.number.parts	TypeScript number parts
+ts.number.ratio	TypeScript number ratio
+ts.number.receiver	TypeScript number receiver
+ts.number.round_decimal	TypeScript number round decimal
+ts.number.toExponential	TypeScript number toExponential
+ts.number.toFixed	TypeScript number toFixed
+ts.number.toPrecision	TypeScript number toPrecision
+ts.number.toString	TypeScript number toString
+ts.number.to_string	TypeScript number to string
+ts.number.valueOf	TypeScript number valueOf
+ts.number_index	TypeScript number index
+ts.object.assign	TypeScript object assign
+ts.object.convert	TypeScript object convert
+ts.object.create	TypeScript object create
+ts.object.defineProperties	TypeScript object defineProperties
+ts.object.defineProperty	TypeScript object defineProperty
+ts.object.entries	TypeScript object entries
+ts.object.freeze	TypeScript object freeze
+ts.object.fromEntries	TypeScript object fromEntries
+ts.object.getOwnPropertyDescriptor	TypeScript object getOwnPropertyDescriptor
+ts.object.getOwnPropertyDescriptors	TypeScript object getOwnPropertyDescriptors
+ts.object.getOwnPropertyNames	TypeScript object getOwnPropertyNames
+ts.object.getOwnPropertySymbols	TypeScript object getOwnPropertySymbols
+ts.object.getPrototypeOf	TypeScript object getPrototypeOf
+ts.object.groupBy	TypeScript object groupBy
+ts.object.hasOwn	TypeScript object hasOwn
+ts.object.hasOwnProperty	TypeScript object hasOwnProperty
+ts.object.is	TypeScript object is
+ts.object.isExtensible	TypeScript object isExtensible
+ts.object.isFrozen	TypeScript object isFrozen
+ts.object.isPrototypeOf	TypeScript object isPrototypeOf
+ts.object.isSealed	TypeScript object isSealed
+ts.object.is_instance	TypeScript object is instance
+ts.object.keys	TypeScript object keys
+ts.object.own_keys	TypeScript object own keys
+ts.object.preventExtensions	TypeScript object preventExtensions
+ts.object.propertyIsEnumerable	TypeScript object propertyIsEnumerable
+ts.object.seal	TypeScript object seal
+ts.object.setPrototypeOf	TypeScript object setPrototypeOf
+ts.object.toLocaleString	TypeScript object toLocaleString
+ts.object.toString	TypeScript object toString
+ts.object.valueOf	TypeScript object valueOf
+ts.object.values	TypeScript object values
+ts.object_rest	TypeScript object rest
+ts.pad	TypeScript pad
+ts.pow	TypeScript pow
+ts.primitive_to_number	TypeScript primitive to number
+ts.primitive_to_string	TypeScript primitive to string
+ts.promise.all	TypeScript promise all
+ts.promise.all_settled	TypeScript promise all settled
+ts.promise.any	TypeScript promise any
+ts.promise.callable	TypeScript promise callable
+ts.promise.catch	TypeScript promise catch
+ts.promise.decided	TypeScript promise decided
+ts.promise.finally	TypeScript promise finally
+ts.promise.is	TypeScript promise is
+ts.promise.members	TypeScript promise members
+ts.promise.pending	TypeScript promise pending
+ts.promise.race	TypeScript promise race
+ts.promise.reactions	TypeScript promise reactions
+ts.promise.reject	TypeScript promise reject
+ts.promise.resolve	TypeScript promise resolve
+ts.promise.run	TypeScript promise run
+ts.promise.settled	TypeScript promise settled
+ts.promise.start	TypeScript promise start
+ts.promise.then	TypeScript promise then
+ts.property.dotAll	TypeScript property dotAll
+ts.property.flags	TypeScript property flags
+ts.property.global	TypeScript property global
+ts.property.ignoreCase	TypeScript property ignoreCase
+ts.property.length	TypeScript property length
+ts.property.multiline	TypeScript property multiline
+ts.property.size	TypeScript property size
+ts.property.source	TypeScript property source
+ts.property.sticky	TypeScript property sticky
+ts.property.unicode	TypeScript property unicode
+ts.read	TypeScript read
+ts.receiver	TypeScript receiver
+ts.regexp.argument	TypeScript regexp argument
+ts.regexp.call	TypeScript regexp call
+ts.regexp.create	TypeScript regexp create
+ts.regexp.dotAll	TypeScript regexp dotAll
+ts.regexp.escaped_source	TypeScript regexp escaped source
+ts.regexp.exec	TypeScript regexp exec
+ts.regexp.flags	TypeScript regexp flags
+ts.regexp.global	TypeScript regexp global
+ts.regexp.ignoreCase	TypeScript regexp ignoreCase
+ts.regexp.is	TypeScript regexp is
+ts.regexp.match_record	TypeScript regexp match record
+ts.regexp.multiline	TypeScript regexp multiline
+ts.regexp.native_exec	TypeScript regexp native exec
+ts.regexp.native_match_all	TypeScript regexp native match all
+ts.regexp.native_replace	TypeScript regexp native replace
+ts.regexp.native_split	TypeScript regexp native split
+ts.regexp.require	TypeScript regexp require
+ts.regexp.snapshot	TypeScript regexp snapshot
+ts.regexp.source	TypeScript regexp source
+ts.regexp.spell	TypeScript regexp spell
+ts.regexp.sticky	TypeScript regexp sticky
+ts.regexp.test	TypeScript regexp test
+ts.regexp.toString	TypeScript regexp toString
+ts.regexp.unicode	TypeScript regexp unicode
+ts.relational	TypeScript relational
+ts.rem	TypeScript rem
+ts.require_object_coercible	TypeScript require object coercible
+ts.requires_new	TypeScript requires new
+ts.rest	TypeScript rest
+ts.set	TypeScript set
+ts.set.add	TypeScript set add
+ts.set.call	TypeScript set call
+ts.set.clear	TypeScript set clear
+ts.set.construct	TypeScript set construct
+ts.set.contains_other	TypeScript set contains other
+ts.set.delete	TypeScript set delete
+ts.set.difference	TypeScript set difference
+ts.set.entries	TypeScript set entries
+ts.set.forEach	TypeScript set forEach
+ts.set.has	TypeScript set has
+ts.set.intersection	TypeScript set intersection
+ts.set.is	TypeScript set is
+ts.set.isDisjointFrom	TypeScript set isDisjointFrom
+ts.set.isSubsetOf	TypeScript set isSubsetOf
+ts.set.isSupersetOf	TypeScript set isSupersetOf
+ts.set.other	TypeScript set other
+ts.set.other_size	TypeScript set other size
+ts.set.size	TypeScript set size
+ts.set.symmetricDifference	TypeScript set symmetricDifference
+ts.set.union	TypeScript set union
+ts.set.values	TypeScript set values
+ts.shift_count	TypeScript shift count
+ts.shl	TypeScript shl
+ts.shr	TypeScript shr
+ts.spread	TypeScript spread
+ts.strict_equals	TypeScript strict equals
+ts.strict_not_equals	TypeScript strict not equals
+ts.string.apply_arguments	TypeScript string apply arguments
+ts.string.at	TypeScript string at
+ts.string.at_generic	TypeScript string at generic
+ts.string.charAt	TypeScript string charAt
+ts.string.charCodeAt	TypeScript string charCodeAt
+ts.string.clamp	TypeScript string clamp
+ts.string.codePointAt	TypeScript string codePointAt
+ts.string.concat	TypeScript string concat
+ts.string.create	TypeScript string create
+ts.string.endsWith	TypeScript string endsWith
+ts.string.endsWith_generic	TypeScript string endsWith generic
+ts.string.fromCharCode	TypeScript string fromCharCode
+ts.string.fromCodePoint	TypeScript string fromCodePoint
+ts.string.includes	TypeScript string includes
+ts.string.includes_generic	TypeScript string includes generic
+ts.string.indexOf	TypeScript string indexOf
+ts.string.indexOf_generic	TypeScript string indexOf generic
+ts.string.integer	TypeScript string integer
+ts.string.lastIndexOf	TypeScript string lastIndexOf
+ts.string.length	TypeScript string length
+ts.string.length_value	TypeScript string length value
+ts.string.locale_unsupported	TypeScript string locale unsupported
+ts.string.match	TypeScript string match
+ts.string.matchAll	TypeScript string matchAll
+ts.string.normalize	TypeScript string normalize
+ts.string.padEnd	TypeScript string padEnd
+ts.string.padStart	TypeScript string padStart
+ts.string.raw	TypeScript string raw
+ts.string.receiver	TypeScript string receiver
+ts.string.relative	TypeScript string relative
+ts.string.repeat	TypeScript string repeat
+ts.string.replace	TypeScript string replace
+ts.string.replaceAll	TypeScript string replaceAll
+ts.string.replace_value	TypeScript string replace value
+ts.string.search	TypeScript string search
+ts.string.slice	TypeScript string slice
+ts.string.slice_generic	TypeScript string slice generic
+ts.string.slice_units	TypeScript string slice units
+ts.string.split	TypeScript string split
+ts.string.split_generic	TypeScript string split generic
+ts.string.startsWith	TypeScript string startsWith
+ts.string.startsWith_generic	TypeScript string startsWith generic
+ts.string.substitute	TypeScript string substitute
+ts.string.substring	TypeScript string substring
+ts.string.substring_generic	TypeScript string substring generic
+ts.string.toLowerCase	TypeScript string toLowerCase
+ts.string.toString	TypeScript string toString
+ts.string.toUpperCase	TypeScript string toUpperCase
+ts.string.trim	TypeScript string trim
+ts.string.trimEnd	TypeScript string trimEnd
+ts.string.trimStart	TypeScript string trimStart
+ts.string.trim_value	TypeScript string trim value
+ts.string.uint32	TypeScript string uint32
+ts.string.valueOf	TypeScript string valueOf
+ts.sub	TypeScript sub
+ts.tdz	TypeScript tdz
+ts.to_boolean	TypeScript to boolean
+ts.to_int32	TypeScript to int32
+ts.to_number	TypeScript to number
+ts.to_primitive	TypeScript to primitive
+ts.to_property_key	TypeScript to property key
+ts.to_string	TypeScript to string
+ts.typeof	TypeScript typeof
+ts.uri.decode	TypeScript uri decode
+ts.uri.decodeURI	TypeScript uri decodeURI
+ts.uri.decodeURIComponent	TypeScript uri decodeURIComponent
+ts.uri.encode	TypeScript uri encode
+ts.uri.encodeURI	TypeScript uri encodeURI
+ts.uri.encodeURIComponent	TypeScript uri encodeURIComponent
+ts.uri.escape	TypeScript uri escape
+ts.uri.flush	TypeScript uri flush
+ts.uri.hex	TypeScript uri hex
+ts.url.canParse	TypeScript url canParse
+ts.url.commit	TypeScript url commit
+ts.url.construct	TypeScript url construct
+ts.url.is	TypeScript url is
+ts.url.toJSON	TypeScript url toJSON
+ts.url.toString	TypeScript url toString
+ts.url.valueOf	TypeScript url valueOf
+ts.url_search_params.append	TypeScript url search params append
+ts.url_search_params.construct	TypeScript url search params construct
+ts.url_search_params.delete	TypeScript url search params delete
+ts.url_search_params.entries	TypeScript url search params entries
+ts.url_search_params.forEach	TypeScript url search params forEach
+ts.url_search_params.get	TypeScript url search params get
+ts.url_search_params.getAll	TypeScript url search params getAll
+ts.url_search_params.has	TypeScript url search params has
+ts.url_search_params.is	TypeScript url search params is
+ts.url_search_params.keys	TypeScript url search params keys
+ts.url_search_params.refresh	TypeScript url search params refresh
+ts.url_search_params.set	TypeScript url search params set
+ts.url_search_params.size	TypeScript url search params size
+ts.url_search_params.sort	TypeScript url search params sort
+ts.url_search_params.toString	TypeScript url search params toString
+ts.url_search_params.valueOf	TypeScript url search params valueOf
+ts.url_search_params.values	TypeScript url search params values
+ts.ushr	TypeScript ushr
+ts.wrap_int32	TypeScript wrap int32

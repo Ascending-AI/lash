@@ -1,0 +1,160 @@
+//! Closed helper sets generated from the definitions, without reordering bodies.
+
+use lash_kernel_doc::FunctionRegistry;
+use std::collections::BTreeSet;
+
+pub fn enum_source<'a>(
+    ty: &str,
+    names: impl IntoIterator<Item = &'a str>,
+) -> Result<String, String> {
+    let mut unique = BTreeSet::new();
+    let mut variants = BTreeSet::new();
+    let mut rows = Vec::new();
+    for name in names {
+        if !unique.insert(name) {
+            return Err(format!("duplicate helper `{name}`"));
+        }
+        // Preserve case and escape separators: parseInt and parse_int are distinct helpers.
+        let variant = format!("H_{}", name.replace('_', "_u").replace('.', "_d"));
+        if !variants.insert(variant.clone()) {
+            return Err(format!("helper variant collision for `{name}`"));
+        }
+        rows.push((name, variant));
+    }
+    rows.sort_unstable();
+    let mut source = format!(
+        "// Generated from the registered definitions; review changes to this set.\n#[allow(non_camel_case_types)]\n#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub enum {ty} {{\n"
+    );
+    for (_, variant) in &rows {
+        source.push_str(&format!("    {variant},\n"));
+    }
+    source.push_str(&format!(
+        "}}\nimpl {ty} {{\n    pub const ALL: &'static [Self] = &[\n"
+    ));
+    for (_, variant) in &rows {
+        source.push_str(&format!("        Self::{variant},\n"));
+    }
+    source.push_str("    ];\n    pub fn name(self) -> &'static str {\n        match self {\n");
+    for (name, variant) in &rows {
+        source.push_str(&format!("            Self::{variant} => {name:?},\n"));
+    }
+    source.push_str("        }\n    }\n    pub fn from_name(name: &str) -> Option<Self> {\n        Self::ALL.iter().copied().find(|helper| helper.name() == name)\n    }\n}\n");
+    Ok(source)
+}
+
+pub fn kernel_names(registry: &FunctionRegistry) -> Result<Vec<&str>, String> {
+    let names: Vec<_> = registry
+        .iter()
+        .map(|(_, f)| f.definition().name.as_str())
+        .collect();
+    for name in &names {
+        let family = name.split_once('.').map_or("", |(family, _)| family);
+        if !lash_kernel_lib::KERNEL_NAME_FAMILIES.contains(&family) {
+            return Err(format!(
+                "kernel helper `{name}` is outside the declared families"
+            ));
+        }
+    }
+    Ok(names)
+}
+
+/// Checks the installed sets against the build's actual registration, including
+/// generated dispatchers, and keeps display data out of function definitions.
+pub fn validate(
+    registry: &FunctionRegistry,
+    helpers: &[lash_kernel_doc::FunctionName],
+    typescript: bool,
+) -> Result<(), String> {
+    use lash_helper_labels::{FunctionLabels, Library};
+    let mut expected = BTreeSet::new();
+    let mut add = |name: &str| {
+        if expected.insert(name.to_owned()) {
+            Ok(())
+        } else {
+            Err(format!("helper sets share `{name}`"))
+        }
+    };
+    // Kernel names come from the registry: its reviewed enum is checked by
+    // the release law, so the explicit recorder can refresh that data.
+    for (_, function) in registry.iter() {
+        let name = function.definition().name.as_str();
+        if !name.starts_with("ts.")
+            && !name.starts_with("py.")
+            && !name.starts_with("regex.")
+            && !name.starts_with("date.")
+            && !name.starts_with("url.")
+        {
+            add(name)?;
+        }
+    }
+    #[cfg(feature = "dialect-typescript")]
+    if typescript {
+        for op in lash_ext_regex_ecma::Operation::ALL {
+            add(op.name())?;
+        }
+        for op in lash_ext_date_ecma::Operation::ALL {
+            add(op.name())?;
+        }
+        for op in lash_ext_url_whatwg::Operation::ALL {
+            add(op.name())?;
+        }
+    }
+    for helper in helpers {
+        add(helper.as_str())?;
+    }
+    let actual: BTreeSet<_> = registry
+        .iter()
+        .map(|(_, f)| f.definition().name.to_string())
+        .collect();
+    if expected != actual {
+        return Err(format!(
+            "closed helper sets differ from registry: missing {:?}, extra {:?}",
+            actual.difference(&expected),
+            expected.difference(&actual)
+        ));
+    }
+    let libraries = if typescript {
+        vec![
+            Library::Kernel,
+            Library::TypeScript,
+            Library::Regex,
+            Library::Date,
+            Library::Url,
+        ]
+    } else {
+        vec![Library::Kernel, Library::Python]
+    };
+    let mut labels = FunctionLabels::new();
+    for library in libraries {
+        for (name, label) in library.labels().map_err(|error| error.to_string())? {
+            if labels.insert(name.clone(), label).is_some() {
+                return Err(format!("duplicate label for `{name}`"));
+            }
+        }
+    }
+    let labelled: BTreeSet<_> = labels.keys().map(ToString::to_string).collect();
+    if labelled != actual {
+        return Err(format!(
+            "labels differ from registry: missing {:?}, extra {:?}",
+            actual.difference(&labelled),
+            labelled.difference(&actual)
+        ));
+    }
+    Ok(())
+}
+
+/// The kernel families are recorded from its registry, alongside the closed enum.
+pub fn kernel_source(registry: &FunctionRegistry) -> Result<String, String> {
+    let names = kernel_names(registry)?;
+    let families: BTreeSet<_> = names
+        .iter()
+        .map(|name| name.split_once('.').map_or("", |(prefix, _)| prefix))
+        .collect();
+    let mut source = enum_source("KernelHelper", names)?;
+    source.push_str("\n/// Name families present in the registered kernel library.\npub const KERNEL_NAME_FAMILIES: &[&str] = &[\n");
+    for family in families {
+        source.push_str(&format!("    {family:?},\n"));
+    }
+    source.push_str("];\n");
+    Ok(source)
+}

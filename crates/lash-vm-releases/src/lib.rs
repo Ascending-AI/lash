@@ -136,3 +136,18 @@ pub fn dialect(dialect: &str) -> Option<&'static DialectReleases> {
 
 #[cfg(test)]
 mod tests;
+
+/// The closed set of TypeScript helpers defined from the package's kernel sources.
+#[cfg(feature = "dialect-typescript")]
+mod typescript_helpers {
+    include!(concat!(env!("OUT_DIR"), "/typescript_helpers.rs"));
+}
+#[cfg(feature = "dialect-typescript")]
+pub use typescript_helpers::TypeScriptHelper;
+/// The closed set of Python helpers defined from the package's kernel sources.
+#[cfg(feature = "dialect-python")]
+mod python_helpers {
+    include!(concat!(env!("OUT_DIR"), "/python_helpers.rs"));
+}
+#[cfg(feature = "dialect-python")]
+pub use python_helpers::PythonHelper;

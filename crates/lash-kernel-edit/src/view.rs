@@ -221,7 +221,7 @@ pub struct ActionView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CalleeView {
-    Library(FunctionName),
+    Library { id: FunctionId, name: FunctionName },
     Declared(Name),
     Effect(EffectName),
 }
@@ -669,7 +669,16 @@ impl<'a> Walk<'a> {
                                 function: *function,
                             })?;
                     (
-                        Some(CalleeView::Library(definition.name.clone())),
+                        Some(CalleeView::Library {
+                            id: *function,
+                            name: self
+                                .document
+                                .manifest
+                                .functions
+                                .get(function)
+                                .cloned()
+                                .ok_or_else(|| mismatch(node))?,
+                        }),
                         definition.signature.params.clone(),
                     )
                 }
