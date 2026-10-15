@@ -349,6 +349,17 @@ packages = ["lash-internal-vm-worker"]
 kinds = ["unit-test"]
 compile_data = ["//examples:typescript_host_flow_cells"]
 
+# The dialect's unit tests ran in its package batch, which on the persistent
+# heap went past the 300 s bound (FIG-6318): three cases replay thousands of
+# small runs, each paying the heap's per-statement cost, and take 352 s
+# (plain_json_matches_the_generic_walk, 15.7 s on main), 159 s and 134 s
+# alone. Six shards give each of them an action of its own and spread the
+# other cases over the rest; the bound is unchanged.
+[[rule]]
+packages = ["lash-dialect-typescript"]
+kinds = ["unit-test"]
+shards = 6
+
 # Test262 on the kernel reads the vendored corpus.
 [[rule]]
 packages = ["lash-dialect-typescript"]

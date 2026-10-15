@@ -1,4 +1,9 @@
 {
+  "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {
+    "tests::array_callbacks::callback_methods_match_their_replaced_definitions": 159193,
+    "tests::hot_helpers::the_boundary_matches_its_former_copy_and_walk": 134347,
+    "tests::json::plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path": 351992
+  },
   "//crates/lash-durable-test:cell_restore_laws__test": {
     "a_race_loser_in_a_cell_is_admitted_and_settles_on_postgres": 24202,
     "a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_file": 6400,
