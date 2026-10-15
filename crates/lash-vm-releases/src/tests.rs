@@ -13,6 +13,9 @@ use super::*;
 #[path = "build/release.rs"]
 mod release;
 
+#[path = "helper_classes.rs"]
+mod helper_classes;
+
 fn helper(result: i64) -> lash_kernel_doc::FunctionDefinition {
     lash_kernel_doc::parse_definition(&format!(
         "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
