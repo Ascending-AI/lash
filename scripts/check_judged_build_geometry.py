@@ -37,6 +37,7 @@ outside the locks, and `check_build_precedes_launcher_locks` keeps it there.
 from __future__ import annotations
 
 import ast
+import builtins
 import importlib.util
 import pathlib
 import re
@@ -409,68 +410,159 @@ def starlark_literal(text: str, name: str) -> object | None:
     return None
 
 
+# The flag functions are evaluated the way Buck2 sees them: the function's own
+# text is exec'd, and every global it references is loaded from the .bzl — its
+# module-level assignments, or the files its load() statements name — never
+# duplicated here, so a new constant cannot leave the namespace incomplete.
+LOAD_STATEMENT = re.compile(
+    r'load\(\s*"(?P<module>[^"]+)"(?P<symbols>[^)]*)\)', re.DOTALL
+)
+LOAD_SYMBOL = re.compile(r'(?:(?P<local>\w+)\s*=\s*)?"(?P<name>[^"]+)"')
+
+
+def starlark_def(text: str, name: str) -> str | None:
+    match = re.search(
+        rf"^def {re.escape(name)}\([^\n]*\)(?:\s*->\s*[^:]+)?:\n.*?(?=^def |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    return match.group(0) if match else None
+
+
+def load_symbol_sources(
+    text: str, directory: pathlib.Path
+) -> dict[str, tuple[str, pathlib.Path]]:
+    """The names a .bzl's load() statements bind, mapped to their source."""
+    sources: dict[str, tuple[str, pathlib.Path]] = {}
+    for statement in LOAD_STATEMENT.finditer(text):
+        module = statement.group("module")
+        if module.startswith(":"):
+            origin = directory / module[1:]
+        elif module.startswith("//"):
+            origin = ROOT / module[2:]
+        else:
+            continue
+        for symbol in LOAD_SYMBOL.finditer(statement.group("symbols")):
+            name = symbol.group("name")
+            sources[symbol.group("local") or name] = (name, origin)
+    return sources
+
+
+def starlark_constant(
+    path: pathlib.Path, name: str, seen: frozenset[pathlib.Path] = frozenset()
+) -> tuple[bool, object]:
+    """Resolve a .bzl module constant, chasing the file's own load()s."""
+    resolved = path.resolve()
+    if resolved in seen or not path.is_file():
+        return False, None
+    text = path.read_text(encoding="utf-8")
+    value = starlark_literal(text, name)
+    if value is not None:
+        return True, value
+    scalar = re.search(
+        rf"^{re.escape(name)}\s*=\s*(?P<expression>[^\n]+)$",
+        text,
+        re.MULTILINE,
+    )
+    if scalar is not None:
+        try:
+            return True, ast.literal_eval(scalar.group("expression"))
+        except (SyntaxError, ValueError, TypeError):
+            pass
+    source = load_symbol_sources(text, path.parent).get(name)
+    if source is not None:
+        return starlark_constant(source[1], source[0], seen | {resolved})
+    return False, None
+
+
+def referenced_globals(source: str) -> set[str]:
+    """The global names a Starlark function body references."""
+    tree = ast.parse(source)
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if not isinstance(node, ast.Lambda):
+                bound.add(node.name)
+            arguments = node.args
+            bound.update(
+                argument.arg
+                for argument in (
+                    *arguments.posonlyargs,
+                    *arguments.args,
+                    *arguments.kwonlyargs,
+                )
+            )
+            for argument in (arguments.vararg, arguments.kwarg):
+                if argument is not None:
+                    bound.add(argument.arg)
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update(
+                alias.asname or alias.name.split(".", 1)[0] for alias in node.names
+            )
+    return {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    } - bound
+
+
+def evaluated_starlark_function(
+    path: pathlib.Path, name: str, provided: dict[str, object]
+) -> object:
+    source = starlark_def(path.read_text(encoding="utf-8"), name)
+    if source is None:
+        raise ValueError(f"{path.name}: {name} is not evaluable")
+    namespace = dict(provided)
+    exec(source, namespace)
+    for reference in referenced_globals(source):
+        if reference in namespace or hasattr(builtins, reference):
+            continue
+        found, value = starlark_constant(path, reference)
+        if not found:
+            raise ValueError(
+                f"{path.name}: {name} references {reference}, "
+                "which no reachable constant supplies"
+            )
+        namespace[reference] = value
+    return namespace[name]
+
+
 def evaluate_first_party_flags(
-    text: str,
     opt_levels: dict[str, int],
     constraint: str,
     package: str,
 ) -> list[str]:
-    function = re.search(
-        r"^def _rustc_flags\([^\n]*\):\n.*?(?=^def |\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
-    )
-    optimized = starlark_literal(text, "_OPTIMIZED_FLAGS")
-    if function is None or not isinstance(optimized, list):
-        raise ValueError("first-party optimized flag function is not evaluable")
-
     def select(options: dict[str, list[str]]) -> list[str]:
         value = options.get(constraint, options.get("DEFAULT", []))
         return list(value)
 
-    namespace = {
-        "FIRST_PARTY_OPT_LEVELS": opt_levels,
-        "_OPTIMIZED_FLAGS": optimized,
-        "select": select,
-    }
-    lint_text = (ROOT / "tools/buck2/clippy_policy.bzl").read_text(encoding="utf-8")
-    for name in ("FIRST_PARTY_RUST_LINT_FLAGS", "FIRST_PARTY_CLIPPY_LINT_FLAGS"):
-        flags = starlark_literal(lint_text, name)
-        if not isinstance(flags, list):
-            raise ValueError(f"{name} is not a generated list")
-        namespace[name] = flags
-    exec(function.group(0), namespace)
-    return namespace["_rustc_flags"](package, [], [])
+    rustc_flags = evaluated_starlark_function(
+        ROOT / "tools/buck2/lash_rust.bzl",
+        "_rustc_flags",
+        {"select": select, "FIRST_PARTY_OPT_LEVELS": opt_levels},
+    )
+    return rustc_flags(package, [], [])
 
 
 def evaluate_third_party_flags(
-    text: str,
     opt_levels: dict[str, int],
     constraint: str,
     package: str,
 ) -> list[str]:
-    function = re.search(
-        r"^def _profile_kwargs\([^\n]*\):\n.*?(?=^def |\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
-    )
-    optimized = starlark_literal(text, "_OPTIMIZED_FLAGS")
-    if function is None or not isinstance(optimized, list):
-        raise ValueError("third-party optimized flag function is not evaluable")
-
     def select(options: dict[str, list[str]]) -> list[str]:
         value = options.get(constraint, options.get("DEFAULT", []))
         return list(value)
 
-    namespace = {
-        "THIRD_PARTY_OPT_LEVELS": opt_levels,
-        "_OPTIMIZED_FLAGS": optimized,
-        "select": select,
-    }
-    exec(function.group(0), namespace)
-    result = namespace["_profile_kwargs"](
-        {"env": {"CARGO_PKG_NAME": package}, "rustc_flags": []}
+    profile_kwargs = evaluated_starlark_function(
+        ROOT / "tools/buck2/third_party.bzl",
+        "_profile_kwargs",
+        {"select": select, "THIRD_PARTY_OPT_LEVELS": opt_levels},
     )
+    result = profile_kwargs({"env": {"CARGO_PKG_NAME": package}, "rustc_flags": []})
     flags = result.get("rustc_flags")
     if not isinstance(flags, list):
         raise ValueError("third-party profile did not return rustc_flags")
@@ -591,19 +683,19 @@ def check_buck2_optimized_config(failures: list[str]) -> None:
         if not isinstance(third_levels, dict):
             raise ValueError("THIRD_PARTY_OPT_LEVELS is not a dictionary")
         target_regress = evaluate_first_party_flags(
-            first_text, levels, "//tools/buck2:profile_optimized", "lash-regress"
+            levels, "//tools/buck2:profile_optimized", "lash-regress"
         )
         target_ordinary = evaluate_first_party_flags(
-            first_text, levels, "//tools/buck2:profile_optimized", "lash-core"
+            levels, "//tools/buck2:profile_optimized", "lash-core"
         )
         host_regress = evaluate_first_party_flags(
-            first_text, levels, "//tools/buck2:profile_host", "lash-regress"
+            levels, "//tools/buck2:profile_host", "lash-regress"
         )
         target_dependency = evaluate_third_party_flags(
-            third_text, third_levels, "//tools/buck2:profile_optimized", "serde"
+            third_levels, "//tools/buck2:profile_optimized", "serde"
         )
         host_dependency = evaluate_third_party_flags(
-            third_text, third_levels, "//tools/buck2:profile_host", "serde"
+            third_levels, "//tools/buck2:profile_host", "serde"
         )
     except (KeyError, NameError, TypeError, ValueError, SyntaxError) as error:
         failures.append(
