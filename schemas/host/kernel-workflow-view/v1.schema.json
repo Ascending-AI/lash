@@ -214,6 +214,17 @@
         "block": {
           "$ref": "#/$defs/Site"
         },
+        "callee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CalleeView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The statically named target of a library or declared call or spawn.\nCalls through values have no static callee name."
+        },
         "destination": {
           "anyOf": [
             {
@@ -271,11 +282,11 @@
               "type": "null"
             }
           ],
-          "description": "The parameter a `perform`'s effect signature names at this position."
+          "description": "The parameter the library, declared function or effect names here."
         },
         "type": {
           "$ref": "#/$defs/Type",
-          "description": "That parameter's type; `any` when no signature names one."
+          "description": "That parameter's type; `any` for an untyped declared parameter or\nwhen no signature names one."
         }
       },
       "required": [
@@ -455,6 +466,35 @@
           },
           "required": [
             "library"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CalleeView": {
+      "description": "A statically named call target. Declared names are arbitrary kernel names;\nlibrary names are qualified [`FunctionName`]s.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/QualifiedName"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declared": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "declared"
           ],
           "type": "object"
         }

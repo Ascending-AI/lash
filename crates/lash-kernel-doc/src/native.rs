@@ -525,6 +525,19 @@ impl FunctionRegistry {
         self.functions.get(function)
     }
 
+    /// Export the complete library as typed, serialisable declarations.
+    ///
+    /// The result implements [`FunctionCatalog`]. A host can decode it and
+    /// derive a workflow view without this registry's native implementations
+    /// or the engine that owns it. Identities, names, signatures and bodies
+    /// are preserved, including transitive library dependencies.
+    pub fn export_declarations(&self) -> crate::FunctionDeclarations {
+        self.functions
+            .iter()
+            .map(|(id, registered)| (*id, registered.definition.as_ref().clone()))
+            .collect()
+    }
+
     /// Every registered function, ordered by identity.
     pub fn iter(&self) -> impl Iterator<Item = (&FunctionId, &RegisteredFunction)> {
         self.functions.iter()

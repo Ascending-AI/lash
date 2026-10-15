@@ -3,7 +3,7 @@
 use lash_kernel_check::Environment;
 use lash_kernel_doc::{
     Document, EffectName, Expr, FunctionRegistry, Literal, Name, Place, Site, Stmt, Type, Unit,
-    parse_document,
+    parse_definition, parse_document,
 };
 use serde_json::Value;
 
@@ -13,7 +13,13 @@ use crate::{Draft, Position};
 
 fn view_of(document: &Document, entry: &str) -> WorkflowView {
     let graph = lash_kernel_check::derive(document, &FunctionRegistry::default()).expect("graph");
-    derive(document, &graph, &Unit::Function(Name::new(entry))).expect("view")
+    derive(
+        document,
+        &graph,
+        &Unit::Function(Name::new(entry)),
+        &FunctionRegistry::default(),
+    )
+    .expect("view")
 }
 
 fn site(entry: &str, path: &[u32]) -> Site {
@@ -44,6 +50,7 @@ fn render(value: &Value, indent: usize, out: &mut String) {
 
 const PINNED: &str = r#"kernel 1
 numbers float
+use text.pad = @LIBRARY
 effect mail.send(to: Text) -> Bool
 effect log.write(line: Text) -> Any
 entry notify(to: Text) -> Any
@@ -60,6 +67,13 @@ fn notify(to) {
   } catch e {
     fail e
   }
+  do invoke text.pad(to, 2)
+  do call wrap(to, 2)
+  do spawn call wrap(to, 2)
+}
+
+fn wrap(value, copies) {
+  return value
 }
 
 main {
@@ -71,9 +85,12 @@ const PINNED_VIEW: &str = r#"dataflow:
   actions:
     {"args":[{"atom":{"variable":"to"},"binding":0,"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
     {"args":[{"atom":{"variable":"line"},"binding":2,"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":"text.pad"},"result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
   assignments: []
   bindings:
-    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":0,"kind":"param","name":"to","site":{"unit":{"function":"notify"}},"type":"any","uses":[{"path":[0,0],"unit":{"function":"notify"}}]}
+    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":0,"kind":"param","name":"to","site":{"unit":{"function":"notify"}},"type":"any","uses":[{"path":[0,0],"unit":{"function":"notify"}},{"path":[3,0],"unit":{"function":"notify"}},{"path":[4,0],"unit":{"function":"notify"}},{"path":[5,0],"unit":{"function":"notify"}}]}
     {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":1,"kind":"let","name":"sent","site":{"path":[0],"unit":{"function":"notify"}},"type":"any","uses":[{"path":[1,0],"unit":{"function":"notify"}},{"path":[2,0,0,0],"unit":{"function":"notify"}}],"value_site":{"path":[0,0],"unit":{"function":"notify"}}}
     {"assigned":false,"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"captured":false,"id":2,"kind":"for","name":"line","site":{"path":[1,1,0],"unit":{"function":"notify"}},"type":"text","uses":[{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}}]}
     {"assigned":false,"block":{"path":[2,1],"unit":{"function":"notify"}},"captured":false,"id":3,"kind":"catch","name":"e","site":{"path":[2],"unit":{"function":"notify"}},"type":"any","uses":[{"path":[2,1,0,0],"unit":{"function":"notify"}}]}
@@ -90,6 +107,9 @@ const PINNED_VIEW: &str = r#"dataflow:
 execution_sites:
   {"kind":"perform","loops":[],"site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
   {"kind":"perform","loops":[{"path":[1,1,0],"unit":{"function":"notify"}}],"site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
+  {"kind":"call","loops":[],"site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
+  {"kind":"call","loops":[],"site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
+  {"kind":"spawn","loops":[],"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
 scopes:
   {"block":{"unit":{"function":"notify"}},"kind":"entry"}
   {"block":{"path":[1,1],"unit":{"function":"notify"}},"kind":"then"}
@@ -105,14 +125,63 @@ statements:
   {"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[2],"unit":{"function":"notify"}},"statement":{"try":{"body":[{"return":{"value":{"variable":"sent"}}}],"catch":{"binding":"e","body":[{"fail":{"value":{"variable":"e"}}}]}}}}
   {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"site":{"path":[2,0,0],"unit":{"function":"notify"}},"statement":{"return":{"value":{"variable":"sent"}}}}
   {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"site":{"path":[2,1,0],"unit":{"function":"notify"}},"statement":{"fail":{"value":{"variable":"e"}}}}
+  {"action":{"path":[3,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"c4d9bb90b9e1114bd9196a9014d9723a58d66becb5cbd9c5c60f5426e58fab63"}}}}}}
+  {"action":{"path":[4,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"action":{"path":[5,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
 "#;
 
 /// The serialized view of one workflow with a branch, a loop, a try and
 /// two effects: its whole wire shape, reviewed.
 #[test]
 fn the_view_of_a_branch_a_loop_a_try_and_two_effects_is_pinned() {
-    let document = parse_document(PINNED).expect("pinned workflow");
-    let view = view_of(&document, "notify");
+    let definition = parse_definition(
+        "function text.pad(items: Text, count: Int) -> Text\nkernel 1\ncharge 1\nnative\n",
+    )
+    .expect("library declaration");
+    let mut functions = FunctionRegistry::declarations();
+    let function = functions
+        .register(definition, None)
+        .expect("register declaration");
+    let document =
+        parse_document(&PINNED.replace("LIBRARY", &function.to_string())).expect("pinned workflow");
+    let graph = lash_kernel_check::derive(&document, &functions).expect("graph");
+    let view = derive(
+        &document,
+        &graph,
+        &Unit::Function(Name::new("notify")),
+        &functions,
+    )
+    .expect("view");
+    assert_eq!(
+        derive(
+            &document,
+            &graph,
+            &Unit::Function(Name::new("notify")),
+            &FunctionRegistry::default()
+        ),
+        Err(crate::view::ViewError::MissingFunction { function }),
+    );
+    let wire = serde_json::to_value(&view).unwrap();
+    assert_eq!(
+        wire["dataflow"]["actions"][2]["callee"],
+        serde_json::json!({"library": "text.pad"})
+    );
+    assert_eq!(wire["dataflow"]["actions"][2]["args"][0]["name"], "items");
+    assert_eq!(wire["dataflow"]["actions"][2]["args"][1]["name"], "count");
+    for index in [3, 4] {
+        assert_eq!(
+            wire["dataflow"]["actions"][index]["callee"],
+            serde_json::json!({"declared": "wrap"})
+        );
+        assert_eq!(
+            wire["dataflow"]["actions"][index]["args"][0]["name"],
+            "value"
+        );
+        assert_eq!(
+            wire["dataflow"]["actions"][index]["args"][1]["name"],
+            "copies"
+        );
+    }
     let mut rendered = String::new();
     render(&serde_json::to_value(&view).unwrap(), 0, &mut rendered);
     assert_eq!(
@@ -122,6 +191,18 @@ fn the_view_of_a_branch_a_loop_a_try_and_two_effects_is_pinned() {
     let decoded: WorkflowView =
         serde_json::from_value(serde_json::to_value(&view).unwrap()).expect("the view decodes");
     assert_eq!(decoded, view);
+    for kind in [
+        SiteKind::Call,
+        SiteKind::Perform,
+        SiteKind::Sleep,
+        SiteKind::Join,
+        SiteKind::JoinMany,
+        SiteKind::Yield,
+        SiteKind::Spawn,
+        SiteKind::Cancel,
+    ] {
+        assert_eq!(serde_json::to_value(kind).unwrap(), kind.to_string());
+    }
 }
 
 /// An effect inserted by an authoring operation is an execution site of

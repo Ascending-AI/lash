@@ -11,7 +11,9 @@
 use std::sync::Arc;
 
 use lash_kernel_check::{Environment, Graph, Refusal};
-use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, Name, Signature, Unit};
+use lash_kernel_doc::{
+    Document, DocumentId, FunctionCatalog, FunctionRegistry, Name, Signature, Unit,
+};
 use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef, WorkflowOverlayDocument};
 
 use super::{
@@ -31,6 +33,8 @@ pub struct WorkflowDocument {
 
 impl WorkflowDocument {
     /// `document` entered at `entry`, with the view `functions` derive.
+    /// A decoded [`lash_kernel_doc::FunctionDeclarations`] is sufficient:
+    /// linking requires definitions, not native code or an engine.
     ///
     /// # Errors
     ///
@@ -38,7 +42,7 @@ impl WorkflowDocument {
     pub fn derive(
         document: Document,
         entry: WorkflowDocumentEntry,
-        functions: &FunctionRegistry,
+        functions: &dyn FunctionCatalog,
     ) -> Result<Self, WorkflowDocumentError> {
         let identity = document.identity()?;
         let graph = lash_kernel_check::derive(&document, functions)?;
@@ -334,7 +338,7 @@ impl KernelDocumentProvider {
         let Some(stored) = self.engine.documents.get(document).await? else {
             return Ok(None);
         };
-        WorkflowDocument::derive(stored, entry, &self.engine.functions)
+        WorkflowDocument::derive(stored, entry, self.engine.functions.as_ref())
             .map(Some)
             .map_err(|error| unresolvable(error.to_string()))
     }

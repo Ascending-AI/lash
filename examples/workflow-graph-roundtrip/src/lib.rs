@@ -82,10 +82,11 @@ impl SavedWorkflow {
         );
         let (view, view_unavailable, source, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (view, view_unavailable) = match lash::workflow::view::derive(derived) {
-                    Ok(view) => (Some(view), None),
-                    Err(error) => (None, Some(error.to_string())),
-                };
+                let (view, view_unavailable) =
+                    match lash::workflow::view::derive(derived, functions) {
+                        Ok(view) => (Some(view), None),
+                        Err(error) => (None, Some(error.to_string())),
+                    };
                 let (source, source_unavailable) = match derived.typescript(Default::default()) {
                     Ok(printed) => (Some(printed.source), None),
                     Err(error) => (None, Some(error.to_string())),

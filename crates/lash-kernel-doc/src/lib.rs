@@ -49,8 +49,8 @@ pub use document::{
     NodeAnnotation,
 };
 pub use function::{
-    FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDefinition, Guard, Implementation,
-    Measure, Operand,
+    FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,
+    Implementation, Measure, Operand,
 };
 pub use graph_codec::{
     FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,

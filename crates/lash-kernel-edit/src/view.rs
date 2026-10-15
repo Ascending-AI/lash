@@ -21,7 +21,10 @@ use lash_kernel_check::{
     ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId, NodeKind,
     Reference, StmtNode,
 };
-use lash_kernel_doc::{Action, Atom, Document, Expr, Name, Node, Place, Site, Stmt, Type, Unit};
+use lash_kernel_doc::{
+    Action, Atom, Callee, Document, Expr, FunctionCatalog, FunctionId, FunctionName, Name, Node,
+    Param, Place, Site, Stmt, Type, Unit,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -174,20 +177,34 @@ pub struct ActionView {
     /// What an assignment of the action's result writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Place>,
+    /// The statically named target of a library or declared call or spawn.
+    /// Calls through values have no static callee name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<CalleeView>,
     pub args: Vec<ArgumentView>,
     /// A `perform`'s declared result, else the checker's facet.
     pub result_type: Type,
     pub available: Vec<usize>,
 }
 
+/// A statically named call target. Declared names are arbitrary kernel names;
+/// library names are qualified [`FunctionName`]s.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CalleeView {
+    Library(FunctionName),
+    Declared(Name),
+}
+
 /// One argument of an action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArgumentView {
-    /// The parameter a `perform`'s effect signature names at this position.
+    /// The parameter the library, declared function or effect names here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<Name>,
-    /// That parameter's type; `any` when no signature names one.
+    /// That parameter's type; `any` for an untyped declared parameter or
+    /// when no signature names one.
     #[serde(rename = "type")]
     pub ty: Type,
     pub atom: Atom,
@@ -250,23 +267,48 @@ pub enum SiteKind {
     Cancel,
 }
 
+impl std::fmt::Display for SiteKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Call => "call",
+            Self::Perform => "perform",
+            Self::Sleep => "sleep",
+            Self::Join => "join",
+            Self::JoinMany => "join_many",
+            Self::Yield => "yield",
+            Self::Spawn => "spawn",
+            Self::Cancel => "cancel",
+        })
+    }
+}
+
 /// Why a graph has no view of an entry.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ViewError {
     #[error("the graph has no unit {unit:?}")]
     NoSuchUnit { unit: Unit },
+    #[error("the view's catalog has no library function {function}")]
+    MissingFunction { function: FunctionId },
     /// The graph was derived from another document.
     #[error("the graph does not describe the document at {site:?}")]
     Mismatch { site: Site },
 }
 
 /// The view of `entry` in `document`, read from the `graph` the checker
-/// derived from it.
+/// derived from it. `functions` must be the catalog used to derive the graph:
+/// document `use` lines name library identities but carry no signatures.
+/// A decoded [`lash_kernel_doc::FunctionDeclarations`] is sufficient.
 ///
 /// # Errors
 ///
-/// The graph has no such unit, or was not derived from `document`.
-pub fn derive(document: &Document, graph: &Graph, entry: &Unit) -> Result<WorkflowView, ViewError> {
+/// The graph has no such unit or was not derived from `document`, or the
+/// catalog lacks a called library function.
+pub fn derive(
+    document: &Document,
+    graph: &Graph,
+    entry: &Unit,
+    functions: &dyn FunctionCatalog,
+) -> Result<WorkflowView, ViewError> {
     let unit = graph.unit(entry).ok_or_else(|| ViewError::NoSuchUnit {
         unit: entry.clone(),
     })?;
@@ -285,6 +327,7 @@ pub fn derive(document: &Document, graph: &Graph, entry: &Unit) -> Result<Workfl
     let mut walk = Walk {
         document,
         graph,
+        functions,
         entry: Callable {
             site: Site::new(entry.clone(), Vec::new()),
             expected: expected.unwrap_or(Type::Any),
@@ -392,6 +435,7 @@ struct Context {
 struct Walk<'a> {
     document: &'a Document,
     graph: &'a Graph,
+    functions: &'a dyn FunctionCatalog,
     entry: Callable,
     view: WorkflowView,
     uses: BTreeMap<BindingId, Vec<Site>>,
@@ -583,12 +627,55 @@ impl<'a> Walk<'a> {
             Action::Perform { effect, .. } => self.document.manifest.effects.get(effect),
             _ => None,
         };
+        let (callee, params) = match written {
+            Action::Call { callee, .. } | Action::Spawn { callee, .. } => match callee {
+                Callee::Library(function) => {
+                    let definition =
+                        self.functions
+                            .definition(function)
+                            .ok_or(ViewError::MissingFunction {
+                                function: *function,
+                            })?;
+                    (
+                        Some(CalleeView::Library(definition.name.clone())),
+                        definition.signature.params.clone(),
+                    )
+                }
+                Callee::Declared(name) => {
+                    let function = self
+                        .document
+                        .functions
+                        .get(name)
+                        .ok_or_else(|| mismatch(node))?;
+                    let params = self.document.entries.get(name).map_or_else(
+                        || {
+                            function
+                                .params
+                                .iter()
+                                .map(|name| Param {
+                                    name: name.clone(),
+                                    ty: Type::Any,
+                                    optional: false,
+                                })
+                                .collect()
+                        },
+                        |signature| signature.params.clone(),
+                    );
+                    (Some(CalleeView::Declared(name.clone())), params)
+                }
+                Callee::Value(_) => (None, Vec::new()),
+            },
+            _ => (
+                None,
+                signature.map_or_else(Vec::new, |signature| signature.params.clone()),
+            ),
+        };
         let args = written_atoms(written)
             .into_iter()
             .zip(atoms(derived))
             .enumerate()
             .map(|(index, (atom, derived))| {
-                let param = signature.and_then(|signature| signature.params.get(index));
+                let param = params.get(index);
                 ArgumentView {
                     name: param.map(|param| param.name.clone()),
                     ty: param.map_or(Type::Any, |param| param.ty.clone()),
@@ -611,6 +698,7 @@ impl<'a> Walk<'a> {
             statement,
             block: at.block.clone(),
             destination: at.assigns.clone(),
+            callee,
             args,
             result_type,
             available: available(self.graph, node),

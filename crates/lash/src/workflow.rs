@@ -26,7 +26,12 @@
 //! blocks a host can select with what opens each, the dataflow ports and
 //! wires are drawn from, and every execution site. It is lash's wire shape
 //! (the `kernel-workflow-view` host schema); labels, layout and styling
-//! stay the host's.
+//! stay the host's. The view also takes the library catalog explicitly. A
+//! document's `use` lines carry names and ids but no signatures. The runtime
+//! can ship [`document::FunctionRegistry::export_declarations`] as serde data;
+//! a separate reader decodes [`document::FunctionDeclarations`], passes it to
+//! [`WorkflowDocument::derive`], then to [`view::derive`]. This needs no engine
+//! object or native implementations.
 //!
 //! A place in a document is a [`document::Site`]: the unit (`main`, a
 //! declared function or a library function) and the path of child indexes
@@ -169,23 +174,33 @@ pub use lash_kernel_edit::authoring;
 /// execution sites, as serialisable data with no presentation.
 pub mod view {
     pub use lash_kernel_edit::view::{
-        ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, Dataflow,
+        ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
         ExecutionSiteView, ExpressionView, ReturnView, ScopeKind, ScopeView, SiteKind,
         StatementView, ViewError, WorkflowView,
     };
 
     /// The view of `document` at the entry it is entered at.
     ///
+    /// `functions` is the catalog used to derive the document. Its `use`
+    /// lines hold names and identities, not parameter signatures. A runtime
+    /// ships [`document::FunctionRegistry::export_declarations`](super::document::FunctionRegistry::export_declarations)
+    /// as serde data; a reader decodes [`document::FunctionDeclarations`](super::document::FunctionDeclarations),
+    /// passes it to [`WorkflowDocument::derive`](super::WorkflowDocument::derive),
+    /// then passes the same catalog here. No engine or native code is needed.
+    ///
     /// # Errors
     ///
-    /// Never for a [`WorkflowDocument`](super::WorkflowDocument): its graph
-    /// is derived from its own document. The error is the projection's
-    /// refusal of a graph that does not describe the document.
-    pub fn derive(document: &super::WorkflowDocument) -> Result<WorkflowView, ViewError> {
+    /// The projection refuses a graph that does not describe the document,
+    /// or a catalog missing a library call's definition.
+    pub fn derive(
+        document: &super::WorkflowDocument,
+        functions: &dyn super::document::FunctionCatalog,
+    ) -> Result<WorkflowView, ViewError> {
         lash_kernel_edit::view::derive(
             document.document(),
             document.graph(),
             &document.entry_unit(),
+            functions,
         )
     }
 }

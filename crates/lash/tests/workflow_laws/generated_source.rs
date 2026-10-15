@@ -88,9 +88,12 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
     );
     let service = lash::vm::WorkerService::default();
     for document in [ts, py, host] {
-        let view =
-            WorkflowDocument::derive(document.clone(), WorkflowDocumentEntry::Main, registry)
-                .expect("derive");
+        let view = WorkflowDocument::derive(
+            document.clone(),
+            WorkflowDocumentEntry::Main,
+            registry.as_ref(),
+        )
+        .expect("derive");
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
             let mut without_map = None;
             for maps in [false, true] {
@@ -268,4 +271,66 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
     };
     exact(&document, imported.document());
     core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-6322: the runtime's declarations and an imported document are enough
+/// for a remote reader to derive the canvas, without an engine or native code.
+#[test]
+fn an_imported_typescript_view_needs_only_serialized_library_declarations() {
+    let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
+    let registry = embedding.registry().expect("registry");
+    let environment = lash::dialect::Environment {
+        library: embedding.library(),
+        effects: &Default::default(),
+        tool_roots: &Default::default(),
+        controls: &Default::default(),
+        bindings: &Default::default(),
+        functions: &Default::default(),
+    };
+    let imported = lash::typescript::lower_workflow(
+        "export async function digest(items: string[], count: number) { let total = count; for (const item of items) { total = total + item.length; } return total; }",
+        &environment,
+    ).expect("import TypeScript workflow").document;
+    assert!(
+        imported
+            .manifest
+            .functions
+            .values()
+            .any(|name| name.as_str().starts_with("ts."))
+    );
+    assert!(
+        imported
+            .manifest
+            .functions
+            .values()
+            .any(|name| name.as_str().starts_with("num."))
+    );
+    let document_wire = serde_json::to_vec(&imported).expect("ship document");
+    let library_wire = serde_json::to_vec(&registry.export_declarations()).expect("ship library");
+    drop(embedding);
+
+    let document: Document = serde_json::from_slice(&document_wire).expect("read document");
+    let functions: k::FunctionDeclarations =
+        serde_json::from_slice(&library_wire).expect("read library declarations");
+    let entry = WorkflowDocumentEntry::Entry {
+        function: k::Name::new("digest"),
+    };
+    assert!(
+        WorkflowDocument::derive(
+            document.clone(),
+            entry.clone(),
+            &k::FunctionRegistry::default()
+        )
+        .is_err(),
+        "use lines alone do not link"
+    );
+    let document =
+        WorkflowDocument::derive(document, entry, &functions).expect("link without engine");
+    let view = lash::workflow::view::derive(&document, &functions).expect("canvas without engine");
+    assert!(!view.statements.is_empty());
+    assert!(!view.execution_sites.is_empty());
+    let serialized = serde_json::to_value(&view).expect("view serializes");
+    let decoded: lash::workflow::view::WorkflowView =
+        serde_json::from_value(serialized).expect("view decodes");
+    assert_eq!(view, decoded);
 }

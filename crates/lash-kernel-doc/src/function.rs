@@ -11,6 +11,15 @@ use crate::document::{DecodeError, from_versioned_json_with_limits, to_json};
 use crate::name::{FunctionId, FunctionName, Name};
 use crate::types::Signature;
 
+/// A library's declarations by content identity, without native implementations.
+///
+/// A runtime exports these with [`crate::FunctionRegistry::export_declarations`]
+/// and ships their serde representation beside documents. The decoded map is
+/// a [`crate::FunctionCatalog`], so a reader can link documents and derive
+/// workflow views without a registry or engine. Definitions include signatures
+/// and kernel bodies: document `use` lines contain only names and identities.
+pub type FunctionDeclarations = BTreeMap<FunctionId, FunctionDefinition>;
+
 /// A library function: its name, its typed signature over kernel values,
 /// its error kinds, what a call is charged, the guard that bounds its work,
 /// and how it is implemented. Its identity is the hash of all of it, so a
