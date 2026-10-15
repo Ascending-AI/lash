@@ -297,14 +297,31 @@ pub struct DynamicCall {
 }
 
 /// What a linked effect is linked to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkKind {
-    /// An ordinary tool.
+    /// An ordinary tool: one the link's provider advertises.
     Tool,
     /// The fixed `call_dynamic` endpoint of the env's deferred provider: a
     /// call it makes is resolved once, then runs on the recorded match.
     Dynamic,
+    /// A tool the declaring cell's deferred provider resolved, as its
+    /// committed match recorded it: served from this retained definition
+    /// and binding by the link's provider, which need not advertise it, and
+    /// never resolved again.
+    Resolved(Box<ResolvedLink>),
+}
+
+/// The committed resolution a [`LinkKind::Resolved`] link retains: the
+/// matched tool's definition, whose process surface is the link's, and its
+/// execution binding, routed to the codec's process twin with its format
+/// and payload as recorded.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedLink {
+    pub definition: ToolDefinition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ExecutionBinding>,
 }
 
 /// How one effect a process performs is implemented: the tool it is linked
@@ -331,6 +348,32 @@ impl EffectLink {
             provider: deferred,
             surface: ProcessSurface::of(&call_dynamic_endpoint()),
             kind: LinkKind::Dynamic,
+        }
+    }
+
+    /// The link of the tool a committed deferred match resolved to
+    /// `definition` under `binding`, served by the env component provider
+    /// declared as `provider`.
+    pub fn resolved(
+        provider: ProviderKey,
+        definition: ToolDefinition,
+        binding: Option<ExecutionBinding>,
+    ) -> Self {
+        Self {
+            provider,
+            surface: ProcessSurface::of(&definition),
+            kind: LinkKind::Resolved(Box::new(ResolvedLink {
+                definition,
+                binding,
+            })),
+        }
+    }
+
+    /// The retained resolution of a [`LinkKind::Resolved`] link.
+    pub fn resolution(&self) -> Option<&ResolvedLink> {
+        match &self.kind {
+            LinkKind::Resolved(resolved) => Some(resolved),
+            LinkKind::Tool | LinkKind::Dynamic => None,
         }
     }
 }

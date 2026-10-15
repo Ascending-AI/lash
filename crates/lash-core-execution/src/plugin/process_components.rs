@@ -343,14 +343,16 @@ impl ProcessComponentRegistry {
 
     /// Check that these components serve every link of `env` (P1): the
     /// link's provider, built under the env's config, serves its tool with
-    /// the surface the link retained, and a `call_dynamic` link's provider
-    /// is a component's deferred provider, which matches its target per
-    /// call.
+    /// the surface the link retained, a `call_dynamic` link's provider is a
+    /// component's deferred provider, which matches its target per call,
+    /// and a resolved link's provider serves the definition it retains under
+    /// a binding a component reads.
     ///
     /// # Errors
     ///
-    /// [`ProcessEnvRefusal::ToolNotServed`] or
-    /// [`ProcessEnvRefusal::LinkedSurfaceChanged`] naming the effect, or the
+    /// [`ProcessEnvRefusal::ToolNotServed`],
+    /// [`ProcessEnvRefusal::LinkedSurfaceChanged`] or
+    /// [`ProcessEnvRefusal::BindingUnreadable`] naming the effect, or the
     /// refusal of a component that does not compose.
     pub fn check_served(&self, env: &Arc<ProcessEnv>) -> Result<(), ProcessEnvRefusal> {
         if env.effects().is_empty() {
@@ -360,6 +362,14 @@ impl ProcessComponentRegistry {
         for (effect, link) in env.effects() {
             match composition.step_link(env, effect) {
                 StepLink::Served { .. } => {}
+                StepLink::Unreadable { codec, reason } => {
+                    return Err(ProcessEnvRefusal::BindingUnreadable {
+                        effect: effect.to_string(),
+                        tool: link.tool().to_string(),
+                        codec: codec.to_string(),
+                        reason,
+                    });
+                }
                 StepLink::Drifted {
                     kind: crate::ToolSurfaceDriftKind::Changed,
                     ..
@@ -952,12 +962,21 @@ pub enum StepLink {
         tool: crate::ToolId,
         kind: crate::ToolSurfaceDriftKind,
     },
+    /// A resolved link's binding cannot be read here (S8): its codec is not
+    /// registered, or does not read its format. The call's process parks
+    /// before it is admitted.
+    Unreadable {
+        codec: crate::ProviderKey,
+        reason: String,
+    },
 }
 
 impl ProcessComposition {
     /// How this node serves the linked call of `effect` under `env` (D3):
     /// the link's provider, by its key, serving the linked tool with the
     /// surface the link retained, judged now, before the call's `x_start`.
+    /// A resolved link's provider serves the definition the link retains,
+    /// advertised or not, once this node reads its binding.
     #[must_use]
     pub fn step_link(
         &self,
@@ -996,12 +1015,32 @@ impl ProcessComposition {
                 Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
             };
         }
-        let Some(definition) = self.registry.served(&link.provider, link.tool(), &config) else {
-            return drifted(crate::ToolSurfaceDriftKind::Missing);
+        let definition = match &link.kind {
+            crate::LinkKind::Resolved(resolved) => {
+                if crate::ProcessSurface::of(&resolved.definition) != link.surface {
+                    return drifted(crate::ToolSurfaceDriftKind::Changed);
+                }
+                if let Some(binding) = &resolved.binding
+                    && let Err(reason) = self.check_binding(binding)
+                {
+                    return StepLink::Unreadable {
+                        codec: binding.codec.clone(),
+                        reason,
+                    };
+                }
+                resolved.definition.clone()
+            }
+            crate::LinkKind::Tool | crate::LinkKind::Dynamic => {
+                let Some(definition) = self.registry.served(&link.provider, link.tool(), &config)
+                else {
+                    return drifted(crate::ToolSurfaceDriftKind::Missing);
+                };
+                if crate::ProcessSurface::of(&definition) != link.surface {
+                    return drifted(crate::ToolSurfaceDriftKind::Changed);
+                }
+                definition
+            }
         };
-        if crate::ProcessSurface::of(&definition) != link.surface {
-            return drifted(crate::ToolSurfaceDriftKind::Changed);
-        }
         match self
             .composition
             .tool_run_binding(link.tool(), Some(&link.provider))
@@ -1050,6 +1089,12 @@ impl ProcessComposition {
         let Some((_, _, Some(binding))) = matched.resolved() else {
             return Ok(());
         };
+        self.check_binding(binding)
+    }
+
+    /// Check that `binding`'s codec is a provider registered here that
+    /// reads its format (S8).
+    fn check_binding(&self, binding: &crate::ExecutionBinding) -> Result<(), String> {
         let readable = self
             .registry
             .provider(&binding.codec)

@@ -22,6 +22,10 @@
 //!   issues in the commit that consumes it runs the matched tool on the
 //!   match's provider and binding, admitted under the tool's own
 //!   declaration, as a linked call is.
+//! - **Resolved links** run the tool the declaring cell's committed
+//!   deferred match resolved, as the env retains it: its definition, on the
+//!   link's provider, under its binding, which this node must read before
+//!   the call is admitted. Nothing resolves it again.
 //! - **Engine steps** run through the [`EngineSteps`](crate::EngineSteps)
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
@@ -90,12 +94,22 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "a process tool step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
-        // The target of a `call_dynamic` call runs on its recorded match:
-        // the matched tool, on the provider and binding the match names.
-        if let Some(matched) = matched {
-            let Some((provider, definition, binding)) = matched.resolved() else {
-                return SettledOutput::Interrupted.into();
-            };
+        // The target of a `call_dynamic` call runs on its recorded match,
+        // and a resolved link's call on the resolution its env retains: the
+        // matched tool, on the provider and binding the record names.
+        let resolution = match &matched {
+            Some(matched) => matched.resolved(),
+            None => step.effects.get(&effect).and_then(|link| {
+                link.resolution().map(|resolved| {
+                    (
+                        &link.provider,
+                        &resolved.definition,
+                        resolved.binding.as_ref(),
+                    )
+                })
+            }),
+        };
+        if let Some((provider, definition, binding)) = resolution {
             let call = lash_core_execution::sansio::PendingToolCall {
                 call_id: execution.call().clone(),
                 provider_call_id: None,
@@ -108,6 +122,9 @@ impl DurableProcessWorker {
                     .with_execution_binding(binding.cloned());
             let result = step.tools.granted_body(&call, &execution, grant)(token).await;
             return tool_step_output(&process.id, &call, result);
+        }
+        if matched.is_some() {
+            return SettledOutput::Interrupted.into();
         }
         let tool = execution.draft().tool();
         let name = step
@@ -489,6 +506,12 @@ impl ProcessSteps for WorkerSteps {
                         step: step.0.clone(),
                         tool: effect.to_string(),
                     }),
+                    // A resolved link's binding this node cannot read parks
+                    // the process before the call is admitted (S8), as a
+                    // match's does.
+                    crate::plugin::StepLink::Unreadable { reason, .. } => {
+                        Err(StepRefusal::CompositionUnavailable { reason })
+                    }
                     // The body's limit and the park's deadline are pinned
                     // separately, as a round member's are.
                     crate::plugin::StepLink::Served { manifest, binding } => {

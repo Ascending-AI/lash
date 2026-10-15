@@ -79,6 +79,30 @@ impl CellEnvelope {
         )
     }
 
+    /// The grants the cell's committed deferred matches recorded, by the
+    /// effect path each matched tool's binding names: what a start the
+    /// cell declares captures an effect the run's surface does not offer
+    /// from, never resolving it again. A path two grants name is left out,
+    /// so neither is captured in place of the other.
+    pub(super) fn recorded_grants(&self) -> BTreeMap<EffectName, lash_core::ToolExecutionGrant> {
+        let mut grants = BTreeMap::new();
+        let mut conflicted = BTreeSet::new();
+        for grant in self.grants.values() {
+            let Some(effect) = lash_core::effect_path_of(grant.manifest())
+                .and_then(|path| EffectName::new(path.as_str()).ok())
+            else {
+                continue;
+            };
+            if grants.insert(effect.clone(), grant.clone()).is_some() {
+                conflicted.insert(effect);
+            }
+        }
+        for effect in conflicted {
+            grants.remove(&effect);
+        }
+        grants
+    }
+
     /// The effects `boundary` offers, as the envelope records them.
     pub(super) fn record_effects(boundary: &HostBoundary) -> BTreeMap<EffectName, RecordedEffect> {
         boundary

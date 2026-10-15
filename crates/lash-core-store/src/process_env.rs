@@ -421,10 +421,25 @@ pub enum ProcessEnvRefusal {
     /// Two linked effect paths collide: one is a namespace of the other.
     #[error("linked effects `{first}` and `{second}` collide")]
     LinkPathCollision { first: String, second: String },
-    /// Capture matched an effect to a tool of the run's recorded surface
-    /// that no component the env names serves.
+    /// Capture matched an effect to a tool of the run's recorded surface,
+    /// or of the declaring cell's committed deferred match, that no
+    /// component the env names serves.
     #[error("{}", capture_missing(effect, tool))]
     CaptureMissing { effect: String, tool: String },
+    /// Capture matched an effect to a tool the declaring cell's deferred
+    /// provider resolved, whose execution binding no component the env
+    /// names reads: its codec has no process twin there, or the twin does
+    /// not read the binding's format.
+    #[error(
+        "effect `{effect}` is linked to tool `{tool}`, whose execution binding of codec `{codec}` \
+         cannot be read: {reason}"
+    )]
+    BindingUnreadable {
+        effect: String,
+        tool: String,
+        codec: String,
+        reason: String,
+    },
     /// A restricted child env names an effect its parent does not link.
     #[error("effect `{effect}` is not linked by the parent env it is restricted from")]
     RestrictMissing { effect: String },
@@ -769,7 +784,7 @@ impl ProcessEnvBuilder {
 /// type lowers to, so a body that never names it can need it linked.
 fn capture_missing(effect: &str, tool: &str) -> String {
     let refusal = format!(
-        "effect `{effect}` matched tool `{tool}` in the run's recorded surface, which no component the env names serves"
+        "effect `{effect}` matched tool `{tool}` in the run's recorded surface or the declaring cell's deferred match, which no component the env names serves"
     );
     if effect == "processes.await" {
         format!(

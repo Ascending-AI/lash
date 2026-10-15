@@ -4,11 +4,13 @@
 //! host's required [`ProcessEnvPolicy`] states the environment and engine
 //! settings the child runs under. The policy sees the target's
 //! authoritative signature, the starting turn's recorded run, the surface
-//! the declaring attempt was admitted under and, inside a process, the
+//! the declaring attempt was admitted under, the grants the declaring
+//! cell's committed deferred matches recorded and, inside a process, the
 //! enclosing process's environment. Its choice is sealed into the declaration's
 //! launch and journaled with the tool outcome: once that outcome commits,
 //! realization, redrive, takeover and adoption never call it again.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_store::process_env::{ProcessComponentEntry, ProcessEnv, ProcessEnvRefusal};
@@ -16,7 +18,7 @@ use lash_core_store::run_spec::ResolvedRun;
 
 use super::model::{EngineLaunch, EngineSettings, ProcessEnvRef};
 use super::{ProcessDefinitionId, ProcessEngineRegistry, ProcessSignature};
-use crate::{ExecutionOwner, ProcessId, SurfaceTools};
+use crate::{EffectName, ExecutionOwner, ProcessId, SurfaceTools, ToolExecutionGrant};
 
 /// Chooses the environment and engine settings of a model's process start.
 ///
@@ -74,6 +76,7 @@ pub struct ProcessEnvCx<'a> {
     /// process.
     pub surface: Option<&'a SurfaceTools>,
     pub enclosing: Option<&'a EnclosingProcess>,
+    recorded_grants: &'a BTreeMap<EffectName, ToolExecutionGrant>,
     engines: &'a ProcessEngineRegistry,
 }
 
@@ -87,6 +90,7 @@ impl<'a> ProcessEnvCx<'a> {
         enclosing: Option<&'a EnclosingProcess>,
         engines: &'a ProcessEngineRegistry,
     ) -> Self {
+        static NONE: BTreeMap<EffectName, ToolExecutionGrant> = BTreeMap::new();
         Self {
             starter,
             target,
@@ -94,8 +98,28 @@ impl<'a> ProcessEnvCx<'a> {
             run,
             surface,
             enclosing,
+            recorded_grants: &NONE,
             engines,
         }
+    }
+
+    /// This context for a start the cell whose committed deferred matches
+    /// recorded `grants` declares.
+    pub(crate) fn with_recorded_grants(
+        mut self,
+        grants: &'a BTreeMap<EffectName, ToolExecutionGrant>,
+    ) -> Self {
+        self.recorded_grants = grants;
+        self
+    }
+
+    /// The grants the declaring cell's committed deferred matches recorded,
+    /// by the effect path each matched tool's binding names: what capture
+    /// links an effect the surface does not offer from. Only the declaring
+    /// cell's own: empty for any other start, and never another cell's.
+    #[must_use]
+    pub fn recorded_grants(&self) -> &BTreeMap<EffectName, ToolExecutionGrant> {
+        self.recorded_grants
     }
 
     /// This declaring build's engine defaults for the target, sealed now:
@@ -113,17 +137,20 @@ impl<'a> ProcessEnvCx<'a> {
 
     /// Capture (R8): the env of the starting turn's recorded `run` with
     /// `components`, linking each effect the target performs to the tool the
-    /// run's recorded surface matched it to, served with that same surface by
-    /// the declared process twin of its recorded provider among `components`:
-    /// the same owner and local key in the process registry.
-    /// Nothing is re-resolved: an effect the surface does not offer (one the
-    /// run met only through a deferred match, say) is refused, as is one no
-    /// component serves.
+    /// run's recorded surface matched it to or, for one the surface does not
+    /// offer, the tool the declaring cell's committed deferred match resolved
+    /// it to ([`recorded_grants`](Self::recorded_grants)), with that match's
+    /// definition and execution binding. Each is served by the declared
+    /// process twin of its recorded provider among `components`: the same
+    /// owner and local key in the process registry. A binding is routed to
+    /// its codec's twin there, its format and payload kept as recorded.
+    /// Nothing is re-resolved: an effect neither offers is refused, as is
+    /// one no component serves or whose binding no component reads.
     ///
     /// # Errors
     ///
-    /// The target's effects cannot be certified, an effect is not on the
-    /// surface, or no component serves its tool.
+    /// The target's effects cannot be certified, an effect is not linked, no
+    /// component serves its tool, or none reads its binding.
     pub async fn capture(
         &self,
         run: &ResolvedRun,
@@ -137,52 +164,88 @@ impl<'a> ProcessEnvCx<'a> {
         let base = ProcessEnv::from_run(run, Default::default(), components.clone())?;
         let composition = self.engines.components().compose(&base, None)?;
         let config = crate::plugin::OwnerConfigView::components(Arc::new(base));
-        let mut effects = std::collections::BTreeMap::new();
-        for effect in performed.keys() {
-            let entry = surface
-                .entries()
-                .find(|entry| {
-                    crate::effect_path_of(&entry.definition.manifest).as_deref()
-                        == Some(effect.as_str())
-                })
-                .ok_or_else(|| ProcessEnvRefusal::EffectNotLinked {
-                    effect: effect.to_string(),
-                })?;
-            let tool = entry.tool();
-            let provider = composition
+        let twin = |provider: &crate::ProviderKey| {
+            composition
                 .registry
                 .keys()
-                .find(|provider| {
-                    provider.registry() == crate::RegistryKind::Process
-                        && provider.owner() == entry.provider.owner()
-                        && provider.key() == entry.provider.key()
+                .find(|twin| {
+                    twin.registry() == crate::RegistryKind::Process
+                        && twin.owner() == provider.owner()
+                        && twin.key() == provider.key()
                 })
-                .ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
-                    effect: effect.to_string(),
-                    tool: tool.to_string(),
-                })?;
-            let served = composition
-                .registry
-                .served(provider, tool, &config)
-                .ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
-                    effect: effect.to_string(),
-                    tool: tool.to_string(),
-                })?;
-            let retained = crate::ProcessSurface::of(&entry.definition);
-            if crate::ProcessSurface::of(&served) != retained {
-                return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
-                    effect: effect.to_string(),
-                    tool: tool.to_string(),
-                });
-            }
-            effects.insert(
-                effect.clone(),
-                crate::EffectLink {
-                    provider: provider.clone(),
-                    surface: retained,
-                    kind: crate::LinkKind::Tool,
-                },
-            );
+                .cloned()
+        };
+        let mut effects = BTreeMap::new();
+        for effect in performed.keys() {
+            let offered = surface.entries().find(|entry| {
+                crate::effect_path_of(&entry.definition.manifest).as_deref()
+                    == Some(effect.as_str())
+            });
+            let link = match (offered, self.recorded_grants.get(effect)) {
+                (Some(entry), _) => {
+                    let tool = entry.tool();
+                    let missing = || ProcessEnvRefusal::CaptureMissing {
+                        effect: effect.to_string(),
+                        tool: tool.to_string(),
+                    };
+                    let provider = twin(&entry.provider).ok_or_else(missing)?;
+                    let served = composition
+                        .registry
+                        .served(&provider, tool, &config)
+                        .ok_or_else(missing)?;
+                    let retained = crate::ProcessSurface::of(&entry.definition);
+                    if crate::ProcessSurface::of(&served) != retained {
+                        return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
+                            effect: effect.to_string(),
+                            tool: tool.to_string(),
+                        });
+                    }
+                    crate::EffectLink {
+                        provider,
+                        surface: retained,
+                        kind: crate::LinkKind::Tool,
+                    }
+                }
+                (None, Some(grant)) => {
+                    let tool = &grant.manifest().id;
+                    let provider =
+                        twin(&grant.provider).ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
+                            effect: effect.to_string(),
+                            tool: tool.to_string(),
+                        })?;
+                    let binding = grant
+                        .binding
+                        .clone()
+                        .map(|binding| {
+                            let codec = twin(&binding.codec).ok_or_else(|| {
+                                ProcessEnvRefusal::BindingUnreadable {
+                                    effect: effect.to_string(),
+                                    tool: tool.to_string(),
+                                    codec: binding.codec.to_string(),
+                                    reason: "it has no process twin: no component the env names \
+                                             declares it"
+                                        .to_owned(),
+                                }
+                            })?;
+                            Ok(crate::ExecutionBinding { codec, ..binding })
+                        })
+                        .transpose()?;
+                    crate::EffectLink::resolved(
+                        provider,
+                        crate::ToolDefinition {
+                            manifest: grant.manifest().clone(),
+                            contract: grant.contract().clone(),
+                        },
+                        binding,
+                    )
+                }
+                (None, None) => {
+                    return Err(ProcessEnvRefusal::EffectNotLinked {
+                        effect: effect.to_string(),
+                    });
+                }
+            };
+            effects.insert(effect.clone(), link);
         }
         let candidate = ProcessEnv::from_run(run, effects, components)?;
         self.engines.capture_env(&performed, &candidate)
@@ -250,7 +313,7 @@ impl ProcessEngineRegistry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessStartChoice {
     /// Per-effect fit checked before holding the launch; never stored.
-    pub fits: std::collections::BTreeMap<crate::EffectName, crate::FitPolicy>,
+    pub fits: BTreeMap<crate::EffectName, crate::FitPolicy>,
     pub env: ProcessEnvChoice,
     pub engine_settings: Option<EngineSettings>,
 }

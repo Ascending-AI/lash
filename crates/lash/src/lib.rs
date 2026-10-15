@@ -1074,7 +1074,9 @@ pub mod process {
     /// What an env links each effect a process performs to: the tool, the
     /// component provider that serves it and the dispatch surface the link
     /// was checked against, and the effects an engine declares it performs.
-    pub use lash_core::{EffectLink, LinkKind, PerformedEffects, ProcessSurface, effect_path_of};
+    pub use lash_core::{
+        EffectLink, LinkKind, PerformedEffects, ProcessSurface, ResolvedLink, effect_path_of,
+    };
     /// Explicit environment choices for a start policy. None is a default:
     /// a host states which it uses.
     pub mod env {

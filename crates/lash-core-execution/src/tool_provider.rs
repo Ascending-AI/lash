@@ -237,6 +237,10 @@ pub struct AttemptContext<'run> {
     /// The routes of the surface the attempt was admitted under: what a
     /// start's capture links from. `None` outside a runtime dispatch.
     routes: Option<crate::SurfaceTools>,
+    /// The grants the declaring cell's committed deferred matches recorded,
+    /// by effect path: what a start's capture links an effect the surface
+    /// does not offer from. Empty outside a cell.
+    recorded_grants: crate::session::RecordedGrants,
     definition_engines: crate::ProcessEngineRegistry,
     pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
     /// The environments [`declare_launch`](Self::declare_launch) held under
@@ -382,6 +386,11 @@ impl<'run> AttemptContext<'run> {
                 .runtime_dispatch
                 .as_ref()
                 .map(|dispatch| dispatch.routes.clone()),
+            recorded_grants: context
+                .runtime_execution_context
+                .as_ref()
+                .map(crate::RuntimeExecutionContext::recorded_grants)
+                .unwrap_or_default(),
             resolved_run: context
                 .runtime_execution_context
                 .as_ref()
@@ -557,8 +566,9 @@ impl<'run> AttemptContext<'run> {
     }
 
     /// What a start policy decides `target`'s start with (§3.6): the
-    /// starting turn's recorded run, the catalog this attempt was offered
-    /// and, inside a process, the enclosing process's environment.
+    /// starting turn's recorded run, the catalog this attempt was offered,
+    /// the grants its cell's committed deferred matches recorded and,
+    /// inside a process, the enclosing process's environment.
     pub fn start_policy_cx<'a>(
         &'a self,
         target: &'a crate::ResolvedStartTarget,
@@ -573,6 +583,7 @@ impl<'run> AttemptContext<'run> {
             self.enclosing_env.as_deref(),
             &self.definition_engines,
         )
+        .with_recorded_grants(&self.recorded_grants)
     }
 
     /// Hold the environment `choice` states under this attempt's execution

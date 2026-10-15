@@ -659,6 +659,10 @@ async fn run_linked_cell(
         }
         Err(Refused::Worker(error)) => return worker_setup_failure(state, &ctx, *error),
     };
+    // A process the cell starts captures the tools its committed deferred
+    // matches resolved from them, with their bindings, never resolving
+    // again; a resumed cell's are its envelope's.
+    let ctx = ctx.with_recorded_grants(Arc::new(linked.envelope.recorded_grants()));
 
     // Every call the cell makes is its own admitted execution, run from
     // these bodies (ADR 0132 §5): a resumed cell knows each call its ledger

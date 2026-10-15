@@ -205,7 +205,17 @@ pub struct RuntimeExecutionContext<'run> {
     /// the language runtime that reports the failed cell or process: its own
     /// error channel carries the refusal's class, code and message only.
     pub(crate) tool_call_limit_refusal: Arc<std::sync::Mutex<Option<crate::ToolCallLimitExceeded>>>,
+    /// The grants the committed deferred matches of the cell this context
+    /// runs recorded, by effect path: what a start its calls declare
+    /// captures an effect the run's surface does not offer from. Empty
+    /// outside a cell.
+    recorded_grants: RecordedGrants,
 }
+
+/// The grants a cell's committed deferred matches recorded, keyed by the
+/// effect path each matched tool's binding names.
+pub(crate) type RecordedGrants =
+    Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
@@ -514,7 +524,29 @@ impl<'run> RuntimeExecutionContext<'run> {
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
+            recorded_grants: Arc::clone(&self.recorded_grants),
         })
+    }
+
+    /// This context running a cell whose committed deferred matches
+    /// recorded `grants`, by effect path: what a start the cell's calls
+    /// declare captures from. Only the declaring cell's own.
+    #[must_use]
+    pub fn with_recorded_grants(
+        mut self,
+        grants: Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>,
+    ) -> Self {
+        self.recorded_grants = grants;
+        self
+    }
+
+    /// The grants of [`with_recorded_grants`](Self::with_recorded_grants);
+    /// empty outside a cell.
+    #[must_use]
+    pub fn recorded_grants(
+        &self,
+    ) -> Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>> {
+        Arc::clone(&self.recorded_grants)
     }
 
     pub fn with_tool_material_store(

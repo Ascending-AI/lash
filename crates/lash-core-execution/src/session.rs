@@ -8,7 +8,7 @@ use crate::RuntimeServices;
 use crate::tool_dispatch::ToolDispatchContext;
 
 mod execution_context;
-pub(crate) use execution_context::{ToolCallStart, ToolObservationAttribution};
+pub(crate) use execution_context::{RecordedGrants, ToolCallStart, ToolObservationAttribution};
 mod opener_run;
 mod process_handles;
 mod settlement_incorporation;

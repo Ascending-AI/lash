@@ -118,6 +118,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
+            recorded_grants: Arc::default(),
             parent_invocation: None,
             turn_phase_probe: None,
             cancellation_token: None,
