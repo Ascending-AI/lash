@@ -35,15 +35,13 @@ agent-workbench-foreground port='3030':
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
 
-workflow-graph-roundtrip port='3031':
+workflow-graph-roundtrip port='':
   #!/usr/bin/env bash
   set -euo pipefail
-  target_dir="${WORKFLOW_GRAPH_TARGET_DIR:-/tmp/lash-workflow-graph-{{port}}}"
-  # The host finds the VM worker beside its own executable.
-  CARGO_TARGET_DIR="$target_dir" \
-    cargo build -p lash-internal-vm-worker --bin lash-vm-worker --features dialect-typescript --profile judged
-  WORKFLOW_GRAPH_ADDR="127.0.0.1:{{port}}" CARGO_TARGET_DIR="$target_dir" \
-    cargo run -p workflow-graph-roundtrip --bin workflow-graph-roundtrip --profile judged
+  if [[ -n "{{port}}" ]]; then
+    export WORKFLOW_GRAPH_ADDR="127.0.0.1:{{port}}"
+  fi
+  bash "{{repo}}/examples/workflow-graph-roundtrip/run.sh"
 
 # FIG-4042: token-free RLM warning and frame-switch companion for the manual
 # workbench continue_as runbook. The provider responses are scripted in-process.

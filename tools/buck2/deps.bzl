@@ -3,7 +3,6 @@ PACKAGE_DEPS = {
     "agent-workbench": {
         "build": {},
         "dev": {
-            "http": "//third-party/rust:p0148",
             "lash": "//crates/lash:lash",
             "lash_sim": "//crates/lash-sim:lash-sim",
             "tempfile": "//third-party/rust:p0372",
@@ -85,8 +84,8 @@ PACKAGE_DEPS = {
     "integrator-contract": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
-            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {
@@ -1509,14 +1508,14 @@ PACKAGE_DEPS = {
     "workflow-graph-roundtrip": {
         "build": {},
         "dev": {
-            "lash": "//crates/lash:lash"
+            "lash": "//crates/lash:lash",
+            "reqwest": "//third-party/rust:p0281"
         },
         "normal": {
             "anyhow": "//third-party/rust:p0010",
             "axum": "//third-party/rust:p0024",
             "chrono": "//third-party/rust:p0048",
             "lash": "//crates/lash:lash",
-            "reqwest": "//third-party/rust:p0281",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375",

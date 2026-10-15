@@ -159,15 +159,43 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     .await;
     assert_eq!(unchanged["identity"], opened["identity"]);
 
+    // The host previews public authoring operations, then submits their
+    // ordinary transaction through the same edit/admission route.
+    let planned = answer(
+        client
+            .post(format!("{base}/workflow/plan"))
+            .json(&json!({"version": opened["version"], "steps": [
+                {"direct": {"replace_expression": {
+                    "expression": literal,
+                    "with": {"literal": {"text": "Edited as a kernel document"}},
+                }}},
+                {"effect": {
+                    "at": {"block": {"unit": {"function": "onboarding"}, "path": []}, "before": bound["site"]},
+                    "effect": "display.show_message",
+                    "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],
+                    "result": "null",
+                    "binding": "extra_message",
+                }},
+            ]}))
+            .send()
+            .await
+            .expect("preview authoring operations"),
+    )
+    .await;
+    let still_saved = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("get after preview"),
+    )
+    .await;
+    assert_eq!(still_saved["identity"], opened["identity"]);
+    assert_eq!(still_saved["version"], opened["version"]);
     let edited = answer(
         client
             .post(format!("{base}/workflow/edits"))
-            .json(&json!({"version": opened["version"], "edits": [
-                {"replace_expression": {
-                    "expression": literal,
-                    "with": {"literal": {"text": "Edited as a kernel document"}},
-                }},
-            ]}))
+            .json(&json!({"version": opened["version"], "edits": planned["transaction"]["edits"]}))
             .send()
             .await
             .expect("edits"),
@@ -194,7 +222,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         survivors
             .iter()
             .filter(|survivor| survivor["edited"] == true)
-            .map(|survivor| &survivor["to"])
+            .map(|survivor| &survivor["from"])
             .eq([&literal]),
         "the correspondence marks the replaced literal alone as edited"
     );
@@ -224,12 +252,158 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     }
     assert_eq!(
         last.display.messages,
-        ["Edited as a kernel document"],
-        "the run showed the edited message"
+        [
+            "Added through public authoring",
+            "Edited as a kernel document"
+        ],
+        "the run showed the helper's input and the directly edited message"
     );
     assert_eq!(last.display.progress, 100.0);
     assert_eq!(
         last.display.lists["steps"],
         ["Approved", "Loop item", "Loop item"]
+    );
+}
+
+#[tokio::test]
+async fn each_edit_response_maps_its_immediate_base() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let mut previous = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("read"),
+    )
+    .await;
+    for number in 0..2 {
+        let first = &previous["statements"][0];
+        let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
+            "version": previous["version"],
+            "edits": [{"insert_statement": {
+                "at": {"block": first["block"], "before": first["site"]},
+                "statement": {"let": {"name": format!("correspondence_probe_{number}"), "value": {"expr": {"literal": "null"}}}}
+            }}]
+        })).send().await.expect("edit")).await;
+        assert_eq!(
+            response["correspondence"]["base"], previous["identity"],
+            "the response must map from this request's document, not the originally opened document"
+        );
+        assert_eq!(
+            response["correspondence"]["result"],
+            response["workflow"]["identity"]
+        );
+        previous = response["workflow"].clone();
+    }
+}
+
+/// Named entry inputs are sent to the canonical process launch; the settled
+/// result and tool call evidence must agree with that exact invocation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn named_inputs_reach_effects_and_the_final_workflow_output() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let workflow = answer(
+        client
+            .post(format!("{base}/workflow/select"))
+            .json(&json!({"id":"deep-research"}))
+            .send()
+            .await
+            .expect("select"),
+    )
+    .await;
+    assert_eq!(
+        workflow["document"]["entries"]["deep_research"]["params"][0]["ty"],
+        "text"
+    );
+    assert_eq!(workflow["dataflow"]["bindings"][0]["type"], "any");
+    assert_eq!(workflow["dataflow"]["returns"][0]["type"], "any");
+    let refused = client
+        .post(format!("{base}/run"))
+        .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
+        .send()
+        .await
+        .expect("stale request");
+    assert_eq!(refused.status(), reqwest::StatusCode::CONFLICT);
+    let response = client
+        .post(format!("{base}/run"))
+        .json(&json!({"version":workflow["version"],"inputs":{"topic":"Typed dataflow research"}}))
+        .send()
+        .await
+        .expect("run");
+    assert!(response.status().is_success());
+    let body = response.text().await.expect("SSE body");
+    assert!(!body.contains("event: run_error"), "{body}");
+    let events: Vec<RunEvent> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|json| serde_json::from_str(json).expect("run event"))
+        .collect();
+    let last = events.last().expect("terminal event");
+    assert_eq!(last.status, RunStatus::Succeeded);
+    assert_eq!(
+        last.output.as_ref().expect("returned report")["title"],
+        "Typed dataflow research"
+    );
+    assert!(
+        events
+            .iter()
+            .filter_map(|event| event.call.as_ref())
+            .any(|call| call.input["topic"] == "Typed dataflow research")
+    );
+    assert_eq!(
+        workflow["dataflow"]["parameters"]
+            .as_array()
+            .expect("parameters")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn imported_parameterized_entries_can_run_with_named_inputs() {
+    let base = serve().await;
+    let client = reqwest::Client::new();
+    let before = answer(
+        client
+            .get(format!("{base}/workflow"))
+            .send()
+            .await
+            .expect("workflow"),
+    )
+    .await;
+    let workflow = answer(
+        client
+            .post(format!("{base}/workflow/source"))
+            .json(&json!({
+                "version": before["version"], "entry": "echo",
+                "source": "export async function echo(message: string) { return message; }"
+            }))
+            .send()
+            .await
+            .expect("import parameterized source"),
+    )
+    .await;
+    let response = client
+        .post(format!("{base}/run"))
+        .json(&json!({
+            "version": workflow["version"], "inputs": {"message":"Named input from imported source"}
+        }))
+        .send()
+        .await
+        .expect("run imported entry");
+    assert!(response.status().is_success());
+    let body = response.text().await.expect("run events");
+    let terminal: RunEvent = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .next_back()
+        .map(|data| serde_json::from_str(data).expect("terminal event"))
+        .expect("run event");
+    assert_eq!(terminal.status, RunStatus::Succeeded);
+    assert_eq!(
+        terminal.output,
+        Some(json!("Named input from imported source"))
     );
 }

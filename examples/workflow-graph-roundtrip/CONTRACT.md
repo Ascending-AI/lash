@@ -18,7 +18,10 @@ shapes and pass through unchanged (snake_case).
 | `POST` | `/workflow/select` | `{ id }`: save a built-in example as the next version; its `WorkflowView` |
 | `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
 | `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
-| `POST` | `/run` | Start a run of the saved version; its `text/event-stream` |
+| `GET` | `/workflow/templates` | TypeScript source templates for the visual editor |
+| `POST` | `/workflow/source` | `{ version, source, entry }`: import and admit source before replacing the current document |
+| `POST` | `/workflow/plan` | `{ version, steps }`: preview helper/direct edits without publishing; `{ version, transaction, preview, correspondence }` |
+| `POST` | `/run` | `{ version?, inputs? }`: start a run with named input values; its `text/event-stream` |
 | `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
 | `GET` | `/` and `/{path}` | Files from `frontend/` |
@@ -46,9 +49,11 @@ here.
 | `definition` | The id of the definition lash admitted this version as. Absent when lash refused it; `notAdmitted` then says why. Such a version is saved and editable but cannot run. |
 | `document` | The kernel document. |
 | `text` | The document in kernel notation. |
-| `statements` | The entry's statements in document order: `{ site, block, depth, summary, action? }`. `action` is the site of the statement's action, which is where a run reports. `summary` is this host's wording. |
+| `statements` | The entry's statements in document order: `{ site, block, depth, summary, statement, action? }`. `action` is the site of the statement's action, which is where a run reports. `summary` is this host's wording. |
+| `scopes` | Canonical graph blocks with labels for the canvas scope selector. |
+| `dataflow` | Canonical bindings, expression sites, lexical availability, callable returns, assignments and effect signatures used to draw and edit ports. Inferred types are the checker’s conservative facets; `Any` is not proof of compatibility. |
 | `executionSites` | The sites a run can report at: `{ site, statement, kind, loops }`. |
-| `source` | The document as the TypeScript printer spells it. Read-only. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
+| `source` | The exact TypeScript export. Editing this text has no effect until `POST /workflow/source` admits it. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 
@@ -80,6 +85,16 @@ A refused transaction is HTTP 422 `edit_refused` with
 `details.diagnostics: [{ edit, site, message }]`, and the saved version is
 unchanged.
 
+`POST /workflow/plan` accepts this example's `steps` request vocabulary:
+`{ "direct": <Edit> }` or `{ "effect": { at, effect, args, result, binding } }`.
+The adapter converts these to `lash::workflow::authoring::Operation` and calls
+`plan` before admitting the transaction against a cloned draft. It returns the
+canonical transaction and preview without changing the saved version. Send the
+returned edits to `/workflow/edits` to save against that same version.
+The HTTP operation format belongs to this example; the public authoring API
+defines no additional serialization protocol. Planning refusals are HTTP 422
+`plan_refused`, with diagnostic indices into the expanded canonical edits.
+
 ## Running
 
 `POST /run` answers an SSE stream. Each `run_event` is:
@@ -90,10 +105,21 @@ unchanged.
 | `workflowVersion`, `definition` | The saved version the run started from and the identity of the document it executes. |
 | `sequence` | The event's position in this stream. |
 | `site` | The site the event is about, a site of that document. Absent for the run as a whole. |
-| `status` | `started`, `waiting`, `succeeded` or `failed`. |
+| `status` | `started`, `waiting`, `succeeded`, `failed` or `incomplete`. |
 | `displayDelta`, `display` | What this event changed in the host's display, and the display after it. |
-| `error` | Why a site or the run failed. |
+| `error` | A failure or explanation of missing observation evidence. |
+| `reset` | Discard provisional node, call and approval state before applying replacement evidence. |
+| `callOnly` | Call inspection update; does not replace the node’s aggregate status. |
+| `callId`, `call` | Admitted call identity and retained input/output data when available. |
+| `output` | The workflow’s terminal result when available. |
 | `approvalKey` | The key to resolve when the run is parked on `host.approval`. |
 
 The last event has no `site` and carries the run's terminal status. A
-`run_error` event carries a message and ends the stream.
+`run_error` event carries an observation/start error and ends the stream; it does
+not prove the underlying invocation failed. Multiple approval keys can be pending
+at once and must each remain resolvable.
+
+The editor draft and revision are in memory. Publishing retains a Lash workflow
+artifact for execution; this example does not restore an editable draft or a run
+history after a host restart. These HTTP/SSE shapes are example-owned, not Lash
+facade contracts.

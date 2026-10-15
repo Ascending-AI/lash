@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import time
 import urllib.parse
@@ -140,7 +141,7 @@ def main() -> None:
     artifact_dir = ROOT / "target/functional-e2e-artifacts/transcript-projection" / gate_id.replace("/", "-")
     artifact_dir.mkdir(parents=True, exist_ok=False)
     report = artifact_dir / "build.json"
-    build = ["kiln", "build"] if (ROOT / ".buckconfig.local").exists() else ["bash", "scripts/hermetic-build.sh", "build"]
+    build = ["kiln", "build"] if (ROOT / ".buckconfig.local").exists() and shutil.which("kiln") else ["bash", "scripts/hermetic-build.sh", "build"]
     subprocess.run([*build, "//examples/agent-workbench:agent-workbench", "--materializations", "final", "--build-report", str(report)], cwd=ROOT, check=True)
     binary = subprocess.check_output(["python3", "tools/buck2/outputs.py", "--report", str(report), "--label", "//examples/agent-workbench:agent-workbench", "--single"], cwd=ROOT, text=True).strip()
     if not Path(binary).is_absolute():

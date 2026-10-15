@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use integrator_contract::stores::IntegratorStores;
 use lash::persistence::{ConformanceDeployment, ConformanceProcessRegistry};
 use lash::runtime::{ActorContext, Clock, SystemClock};
-use lash_sqlite_store::SqliteStoreSet;
+use lash::sqlite::SqliteStoreSet;
 
 /// Both views share one substrate: the integrator's production ports and the
 /// backend's test-only mutation/inspection hooks required by some laws.

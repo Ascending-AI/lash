@@ -6,8 +6,10 @@
 //! lash's execution overlay of the document's sites.
 
 use lash::sync::MutexExt;
+mod authoring_http;
 mod catalog;
 mod contract;
+pub mod dataflow;
 mod display;
 mod runtime;
 mod sample_tools;
@@ -29,6 +31,7 @@ use lash::workflow::document::{
     Action, Document, FunctionRegistry, Name, Node, Place, Rhs, Site, Stmt, Unit, print_document,
 };
 use lash::workflow::edit::{Draft, Location, Transaction};
+use lash::workflow::graph::{ExprNode, Graph, NodeKind, StmtNode};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -36,9 +39,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse, EnvironmentView,
-    ErrorBody, ErrorDetail, ErrorResponse, ExecutionSiteView, OpenWorkflowRequest, RunEvent,
-    RunStatus, StatementView, WorkflowView,
+    CallData, DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse,
+    EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse, ExecutionSiteView, OpenWorkflowRequest,
+    RunEvent, RunStatus, ScopeView, StatementView, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 
@@ -117,6 +120,14 @@ impl SavedWorkflow {
                 .map(|refusal| refusal.to_string()),
             text: print_document(&document),
             statements: statements(&document, &self.entry),
+            scopes: derived
+                .as_ref()
+                .map(|view| scopes(view.graph(), &self.entry))
+                .unwrap_or_default(),
+            dataflow: derived
+                .as_ref()
+                .map(|view| dataflow::project(&document, view.graph(), &self.entry))
+                .unwrap_or_default(),
             execution_sites,
             source,
             source_unavailable,
@@ -125,9 +136,43 @@ impl SavedWorkflow {
     }
 }
 
+fn scopes(graph: &Graph, entry: &Name) -> Vec<ScopeView> {
+    graph
+        .scopes()
+        .iter()
+        .filter_map(|scope| {
+            let block = graph.node(scope.block);
+            if block.site.unit != Unit::Function(entry.clone()) {
+                return None;
+            }
+            let label = match block.parent.map(|id| &graph.node(id).kind) {
+                None => "Entry",
+                Some(NodeKind::Expr(ExprNode::Closure { .. })) => "Function body",
+                Some(NodeKind::Stmt(StmtNode::If { .. })) => "Branch",
+                Some(NodeKind::Stmt(StmtNode::For { .. } | StmtNode::While { .. })) => "Loop body",
+                Some(NodeKind::Stmt(StmtNode::Try { .. })) => "Try block",
+                _ => "Block",
+            };
+            Some(ScopeView {
+                block: block.site.clone(),
+                label: label.to_owned(),
+            })
+        })
+        .collect()
+}
+
 /// The statements of entry `entry` in document order, nested blocks after
 /// the statement that holds them.
 fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
+    fn nested(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
+        if matches!(node, Node::Block(_)) {
+            block(node, at, depth, out);
+        } else {
+            for (index, child) in (0u32..).zip(node.children()) {
+                nested(child, &at.child(index), depth, out);
+            }
+        }
+    }
     fn block(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
         for (index, statement) in (0u32..).zip(node.children()) {
             let Node::Stmt(written) = statement else {
@@ -140,6 +185,7 @@ fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
                 .collect();
             out.push(StatementView {
                 site: site.clone(),
+                statement: written.clone(),
                 block: at.clone(),
                 depth,
                 summary: summary(written),
@@ -149,9 +195,7 @@ fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
                     .map(|(site, _)| site.clone()),
             });
             for (site, part) in parts {
-                if matches!(part, Node::Block(_)) {
-                    block(part, &site, depth + 1, out);
-                }
+                nested(part, &site, depth + 1, out);
             }
         }
     }
@@ -294,6 +338,9 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(open_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/workflow/edits", post(edit_workflow))
+        .route("/workflow/templates", get(authoring_http::templates))
+        .route("/workflow/source", post(authoring_http::import_source))
+        .route("/workflow/plan", post(authoring_http::preview))
         .route("/run", post(run_workflow))
         .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))
@@ -406,14 +453,12 @@ async fn edit_workflow(
                 serde_json::json!({ "diagnostics": diagnostics }),
             )
         })?;
-    let (saved, publication) = state.install(draft, current.entry).await;
+    let (saved, _) = state.install(draft, current.entry).await;
     Ok(Json(EditWorkflowResponse {
         workflow: saved.view(environment.functions()),
         // The published document is the draft's, so the transaction's
         // correspondence is also where each node is in the definition.
-        correspondence: publication.map_or(applied.correspondence, |publication| {
-            publication.correspondence
-        }),
+        correspondence: applied.correspondence,
     }))
 }
 
@@ -432,7 +477,14 @@ pub async fn serve_addr(addr: SocketAddr, state: AppState) -> std::io::Result<()
 )]
 async fn run_workflow(
     State(state): State<AppState>,
+    body: axum::body::Bytes,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, ErrorResponse> {
+    let request: contract::RunRequest = if body.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|error| ErrorResponse::invalid("invalid_run_request", error))?
+    };
     let (tx, rx) = mpsc::channel::<Result<RunEvent, runtime::RunError>>(64);
     let key = uuid::Uuid::new_v4().to_string();
     let (version, started) = {
@@ -442,7 +494,15 @@ async fn run_workflow(
             .published
             .as_ref()
             .map_err(|refusal| ErrorResponse::invalid("run_preparation", refusal))?;
-        let started = state.commands.start(published.start_request(&key)).await;
+        if let Some(version) = request.version
+            && version != saved.version
+        {
+            return Err(ErrorResponse::version_conflict(version, saved.version));
+        }
+        let started = state
+            .commands
+            .start(published.start_request(&key, request.inputs))
+            .await;
         (saved.version, started)
     };
     let started = started.map_err(|error| ErrorResponse::invalid("run_preparation", error))?;

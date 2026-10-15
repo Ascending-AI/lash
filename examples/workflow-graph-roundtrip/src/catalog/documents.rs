@@ -280,3 +280,49 @@ main {
   finish null
 }
 "#;
+
+pub(super) const DEEP_RESEARCH: &str = r#"kernel 1
+numbers float
+effect research.search(input: Any) -> Any
+effect research.synthesize(input: Any) -> Any
+effect display.show_message(input: Any) -> Any
+entry deep_research(topic: Text) -> Any
+
+fn deep_research(topic) {
+  let search_input = {topic: topic, max_sources: 3}
+  let evidence = perform research.search(search_input) as Any
+  let synthesis_input = {topic: evidence.topic, sources: evidence.sources}
+  let report = perform research.synthesize(synthesis_input) as Any
+  let display_input = {text: report.summary}
+  do perform display.show_message(display_input) as Any
+  return report
+}
+
+main {
+  finish null
+}
+"#;
+
+pub(super) const WEEKLY_KPIS: &str = r#"kernel 1
+numbers float
+effect metrics.fetch(input: Any) -> Any
+effect metrics.report(input: Any) -> Any
+effect display.show_message(input: Any) -> Any
+entry weekly_kpis(workspace: Text) -> Any
+
+fn weekly_kpis(workspace) {
+  let current_input = {workspace: workspace, period: "current"}
+  let current = perform metrics.fetch(current_input) as Any
+  let previous_input = {workspace: current.workspace, period: "previous"}
+  let previous = perform metrics.fetch(previous_input) as Any
+  let report_input = {workspace: current.workspace, current: current, previous: previous}
+  let report = perform metrics.report(report_input) as Any
+  let display_input = {text: report.summary}
+  do perform display.show_message(display_input) as Any
+  return report
+}
+
+main {
+  finish null
+}
+"#;

@@ -13,10 +13,14 @@
 //! transaction means the same against any copy of its base document. The
 //! rules are the `K-EDIT` rules of `docs/kernel/semantics.md`.
 //!
+//! [`authoring`] constructs those transactions from expression-valued effect
+//! inputs mixed with ordinary edits. Admission remains on [`Draft::apply`].
+//!
 //! The crate depends on `lash-kernel-doc` and `lash-kernel-check` and on no
 //! other lash crate. It links no dialect.
 
 mod apply;
+pub mod authoring;
 mod correspondence;
 mod draft;
 mod edit;

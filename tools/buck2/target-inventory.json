@@ -70270,7 +70270,6 @@
         "delegation",
         "dotenvy",
         "futures-util",
-        "http",
         "lash-rmcp",
         "lash-runtime",
         "lash-sim",
@@ -70472,7 +70471,6 @@
       "declared_features": [],
       "dependencies": [
         "lash-internal-conformance",
-        "lash-internal-sqlite-store",
         "lash-runtime",
         "tokio"
       ],

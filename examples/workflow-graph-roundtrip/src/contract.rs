@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::document::{Document, Name, Site, Stmt};
 use lash::workflow::edit::{Correspondence, Edit};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,6 +33,9 @@ pub struct WorkflowView {
     pub text: String,
     /// The entry's statements in document order, each with its site.
     pub statements: Vec<StatementView>,
+    /// Canonical blocks the host can explicitly select, including empty bodies.
+    pub scopes: Vec<ScopeView>,
+    pub dataflow: crate::dataflow::Dataflow,
     /// The sites of the document a run can report an occurrence at.
     pub execution_sites: Vec<ExecutionSiteView>,
     /// The document as the TypeScript printer spells it: a read-only lens.
@@ -42,11 +45,20 @@ pub struct WorkflowView {
     pub source_unavailable: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScopeView {
+    pub block: Site,
+    pub label: String,
+}
+
 /// One statement of the entry: where it is and how this host words it.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatementView {
     pub site: Site,
+    /// Canonical payload for this site's inspector; clients need no AST walker.
+    pub statement: Stmt,
     /// The block the statement is in.
     pub block: Site,
     /// How many blocks enclose the statement inside the entry's body.
@@ -138,6 +150,15 @@ pub enum RunStatus {
     Succeeded,
     Waiting,
     Failed,
+    Incomplete,
+}
+
+/// Host presentation of a retained tool call. Absence is unavailable evidence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallData {
+    pub input: Value,
+    pub output: Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -149,6 +170,12 @@ pub struct RunEvent {
     /// a site of that document.
     pub definition: String,
     pub sequence: u64,
+    /// Replace the client's provisional observation state before applying this event.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reset: bool,
+    /// Inspector or display data that does not update the site's aggregate status.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub call_only: bool,
     /// The site the event is about; absent for the run as a whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<Site>,
@@ -160,6 +187,12 @@ pub struct RunEvent {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<lash::ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<CallData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -222,4 +255,12 @@ impl ErrorResponse {
     pub(crate) fn invalid(code: &str, message: impl std::fmt::Display) -> Self {
         Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, Value::Null)
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunRequest {
+    pub version: Option<u64>,
+    #[serde(default)]
+    pub inputs: serde_json::Map<String, Value>,
 }

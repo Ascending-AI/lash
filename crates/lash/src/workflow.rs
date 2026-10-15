@@ -41,6 +41,13 @@
 //! admitted whole against the environment or changes nothing, and a
 //! refusal names the edit and the site ([`edit::EditRefusal`]).
 //!
+//! For effect inputs written as expressions, [`authoring::plan`] lowers an
+//! ordered batch of [`authoring::Operation`]s to the same transaction. Mix
+//! [`authoring::Operation::InsertEffect`] with ordinary
+//! [`authoring::Operation::Edit`]s; computed inputs become preceding bindings
+//! whose names avoid the whole batch. Planning neither mutates nor admits the
+//! draft. Inspect the transaction, then use [`edit::Draft::apply`] as usual.
+//!
 //! Sites are structural paths, so they change under edits. Continuity is
 //! the [`edit::Correspondence`] each applied transaction answers: where
 //! every surviving node of the base sits in the result, and whether an
@@ -136,8 +143,15 @@ pub mod graph {
 /// Editing a document: drafts, edits, transactions, refusals and the
 /// correspondence an applied transaction answers.
 pub mod edit {
-    pub use lash_kernel_edit::*;
+    pub use lash_kernel_edit::{
+        Applied, Correspondence, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal,
+        Location, NodeClass, Position, Survivor, Transaction,
+    };
 }
+
+/// Compose expression-valued effect insertions and direct edits into a
+/// canonical transaction, without admission, publication or execution.
+pub use lash_kernel_edit::authoring;
 
 pub use lash_trace::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
