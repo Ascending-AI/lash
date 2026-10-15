@@ -252,3 +252,8 @@ identity!(
     /// which holds no source map (`K-ID-001`).
     DocumentId
 );
+identity!(
+    /// A source map's identity: the digest of its canonical encoding, which
+    /// names its document and the SHA-256 of its source.
+    SourceMapId
+);

@@ -34,7 +34,10 @@ use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
 pub(crate) use documents::ProcessPreparations;
-pub use documents::{DocumentStoreError, KernelDocuments};
+pub use documents::{
+    DocumentStoreError, ExecutionDocument, KernelDocuments, StoredSourceMap, StoredWorkflow,
+    Unretained,
+};
 pub use helpers::{
     AdoptedRun, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
     RetiredHelpers, plan_helper_adoption, retired_functions_reached, survey_helper_processes,
@@ -256,7 +259,9 @@ mod observe_level {
 }
 
 /// The descriptor of the definition `entry` of `document` is: the engine,
-/// the definition value and the one artifact it holds.
+/// the definition value, and the artifacts it holds: the document and the
+/// declaration of every library function the document lists, each by its
+/// own identity (FIG-6379).
 ///
 /// # Errors
 ///
@@ -264,16 +269,17 @@ mod observe_level {
 pub fn definition_draft(
     definition: &KernelProcessDefinition,
 ) -> Result<lash_core::ProcessDefinitionDraft, lash_core::ProcessDefinitionDraftError> {
+    let mut value = serde_json::json!({
+        "document": definition.document,
+        "entry": definition.entry,
+    });
+    if !definition.functions.is_empty() {
+        value["functions"] = serde_json::json!(definition.functions);
+    }
     lash_core::ProcessDefinitionDraft::new(
         lash_core::ProcessEngineKind::new(LASH_VM_ENGINE_KIND),
-        lash_core::ProcessDefinitionValue::new(serde_json::json!({
-            "document": definition.document,
-            "entry": definition.entry,
-        })),
-        vec![lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::KernelDocument,
-            artifact_ref: definition.artifact_ref(),
-        }],
+        lash_core::ProcessDefinitionValue::new(value),
+        definition.artifacts(),
     )
 }
 
@@ -296,10 +302,11 @@ pub fn definition_of_entry(
     let signature = document.entries.get(function).ok_or_else(|| {
         format!("`{function}` is not an entry of the document, so no process starts from it")
     })?;
-    let draft = definition_draft(&KernelProcessDefinition {
-        document: identity,
-        entry: function.clone(),
-    })
+    let draft = definition_draft(&KernelProcessDefinition::of(
+        document,
+        identity,
+        function.clone(),
+    ))
     .map_err(|error| error.to_string())?;
     serde_json::to_value(lash_core::ProcessDefinition::new(
         draft.id(),
@@ -487,6 +494,17 @@ impl KernelProcessEngine {
                 definition.document
             )));
         };
+        if !document
+            .manifest
+            .functions
+            .keys()
+            .eq(definition.functions.iter())
+        {
+            return Ok(Err(format!(
+                "the definition does not name the library functions document `{}` lists",
+                definition.document
+            )));
+        }
         Ok(match document.entries.get(&definition.entry).cloned() {
             Some(signature) => Ok((document, signature)),
             None => Err(format!(
@@ -623,23 +641,21 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         advance::advance(self.writes, state, event)
     }
 
-    /// A start names one artifact: its document, in the store set's module
-    /// port. The payload is a start input or a definition value.
+    /// A start holds its document and the declaration of every library
+    /// function the document lists, in the store set's module port. The
+    /// payload is a start input or a definition value.
     fn start_artifacts(
         &self,
         payload: &serde_json::Value,
     ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
-        Ok(vec![lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::KernelDocument,
-            artifact_ref: KernelProcessDefinition::from_payload(payload)
-                .map_err(|error| {
-                    lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::DefinitionRefused,
-                        format!("invalid kernel process payload: {error}"),
-                    ))
-                })?
-                .artifact_ref(),
-        }])
+        Ok(KernelProcessDefinition::from_payload(payload)
+            .map_err(|error| {
+                lash_core::PluginError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::DefinitionRefused,
+                    format!("invalid kernel process payload: {error}"),
+                ))
+            })?
+            .artifacts())
     }
 
     /// The engine keeps no store of its own: documents live in the module
@@ -730,8 +746,8 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
             .filter(|entry| **entry != definition.entry)
             .map(|entry| {
                 definition_draft(&KernelProcessDefinition {
-                    document: definition.document,
                     entry: entry.clone(),
+                    ..definition.clone()
                 })
                 .map_err(|error| unresolvable(error.to_string()))
             })

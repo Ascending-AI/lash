@@ -804,6 +804,7 @@ impl DialectSession {
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
                 helpers: self.services.helpers.clone(),
+                kernel: self.services.kernel.clone(),
             },
             session_projected_bindings,
         )

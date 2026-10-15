@@ -481,6 +481,7 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
             draft.document(),
             &request.entry,
             &environment().map_err(api_error)?,
+            None,
         )
         .await
         .map_err(api_error)?;
@@ -496,6 +497,10 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
                 serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
         }),
         WorkflowPublish::Refused(refusal) => json!({
+            "published": false,
+            "refused": refusal.to_string(),
+        }),
+        WorkflowPublish::SourceMapRefused(refusal) => json!({
             "published": false,
             "refused": refusal.to_string(),
         }),
@@ -686,7 +691,7 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
         .await
         .map_err(api_error)?
     {
-        WorkflowDocumentRead::Read(document) => *document,
+        WorkflowDocumentRead::Read(read) => read.document,
         other => return Err(api_error(format!("the document does not read: {other:?}"))),
     };
     let mut accumulator = WorkflowExecutionOverlayAccumulator::default();

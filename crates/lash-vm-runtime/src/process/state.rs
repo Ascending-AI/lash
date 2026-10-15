@@ -10,11 +10,11 @@
 //! the admission of the steps a park asked for, in one `process.advance`
 //! transaction, whose execution root owns the page from then on.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::StepName;
 use lash_core_store::checkpoint_graph::NodeId;
-use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, Name};
+use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, FunctionId, Name};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_client::wire::OutcomeWire;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -24,14 +24,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub const KERNEL_RUN_STEP: &str = "kernel_run";
 
 /// What a process of this engine starts from: the admitted document it
-/// runs, the entry it enters and the entry's arguments by parameter name.
+/// runs, the library functions its `use` lines name, the entry it enters
+/// and the entry's arguments by parameter name.
 ///
 /// The document is named by identity, so a running instance keeps the
-/// document it was admitted under whatever is published after it.
+/// document it was admitted under whatever is published after it. The
+/// functions are the document's own manifest, stated beside its identity so
+/// that what a start holds is read from the start alone (FIG-6379): every
+/// read checks them against the document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessInput {
     pub document: DocumentId,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub functions: BTreeSet<FunctionId>,
     pub entry: Name,
     #[serde(default)]
     pub args: serde_json::Map<String, serde_json::Value>,
@@ -52,20 +58,44 @@ impl KernelProcessInput {
     pub fn definition(&self) -> KernelProcessDefinition {
         KernelProcessDefinition {
             document: self.document,
+            functions: self.functions.clone(),
             entry: self.entry.clone(),
         }
     }
 }
 
-/// The value of one immutable definition: an entry of an admitted document.
+/// The value of one immutable definition: an entry of an admitted document,
+/// with the library functions the document lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessDefinition {
     pub document: DocumentId,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub functions: BTreeSet<FunctionId>,
     pub entry: Name,
 }
 
 impl KernelProcessDefinition {
+    /// The definition of `entry` of `document`, whose identity is
+    /// `identity`: pure, from the document alone.
+    pub fn of(document: &lash_kernel_doc::Document, identity: DocumentId, entry: Name) -> Self {
+        Self {
+            document: identity,
+            functions: document.manifest.functions.keys().copied().collect(),
+            entry,
+        }
+    }
+
+    /// A start of this definition with `args`.
+    pub fn start(&self, args: serde_json::Map<String, serde_json::Value>) -> KernelProcessInput {
+        KernelProcessInput {
+            document: self.document,
+            functions: self.functions.clone(),
+            entry: self.entry.clone(),
+            args,
+        }
+    }
+
     /// The definition a start payload or a definition value names.
     ///
     /// # Errors
@@ -89,9 +119,16 @@ impl KernelProcessDefinition {
         ))
     }
 
-    /// The store key of the document the definition runs.
-    pub fn artifact_ref(&self) -> String {
-        self.document.to_string()
+    /// What a definition and every process of it hold: the document it
+    /// runs, and each library function it lists, by identity.
+    pub fn artifacts(&self) -> Vec<lash_core::ArtifactName> {
+        std::iter::once(super::documents::document_artifact(&self.document))
+            .chain(
+                self.functions
+                    .iter()
+                    .map(super::documents::function_artifact),
+            )
+            .collect()
     }
 }
 

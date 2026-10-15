@@ -37,9 +37,11 @@
 //! other catalog. A document's `use` lines carry names and ids but no
 //! signatures: the runtime can ship
 //! [`document::FunctionRegistry::export_declarations`] as serde data, and a
-//! separate reader decodes [`document::FunctionDeclarations`] and passes it
-//! to [`WorkflowDocument::derive`]. This needs no engine object, native
-//! implementation or dialect.
+//! separate reader decodes [`document::FunctionDeclarations`], narrows it with
+//! [`document::required_declarations`] and holds the document with
+//! [`WorkflowDocument::new`], which checks every declaration against its
+//! identity first. This needs no engine object, native implementation or
+//! dialect.
 //!
 //! A place in a document is a [`document::Site`]: the unit (`main`, a
 //! declared function or a library function) and the path of child indexes
@@ -80,11 +82,15 @@
 //! admits a document as a definition of one of its entries. It takes the
 //! document, not an editor's draft: publishing needs no editor. The
 //! checker admits the document against the environment a process of it
-//! would run under; lash stores the document under its identity and
-//! publishes the descriptor of every entry under the host's pin, so a
-//! process that starts another entry by function reference finds it. A
-//! [`WorkflowPublication`] names the definition and the admitted document.
-//! A refused document ([`WorkflowAdmissionRefusal`]) publishes nothing.
+//! would run under; lash stores the document under its identity, with the
+//! declaration of every library function it lists under that function's
+//! identity, and publishes the descriptor of every entry under the host's
+//! pin, so a process that starts another entry by function reference finds
+//! it. Every later read links the document against those retained
+//! declarations, never against the reading build's library. A
+//! [`WorkflowPublication`] names the definition, the admitted document and
+//! the id of the source map published with it, if any. A refused document
+//! ([`WorkflowAdmissionRefusal`]) or map publishes nothing.
 //!
 //! A definition names its document by identity. A process keeps the
 //! document it was admitted under: publishing an edited document creates a
@@ -179,25 +185,26 @@ pub mod document {
     // Observation inputs belong to `view`; data limits belong to `persistence`.
     // An explicit vocabulary keeps those names out of this module.
     pub use lash_kernel_doc::{
-        Action, Atom, Block, Bytes, Callee, Catch, Closure, Correspondence, Datum, DecodeError,
-        DecodeMismatch, Decoder, Document, DocumentId, EffectIdentity, EffectName, Element,
-        EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON,
-        FROZEN_TOOL_VALUE, Float, Formula, FrozenDatum, Function, FunctionBody, FunctionCatalog,
-        FunctionDeclarations, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
-        Guard, GuardExceeded, Handle, Identity, Implementation, Integer, Invalid, InvalidBytes,
-        InvalidFloat, InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName,
-        InvalidReason, JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopIteration,
-        MAX_DECODE_DEPTH, MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name,
-        NativeCall, NativeError, NativeFunction, NativeHeap, Node, NumberPolicy, NumberToken,
-        Object, Operand, Param, ParseError, ParseErrorReason, Place, PreparedNative,
-        ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField,
-        RegisteredFunction, RegistryError, Rhs, Signature, Site, SourceLanguage, SourceMap,
-        SourceMapRefusal, SourceSite, Span, SpawnIdentity, StatementForm, StatementRuleViolation,
-        Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type, Unit, ValidatedFunctions,
-        Value, ValueKind, WorkCounter, check_statement, core_support, graph_tokens, heap,
+        Action, Atom, Block, Bytes, Callee, Catch, Closure, Correspondence, Datum,
+        DeclarationRefusal, DecodeError, DecodeMismatch, Decoder, Document, DocumentId,
+        EffectIdentity, EffectName, Element, EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION,
+        FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, Float, Formula, FrozenDatum, Function,
+        FunctionBody, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId,
+        FunctionName, FunctionRegistry, Guard, GuardExceeded, Handle, Identity, Implementation,
+        Integer, Invalid, InvalidBytes, InvalidFloat, InvalidIdentity, InvalidInteger,
+        InvalidNumberToken, InvalidQualifiedName, InvalidReason, JoinMode, KERNEL_VERSION,
+        KernelVersion, Label, Literal, LoopIteration, MAX_DECODE_DEPTH, MAX_NESTING_DEPTH,
+        Manifest, MapEntry, MapType, Measure, Member, Name, NativeCall, NativeError,
+        NativeFunction, NativeHeap, Node, NumberPolicy, NumberToken, Object, Operand, Param,
+        ParseError, ParseErrorReason, Place, PreparedNative, ProjectionRead, QualifiedName,
+        RecordEntry, RecordType, RecordTypeField, RegisteredFunction, RegistryError, Rhs,
+        Signature, Site, SourceLanguage, SourceMap, SourceMapId, SourceMapRefusal, SourceSite,
+        Span, SpawnIdentity, StatementForm, StatementRuleViolation, Stmt, Survivor, TaskId,
+        TaskIdentity, Timestamp, TryStmt, Type, Unit, ValidatedFunctions, Value, ValueKind,
+        WorkCounter, check_declarations, check_statement, core_support, graph_tokens, heap,
         parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
-        print_definition, print_document, validate_definition, validate_definition_with_limits,
-        validate_document, validate_document_with_limits,
+        print_definition, print_document, required_declarations, validate_definition,
+        validate_definition_with_limits, validate_document, validate_document_with_limits,
     };
 }
 
@@ -271,7 +278,8 @@ pub use lash_trace::{
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable, WorkflowEnvironment,
+    ExecutionDocument, ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable,
+    WorkflowEnvironment,
 };
 
 #[cfg(feature = "codemode")]
@@ -302,6 +310,11 @@ pub struct WorkflowPublication {
     pub definition: ProcessDefinition,
     /// The admitted document, entered at the entry the definition starts.
     pub document: WorkflowDocument,
+    /// The id of the source map published with it, when one was: the host
+    /// keeps it beside the definition id, and reads the map and its source
+    /// back with
+    /// [`HostArtifacts::read_source_map`](crate::process::HostArtifacts::read_source_map).
+    pub source_map: Option<document::SourceMapId>,
 }
 
 #[cfg(feature = "codemode")]
@@ -311,6 +324,9 @@ pub enum WorkflowPublish {
     Published(Box<WorkflowPublication>),
     /// The document was refused admission. Nothing was published.
     Refused(WorkflowAdmissionRefusal),
+    /// The source map is not one of the document and source it was
+    /// published with: the first check it failed. Nothing was published.
+    SourceMapRefused(document::SourceMapRefusal),
     /// No engine of this core admits workflow documents.
     Unsupported {
         engine_kind: ProcessEngineKind,
@@ -335,7 +351,11 @@ pub enum WorkflowRead {
 /// The document an execution names, or why there is none.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowDocumentRead {
-    Read(Box<WorkflowDocument>),
+    /// The document entered where the reference says, held with the
+    /// declarations it was stored with, and the document it was rewritten
+    /// from with the rewrite's correspondence when a migration or a
+    /// successor carry made it.
+    Read(Box<ExecutionDocument>),
     /// Nothing retains the document the reference names any more.
     Unavailable(WorkflowUnavailable),
     /// This core has no engine that reads workflow documents.
@@ -352,6 +372,36 @@ pub enum WorkflowUnavailable {
     Definition { definition_id: ProcessDefinitionId },
     /// No referrer holds an artifact the definition reads.
     Artifact { artifact: ArtifactName },
+    /// An artifact the read needs is retained with bytes that are not the
+    /// artifact its name says: a declaration that is not the function its
+    /// identity names, or a map that is not its source's.
+    Corrupt {
+        artifact: ArtifactName,
+        message: String,
+    },
+}
+
+#[cfg(feature = "codemode")]
+impl WorkflowUnavailable {
+    pub(crate) fn of(unretained: lash_vm_runtime::Unretained) -> Self {
+        match unretained {
+            lash_vm_runtime::Unretained::Missing { artifact } => Self::Artifact { artifact },
+            lash_vm_runtime::Unretained::Corrupt { artifact, message } => {
+                Self::Corrupt { artifact, message }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "codemode")]
+/// A published source map and the source it maps, or why there is none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceMapRead {
+    Read {
+        map: document::SourceMap,
+        source: String,
+    },
+    Unavailable(WorkflowUnavailable),
 }
 
 #[cfg(feature = "codemode")]
@@ -373,6 +423,12 @@ pub(crate) async fn read(
         lash_core::ProcessDocumentRead::ArtifactMissing { artifact } => {
             return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Artifact {
                 artifact,
+            }));
+        }
+        lash_core::ProcessDocumentRead::ArtifactCorrupt { artifact, message } => {
+            return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Corrupt {
+                artifact,
+                message,
             }));
         }
     };

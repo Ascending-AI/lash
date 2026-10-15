@@ -232,20 +232,38 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
             mut state,
             mut input,
             document,
+            correspondence,
             at_park: true,
         }) = carried
         else {
             return Ok(None);
         };
         // The process holds the rewritten document as it held the one it
-        // started from: under its own record, until it ends.
+        // started from: under its own record, until it ends, with the
+        // declarations of the functions it was redeclared over and the
+        // record of the rewrite a host rekeys its maps by.
         let claim = lash_core::ReferrerClaim::unguarded(
             lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
         )
         .map_err(retried)?;
+        let declarations =
+            lash_kernel_doc::required_declarations(&document, engine.functions.as_ref()).map_err(
+                |refusal| {
+                    fatal(&KernelMigrationRefusal::NotAdmitted {
+                        document: correspondence.base,
+                        reason: refusal.to_string(),
+                    })
+                },
+            )?;
         input.document = engine
             .documents
-            .publish(&claim, &document)
+            .publish(&claim, &document, &declarations)
+            .await
+            .map_err(retried)?;
+        input.functions = document.manifest.functions.keys().copied().collect();
+        engine
+            .documents
+            .record_rewrite(&claim, &correspondence)
             .await
             .map_err(retried)?;
         state.payload = serde_json::to_value(&input).map_err(retried)?;
@@ -267,6 +285,8 @@ struct Carried {
     input: KernelProcessInput,
     /// The rewritten document.
     document: Document,
+    /// Where each node of the document it was rewritten from went.
+    correspondence: lash_kernel_doc::Correspondence,
     /// Whether the process stands at a park; one in flight is carried
     /// from its next.
     at_park: bool,
@@ -334,6 +354,7 @@ async fn carry(
         state,
         input,
         document: plan.rewritten.document,
+        correspondence: plan.rewritten.correspondence,
     }))
 }
 

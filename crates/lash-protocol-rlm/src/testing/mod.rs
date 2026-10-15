@@ -85,6 +85,7 @@ pub(crate) fn cell_services(
         code_renderer: crate::render::CodeRendererSlot::default(),
         prompts: dialect.prompts(),
         helpers: None,
+        kernel: crate::executor::KernelCarry::default(),
     }
 }
 

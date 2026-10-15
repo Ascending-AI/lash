@@ -14,11 +14,13 @@
 mod ast;
 mod canonical;
 mod correspondence;
+mod declarations;
 mod source_map;
 mod source_map_codec;
 #[cfg(test)]
 mod source_map_tests;
 pub use correspondence::{Correspondence, Survivor};
+pub use declarations::{DeclarationRefusal, check_declarations, required_declarations};
 pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
 mod data_limits;
@@ -72,7 +74,7 @@ pub use heap::{
 pub use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 pub use name::{
     DocumentId, EffectName, FunctionId, FunctionName, InvalidIdentity, InvalidQualifiedName, Name,
-    QualifiedName,
+    QualifiedName, SourceMapId,
 };
 pub use native::{
     FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction, RegistryError,

@@ -125,10 +125,16 @@ pub(super) async fn declare_saved_captures(
 pub(super) async fn retain_document(
     ctx: &RuntimeExecutionContext<'_>,
     entries: &CellEntries,
+    functions: &lash_kernel_doc::FunctionRegistry,
 ) -> Result<(), String> {
     let claim = ctx.execution_claim().map_err(|error| error.to_string())?;
+    // The cell's document is held with the declarations of the helpers it
+    // was lowered against, so it reads without this build's library
+    // (FIG-6379).
+    let declarations = lash_kernel_doc::required_declarations(&entries.document, functions)
+        .map_err(|error| error.to_string())?;
     lash_vm_runtime::KernelDocuments::new(ctx.actor_context().backend().module_artifacts())
-        .publish(&claim, &entries.document)
+        .publish(&claim, &entries.document, &declarations)
         .await
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -154,10 +160,11 @@ pub(super) async fn publish_entries(
             .map_err(|error| error.to_string())?,
     };
     for entry in entries.document.entries.keys() {
-        let draft = definition_draft(&KernelProcessDefinition {
-            document: entries.identity,
-            entry: entry.clone(),
-        })
+        let draft = definition_draft(&KernelProcessDefinition::of(
+            &entries.document,
+            entries.identity,
+            entry.clone(),
+        ))
         .map_err(|error| error.to_string())?;
         let definition = ctx
             .publish_compiled_definition(

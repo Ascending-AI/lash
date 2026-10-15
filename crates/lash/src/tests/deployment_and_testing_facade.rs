@@ -112,6 +112,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
             &document,
             &crate::workflow::document::Name::new("handler"),
             &environment,
+            None,
         )
         .await
         .unwrap()
@@ -277,6 +278,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
             &document,
             &crate::workflow::document::Name::new("handler"),
             &environment,
+            None,
         )
         .await
         .unwrap()

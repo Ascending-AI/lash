@@ -133,7 +133,13 @@ async fn publish_nodes(
     let draft = Draft::open(document).expect("the document opens");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, draft.document(), &Name::new("nodes"), &environment)
+            .publish_workflow(
+                &pin,
+                draft.document(),
+                &Name::new("nodes"),
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );

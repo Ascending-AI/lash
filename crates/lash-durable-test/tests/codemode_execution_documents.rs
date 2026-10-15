@@ -144,6 +144,9 @@ struct ReadingFetch {
     sink: Arc<RecordingSink>,
     core: std::sync::OnceLock<lash::LashCore>,
     read: Mutex<Vec<(WorkflowDocumentRef, Option<WorkflowDocument>)>>,
+    /// The same reference read from the store alone, with no engine and no
+    /// registry: what a fresh reader of the retained document holds.
+    retained: Mutex<Vec<Option<WorkflowDocument>>>,
 }
 
 #[async_trait::async_trait]
@@ -181,9 +184,19 @@ impl lash_core::ToolProvider for ReadingFetch {
             .await
             .expect("the document read answers")
         {
-            WorkflowDocumentRead::Read(document) => Some(*document),
+            WorkflowDocumentRead::Read(read) => Some(read.document),
             _ => None,
         };
+        let retained =
+            match lash_vm_runtime::KernelDocuments::new(core.backend().module_artifacts())
+                .workflow(&reference)
+                .await
+                .expect("the store answers")
+            {
+                lash_vm_runtime::StoredWorkflow::Read(read) => Some(read.document),
+                lash_vm_runtime::StoredWorkflow::Unretained(_) => None,
+            };
+        self.retained.lock_recover().push(retained);
         self.read.lock_recover().push((reference, document));
         lash_core::ToolProvider::execute(&Fetch, call).await
     }
@@ -281,6 +294,57 @@ await control.finish(fetched.url);
     assert!(
         finished(&events, &started.identity),
         "the cell reported its end"
+    );
+    world.shutdown().await;
+}
+
+/// DOC-CELL (FIG-6379): a cell's document is retained with the declarations
+/// of the helpers it was lowered against, so a fresh reader, holding no
+/// engine and no registry, derives the cell's `main` view from the store
+/// alone, as the producing engine draws it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_retained_cell_draws_its_main_view_without_the_producing_engines_registry() {
+    let sink = Arc::new(RecordingSink::default());
+    let (world, tools) = reading_world(&sink).await;
+    let output = world
+        .run(
+            "cell-retained",
+            served::spec(8),
+            vec![served::cell(
+                r#"
+const urls = ["only"].map((url) => url);
+const fetched = await web.fetch({ url: urls[0] });
+await control.finish(fetched.url);
+"#,
+            )],
+        )
+        .await;
+    served::assert_answered("the retained cell", &output);
+    let read = tools.read.lock_recover().clone();
+    let [(_, Some(drawn))] = read.as_slice() else {
+        panic!("the producing engine read the cell's document: {read:?}");
+    };
+    let retained = tools.retained.lock_recover().clone();
+    let [Some(retained)] = retained.as_slice() else {
+        panic!("the store alone reads the retained cell's document: {retained:?}");
+    };
+    assert_eq!(retained.reference().entry, WorkflowDocumentEntry::Main);
+    assert!(
+        !retained.declarations().is_empty(),
+        "the cell's helpers are retained beside it"
+    );
+    assert_eq!(
+        retained.declarations().keys().collect::<Vec<_>>(),
+        retained
+            .document()
+            .manifest
+            .functions
+            .keys()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        lash::workflow::view::derive(retained).expect("the retained cell draws"),
+        lash::workflow::view::derive(drawn).expect("the engine's read draws"),
     );
     world.shutdown().await;
 }

@@ -453,8 +453,8 @@ impl ExecutionGraphs {
             .execution_document(&reference)
             .await
         {
-            Ok(WorkflowDocumentRead::Read(document)) => {
-                self.inner.cache.lock_recover().loaded(*document);
+            Ok(WorkflowDocumentRead::Read(read)) => {
+                self.inner.cache.lock_recover().loaded(read.document);
             }
             Ok(unreadable) => {
                 eprintln!("warning: workbench cannot read a workflow document: {unreadable:?}");

@@ -269,6 +269,9 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
         &lash::workflow::graph::Environment::new(functions.as_ref()),
     )
     .expect("the document is admitted");
+    let declarations =
+        lash::workflow::document::required_declarations(&document, functions.as_ref())
+            .expect("the document's helpers are shipped");
     let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
         .publish(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
@@ -276,14 +279,18 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
             ))
             .expect("a host pin is unguarded"),
             &document,
+            &declarations,
         )
         .await
         .expect("the document publishes");
-    serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        document: identity,
-        entry: lash::workflow::document::Name::new("worker"),
-        args: serde_json::Map::new(),
-    })
+    serde_json::to_value(
+        lash_vm_runtime::KernelProcessDefinition::of(
+            &document,
+            identity,
+            lash::workflow::document::Name::new("worker"),
+        )
+        .start(serde_json::Map::new()),
+    )
     .expect("the input encodes")
 }
 
@@ -1528,11 +1535,14 @@ async fn payload_under(
             ))
             .expect("a host pin is unguarded"),
             &document,
+            &lash::workflow::document::required_declarations(&document, environment.functions())
+                .expect("the document's helpers are held"),
         )
         .await
         .expect("the document publishes");
     serde_json::to_value(lash_vm_runtime::KernelProcessInput {
         document: identity,
+        functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),
         args: serde_json::Map::new(),
     })

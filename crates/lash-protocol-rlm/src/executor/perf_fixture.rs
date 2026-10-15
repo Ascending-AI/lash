@@ -14,7 +14,7 @@ use lash_core::{ExecRequest, RuntimeExecutionContext};
 use lash_core_store::checkpoint_graph::stage::ManifestEntry;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode};
 
-use super::{CellServices, CodeModeExecutionState, execute_cell};
+use super::{CellServices, CodeModeExecutionState, KernelCarry, execute_cell};
 use crate::projection::CodeModeProjectedBindings;
 
 /// The format set the publisher's node decodes and its actor is created in.
@@ -61,6 +61,7 @@ impl CodeModeCheckpointPerfFixture {
                 code_renderer: crate::render::CodeRendererSlot::default(),
                 prompts: dialect.prompts(),
                 helpers: None,
+                kernel: KernelCarry::default(),
             },
             state,
             binding_count,

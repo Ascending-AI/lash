@@ -145,7 +145,7 @@ pub(crate) async fn publish(
         // the effects its entry calls or spawns, including called functions.
         let environment = environment.restrict(effects.keys())?;
         match artifacts
-            .publish_workflow(&pin, draft.document(), entry, &environment)
+            .publish_workflow(&pin, draft.document(), entry, &environment, None)
             .await?
         {
             WorkflowPublish::Published(publication) => {
@@ -159,6 +159,9 @@ pub(crate) async fn publish(
                 })
             }
             WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
+            WorkflowPublish::SourceMapRefused(refusal) => Err(RunError::Invalid(format!(
+                "the source map is refused: {refusal}"
+            ))),
             WorkflowPublish::Unsupported { engine_kind } => Err(RunError::Invalid(format!(
                 "engine `{engine_kind}` admits no workflow documents"
             ))),
@@ -346,7 +349,7 @@ async fn execution_document(
         )));
     };
     match core.host_artifacts().execution_document(reference).await? {
-        WorkflowDocumentRead::Read(document) => Ok(*document),
+        WorkflowDocumentRead::Read(read) => Ok(read.document),
         unreadable => Err(RunError::Invalid(format!(
             "the run's workflow document cannot be read: {unreadable:?}"
         ))),

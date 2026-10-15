@@ -45,7 +45,7 @@ fn undecodable(message: impl std::fmt::Display) -> SuccessionError {
 impl lash_core::EngineSuccession for KernelSuccession {
     async fn carry(
         &self,
-        _process: &ProcessId,
+        process: &ProcessId,
         from: &serde_json::Value,
         to: &serde_json::Value,
         state: Option<&EngineState>,
@@ -114,6 +114,16 @@ impl lash_core::EngineSuccession for KernelSuccession {
                 successor: successor.document,
             }));
         }
+        // The process holds the record of the rewrite beside the successor's
+        // document, so a host rekeys a map it holds of the earlier one.
+        let claim = lash_core::ReferrerClaim::unguarded(
+            lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
+        )
+        .map_err(|error| SuccessionError::Unavailable(error.to_string()))?;
+        documents
+            .record_rewrite(&claim, &carried.rewritten.correspondence)
+            .await
+            .map_err(|error| SuccessionError::Unavailable(error.to_string()))?;
         // A state that stands on no run holds no wait: every wait is a
         // park's, and a parked run was refused above.
         advance::encode(&state, engine.writes)

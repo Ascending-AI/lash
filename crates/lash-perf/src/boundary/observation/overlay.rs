@@ -40,7 +40,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             anyhow::bail!("the process names no workflow document: {:?}", view.document);
         };
         let document = match node.core.host_artifacts().execution_document(reference).await? {
-            WorkflowDocumentRead::Read(document) => *document,
+            WorkflowDocumentRead::Read(read) => read.document,
             other => anyhow::bail!("the workflow document cannot be read: {other:?}"),
         };
         let (nodes, site_count) = (

@@ -95,8 +95,12 @@ shape (schema `schemas/host/kernel-workflow-view`). The feature links the
 kernel's document, checker and view crates and the label data, and no
 dialect, editor or runtime: a viewer draws TypeScript and Python workflows
 without either parser, from a decoded document and the declarations
-`FunctionRegistry::export_declarations` ships, passed to
-`WorkflowDocument::derive`.
+`FunctionRegistry::export_declarations` ships. Narrow those to the ones the
+document lists with `document::required_declarations` and hold them with
+`WorkflowDocument::new(document, declarations)` (or `WorkflowDocument::entered`
+for an entry): each declaration is checked against the identity it is
+listed under before anything is derived, so an import draws before it is
+published and a corrupt declaration is a typed refusal, never a view.
 It holds the entry's `statements` (each with its site, kernel statement,
 block, depth, document ordinal and action site), its `scopes` (every block with its ordinal and depth,
 typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
@@ -131,10 +135,24 @@ match read {
         let document = inspection.document.document();   // the kernel document
         let entry = &inspection.document.reference().entry;
     }
-    WorkflowRead::Unavailable(what) => { /* nothing retains it any more */ }
+    WorkflowRead::Unavailable(what) => { /* not retained, or retained corrupt */ }
     WorkflowRead::Unsupported { engine_kind } => { /* the engine has no document */ }
 }
 ```
+
+A stored document is held with the definition of every library function it
+lists, each under its own identity, and every read links it against those:
+never against the reading build's library. A process keeps them for as long
+as it keeps its document, so a build that retired the helper release a
+document was written against still reads and draws it. A declaration that is
+gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
+`WorkflowUnavailable::Corrupt`, not a fallback to another definition.
+
+`host_artifacts().execution_document(&reference)` answers an
+`ExecutionDocument`: the `document`, and `rewritten_from`, the document it
+was rewritten from with the `Correspondence` of the rewrite, when a kernel
+migration or a successor carry made it. A host holding a source map of the
+earlier document carries it across with `SourceMap::rekey(&correspondence)`.
 
 ### Writing one
 
@@ -282,17 +300,33 @@ editor; a host that edited one passes `draft.document()` and keeps its own
 let pin = HostArtifactPin::mint();
 match core
     .host_artifacts()
-    .publish_workflow(&pin, draft.document(), &Name::new("order_review"), &env_spec)
+    .publish_workflow(
+        &pin,
+        draft.document(),
+        &Name::new("order_review"),
+        &env_spec,
+        Some((&source_map, &source)),   // or None
+    )
     .await?
 {
     WorkflowPublish::Published(publication) => {
         let definition = publication.definition;   // id and signature: what a run starts
         let admitted = publication.document;       // the WorkflowDocument, with its graph
+        let map = publication.source_map;          // Some(SourceMapId): keep it beside the id
     }
     WorkflowPublish::Refused(refusal) => { /* why admission refused it */ }
+    WorkflowPublish::SourceMapRefused(refusal) => { /* the map is not this document's or source's */ }
     WorkflowPublish::Unsupported { .. } => { /* no engine admits documents */ }
 }
 ```
+
+A source map is optional and never changes behaviour. Published with the
+document, it is checked against the document and the source (identity,
+source digest, every site, every range) and stored beside the source under
+the same pin; the answer's `SourceMapId` is the digest of its canonical
+bytes. Lash keeps no association between a definition and a map: the host
+keeps the id, and `host_artifacts().read_source_map(&id)` answers the map
+and its source again, checked.
 
 Lash checks the document against `env_spec`, the `ProcessEnv` a process of
 the definition would run under: the tools it admits, contributed by the

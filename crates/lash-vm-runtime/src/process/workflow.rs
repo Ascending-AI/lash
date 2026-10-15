@@ -3,18 +3,20 @@
 //!
 //! The document a host reads is the kernel document itself with the total
 //! view `lash-kernel-check` derives from it: node ids, edges, scopes, type
-//! facets, effect sets and execution sites. Nothing else is stored and
-//! nothing the document says about itself is trusted: the view is derived
-//! again on every read. Publication checks the document structurally, then
-//! admits only the selected entry's called and spawned effects against its offering.
+//! facets, effect sets and execution sites. Beside it the store holds only
+//! the declarations of the library functions it lists, which every read
+//! links it against, so a reader never needs the library of the build that
+//! wrote it. Nothing the document says about itself is trusted: the view is
+//! derived again on every read. Publication checks the document
+//! structurally, then admits only the selected entry's called and spawned
+//! effects against its offering.
 
 use std::sync::Arc;
 
 use lash_kernel_check::Environment;
 pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::{
-    Document, DocumentId, FunctionRegistry, Name, Signature, WorkflowDocumentEntry,
-    WorkflowDocumentRef,
+    Document, FunctionRegistry, Name, Signature, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 
 use super::{
@@ -119,25 +121,26 @@ fn unresolvable(message: String) -> lash_core::PluginError {
     )
 }
 
-fn missing(document: &DocumentId) -> lash_core::ArtifactName {
-    lash_core::ArtifactName {
-        store: lash_core::ArtifactStoreId::KernelDocument,
-        artifact_ref: document.to_string(),
+fn store_fault(error: super::DocumentStoreError) -> lash_core::PluginError {
+    match error {
+        super::DocumentStoreError::Store(error) => lash_core::PluginError::from(error),
+        other => unresolvable(other.to_string()),
     }
 }
 
 impl KernelDocumentProvider {
+    /// The document `reference` names, from what the store retains: the
+    /// document and the declarations it was stored with, never this
+    /// engine's registry (FIG-6379).
     async fn read(
         &self,
-        document: &DocumentId,
-        entry: WorkflowDocumentEntry,
-    ) -> Result<Option<WorkflowDocument>, lash_core::PluginError> {
-        let Some(stored) = self.engine.documents.get(document).await? else {
-            return Ok(None);
-        };
-        WorkflowDocument::derive(stored, entry, self.engine.functions.as_ref())
-            .map(Some)
-            .map_err(|error| unresolvable(error.to_string()))
+        reference: &WorkflowDocumentRef,
+    ) -> Result<super::StoredWorkflow, lash_core::PluginError> {
+        self.engine
+            .documents
+            .workflow(reference)
+            .await
+            .map_err(store_fault)
     }
 }
 
@@ -148,14 +151,34 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         payload: &serde_json::Value,
     ) -> Result<lash_core::ProcessDocumentRead, lash_core::PluginError> {
         let definition = super::payload_definition(payload)?;
-        let entry = WorkflowDocumentEntry::Entry {
-            function: definition.entry.clone(),
+        let reference = WorkflowDocumentRef {
+            document: definition.document,
+            entry: WorkflowDocumentEntry::Entry {
+                function: definition.entry.clone(),
+            },
         };
-        let Some(document) = self.read(&definition.document, entry).await? else {
-            return Ok(lash_core::ProcessDocumentRead::ArtifactMissing {
-                artifact: missing(&definition.document),
-            });
+        let read = match self.read(&reference).await? {
+            super::StoredWorkflow::Read(read) => read,
+            super::StoredWorkflow::Unretained(super::Unretained::Missing { artifact }) => {
+                return Ok(lash_core::ProcessDocumentRead::ArtifactMissing { artifact });
+            }
+            super::StoredWorkflow::Unretained(super::Unretained::Corrupt { artifact, message }) => {
+                return Ok(lash_core::ProcessDocumentRead::ArtifactCorrupt { artifact, message });
+            }
         };
+        let document = read.document;
+        if !document
+            .document()
+            .manifest
+            .functions
+            .keys()
+            .eq(definition.functions.iter())
+        {
+            return Err(unresolvable(format!(
+                "the definition does not name the library functions document `{}` lists",
+                definition.document
+            )));
+        }
         let draft =
             definition_draft(&definition).map_err(|error| unresolvable(error.to_string()))?;
         let signature = document
@@ -188,19 +211,51 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         &self,
         reference: &WorkflowDocumentRef,
     ) -> Result<lash_core::ProcessExecutionDocumentRead, lash_core::PluginError> {
-        Ok(
-            match self
-                .read(&reference.document, reference.entry.clone())
-                .await?
-            {
-                Some(document) => lash_core::ProcessExecutionDocumentRead::Read(
-                    lash_core::ProcessDocument::new(document),
-                ),
-                None => lash_core::ProcessExecutionDocumentRead::ArtifactMissing {
-                    artifact: missing(&reference.document),
-                },
-            },
-        )
+        Ok(match self.read(reference).await? {
+            super::StoredWorkflow::Read(read) => lash_core::ProcessExecutionDocumentRead::Read(
+                lash_core::ProcessDocument::new(*read),
+            ),
+            super::StoredWorkflow::Unretained(super::Unretained::Missing { artifact }) => {
+                lash_core::ProcessExecutionDocumentRead::ArtifactMissing { artifact }
+            }
+            super::StoredWorkflow::Unretained(super::Unretained::Corrupt { artifact, message }) => {
+                lash_core::ProcessExecutionDocumentRead::ArtifactCorrupt { artifact, message }
+            }
+        })
+    }
+
+    /// The second document writer, until its module field is deleted
+    /// (FIG-6352 C1c): the bytes are decoded, checked against the reference
+    /// they are named by and against this engine's library, and stored
+    /// through [`super::KernelDocuments::publish`] like every document.
+    async fn retain_module(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        module: &lash_core::DeclaredModuleArtifact,
+    ) -> Result<(), lash_core::PluginError> {
+        let document = lash_kernel_doc::Document::from_json(&module.bytes).map_err(|error| {
+            unresolvable(format!("the declared module does not decode: {error}"))
+        })?;
+        let identity = document
+            .identity()
+            .map_err(|error| unresolvable(error.to_string()))?;
+        if identity.to_string() != module.module_ref {
+            return Err(unresolvable(format!(
+                "the declared module `{}` is the document `{identity}`",
+                module.module_ref
+            )));
+        }
+        let functions = self.engine.functions.as_ref();
+        lash_kernel_doc::validate_document(&document, functions)
+            .map_err(|error| unresolvable(error.to_string()))?;
+        let declarations = lash_kernel_doc::required_declarations(&document, functions)
+            .map_err(|error| unresolvable(error.to_string()))?;
+        self.engine
+            .documents
+            .publish(claim, &document, &declarations)
+            .await
+            .map(|_| ())
+            .map_err(store_fault)
     }
 
     async fn environment(
@@ -292,10 +347,11 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             });
         };
         let draft_of = |entry: &Name| {
-            definition_draft(&KernelProcessDefinition {
-                document: document.identity(),
-                entry: entry.clone(),
-            })
+            definition_draft(&KernelProcessDefinition::of(
+                document.document(),
+                document.identity(),
+                entry.clone(),
+            ))
             .map_err(|error| unresolvable(error.to_string()))
         };
         let draft = draft_of(&request.entry)?;
@@ -306,15 +362,13 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             .filter(|entry| **entry != request.entry)
             .map(draft_of)
             .collect::<Result<Vec<_>, _>>()?;
-        // Only an admitted document is held.
+        // Only an admitted document is held, with the declarations it was
+        // admitted against.
         self.engine
             .documents
-            .publish(claim, document.document())
+            .publish(claim, document.document(), document.declarations())
             .await
-            .map_err(|error| match error {
-                super::DocumentStoreError::Store(error) => lash_core::PluginError::from(error),
-                other => unresolvable(other.to_string()),
-            })?;
+            .map_err(store_fault)?;
         Ok(lash_core::ProcessDocument::new(
             WorkflowAdmissionOutcome::Admitted(Box::new(AdmittedWorkflow {
                 draft,

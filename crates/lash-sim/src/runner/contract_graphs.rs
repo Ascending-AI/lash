@@ -50,13 +50,13 @@ impl ContractGraphs {
                 .collect::<std::collections::BTreeSet<_>>()
         };
         for reference in wanted {
-            if let Ok(lash::workflow::WorkflowDocumentRead::Read(document)) =
+            if let Ok(lash::workflow::WorkflowDocumentRead::Read(read)) =
                 core.host_artifacts().execution_document(&reference).await
             {
                 self.documents
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(reference, *document);
+                    .insert(reference, read.document);
             }
         }
     }

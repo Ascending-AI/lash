@@ -65,19 +65,19 @@ pub use lash_vm_client::{RemoteMachine, RemoteMachines, RunHost};
 pub use process::RetiredHelpers;
 pub use process::{
     AdmittedWorkflow, AdoptedRun, DocumentStoreError, EFFECT_ARGUMENTS, EFFECT_UNKNOWN,
-    HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession, KERNEL_RUN_STEP,
-    KernelDocuments, KernelEngineSteps, KernelMigrationRefusal, KernelMigrationSurvey,
-    KernelMigrationSurveyError, KernelProcessDefinition, KernelProcessEngine,
-    KernelProcessFailureCode, KernelProcessInput, KernelRecordedSettings, KernelRunPolicy,
-    KernelSettingsError, KernelStateMigration, LASH_VM_ENGINE_KIND, PlannedMigration,
-    ProcessReplayRequest, RefusedKernelCell, RefusedKernelProcess, ReplayFault, ReplayPath,
-    ReplaySegments, SegmentAnswer, SegmentReplay, TOOL_FAILED, TaskPath, UnmigratedKernelSession,
-    Unreplayable, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
-    WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest,
-    admit_kernel_process, definition_draft, definition_of_entry, entry_signature,
-    kernel_process_engine_registration, migrate_saved_function, migration_refusal,
-    plan_helper_adoption, plan_migration, retired_functions_reached, survey_helper_processes,
-    survey_kernel_processes, with_definitions,
+    ExecutionDocument, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
+    KERNEL_RUN_STEP, KernelDocuments, KernelEngineSteps, KernelMigrationRefusal,
+    KernelMigrationSurvey, KernelMigrationSurveyError, KernelProcessDefinition,
+    KernelProcessEngine, KernelProcessFailureCode, KernelProcessInput, KernelRecordedSettings,
+    KernelRunPolicy, KernelSettingsError, KernelStateMigration, LASH_VM_ENGINE_KIND,
+    PlannedMigration, ProcessReplayRequest, RefusedKernelCell, RefusedKernelProcess, ReplayFault,
+    ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay, StoredSourceMap, StoredWorkflow,
+    TOOL_FAILED, TaskPath, UnmigratedKernelSession, Unreplayable, Unretained,
+    WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest, WorkflowDocument,
+    WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest, admit_kernel_process,
+    definition_draft, definition_of_entry, entry_signature, kernel_process_engine_registration,
+    migrate_saved_function, migration_refusal, plan_helper_adoption, plan_migration,
+    retired_functions_reached, survey_helper_processes, survey_kernel_processes, with_definitions,
 };
 pub use process_plugin::KernelProcessPluginFactory;
 

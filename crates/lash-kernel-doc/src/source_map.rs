@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{Correspondence, Document, DocumentId, EncodeError, Site};
+use crate::{Correspondence, Document, DocumentId, EncodeError, Site, SourceMapId};
 
 /// UTF-8 byte offsets in authored or printed source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
@@ -115,6 +115,20 @@ impl SourceMap {
                 });
             }
         }
+        self.check_locations(source)
+    }
+
+    /// [`Self::validate`]'s checks that need only the source: its digest,
+    /// every range and offset, and the site order. A reader whose document
+    /// is no longer retained checks this much.
+    pub fn validate_source(&self, source: &str) -> Result<(), SourceMapRefusal> {
+        if self.source != <[u8; 32]>::from(Sha256::digest(source.as_bytes())) {
+            return Err(SourceMapRefusal::Digest);
+        }
+        self.check_locations(source)
+    }
+
+    fn check_locations(&self, source: &str) -> Result<(), SourceMapRefusal> {
         for entry in &self.sites {
             for range in &entry.ranges {
                 if range.start > range.end
@@ -180,6 +194,28 @@ impl SourceMap {
     /// Canonical JSON, using the document vocabulary's identity encoder.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, EncodeError> {
         crate::canonical::canonical_bytes(self)
+    }
+
+    /// The map's identity: the digest of [`Self::canonical_bytes`].
+    pub fn identity(&self) -> Result<SourceMapId, EncodeError> {
+        Ok(SourceMapId::from_bytes(crate::canonical::digest_bytes(
+            "lash-kernel-source-map",
+            &self.canonical_bytes()?,
+        )))
+    }
+
+    /// The map `bytes` encode canonically, or why they do not.
+    ///
+    /// # Errors
+    ///
+    /// The decoder's message, or that the bytes are not the canonical
+    /// encoding of the map they decode to.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let map: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        if map.canonical_bytes().map_err(|error| error.message)? != bytes {
+            return Err("the source map is not in its canonical encoding".to_owned());
+        }
+        Ok(map)
     }
 }
 

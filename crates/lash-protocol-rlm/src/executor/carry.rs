@@ -52,7 +52,7 @@ impl KernelCarry {
         }
     }
 
-    fn library(&self) -> Result<Arc<FunctionRegistry>, KernelMigrationRefusal> {
+    pub(crate) fn library(&self) -> Result<Arc<FunctionRegistry>, KernelMigrationRefusal> {
         match &self.functions {
             Some(functions) => Ok(Arc::clone(functions)),
             None => lash_vm_runtime::standard_functions().map_err(|error| {

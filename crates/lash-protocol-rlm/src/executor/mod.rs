@@ -75,6 +75,9 @@ pub(crate) struct CellServices {
     /// Which helper release the cell is lowered against; `None` is the
     /// build's own (FIG-5799).
     pub helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
+    /// The library the workers hold, which a cell's document is retained
+    /// with the declarations of.
+    pub kernel: KernelCarry,
 }
 
 /// Runs one cell of `state`'s session, or resumes it from its parked state.
@@ -793,9 +796,12 @@ async fn run_linked_cell(
     let published = if runs_on {
         Ok(())
     } else {
-        match processes::retain_document(&ctx, &entries).await {
-            Ok(()) => processes::publish_entries(&ctx, &entries).await,
-            Err(message) => Err(message),
+        match services.kernel.library() {
+            Ok(functions) => match processes::retain_document(&ctx, &entries, &functions).await {
+                Ok(()) => processes::publish_entries(&ctx, &entries).await,
+                Err(message) => Err(message),
+            },
+            Err(refusal) => Err(refusal.to_string()),
         }
     };
     if let Err(message) = published {

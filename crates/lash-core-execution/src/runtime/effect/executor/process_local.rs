@@ -425,15 +425,21 @@ impl ProcessDefinitionLocalExecution {
         let definition = match command {
             ProcessCommand::PublishDefinition { draft, module } => {
                 if let Some(module) = module {
-                    ports
-                        .modules()
-                        .publish_module_artifact(
-                            &claim,
-                            &module.module_ref,
-                            module.bytes.as_bytes(),
-                        )
-                        .await
-                        .map_err(crate::PluginError::from)?;
+                    // The engine that owns the draft holds its document as
+                    // it holds every document it admits (FIG-6379).
+                    let provider = engines
+                        .document_provider(draft.engine_kind().as_str())
+                        .ok_or_else(|| {
+                            crate::PluginError::from(
+                                crate::ProcessDefinitionRefusal::UnresolvableDefinition {
+                                    engine_kind: draft.engine_kind().clone(),
+                                    message: "the engine reads no documents, so it holds no \
+                                              module a declaration carries"
+                                        .to_owned(),
+                                },
+                            )
+                        })?;
+                    provider.retain_module(&claim, &module).await?;
                 }
                 ports.publish_definition(&engines, &claim, &draft).await?
             }

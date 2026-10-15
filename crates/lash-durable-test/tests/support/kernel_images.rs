@@ -258,11 +258,19 @@ async fn seed(backend: &Backend, source: &str) {
             )
             .expect("a host pin is unguarded"),
             &document,
+            &lash_vm_runtime::standard_functions()
+                .ok()
+                .and_then(|functions| {
+                    lash::workflow::document::required_declarations(&document, functions.as_ref())
+                        .ok()
+                })
+                .expect("the document's helpers are shipped"),
         )
         .await
         .expect("the worker document publishes");
     let input = KernelProcessInput {
         document: identity,
+        functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),
         args: serde_json::Map::new(),
     };

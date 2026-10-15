@@ -284,15 +284,28 @@ pub enum ProcessDocumentRead {
     ArtifactMissing {
         artifact: crate::ArtifactName,
     },
+    /// An artifact the definition reads is retained with bytes that are not
+    /// the artifact its name says.
+    ArtifactCorrupt {
+        artifact: crate::ArtifactName,
+        message: String,
+    },
 }
 
 /// What a [`ProcessDocumentProvider`] reads for a document reference.
 #[derive(Debug)]
 pub enum ProcessExecutionDocumentRead {
     Read(ProcessDocument),
-    /// Nothing retains the module the reference names.
+    /// Nothing retains the module the reference names, or an artifact it
+    /// reads.
     ArtifactMissing {
         artifact: crate::ArtifactName,
+    },
+    /// An artifact the document reads is retained with bytes that are not
+    /// the artifact its name says.
+    ArtifactCorrupt {
+        artifact: crate::ArtifactName,
+        message: String,
     },
 }
 
@@ -349,6 +362,16 @@ pub trait ProcessDocumentProvider: Send + Sync {
         claim: &crate::ReferrerClaim,
         request: ProcessDocument,
     ) -> Result<ProcessDocument, crate::PluginError>;
+
+    /// Hold `module`, a document a definition's declaration carried, under
+    /// `claim` the way the engine holds every document it admits: decoded,
+    /// checked against the reference it is named by, and stored with what
+    /// it needs to be read. Raw bytes never reach the store unchecked.
+    async fn retain_module(
+        &self,
+        claim: &crate::ReferrerClaim,
+        module: &crate::DeclaredModuleArtifact,
+    ) -> Result<(), crate::PluginError>;
 
     /// What a document of this engine is written, edited and admitted
     /// against, for the processes `request` describes. A host edits a

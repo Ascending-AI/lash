@@ -374,7 +374,7 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
     let pin = HostArtifactPin::mint();
     let publication = match within(
         "workflow publication",
-        artifacts.publish_workflow(&pin, &document, &Name::new(ENTRY), &environment),
+        artifacts.publish_workflow(&pin, &document, &Name::new(ENTRY), &environment, None),
     )
     .await??
     {

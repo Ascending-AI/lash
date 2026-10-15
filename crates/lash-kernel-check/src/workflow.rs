@@ -30,22 +30,41 @@ pub struct WorkflowDocument {
 }
 
 impl WorkflowDocument {
-    /// `document` entered at `entry`, with the view `functions` derive.
-    /// A decoded [`FunctionDeclarations`] is sufficient: linking requires
-    /// definitions, not native code or an engine. An entry links only the
-    /// units it executes; the total graph still includes main and templates
-    /// it merely passes to another receiver.
+    /// `document` read at `main`, held with `declarations`: exactly the
+    /// library functions it lists, as a runtime ships them
+    /// ([`lash_kernel_doc::FunctionRegistry::export_declarations`], narrowed
+    /// with [`lash_kernel_doc::required_declarations`]) or as a store
+    /// retained them. The document is checked structurally and every
+    /// declaration against the identity it is listed under before anything
+    /// is derived; linking then needs no registry, engine or native code.
     ///
     /// # Errors
     ///
-    /// The checker's refusal of a document it cannot link, or an entry the
-    /// document does not list.
-    pub fn derive(
+    /// A declaration that is not the one the document lists, a document
+    /// that is not well formed, or the checker's refusal of one it cannot
+    /// link.
+    pub fn new(
+        document: Document,
+        declarations: FunctionDeclarations,
+    ) -> Result<Self, WorkflowDocumentError> {
+        Self::entered(document, WorkflowDocumentEntry::Main, declarations)
+    }
+
+    /// [`Self::new`] entered at `entry`. An entry links only the units it
+    /// executes; the total graph still includes main and templates it merely
+    /// passes to another receiver.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`], and an entry the document does not list.
+    pub fn entered(
         document: Document,
         entry: WorkflowDocumentEntry,
-        functions: &dyn FunctionCatalog,
+        declarations: FunctionDeclarations,
     ) -> Result<Self, WorkflowDocumentError> {
         let identity = document.identity()?;
+        lash_kernel_doc::check_declarations(&document, &declarations)?;
+        lash_kernel_doc::validate_document(&document, &declarations)?;
         let graph = match &entry {
             WorkflowDocumentEntry::Entry { function } => {
                 if !document.entries.contains_key(function) {
@@ -54,12 +73,27 @@ impl WorkflowDocument {
                         entry: function.clone(),
                     });
                 }
-                derive_entry(&document, functions, function)?
+                derive_entry(&document, &declarations, function)?
             }
-            WorkflowDocumentEntry::Main => derive(&document, functions)?,
+            WorkflowDocumentEntry::Main => derive(&document, &declarations)?,
         };
-        let declarations = declarations(&document, functions)?;
         Ok(Self::hold(identity, entry, document, graph, declarations))
+    }
+
+    /// [`Self::entered`] with the declarations `document` lists taken from
+    /// `functions`: a registry, or a decoded [`FunctionDeclarations`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::entered`]; a function `functions` does not hold is a
+    /// missing declaration.
+    pub fn derive(
+        document: Document,
+        entry: WorkflowDocumentEntry,
+        functions: &dyn FunctionCatalog,
+    ) -> Result<Self, WorkflowDocumentError> {
+        let declarations = lash_kernel_doc::required_declarations(&document, functions)?;
+        Self::entered(document, entry, declarations)
     }
 
     /// Admit an unstored document against a workflow environment and retain
@@ -85,8 +119,8 @@ impl WorkflowDocument {
                 (admitted.identity, admitted.graph)
             }
         };
-        let declarations = declarations(&document, environment.functions)
-            .map_err(WorkflowAdmissionRefusal::Document)?;
+        let declarations = lash_kernel_doc::required_declarations(&document, environment.functions)
+            .map_err(WorkflowAdmissionRefusal::Declarations)?;
         Ok(Self::hold(identity, entry, document, graph, declarations))
     }
 
@@ -149,36 +183,6 @@ impl WorkflowDocument {
     }
 }
 
-/// The definitions of the library functions `document` lists. Linking has
-/// already refused an absent one; this names it again rather than holding a
-/// partial set.
-fn declarations(
-    document: &Document,
-    functions: &dyn FunctionCatalog,
-) -> Result<FunctionDeclarations, Refusal> {
-    let mut held = FunctionDeclarations::new();
-    let mut errors = Vec::new();
-    for (function, name) in &document.manifest.functions {
-        match functions.definition(function) {
-            Some(definition) => {
-                held.insert(*function, definition.clone());
-            }
-            None => errors.push(Refused {
-                site: None,
-                reason: RefusalReason::MissingFunction {
-                    function: *function,
-                    name: name.clone(),
-                },
-            }),
-        }
-    }
-    if errors.is_empty() {
-        Ok(held)
-    } else {
-        Err(Refusal { errors })
-    }
-}
-
 /// Why a document has no view.
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowDocumentError {
@@ -188,6 +192,10 @@ pub enum WorkflowDocumentError {
     Refused(#[from] Refusal),
     #[error("document `{document}` has no entry `{entry}`")]
     NoSuchEntry { document: DocumentId, entry: Name },
+    #[error("the document's declarations are refused: {0}")]
+    Declarations(#[from] lash_kernel_doc::DeclarationRefusal),
+    #[error("the document is not well formed: {0}")]
+    Invalid(#[from] lash_kernel_doc::Invalid),
 }
 
 /// Why a document was not admitted. Nothing was stored.
@@ -205,6 +213,9 @@ pub enum WorkflowAdmissionRefusal {
     NoSuchEntry { entry: Name },
     /// The catalog cannot be stated as effects.
     Boundary { message: String },
+    /// The environment's library does not hold a function the document
+    /// lists as the document lists it.
+    Declarations(lash_kernel_doc::DeclarationRefusal),
 }
 
 impl WorkflowAdmissionRefusal {
@@ -218,6 +229,7 @@ impl WorkflowAdmissionRefusal {
             Self::EntryEffects(_) => "entry_effects",
             Self::NoSuchEntry { .. } => "no_such_entry",
             Self::Boundary { .. } => "boundary",
+            Self::Declarations(_) => "declarations",
         }
     }
 }
@@ -229,6 +241,7 @@ impl std::fmt::Display for WorkflowAdmissionRefusal {
             Self::EntryEffects(refusal) => write!(f, "{refusal}"),
             Self::NoSuchEntry { entry } => write!(f, "the document lists no entry `{entry}`"),
             Self::Boundary { message } => f.write_str(message),
+            Self::Declarations(refusal) => write!(f, "{refusal}"),
         }
     }
 }

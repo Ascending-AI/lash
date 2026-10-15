@@ -419,10 +419,10 @@ impl HostArtifacts {
     }
 
     /// Admit `document` as the definition of its entry `entry`, and hold it
-    /// under `pin`: the document, and the descriptor
-    /// of every entry it lists. The answer names the one `entry` selects;
-    /// the others are what a process of it starts by function reference,
-    /// so one publication is all a run needs.
+    /// under `pin`: the document, the declaration of every library function
+    /// it lists, and the descriptor of every entry it lists. The answer
+    /// names the one `entry` selects; the others are what a process of it
+    /// starts by function reference, so one publication is all a run needs.
     ///
     /// The checker admits the document against `environment`, the
     /// environment a process of the definition would run under. No source
@@ -430,10 +430,17 @@ impl HostArtifacts {
     /// states about itself is taken as true: its view, its types and its
     /// effect sets are derived again.
     ///
+    /// With `source`, the host's source map of the document and the source
+    /// it maps are checked against the document and held under `pin` beside
+    /// it; the answer carries the map's id, which the host keeps beside the
+    /// definition id and reads back with [`Self::read_source_map`]. Lash keeps
+    /// no association of its own between a definition and a map.
+    ///
     /// Equal content publishes to the same id and changes nothing, so an
     /// unchanged document is the definition it was read from. A refused
-    /// document publishes nothing. A released pin is refused. Processes
-    /// already started keep the document they were admitted under.
+    /// document or map publishes nothing. A released pin is refused.
+    /// Processes already started keep the document they were admitted
+    /// under.
     #[cfg(feature = "codemode")]
     pub async fn publish_workflow(
         &self,
@@ -441,6 +448,7 @@ impl HostArtifacts {
         document: &crate::workflow::document::Document,
         entry: &crate::workflow::document::Name,
         environment: &ProcessEnv,
+        source: Option<(&crate::workflow::document::SourceMap, &str)>,
     ) -> Result<crate::workflow::WorkflowPublish> {
         use crate::workflow::{WorkflowPublication, WorkflowPublish};
         let unsupported = || WorkflowPublish::Unsupported {
@@ -452,6 +460,11 @@ impl HostArtifacts {
         else {
             return Ok(unsupported());
         };
+        if let Some((map, text)) = source
+            && let Err(refusal) = map.validate(document, text)
+        {
+            return Ok(WorkflowPublish::SourceMapRefused(refusal));
+        }
         let claim = claim(pin)?;
         let request = lash_vm_runtime::WorkflowAdmissionRequest {
             document: document.clone(),
@@ -470,9 +483,20 @@ impl HostArtifacts {
                 return Ok(WorkflowPublish::Refused(refusal));
             }
         };
-        // The document is held under the pin from here; the entry's
-        // descriptor joins it, checked by the engine against the stored
-        // document, with the descriptor of every other entry.
+        // The document and its declarations are held under the pin from
+        // here; the map and its source join them before the descriptor
+        // does, so no answer names a map whose source is not held.
+        let source_map = match source {
+            Some((map, text)) => Some(
+                self.documents()
+                    .publish_source_map(&claim, admitted.document.document(), map, text)
+                    .await
+                    .map_err(lash_core::PluginError::from)?,
+            ),
+            None => None,
+        };
+        // The entry's descriptor joins them, checked by the engine against
+        // the stored document, with the descriptor of every other entry.
         let definition = self
             .definition_ports
             .publish_definition(&self.engines, &claim, &admitted.draft)
@@ -480,7 +504,40 @@ impl HostArtifacts {
         Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
             definition,
             document: admitted.document,
+            source_map,
         })))
+    }
+
+    /// The source map a publication stored under `id`, with the source it
+    /// maps, both checked against each other and, while it is retained,
+    /// against the document the map names. This acquires no lasting pin.
+    #[cfg(feature = "codemode")]
+    pub async fn read_source_map(
+        &self,
+        id: &crate::workflow::document::SourceMapId,
+    ) -> Result<crate::workflow::SourceMapRead> {
+        use crate::workflow::{SourceMapRead, WorkflowUnavailable};
+        Ok(
+            match self
+                .documents()
+                .source_map(id)
+                .await
+                .map_err(lash_core::PluginError::from)?
+            {
+                lash_vm_runtime::StoredSourceMap::Read { map, source } => {
+                    SourceMapRead::Read { map, source }
+                }
+                lash_vm_runtime::StoredSourceMap::Unretained(unretained) => {
+                    SourceMapRead::Unavailable(WorkflowUnavailable::of(unretained))
+                }
+            },
+        )
+    }
+
+    /// The store of kernel documents behind this core's module port.
+    #[cfg(feature = "codemode")]
+    fn documents(&self) -> lash_vm_runtime::KernelDocuments {
+        lash_vm_runtime::KernelDocuments::new(self.core.backend().module_artifacts())
     }
 
     /// Read the definition `id` names as its workflow: its identity and
@@ -541,13 +598,19 @@ impl HostArtifacts {
         };
         Ok(match provider.execution_document(reference).await? {
             lash_core::ProcessExecutionDocumentRead::Read(document) => {
-                match document.downcast::<crate::workflow::WorkflowDocument>() {
+                match document.downcast::<crate::workflow::ExecutionDocument>() {
                     Ok(document) => WorkflowDocumentRead::Read(Box::new(document)),
                     Err(_) => WorkflowDocumentRead::Unsupported,
                 }
             }
             lash_core::ProcessExecutionDocumentRead::ArtifactMissing { artifact } => {
                 WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Artifact { artifact })
+            }
+            lash_core::ProcessExecutionDocumentRead::ArtifactCorrupt { artifact, message } => {
+                WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Corrupt {
+                    artifact,
+                    message,
+                })
             }
         })
     }
