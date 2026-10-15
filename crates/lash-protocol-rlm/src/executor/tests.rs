@@ -169,8 +169,15 @@ await control.finish(winner);"#,
     )
     .await;
     assert!(response.error().is_none(), "{:?}", response.error());
+    // The turn commits the cell's end; its bindings are read from there.
+    crate::testing::commit_working(&mut state, &host).await;
     let bindings: std::collections::BTreeMap<_, _> = state
-        .bound_variable_values(&std::collections::BTreeSet::new())
+        .bound_variable_values(
+            &std::collections::BTreeSet::new(),
+            host.session_pages().as_ref(),
+        )
+        .await
+        .expect("the bindings read")
         .into_iter()
         .filter_map(|(name, kind)| match kind {
             crate::session_globals::SessionGlobalKind::Data(value) => Some((name, value)),
@@ -186,14 +193,53 @@ await control.finish(winner);"#,
     assert_eq!(finish_of(&response), serde_json::json!("fast"));
 }
 
-/// FIG-5764: a corrupt node refuses the whole restore, and the host's
-/// error retains the typed graph refusal naming the node.
+/// A finished cell's carry names pages its run committed when it parked
+/// for its tool: the host reads them (a prompt's bindings) before any
+/// commit owns the carry, under the run's lease the session holds until
+/// one does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parked_cells_carry_reads_before_the_turn_commits_it() {
+    let host = open_host().await;
+    let mut state = typescript_state();
+    let response = run_cell(
+        &mut state,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:0",
+            Arc::new(ControlRaceTools::default()),
+        ),
+        &typescript_services(),
+        r#"const kept = [];
+for (let i = 0; i < 2000; i++) kept.push(i);
+const answer = await tools.release({});"#,
+    )
+    .await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    let bindings: std::collections::BTreeMap<_, _> = state
+        .bound_variable_values(
+            &std::collections::BTreeSet::new(),
+            host.session_pages().as_ref(),
+        )
+        .await
+        .expect("the carry reads before its commit")
+        .into_iter()
+        .filter_map(|(name, kind)| match kind {
+            crate::session_globals::SessionGlobalKind::Data(value) => Some((name, value)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bindings["answer"], serde_json::json!("release"));
+    assert_eq!(bindings["kept"].as_array().map(Vec::len), Some(2000));
+}
+
+/// FIG-5764: a corrupt descriptor refuses the whole restore, and the
+/// host's error retains the typed refusal.
 #[tokio::test]
-async fn a_corrupt_node_refuses_the_restore_with_a_typed_cause() {
+async fn a_corrupt_descriptor_refuses_the_restore_with_a_typed_cause() {
     use std::collections::BTreeSet;
     use std::error::Error as _;
-
-    use lash_core_store::checkpoint_graph::GraphRefusal;
 
     use super::snapshot::CodeModeSnapshotError;
 
@@ -209,43 +255,34 @@ async fn a_corrupt_node_refuses_the_restore_with_a_typed_cause() {
             &BTreeSet::new(),
         )
         .await
-        .expect("bind a value stored as a leaf");
+        .expect("bind a value");
+    state
+        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
+        .await
+        .expect("seal the bindings");
     let mut saved = state
         .hydrated_execution_graph()
         .await
-        .expect("capture the bindings");
-    let named = saved
-        .nodes
-        .values()
-        .find(|node| {
-            node.envelope().is_ok_and(|envelope| {
-                envelope.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF
-            })
-        })
-        .map(|node| node.id)
-        .expect("the notes leaf");
-    let leaf = saved.nodes.get_mut(&named).expect("the notes leaf");
-    let mut corrupt = leaf.bytes.to_vec();
+        .expect("the session's descriptor");
+    let descriptor = saved.nodes.get_mut(&saved.root).expect("the descriptor");
+    let mut corrupt = descriptor.bytes.to_vec();
     corrupt.push(b' ');
-    leaf.bytes = corrupt.into();
+    descriptor.bytes = corrupt.into();
 
     let mut restored = typescript_state();
     let error = restored
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .map_err(lash_core::SessionError::from)
-        .expect_err("a corrupt node refuses the restore");
+        .expect_err("a corrupt descriptor refuses the restore");
     let cause = error
         .source()
         .and_then(|source| source.downcast_ref::<CodeModeSnapshotError>())
         .expect("the public restore error retains its typed cause");
     assert!(
-        matches!(
-            cause,
-            CodeModeSnapshotError::Graph(GraphRefusal::HashMismatch(id)) if *id == named
-        ),
+        matches!(cause, CodeModeSnapshotError::Descriptor(_)),
         "{cause}"
     );
-    assert!(restored.bindings().names().is_empty());
+    assert!(restored.names().is_empty());
 }
 
 async fn open_host() -> DurableHost {
@@ -471,18 +508,14 @@ async fn session_bindings_are_carried_between_cells_and_across_a_reload() {
         "the second cell reads the first cell's bindings, and `alias` is still `rows`"
     );
 
-    state
-        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-        .expect("capture the session's bindings");
-    state.acknowledge_execution_state_capture();
+    crate::testing::commit_working(&mut state, &host).await;
     let saved = state
         .hydrated_execution_graph()
         .await
         .expect("the saved session state");
-    host.install(&saved).await;
     let mut reloaded = typescript_state();
     reloaded
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("load the session's bindings");
 
     let after = run_cell(
@@ -1014,6 +1047,8 @@ async fn a_python_session_runs_a_cell_end_to_end() {
         vec!["py"]
     );
     assert_eq!(tools.answered(), vec!["py"]);
+    // The turn's phase commit adopts what the parked cell committed.
+    crate::testing::commit_working(&mut state, &host).await;
 
     let read = run_cell(
         &mut state,
@@ -1069,7 +1104,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
     // K-SES-003 requires both the unbound-variable kind and exact data.
     let dropped = std::collections::BTreeMap::from([(
         lash_kernel_doc::Name::new("format"),
-        lash_kernel_dialect::NotSaved::Task,
+        lash_kernel_dialect::NotSaved::Task.to_string(),
     )]);
     for (kind, binding, expected) in [
         ("unbound_variable", "format", true),

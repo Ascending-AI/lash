@@ -2,9 +2,9 @@
 //! Domain failures return NaN, poles and overflow return signed infinities.
 //! Dialects that raise for these outcomes check explicitly after the call.
 
-use lash_kernel_doc::{Float, NativeError, Value};
+use lash_kernel_doc::{Float, NativeError};
 
-use crate::numeric::as_float;
+use crate::numeric::{Numeric, scalar_float as as_float};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Math {
@@ -57,7 +57,7 @@ impl Math {
     }
 
     #[inline]
-    pub(crate) fn call(self, args: &[Value]) -> Result<Value, NativeError> {
+    pub(crate) fn call(self, args: &[Numeric]) -> Result<Numeric, NativeError> {
         let a = as_float(&args[0])?;
         let b = if self.arity() > 1 {
             as_float(&args[1])?
@@ -98,6 +98,6 @@ impl Math {
             Self::Pow => libm::pow(a, b),
             Self::Fma => libm::fma(a, b, as_float(&args[2])?),
         };
-        Ok(Value::Float(Float::new(result)))
+        Ok(Numeric::Float(Float::new(result)))
     }
 }

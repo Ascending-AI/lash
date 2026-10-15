@@ -13,9 +13,11 @@ use lash_durable::{
     MailCommit, MailTx, Release, StoreFailure, StoreFailureKind,
 };
 
+use lash_durable::domain::pages::CandidatePublication;
+
 use super::{
     Committing, PostgresDurableStore, Retired, SQL, Tx, actor_state, apply_domain, apply_mail,
-    executor, fenced, get, graph, group_members, sqlx_failure, store_failure,
+    executor, fenced, get, graph, group_members, pages, sqlx_failure, store_failure,
 };
 use crate::guarded_tx::begin_durable;
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
@@ -46,6 +48,18 @@ impl PostgresDurableStore {
         tx: ActorTx,
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
+        self.commit_owner_with(tx, label, None).await
+    }
+
+    /// [`commit_owner`](Self::commit_owner) installing `candidate` beside
+    /// the owner's graph (FIG-6191): always the explicit form, each attempt
+    /// streaming the manifest again from its first entry.
+    pub(super) async fn commit_owner_with(
+        &self,
+        tx: ActorTx,
+        label: CommitLabel,
+        candidate: Option<&tokio::sync::Mutex<CandidatePublication>>,
+    ) -> Result<ActorCommit, DurableError> {
         let deadline = self.deadline(label.capacity());
         self.within(
             label.capacity(),
@@ -65,12 +79,16 @@ impl PostgresDurableStore {
                                 });
                             }
                             let tx = &tx;
-                            let call = executor::Call::of(
-                                tx,
-                                &self.pools.held_texts,
-                                &self.pools.session_hints,
-                                self.fence.fleet(),
-                            );
+                            let call = if candidate.is_some() {
+                                None
+                            } else {
+                                executor::Call::of(
+                                    tx,
+                                    &self.pools.held_texts,
+                                    &self.pools.session_hints,
+                                    self.fence.fleet(),
+                                )
+                            };
                             let call = &call;
                             self.replay(label, deadline, || async move {
                                 if let Some(call) = call
@@ -81,6 +99,10 @@ impl PostgresDurableStore {
                                 }
                                 let (mut guarded, now, fence) =
                                     self.open_replayable(label, Some(tx)).await?;
+                                let mut publication = match candidate {
+                                    Some(candidate) => Some(candidate.lock().await),
+                                    None => None,
+                                };
                                 let outcome = Box::pin(apply_owner(
                                     &mut guarded,
                                     tx,
@@ -88,8 +110,10 @@ impl PostgresDurableStore {
                                     now,
                                     self.fence.fleet(),
                                     self.pools.maintenance.checkpoint_ref_chunk as usize,
+                                    publication.as_deref_mut(),
                                 ))
                                 .await;
+                                drop(publication);
                                 self.settle(label, guarded, outcome, deadline).await
                             })
                             .await
@@ -267,7 +291,9 @@ impl PostgresDurableStore {
 /// Apply the owner's `write` after its ownership fence, which the commit's
 /// first statement ran ([`super::PostgresDurableStatements::owner_envelope`]):
 /// `fence` is what it read under the fence, `None` when the epoch was not
-/// current.
+/// current. A `candidate` is installed with the owner's own graph and its
+/// semantic admission recorded once the domain writes ran (FIG-6191); the
+/// roots the commit retired are held for retirement steps (D-RET).
 pub(super) async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
@@ -275,6 +301,7 @@ pub(super) async fn apply_owner(
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
     checkpoint_ref_chunk: usize,
+    mut candidate: Option<&mut CandidatePublication>,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(fence) = fence else {
@@ -285,17 +312,31 @@ pub(super) async fn apply_owner(
         .iter()
         .flat_map(DomainWrite::publications)
         .collect();
-    if !write.graph().is_empty() || !write.reads().is_empty() || !publications.is_empty() {
+    if candidate.is_some()
+        || !write.graph().is_empty()
+        || !write.reads().is_empty()
+        || !publications.is_empty()
+    {
         let checked = lash_durable::domain::graph_commit::check_graph(
             write.graph(),
             write.reads(),
             &publications,
         )?;
+        // A candidate's pages are bounded by its stream, not the budget.
         if let Some(budget) = write.budget() {
             lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
                 .and_then(|measured| budget.admit(&measured))?;
         }
-        graph::install(tx, &checked).await?;
+        match candidate.as_deref_mut() {
+            Some(candidate) => {
+                pages::install_candidate(tx, write.domain(), &checked, candidate)
+                    .await
+                    .map_err(DurableError::Graph)?;
+            }
+            None => {
+                graph::install(tx, &checked).await?;
+            }
+        }
     }
     let committing = Committing {
         checkpoint_ref_chunk,
@@ -311,9 +352,14 @@ pub(super) async fn apply_owner(
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
     }
-    graph::reclaim(tx, committing.retired)
+    if let Some(candidate) = &candidate {
+        pages::admit(tx, &candidate.admission)
+            .await
+            .map_err(DurableError::Graph)?;
+    }
+    pages::hold_retired(tx, committing.retired, now)
         .await
-        .map_err(DurableError::Graph)?;
+        .map_err(sqlx_failure)?;
     if let Some(formats) = write.formats() {
         crate::observed_sql::query(SQL.actor.stamp_formats.sql())
             .bind(actor)

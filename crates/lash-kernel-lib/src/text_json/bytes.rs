@@ -1,9 +1,12 @@
-use lash_kernel_doc::{Bytes, NativeCall, NativeError, Type, Value};
+use lash_kernel_doc::heap::{BytesRef, IntRef, Payload};
+use lash_kernel_doc::{NativeCall, NativeError, Type, Value};
 use num_traits::ToPrimitive;
+use std::sync::Arc;
 
 use super::text::position;
 use super::{
-    Function, arg, definition, integer_value, ordering, raise, sequence, sequence_type, text_arg,
+    Function, arg, definition, integer_value, materialized_text, ordering, raise, sequence,
+    sequence_type,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -57,13 +60,19 @@ pub(super) fn functions() -> Vec<Function> {
     ]
 }
 
-fn bytes_arg(args: &[Value], index: usize) -> Result<&[u8], NativeError> {
+fn bytes_arg(args: &[Value], index: usize) -> Result<&BytesRef, NativeError> {
     match arg(args, index)? {
-        Value::Bytes(bytes) => Ok(bytes.as_slice()),
+        Value::Bytes(bytes) => Ok(bytes),
         _ => Err(raise("type_error", "expected bytes")),
     }
 }
-
+fn materialized_bytes(call: &mut NativeCall<'_>, index: usize) -> Result<Arc<[u8]>, NativeError> {
+    let bytes = bytes_arg(call.args, index)?;
+    match &bytes.body {
+        Payload::Resident(bytes) => Ok(Arc::clone(bytes)),
+        _ => call.heap.materialize_bytes(bytes),
+    }
+}
 fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let bytes: Result<Vec<_>, _> = sequence(&call, 0)?
         .iter()
@@ -71,44 +80,43 @@ fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
             let Value::Int(i) = value else {
                 return Err(raise("type_error", "expected integer octet"));
             };
-            i.to_u8()
-                .ok_or_else(|| raise("number_range", "octet is outside 0..255"))
+            match i {
+                IntRef::Inline(i) => i.to_u8(),
+                _ => None,
+            }
+            .ok_or_else(|| raise("number_range", "octet is outside 0..255"))
         })
         .collect();
-    Ok(Value::Bytes(Bytes::new(bytes?)))
+    Ok(Value::Bytes(call.heap.bytes(&bytes?)?))
 }
 
 fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let bytes = bytes_arg(call.args, 0)?;
-    let start = position(integer_value(call.args, 1)?, bytes.len());
-    let end = position(integer_value(call.args, 2)?, bytes.len());
-    Ok(Value::Bytes(Bytes::new(if start > end {
-        Vec::new()
-    } else {
-        bytes[start..end].to_vec()
-    })))
+    let start = position(integer_value(call.args, 1)?, bytes.len as usize) as u64;
+    let end = (position(integer_value(call.args, 2)?, bytes.len as usize) as u64).max(start);
+    call.heap.slice(&Value::Bytes(bytes.clone()), start..end)
 }
-
 fn concat(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    Ok(Value::Bytes(Bytes::new(
-        [bytes_arg(call.args, 0)?, bytes_arg(call.args, 1)?].concat(),
-    )))
+    bytes_arg(call.args, 0)?;
+    bytes_arg(call.args, 1)?;
+    call.heap.concat(call.args)
 }
-
 fn compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    Ok(ordering(
-        bytes_arg(call.args, 0)?.cmp(bytes_arg(call.args, 1)?),
-    ))
+    bytes_arg(call.args, 0)?;
+    bytes_arg(call.args, 1)?;
+    Ok(ordering(crate::comparison::payload_order(
+        arg(call.args, 0)?,
+        arg(call.args, 1)?,
+        call.heap,
+    )?))
 }
-
 fn encode(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    Ok(Value::Bytes(Bytes::new(
-        text_arg(call.args, 0)?.as_bytes().to_vec(),
-    )))
+    let text = materialized_text(call.args, 0, call.heap)?;
+    Ok(Value::Bytes(call.heap.bytes(text.as_bytes())?))
 }
-
-fn decode(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    std::str::from_utf8(bytes_arg(call.args, 0)?)
-        .map(Value::text)
-        .map_err(|_| raise("invalid_utf8", "bytes are not well-formed UTF-8"))
+fn decode(mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let bytes = materialized_bytes(&mut call, 0)?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| raise("invalid_utf8", "bytes are not well-formed UTF-8"))?;
+    Ok(Value::Text(call.heap.text(text)?))
 }

@@ -5,11 +5,14 @@
 //! the document when it starts the run, hands the machine the committed
 //! outcomes it waits on and runs ready tasks until the run parks, spends
 //! its slice or ends, and a park that requests something answers with the
-//! run's state ([`ParentMessage::Start`], [`ParentMessage::Deliver`] and
-//! [`ParentMessage::ExportGraph`] do each part alone). While
+//! run's checkpoint candidate ([`ParentMessage::Start`],
+//! [`ParentMessage::Deliver`] and [`ParentMessage::Seal`] do each part
+//! alone). While
 //! a slice runs the worker asks the parent what the machine reads from its
 //! host ([`WorkerMessage::HostRead`]) and hands over what it prints
-//! ([`WorkerMessage::Printed`]). Every message travels under a
+//! ([`WorkerMessage::Printed`]). A run on the persistent heap reads and
+//! seals its pages the same way, mid-slice ([`WorkerMessage::Pages`]).
+//! Every message travels under a
 //! [`MessageHeader`], and a receiver admits it through a [`MessageFence`].
 //!
 //! Documents, requests, outcomes and ends cross as [`EncodedPayload`] bytes
@@ -20,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::graph_state::SealedGraphState;
+use crate::page::{PageCapability, PageExchangeId, PageReply, PageRequest};
 use crate::state::VmOwner;
 
 /// The lease one checkout of a worker runs under. The parent mints it and
@@ -240,23 +243,25 @@ pub struct RunBounds {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StartFrom {
-    /// A new run: its target, arguments and session bindings, in the
-    /// kernel's encoding.
+    /// A new run: its target, arguments and carried session, in the
+    /// kernel's encoding. A carried session's pages are read through
+    /// [`WorkerMessage::Pages`] under the capabilities it names.
     Fresh(EncodedPayload),
-    /// A parked run as checkpoint graph state, with the admission of every
-    /// wait it holds.
-    ParkedGraph(ParkedGraph),
+    /// A committed checkpoint root on the persistent heap: the worker reads
+    /// its control header, then only the pages its next steps touch.
+    Checkpoint(CheckpointStart),
 }
 
-/// A parked run as the parent hands it back: the graph state a worker
-/// exported (a KernelWhole root and the nodes it needs), and, for every wait
-/// the run holds, the request the parent's admission froze when the park
-/// handed the wait out. The state holds a wait as its effect identity
-/// alone, so a worker resumes it only from these (FIG-5887 §3).
+/// A run resumed from a committed checkpoint root (FIG-6190): the root's
+/// capability under the activation's root lease, and the admission of every
+/// wait it holds. Nothing else crosses: the heap faults its pages in
+/// through [`WorkerMessage::Pages`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParkedGraph {
-    pub state: SealedGraphState,
+pub struct CheckpointStart {
+    /// The `CheckpointRoot` page, readable under the activation's root
+    /// lease.
+    pub root: PageCapability,
     /// Each an admitted wait in the kernel's binary encoding
     /// (`lash_kernel_state::AdmittedWait`); the protocol does not read it.
     pub admissions: Vec<EncodedPayload>,
@@ -277,12 +282,15 @@ pub struct Start {
     pub document: EncodedPayload,
     pub from: StartFrom,
     pub bounds: RunBounds,
-    /// The execution the run's parked state is bound to (an OwnerBinding
-    /// body in the graph's token encoding), when the parent saves the
-    /// state at every park that requests something: the worker exports it
-    /// there and [`WorkerMessage::Parked`] carries it, so no separate
-    /// [`ParentMessage::ExportGraph`] exchange asks for it (FIG-5921).
-    pub export: Option<EncodedPayload>,
+    /// The OwnerBinding node of the execution every checkpoint root of the
+    /// run is bound to: the parent stages the node, the worker writes its
+    /// digest into each root it seals.
+    #[serde(with = "serde_bytes")]
+    pub binding: [u8; 32],
+    /// How a session cell's end saves the functions its carry would drop,
+    /// in the kernel embedding's encoding; none for a run that saves none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save: Option<EncodedPayload>,
 }
 
 /// One committed outcome, for the wait the machine named.
@@ -362,12 +370,15 @@ pub enum ParentMessage {
         id: HostReadId,
         answer: EncodedPayload,
     },
-    /// Write the run's state at a park as checkpoint graph state, bound to
-    /// the execution `binding` names (an OwnerBinding body in the graph's
-    /// token encoding).
-    ExportGraph {
-        binding: EncodedPayload,
+    /// The answer to the worker's pending [`WorkerMessage::Pages`].
+    Pages {
+        id: PageExchangeId,
+        reply: PageReply,
     },
+    /// Seal the run as it stands at this safe point into a checkpoint
+    /// candidate: a run's start before its first slice, or a park whose
+    /// candidate did not cross with it.
+    Seal,
     /// Physical cancellation: drop the machine where it stands.
     Cancel,
     /// Drop the machine and everything guest-derived. Sent only after a
@@ -409,19 +420,26 @@ pub enum WorkerMessage {
         kind: HostReadKind,
         request: EncodedPayload,
     },
+    /// The machine's heap reads or seals pages; it runs on once the parent
+    /// answers. The machine's statement and native stack wait intact: a
+    /// page fault never parks, retries or reruns anything.
+    Pages {
+        id: PageExchangeId,
+        request: PageRequest,
+    },
     /// What the run printed, in order, with no authority.
     Printed {
         payload: EncodedPayload,
     },
     /// No task is ready: the effects and sleeps requested since the last
-    /// park, and the waits withdrawn since. `state` is the run's state at
-    /// the park, bound to its start's `export`, when the park requests
-    /// something and the two fit one frame; otherwise the parent asks for
-    /// it with [`ParentMessage::ExportGraph`].
+    /// park, and the waits withdrawn since. A park that requests something
+    /// is sealed: `candidate` is a stage capability for its
+    /// `CheckpointRoot` page in the activation's staging, which the parent
+    /// publishes with the park's admissions.
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
-        state: Option<SealedGraphState>,
+        candidate: Option<PageCapability>,
     },
     /// The slice is spent and a task is still ready.
     Slice {
@@ -436,8 +454,10 @@ pub enum WorkerMessage {
     /// The outcome was taken, or dropped when its wait had been
     /// withdrawn.
     Delivered,
-    ExportedGraph {
-        state: SealedGraphState,
+    /// The candidate a [`ParentMessage::Seal`] asked for: a stage
+    /// capability for its `CheckpointRoot` page.
+    Sealed {
+        candidate: PageCapability,
     },
     Cancelled,
     ResetDone {
@@ -458,13 +478,14 @@ impl WorkerMessage {
             Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,
             Self::Ready { .. } => WorkerFrameKind::Ready,
             Self::Started => WorkerFrameKind::Started,
-            Self::HostRead { .. } => WorkerFrameKind::HostRead,
+            // A page exchange is a host read of the heap's storage.
+            Self::HostRead { .. } | Self::Pages { .. } => WorkerFrameKind::HostRead,
             Self::Printed { .. } => WorkerFrameKind::Printed,
             Self::Parked { .. } => WorkerFrameKind::Parked,
             Self::Slice { .. } => WorkerFrameKind::Slice,
             Self::Ended { .. } => WorkerFrameKind::Ended,
             Self::Delivered => WorkerFrameKind::Delivered,
-            Self::ExportedGraph { .. } => WorkerFrameKind::Exported,
+            Self::Sealed { .. } => WorkerFrameKind::Sealed,
             Self::Cancelled => WorkerFrameKind::Cancelled,
             Self::ResetDone { .. } => WorkerFrameKind::ResetDone,
             Self::Prepared { .. } => WorkerFrameKind::Prepared,
@@ -524,14 +545,14 @@ pub struct WorkerWork {
     pub serialized_body_bytes: u64,
     pub decoded_body_bytes: u64,
     pub vm_steps: u64,
-    pub checkpoint_values: u64,
-    pub resume_values: u64,
-    pub carry_values: u64,
+    /// Pages the worker's heap read through its page port (cache misses).
+    pub pages_loaded: u64,
+    /// Pages the worker's heap sealed into the activation's staging.
+    pub pages_sealed: u64,
     pub encoded_nodes: u64,
     pub encoded_bytes: u64,
     pub decoded_nodes: u64,
     pub decoded_bytes: u64,
-    pub probe_units: u64,
     /// Largest simultaneously owned frame buffers, excluding kernel heap.
     pub peak_buffer_bytes: u64,
 }
@@ -540,14 +561,12 @@ impl WorkerWork {
         self.serialized_body_bytes += next.serialized_body_bytes;
         self.decoded_body_bytes += next.decoded_body_bytes;
         self.vm_steps += next.vm_steps;
-        self.checkpoint_values += next.checkpoint_values;
-        self.resume_values += next.resume_values;
-        self.carry_values += next.carry_values;
+        self.pages_loaded += next.pages_loaded;
+        self.pages_sealed += next.pages_sealed;
         self.encoded_nodes += next.encoded_nodes;
         self.encoded_bytes += next.encoded_bytes;
         self.decoded_nodes += next.decoded_nodes;
         self.decoded_bytes += next.decoded_bytes;
-        self.probe_units += next.probe_units;
         self.peak_buffer_bytes = self.peak_buffer_bytes.max(next.peak_buffer_bytes);
     }
 }

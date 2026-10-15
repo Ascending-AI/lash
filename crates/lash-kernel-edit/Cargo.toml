@@ -29,6 +29,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 
 [[bin]]

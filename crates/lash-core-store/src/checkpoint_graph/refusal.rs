@@ -22,6 +22,14 @@ pub enum GraphRefusal {
     BadMagic,
     #[error("node kind {0} is not supported here")]
     UnsupportedKind(u32),
+    /// A node of a kind the persistent heap retired (FIG-6193): a pre-heap
+    /// image's `format`, refused before its body is read, never misread.
+    #[error("node kind {kind} is a retired {format} image, which this build does not read")]
+    RetiredFormat {
+        node: Option<NodeId>,
+        kind: u32,
+        format: &'static str,
+    },
     #[error("node kind {kind} has no variant {variant}")]
     UnsupportedVariant { kind: u32, variant: u32 },
     #[error("non-canonical node {node:?}: {reason}")]
@@ -45,6 +53,12 @@ pub enum GraphRefusal {
     EncodingConflict(NodeId),
     #[error("node {0} is missing")]
     MissingNode(NodeId),
+    /// A host graph read was asked to start at a persistent-heap page
+    /// (FIG-6193). A read that reaches one from a host node takes the page
+    /// itself, its header, and never descends into it: semantic pages are
+    /// read under a root lease through the page exchange, a page at a time.
+    #[error("node {0} is a persistent-heap page, which a host graph read does not descend into")]
+    SemanticPage(NodeId),
     #[error("node {parent} references {child} of the wrong kind")]
     WrongChildKind { parent: NodeId, child: NodeId },
     /// A node read as one kind is another. (Added by the seam lane: the
@@ -83,6 +97,10 @@ pub enum GraphRefusal {
     FenceLost,
     #[error("the root was retired")]
     RootRetired,
+    /// A root lease past its expiry, released, or reaped: no read or
+    /// renewal runs under it, and the activation it served is fenced.
+    #[error("the root lease is lost")]
+    LeaseLost,
     /// A publication does not match the domain record it names.
     #[error("the commit's root changes are not the projection of its writes")]
     PublicationMismatch,

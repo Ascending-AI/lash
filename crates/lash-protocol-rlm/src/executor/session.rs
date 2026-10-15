@@ -1,722 +1,149 @@
-//! One session's execution state: its bindings (`K-SES-001`).
+//! One session's execution state: its bindings (`K-SES-001`), as pages of
+//! the persistent heap (FIG-6193).
 //!
-//! Each cell is its own kernel document. What a session carries from one
-//! cell to the next is the bindings `main` left at its top level, as data:
-//! every variable's value and the heap objects those values reach. The
-//! parent holds them between cells, hands them to the next cell's machine
-//! as its start, and takes what that cell leaves.
+//! What a session carries from one cell to the next is the carry its last
+//! cell's machine sealed: the heap, the bindings `main` left at its top
+//! level and the functions it saved (S8), each a page root. The parent
+//! never copies the state out: it holds the session's descriptor
+//! ([`graph`]), a page naming those roots, and reads a binding's value only
+//! where a host asks for it, through the [`SessionEditor`].
 //!
-//! A binding that reaches a closure or a task handle is not carried
-//! (`K-SES-003`). A function a cell bound to a name of its own is kept
-//! instead as a saved function: its code and the variables it read, frozen
-//! as data when the cell ended (`lash_kernel_dialect::SavedFunction`). The
-//! session holds those beside its bindings, each once however many
-//! bindings hold it, a later cell that names one has it declared in its
-//! own document, and in that cell each of its bindings is a reference to
-//! the declaration. Any other such binding is dropped, and
-//! the session remembers its name and the reason, so a later cell that
-//! reads it is told why it is gone.
-//!
-//! The state is saved as one checkpoint graph ([`graph`]): a complete
-//! SessionExecution root whose large text and bytes are shared leaves and
-//! whose saved functions are immutable bundles, shared by every state that
-//! holds them. A capture writes the whole root and sends only the nodes no
-//! acknowledged capture installed. The session renumbers the objects a cell
-//! leaves into each binding's own range ([`SessionBindings::settle`]): that
-//! numbering is the session's heap bookkeeping, never a storage identity.
+//! The cells of a turn stage what they seal in the turn's one spool. A
+//! cell's end is staged there under a new descriptor; a capture is that
+//! descriptor with every page the spool holds under it, and its
+//! acknowledgement settles them. A binding a cell left that the session
+//! does not carry (`K-SES-003`) is listed by name with why, until a later
+//! cell binds the name again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::SessionError;
-use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
+use lash_core::plugin::SessionPages;
+use lash_core_store::checkpoint_graph::stage::{ManifestEntry, StageSpool};
+use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
 use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
 };
-use lash_kernel_dialect::{FunctionValues, Kept, NotSaved, SavedFunction};
-use lash_kernel_doc::{
-    Annotations, Document, Identity, KERNEL_VERSION, Name, NumberPolicy, Object, ObjectId, Value,
-};
-use lash_kernel_vm::Bindings;
+use lash_durable::domain::pages::RootLease;
+use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
+use lash_kernel_state::paged::{KeyedRoot, PageAnswer, PageBody, PageSource, SessionRoot};
+use lash_kernel_vm::{SessionEditor, SessionValue};
+use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
+use lash_vm_client::service::LowerFunction;
 
+use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::CodeModeSnapshotError;
 
 mod graph;
-mod release;
 
 /// The reserved binding the history projection answers; no cell binds it.
 pub(crate) const HISTORY_BINDING: &str = "history";
 
-/// The objects one binding may own: its identities are its slot's range.
-const SLOT_OBJECTS: u64 = 1 << 32;
+/// The most manifest entries one read of a capture's candidate takes.
+const MANIFEST_BATCH: usize = 1024;
 
-/// A session's bindings as the parent holds them between cells.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct SessionBindings {
-    variables: BTreeMap<Name, Value>,
-    objects: BTreeMap<ObjectId, Object>,
-    /// The range of identities each binding's own objects take. A binding
-    /// keeps its slot for as long as the session holds it, so its fragment
-    /// changes only when the binding does.
-    slots: BTreeMap<Name, u32>,
-    next_slot: u32,
-    /// The bindings a cell left that were not carried (`K-SES-003`), each
-    /// with why, until a later cell binds the name again.
-    not_carried: BTreeMap<Name, NotSaved>,
-    /// The functions the session holds, each by the binding it is declared
-    /// under ([`SavedFunction::name`]).
-    functions: BTreeMap<Name, HeldFunction>,
-    /// How many cells have left this session their bindings.
+/// One version of the session: its descriptor and what the descriptor
+/// states.
+#[derive(Clone, Debug, Default)]
+struct Version {
+    /// The descriptor page; none for a session that holds nothing.
+    descriptor: Option<NodeId>,
+    /// Its bytes, which a host that hydrates the state is handed.
+    bytes: Option<Arc<[u8]>>,
+    session: Option<SessionRoot>,
     cells: u64,
+    names: BTreeSet<Name>,
+    not_carried: BTreeMap<Name, String>,
+    functions: BTreeMap<Name, (u64, BTreeSet<FunctionId>)>,
 }
 
-/// A saved function as a session holds it.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct HeldFunction {
-    pub(crate) function: SavedFunction,
-    /// The session's cell, counted from one, whose end froze the
-    /// function's captures: its generation. `None` for a function the
-    /// session was created with.
-    pub(crate) cell: Option<u64>,
-    /// The other bindings that hold the function, besides the one it is
-    /// declared under: the one function, which a cell makes once.
-    pub(crate) aliases: BTreeSet<Name>,
+/// What the parent read of a version, kept until a cell changes it.
+#[derive(Clone, Debug, Default)]
+struct View {
+    /// Each binding's value, as the prompt lists it.
+    values: BTreeMap<Name, SessionValue>,
+    /// Each saved function's description; none until a cell or a prompt
+    /// needs them.
+    functions: Option<BTreeMap<Name, LowerFunction>>,
+    /// The saved functions this build's kernel does not carry, with why:
+    /// listed as not carried and never lowered.
+    refused: BTreeMap<Name, String>,
 }
 
-/// Each binding of `functions` with the function it holds.
-fn bound(functions: &BTreeMap<Name, HeldFunction>) -> BTreeMap<&Name, &HeldFunction> {
-    functions
-        .iter()
-        .flat_map(|(name, held)| {
-            std::iter::once(name)
-                .chain(&held.aliases)
-                .map(move |binding| (binding, held))
-        })
-        .collect()
+/// The session as it stood before the active cell.
+struct Active {
+    current: Version,
+    defaults: BTreeMap<Name, Datum>,
+    view: View,
 }
 
-/// Refuses held functions whose bindings are not their own: one declared
-/// under a name other than its key, or a binding held twice or also held
-/// as data.
-fn check_held(
-    functions: &BTreeMap<Name, HeldFunction>,
-    data: &BTreeMap<Name, Value>,
-) -> Result<(), String> {
-    let mut seen = BTreeSet::new();
-    for (name, held) in functions {
-        if held.function.name != *name {
-            return Err(format!(
-                "the function held as `{name}` is declared as `{}`",
-                held.function.name
-            ));
-        }
-        for binding in std::iter::once(&held.function.name).chain(&held.aliases) {
-            if !seen.insert(binding) || data.contains_key(binding) {
-                return Err(format!("`{binding}` is bound twice"));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// What a finished cell left a session.
-pub(super) struct CellLeft<'a> {
-    pub document: &'a Document,
-    pub annotations: Option<&'a Annotations>,
-    /// `main`'s top-level bindings that are data.
-    pub bindings: Bindings,
-    /// The ones the run's end did not carry, and of those the ones that
-    /// reach a closure and no task.
-    pub not_carried: Vec<Name>,
-    pub closures: Bindings,
-    /// The effects the cell was lowered against whose call ends the turn.
-    pub controls:
-        BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
-    /// What the cell's dialect declared its function values are; `None`
-    /// when its sessions keep no function between cells.
-    pub function_values: Option<&'a FunctionValues>,
-}
-
-impl SessionBindings {
-    /// The bindings a cell's machine starts with.
-    pub(crate) fn start(&self) -> Bindings {
-        let mut variables = self.variables.clone();
-        // A saved function is, in a cell, a reference to its declaration
-        // in that cell's document, under each of its bindings.
-        for (name, held) in bound(&self.functions) {
-            variables.insert(name.clone(), Value::Function(held.function.name.clone()));
-        }
-        Bindings {
-            variables,
-            objects: self.objects.clone(),
-        }
-    }
-
-    /// Every name in scope when a cell's `main` starts: the bindings and
-    /// the functions the session holds. A name it lost to `K-SES-003` is
-    /// not among them.
-    pub(crate) fn names(&self) -> BTreeSet<Name> {
-        self.variables
-            .keys()
-            .chain(bound(&self.functions).into_keys())
-            .cloned()
-            .collect()
-    }
-
-    /// The functions a cell is lowered against, by each binding that holds
-    /// one.
-    pub(crate) fn functions(&self) -> BTreeMap<Name, SavedFunction> {
-        bound(&self.functions)
-            .into_iter()
-            .map(|(name, held)| (name.clone(), held.function.clone()))
-            .collect()
-    }
-
-    /// The functions the session holds, by each binding that holds one.
-    pub(crate) fn held_functions(&self) -> BTreeMap<&Name, &HeldFunction> {
-        bound(&self.functions)
-    }
-
-    /// Unbinds `name` from the function it holds, if it holds one: the
-    /// function's other bindings keep it, declared under the first of them
-    /// when `name` was the one it was declared under.
-    fn unbind(&mut self, name: &Name) {
-        if let Some(held) = self
-            .functions
-            .values_mut()
-            .find(|held| held.aliases.contains(name))
-        {
-            held.aliases.remove(name);
-            return;
-        }
-        let Some(mut held) = self.functions.remove(name) else {
-            return;
-        };
-        if let Some(first) = held.aliases.pop_first() {
-            held.function = held.function.renamed(&first);
-            self.functions.insert(first, held);
-        }
-    }
-
-    pub(crate) fn not_carried(&self) -> &BTreeMap<Name, NotSaved> {
-        &self.not_carried
-    }
-
-    /// Takes what a cell left. A function bound to names of its own whose
-    /// captures are data or other saved functions becomes one saved
-    /// function, which each of those names holds; the bindings that hold a
-    /// reference to a saved function, bare or in its dialect's token, keep
-    /// the function it names, with that token. Where the cell's dialect
-    /// keeps no function between cells (`function_values`), none is saved.
-    /// Answers what that did to the bindings, every name: a saved function
-    /// is a binding like any other.
-    pub(super) fn settle(&mut self, cell: CellLeft<'_>) -> lash_core::BindingChanges {
-        self.cells += 1;
-        let held: BTreeSet<Name> = self.functions.keys().cloned().collect();
-        let (saved, refused) = if let Some(values) = cell.function_values {
-            lash_kernel_dialect::save(
-                lash_kernel_dialect::Left {
-                    document: cell.document,
-                    carried: &cell.bindings.variables,
-                    carried_objects: &cell.bindings.objects,
-                    closures: &cell.closures.variables,
-                    closure_objects: &cell.closures.objects,
-                    not_carried: &cell.not_carried,
-                    controls: &cell.controls,
-                    annotations: cell.annotations,
-                    values,
-                },
-                &held,
-            )
-        } else {
-            let refused = cell
-                .not_carried
-                .iter()
-                .map(|name| {
-                    let why = if cell.closures.variables.contains_key(name) {
-                        NotSaved::Dialect
-                    } else {
-                        NotSaved::Task
-                    };
-                    (name.clone(), why)
-                })
-                .collect();
-            (BTreeMap::new(), refused)
-        };
-        let mut left = cell.bindings;
-        // A reference to a saved function is that function, under whichever
-        // names hold it now, in the token it is held in.
-        let values = cell.function_values.unwrap_or(&FunctionValues::Bare);
-        let mut holding: BTreeMap<Name, (BTreeSet<Name>, Option<lash_kernel_dialect::Token>)> =
-            BTreeMap::new();
-        left.variables.retain(|name, value| {
-            let Some(target) = lash_kernel_dialect::function_reference(value, values)
-                .filter(|target| self.functions.contains_key(*target))
-            else {
-                return true;
-            };
-            let (names, token) = holding.entry(target.clone()).or_default();
-            names.insert(name.clone());
-            if token.is_none() {
-                *token = lash_kernel_dialect::token_of(value, &left.objects, values);
-            }
-            false
-        });
-        let mut functions = BTreeMap::new();
-        for (target, (mut names, token)) in holding {
-            let Some(held) = self.functions.get(&target) else {
-                continue;
-            };
-            // Declared under its name while a binding of that name holds
-            // it, and otherwise under the first that does.
-            let declared = if names.remove(&target) {
-                target
-            } else {
-                let Some(first) = names.pop_first() else {
-                    continue;
-                };
-                first
-            };
-            let mut function = held.function.renamed(&declared);
-            if token.is_some() {
-                function.token = token;
-            }
-            functions.insert(
-                declared,
-                HeldFunction {
-                    function,
-                    cell: held.cell,
-                    aliases: names,
-                },
-            );
-        }
-        for (name, Kept { function, aliases }) in saved {
-            functions.insert(
-                name,
-                HeldFunction {
-                    function,
-                    cell: Some(self.cells),
-                    aliases,
-                },
-            );
-        }
-        let now_bound: BTreeSet<Name> = bound(&functions).into_keys().cloned().collect();
-        self.not_carried
-            .retain(|name, _| !left.variables.contains_key(name) && !now_bound.contains(name));
-        let before = Bindings {
-            variables: std::mem::take(&mut self.variables),
-            objects: std::mem::take(&mut self.objects),
-        };
-        let before_held = std::mem::replace(&mut self.functions, functions);
-        let before_functions = bound(&before_held);
-        self.adopt(left);
-        let mut changes = lash_core::BindingChanges {
-            not_carried: refused.keys().map(ToString::to_string).collect(),
-            ..Default::default()
-        };
-        for (name, value) in &self.variables {
-            match before.variables.get(name) {
-                // The name held a function and now holds data.
-                None if before_functions.contains_key(name) => {
-                    changes.changed.push(name.to_string());
-                }
-                None => changes.added.push(name.to_string()),
-                Some(was)
-                    if binding_data(was, &before.objects) != binding_data(value, &self.objects) =>
-                {
-                    changes.changed.push(name.to_string());
-                }
-                Some(_) => {}
-            }
-        }
-        let after_functions = bound(&self.functions);
-        for (name, held) in &after_functions {
-            match before_functions.get(*name) {
-                Some(was) if was.function == held.function => {}
-                None if !before.variables.contains_key(*name) => {
-                    changes.added.push(name.to_string());
-                }
-                _ => changes.changed.push(name.to_string()),
-            }
-        }
-        changes.added.sort();
-        changes.changed.sort();
-        changes.removed = before
-            .variables
-            .keys()
-            .chain(before_functions.keys().copied())
-            .filter(|name| {
-                !self.variables.contains_key(*name)
-                    && !after_functions.contains_key(*name)
-                    && !refused.contains_key(*name)
-            })
-            .map(ToString::to_string)
-            .collect();
-        self.not_carried.extend(refused);
-        changes
-    }
-
-    /// Records that `function`, stored in an earlier kernel version under
-    /// the bindings `names`, was refused by the migration to this build's:
-    /// the session holds no function under them, and lists each with why.
-    fn not_migrated(
-        &mut self,
-        names: impl IntoIterator<Item = Name>,
-        function: &SavedFunction,
-        refusal: &lash_vm_runtime::KernelMigrationRefusal,
-    ) {
-        for name in names {
-            self.unbind(&name);
-            self.not_carried.insert(
-                name,
-                NotSaved::NotMigrated {
-                    from: function.document.manifest.kernel,
-                    problem: refusal.to_string(),
-                },
-            );
-        }
-    }
-
-    /// Holds `function` under `name`, as a session is created with it.
-    fn hold(&mut self, name: Name, function: SavedFunction) {
-        let function = function.renamed(&name);
-        self.unbind(&name);
-        self.not_carried.remove(&name);
-        let mut left = Bindings {
-            variables: self.variables.clone(),
-            objects: self.objects.clone(),
-        };
-        if left.variables.remove(&name).is_some() {
-            self.adopt(left);
-        }
-        self.functions.insert(
-            name,
-            HeldFunction {
-                function,
-                cell: None,
-                aliases: BTreeSet::new(),
-            },
-        );
-    }
-
-    /// Replaces the bindings with `left`, renumbering its objects: each is
-    /// owned by the first binding, in name order, that reaches it, and
-    /// takes the next identity of that binding's slot in the order the walk
-    /// meets it.
-    fn adopt(&mut self, left: Bindings) {
-        self.slots
-            .retain(|name, _| left.variables.contains_key(name));
-        let mut renamed: BTreeMap<ObjectId, ObjectId> = BTreeMap::new();
-        for (name, value) in &left.variables {
-            let slot = match self.slots.get(name) {
-                Some(slot) => *slot,
-                None => {
-                    let slot = self.next_slot;
-                    self.next_slot += 1;
-                    self.slots.insert(name.clone(), slot);
-                    slot
-                }
-            };
-            let mut next = u64::from(slot) * SLOT_OBJECTS;
-            let mut pending = Vec::new();
-            value_objects(value, &mut pending);
-            // Depth first, in the order the value names its objects.
-            while let Some(id) = pending.pop() {
-                if renamed.contains_key(&id) {
-                    continue;
-                }
-                renamed.insert(id, ObjectId(next));
-                next += 1;
-                if let Some(object) = left.objects.get(&id) {
-                    let mut named = Vec::new();
-                    object_objects(object, &mut named);
-                    pending.extend(named.into_iter().rev());
-                }
-            }
-        }
-        let rename = |id: &ObjectId| renamed.get(id).copied().unwrap_or(*id);
-        self.variables = left
-            .variables
-            .iter()
-            .map(|(name, value)| (name.clone(), rename_value(value, &rename)))
-            .collect();
-        self.objects = left
-            .objects
-            .iter()
-            .filter_map(|(id, object)| {
-                renamed
-                    .get(id)
-                    .map(|renamed| (*renamed, rename_object(object, &rename)))
-            })
-            .collect();
-    }
-
-    /// Binds `name` to a host's JSON `value`, decoded by `numbers`.
-    fn seed(&mut self, name: &str, value: &serde_json::Value, numbers: NumberPolicy) {
-        let mut left = self.data();
-        let mut next = left
-            .objects
-            .keys()
-            .next_back()
-            .map_or(0, |id| id.0.saturating_add(1));
-        let mut allocate = || {
-            let id = ObjectId(next);
-            next += 1;
-            id
-        };
-        let value = crate::cell_value::bind_json(value, numbers, &mut allocate, &mut left.objects);
-        left.variables.insert(Name::new(name), value);
-        self.not_carried.remove(&Name::new(name));
-        self.unbind(&Name::new(name));
-        self.adopt(left);
-    }
-
-    /// The session's data bindings alone.
-    fn data(&self) -> Bindings {
-        Bindings {
-            variables: self.variables.clone(),
-            objects: self.objects.clone(),
-        }
-    }
-
-    fn remove(&mut self, names: &BTreeSet<String>) -> bool {
-        let mut left = self.data();
-        let held = |bindings: &Self| bound(&bindings.functions).len();
-        let before = left.variables.len() + self.not_carried.len() + held(self);
-        left.variables
-            .retain(|name, _| !names.contains(name.as_str()));
-        self.not_carried
-            .retain(|name, _| !names.contains(name.as_str()));
-        for name in names {
-            self.unbind(&Name::new(name.as_str()));
-        }
-        let changed = left.variables.len() + self.not_carried.len() + held(self) != before;
-        if changed {
-            self.adopt(left);
-        }
-        changed
-    }
-}
-
-/// One binding's value and the objects it reaches, numbered in the order
-/// the value reaches them: equal for two bindings that hold the same data,
-/// wherever a session numbered their objects.
-fn binding_data(value: &Value, objects: &BTreeMap<ObjectId, Object>) -> (Value, Vec<Object>) {
-    let mut renamed: BTreeMap<ObjectId, ObjectId> = BTreeMap::new();
-    let mut reached = Vec::new();
-    let mut pending = Vec::new();
-    value_objects(value, &mut pending);
-    while let Some(id) = pending.pop() {
-        if renamed.contains_key(&id) {
-            continue;
-        }
-        renamed.insert(id, ObjectId(reached.len() as u64));
-        reached.push(id);
-        if let Some(object) = objects.get(&id) {
-            let mut named = Vec::new();
-            object_objects(object, &mut named);
-            pending.extend(named.into_iter().rev());
-        }
-    }
-    let rename = |id: &ObjectId| renamed.get(id).copied().unwrap_or(*id);
-    (
-        rename_value(value, &rename),
-        reached
-            .iter()
-            .filter_map(|id| objects.get(id))
-            .map(|object| rename_object(object, &rename))
-            .collect(),
-    )
-}
-
-/// Refuses a heap whose bindings reach an object it does not hold, or that
-/// holds an object no binding reaches: what a session writes is exactly the
-/// objects its bindings reach.
-fn check_reached(
-    variables: &BTreeMap<Name, Value>,
-    objects: &BTreeMap<ObjectId, Object>,
-) -> Result<(), String> {
-    let mut reached = BTreeSet::new();
-    let mut pending = Vec::new();
-    for value in variables.values() {
-        value_objects(value, &mut pending);
-    }
-    while let Some(id) = pending.pop() {
-        if !reached.insert(id) {
-            continue;
-        }
-        let object = objects
-            .get(&id)
-            .ok_or_else(|| format!("a binding reaches object {} the state does not hold", id.0))?;
-        object_objects(object, &mut pending);
-    }
-    match objects.keys().find(|id| !reached.contains(id)) {
-        Some(id) => Err(format!("object {} is reached by no binding", id.0)),
-        None => Ok(()),
-    }
-}
-
-fn value_objects(value: &Value, out: &mut Vec<ObjectId>) {
-    match value {
-        Value::List(id)
-        | Value::Map(id)
-        | Value::Set(id)
-        | Value::Record(id)
-        | Value::Closure(id)
-        | Value::Ref(Identity::Object(id)) => out.push(*id),
-        Value::Tuple(items) => {
-            // Reversed, so that a stack pops them in their own order.
-            for item in items.iter().rev() {
-                value_objects(item, out);
-            }
-        }
-        Value::Error(error) => value_objects(&error.data, out),
-        _ => {}
-    }
-}
-
-/// The objects `object` names, in its own order.
-fn object_objects(object: &Object, out: &mut Vec<ObjectId>) {
-    let mut each = |value: &Value| {
-        let mut named = Vec::new();
-        value_objects(value, &mut named);
-        out.extend(named.into_iter().rev());
-    };
-    match object {
-        Object::List(items) | Object::Set(items) => items.iter().for_each(&mut each),
-        Object::Map(entries) => {
-            for (key, value) in entries {
-                each(key);
-                each(value);
-            }
-        }
-        Object::Record(fields) => fields.iter().for_each(|(_, value)| each(value)),
-        Object::Closure(closure) => out.extend(closure.captures.iter().map(|(_, cell)| *cell)),
-        Object::Variable(value) => each(value),
-    }
-}
-
-fn rename_value(value: &Value, rename: &dyn Fn(&ObjectId) -> ObjectId) -> Value {
-    match value {
-        Value::List(id) => Value::List(rename(id)),
-        Value::Map(id) => Value::Map(rename(id)),
-        Value::Set(id) => Value::Set(rename(id)),
-        Value::Record(id) => Value::Record(rename(id)),
-        Value::Closure(id) => Value::Closure(rename(id)),
-        Value::Ref(Identity::Object(id)) => Value::Ref(Identity::Object(rename(id))),
-        Value::Tuple(items) => Value::Tuple(
-            items
-                .iter()
-                .map(|item| rename_value(item, rename))
-                .collect(),
-        ),
-        Value::Error(error) => Value::Error(Arc::new(lash_kernel_doc::ErrorValue {
-            kind: error.kind.clone(),
-            message: error.message.clone(),
-            data: rename_value(&error.data, rename),
-        })),
-        other => other.clone(),
-    }
-}
-
-fn rename_object(object: &Object, rename: &dyn Fn(&ObjectId) -> ObjectId) -> Object {
-    let value = |value: &Value| rename_value(value, rename);
-    match object {
-        Object::List(items) => Object::List(items.iter().map(value).collect()),
-        Object::Set(items) => Object::Set(items.iter().map(value).collect()),
-        Object::Map(entries) => Object::Map(
-            entries
-                .iter()
-                .map(|(key, entry)| (value(key), value(entry)))
-                .collect(),
-        ),
-        Object::Record(fields) => Object::Record(
-            fields
-                .iter()
-                .map(|(name, field)| (name.clone(), value(field)))
-                .collect(),
-        ),
-        Object::Closure(closure) => Object::Closure(lash_kernel_doc::ClosureObject {
-            site: closure.site.clone(),
-            captures: closure
-                .captures
-                .iter()
-                .map(|(name, cell)| (name.clone(), rename(cell)))
-                .collect(),
-        }),
-        Object::Variable(inner) => Object::Variable(value(inner)),
-    }
-}
-
-/// One complete capture of a session's state: its SessionExecution root
-/// and every node the root reaches, with their bytes.
+/// A capture staged and not yet acknowledged.
 #[derive(Clone, Debug)]
-struct Capture {
+struct Pending {
     root: NodeId,
-    nodes: BTreeMap<NodeId, EncodedNode>,
+    /// The spool candidate the capture's nodes came from, when the spool
+    /// held the descriptor.
+    commit: Option<CommitId>,
+    purpose: ExecutionGraphPurpose,
+    /// The helper releases whose closures the capture sends.
+    releases: BTreeSet<NodeId>,
+    /// The held runs whose carries the capture owns once committed.
+    runs: usize,
 }
 
-impl Capture {
-    /// The capture as a graph capture: every node no acknowledged capture
-    /// installed, the root included, sent with its bytes.
-    fn graph(&self, installed: &BTreeSet<NodeId>) -> ExecutionGraphCapture {
-        ExecutionGraphCapture::Replace {
-            root: self.root,
-            nodes: self
-                .nodes
-                .iter()
-                .filter(|(id, _)| !installed.contains(id))
-                .map(|(id, node)| (*id, node.clone()))
-                .collect(),
-        }
-    }
-
-    fn hydrated(&self) -> HydratedExecutionGraph {
-        HydratedExecutionGraph {
-            root: self.root,
-            nodes: self.nodes.clone(),
-        }
-    }
+/// What a finished cell changed in the session's bindings.
+pub(super) struct CellChanges {
+    pub bindings: lash_core::BindingChanges,
 }
 
-/// The session as it stood before the active cell, with the capture
-/// bookkeeping that cell may move.
-struct CodeModeExecutionCheckpoint {
-    bindings: SessionBindings,
-    installed: BTreeSet<NodeId>,
-    capture_dirty: bool,
-    capture_rollback: Option<BTreeSet<NodeId>>,
-    pending: Option<Capture>,
-}
-
-/// One code mode session's execution state: its bindings, the dialect its cells
-/// are written in, and the bookkeeping its durable captures are built from.
+/// One code mode session's execution state: its pages, the dialect its
+/// cells are written in, and the bookkeeping its captures are built from.
 pub struct CodeModeExecutionState {
     dialect: Arc<str>,
     numbers: NumberPolicy,
-    bindings: SessionBindings,
-    /// The nodes the last acknowledged capture's root reaches: what the
-    /// store holds, whose bytes a capture need not send.
-    installed: BTreeSet<NodeId>,
-    /// Whether anything may have changed since the last staged capture.
-    capture_dirty: bool,
-    /// What `installed` was before the first capture since the last
-    /// settlement: what an aborted commit goes back to.
-    capture_rollback: Option<BTreeSet<NodeId>>,
-    /// The staged capture, kept until its commit is acknowledged or
-    /// aborted: a refused commit sends its nodes again.
-    pending: Option<Capture>,
-    /// What the staged capture is for.
-    pending_purpose: ExecutionGraphPurpose,
+    current: Version,
+    /// The descriptor the store holds as of the last acknowledged capture
+    /// or restore.
+    installed: Option<NodeId>,
+    /// The helper releases an acknowledged capture installed: a saved
+    /// function's record names the release its code calls into, and a
+    /// capture sends that release's closure until a commit installs it.
+    releases: BTreeSet<NodeId>,
+    pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
     /// nothing changed since a working capture was acknowledged.
     final_owed: bool,
-    active_execution_checkpoint: Option<CodeModeExecutionCheckpoint>,
-    execution_response_returned: bool,
-    /// What a saved function stored in an earlier kernel version is
-    /// carried forward with.
+    active: Option<Active>,
+    response_returned: bool,
+    /// Host bindings set by default (`set_default`) and not yet sealed
+    /// into the session: each binds its name only where nothing does.
+    defaults: BTreeMap<Name, Datum>,
+    /// Names a read-only projected binding shadows: never listed as the
+    /// session's.
+    protected: BTreeSet<Name>,
+    view: View,
+    pages: SessionPageAccess,
+    spools: Option<Arc<SpoolRoot>>,
     kernel: super::KernelCarry,
+}
+
+impl std::fmt::Debug for CodeModeExecutionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodeModeExecutionState")
+            .field("dialect", &self.dialect)
+            .field("current", &self.current.descriptor)
+            .field("installed", &self.installed)
+            .field("pending", &self.pending)
+            .field("pages", &self.pages)
+            .finish_non_exhaustive()
+    }
+}
+
+fn protocol(error: impl std::fmt::Display) -> SessionError {
+    SessionError::Protocol(format!("code mode session state: {error}"))
 }
 
 impl CodeModeExecutionState {
@@ -726,15 +153,18 @@ impl CodeModeExecutionState {
         Self {
             dialect: dialect.into(),
             numbers,
-            bindings: SessionBindings::default(),
-            installed: BTreeSet::new(),
-            capture_dirty: true,
-            capture_rollback: None,
+            current: Version::default(),
+            installed: None,
+            releases: BTreeSet::new(),
             pending: None,
-            pending_purpose: ExecutionGraphPurpose::Final,
             final_owed: false,
-            active_execution_checkpoint: None,
-            execution_response_returned: false,
+            active: None,
+            response_returned: false,
+            defaults: BTreeMap::new(),
+            protected: BTreeSet::from([Name::new(HISTORY_BINDING)]),
+            view: View::default(),
+            pages: SessionPageAccess::default(),
+            spools: None,
             kernel: super::KernelCarry::default(),
         }
     }
@@ -746,118 +176,257 @@ impl CodeModeExecutionState {
         self
     }
 
+    /// This state, staging its turns' pages in spools `spools` opens.
+    #[must_use]
+    pub(crate) fn staging(mut self, spools: Option<Arc<SpoolRoot>>) -> Self {
+        self.spools = spools;
+        self
+    }
+
     /// The dialect the session recorded at its creation.
     pub(crate) fn dialect(&self) -> &str {
         &self.dialect
     }
 
-    pub(crate) fn bindings(&self) -> &SessionBindings {
-        &self.bindings
+    /// Takes `pages` as where the session's committed state stands.
+    pub(crate) fn note_pages(&mut self, pages: Option<&SessionPages>) {
+        self.pages.note(pages);
     }
 
-    /// Every name a stored state binds, data or function: what catalog
-    /// admission checks a tool's namespace against (FIG-5824).
+    /// Lease writes the session's reads made: one per acquisition or
+    /// renewal.
+    #[cfg(test)]
+    pub(crate) fn lease_writes(&self) -> u64 {
+        self.pages.lease_writes()
+    }
+
+    /// The turn's spool, opened on first use.
+    pub(super) fn turn_spool(&mut self) -> Result<SharedSpool, PageAccessError> {
+        let spools = match &self.spools {
+            Some(spools) => Arc::clone(spools),
+            None => {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "a session whose host names no staging directory stages where the worker pool's default does (PoolConfig::staging_dir)"
+                )]
+                let fallback = std::env::temp_dir().join("lash-staging");
+                let spools = Arc::new(SpoolRoot::open(&fallback, 1 << 30)?);
+                self.spools = Some(Arc::clone(&spools));
+                spools
+            }
+        };
+        Ok(self.pages.spool(&spools)?)
+    }
+
+    /// The lease a cell's run reads the session's committed pages under:
+    /// none when the store holds none of them.
+    pub(super) async fn lease(&mut self) -> Result<Option<RootLease>, PageAccessError> {
+        self.pages.lease().await
+    }
+
+    /// The carried session a cell starts from.
+    pub(super) fn session(&self) -> Option<SessionRoot> {
+        self.current.session
+    }
+
+    /// The pages a cell's run may name without reading them: its carried
+    /// session's roots.
+    pub(super) fn session_references(&self) -> Vec<NodeId> {
+        let Some(session) = &self.current.session else {
+            return Vec::new();
+        };
+        std::iter::once(session.heap)
+            .chain(session.bindings.page())
+            .chain(session.functions.page())
+            .map(|page| NodeId(page.id.0))
+            .collect()
+    }
+
+    /// Every name the session binds, data or function, a host default
+    /// included: what a cell is lowered against.
+    pub(crate) fn names(&self) -> BTreeSet<Name> {
+        self.current
+            .names
+            .iter()
+            .chain(self.defaults.keys())
+            .filter(|name| !self.protected.contains(*name))
+            .cloned()
+            .collect()
+    }
+
+    /// The bindings not carried, each with why.
+    pub(crate) fn not_carried(&self) -> BTreeMap<Name, String> {
+        let mut not_carried = self.current.not_carried.clone();
+        not_carried.extend(self.view.refused.clone());
+        not_carried
+    }
+
+    /// Every name a stored state binds: what catalog admission checks a
+    /// tool's namespace against (FIG-5824).
     pub(crate) fn persisted_binding_names(
         state: &HydratedExecutionGraph,
     ) -> Result<BTreeSet<String>, CodeModeSnapshotError> {
-        Ok(graph::read(state.root, &state.nodes)?
-            .bindings
-            .names()
+        Ok(stored_descriptor(state)?
+            .names
             .into_iter()
             .map(|name| name.to_string())
             .collect())
     }
 
-    /// Takes what a finished cell left (see [`SessionBindings::settle`]).
-    pub(super) fn settle_cell(&mut self, cell: CellLeft<'_>) -> lash_core::BindingChanges {
-        self.capture_dirty = true;
-        self.bindings.settle(cell)
-    }
-
-    /// The functions the session holds, in the form another session is
-    /// created with ([`Self::seed_functions`]).
-    #[cfg(test)]
-    pub(crate) fn saved_functions(&self) -> serde_json::Map<String, serde_json::Value> {
-        bound(&self.bindings.functions)
-            .into_iter()
-            .filter_map(|(name, held)| {
-                Some((name.to_string(), serde_json::to_value(&held.function).ok()?))
-            })
-            .collect()
-    }
-
-    /// Holds each of `functions` under its key, as a session is created
-    /// with them. Every one is read before any is held; none is checked
-    /// against what this session offers until a cell uses it.
-    ///
-    /// # Errors
-    ///
-    /// A value that is not a saved function, or a key a read-only host
-    /// binding holds.
-    pub async fn seed_functions(
-        &mut self,
-        functions: &serde_json::Map<String, serde_json::Value>,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        let mut read = Vec::with_capacity(functions.len());
-        for (key, value) in functions {
-            if key == HISTORY_BINDING || protected_names.contains(key) {
-                return Err(SessionError::Protocol(format!(
-                    "`{key}` is a read-only projected host binding; choose a different name for the saved function"
-                )));
-            }
-            let function: SavedFunction =
-                serde_json::from_value(value.clone()).map_err(|error| {
-                    SessionError::Protocol(format!("`{key}` is not a saved function: {error}"))
-                })?;
-            if function.definition().is_none() {
-                return Err(SessionError::Protocol(format!(
-                    "`{key}` is not a saved function: its document does not declare `{}`",
-                    function.name
-                )));
-            }
-            read.push((Name::new(key.as_str()), function));
+    /// Seals the host's pending defaults into the session, each only where
+    /// nothing binds its name. Reads the bindings' pages on each name's
+    /// path.
+    async fn seal_defaults(&mut self) -> Result<(), PageAccessError> {
+        if self.defaults.is_empty() {
+            return Ok(());
         }
-        for (name, function) in read {
-            // One stored in an earlier kernel version is carried to this
-            // build's; one the migration refuses is not held, and the
-            // session lists its name with why.
-            match self.kernel.saved_function(&function) {
-                Ok(carried) => self.bindings.hold(name, carried.unwrap_or(function)),
-                Err(refusal) => self.bindings.not_migrated([name], &function, &refusal),
+        let spool = self.turn_spool()?;
+        let defaults = self.defaults.clone();
+        let session = self.current.session;
+        let (sealed, bound) = self
+            .pages
+            .read(|source| {
+                let mut editor = SessionEditor::open(session.as_ref(), source)?;
+                let mut bound = Vec::new();
+                for (name, value) in &defaults {
+                    if editor.get(name)?.is_none() {
+                        editor.set(name, value)?;
+                        bound.push(name.clone());
+                    }
+                }
+                Ok((
+                    if editor.edited() {
+                        Some(editor.seal()?)
+                    } else {
+                        None
+                    },
+                    bound,
+                ))
+            })
+            .await?;
+        self.defaults.clear();
+        if let Some(sealed) = sealed {
+            let mut next = self.current.clone();
+            next.session = Some(sealed);
+            for name in bound {
+                next.not_carried.remove(&name);
+                next.names.insert(name);
             }
-            self.capture_dirty = true;
+            self.current = self.seal_descriptor(next, spool)?;
         }
         Ok(())
     }
 
-    pub fn execution_state_dirty(&self) -> bool {
-        self.pending.is_some() || self.capture_dirty || self.final_owed
+    fn seal_descriptor(
+        &self,
+        mut version: Version,
+        mut spool: SharedSpool,
+    ) -> Result<Version, PageAccessError> {
+        let Some(session) = version.session else {
+            version.descriptor = None;
+            version.bytes = None;
+            return Ok(version);
+        };
+        let page = graph::seal(
+            &mut ParentSeal(&mut spool),
+            &graph::SessionDescriptor {
+                dialect: self.dialect.to_string(),
+                numbers: self.numbers,
+                kernel: KERNEL_VERSION,
+                cells: version.cells,
+                session,
+                names: version.names.clone(),
+                not_carried: version.not_carried.clone(),
+                functions: version.functions.clone(),
+            },
+        )?;
+        let id = NodeId(page.id.0);
+        version.bytes = Some(spool.read(&id)?);
+        version.descriptor = Some(id);
+        Ok(version)
+    }
+
+    /// Readies the session for a cell: the host's defaults sealed in, the
+    /// saved functions' descriptions read. `pages` is where the turn says
+    /// the committed state stands.
+    pub(super) async fn prepare_cell(
+        &mut self,
+        pages: Option<&SessionPages>,
+    ) -> Result<(), PageAccessError> {
+        self.note_pages(pages);
+        self.seal_defaults().await?;
+        self.load_functions().await
+    }
+
+    /// The saved functions a cell is lowered against, each in this build's
+    /// kernel version.
+    pub(super) fn lowering_functions(&self) -> BTreeMap<Name, LowerFunction> {
+        self.view.functions.clone().unwrap_or_default()
+    }
+
+    async fn load_functions(&mut self) -> Result<(), PageAccessError> {
+        if self.view.functions.is_some() {
+            return Ok(());
+        }
+        let Some(session) = self.current.session else {
+            self.view.functions = Some(BTreeMap::new());
+            return Ok(());
+        };
+        let metas = self
+            .pages
+            .read(|source| SessionEditor::open(Some(&session), source)?.functions())
+            .await?;
+        let mut functions = BTreeMap::new();
+        for (name, meta) in metas {
+            match self.lower_function(&name, &meta) {
+                Ok(function) => {
+                    functions.insert(name, function);
+                }
+                Err(why) => {
+                    self.view.refused.insert(name, why);
+                }
+            }
+        }
+        self.view.functions = Some(functions);
+        Ok(())
+    }
+
+    /// A saved function's description as a cell is lowered against it,
+    /// carried to this build's kernel version.
+    fn lower_function(&self, name: &Name, meta: &str) -> Result<LowerFunction, String> {
+        let function: LowerFunction = serde_json::from_str(meta)
+            .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
+        match self.kernel.saved_function(&function.clone().into_saved()) {
+            Ok(None) => Ok(function),
+            Ok(Some(carried)) => Ok(LowerFunction {
+                document: carried.document,
+                ..function
+            }),
+            Err(refusal) => Err(refusal.to_string()),
+        }
     }
 
     /// Marks the start of a cell: the session as it stands is what a
     /// cancelled or refused cell goes back to.
     pub(super) fn begin_code_execution(&mut self) {
         debug_assert!(
-            !self.execution_response_returned,
+            !self.response_returned,
             "a returned code execution must be settled before another cell starts"
         );
-        self.active_execution_checkpoint = Some(CodeModeExecutionCheckpoint {
-            bindings: self.bindings.clone(),
-            installed: self.installed.clone(),
-            capture_dirty: self.capture_dirty,
-            capture_rollback: self.capture_rollback.clone(),
-            pending: self.pending.clone(),
+        self.withdraw_pending();
+        self.active = Some(Active {
+            current: self.current.clone(),
+            defaults: self.defaults.clone(),
+            view: self.view.clone(),
         });
-        self.execution_response_returned = false;
-        self.capture_dirty = true;
+        self.response_returned = false;
     }
 
     pub(crate) fn prepare_runtime_code_execution(&mut self) -> Result<(), &'static str> {
-        if self.active_execution_checkpoint.is_none() {
+        if self.active.is_none() {
             return Ok(());
         }
-        if self.execution_response_returned {
+        if self.response_returned {
             return Err("the previous code execution response has not been settled");
         }
         self.rollback_code_execution();
@@ -865,27 +434,24 @@ impl CodeModeExecutionState {
     }
 
     pub(crate) fn mark_code_execution_response_returned(&mut self) {
-        self.execution_response_returned = true;
+        self.response_returned = true;
     }
 
     pub(crate) fn accept_code_execution(&mut self) {
-        self.active_execution_checkpoint = None;
-        self.execution_response_returned = false;
+        self.active = None;
+        self.response_returned = false;
     }
 
-    /// Goes back to the session as it stood before the active cell: its
-    /// bindings, and the capture bookkeeping, so a capture the cell staged
-    /// is dropped and never promoted.
+    /// Goes back to the session as it stood before the active cell. What
+    /// the cell staged stays in the turn's spool, unreferenced.
     pub(crate) fn rollback_code_execution(&mut self) {
-        self.execution_response_returned = false;
-        let Some(checkpoint) = self.active_execution_checkpoint.take() else {
+        self.response_returned = false;
+        let Some(active) = self.active.take() else {
             return;
         };
-        self.bindings = checkpoint.bindings;
-        self.installed = checkpoint.installed;
-        self.capture_dirty = checkpoint.capture_dirty;
-        self.capture_rollback = checkpoint.capture_rollback;
-        self.pending = checkpoint.pending;
+        self.current = active.current;
+        self.defaults = active.defaults;
+        self.view = active.view;
     }
 
     /// Cancellation rolls the execution back; the cell's parked state is
@@ -894,117 +460,298 @@ impl CodeModeExecutionState {
         self.rollback_code_execution();
     }
 
-    /// Stages the complete state: the staged capture while nothing changed
-    /// since it, else a new one.
-    fn stage_capture(&mut self) -> Result<Capture, SessionError> {
-        if !self.capture_dirty
-            && let Some(pending) = &self.pending
-        {
-            return Ok(pending.clone());
+    /// Takes the carry a finished cell sealed into the turn's spool: the
+    /// session's next version, under a descriptor staged beside it. Reads
+    /// only the pages of the bindings and saved functions the cell
+    /// changed.
+    pub(super) async fn stage_cell(
+        &mut self,
+        carry: SessionRoot,
+        not_carried: Vec<(Name, String)>,
+        run: Option<super::pages::HeldRun>,
+    ) -> Result<CellChanges, PageAccessError> {
+        if let Some(run) = run {
+            self.pages.hold(run);
         }
-        let capture = self.build_capture()?;
-        if self.capture_rollback.is_none() {
-            self.capture_rollback = Some(self.installed.clone());
-        }
-        self.capture_dirty = false;
-        self.pending = Some(capture.clone());
-        Ok(capture)
+        self.stage_carry(carry, not_carried).await
     }
 
-    /// A cell's last acknowledged park protects these nodes until the
-    /// consuming phase adopts its state. Its working capture need only
-    /// send nodes produced after that park, including the cell's end.
-    pub(super) fn parked_nodes_stored(&mut self, nodes: BTreeSet<NodeId>) {
-        self.installed.extend(nodes);
+    async fn stage_carry(
+        &mut self,
+        carry: SessionRoot,
+        not_carried: Vec<(Name, String)>,
+    ) -> Result<CellChanges, PageAccessError> {
+        let spool = self.turn_spool()?;
+        let (old_bindings, old_functions) = match &self.current.session {
+            Some(session) => (session.bindings, session.functions),
+            None => (KeyedRoot::Empty, KeyedRoot::Empty),
+        };
+        let (bindings, functions) = self
+            .pages
+            .read(|source| {
+                let editor = SessionEditor::open(Some(&carry), source)?;
+                Ok((
+                    editor.changed(&old_bindings, &carry.bindings)?,
+                    editor.changed_functions(&old_functions, &carry.functions)?,
+                ))
+            })
+            .await?;
+        let cells = self.current.cells.saturating_add(1);
+        let mut next = Version {
+            descriptor: None,
+            bytes: None,
+            session: Some(carry),
+            cells,
+            ..self.current.clone()
+        };
+        let mut changes = lash_core::BindingChanges::default();
+        for (name, (was, is)) in bindings {
+            self.view.values.remove(&name);
+            match (was, is) {
+                (false, true) => changes.added.push(name.to_string()),
+                (true, true) => changes.changed.push(name.to_string()),
+                (true, false) => changes.removed.push(name.to_string()),
+                (false, false) => continue,
+            }
+            if is {
+                next.names.insert(name.clone());
+                next.not_carried.remove(&name);
+            } else {
+                next.names.remove(&name);
+            }
+        }
+        for (name, why) in not_carried {
+            if !next.names.contains(&name) {
+                changes.not_carried.push(name.to_string());
+                // A name the session bound before and not now was not
+                // carried, never removed.
+                changes
+                    .removed
+                    .retain(|removed| removed.as_str() != name.as_str());
+                next.not_carried.insert(name, why);
+            }
+        }
+        for (name, meta) in functions {
+            self.view.refused.remove(&name);
+            let lowered = meta.map(|meta| self.lower_function(&name, &meta));
+            let view = self.view.functions.get_or_insert_with(BTreeMap::new);
+            match lowered {
+                Some(Ok(function)) => {
+                    let pins = function
+                        .document
+                        .manifest
+                        .functions
+                        .keys()
+                        .copied()
+                        .collect();
+                    next.functions.insert(name.clone(), (cells, pins));
+                    view.insert(name, function);
+                }
+                Some(Err(why)) => {
+                    next.functions.remove(&name);
+                    view.remove(&name);
+                    self.view.refused.insert(name, why);
+                }
+                None => {
+                    next.functions.remove(&name);
+                    view.remove(&name);
+                }
+            }
+        }
+        self.current = self.seal_descriptor(next, spool)?;
+        if self.current.descriptor.is_none() {
+            return Err(PageAccessError::Heap(HeapFault::Malformed(
+                "a staged session has no descriptor".into(),
+            )));
+        }
+        Ok(CellChanges { bindings: changes })
     }
 
-    /// The session's complete SessionExecution graph (FIG-5887 §6): the
-    /// root, and every node it reaches that no acknowledged capture
-    /// installed. Its nodes are kept until the capture is acknowledged; a
-    /// refused commit is answered by the next capture with the same
-    /// nodes. A working capture and a final one write the same root.
-    pub fn capture_execution_graph(
+    /// The descriptor a cell's recorded end names, staged in the turn's
+    /// spool so the end publishes it: the session as it stands, an empty
+    /// one sealed for a session that holds nothing yet.
+    ///
+    /// # Errors
+    ///
+    /// The spool's faults.
+    pub(super) fn end_descriptor(&mut self) -> Result<NodeId, PageAccessError> {
+        let spool = self.turn_spool()?;
+        let mut version = self.current.clone();
+        if version.session.is_none() {
+            let empty = SessionEditor::open(None, Box::new(SpoolSeal(spool.clone())))?;
+            version.session = Some(empty.seal()?);
+        }
+        self.current = self.seal_descriptor(version, spool)?;
+        self.current.descriptor.ok_or_else(|| {
+            PageAccessError::Heap(HeapFault::Malformed(
+                "a sealed session has no descriptor".into(),
+            ))
+        })
+    }
+
+    pub fn execution_state_dirty(&self) -> bool {
+        self.pending.is_some()
+            || self.final_owed
+            || self.current.descriptor != self.installed
+            || !self.defaults.is_empty()
+    }
+
+    /// The session's state as one capture (FIG-6193): its descriptor, and
+    /// every page the turn's spool holds under it. A descriptor the store
+    /// holds already is sent alone. Its pages stay staged until the
+    /// capture is acknowledged; a refused commit is answered by the next
+    /// capture with the same pages.
+    pub async fn capture_execution_graph(
         &mut self,
         purpose: ExecutionGraphPurpose,
     ) -> Result<ExecutionGraphCapture, SessionError> {
-        let capture = self.stage_capture()?;
-        self.pending_purpose = purpose;
-        Ok(capture.graph(&self.installed))
+        self.seal_defaults().await.map_err(protocol)?;
+        self.withdraw_pending();
+        let Some(root) = self.current.descriptor else {
+            return Ok(ExecutionGraphCapture::Clear);
+        };
+        let (mut nodes, commit, named) = self.staged_under(root).map_err(protocol)?;
+        let mut releases = BTreeSet::new();
+        for release in named.difference(&self.releases) {
+            if let Some((_, closure)) = held_releases().and_then(|held| held.pinned(*release)) {
+                nodes.extend(closure);
+                releases.insert(*release);
+            }
+        }
+        self.pending = Some(Pending {
+            root,
+            commit,
+            purpose,
+            releases,
+            runs: self.pages.held(),
+        });
+        Ok(ExecutionGraphCapture::Replace { root, nodes })
+    }
+
+    /// Every page the turn's spool holds under `root`, with the candidate
+    /// they were read as and the pages they name outside it; none when the
+    /// spool does not hold `root`.
+    #[expect(clippy::type_complexity, reason = "one candidate, in its parts")]
+    fn staged_under(
+        &mut self,
+        root: NodeId,
+    ) -> Result<
+        (
+            BTreeMap<NodeId, EncodedNode>,
+            Option<CommitId>,
+            BTreeSet<NodeId>,
+        ),
+        PageAccessError,
+    > {
+        let Some(mut spool) = self.pages.staged().cloned() else {
+            return Ok((BTreeMap::new(), None, BTreeSet::new()));
+        };
+        if !spool.contains(&root) {
+            return Ok((BTreeMap::new(), None, BTreeSet::new()));
+        }
+        let commit = CommitId::mint();
+        let mut manifest = spool.candidate(root, None, commit)?;
+        let mut nodes = BTreeMap::new();
+        let mut external = BTreeSet::new();
+        let mut after = None;
+        loop {
+            let entries = manifest.entries(after, MANIFEST_BATCH)?;
+            let Some(last) = entries.last() else {
+                break;
+            };
+            after = Some(match last {
+                ManifestEntry::External(id) => *id,
+                ManifestEntry::Fresh(node) => node.id,
+            });
+            for entry in entries {
+                match entry {
+                    ManifestEntry::Fresh(node) => {
+                        nodes.insert(node.id, node);
+                    }
+                    ManifestEntry::External(id) => {
+                        external.insert(id);
+                    }
+                }
+            }
+        }
+        Ok((nodes, Some(commit), external))
     }
 
     /// Whether the capture [`Self::capture_execution_graph`] would take
     /// now can be built, without staging it.
     pub async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        if !self.capture_dirty && self.pending.is_some() {
-            return Ok(());
-        }
-        self.build_capture().map(|_| ())
+        Ok(())
     }
 
-    /// The complete state, with every node's body present and no capture
-    /// bookkeeping touched.
+    /// The session's descriptor, alone: its pages are the store's or the
+    /// turn's, and read where a host asks for them.
     pub async fn hydrated_execution_graph(&self) -> Result<HydratedExecutionGraph, SessionError> {
-        self.build_capture().map(|capture| capture.hydrated())
-    }
-
-    fn build_capture(&self) -> Result<Capture, SessionError> {
-        let failed = |error: &dyn std::fmt::Display| {
-            SessionError::Protocol(format!(
-                "failed to encode code mode session bindings: {error}"
-            ))
+        let (Some(root), Some(bytes)) = (self.current.descriptor, self.current.bytes.clone())
+        else {
+            return Err(SessionError::Protocol(
+                "the code mode session holds no execution state".to_owned(),
+            ));
         };
-        let mut staging = graph::staging();
-        let root = graph::stage(&self.dialect, self.numbers, &self.bindings, &mut staging)
-            .map_err(|error| failed(&error))?;
-        let mut nodes = staging.into_nodes();
-        release::complete(&mut nodes).map_err(|error| failed(&error))?;
-        Ok(Capture { root, nodes })
+        Ok(HydratedExecutionGraph {
+            root,
+            nodes: BTreeMap::from([(root, EncodedNode { id: root, bytes })]),
+        })
     }
 
-    pub(crate) fn acknowledge_execution_state_capture(&mut self) {
-        self.capture_rollback = None;
-        if let Some(pending) = self.pending.take() {
-            self.installed = pending.nodes.into_keys().collect();
-            // A working capture's commit roots the state under its turn; only
-            // a final one publishes it as the session's.
-            self.final_owed = self.pending_purpose == ExecutionGraphPurpose::Working;
+    /// Settles the acknowledged capture: the pages it published leave the
+    /// spool, and a final one ends the turn's staging and lease.
+    pub(crate) async fn acknowledge_execution_state_capture(&mut self) {
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
+        self.installed = Some(pending.root);
+        self.releases.extend(pending.releases);
+        self.pages.release_runs(pending.runs).await;
+        if let (Some(commit), Some(spool)) = (pending.commit, self.pages.staged()) {
+            let _ = spool.clone().settle(commit);
+        }
+        // A working capture's commit roots the state under its turn; only
+        // a final one publishes it as the session's.
+        self.final_owed = pending.purpose == ExecutionGraphPurpose::Working;
+        if pending.purpose == ExecutionGraphPurpose::Final && self.active.is_none() {
+            self.pages.end_turn();
+            self.pages.release().await;
         }
     }
 
     pub(crate) fn abort_execution_state_capture(&mut self) {
-        let Some(rollback) = self.capture_rollback.take() else {
-            return;
-        };
-        // The installed set is the rollback's, so the next capture sends
-        // every node the store may not hold.
-        self.installed = rollback;
-        self.capture_dirty = true;
-        self.pending = None;
+        self.withdraw_pending();
     }
 
-    /// Installs a hydrated SessionExecution graph (FIG-5887 §6): the
-    /// working state a turn phase owns, or a session revision's, as
-    /// `purpose` says, before any model continuation or cell compiles. A
-    /// working state is one the turn's final capture still owes.
+    /// Forgets the capture staged and not acknowledged, whose commit was
+    /// not made: its pages stay staged, and its candidate leaves the turn's
+    /// spool free for the next one.
+    fn withdraw_pending(&mut self) {
+        if let Some(Pending {
+            commit: Some(commit),
+            ..
+        }) = self.pending.take()
+            && let Some(spool) = self.pages.staged()
+        {
+            let _ = spool.clone().withdraw(commit);
+        }
+    }
+
+    /// Installs a stored descriptor (FIG-6193): the working state a turn
+    /// phase owns, or a session revision's, as `purpose` says, before any
+    /// model continuation or cell compiles. A working state is one the
+    /// turn's final capture still owes.
+    ///
+    /// # Errors
+    ///
+    /// A descriptor recorded under another dialect, number policy or
+    /// kernel, or one that does not decode. Nothing is adopted then.
     pub fn restore_execution_graph(
         &mut self,
         graph: &HydratedExecutionGraph,
         purpose: ExecutionGraphPurpose,
     ) -> Result<(), CodeModeSnapshotError> {
-        self.restore(graph.root, &graph.nodes)?;
-        self.final_owed = purpose == ExecutionGraphPurpose::Working;
-        Ok(())
-    }
-
-    /// Restores the state rooted at `root`. A state recorded under another
-    /// dialect or number policy is refused: a session's are the ones it
-    /// recorded at its creation. Nothing is adopted when any check fails.
-    fn restore(
-        &mut self,
-        root: NodeId,
-        nodes: &BTreeMap<NodeId, EncodedNode>,
-    ) -> Result<(), CodeModeSnapshotError> {
-        let read = graph::read(root, nodes)?;
+        let read = stored_descriptor(graph)?;
         if read.dialect != self.dialect.as_ref() {
             return Err(CodeModeSnapshotError::DialectMismatch {
                 expected: self.dialect.to_string(),
@@ -1017,63 +764,61 @@ impl CodeModeExecutionState {
                 found: read.numbers,
             });
         }
-        // A state an earlier kernel version wrote is rewritten by the next
-        // capture in this build's: what an idle session's carry recaptures
-        // (FIG-5787).
-        let stale_kernel = read.kernel != KERNEL_VERSION;
-        let mut bindings = read.bindings;
-        // A saved function stored in an earlier kernel version is carried
-        // to this build's, each one alone; the next capture stores what was
-        // carried. One the migration refuses is not held: the session lists
-        // its name with why, as it does a binding that was not saved.
-        let mut carried_functions = false;
-        let mut not_migrated = Vec::new();
-        for (name, held) in &mut bindings.functions {
-            match self.kernel.saved_function(&held.function) {
-                Ok(None) => {}
-                Ok(Some(carried)) => {
-                    held.function = carried;
-                    carried_functions = true;
-                }
-                Err(refusal) => {
-                    let names = std::iter::once(name.clone()).chain(held.aliases.iter().cloned());
-                    not_migrated.push((names.collect::<Vec<_>>(), held.function.clone(), refusal));
-                    carried_functions = true;
-                }
-            }
+        if read.kernel != KERNEL_VERSION {
+            return Err(CodeModeSnapshotError::KernelMismatch {
+                expected: KERNEL_VERSION,
+                found: read.kernel,
+            });
         }
-        for (names, function, refusal) in not_migrated {
-            bindings.not_migrated(names, &function, &refusal);
-        }
-        // The history binding is the projection's; a stored state never
-        // shadows it.
-        let pruned_reserved = bindings.remove(&BTreeSet::from([HISTORY_BINDING.to_string()]));
-        self.bindings = bindings;
-        self.installed = nodes.keys().copied().collect();
-        self.capture_dirty = pruned_reserved || carried_functions || stale_kernel;
-        self.capture_rollback = None;
-        self.pending = None;
-        self.active_execution_checkpoint = None;
-        self.execution_response_returned = false;
+        self.pages.preload(
+            graph
+                .nodes
+                .values()
+                .map(|node| (node.id, Arc::clone(&node.bytes))),
+        );
+        self.current = Version {
+            descriptor: Some(graph.root),
+            bytes: graph
+                .nodes
+                .get(&graph.root)
+                .map(|node| Arc::clone(&node.bytes)),
+            session: Some(read.session),
+            cells: read.cells,
+            names: read.names,
+            not_carried: read.not_carried,
+            functions: read.functions,
+        };
+        self.installed = Some(graph.root);
+        self.final_owed = purpose == ExecutionGraphPurpose::Working;
+        self.withdraw_pending();
+        self.active = None;
+        self.response_returned = false;
+        self.defaults.clear();
+        self.view = View::default();
         Ok(())
     }
 
-    /// Drops every binding a read-only projected name now shadows.
+    /// Takes `protected_names` as the read-only projected names: a binding
+    /// one shadows is never listed as the session's, and the next cell,
+    /// which binds the name to the host's value, carries none under it.
     pub async fn prune_protected_globals(
         &mut self,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
-        let mut names = protected_names.clone();
-        names.insert(HISTORY_BINDING.to_string());
-        if self.bindings.remove(&names) {
-            self.capture_dirty = true;
-        }
+        self.protected = protected_names
+            .iter()
+            .map(|name| Name::new(name.as_str()))
+            .chain(std::iter::once(Name::new(HISTORY_BINDING)))
+            .collect();
+        self.defaults
+            .retain(|name, _| !self.protected.contains(name));
         Ok(())
     }
 
     /// Applies a `set_default` patch as one transaction: every key is
-    /// checked before any is bound, and a name the session already binds
-    /// keeps its value.
+    /// checked before any is held, and a name the session already binds
+    /// keeps its value. The defaults are sealed into the session where its
+    /// pages are next readable: the next cell, or the next capture.
     pub async fn patch_globals(
         &mut self,
         patch: &lash_rlm_types::RlmGlobalsPatchPluginBody,
@@ -1087,79 +832,157 @@ impl CodeModeExecutionState {
             }
         }
         for (key, value) in &patch.set_default {
-            if self
-                .bindings
-                .variables
-                .contains_key(&Name::new(key.as_str()))
-            {
+            let name = Name::new(key.as_str());
+            if self.current.names.contains(&name) || self.defaults.contains_key(&name) {
                 continue;
             }
-            self.bindings.seed(key, value, self.numbers);
-            self.capture_dirty = true;
+            let datum = crate::cell_value::json_datum(value, self.numbers);
+            self.defaults.insert(name, datum);
         }
         Ok(())
     }
 
-    /// The complete graph of the state as it stands, every node present.
-    #[cfg(test)]
-    pub(crate) fn hydrated_graph(&self) -> HydratedExecutionGraph {
-        let capture = self.build_capture().expect("the state encodes");
-        HydratedExecutionGraph {
-            root: capture.root,
-            nodes: capture.nodes,
-        }
-    }
-
-    /// The bundle each binding that holds a saved function names in
-    /// `graph`.
-    #[cfg(test)]
-    pub(crate) fn bundles(graph: &HydratedExecutionGraph) -> BTreeMap<String, NodeId> {
-        use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeKind};
-        let body: graph::SessionExecutionBody =
-            GraphDecoder::new(&graph.nodes, DecodeLimits::within_total(u64::MAX))
-                .decode(graph.root, NodeKind::SESSION_EXECUTION)
-                .expect("a SessionExecution root");
-        body.aliases
-            .into_iter()
-            .map(|row| (row.binding.to_string(), NodeId::from(row.bundle)))
-            .collect()
-    }
-
-    /// Every binding the session holds.
-    #[cfg(test)]
-    pub(crate) fn binding_names(&self) -> impl Iterator<Item = &str> {
-        self.bindings.variables.keys().map(Name::as_str)
-    }
-
-    /// The session's bindings as JSON for the "Bound Variables" prompt
-    /// section, without the reserved history binding and the `exclude`
-    /// names, which are read-only values with a section of their own.
-    /// The session's bound variables but `exclude`: a host resource handle
-    /// as itself, which stays opaque, and every other value as the host
-    /// reads it.
-    pub(crate) fn bound_variable_values(
-        &self,
+    /// The session's bound variables but `exclude` and its saved
+    /// functions: a host resource handle as itself, which stays opaque,
+    /// and every other value as the host reads it. Reads the value of each
+    /// binding a cell changed since the last listing.
+    pub(crate) async fn bound_variable_values(
+        &mut self,
         exclude: &BTreeSet<String>,
-    ) -> Vec<(String, crate::session_globals::SessionGlobalKind)> {
-        self.bindings
-            .variables
-            .iter()
-            .filter(|(name, _)| {
-                name.as_str() != HISTORY_BINDING && !exclude.contains(name.as_str())
+        pages: Option<&SessionPages>,
+    ) -> Result<Vec<(String, crate::session_globals::SessionGlobalKind)>, SessionError> {
+        self.note_pages(pages);
+        self.load_functions().await.map_err(protocol)?;
+        let listed: Vec<Name> = self
+            .names()
+            .into_iter()
+            .filter(|name| {
+                !exclude.contains(name.as_str()) && !self.current.functions.contains_key(name)
             })
-            .map(|(name, value)| {
-                let kind = match value {
-                    Value::Handle(handle) => crate::session_globals::SessionGlobalKind::Handle {
-                        kind: handle.kind.clone(),
-                        id: handle.id.clone(),
-                    },
-                    value => crate::session_globals::SessionGlobalKind::Data(
-                        crate::cell_value::binding_json(value, &self.bindings.objects),
-                    ),
+            .collect();
+        let unread: Vec<Name> = listed
+            .iter()
+            .filter(|name| {
+                !self.view.values.contains_key(*name) && !self.defaults.contains_key(*name)
+            })
+            .cloned()
+            .collect();
+        if !unread.is_empty()
+            && let Some(session) = self.current.session
+        {
+            let read = self
+                .pages
+                .read(|source| {
+                    let mut editor = SessionEditor::open(Some(&session), source)?;
+                    let mut read = Vec::with_capacity(unread.len());
+                    for name in &unread {
+                        if let Some(value) = editor.get(name)? {
+                            read.push((name.clone(), value));
+                        }
+                    }
+                    Ok(read)
+                })
+                .await
+                .map_err(protocol)?;
+            self.view.values.extend(read);
+        }
+        Ok(listed
+            .into_iter()
+            .filter_map(|name| {
+                let value = match self.defaults.get(&name) {
+                    Some(datum) => SessionValue::Data(datum.clone()),
+                    None => self.view.values.get(&name)?.clone(),
                 };
-                (name.to_string(), kind)
+                let kind = match value {
+                    SessionValue::Data(Datum::Handle(handle)) => {
+                        crate::session_globals::SessionGlobalKind::Handle {
+                            kind: handle.kind.clone(),
+                            id: handle.id.clone(),
+                        }
+                    }
+                    SessionValue::Data(datum) => crate::session_globals::SessionGlobalKind::Data(
+                        crate::cell_value::datum_json(&datum),
+                    ),
+                    SessionValue::Opaque => return None,
+                };
+                Some((name.to_string(), kind))
+            })
+            .collect())
+    }
+
+    /// Each saved function the session holds, with its signature and the
+    /// cell whose end froze what it reads.
+    pub(crate) fn held_functions(&self) -> Vec<(String, String, Option<u64>)> {
+        let described = self.view.functions.as_ref();
+        self.current
+            .functions
+            .iter()
+            .filter(|(name, _)| !self.protected.contains(*name))
+            .map(|(name, (cell, _))| {
+                let signature = described
+                    .and_then(|functions| functions.get(name))
+                    .and_then(|function| function.written.as_ref())
+                    .and_then(|written| written.signature.clone())
+                    .unwrap_or_else(|| "(...)".to_owned());
+                (name.to_string(), signature, Some(*cell))
             })
             .collect()
+    }
+}
+
+/// A fresh session's pages: sealed into the turn's spool, and none to
+/// read.
+struct SpoolSeal(SharedSpool);
+
+impl PageSource for SpoolSeal {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        Err(HeapFault::Missing {
+            page: pages.first().map_or(PageId([0; 32]), |page| page.id),
+        })
+    }
+
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        ParentSeal(&mut self.0).seal(page)
+    }
+}
+
+/// The descriptor a stored state's root page holds.
+fn stored_descriptor(
+    graph: &HydratedExecutionGraph,
+) -> Result<graph::SessionDescriptor, CodeModeSnapshotError> {
+    let mut source = StoredPages(&graph.nodes);
+    graph::read(
+        &mut source,
+        PageRef {
+            id: PageId(graph.root.0),
+            grant: PageGrant::NONE,
+        },
+    )
+    .map_err(CodeModeSnapshotError::Descriptor)
+}
+
+/// The pages of a stored state the host was handed, read as they are.
+struct StoredPages<'a>(&'a BTreeMap<NodeId, EncodedNode>);
+
+impl PageSource for StoredPages<'_> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        pages
+            .iter()
+            .map(|page| {
+                let node = self
+                    .0
+                    .get(&NodeId(page.id.0))
+                    .ok_or(HeapFault::Missing { page: page.id })?;
+                answer_page(*page, &node.bytes, |_| Ok(PageGrant::NONE))
+            })
+            .collect()
+    }
+
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        Err(HeapFault::Malformed(format!(
+            "a stored session state is read, never sealed into (a {:?} page)",
+            page.kind
+        )))
     }
 }
 
@@ -1173,25 +996,19 @@ impl CodeModeExecutionState {
 /// The refusal of a state that is not one this build reads.
 pub fn saved_function_pins(
     state: &HydratedExecutionGraph,
-) -> Result<BTreeMap<String, BTreeSet<lash_kernel_doc::FunctionId>>, CodeModeSnapshotError> {
-    Ok(graph::read(state.root, &state.nodes)?
-        .bindings
+) -> Result<BTreeMap<String, BTreeSet<FunctionId>>, CodeModeSnapshotError> {
+    Ok(stored_descriptor(state)?
         .functions
         .into_iter()
-        .map(|(name, held)| {
-            (
-                name.to_string(),
-                held.function
-                    .document
-                    .manifest
-                    .functions
-                    .keys()
-                    .copied()
-                    .collect(),
-            )
-        })
+        .map(|(name, (_, pins))| (name.to_string(), pins))
         .collect())
 }
 
-#[cfg(test)]
-mod tests;
+/// The helper releases this build holds, read once: a build's releases
+/// never change while it runs.
+fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGraph> {
+    static HELD: std::sync::OnceLock<Option<lash_vm_broker::kernel::state::ReleaseGraph>> =
+        std::sync::OnceLock::new();
+    HELD.get_or_init(|| lash_vm_broker::kernel::state::release_manifests().ok())
+        .as_ref()
+}

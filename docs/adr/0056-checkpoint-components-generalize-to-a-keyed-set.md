@@ -14,41 +14,47 @@ that contract at finer granularity.
 
 ## Decision
 
-A session's protocol execution state is one checkpoint graph (FIG-5887): a
-SessionExecution root (node kind 29) the session manifest names as a typed
-child, over content-addressed nodes. Plugin namespaces and the other
-manifest components stay keyed components; execution state is not one of
-them.
+A session's protocol execution state is one descriptor page the session
+manifest names as a typed child (`SessionRoot`, kind 1008), over the pages
+of the kernel's persistent heap
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§9). The descriptor names the session's dialect, number policy and kernel
+version, its carried heap, binding and saved-function roots, and the names
+it binds or does not carry. Plugin namespaces and the other manifest
+components stay keyed components; execution state is not one of them.
 
 A protocol captures `ExecutionGraphCapture::Clear` or
-`Replace { root, nodes }`. `nodes` holds only the nodes no acknowledged
-capture installed: a capture after a refused commit sends the same nodes
-again, and an acknowledged one drops them from the next. A capture names its
-purpose: `Working` writes the unfinished turn's working root after a cell
-ends, `Final` the session manifest's root at the turn's commit; both write
-the same root for the same state. Stores install the root and its new nodes
-in the commit's transaction and refuse a commit whose root reaches a node
-that is neither staged nor installed. Restore hands the protocol a
-`HydratedExecutionGraph`: the root and every node it reaches.
+`Replace { root, nodes }`. `root` is the descriptor and `nodes` holds only
+the pages no acknowledged capture installed: the pages a turn's cells
+staged under it. A capture after a refused commit sends the same pages
+again, and an acknowledged one settles them. A capture names its purpose:
+`Working` writes the unfinished turn's working root after a cell ends,
+`Final` the session manifest's root at the turn's commit; both write the
+same root for the same state. Stores install the root and its new pages in
+the commit's transaction and refuse a commit whose root reaches a page that
+is neither staged nor installed. Restore hands the protocol a
+`HydratedExecutionGraph`: the descriptor page, never the heap pages under
+it. A binding's value is read on demand through the page exchange, under a
+root lease, when a cell or a host reads it.
 
 ### Runtime roots and heap state
 
-The code mode root carries the engine ID, the globals, deferred tool and
-deferred-call resolutions and the saved function bundles. Values keep their
-shared references, exotics, property order and non-finite floats across
-capture and reload. ADR 0076 owns the runtime-root, host-view and
+The code mode descriptor carries the carried bindings and the saved
+function bundles as heap roots. Values keep their shared references,
+exotics, property order and non-finite floats across capture and reload,
+because the next cell adopts the same heap rather than a copy of it. ADR 0076 owns the runtime-root, host-view and
 shared-graph boundary.
 
 ### Granularity and encoding
 
 Nodes use the canonical binary grammar of
-[`checkpoint_graph::node`](../../crates/lash-core-store/src/checkpoint_graph/node.rs)
-(FIG-5887). A text or byte token
-over `checkpoint_graph::INLINE_TOKEN_MAX` (256 bytes, tag and length
-included) becomes its own leaf node, chunked under an index when it exceeds
-one leaf. A large value is therefore written once: a later capture whose
-value is unchanged names the installed leaf and stages no bytes for it.
-Encoded size determines granularity, regardless of value shape.
+[`checkpoint_graph::node`](../../crates/lash-core-store/src/checkpoint_graph/node.rs).
+Heap pages are canonical trees of at most 8 KiB leaves, and immutable text,
+bytes and integer digits over 256 bytes are 4 KiB payload leaves under an
+index. A large value is therefore written once: a later capture whose value
+is unchanged names the installed pages and stages no bytes for them, and a
+point edit stages one leaf and its index path. Encoded size determines
+granularity, regardless of value shape.
 
 Node identity is BLAKE3 over the canonical node bytes; a node's edges are
 exactly its child table, which is what collection walks. The commit budget
@@ -78,15 +84,16 @@ hide capture failures, so unsupported values fail at the writer.
 - Shared heap identity, exotics, property order and non-finite values survive
   supported durable round trips.
 - Canonical encoding is part of content identity and must match at both ends.
-- Lazy hydration is a separate decision; the graph contract does not require
-  it.
+- A restore reads the descriptor only; heap pages load when a cell or a
+  host reads them (ADR 0145 §3).
 
 ## Code evidence
 
 - [Capture and purpose](../../crates/lash-core-store/src/execution_state.rs#L35).
-- [Code mode capture](../../crates/lash-protocol-rlm/src/executor/session.rs#L919).
+- [Code mode capture](../../crates/lash-protocol-rlm/src/executor/session.rs#L607).
 - [Leaf placement](../../crates/lash-core-store/src/checkpoint_graph/encode.rs#L253).
 - [Inline bound](../../crates/lash-core-store/src/checkpoint_graph/node.rs#L28).
+- [Session descriptor](../../crates/lash-protocol-rlm/src/executor/session/graph.rs#L10).
 - [Manifest and execution](../../crates/lash-core-store/src/store/checkpoint.rs#L62).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

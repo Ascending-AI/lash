@@ -21,7 +21,7 @@ pub const MAGIC: [u8; 4] = *b"LASH";
 pub const MAX_NODE_BYTES: u64 = 65_536;
 
 /// The largest complete envelope of a root kind (ExecRoot, HostRoot, CellEnd,
-/// KernelWhole, SessionExecution, PhaseRoot, SessionManifest, WholeStream).
+/// PhaseRoot, SessionManifest, WholeStream, CheckpointRoot).
 pub const MAX_ROOT_BYTES: u64 = 4_096;
 
 /// A text or bytes token, its tag and length included, of at most this many
@@ -252,6 +252,87 @@ pub(crate) fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usiz
         + body
 }
 
+/// The envelope kinds of semantic heap pages (FIG-6187): direct-bodied,
+/// with no inline or stream wrapper and no placement of large tokens.
+pub const SEMANTIC_KINDS: std::ops::Range<u32> = 1_000..2_000;
+
+/// Whether an envelope of `kind` is a persistent-heap page, which a host
+/// graph read takes as a leaf and never descends into
+/// ([`GraphRefusal::SemanticPage`]).
+#[must_use]
+pub fn is_semantic(kind: NodeKind) -> bool {
+    SEMANTIC_KINDS.contains(&kind.0)
+}
+
+/// Frames a direct-bodied semantic page from its logical body, whose child
+/// references are full digests: the body's distinct children become the
+/// sorted child table and each reference its slot. Nothing is placed: a
+/// body that does not fit `bound` (at most [`MAX_NODE_BYTES`]) is refused,
+/// never split.
+///
+/// # Errors
+///
+/// [`GraphRefusal::UnsupportedKind`] outside [`SEMANTIC_KINDS`], a token
+/// refusal for a body that is not canonical, and
+/// [`GraphRefusal::EncodedNodeTooLarge`] past the bound.
+pub fn frame_direct(
+    kind: NodeKind,
+    logical: &[u8],
+    bound: u64,
+) -> Result<EncodedNode, GraphRefusal> {
+    if !SEMANTIC_KINDS.contains(&kind.0) {
+        return Err(GraphRefusal::UnsupportedKind(kind.0));
+    }
+    let (children, body) = super::encode::to_physical(logical, kind)?;
+    let bytes = write_envelope(kind, &children, &body);
+    let limit = bound.min(MAX_NODE_BYTES);
+    if bytes.len() as u64 > limit {
+        return Err(GraphRefusal::EncodedNodeTooLarge {
+            bytes: bytes.len() as u64,
+            limit,
+        });
+    }
+    Ok(EncodedNode {
+        id: NodeId::of_envelope(&bytes),
+        bytes: bytes.into(),
+    })
+}
+
+/// A checked semantic page's logical body: each child slot written back as
+/// its child's full digest. The inverse of [`frame_direct`].
+///
+/// # Errors
+///
+/// [`GraphRefusal::UnsupportedKind`] outside [`SEMANTIC_KINDS`], and a token
+/// refusal for a body that is not canonical.
+pub fn direct_logical(envelope: &NodeEnvelope<'_>, id: NodeId) -> Result<Vec<u8>, GraphRefusal> {
+    if !SEMANTIC_KINDS.contains(&envelope.kind.0) {
+        return Err(GraphRefusal::UnsupportedKind(envelope.kind.0));
+    }
+    let refuse = |error| GraphRefusal::from_token(error, Some(id), Some(envelope.kind.0));
+    let mut out = lash_kernel_doc::graph_tokens::TokenWriter::with_capacity(
+        envelope.body.len() + 32 * envelope.children.len(),
+    );
+    let mut reader = envelope.reader();
+    while !reader.is_empty() {
+        let start = reader.position();
+        match reader.next_event().map_err(refuse)? {
+            TokenEvent::Slot(slot) => {
+                let child = envelope
+                    .children
+                    .get(slot)
+                    .ok_or(GraphRefusal::NonCanonical {
+                        node: Some(id),
+                        reason: CanonicalFault::ChildSlotOutOfRange(slot),
+                    })?;
+                out.child(child.child_ref());
+            }
+            _ => out.raw(&envelope.body[start..reader.position()]),
+        }
+    }
+    Ok(out.into_bytes())
+}
+
 /// The generic check: verifies `bytes` hash to `expected`, then parses them
 /// with [`parse_envelope`], within `limits`' node-size bound.
 ///
@@ -468,7 +549,7 @@ pub fn immutable_catalog_heads() -> &'static [NodeId] {
 /// # Errors
 ///
 /// [`GraphRefusal::BadMagic`], [`GraphRefusal::UnsupportedKind`] for kind 0,
-/// [`GraphRefusal::Truncated`], [`GraphRefusal::TrailingBytes`],
+/// [`GraphRefusal::RetiredFormat`] for a retired kind, [`GraphRefusal::Truncated`], [`GraphRefusal::TrailingBytes`],
 /// [`GraphRefusal::LengthOverflow`], or [`GraphRefusal::NonCanonical`].
 pub fn parse_envelope(
     bytes: &[u8],
@@ -502,6 +583,9 @@ fn parse_framed(bytes: &[u8], node: Option<NodeId>) -> Result<NodeEnvelope<'_>, 
     let kind = u32::try_from(kind).map_err(|_| GraphRefusal::LengthOverflow)?;
     if kind == 0 {
         return Err(GraphRefusal::UnsupportedKind(0));
+    }
+    if let Some(format) = NodeKind(kind).retired_format() {
+        return Err(GraphRefusal::RetiredFormat { node, kind, format });
     }
     let count = get_varint(bytes, &mut pos).map_err(refuse)?;
     let table_len = usize::try_from(count)

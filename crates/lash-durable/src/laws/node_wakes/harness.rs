@@ -185,19 +185,41 @@ impl Drop for LawNode {
 ///
 /// When `settings` do not validate: the law's own settings are wrong.
 #[must_use]
-#[expect(clippy::expect_used, reason = "a law's own settings validate")]
 pub fn serve_node(
     store: Arc<dyn DurableStore>,
     node_wakes: Option<Arc<dyn NodeWakes>>,
     name: &str,
     settings: DurableSettings,
 ) -> LawNode {
+    serve_node_on(
+        store,
+        node_wakes,
+        name,
+        settings,
+        Arc::new(lash_core_ids::clock::SystemClock),
+    )
+}
+
+/// [`serve_node`] with the runner on `clock`.
+///
+/// # Panics
+///
+/// When `settings` do not validate: the law's own settings are wrong.
+#[must_use]
+#[expect(clippy::expect_used, reason = "a law's own settings validate")]
+pub fn serve_node_on(
+    store: Arc<dyn DurableStore>,
+    node_wakes: Option<Arc<dyn NodeWakes>>,
+    name: &str,
+    settings: DurableSettings,
+    clock: Arc<dyn lash_core_ids::clock::Clock>,
+) -> LawNode {
     let config = settings.validate().expect("the law's settings validate");
     let (send, arrived) = mpsc::unbounded_channel();
     let (idle, waiting) = mpsc::unbounded_channel();
     let mut runner = Runner::new(
         store,
-        Arc::new(lash_core_ids::clock::SystemClock),
+        clock,
         RunnerConfig::new(NodeId::new(name), vec![formats()], &config),
         Arc::new(Hold {
             arrived: send,
@@ -305,6 +327,10 @@ pub struct CountingStore {
 impl DurableStore for CountingStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
+    }
+
+    fn pages(&self) -> Option<std::sync::Arc<dyn crate::domain::pages::PageStore>> {
+        self.inner.pages()
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {

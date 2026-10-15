@@ -132,6 +132,7 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
                 ctx.recorded_render(),
                 ctx.prompt_history(),
                 self.config.prompt_features.images,
+                ctx.session_pages(),
             )
             .await?;
         Ok(Some(Arc::new(facts)))

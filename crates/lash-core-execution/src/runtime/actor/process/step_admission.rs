@@ -340,7 +340,7 @@ impl ProcessActivation {
         // the admission and starts no body.
         for (member, settled) in admitted.members().iter().zip(settled) {
             match settled {
-                Some(output) => round::settle(tx, member, output, Vec::new())
+                Some(output) => round::settle(tx, member, output, Vec::new(), None)
                     .map_err(|refusal| corrupt("a settled step's admission", refusal))?,
                 None => fresh.push(member.clone()),
             }

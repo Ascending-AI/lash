@@ -537,6 +537,47 @@ impl ActorContext {
             .await
     }
 
+    /// Commit `tx` with `candidate` under `label`, owing `owing`: the
+    /// candidate's heap pages, its owner write and the transaction's own
+    /// rows in one fenced transaction (S6), through this context's store's
+    /// page publication.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing was written. [`DurableError::AckLost`]
+    /// leaves the publication ambiguous: the caller resolves it against
+    /// the owner's row.
+    pub async fn commit_candidate_owing(
+        &self,
+        tx: ActorTx,
+        candidate: lash_durable::domain::pages::CandidatePublication,
+        label: CommitLabel,
+        owing: Option<&super::claim_obligations::ExecutionDebts>,
+    ) -> Result<ActorCommit, DurableError> {
+        let pages = self.pages()?;
+        self.with_obligations(tx, owing, |tx| async move {
+            pages
+                .commit_candidate(tx, candidate, label)
+                .await
+                .map(|receipt| receipt.actor)
+        })
+        .await
+    }
+
+    /// This context's store's heap page publication (S6).
+    ///
+    /// # Errors
+    ///
+    /// Unavailable for a store that holds no heap pages.
+    pub fn pages(&self) -> Result<Arc<dyn lash_durable::domain::pages::PageStore>, DurableError> {
+        self.durable()?.pages().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "the store publishes no heap pages".to_owned(),
+            })
+        })
+    }
+
     /// Commit the mailbox transaction `tx` under `label` through this
     /// context's store (its node's, under a claim), then hint every actor it
     /// woke, as [`Backend::commit_mail`] does.

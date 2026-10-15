@@ -59,7 +59,7 @@ impl KernelMachine {
             for _ in 0..edge.leaves {
                 if let Some(Control::Block { block, .. }) = frame.control.pop() {
                     for at in &exe.block(block).declares {
-                        frame.slots[*at as usize] = SlotState::Empty;
+                        frame.set_slot(*at, SlotState::Empty)?;
                     }
                 }
             }
@@ -78,7 +78,7 @@ impl KernelMachine {
     }
 
     fn verify_leaves(&mut self, task: TaskId, exe: &Executable, leaves: u32) -> Result<(), Halt> {
-        let derived = self.derived_leaves(task, exe);
+        let derived = self.derived_leaves(task, exe)?;
         if derived != leaves {
             return Err(Halt::Fault(format!(
                 "the prepared step leaves {leaves} block(s) where the frame shows {derived}"
@@ -118,16 +118,18 @@ impl KernelMachine {
     /// while each is inside another block of the same frame. A frame that
     /// waits in a statement, or whose block is a loop's or a `try`'s, leaves
     /// nothing.
-    fn derived_leaves(&self, task: TaskId, exe: &Executable) -> u32 {
+    fn derived_leaves(&mut self, task: TaskId, exe: &Executable) -> Result<u32, Halt> {
         let Some(frame) = self
             .tasks
-            .get(task.0 as usize)
-            .and_then(|task| task.frames.last())
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| super::fault("a running task is missing"))?
+            .frames
+            .last_mut()?
         else {
-            return 0;
+            return Ok(0);
         };
         if frame.awaiting.is_some() {
-            return 0;
+            return Ok(0);
         }
         let mut control = frame.control.as_slice();
         let mut leaves = 0;
@@ -143,6 +145,6 @@ impl KernelMachine {
             leaves += 1;
             control = &control[..rest.len() + 1];
         }
-        leaves
+        Ok(leaves)
     }
 }

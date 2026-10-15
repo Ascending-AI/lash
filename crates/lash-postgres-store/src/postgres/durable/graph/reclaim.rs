@@ -1,15 +1,14 @@
-//! Reclamation: the peel that deletes what a transaction's retired roots
-//! left unreachable, level by level and in that transaction, and the page
-//! of the online orphan audit that feeds it what no root names. A peel
-//! locks with `SKIP LOCKED` and never waits: a node another transaction
-//! holds is left for a later peel or the audit.
+//! Reclamation: the peel that deletes what retired roots left unreachable,
+//! level by level, which the retirement steps (`super::super::pages`) and
+//! the online orphan audit run. A peel locks with `SKIP LOCKED` and never
+//! waits: a node another transaction holds is left to it, or to a later
+//! step or the audit.
 
 use std::collections::BTreeSet;
 
 use sqlx::PgConnection;
 
 use super::{Answer, SQL, db};
-use crate::durable::Retired;
 
 /// What a peel did: the candidates it examined (the retired roots and each
 /// child of a node it deleted), how many it deleted, and how many something
@@ -75,22 +74,6 @@ async fn peel_level(
         usize::try_from(gone).unwrap_or_default(),
         children.into_iter().collect(),
     ))
-}
-
-/// Peels what `retired` recorded, before its transaction commits: each
-/// retired root's closure, and each ended turn's PhaseRoot alone. Answers
-/// how many blobs it deleted.
-pub(crate) async fn reclaim(tx: &mut PgConnection, retired: Retired) -> Answer<usize> {
-    let (closures, phase_ends) = retired.into_parts();
-    let mut deleted = if closures.is_empty() {
-        0
-    } else {
-        peel(tx, closures).await?.deleted
-    };
-    if !phase_ends.is_empty() {
-        deleted += peel_level(tx, &phase_ends).await?.0;
-    }
-    Ok(deleted)
 }
 
 /// How many roots the catalog names and how many blobs are stored.

@@ -212,6 +212,54 @@ fn the_configuration_serializes_in_milliseconds_and_refuses_unknown_fields() {
     }
 }
 
+/// D-RET limits as host configuration: the node's retirement serializes in
+/// milliseconds and counts at the standard values, reads back exactly, and
+/// one limit above its hard maximum is refused by the node field with the
+/// durable settings' typed refusal, before anything connects.
+#[test]
+fn retirement_limits_are_host_configuration_refused_above_their_maxima() {
+    use lash_durable::{DurableConfigError, RetirementSettings};
+
+    let config = PostgresHostConfig::default();
+    let json = serde_json::to_value(&config).expect("the default serializes");
+    assert_eq!(
+        json["node"]["retirement"],
+        serde_json::json!({
+            "every_ms": 1_000,
+            "batch_nodes": 256,
+            "steps_per_sweep": 16,
+            "backlog_limit": 10_000,
+        })
+    );
+    let mut above = json.clone();
+    above["node"]["retirement"]["backlog_limit"] =
+        serde_json::json!(RetirementSettings::MAX_BACKLOG_LIMIT + 1);
+    let above: PostgresHostConfig = serde_json::from_value(above).expect("it parses");
+    let refused = above.validate().expect_err("above the maximum");
+    assert_eq!(refused.field, "node");
+    assert_eq!(
+        refused.reason,
+        DurableConfigError::AboveMaximum {
+            field: "retirement.backlog_limit",
+            maximum: RetirementSettings::MAX_BACKLOG_LIMIT,
+        }
+        .to_string()
+    );
+    let mut at_maxima = config;
+    at_maxima.node.retirement = RetirementSettings {
+        every: Duration::from_millis(1),
+        batch_nodes: RetirementSettings::MAX_BATCH_NODES,
+        steps_per_sweep: RetirementSettings::MAX_STEPS_PER_SWEEP,
+        backlog_limit: RetirementSettings::MAX_BACKLOG_LIMIT,
+    };
+    assert_eq!(
+        at_maxima
+            .validate()
+            .map(|durable| durable.settings().retirement),
+        Ok(at_maxima.node.retirement)
+    );
+}
+
 /// `None` idle and lifetime reach SQLx as `None`: the pool never closes a
 /// connection for idleness or age. The old builder skipped SQLx's setters
 /// for `None`, so its defaults (10 min idle, 30 min lifetime) still applied.

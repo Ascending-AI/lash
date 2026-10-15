@@ -10,34 +10,51 @@
 
 use std::sync::Arc;
 
-use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
-use lash_core_store::checkpoint_graph::{DecodeLimits, NodeKind};
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_kernel_doc::heap::PageGrant;
 use lash_kernel_doc::{
-    Datum, Document, DocumentId, EffectName, ErrorDatum, Handle, KernelVersion, Site, Timestamp,
+    Datum, Document, DocumentId, EffectName, ErrorDatum, Handle, Site, Timestamp,
 };
-use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Start, Step, WaitId};
-use lash_sansio::VersionRange;
+use lash_kernel_state::paged::SessionRoot;
+use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph, WholeState};
-use lash_vm_broker::kernel::{DrivenMachine, KernelFailure, Machines, ParkedState};
+use lash_vm_broker::kernel::pages::{PageExchange, SharedPages};
+use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph};
+use lash_vm_broker::kernel::{
+    DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
+};
+use lash_vm_protocol::page::{PageAuthority, PageCapability, PageReply};
 use lash_vm_protocol::{
-    EncodedPayload, FrameEpoch, GraphStateExpectation, HostReadKind, OwnerEpoch, PayloadKind,
-    RunBounds, StartFrom, VmOwner,
+    CheckpointStart, EncodedPayload, FrameEpoch, HostReadKind, InfrastructureOutcome, OwnerEpoch,
+    PayloadKind, RunBounds, StartFrom, VmOwner,
 };
 
 use crate::service::{CallHeld, Service};
-use crate::wire::{self, EffectRead, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
+use crate::wire::{
+    self, CarryWire, EffectRead, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire,
+};
 use crate::{Checkout, ExecutionClass, PoolError, RunStep, WorkerPoolRuntimeOps as _};
 
-/// The kernel versions this build's workers resume a parked run under.
-pub fn kernel_reads() -> VersionRange {
-    let newest = KernelVersion::NEWEST.number();
-    let oldest = KernelVersion::ALL
-        .iter()
-        .map(|version| version.number())
-        .min()
-        .unwrap_or(newest);
-    VersionRange::between(oldest, newest)
+pub use lash_vm_broker::kernel::run::kernel_reads;
+
+/// What a new run starts from: a [`lash_kernel_vm::CellStart`] less the
+/// owner binding, which the broker supplies per execution.
+#[derive(Clone, Debug)]
+pub struct RunStart {
+    pub target: Target,
+    /// The entry's arguments. Empty for `main`.
+    pub args: Vec<Datum>,
+    /// The carried session a cell opens in place, its pages readable under
+    /// the activation's lease.
+    pub session: Option<SessionRoot>,
+    /// The effects a fresh run performs as reads; a resumed run's root
+    /// holds its own.
+    pub modes: EffectModes,
+    /// The host's read-only bindings a cell's `main` starts with.
+    pub host: Vec<(lash_kernel_doc::Name, Datum)>,
+    /// How a session cell's end saves its functions, fresh or resumed;
+    /// none for a run that saves none.
+    pub save: Option<wire::SaveWire>,
 }
 
 /// What a run reads from its host, answered in the parent.
@@ -136,17 +153,14 @@ pub struct RemoteMachines {
     /// a new run pins that dialect's helper release.
     dialect: String,
     encoded: Arc<Vec<u8>>,
-    start: Start,
-    /// The effects a fresh run performs as reads; a resumed run's state
-    /// holds its own.
-    modes: EffectModes,
+    start: RunStart,
     bounds: Bounds,
     releases: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
 }
 
 impl RemoteMachines {
     /// The run of `document`, written in `dialect`, from `start`, held to
-    /// `bounds`, performing each effect in the mode `modes` binds.
+    /// `bounds`.
     /// `dialect` is recorded configuration: what the run's session or
     /// process recorded at creation, never a live read.
     ///
@@ -163,8 +177,7 @@ impl RemoteMachines {
         host: Arc<dyn RunHost>,
         document: &Document,
         dialect: &str,
-        start: Start,
-        modes: EffectModes,
+        start: RunStart,
         bounds: Bounds,
     ) -> Result<Self, KernelFailure> {
         let prepared = service
@@ -182,19 +195,20 @@ impl RemoteMachines {
             dialect: dialect.to_owned(),
             encoded: Arc::clone(&prepared.encoded),
             start,
-            modes,
             bounds,
             releases: std::sync::OnceLock::new(),
         })
     }
 
     /// A checkout holding the run: the one that lowered its document when
-    /// the execution kept it, and otherwise one from the pool. Its state at
-    /// each park that requests something is bound to `binding`.
+    /// the execution kept it, and otherwise one from the pool. Every root it
+    /// seals is bound to the OwnerBinding node `binding`; its pages cross
+    /// through `pages`.
     async fn checkout(
         &self,
         from: StartFrom,
-        binding: &OwnerBinding,
+        binding: NodeId,
+        pages: SharedPages,
     ) -> Result<RemoteMachine, KernelFailure> {
         let start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
@@ -209,9 +223,14 @@ impl RemoteMachines {
                 requests_per_park: self.bounds.requests_per_park,
                 join_members: self.bounds.join_members,
             },
-            export: Some(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
-                binding,
-            ))),
+            binding: binding.0,
+            save: self
+                .start
+                .save
+                .as_ref()
+                .map(|save| wire::encode(PayloadKind::Start, save))
+                .transpose()
+                .map_err(worker)?,
         };
         let reservation = start_reservation(
             &start,
@@ -262,8 +281,8 @@ impl RemoteMachines {
             checkout: Some(checkout),
             service: self.service.clone(),
             host: Arc::clone(&self.host),
-            owner: self.owner.clone(),
-            document: self.document.to_string(),
+            pages,
+            candidate: None,
         })
     }
 }
@@ -280,15 +299,6 @@ impl Machines for RemoteMachines {
         self.bounds
     }
 
-    async fn start(&self, binding: &OwnerBinding) -> Result<RemoteMachine, KernelFailure> {
-        let start = wire::encode(
-            PayloadKind::Start,
-            &StartWire::of(self.start.clone(), &self.modes),
-        )
-        .map_err(worker)?;
-        self.checkout(StartFrom::Fresh(start), binding).await
-    }
-
     fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
         self.releases
             .get_or_init(lash_vm_broker::kernel::state::release_manifests)
@@ -296,35 +306,55 @@ impl Machines for RemoteMachines {
             .map_err(|failure| KernelFailure::State(failure.clone()))
     }
 
-    /// Resumes a parked run from its checkpoint graph state and the
-    /// admission of each wait it holds (FIG-5887 §3).
+    async fn start(
+        &self,
+        binding: NodeId,
+        pages: SharedPages,
+    ) -> Result<RemoteMachine, KernelFailure> {
+        let session = {
+            let service = pages.lock().await;
+            self.start
+                .session
+                .as_ref()
+                .map(|session| CarryWire::of(session, |page| service.issue(NodeId(page.id.0))))
+        };
+        let start = wire::encode(
+            PayloadKind::Start,
+            &StartWire::of(
+                self.start.target.clone(),
+                self.start.args.clone(),
+                session,
+                &self.start.modes,
+                self.start.host.clone(),
+            ),
+        )
+        .map_err(worker)?;
+        self.checkout(StartFrom::Fresh(start), binding, pages).await
+    }
+
+    /// Opens the run's committed checkpoint root: the worker reads its
+    /// header, then only the pages its next steps touch, under the
+    /// activation's lease (FIG-6190).
     async fn resume(
         &self,
         parked: &ParkedState,
-        binding: &OwnerBinding,
+        binding: NodeId,
+        pages: SharedPages,
     ) -> Result<RemoteMachine, KernelFailure> {
-        self.resume_sealed(parked.sealed(self.owner.clone()), binding)
-            .await
+        let root = pages.lock().await.issue(parked.root);
+        let from = StartFrom::Checkpoint(CheckpointStart {
+            root,
+            admissions: parked
+                .admissions
+                .iter()
+                .map(lash_vm_broker::kernel::state::admission)
+                .collect(),
+        });
+        self.checkout(from, binding, pages).await
     }
 }
 
 impl RemoteMachines {
-    /// Resumes a parked run from sealed graph state and the admission of
-    /// each wait it holds: a holder that keeps the state sealed, such as a
-    /// kernel process's engine. Its state at each park that requests
-    /// something is bound to `binding`.
-    ///
-    /// # Errors
-    ///
-    /// The worker's refusal of the state, its release or an admission.
-    pub async fn resume_sealed(
-        &self,
-        parked: lash_vm_protocol::ParkedGraph,
-        binding: &OwnerBinding,
-    ) -> Result<RemoteMachine, KernelFailure> {
-        self.checkout(StartFrom::ParkedGraph(parked), binding).await
-    }
-
     /// Whose runs these machines are.
     #[must_use]
     pub fn owner(&self) -> &VmOwner {
@@ -338,36 +368,95 @@ pub struct RemoteMachine {
     checkout: Option<Checkout>,
     service: Service,
     host: Arc<dyn RunHost>,
-    owner: VmOwner,
-    document: String,
+    /// The activation's page service, which answers the heap's page
+    /// exchanges in this process: never another worker (FIG-6190).
+    pages: SharedPages,
+    /// The root the last park sealed, until a delivery or a slice moves
+    /// the run on.
+    candidate: Option<NodeId>,
+}
+
+/// Where a worker's exchange stopped once its host reads and page
+/// exchanges were answered.
+enum Stop {
+    Parked {
+        park: EncodedPayload,
+        candidate: Option<PageCapability>,
+    },
+    Slice,
+    Ended(EncodedPayload),
+    Sealed(PageCapability),
 }
 
 impl RemoteMachine {
-    /// The run's end, as the worker sealed it: refused unless it is this
-    /// owner's TerminalWhole under the run's document.
-    fn end(&self, end: EndWire) -> Result<End, KernelFailure> {
-        let Some(state) = end else {
-            return Ok(End::Cancelled);
-        };
-        state
-            .check(&GraphStateExpectation {
-                owner: &self.owner,
-                kernel: kernel_reads(),
-                document: Some(&self.document),
-                root_kinds: &[NodeKind::TERMINAL_WHOLE.0],
-                max_nodes: u64::MAX,
-                max_bytes: u64::MAX,
-            })
-            .map_err(|refusal| {
-                worker(PoolError::from(
-                    lash_vm_protocol::InfrastructureOutcome::output_graph_state(refusal),
-                ))
-            })?;
-        lash_vm_broker::kernel::state::read_end(
-            &state,
-            self.service.config().graph_reads.execution(),
-        )
-        .map_err(KernelFailure::State)
+    /// The staged page a candidate's capability names, when it is this
+    /// activation's and staged.
+    async fn staged(
+        pages: &SharedPages,
+        candidate: &PageCapability,
+    ) -> Result<NodeId, KernelFailure> {
+        if !matches!(candidate.authority, PageAuthority::Stage(_)) {
+            return Err(worker(PoolError::from(
+                InfrastructureOutcome::PageRefused {
+                    refusal: lash_vm_protocol::page::PageRefusal::Unauthorized,
+                },
+            )));
+        }
+        pages.lock().await.verify(candidate).map_err(|refusal| {
+            worker(PoolError::from(InfrastructureOutcome::PageRefused {
+                refusal,
+            }))
+        })
+    }
+
+    /// The run's end: a finished cell's carry names only pages this
+    /// activation may read.
+    async fn end(pages: &SharedPages, end: EndWire) -> Result<End, KernelFailure> {
+        let pages = pages.lock().await;
+        end.into_end(|capability| {
+            pages
+                .verify(capability)
+                .map(|_| PageGrant::NONE)
+                .map_err(|refusal| PoolError::from(InfrastructureOutcome::PageRefused { refusal }))
+        })
+        .map_err(worker)
+    }
+
+    /// Answers the worker's host reads and page exchanges from `step` on,
+    /// until it stops.
+    async fn drive(&mut self, mut step: RunStep) -> Result<Stop, KernelFailure> {
+        loop {
+            self.printed()?;
+            match step {
+                RunStep::HostRead { id, kind, request } => {
+                    let host = Arc::clone(&self.host);
+                    let answer = answer(host.as_ref(), kind, &request).await?;
+                    step = self
+                        .with(move |checkout| checkout.host_answer(id, answer))
+                        .await?;
+                }
+                RunStep::Pages { id, request } => {
+                    let reply = self.pages.serve(request).await;
+                    if let PageReply::Refused(refusal) = reply {
+                        // The activation ends here, as infrastructure; the
+                        // worker that waits on the pages is discarded.
+                        self.checkout = None;
+                        return Err(KernelFailure::Worker {
+                            outcome: InfrastructureOutcome::PageRefused { refusal },
+                        });
+                    }
+                    step = self
+                        .with(move |checkout| checkout.page_reply(id, reply))
+                        .await?;
+                }
+                RunStep::Parked {
+                    park, candidate, ..
+                } => return Ok(Stop::Parked { park, candidate }),
+                RunStep::Slice { .. } => return Ok(Stop::Slice),
+                RunStep::Ended { end, .. } => return Ok(Stop::Ended(end)),
+                RunStep::Sealed { candidate } => return Ok(Stop::Sealed(candidate)),
+            }
+        }
     }
 
     /// One blocking exchange on the checkout, off the async runtime.
@@ -442,50 +531,55 @@ async fn answer(
 
 #[async_trait::async_trait]
 impl DrivenMachine for RemoteMachine {
-    async fn run(&mut self, slice: u64, cancel: bool) -> Result<Step, KernelFailure> {
-        let mut step = self
+    async fn run(&mut self, slice: u64, cancel: bool) -> Result<MachineStep, KernelFailure> {
+        self.candidate = None;
+        let step = self
             .with(move |checkout| checkout.run(slice, cancel))
             .await?;
-        loop {
-            self.printed()?;
-            match step {
-                RunStep::HostRead { id, kind, request } => {
-                    let host = Arc::clone(&self.host);
-                    let answer = answer(host.as_ref(), kind, &request).await?;
-                    step = self
-                        .with(move |checkout| checkout.host_answer(id, answer))
-                        .await?;
+        match self.drive(step).await? {
+            Stop::Parked { park, candidate } => {
+                if let Some(candidate) = candidate {
+                    self.candidate = Some(Self::staged(&self.pages, &candidate).await?);
                 }
-                RunStep::Parked { park, .. } => {
-                    let park: ParkWire = wire::decode(PayloadKind::Park, &park).map_err(worker)?;
-                    return Ok(Step::Parked(park.try_into().map_err(worker)?));
-                }
-                RunStep::Slice { .. } => return Ok(Step::Slice),
-                RunStep::Ended { end, .. } => {
-                    let end: EndWire = wire::decode(PayloadKind::End, &end).map_err(worker)?;
-                    return Ok(Step::Ended(self.end(end)?));
-                }
+                let park: ParkWire = wire::decode(PayloadKind::Park, &park).map_err(worker)?;
+                Ok(MachineStep::Parked(
+                    MachinePark::try_from(park).map_err(worker)?,
+                ))
             }
+            Stop::Slice => Ok(MachineStep::Slice),
+            Stop::Ended(end) => {
+                let end: EndWire = wire::decode(PayloadKind::End, &end).map_err(worker)?;
+                Ok(MachineStep::Ended(Self::end(&self.pages, end).await?))
+            }
+            Stop::Sealed(_) => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Sealed)),
         }
     }
 
     async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure> {
+        self.candidate = None;
         let outcome =
             wire::encode(PayloadKind::Outcome, &OutcomeWire::from(outcome)).map_err(worker)?;
         self.with(move |checkout| checkout.deliver(wait.0, outcome))
             .await
     }
 
-    /// The run's state at this park as checkpoint graph state, bound to the
-    /// execution `binding` names (FIG-5887 §3): sealed by the worker,
-    /// checked by the pool, and each node checked against its digest here.
-    async fn export(&mut self, binding: &OwnerBinding) -> Result<WholeState, KernelFailure> {
-        let binding = EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(binding));
-        let state = self
-            .with(move |checkout| checkout.export_graph(binding))
-            .await?;
-        WholeState::of_sealed(&state, &DecodeLimits::within_total(state.byte_len()))
-            .map_err(|refusal| KernelFailure::State(GraphStateFailure::Graph(refusal)))
+    /// The root the park sealed when its candidate crossed with it, and
+    /// otherwise the worker's answer to a seal.
+    async fn seal(&mut self) -> Result<NodeId, KernelFailure> {
+        if let Some(root) = self.candidate {
+            return Ok(root);
+        }
+        let step = self.with(Checkout::seal).await?;
+        match self.drive(step).await? {
+            Stop::Sealed(candidate) => {
+                let root = Self::staged(&self.pages, &candidate).await?;
+                self.candidate = Some(root);
+                Ok(root)
+            }
+            Stop::Parked { .. } => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Parked)),
+            Stop::Slice => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Slice)),
+            Stop::Ended(_) => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Ended)),
+        }
     }
 
     async fn release(mut self) -> Result<(), KernelFailure> {
@@ -497,6 +591,15 @@ impl DrivenMachine for RemoteMachine {
         drop(held);
         released
     }
+}
+
+fn unexpected(found: lash_vm_protocol::WorkerFrameKind) -> KernelFailure {
+    worker(PoolError::breach(
+        lash_vm_protocol::ProtocolBreach::Unexpected {
+            exchange: lash_vm_protocol::Exchange::Seal,
+            found,
+        },
+    ))
 }
 
 fn worker(error: PoolError) -> KernelFailure {
@@ -553,7 +656,7 @@ mod reservation_tests {
     };
 
     /// START-RESERVATION-IDENTITY: admission counts the complete encoded input,
-    /// including its export binding and the widest possible transport header.
+    /// including its owner binding and the widest possible transport header.
     #[test]
     fn start_reservation_counts_the_complete_encoded_frame() {
         let codec = lash_vm_protocol::FrameCodec::new(lash_vm_protocol::DecodeLimits::standard());
@@ -570,7 +673,8 @@ mod reservation_tests {
                 requests_per_park: u32::MAX,
                 join_members: u32::MAX,
             },
-            export: Some(EncodedPayload(vec![0; 16 * 1024])),
+            binding: [7; 32],
+            save: None,
         };
         let actual = codec
             .encode_parent(&ParentFrame {

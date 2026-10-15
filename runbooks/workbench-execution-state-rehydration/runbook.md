@@ -14,12 +14,14 @@
 **Purpose.** Prove that a replacement Workbench process rehydrates the session's **RLM
 execution state** — the TypeScript variables bound by earlier code — from the durable
 checkpoint, and that it does so identically on SQLite and PostgreSQL. The checkpoint is a
-content-addressed graph of `LASH` envelope nodes rooted at the session's execution node
-(FIG-5887, FIG-5894): the root holds logical binding names and inline small values or
-content-addressed leaf references. Large values live in separate leaf nodes. A changed
-root and changed leaves commit in one transaction; unchanged leaves carry references
-without bodies. Cold open must resolve the complete root-plus-leaves set, not merely
-recover the transcript. The committed checkpoint reads `CODEMODE_SNAPSHOT_VERSION = 1`
+session descriptor page over the kernel's persistent heap
+([ADR 0145](../../docs/adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§9): the descriptor names the binding tree, the saved-function tree and the heap header,
+and every value lives in content-addressed `LASH` heap pages. Large text is a tree of
+payload leaves. The pages a cell changed and the new descriptor commit in one
+transaction; unchanged pages are named, never rewritten. Cold open reads the descriptor,
+then the pages a binding's read touches; it must resolve the bindings, not merely recover
+the transcript. The committed checkpoint reads `CODEMODE_SNAPSHOT_VERSION = 1`
 (`crates/lash-protocol-rlm/src/executor/snapshot.rs`).
 
 **Why this is not the session-resume scenario.** `workbench-session-resume` proves

@@ -233,3 +233,85 @@ fn source_json(value: &serde_json::Value) -> Result<String, serde_json::Error> {
     }
     Ok(json)
 }
+
+/// Read-only review data; this never changes a case or its acceptance rule.
+#[derive(Serialize)]
+pub(crate) struct ReplayDifference {
+    pub(crate) release: String,
+    pub(crate) name: String,
+    pub(crate) function: lash_kernel_doc::FunctionId,
+    pub(crate) record: String,
+    pub(crate) case: usize,
+    pub(crate) args: String,
+    pub(crate) objects: String,
+    pub(crate) work: u64,
+    pub(crate) room: u64,
+    pub(crate) old_answer_id: String,
+    pub(crate) new_answer_id: String,
+    pub(crate) old: super::probe::Answer,
+    pub(crate) new: super::probe::Answer,
+}
+impl Corpus {
+    pub(crate) fn audit(
+        &self,
+        registry: &FunctionRegistry,
+        dialect: &str,
+        release: &str,
+    ) -> Result<Vec<ReplayDifference>, String> {
+        let release = format!("{dialect}@{release}");
+        let entries = self.releases.get(&release).ok_or("release is absent")?;
+        let mut differences = Vec::new();
+        for (function, id) in entries {
+            let registered = registry
+                .get(function)
+                .ok_or("native implementation is absent")?;
+            let record: NativeRecord = self.read(id)?;
+            let prepared = registered
+                .native
+                .as_ref()
+                .and_then(|native| native.prepare());
+            for (index, case) in record.cases.iter().enumerate() {
+                let input = super::probe::Input {
+                    args: self.read(&case.args)?,
+                    objects: self.read(&case.objects)?,
+                    work: case.work,
+                    room: case.room,
+                };
+                let replay = match super::probe::fixtures::Replay::load(&input) {
+                    Ok(replay) => replay,
+                    Err(error) => {
+                        println!(
+                            "{}",
+                            serde_json::json!({"invalid_fixture":{
+                                "release":release,"name":registered.definition.name.to_string(),"function":function,
+                                "record":id,"case":index,"args":case.args,"objects":case.objects,"error":error
+                            }})
+                        );
+                        continue;
+                    }
+                };
+                let old = self.read(&case.answer)?;
+                let new = super::probe::answer_loaded(registered, &input, prepared, replay);
+                if old != new {
+                    let value = serde_json::to_value(&new).map_err(|e| e.to_string())?;
+                    differences.push(ReplayDifference {
+                        release: release.clone(),
+                        name: registered.definition.name.to_string(),
+                        function: *function,
+                        record: id.clone(),
+                        case: index,
+                        args: case.args.clone(),
+                        objects: case.objects.clone(),
+                        work: case.work,
+                        room: case.room,
+                        old_answer_id: case.answer.clone(),
+                        new_answer_id: digest(&value),
+                        old,
+                        new,
+                    });
+                }
+            }
+        }
+        Ok(differences)
+    }
+}

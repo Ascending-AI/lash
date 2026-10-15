@@ -2,16 +2,13 @@ The corpus pins written kernel rules, independently of a dialect. Each file
 `corpus/<family>/<K-RULE-ID>.json` owns one rule and contains `{rule, cases}`.
 Host-operation cases live in `protocol/<family>/<K-RULE-ID>.json` with the
 same envelope. Their per-rule laws in `src/tests/protocol/` apply typed
-transactions, hand bindings to a new document, inspect exported sites, or
-carry a parked run; the document observations and the protocol assertions
-both have to pass. These shards join the coverage and text/JSON round-trip
-selection. They are separate from the dialect printer selection, which
-cannot express a host editing, importing bindings or migrating a run.
-`K-VER-004` and `K-VER-005` execute the shipped migration under the existing
-`synthetic-next` feature witness; the baseline also checks that version 1
-has no predecessor migration. `K-EFF-011` restores an admitted wait with a
-committed answer and a committed wait before guest code consumes it, and
-requires both paths to end without another effect request.
+transactions, carry a `SessionRoot` into a new cell, inspect paged task/frame
+sites, and resume a `CheckpointRoot`. Both the recorded observations and the
+protocol assertions must pass. The old whole-state migration harness is
+retired; release-change carry guarantees are composed at S8.
+`K-EFF-011` seals an admitted wait and a committed outcome before guest code
+consumes it, opens both roots, and requires both paths to end without another
+effect request.
 
 Each owning crate embeds its own shard tree with `index.py`; no lane edits
 another lane's index. `load_corpus` decodes host-supplied `(path, bytes)` pairs
@@ -47,8 +44,8 @@ literal library identities in its `use` lines; the test injects its registry.
 `environment` defaults to no host reads or deliveries, a charge bound of
 1,000,000, 16 MiB of memory, call depth 64, and 128 live tasks, requests per
 park and join members. It may override those `bounds`, `slice`, `max_steps`,
-`entry`, and `args`. `resume: true` exports state and rebuilds the machine at
-every park. `deliveries` is a list of batches, one per park. Each batch is
+`entry`, and `args`. `resume: true` seals and opens the machine at every park using the real
+paged heap and allocation census. `deliveries` is a list of batches, one per park. Each batch is
 delivered in its written order before the next run. A delivery is
 `{"request":0,"outcome":{"completed":{"int":"2"}}}`, a failed outcome
 `{"failed":{"kind":"io","message":"failure","data":"null"}}`, or
@@ -95,7 +92,7 @@ registry, comparing full observations. The factory must create fresh caches.
 
 `examples/kernel-embedder` is compiled as a development dependency. It loads
 the fan-out document, admits table effects at a park, discards the machine,
-imports the saved state, and delivers answers in reverse order. The per-rule laws and fan-out law run against `KernelMachine`;
+opens the checkpoint root, and delivers answers in reverse order. The per-rule laws and fan-out law run against `KernelMachine`;
 a scheduler double is not proof.
 
 Witness scripts in `witness/` run trusted source under the pinned Node or
@@ -120,7 +117,7 @@ The core rule laws also run test-only contract probes from
 `src/contract_cases.rs` alongside their owning shards. These inspect properties
 that output traces cannot express: stored JSON, domain-separated identity test
 vectors, annotation independence, definition validation, transitive manifests,
-derived sites, and rejected deliveries leaving exported state unchanged.
+derived sites, and rejected deliveries leaving the canonical checkpoint unchanged.
 Definition probes use kernel text and the public checker and machine seams.
 The machine corpus registry includes the kernel numeric library for document
 cases that call its native definitions. The portable case envelope is unchanged.

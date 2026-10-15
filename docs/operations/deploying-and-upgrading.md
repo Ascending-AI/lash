@@ -228,7 +228,7 @@ and it lists:
 - `helper_processes`: each unfinished process that pins a function of an
   earlier release, with the functions it pins and `refused`, the typed
   reason its run would not carry onto this build's helpers (`null` when it
-  would);
+  would; `ParkedRefusal::StateNotCarried` for a run parked on the heap);
 - `helper_sessions`: each session whose open turn's cells or saved
   functions reach one.
 
@@ -250,8 +250,12 @@ let asked = core
 ```
 
 Lash link-checks and holds the new pair, and records the request. The
-process's owner applies it at the run's next park, carrying the parked run
-onto the new document; a crash leaves the old pair or the whole new one.
+process's owner applies it at the run's next rest; a crash leaves the old
+pair or the whole new one. A run already parked on the persistent heap is
+not carried: no migrator this build ships carries its heap pages (FIG-6233),
+so the request is refused with the typed reason the survey lists
+(`ParkedRefusal::StateNotCarried`), and the process stays parked with its rows intact and
+resumes on a build that retains its release.
 Steps already admitted keep the match and call id they were admitted with.
 `AlreadyCurrent` means the process already runs that pair, and a resend
 records nothing. A `ProcessSuccessorRefused` names its typed reason, for

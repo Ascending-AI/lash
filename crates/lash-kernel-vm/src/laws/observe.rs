@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
+use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
-use lash_kernel_state::ParkedRun;
+use lash_kernel_state::paged::SealBudget;
 
 use super::embedder::{Embedder, ROOMY, Setup};
 use crate::observe::{CodeKind, GuestContext, GuestProfile, LibKind, WorkReport};
@@ -71,12 +72,13 @@ fn setup(layout: Layout, slice: u64) -> Setup {
     }
 }
 
-/// What a run shows its embedder: every step, each park's exported state,
-/// what it printed and requested, and its charge.
+/// What a run shows its embedder: every step, the checkpoint root each
+/// park seals, what it printed and requested, and its charge.
 #[derive(Debug, PartialEq)]
 struct Seen {
     steps: Vec<Step>,
-    exports: Vec<ParkedRun>,
+    /// Each park's sealed CheckpointRoot, encoded: its pages by digest.
+    exports: Vec<Vec<u8>>,
     printed: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
@@ -114,7 +116,15 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
             Step::Ended(_) => break,
             Step::Slice => {}
             Step::Parked(_) => {
-                seen.exports.push(embedder.machine.export().unwrap());
+                let sealed = embedder
+                    .machine
+                    .seal(SealBudget {
+                        pages: u64::MAX,
+                        bytes: u64::MAX,
+                    })
+                    .unwrap()
+                    .unwrap();
+                seen.exports.push(encode_body(&sealed.root));
                 let next = super::embedder::label(&embedder.pending[0]);
                 embedder.deliver(&next);
             }
@@ -128,7 +138,7 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
 
 /// Observing a run, by counting its work or publishing its context or
 /// both, leaves its results, failures, charges, parks, prints, requests
-/// and exported states as they are: under the natural layout and one that
+/// and sealed roots as they are: under the natural layout and one that
 /// takes every general native call, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {

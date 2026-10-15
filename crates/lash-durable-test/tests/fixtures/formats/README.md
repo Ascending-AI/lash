@@ -64,6 +64,24 @@ and all six images of set `4b1b3a0d68` in place on one build rebased onto
 `origin/main`. The set keeps its id, programs and expected results; every
 re-recorded image resumed to the result it recorded before.
 
+FIG-6193 replaced the whole-state parked run (a KernelWhole graph root,
+or a kernel process's state carrying its sealed graph inline) with the
+persistent heap's CheckpointRoot pages, in place under the 1.0 freeze. It is
+the sanctioned parked-shape change that FIG-6183's (`b6cf0eeb40`) retained
+images name. The orchestrator authorized re-recording `lashvm`, `session` and
+all six images of set `4b1b3a0d68` in place, on one build of the integrated
+heap tree. The set keeps its id, programs, helper catalogue and expected
+results; each fresh image recorded exactly its old result before it replaced
+the old bytes.
+
+`pre-heap-lashvm/` and `pre-heap-session/` keep the last whole-state images
+of `lashvm` and `session` byte for byte. They are refusal witnesses, not
+upgrade witnesses: no build reads them.
+`format_fixtures::pre_heap_images_are_refused_naming_their_format` holds that
+a pre-heap cell's graph read is refused with `GraphRefusal::RetiredFormat`
+naming `KernelWhole`, and that the kernel engine refuses a pre-heap process's
+state by naming the same format. Never re-record them.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

@@ -4,6 +4,16 @@ use std::time::Duration;
 
 use crate::codec::DecodeLimits;
 
+/// The most pages one page exchange names, read or sealed (start value of
+/// `D-CAP`, the kernel's `READ_BATCH_PAGES`).
+pub const PAGE_BATCH_PAGES: usize = 64;
+
+/// The most envelope bytes one page exchange carries, read or sealed (start
+/// value of `D-CAP`, the kernel's `READ_BATCH_BYTES`). A frame's own bound
+/// may cut a reply shorter: the parent then answers a prefix and the worker
+/// asks again for the rest.
+pub const PAGE_BATCH_BYTES: u64 = 4 << 20;
+
 /// Every protocol bound a host states for its workers. There is no implicit
 /// default: a host takes [`ProtocolBounds::standard`] or states its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

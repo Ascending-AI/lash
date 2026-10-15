@@ -53,7 +53,7 @@ async fn bind(session: &mut DialectSession, globals: &[(&str, serde_json::Value)
 }
 
 async fn listing(
-    session: &DialectSession,
+    session: &mut DialectSession,
     provenance: std::collections::BTreeMap<String, String>,
 ) -> (std::sync::Arc<str>, super::SessionGlobals) {
     session
@@ -61,6 +61,7 @@ async fn listing(
             &BTreeSet::new(),
             lash_render::RenderParams::preview(),
             provenance,
+            None,
         )
         .await
         .expect("render the session's globals")
@@ -123,7 +124,7 @@ async fn a_global_names_the_cell_that_last_bound_it() {
     )
     .await;
     let (text, globals) = listing(
-        &session,
+        &mut session,
         crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
             .projection_index(&projection)
             .expect("valid cell records")
@@ -167,7 +168,7 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
         .map(|(name, value)| (name.as_str(), value.clone()))
         .collect::<Vec<_>>();
     bind(&mut session, &values).await;
-    let (text, globals) = listing(&session, Default::default()).await;
+    let (text, globals) = listing(&mut session, Default::default()).await;
     insta::assert_snapshot!(text, @r"
     These variables are already bound in TypeScript. Access them directly in `<typescript>` cells; do not recreate them manually.
     Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.
@@ -209,10 +210,10 @@ async fn paging_returns_exactly_the_globals_the_listing_left_out() {
     assert_eq!(second.entries, &globals.entries()[listed + 3..]);
 
     bind(&mut session, &[("w", serde_json::json!("new"))]).await;
-    let (_, changed) = listing(&session, Default::default()).await;
+    let (_, changed) = listing(&mut session, Default::default()).await;
     assert_eq!(changed.page(from, 1), Err(StaleGlobalsPage));
 
-    let (_, all) = listing(&session_with(&values).await, Default::default()).await;
+    let (_, all) = listing(&mut session_with(&values).await, Default::default()).await;
     assert_eq!(all.omitted(), 0);
     assert_eq!(all.continuation(), None);
 }

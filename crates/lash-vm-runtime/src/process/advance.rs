@@ -16,6 +16,7 @@ use lash_core::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, ProcessInfraError,
     SettledOutput, StepName, StepRequest,
 };
+use lash_core_store::checkpoint_graph::{GraphRefusal, NodeKind};
 use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
@@ -42,16 +43,16 @@ fn infra(message: impl Into<String>) -> ProcessInfraError {
 }
 
 /// `state` in the format of the kernel version its run is parked under,
-/// or `written` when it holds no run yet.
+/// or `written` when it holds no run yet, standing on its run's page.
 pub(crate) fn encode(
     state: &KernelEngineState,
     written: KernelVersion,
 ) -> Result<EngineState, ProcessInfraError> {
     let kernel = match &state.parked {
-        Some(parked) => KernelVersion::of(parked.0.kernel()).ok_or_else(|| {
+        Some(parked) => KernelVersion::of(parked.kernel).ok_or_else(|| {
             infra(format!(
                 "the run is parked under kernel version {}, which this build does not interpret",
-                parked.0.kernel()
+                parked.kernel
             ))
         })?,
         None => written,
@@ -59,6 +60,7 @@ pub(crate) fn encode(
     Ok(EngineState {
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
+        pages: state.parked.map(|parked| parked.root),
     })
 }
 
@@ -77,9 +79,33 @@ pub(crate) fn decode(
                 state_format(writes)
             ))
         })?;
-    let decoded: KernelEngineState =
-        serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))?;
+    let decoded: KernelEngineState = serde_json::from_slice(&state.bytes).map_err(|error| {
+        infra(
+            pre_heap(&state.bytes).map_or_else(|| error.to_string(), |refusal| refusal.to_string()),
+        )
+    })?;
+    if decoded.parked.map(|parked| parked.root) != state.pages {
+        return Err(infra(
+            "the state names another run page than the process's root holds",
+        ));
+    }
     Ok((decoded, written))
+}
+
+/// The refusal of a state that parks its run in the whole-state shape the
+/// persistent heap retired (FIG-6193): such a state names its run by the
+/// sealed KernelWhole graph itself, as base64 text, where this build names
+/// a page. Asked only of a state that did not decode, so a state of this
+/// build is read once; the old shape is named, never read.
+fn pre_heap(bytes: &[u8]) -> Option<GraphRefusal> {
+    const KERNEL_WHOLE: NodeKind = NodeKind(16);
+    let state: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    state.get("parked")?.is_string().then_some(())?;
+    Some(GraphRefusal::RetiredFormat {
+        node: None,
+        kind: KERNEL_WHOLE.0,
+        format: KERNEL_WHOLE.retired_format()?,
+    })
 }
 
 /// The transition for `event` over `state`, of an engine that writes
@@ -299,6 +325,8 @@ fn run_settled(
     };
     match output {
         KernelRunOutput::Ended { outcome } => {
+            // An ended run stands on no page.
+            state.parked = None;
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }
@@ -429,7 +457,7 @@ fn run(
     state.runs += 1;
     let input = KernelRunInput {
         payload: state.payload.clone(),
-        parked: state.parked.clone(),
+        parked: state.parked,
         admissions: state.admissions.values().cloned().collect(),
         deliver: std::mem::take(&mut state.settled),
     };

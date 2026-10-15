@@ -12,15 +12,15 @@ use thiserror::Error;
 ///     shapes(
 ///         path = "crates/lash-protocol-rlm/src/executor/session/graph.rs",
 ///         path = "crates/lash-protocol-rlm/src/deferred.rs",
-///         cover(SessionExecutionBody),
+///         cover(SessionDescriptor),
 ///     ),
 ///     roots(path = "crates/lash-rlm-types/src/lib.rs", CodeModeProjectedSeedEntry),
 ///     roots(path = "crates/lash-sansio/src/causal.rs", CausalRef),
 /// )
-// The root is a session's SessionExecution checkpoint graph node
-// (FIG-5887 §3): bindings, one local object table, an alias table into
-// shared function bundles. The graph carries no format version of its
-// own; this constant names the surface for the formats manifest.
+// The root is a session's descriptor page (FIG-6193): the session's heap,
+// bindings and saved functions as page roots, with the names it binds. The
+// page carries no format version of its own; this constant names the
+// surface for the formats manifest.
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
@@ -65,9 +65,12 @@ pub enum CodeModeSnapshotError {
     /// or not the node its name names.
     #[error("code mode snapshot graph is refused: {0}")]
     Graph(#[from] lash_core_store::checkpoint_graph::GraphRefusal),
-    /// A function bundle is not one a session writes.
-    #[error("code mode snapshot function bundle is refused: {0}")]
-    Bundle(#[from] lash_kernel_dialect::BundleRefusal),
+    /// The state was written by a kernel version this build does not run.
+    #[error("code mode snapshot was written by kernel {found}; this build runs kernel {expected}")]
+    KernelMismatch { expected: u32, found: u32 },
+    /// The descriptor page is not one a session writes.
+    #[error("code mode snapshot descriptor is refused: {0}")]
+    Descriptor(lash_kernel_doc::heap::HeapFault),
 }
 
 impl From<CodeModeSnapshotError> for lash_core::SessionError {

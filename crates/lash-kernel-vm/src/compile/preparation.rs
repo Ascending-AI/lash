@@ -13,7 +13,7 @@ use lash_kernel_doc::{
 };
 
 use super::{DocumentCode, Executable, Missing, PreparedLibrary, compile_document};
-use crate::{ImportError, StartError};
+use crate::{OpenError, StartError};
 
 #[derive(Default)]
 pub(super) struct Documents(BTreeMap<(usize, usize), Arc<Admission>>);
@@ -38,7 +38,7 @@ impl From<Refused> for StartError {
     }
 }
 
-impl From<Refused> for ImportError {
+impl From<Refused> for OpenError {
     fn from(refused: Refused) -> Self {
         match refused {
             Refused::Missing(function) => Self::MissingFunction { function },

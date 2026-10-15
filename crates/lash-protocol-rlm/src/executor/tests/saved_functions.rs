@@ -51,6 +51,81 @@ async fn a_function_a_cell_defines_is_called_two_cells_later() {
     );
 }
 
+/// S8 carry of a cell-defined function (FIG-6193): `bump`, defined in
+/// cell 1 over a top-level object, is a binding later cells call. Each
+/// call installs a fresh copy of what it froze, so two calls in cell 2 are
+/// independent and neither reaches the session's own `box`; and cell 3,
+/// parked at a held call, its node killed, resumed on another node and a
+/// fresh worker from a session restored cold, calls it the same way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_defined_function_is_called_after_a_park_and_reopen_with_fresh_captures() {
+    use std::sync::atomic::Ordering;
+
+    let mut host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    cell(
+        &mut state,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "const box = { n: 0 };\nfunction bump() { box.n += 1; return box.n; }",
+    )
+    .await;
+    let twice = cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        tools.clone(),
+        "await control.finish([bump(), bump(), box.n]);",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&twice),
+        serde_json::json!([1, 1, 0]),
+        "each call has captures of its own, and none is the session's"
+    );
+    crate::testing::commit_working(&mut state, &host).await;
+    let saved = state
+        .hydrated_execution_graph()
+        .await
+        .expect("the working descriptor");
+    let code = "let said = \"unset\";\ntry { said = await echo.say({ text: \"held\" }); } catch (error) { said = \"interrupted\"; }\nawait control.finish([bump(), bump(), said]);";
+    tools.hold.store(true, Ordering::SeqCst);
+    let services = typescript_services();
+    {
+        let parked = run_cell(
+            &mut state,
+            cell_context(&host, SESSION, TURN, "exec-code:2", tools.clone()),
+            &services,
+            code,
+        );
+        tokio::select! {
+            response = parked => panic!("the cell ended with its call held: {:?}", response.result),
+            () = tools.held_started.notified() => {}
+        }
+    }
+    drop(state);
+    host.kill_and_resume().await;
+    tools.hold.store(false, Ordering::SeqCst);
+    let mut reopened = typescript_state();
+    reopened
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
+        .expect("the working state restores");
+    let resumed = run_cell(
+        &mut reopened,
+        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
+        &services,
+        code,
+    )
+    .await;
+    assert_eq!(
+        finish_of(&resumed),
+        serde_json::json!([1, 1, "interrupted"]),
+        "the reopened cell calls the function cell 1 defined, with fresh captures"
+    );
+}
+
 /// A saved function is the value its cell left, name and length included:
 /// a later cell reads them, a deletion of one lasts into the next cell, a
 /// binding that takes the function keeps its name, and a function made
@@ -116,19 +191,15 @@ async fn aliases_of_a_saved_function_stay_one_function_across_cells() {
         "const h = f;\ndelete (g as any).length;",
     )
     .await;
-    state
-        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-        .expect("capture the session's state");
-    state.acknowledge_execution_state_capture();
+    crate::testing::commit_working(&mut state, &host).await;
     let saved = state
         .hydrated_execution_graph()
         .await
         .expect("the saved session state");
-    host.install(&saved).await;
     drop(state);
     let mut state = typescript_state();
     state
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("load the session's state");
     let read = cell(
         &mut state,
@@ -195,6 +266,24 @@ async fn cell(
     response
 }
 
+/// A fresh session restored from `source`'s state, which `host` commits
+/// as its turn's working state first.
+async fn restored(
+    host: &crate::testing::DurableHost,
+    source: &mut super::CodeModeExecutionState,
+) -> super::CodeModeExecutionState {
+    crate::testing::commit_working(source, host).await;
+    let saved = source
+        .hydrated_execution_graph()
+        .await
+        .expect("the saved session state");
+    let mut restored = typescript_state();
+    restored
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
+        .expect("load the session's state");
+    restored
+}
+
 /// A provider that offers no tool at all.
 pub(super) struct NoTools;
 
@@ -245,19 +334,15 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     )
     .await;
 
-    state
-        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-        .expect("capture the session's state");
-    state.acknowledge_execution_state_capture();
+    crate::testing::commit_working(&mut state, &host).await;
     let saved = state
         .hydrated_execution_graph()
         .await
         .expect("the saved session state");
-    host.install(&saved).await;
     drop(state);
     let mut restored = typescript_state();
     restored
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("load the session's state");
 
     let called = cell(
@@ -269,46 +354,6 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!(42));
-}
-
-/// A saved function seeds a new session: one created with it as an input
-/// calls it, and holds nothing else of the session it came from.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_new_session_created_with_a_saved_function_calls_it() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let mut source = typescript_state();
-    cell(
-        &mut source,
-        &host,
-        "exec-code:0",
-        tools.clone(),
-        "const greeting = \"hello\";\nconst greet = (name) => `${greeting}, ${name}`;",
-    )
-    .await;
-    let mut functions = source.saved_functions();
-    functions.retain(|name, _| name == "greet");
-    drop(source);
-
-    let mut seeded = typescript_state();
-    seeded
-        .seed_functions(&functions, &std::collections::BTreeSet::new())
-        .await
-        .expect("create the session with the function");
-    assert_eq!(
-        seeded.binding_names().collect::<Vec<_>>(),
-        Vec::<&str>::new(),
-        "the new session holds the function and no binding of the old one"
-    );
-    let called = cell(
-        &mut seeded,
-        &host,
-        "exec-code:1",
-        tools,
-        "await control.finish(greet(\"lash\"));",
-    )
-    .await;
-    assert_eq!(finish_of(&called), serde_json::json!("hello, lash"));
 }
 
 /// A saved function is refused where a tool it needs is missing: a session
@@ -329,19 +374,14 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     .await;
     assert_eq!(tools.answered(), vec!["a"]);
     assert!(
-        source.saved_functions().contains_key("shout"),
+        source
+            .lowering_functions()
+            .contains_key(&lash_kernel_doc::Name::new("shout")),
         "{:?}",
-        source.bindings().not_carried()
+        source.not_carried()
     );
 
-    let mut seeded = typescript_state();
-    seeded
-        .seed_functions(
-            &source.saved_functions(),
-            &std::collections::BTreeSet::new(),
-        )
-        .await
-        .expect("create the session with the function");
+    let mut seeded = restored(&host, &mut source).await;
     let refused = run_cell(
         &mut seeded,
         cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
@@ -423,9 +463,8 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
             ..Default::default()
         }
     );
-    let why = state
-        .bindings()
-        .not_carried()
+    let not_carried = state.not_carried();
+    let why = not_carried
         .get(&lash_kernel_doc::Name::new("later"))
         .expect("the session records why `later` was not kept");
     assert_eq!(
@@ -434,9 +473,10 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
             name: lash_kernel_doc::Name::new("pending"),
             why: lash_kernel_dialect::CaptureRefusal::Task,
         }
+        .to_string()
     );
     assert_eq!(
-        why.to_string(),
+        why,
         "its function reads `pending`, which holds a task or a pending promise"
     );
 
@@ -510,14 +550,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_now_ends_the_turn() {
         "async function shout(text) { return await echo.say({ text }); }",
     )
     .await;
-    let mut seeded = typescript_state();
-    seeded
-        .seed_functions(
-            &source.saved_functions(),
-            &std::collections::BTreeSet::new(),
-        )
-        .await
-        .expect("create the session with the function");
+    let mut seeded = restored(&host, &mut source).await;
     let refused = run_cell(
         &mut seeded,
         cell_context(
@@ -565,7 +598,11 @@ async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
         failure.message
     );
     assert!(tools.answered().is_empty(), "nothing of the cell ran");
-    assert!(!state.saved_functions().contains_key("done"));
+    assert!(
+        !state
+            .lowering_functions()
+            .contains_key(&lash_kernel_doc::Name::new("done"))
+    );
 }
 
 /// TS-CALL-SLOTS: a later cell enters the packed wrapper of the shared

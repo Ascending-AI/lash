@@ -5,8 +5,9 @@
 //! over the cell's document, under the cell's execution, and held by the
 //! frame so a later cell can start it (ADR 0113 §3.1). In the cell a
 //! process is a function reference; where it leaves the cell (a tool's
-//! input, a session binding, the cell's answer) it is that entry's
-//! definition, which is data.
+//! input, the cell's answer) it is that entry's definition, which is data.
+//! A function a later cell starts is the session's saved function, which
+//! that cell declares under an entry of its own.
 
 use lash_core::RuntimeExecutionContext;
 use lash_kernel_doc::{Datum, Document, DocumentId};
@@ -34,41 +35,6 @@ impl CellEntries {
             lash_vm_broker::kernel::datum_from_json(&definition.to_string())
                 .map_err(|error| error.to_string())
         })
-    }
-}
-
-impl CellEntries {
-    /// Rebinds every session binding that holds a process to that entry's
-    /// definition, which a later cell starts it by.
-    pub(super) fn bind_definitions(&self, left: &mut lash_kernel_vm::Bindings) {
-        if self.document.entries.is_empty() {
-            return;
-        }
-        let mut next = left
-            .objects
-            .keys()
-            .next_back()
-            .map_or(0, |id| id.0.saturating_add(1));
-        let mut allocate = || {
-            let id = lash_kernel_doc::ObjectId(next);
-            next += 1;
-            id
-        };
-        for value in left.variables.values_mut() {
-            let lash_kernel_doc::Value::Function(function) = value else {
-                continue;
-            };
-            let Ok(definition) = definition_of_entry(&self.document, self.identity, function)
-            else {
-                continue;
-            };
-            *value = crate::cell_value::bind_json(
-                &definition,
-                self.document.manifest.numbers,
-                &mut allocate,
-                &mut left.objects,
-            );
-        }
     }
 }
 

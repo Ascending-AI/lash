@@ -1,6 +1,7 @@
 //! Names and content-addressed identities.
 
 use std::fmt;
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,11 +30,11 @@ pub(crate) use string_schema;
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(transparent)]
-pub struct Name(String);
+pub struct Name(Arc<str>);
 
 impl Name {
     pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
+        Self(Arc::from(name.into()))
     }
 
     pub fn as_str(&self) -> &str {

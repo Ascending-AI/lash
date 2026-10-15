@@ -619,7 +619,7 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     assert_eq!(reply.output.value_for_projection(), json!("sent"));
     assert_eq!(provider.executed.load(Ordering::SeqCst), 1);
     let mut tx = controller.begin().await.unwrap();
-    round::settle(&mut tx, &admitted[0], outcome.output, Vec::new()).unwrap();
+    round::settle(&mut tx, &admitted[0], outcome.output, Vec::new(), None).unwrap();
     controller
         .commit(tx, CommitLabel::new("law.settle"))
         .await

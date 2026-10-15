@@ -404,13 +404,18 @@ pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Resul
         // The root is where the parent reads the version from: a state that
         // states another would resume under a version it was not parked
         // under (FIG-5716).
-        let whole: lash_kernel_state::KernelWhole = decoder
-            .decode(body.state, NodeKind::KERNEL_WHOLE)
+        let page = cell.graph.nodes.get(&body.state).ok_or_else(|| {
+            format!(
+                "the parked run's checkpoint root {} is not in its graph",
+                body.state
+            )
+        })?;
+        let header = lash_vm_broker::kernel::state::checkpoint_header(body.state, &page.bytes)
             .map_err(|error| error.to_string())?;
-        if whole.kernel != body.format {
+        if header.kernel != body.format {
             return Err(format!(
-                "the parked run's root records kernel version {}, and its state states kernel version {}",
-                body.format, whole.kernel
+                "the parked run's root records kernel version {}, and its checkpoint root states kernel version {}",
+                body.format, header.kernel
             ));
         }
     }

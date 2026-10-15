@@ -14,11 +14,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_kernel_doc::heap::{LogicalBytes, PageId};
 use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::paged::{AccountingCertificate, AccountingMetric, AllocationCensus};
 use lash_kernel_vm::{
-    Bindings, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program, Request,
-    Start, Step, Target,
+    CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
+    Request, Step, Target,
 };
+use lash_vm_broker::kernel::next_stage_lease;
+use lash_vm_broker::kernel::pages::{CommittedPages, LocalPages, SpoolRoot};
 use lash_vm_client::WorkerTuning;
 
 use crate::embedding::tests::every_dialect;
@@ -62,6 +68,15 @@ impl Host for Answering {
     }
 }
 
+/// Nothing committed: a fresh cell reads only what it stages.
+struct Uncommitted;
+
+impl CommittedPages for Uncommitted {
+    fn page(&self, _page: &NodeId) -> Option<Arc<[u8]>> {
+        None
+    }
+}
+
 /// How a run ended, what it printed, what it was charged and how often it
 /// parked.
 #[derive(Debug, PartialEq)]
@@ -85,23 +100,45 @@ fn run(
     } else {
         EffectModes::recorded()
     };
-    let start = Start {
+    let start = CellStart {
+        owner: PageId([0; 32]),
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
-    };
-    let mut machine = KernelMachine::start_reading(
-        program.clone(),
-        lash_kernel_vm::Bounds {
-            charge: 1_000_000,
-            memory: 16 << 20,
-            call_depth: 64,
-            live_tasks: 16,
-            requests_per_park: 16,
-            join_members: 16,
-        },
-        start,
+        session: None,
         modes,
+        host: Vec::new(),
+    };
+    let spools = tempfile::tempdir().expect("spool directory");
+    let spools = SpoolRoot::open(spools.path(), 1 << 30).expect("spools");
+    let bounds = lash_kernel_vm::Bounds {
+        charge: 1_000_000,
+        memory: 16 << 20,
+        call_depth: 64,
+        live_tasks: 16,
+        requests_per_park: 16,
+        join_members: 16,
+    };
+    let census: Box<dyn AllocationCensus> = Box::new(
+        Census::restore(
+            AccountingCertificate {
+                metric: AccountingMetric::LocalCostV1,
+                upper: LogicalBytes(0),
+                entities: 0,
+                refinements: 0,
+            },
+            LogicalBytes(bounds.memory),
+        )
+        .expect("a fresh census"),
+    );
+    let mut machine = KernelMachine::start(
+        program.clone(),
+        bounds,
+        start,
+        Box::new(LocalPages::new(
+            Uncommitted,
+            Box::new(spools.spool(next_stage_lease()).expect("spool")),
+        )),
+        census,
     )
     .expect("the cell starts");
     let mut host = Answering {
@@ -179,6 +216,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
         .expect("the document's library")
         .clone();
     Program {
+        release: lash_kernel_doc::heap::PageId([0; 32]),
         document: Arc::new(document),
         library,
     }

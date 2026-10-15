@@ -15,6 +15,10 @@ use lash_core_execution::{
     AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessEnvStore, ProcessRegistry,
     StoreBindingId, StoreSet,
 };
+use lash_durable::domain::pages::{
+    CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, SemanticAdmission, StoredPage,
+};
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
     SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
@@ -290,7 +294,9 @@ impl Recorder {
     }
 }
 
-/// A durable store that records each write transaction.
+/// A durable store that records each write transaction, a candidate's
+/// page publication included.
+#[derive(Clone)]
 pub struct RecordingStore {
     inner: Arc<dyn DurableStore>,
     node: String,
@@ -302,6 +308,11 @@ pub struct RecordingStore {
 impl DurableStore for RecordingStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.inner.now().await
+    }
+
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
+        self.inner.pages()?;
+        Some(Arc::new(self.clone()))
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -585,6 +596,103 @@ impl DurableReads for RecordingStore {
         hashes: &[String],
     ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
         self.inner.prompt_texts(hashes).await
+    }
+}
+
+impl RecordingStore {
+    fn page_store(&self) -> Result<Arc<dyn PageStore>, DurableError> {
+        self.inner.pages().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "the store publishes no heap pages".to_owned(),
+            })
+        })
+    }
+}
+
+/// Page publication: a candidate's commit is recorded as the owner
+/// transaction it is; leases, reads and retirement pass through.
+#[async_trait::async_trait]
+impl PageStore for RecordingStore {
+    async fn acquire_root_lease(
+        &self,
+        request: RootLeaseRequest,
+    ) -> Result<RootLease, DurableError> {
+        self.page_store()?.acquire_root_lease(request).await
+    }
+
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+        self.page_store()?.renew_root_lease(lease).await
+    }
+
+    async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
+        self.page_store()?.release_root_lease(lease).await
+    }
+
+    async fn read_pages(
+        &self,
+        lease: &RootLease,
+        pages: &[lash_core_store::checkpoint_graph::NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        self.page_store()?.read_pages(lease, pages).await
+    }
+
+    async fn commit_candidate(
+        &self,
+        tx: ActorTx,
+        candidate: CandidatePublication,
+        label: CommitLabel,
+    ) -> Result<CandidateReceipt, DurableError> {
+        let pages = self.page_store()?;
+        let actor = tx.actor().to_string();
+        let mut encoded = Encoded::of(&tx);
+        let started = Instant::now();
+        let (answer, sql) = lash_core_execution::facade_support::sql::with_owner(
+            actor.clone(),
+            tx.epoch().0,
+            tx.revision().0,
+            lash_core_execution::facade_support::sql::collect(
+                format!("{actor}/{}", label.as_str()),
+                self.dialect,
+                pages.commit_candidate(tx, candidate, label),
+            ),
+        )
+        .await;
+        encoded.sql = Some(sql);
+        self.recorder
+            .record_with(started, actor, label.as_str(), answer.is_ok(), encoded);
+        answer
+    }
+
+    async fn admission(
+        &self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+    ) -> Result<Option<SemanticAdmission>, DurableError> {
+        self.page_store()?.admission(root).await
+    }
+
+    async fn candidate_state(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<
+        Option<(
+            lash_core_store::checkpoint_graph::NodeId,
+            lash_core_store::checkpoint_graph::CommitId,
+        )>,
+        DurableError,
+    > {
+        self.page_store()?.candidate_state(exec).await
+    }
+
+    async fn retire_step(
+        &self,
+        budget: RetirementBudget,
+    ) -> Result<RetirementProgress, DurableError> {
+        self.page_store()?.retire_step(budget).await
+    }
+
+    async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError> {
+        self.page_store()?.retirement_backlog().await
     }
 }
 

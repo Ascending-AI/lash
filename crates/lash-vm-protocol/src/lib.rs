@@ -8,10 +8,10 @@
 //! - [`message`]: the typed messages, each under a [`MessageHeader`] naming its
 //!   execution lease, owner and frame epochs and transport sequence.
 //! - [`state`]: [`VmOwner`], whose state a worker holds.
-//! - [`graph_state`]: [`SealedGraphState`], a parked run as checkpoint graph
-//!   nodes under a seal binding its root to its structural facts; the parent
-//!   checks the facts and the seal, never a guest frame: validation,
-//!   compilation and resumption happen only in the worker.
+//! - [`checkpoint`]: the typed refusals of a run's checkpoint root, which
+//!   the parent checks by its header alone, never a guest frame:
+//!   validation, compilation and resumption happen only in the worker.
+//! - [`page`]: the page exchange of the persistent heap.
 //! - [`codec`]: length-framed encoding and protocol-version admission, with
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
@@ -24,26 +24,25 @@
 //! There is no transport and no pool here; both belong to the worker entry.
 
 pub mod bounds;
+pub mod checkpoint;
 pub mod codec;
-pub mod graph_state;
 pub mod message;
 pub mod outcome;
+/// The page exchange of the persistent heap (FIG-6195, FIG-6190).
+pub mod page;
 pub mod state;
 mod version;
 
-pub use bounds::ProtocolBounds;
+pub use bounds::{PAGE_BATCH_BYTES, PAGE_BATCH_PAGES, ProtocolBounds};
+pub use checkpoint::{CheckpointRefusal, KernelRestoreRefusal};
 pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
     ObservationChunker,
 };
-pub use graph_state::{
-    GraphNodeBytes, GraphRoot, GraphStateExpectation, GraphStateRefusal, KernelRestoreRefusal,
-    SealedGraphState,
-};
 pub use message::{
-    BorrowedParentFrame, BorrowedParentMessage, Delivery, EncodedPayload, ExecutionLease,
-    FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence, MessageHeader, OwnerEpoch,
-    ParentFrame, ParentMessage, ParkedGraph, RunBounds, RunMeters, Start, StartFrom,
+    BorrowedParentFrame, BorrowedParentMessage, CheckpointStart, Delivery, EncodedPayload,
+    ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind, MessageFence,
+    MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters, Start, StartFrom,
     TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{
@@ -51,7 +50,7 @@ pub use outcome::{
     ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
     WorkerFrameKind, WorkerLimit, WorkerRefusal,
 };
-pub use state::{StateDigest, VmOwner};
+pub use state::VmOwner;
 pub use version::{
     MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, ProtocolVersionRefusal, WORKER_PROTOCOL_VERSION,
     check_worker_protocol_version,

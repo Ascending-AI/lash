@@ -6,19 +6,20 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_kernel_doc::graph_tokens::{ChildRef, TokenError, decode_body, encode_body};
+use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer,
-    NativeCall, NativeError, NativeFunction, NumberToken, Object, PreparedNative, Site, Timestamp,
-    Unit, Value, parse_definition, parse_document,
+    Datum, Document, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
+    NativeError, NativeFunction, NumberToken, Object, PreparedNative, Site, Timestamp, Unit, Value,
+    parse_definition, parse_document,
 };
-use lash_kernel_doc::{EffectIdentity, FrozenDatum};
-use lash_kernel_state::{AdmittedRequest, Baseline, KernelWhole, ParkedRun};
+use lash_kernel_state::paged::*;
 use num_traits::ToPrimitive;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::{
-    Bounds, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
-    Program, Request, RunError, Start, Step, Target, WaitId, register_machine_functions,
+    Bounds, CellStart, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome,
+    PreparedLibrary, Program, Request, RunError, Step, Target, WaitId, register_machine_functions,
 };
 
 /// Bounds no law reaches unless it sets one.
@@ -32,7 +33,7 @@ pub(crate) const ROOMY: Bounds = Bounds {
 };
 
 fn type_error(message: &str) -> NativeError {
-    NativeError::Raised(ErrorValue::new("type_error", message))
+    NativeError::Raised(Arc::new(ErrorRef::new("type_error", message)))
 }
 
 /// Heap-independent law natives offer a prepared entry with the same answer.
@@ -59,20 +60,30 @@ macro_rules! prepared {
 
 struct Add;
 prepared!(Add, |args| match args {
-    [Value::Int(a), Value::Int(b)] =>
-        Ok(Value::Int(Integer::new(&*a.as_bigint() + &*b.as_bigint()))),
+    [Value::Int(IntRef::Inline(a)), Value::Int(IntRef::Inline(b))] => Ok(Value::Int(
+        IntRef::Inline(Integer::new(&*a.as_bigint() + &*b.as_bigint()))
+    )),
     _ => Err(type_error("num.add takes two integers")),
 });
 
 struct Less;
 prepared!(Less, |args| match args {
-    [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
+    [Value::Int(IntRef::Inline(a)), Value::Int(IntRef::Inline(b))] => Ok(Value::Bool(a < b)),
     _ => Err(type_error("num.lt takes two integers")),
 });
 
 struct Concat;
 prepared!(Concat, |args| match args {
-    [Value::Text(a), Value::Text(b)] => Ok(Value::text(format!("{a}{b}"))),
+    [
+        Value::Text(TextRef {
+            body: Payload::Resident(a),
+            ..
+        }),
+        Value::Text(TextRef {
+            body: Payload::Resident(b),
+            ..
+        }),
+    ] => Ok(Value::text(format!("{a}{b}"))),
     _ => Err(type_error("text.concat takes two texts")),
 });
 
@@ -80,7 +91,7 @@ struct Len;
 impl NativeFunction for Len {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         match call.args.first().and_then(Value::object) {
-            Some(object) => Ok(Value::Int(Integer::from(call.heap.len(object) as i64))),
+            Some(object) => Ok(Value::Int(call.heap.len(object)?.into())),
             None => Err(type_error("list.len takes a collection")),
         }
     }
@@ -90,7 +101,7 @@ impl NativeFunction for Len {
 struct Spin;
 impl NativeFunction for Spin {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(steps)] = call.args else {
+        let [Value::Int(IntRef::Inline(steps))] = call.args else {
             return Err(type_error("work.spin takes an integer"));
         };
         let steps = steps.to_u64().unwrap_or(0);
@@ -105,7 +116,7 @@ impl NativeFunction for Spin {
 struct Fill;
 impl NativeFunction for Fill {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(length)] = call.args else {
+        let [Value::Int(IntRef::Inline(length))] = call.args else {
             return Err(type_error("work.fill takes an integer"));
         };
         let length = length.to_usize().unwrap_or(0);
@@ -122,7 +133,7 @@ pub(crate) static REPEAT_BUILDS: AtomicUsize = AtomicUsize::new(0);
 struct Repeat;
 impl NativeFunction for Repeat {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        let [Value::Int(length)] = call.args else {
+        let [Value::Int(IntRef::Inline(length))] = call.args else {
             return Err(type_error("work.repeat takes an integer"));
         };
         let length = length.to_u64().unwrap_or(0);
@@ -151,6 +162,16 @@ impl NativeFunction for Twice {
 
 /// The handful of library functions the laws call, and the header that
 /// names them in a document.
+struct LargeError;
+impl NativeFunction for LargeError {
+    fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
+        Err(NativeError::Raised(Arc::new(ErrorRef::new(
+            &"k".repeat(1 << 20),
+            &"m".repeat(1 << 20),
+        ))))
+    }
+}
+
 pub(crate) struct Library {
     pub(crate) registry: Arc<FunctionRegistry>,
     pub(crate) ids: BTreeMap<&'static str, FunctionId>,
@@ -166,7 +187,12 @@ pub(crate) fn library(native_twice: bool) -> Library {
     let machine = register_machine_functions(&mut registry).unwrap();
     ids.insert("deref", machine.deref);
     ids.insert("tasks.unfinished", machine.tasks_unfinished);
-    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 8] = [
+    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 9] = [
+        (
+            "work.error",
+            "() -> Any\nkernel 1\ncharge 1",
+            Arc::new(LargeError),
+        ),
         (
             "num.add",
             "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
@@ -302,7 +328,7 @@ pub(crate) struct Setup {
     pub(crate) layout: Layout,
     pub(crate) numbers: &'static str,
     pub(crate) native_twice: bool,
-    pub(crate) start: Start,
+    pub(crate) start: CellStart,
     pub(crate) slice: u64,
 }
 
@@ -313,10 +339,13 @@ impl Default for Setup {
             layout: Layout::default(),
             numbers: "by_spelling",
             native_twice: true,
-            start: Start {
+            start: CellStart {
                 target: Target::Main,
                 args: Vec::new(),
-                bindings: Default::default(),
+                session: None,
+                owner: PageId([9; 32]),
+                modes: crate::EffectModes::recorded(),
+                host: Vec::new(),
             },
             slice: u64::MAX,
         }
@@ -328,13 +357,13 @@ pub(crate) struct Embedder {
     pub(crate) world: World,
     pub(crate) library: Library,
     document: Arc<Document>,
-    bounds: Bounds,
     /// Every request the machine handed out, in order.
     pub(crate) requests: Vec<Request>,
     /// The requests handed out and not yet answered.
     pub(crate) pending: Vec<Request>,
     pub(crate) withdrawn: Vec<WaitId>,
     slice: u64,
+    pub(crate) source: Source,
 }
 
 fn wait_of(request: &Request) -> WaitId {
@@ -388,22 +417,30 @@ impl Embedder {
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
         let document = Arc::new(document);
         let program = Program {
+            release: PageId([8; 32]),
             document: Arc::clone(&document),
             library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
-        let machine =
-            KernelMachine::start_with_layout(program, setup.bounds, setup.start, setup.layout)
-                .unwrap_or_else(|error| panic!("{error}\n{text}"));
+        let source = Source::default();
+        let machine = KernelMachine::start_with_layout(
+            program,
+            setup.bounds,
+            setup.start,
+            setup.layout,
+            Box::new(source.clone()),
+            census(setup.bounds.memory),
+        )
+        .unwrap_or_else(|error| panic!("{error}\n{text}"));
         Self {
             machine,
             world: World::default(),
             library,
             document,
-            bounds: setup.bounds,
             requests: Vec::new(),
             pending: Vec::new(),
             withdrawn: Vec::new(),
             slice: setup.slice,
+            source,
         }
     }
 
@@ -412,109 +449,11 @@ impl Embedder {
     pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
         let library = library(native_twice);
         let program = Program {
+            release: PageId([8; 32]),
             document: Arc::clone(&self.document),
             library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
         (program, library)
-    }
-
-    /// An embedder that resumes `parked` in a machine built afresh, with
-    /// this one's pending requests and nothing printed.
-    pub(crate) fn resumed(&self, parked: ParkedRun) -> Result<Self, crate::ImportError> {
-        let (program, library) = self.program(true);
-        Ok(Self {
-            machine: KernelMachine::import(program, self.bounds, parked)?,
-            world: World::default(),
-            library,
-            document: Arc::clone(&self.document),
-            bounds: self.bounds,
-            requests: Vec::new(),
-            pending: self.pending.clone(),
-            withdrawn: Vec::new(),
-            slice: self.slice,
-        })
-    }
-
-    /// Parks the run and resumes it in another machine: the state is
-    /// exported, written as its parts, read back, and imported against an
-    /// executable compiled afresh under `layout`.
-    pub(crate) fn relay(&mut self, layout: Layout, native_twice: bool) {
-        let parked = self.machine.export().unwrap();
-        let saved = parked.save(&Baseline::default()).unwrap();
-        let (loaded, _) = ParkedRun::load(&saved.header, saved.changed()).unwrap();
-        assert_eq!(loaded, parked);
-        let (program, library) = self.program(native_twice);
-        self.machine =
-            KernelMachine::import_with_layout(program, self.bounds, loaded, layout).unwrap();
-        self.library = library;
-    }
-
-    /// Parks the run as its whole binary state and resumes it cold in
-    /// another machine (FIG-5887 PC-EXACT): the state is captured with each
-    /// wait as its identity alone, written in its one binary spelling, read
-    /// back, and imported against a program compiled afresh, each wait's
-    /// request resolved from what the park handed out, as an embedder's
-    /// admission holds it. Re-exporting the resumed machine gives the same
-    /// whole, and every meter is unchanged.
-    pub(crate) fn relay_whole(&mut self, native_twice: bool, frozen: &mut FrozenStore) {
-        let release = ChildRef([0xee; 32]);
-        let owner = ChildRef([0x0e; 32]);
-        let whole = self
-            .machine
-            .export_whole(release, owner, |datum| frozen.freeze(datum))
-            .unwrap();
-        // The export collected the heap: the machine that goes on accounts
-        // its memory as the one that imports the state.
-        let meters = self.machine.meters();
-        let bytes = encode_body(&whole);
-        let read: KernelWhole = decode_body(&bytes).unwrap();
-        assert_eq!(read, whole);
-        let (program, library) = self.program(native_twice);
-        let admissions = self.admissions();
-        self.machine = KernelMachine::import_whole(
-            program,
-            self.bounds,
-            read,
-            |child| frozen.thaw(child),
-            |identity| admissions.get(identity).cloned(),
-        )
-        .unwrap();
-        self.library = library;
-        assert_eq!(
-            self.machine.meters(),
-            meters,
-            "a cold restore keeps every meter"
-        );
-        let again = self
-            .machine
-            .export_whole(release, owner, |datum| frozen.freeze(datum))
-            .unwrap();
-        assert_eq!(
-            again, whole,
-            "a resumed machine exports the whole it resumed from"
-        );
-    }
-
-    /// Every request the machine handed out, as an admission holds it.
-    pub(crate) fn admissions(&self) -> BTreeMap<EffectIdentity, AdmittedRequest> {
-        self.requests
-            .iter()
-            .map(|request| match request {
-                Request::Effect(effect) => (
-                    effect.identity.clone(),
-                    AdmittedRequest::Effect {
-                        effect: effect.effect.clone(),
-                        args: effect.args.clone(),
-                    },
-                ),
-                Request::Sleep(sleep) => (
-                    sleep.identity.clone(),
-                    AdmittedRequest::Sleep {
-                        duration: sleep.duration.into(),
-                    },
-                ),
-            })
-            .collect()
     }
 
     /// Runs the machine once and keeps what a park hands out.
@@ -619,39 +558,65 @@ pub(crate) fn function_site<const N: usize>(name: &str, path: [u32; N]) -> Site 
     Site::new(Unit::Function(name.into()), path)
 }
 
-/// FrozenValue nodes in memory: each distinct body is one reference, so
-/// equal outcomes share one.
-#[derive(Default)]
-pub(crate) struct FrozenStore {
-    bodies: Vec<Vec<u8>>,
-}
-
-impl FrozenStore {
-    pub(crate) fn freeze(&mut self, datum: &FrozenDatum) -> Result<ChildRef, TokenError> {
-        let body = encode_body(datum);
-        let index = match self.bodies.iter().position(|held| *held == body) {
-            Some(index) => index,
-            None => {
-                self.bodies.push(body);
-                self.bodies.len() - 1
-            }
+use lash_kernel_state::paged::census_impl::Census;
+#[derive(Clone, Default)]
+pub(crate) struct Source(pub(crate) Rc<RefCell<BTreeMap<PageId, PageAnswer>>>);
+impl PageSource for Source {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        pages
+            .iter()
+            .map(|page| {
+                self.0
+                    .borrow()
+                    .get(&page.id)
+                    .cloned()
+                    .ok_or(HeapFault::Missing { page: page.id })
+            })
+            .collect()
+    }
+    fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+        let mut tokens = body.kind.0.to_be_bytes().to_vec();
+        tokens.extend_from_slice(&body.tokens);
+        let page = PageRef {
+            id: PageId(lash_kernel_doc::heap_values::key_digest(&tokens)),
+            grant: PageGrant::NONE,
         };
-        let mut digest = [0_u8; 32];
-        digest[..8].copy_from_slice(&(index as u64).to_le_bytes());
-        Ok(ChildRef(digest))
+        self.0.borrow_mut().insert(
+            page.id,
+            PageAnswer {
+                page,
+                kind: body.kind,
+                tokens: body.tokens.into(),
+                children: body.children,
+            },
+        );
+        Ok(page)
     }
-
-    pub(crate) fn thaw(&self, child: ChildRef) -> Result<Datum, TokenError> {
-        let mut index = [0_u8; 8];
-        index.copy_from_slice(&child.0[..8]);
-        let body = self
-            .bodies
-            .get(u64::from_le_bytes(index) as usize)
-            .ok_or_else(|| TokenError::Invalid("no such frozen value".to_owned()))?;
-        decode_body::<FrozenDatum>(body).map(|frozen| frozen.0)
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.bodies.len()
-    }
+}
+pub(crate) fn census(bound: u64) -> Box<dyn AllocationCensus> {
+    Box::new(
+        Census::restore(
+            AccountingCertificate {
+                metric: AccountingMetric::LocalCostV1,
+                upper: LogicalBytes(0),
+                entities: 0,
+                refinements: 0,
+            },
+            LogicalBytes(bound),
+        )
+        .unwrap(),
+    )
+}
+pub(crate) fn start_machine(
+    program: Program,
+    bounds: Bounds,
+    start: CellStart,
+) -> Result<KernelMachine, crate::StartError> {
+    KernelMachine::start(
+        program,
+        bounds,
+        start,
+        Box::new(Source::default()),
+        census(bounds.memory),
+    )
 }

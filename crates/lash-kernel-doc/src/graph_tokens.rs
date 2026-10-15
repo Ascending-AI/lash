@@ -698,6 +698,17 @@ impl<'a> TokenReader<'a> {
         })
     }
 
+    /// Reads one whole token tree as the tokens it is written in.
+    ///
+    /// # Errors
+    ///
+    /// Any refusal of the grammar.
+    pub fn tree(&mut self) -> Result<&'a [u8], TokenError> {
+        let start = self.pos;
+        self.skip_tree()?;
+        Ok(&self.input[start..self.pos])
+    }
+
     /// Skips one whole token tree, returning how many tokens it held.
     ///
     /// # Errors

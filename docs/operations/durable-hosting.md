@@ -961,10 +961,44 @@ rule.
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
 | `cascade_batch` | 256 | How many `Until` children one cascade transaction marks. |
 | `notifier` | `AfterCommit` | `AfterCommit` publishes wake hints and holds the liveness lock, on PostgreSQL and on a SQLite file; `PollOnly` relies on the claim poll alone. |
+| `retirement.every` | 1 s | How long the node's retirement task waits between sweeps once it caught up. |
+| `retirement.batch_nodes` | 256 (at most 4 096) | The most page nodes one retirement step, one transaction, deletes. |
+| `retirement.steps_per_sweep` | 16 (at most 256) | The most steps one sweep runs. |
+| `retirement.backlog_limit` | 10 000 holds and frontier nodes (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
 
 Counts must be at least 1 (`Zero`), durations at least 1 ms
-(`BelowResolution`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
+(`BelowResolution`), retirement values at most their hard maxima
+(`AboveMaximum`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
 and the lease rules (`Lease(LeaseConfigError)`).
+
+### Page retirement
+
+A replaced or released heap root is not deleted in the transaction that
+replaces it: it becomes a retirement hold
+([ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§8). A root a worker is reading is protected by a root lease, a catalog row
+the activation's parent renews at a third of its 60 s time to live; an
+expired lease reads nothing and fences the activation, and retirement reaps
+it. Each node runs a
+retirement task beside its lease renewal. A sweep runs up to
+`steps_per_sweep` bounded steps, each one transaction that deletes at most
+`batch_nodes` unreachable pages and reaps expired root leases, and stops
+early once a step finds nothing to do. What a step does not reach waits on
+its own frontier for the next one. On PostgreSQL steps run one at a time
+under an advisory key; after it a step waits on nothing: it passes over
+rows another transaction holds (`SKIP LOCKED`) and writes only its own
+frontier. Publications and lease releases lock every node they hold before
+they write a hold row. So a step never deadlocks with a publication and
+never stops one; at most a publication waits for a step's transaction to
+end. When the store's
+`retirement_backlog` is above `backlog_limit`, the node takes no new actors
+(its running actors carry on) and sweeps back to back until the backlog is
+under the limit again. A node boots held back and claims only once its first
+backlog read answers under the limit. A failed step is retried at the next sweep.
+
+Page staging is bounded per activation by the worker service's
+`staging_quota_bytes` (1 GiB); passing it is a host outcome, the
+activation's `StagingExhausted`.
 
 ### Parked work and redrive
 
@@ -1474,6 +1508,12 @@ cap; the workbench's upload preset is 1 MiB.
 | H | VM worker address space | 4 GiB | `PoolConfig.confinement: WorkerConfinement` | Platform rlimit; must exceed parser reservation |
 | H | VM parser stack / parent wait / ingress / slice | 8 MiB + 40000/source byte / 24 h / 16 KiB / 1M charge | `WorkerTuning` | Checked arithmetic; inbound at least frame header; finite positive values |
 | H/S | VM diagnostic detail | 512 UTF-8 bytes | `WorkerTuning.diagnostic_bytes: DetailLimit`, `FrameCodec::with_detail_limit`, `Detail::with_limit` | 512 ensures typed refusals fit the minimal frame |
+| H | VM heap page residency: clean / dirty / pinned | 64 / 32 / 8 MiB | `WorkerTuning.pages: PageBudgets` | Resident bytes, never guest memory; passing one is a host outcome (`HeapFault::Exhausted`), and residency never changes a verdict or a charge |
+| H | VM page staging per activation | 1 GiB, under the system temporary directory | `PoolConfig.{staging_quota_bytes,staging_dir}` | Passing the quota is a host outcome (`StagingExhausted`); a dead parent's spools are deleted when the next one opens the directory |
+| S | VM page exchange batch | 64 pages / 4 MiB | `lash_vm_protocol::{PAGE_BATCH_PAGES,PAGE_BATCH_BYTES}` | Fixed protocol bounds (`D-CAP`) |
+| S | Root lease / activation page span | 60 s, renewed at a third / 1 h | `lash_vm_broker::kernel::run::PagePlan.{lease_ttl,span}`, set by lash's composition | An expired lease reads nothing (`LeaseLost`) and fences the activation |
+| S | Memory refinement trace | 8 MiB trace memory (at most 64 MiB); 100 M work units | The census's `TraceLimits`; lash's composition takes the defaults | Exceeding either is `HostResource::TraceBudget` or `HostWork`, infrastructure, never `Bound::Memory` |
+| H | Durable page retirement: sweep period / step nodes / steps per sweep / backlog | 1 s / 256 / 16 / 10 000 holds | `DurableSettings.retirement: RetirementSettings`; PostgreSQL host config `retirement` | Hard maxima 4 096 nodes, 256 steps, 1 000 000 holds (`AboveMaximum`) |
 | H | Session revisions / transcript retention | Until GC | `DataRetention.session_revisions`, session retention policy, history queries | Explicit retention choice / caller page limits |
 | H | Session replay events / age / sessions / total bytes | 2048 / 120 s / 4096 / 64 MiB | `InMemoryLiveReplayStoreConfig` via `LashCoreBuilder::live_replay_store` | Addressable counts/bytes/durations |
 | H | Process replay events / age / bytes/process / processes / total bytes | 2048 / 120 s / 8 MiB / 4096 / 64 MiB | `InMemoryProcessReplayStoreConfig` via `LashCoreBuilder::process_replay_store` | Addressable counts/bytes/durations |

@@ -26,7 +26,7 @@ use crate::{images, sim};
 const HORIZON_MS: u64 = 600_000;
 
 /// The kernel process: a sequential mint makes it the first registered.
-fn process() -> ProcessId {
+pub fn process() -> ProcessId {
     ProcessIdMint::sequential_id_for_testing(1)
 }
 
@@ -154,7 +154,7 @@ impl ProcessSteps for KernelSteps {
 
     fn body(
         &self,
-        _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
+        runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
@@ -175,6 +175,15 @@ impl ProcessSteps for KernelSteps {
                 projection_providers: Some(Arc::clone(self.backend.projection_providers())),
                 kind,
                 input,
+                pages: runtime
+                    .cx()
+                    .pages()
+                    .ok()
+                    .map(|store| lash_core_execution::StepPages {
+                        store,
+                        actor: runtime.cx().actor().clone(),
+                        epoch: runtime.cx().epoch(),
+                    }),
             };
             let steps = Arc::clone(&self.steps);
             let entered = Arc::clone(&self.entered);

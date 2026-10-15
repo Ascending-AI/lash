@@ -384,6 +384,27 @@ table lash_release_stamp
   column singleton boolean not-null default
   column written_at_epoch_ms bigint not-null
   primary-key (singleton)
+table lash_retirement_frontier
+  column closure boolean not-null
+  column node_ref text not-null
+  column queued_at_ms bigint not-null
+  primary-key (node_ref)
+table lash_retirement_holds
+  column closure boolean not-null
+  column queued_at_ms bigint not-null
+  column root_ref text not-null
+  primary-key (root_ref)
+  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+table lash_root_leases
+  column actor_key text not-null
+  column epoch bigint not-null
+  column expires_at_ms bigint not-null
+  column lease_id bigint not-null identity-always
+  column owner_key bytea not-null
+  column root_ref text not-null
+  column ttl_ms bigint not-null
+  primary-key (lease_id)
+  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
 table lash_run_records
   column call_id text nullable
   column kind text not-null
@@ -417,6 +438,14 @@ table lash_schema_versions
   column min_reader integer not-null
   column version integer not-null
   primary-key (component)
+table lash_semantic_admissions
+  column commit_id bytea not-null
+  column kernel bigint not-null
+  column page_format bigint not-null
+  column root_ref text not-null
+  column validator text not-null
+  primary-key (root_ref)
+  foreign-key (root_ref) references lash_blobs (hash) on delete cascade
 table lash_session_close
   column begun_at_ms bigint not-null
   column done_step text nullable

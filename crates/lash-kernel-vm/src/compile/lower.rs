@@ -22,9 +22,7 @@ use lash_kernel_exec::{
     RegRange,
 };
 
-use super::{
-    Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Stmt, Var, literal_value,
-};
+use super::{Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Stmt, Var};
 
 /// One statement's ops as they are gathered, and how many registers they
 /// use.
@@ -374,7 +372,7 @@ impl Compiler<'_> {
     fn atom(&mut self, atom: &doc::Atom) -> Atom {
         match atom {
             doc::Atom::Variable(name) => Atom::Var(self.resolve(name)),
-            doc::Atom::Literal(literal) => Atom::Literal(literal_value(literal)),
+            doc::Atom::Literal(literal) => Atom::Literal(literal.clone()),
         }
     }
 
@@ -397,7 +395,7 @@ impl Compiler<'_> {
         ops.uses(dst);
         match expr {
             doc::Expr::Literal(literal) => {
-                let c = self.constant(literal_value(literal));
+                let c = self.constant(literal.clone());
                 ops.push(Op::Const { dst, c });
             }
             doc::Expr::Variable(name) => {
@@ -463,7 +461,9 @@ impl Compiler<'_> {
                 // A closure runs only where it is applied, which the body of
                 // a function with a native implementation cannot do
                 // (`K-LIB-004`): wherever it runs, it is ordinary code.
-                let code = self.child(0, |c| c.code(&closure.params, &closure.body, false, true));
+                let code = self.child(0, |c| {
+                    c.code(&closure.params, &closure.body, false, true, false)
+                });
                 let id = CodeId(self.base.codes + self.codes.len() as u32);
                 self.codes.push(Some(code));
                 ops.push(Op::Closure {
@@ -512,7 +512,7 @@ impl Compiler<'_> {
         });
     }
 
-    fn constant(&mut self, value: lash_kernel_doc::Value) -> ConstIx {
+    fn constant(&mut self, value: lash_kernel_doc::Literal) -> ConstIx {
         let c = ConstIx(self.stream.consts.len() as u32);
         self.stream.consts.push(value);
         c

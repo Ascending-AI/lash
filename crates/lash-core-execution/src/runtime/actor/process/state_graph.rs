@@ -53,7 +53,13 @@ pub fn stage_engine_state(
             engine: engine.to_owned(),
             executable_identity: state.format.kind.clone(),
             state_format: state.format.version,
-            state: ProcessStateBody::EngineBytes(state.bytes.clone()),
+            state: match state.pages {
+                Some(root) => ProcessStateBody::Kernel {
+                    root,
+                    bytes: state.bytes.clone(),
+                },
+                None => ProcessStateBody::EngineBytes(state.bytes.clone()),
+            },
         },
     )?;
     let root = staging.encode_value(
@@ -160,8 +166,10 @@ pub fn load_engine_state(
         return Err(GraphRefusal::OwnerMismatch);
     }
     let state: ProcessState = decoder.decode(exec.state, NodeKind::PROCESS_STATE)?;
-    let ProcessStateBody::EngineBytes(bytes) = state.state else {
-        return Err(mismatch("a process engine's state is its own bytes"));
+    state.check_children(exec.state, decoder)?;
+    let (bytes, pages) = match state.state {
+        ProcessStateBody::EngineBytes(bytes) => (bytes, None),
+        ProcessStateBody::Kernel { root, bytes } => (bytes, Some(root)),
     };
     if state.executable_identity != exec.executable_identity || state.state_format != exec.format {
         return Err(mismatch("the root states another format than its state"));
@@ -174,6 +182,7 @@ pub fn load_engine_state(
                 version: state.state_format,
             },
             bytes,
+            pages,
         },
     ))
 }

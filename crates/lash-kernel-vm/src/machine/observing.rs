@@ -23,7 +23,7 @@ impl KernelMachine {
             self.exe.code_count(),
             self.exe.lib_count(),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         );
         self.observer_mut().work = Some(counting);
     }
@@ -36,7 +36,7 @@ impl KernelMachine {
             counting,
             &GuestSymbols::of(&self.exe),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         ))
     }
 
@@ -70,7 +70,7 @@ impl KernelMachine {
     #[inline(never)]
     fn observe_unlikely(&mut self, event: Event) {
         if let Some(observer) = self.observer.as_deref_mut() {
-            observer.on(event, self.charged, self.heap.allocated());
+            observer.on(event, self.charged, self.heap.next_ordinal());
         }
     }
 
@@ -134,18 +134,26 @@ impl KernelMachine {
         let Some(observer) = self.observer.as_deref_mut() else {
             return;
         };
-        let frames = self
-            .tasks
-            .get(task.0 as usize)
-            .map_or(&[][..], |running| running.frames.as_slice());
+        let frames = self.tasks.cached_frames(task);
         if let Some(work) = &mut observer.work {
-            work.flush(self.charged, self.heap.allocated());
-            work.step(task.0 as usize, frames.iter().map(|frame| frame.code.0));
+            work.flush(self.charged, self.heap.next_ordinal());
+            work.step(
+                task.0 as usize,
+                frames.as_ref().map(|(len, known)| {
+                    (
+                        *len,
+                        known.iter().map(|(index, frame)| (*index, frame.code.0)),
+                    )
+                }),
+            );
         }
         if let Some(context) = &mut observer.context
             && context.task() != Some(task.0)
         {
-            context.republish(task.0, frames.iter().map(|frame| token(exe, frame)));
+            let known = frames
+                .as_ref()
+                .map_or(&[][..], |(_, known)| known.as_slice());
+            context.republish(task.0, known.iter().map(|(_, frame)| token(exe, frame)));
         }
     }
 }

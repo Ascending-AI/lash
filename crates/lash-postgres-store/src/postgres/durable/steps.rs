@@ -11,7 +11,8 @@
 //!
 //! A step can retire graph roots (FIG-5949): the roots its statement
 //! answers in a named column, and the roots its writer knew it replaced.
-//! Either path peels them once every step ran, before the commit ends.
+//! Either path holds them for the retirement steps once every step ran,
+//! before the commit ends.
 //!
 //! A program decides with its statements' answers, not with values its
 //! client read (FIG-5942). A step can capture the first row it answered in
@@ -103,11 +104,11 @@ pub(super) enum Shape {
 /// What an answered column names for the commit's mechanics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Collect {
-    /// A graph root the row retired: its closure is peeled.
+    /// A graph root the row retired: its closure is retired.
     Closure(&'static str),
     /// An array of graph roots the row retired.
     Closures(&'static str),
-    /// An ended turn's PhaseRoot: peeled alone.
+    /// An ended turn's PhaseRoot: retired alone.
     PhaseEnd(&'static str),
     /// A session graph leaf whose unreachable ancestry is retired.
     Ancestry(&'static str),

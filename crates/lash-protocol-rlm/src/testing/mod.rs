@@ -4,6 +4,8 @@ pub(crate) use durable_host::DurableHost;
 
 use std::sync::Arc;
 
+use lash_core::core_internal::RuntimeExecutionContextRuntimeOps as _;
+
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
     static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =
@@ -88,6 +90,22 @@ pub(crate) async fn run_cell(
     response
 }
 
+/// Captures `state` as its turn's working state and commits it on `host`,
+/// as the turn phase commit after a cell would, the capture acknowledged.
+/// Answers the capture.
+pub(crate) async fn commit_working(
+    state: &mut crate::executor::CodeModeExecutionState,
+    host: &DurableHost,
+) -> lash_core_store::execution_state::ExecutionGraphCapture {
+    let capture = state
+        .capture_execution_graph(lash_core_store::execution_state::ExecutionGraphPurpose::Working)
+        .await
+        .expect("the session's state captures");
+    host.commit_working(&capture).await;
+    state.acknowledge_execution_state_capture().await;
+    capture
+}
+
 /// The context of the cell `replay_key` of `session`'s turn `turn`, with
 /// `provider`'s tools as the cell's catalog.
 pub(crate) fn cell_context(
@@ -104,6 +122,7 @@ pub(crate) fn cell_context(
         catalog,
         lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
     )
+    .with_session_pages(host.session_pages())
 }
 
 /// [`cell_context`] whose run's surface records `deferred` as its deferred
@@ -131,6 +150,7 @@ pub(crate) fn deferred_cell_context(
             deferred,
         ),
     )
+    .with_session_pages(host.session_pages())
 }
 
 /// A provider that offers no tool of its own.

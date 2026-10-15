@@ -79,6 +79,36 @@ pub struct WorkerTuning {
     /// The charge units one `Run` exchange may spend before the machine
     /// returns to the parent, where a run cancel is observed.
     pub slice: u64,
+    /// The worker's page residency on the persistent heap (FIG-6190).
+    pub pages: PageBudgets,
+}
+
+/// A worker's host budgets for heap pages (`D-CAP`): resident bytes, never
+/// the guest's logical memory. Passing one is a host outcome
+/// (`HeapFault::Exhausted`), and residency never changes a verdict or a
+/// charge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageBudgets {
+    /// Clean pages the worker keeps read: evicted first, and read again
+    /// from the parent on demand.
+    pub clean_bytes: u64,
+    /// Changed pages the heap holds before it seals and spills them to the
+    /// parent's staging.
+    pub dirty_bytes: u64,
+    /// Pages a native call or a visit holds pinned at once.
+    pub pinned_bytes: u64,
+}
+
+impl PageBudgets {
+    /// The `D-CAP` start values: 64 MiB clean, 32 MiB dirty, 8 MiB pinned.
+    pub const fn standard() -> Self {
+        Self {
+            clean_bytes: 64 << 20,
+            dirty_bytes: 32 << 20,
+            pinned_bytes: 8 << 20,
+        }
+    }
 }
 impl WorkerTuning {
     /// Existing presets: parent wait 86,400 s; inbound buffer 16 KiB; parser
@@ -98,6 +128,7 @@ impl WorkerTuning {
             parser_stack_base_bytes: 8 * 1024 * 1024,
             parser_stack_bytes_per_source_byte: 40_000,
             slice: 1_000_000,
+            pages: PageBudgets::standard(),
         }
     }
 }
@@ -153,6 +184,13 @@ pub struct PoolConfig {
     pub confinement: WorkerConfinement,
     pub restart_window: Duration,
     pub max_restarts: usize,
+    /// The most bytes one activation may stage in its parent's spool before
+    /// a park publishes them (`D-CAP`); passing it is a host outcome.
+    pub staging_quota_bytes: u64,
+    /// The directory the parent's activations stage pages under; None
+    /// stages under the system temporary directory. Spools of parents
+    /// that died there are deleted when the next one opens it.
+    pub staging_dir: Option<std::path::PathBuf>,
 }
 
 impl PoolConfig {
@@ -165,7 +203,7 @@ impl PoolConfig {
     /// `dhat-heap` feature (20 s at standard bounds). Serving-worker silence
     /// and checkout deadlines keep their configured bounds;
     /// working policy uses `WorkerTuning::standard`; confinement uses
-    /// `WorkerConfinement::standard`. FIG-4157/4162 measured
+    /// `WorkerConfinement::standard`; an activation stages at most 1 GiB. FIG-4157/4162 measured
     /// synthetic workloads, not optimal concurrency or arbitrary guest spend.
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
@@ -189,6 +227,8 @@ impl PoolConfig {
             confinement: WorkerConfinement::standard(),
             restart_window: Duration::from_secs(60),
             max_restarts: 8,
+            staging_quota_bytes: 1 << 30,
+            staging_dir: None,
         }
     }
 

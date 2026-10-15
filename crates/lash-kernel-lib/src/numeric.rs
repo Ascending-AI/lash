@@ -3,7 +3,8 @@
 
 use std::cmp::Ordering;
 
-use lash_kernel_doc::{Float, Integer, NativeError, Value};
+use lash_kernel_doc::heap::{IMMUTABLE_INLINE_MAX, IntRef};
+use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
@@ -74,22 +75,22 @@ pub(crate) fn int_float_cmp(integer: &BigInt, float: f64) -> Option<Ordering> {
     })
 }
 
-pub(crate) fn number_cmp(a: &Value, b: &Value) -> Result<Option<Ordering>, NativeError> {
+pub(crate) fn scalar_cmp(a: &Numeric, b: &Numeric) -> Result<Option<Ordering>, NativeError> {
     match (a, b) {
-        (Value::Int(a), Value::Int(b)) => Ok(Some(a.cmp(b))),
-        (Value::Float(a), Value::Float(b)) => Ok(a.get().partial_cmp(&b.get())),
-        (Value::Int(a), Value::Float(b)) => Ok(int_float_cmp(&a.as_bigint(), b.get())),
-        (Value::Float(a), Value::Int(b)) => {
+        (Numeric::Int(a), Numeric::Int(b)) => Ok(Some(a.cmp(b))),
+        (Numeric::Float(a), Numeric::Float(b)) => Ok(a.get().partial_cmp(&b.get())),
+        (Numeric::Int(a), Numeric::Float(b)) => Ok(int_float_cmp(&a.as_bigint(), b.get())),
+        (Numeric::Float(a), Numeric::Int(b)) => {
             Ok(int_float_cmp(&b.as_bigint(), a.get()).map(Ordering::reverse))
         }
         _ => Err(raised("type_error", "expected two numbers")),
     }
 }
 
-pub(crate) fn as_float(value: &Value) -> Result<f64, NativeError> {
+pub(crate) fn scalar_float(value: &Numeric) -> Result<f64, NativeError> {
     match value {
-        Value::Int(value) => integer_to_float(value).map(Float::get),
-        Value::Float(value) => Ok(value.get()),
+        Numeric::Int(value) => integer_to_float(value).map(Float::get),
+        Numeric::Float(value) => Ok(value.get()),
         _ => Err(raised("type_error", "expected a number")),
     }
 }
@@ -145,4 +146,57 @@ pub(crate) fn ratio_to_float(a: &BigInt, b: &BigInt) -> Result<f64, NativeError>
     } else {
         Ok(signed(value))
     }
+}
+
+/// Materialized operands of numeric algorithms. Heap reads remain explicit
+/// at the call boundary; this domain contains no collection identities.
+#[derive(Clone)]
+pub(crate) enum Numeric {
+    Int(Integer),
+    Float(Float),
+    Bool(bool),
+}
+impl Numeric {
+    pub(crate) fn resident(value: &Value) -> Option<Self> {
+        match value {
+            Value::Int(IntRef::Inline(i)) => Some(Self::Int(i.clone())),
+            Value::Float(f) => Some(Self::Float(*f)),
+            Value::Bool(b) => Some(Self::Bool(*b)),
+            _ => None,
+        }
+    }
+    pub(crate) fn read(value: &Value, heap: &mut dyn NativeHeap) -> Result<Self, NativeError> {
+        match value {
+            Value::Int(i) => Ok(Self::Int(match i {
+                IntRef::Inline(i) => i.clone(),
+                _ => heap.materialize_int(i)?,
+            })),
+            Value::Float(f) => Ok(Self::Float(*f)),
+            _ => Err(raised("type_error", "expected a number")),
+        }
+    }
+    pub(crate) fn store(self, heap: &mut dyn NativeHeap) -> Result<Value, NativeError> {
+        Ok(match self {
+            Self::Int(i) => Value::Int(heap.int(i)?),
+            Self::Float(f) => Value::Float(f),
+            Self::Bool(b) => Value::Bool(b),
+        })
+    }
+    pub(crate) fn inline(self) -> Option<Value> {
+        Some(match self {
+            Self::Int(i) if i.bits().div_ceil(8) <= IMMUTABLE_INLINE_MAX => {
+                Value::Int(IntRef::Inline(i))
+            }
+            Self::Int(_) => return None,
+            Self::Float(f) => Value::Float(f),
+            Self::Bool(b) => Value::Bool(b),
+        })
+    }
+}
+pub(crate) fn number_cmp(
+    a: &Value,
+    b: &Value,
+    heap: &mut dyn NativeHeap,
+) -> Result<Option<Ordering>, NativeError> {
+    scalar_cmp(&Numeric::read(a, heap)?, &Numeric::read(b, heap)?)
 }

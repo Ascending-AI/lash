@@ -250,7 +250,7 @@ pub struct ExecRoot {
     /// The kernel or engine format number.
     pub format: u32,
     pub status: ExecStatus,
-    /// A KernelWhole while a cell is parked, a CellEnd once it ended, or a
+    /// A CheckpointRoot while a cell is parked, a CellEnd once it ended, or a
     /// ProcessState for a process.
     pub state: NodeId,
     /// An EffectMembership.
@@ -319,7 +319,7 @@ impl ExecRoot {
     #[must_use]
     pub fn state_kinds(&self) -> &'static [NodeKind] {
         match (self.exec, self.status) {
-            (ExecRootKind::Cell, ExecStatus::Parked) => &[NodeKind::KERNEL_WHOLE],
+            (ExecRootKind::Cell, ExecStatus::Parked) => &[NodeKind::CHECKPOINT_ROOT],
             (ExecRootKind::Cell, ExecStatus::Ended) => &[NodeKind::CELL_END],
             (ExecRootKind::Process, _) => &[NodeKind::PROCESS_STATE],
         }
@@ -366,8 +366,10 @@ pub enum ProcessStateBody {
     /// Variant 0: the engine's raw state bytes (placed in shared leaves when
     /// large).
     EngineBytes(Vec<u8>),
-    /// Variant 1: a KernelWhole.
-    Kernel(NodeId),
+    /// Variant 1: a kernel engine's state: its own bytes and the
+    /// CheckpointRoot of the run they stand on, which the process's root
+    /// owns from the advance that names it (FIG-6193).
+    Kernel { root: NodeId, bytes: Vec<u8> },
 }
 
 impl TokenCodec for ProcessState {
@@ -381,9 +383,10 @@ impl TokenCodec for ProcessState {
                 out.sum(0, 1);
                 out.bytes(bytes);
             }
-            ProcessStateBody::Kernel(state) => {
-                out.sum(1, 1);
-                state.encode(out);
+            ProcessStateBody::Kernel { root, bytes } => {
+                out.sum(1, 2);
+                root.encode(out);
+                out.bytes(bytes);
             }
         }
     }
@@ -394,10 +397,18 @@ impl TokenCodec for ProcessState {
         let executable_identity = input.text()?.to_owned();
         let state_format = input.unsigned_u32()?;
         let (variant, fields) = input.sum()?;
-        TokenReader::expect_fields(fields, 1)?;
         let state = match variant {
-            0 => ProcessStateBody::EngineBytes(input.bytes()?.to_vec()),
-            1 => ProcessStateBody::Kernel(NodeId::decode(input)?),
+            0 => {
+                TokenReader::expect_fields(fields, 1)?;
+                ProcessStateBody::EngineBytes(input.bytes()?.to_vec())
+            }
+            1 => {
+                TokenReader::expect_fields(fields, 2)?;
+                ProcessStateBody::Kernel {
+                    root: NodeId::decode(input)?,
+                    bytes: input.bytes()?.to_vec(),
+                }
+            }
             other => return Err(unsupported(other)),
         };
         Ok(Self {
@@ -410,7 +421,7 @@ impl TokenCodec for ProcessState {
 }
 
 impl ProcessState {
-    /// Checks a kernel state reference names a KernelWhole.
+    /// Checks a kernel state reference names a CheckpointRoot.
     ///
     /// # Errors
     ///
@@ -420,8 +431,8 @@ impl ProcessState {
         id: NodeId,
         decoder: &mut GraphDecoder<'_>,
     ) -> Result<(), GraphRefusal> {
-        if let ProcessStateBody::Kernel(state) = &self.state {
-            decoder.child_kind(id, *state, &[NodeKind::KERNEL_WHOLE])?;
+        if let ProcessStateBody::Kernel { root, .. } = &self.state {
+            decoder.child_kind(id, *root, &[NodeKind::CHECKPOINT_ROOT])?;
         }
         Ok(())
     }

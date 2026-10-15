@@ -37,7 +37,10 @@ pub(crate) fn perform(
                     tool_roots: &tool_roots,
                     controls: &controls,
                     bindings: &bindings,
-                    functions: &functions,
+                    functions: &functions
+                        .into_iter()
+                        .map(|(name, function)| (name, function.into_saved()))
+                        .collect(),
                 },
             ) {
                 None => Response::UnknownDialect { dialect },

@@ -1,16 +1,16 @@
 //! Independent recorded native outcomes and charges.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorValue, FunctionId, FunctionRegistry, Measure, NativeCall, NativeError, NativeHeap,
-    Object, ObjectId, Operand, Value, WorkCounter,
+    Datum, EntityId, FunctionId, FunctionRegistry, Measure, NativeCall, NativeError, NativeHeap,
+    Object, Operand, Value, WorkCounter,
 };
 use num_traits::ToPrimitive;
 
 use crate::register_numbers;
-use crate::tests::Heap;
+use crate::testsupport;
+use lash_kernel_doc::heap::IntRef;
 
 const NATIVE_SHARDS: &[&str] = &[
     include_str!("../corpus/native/numbers/K-BND-001.json"),
@@ -46,64 +46,20 @@ const DOCUMENT_SHARDS: &[&str] = &[
     include_str!("../corpus/numbers/K-VAL-026.json"),
 ];
 
-fn decode(datum: Datum, heap: &mut dyn NativeHeap) -> Value {
-    match datum {
-        Datum::Null => Value::Null,
-        Datum::Absent => Value::Absent,
-        Datum::Bool(value) => Value::Bool(value),
-        Datum::Int(value) => Value::Int(value),
-        Datum::Float(value) => Value::Float(value),
-        Datum::Text(value) => Value::text(value),
-        Datum::Bytes(value) => Value::Bytes(value),
-        Datum::Timestamp(value) => Value::Timestamp(value),
-        Datum::Tuple(values) => Value::Tuple(
-            values
-                .into_iter()
-                .map(|value| decode(value, heap))
-                .collect(),
-        ),
-        Datum::List(values) => {
-            let values = values
-                .into_iter()
-                .map(|value| decode(value, heap))
-                .collect();
-            Value::List(heap.allocate(Object::List(values)).unwrap())
-        }
-        Datum::Set(values) => {
-            let values = values
-                .into_iter()
-                .map(|value| decode(value, heap))
-                .collect();
-            Value::Set(heap.allocate(Object::Set(values)).unwrap())
-        }
-        Datum::Map(values) => {
-            let values = values
-                .into_iter()
-                .map(|(key, value)| (decode(key, heap), decode(value, heap)))
-                .collect();
-            Value::Map(heap.allocate(Object::Map(values)).unwrap())
-        }
-        Datum::Record(values) => {
-            let values = values
-                .into_iter()
-                .map(|(name, value)| (name, decode(value, heap)))
-                .collect();
-            Value::Record(heap.allocate(Object::Record(values)).unwrap())
-        }
-        Datum::Error(value) => Value::Error(Arc::new(ErrorValue {
-            kind: value.kind,
-            message: value.message,
-            data: decode(value.data, heap),
-        })),
-        Datum::Function(value) => Value::Function(value),
-        Datum::Handle(value) => Value::Handle(Arc::new(value)),
-        Datum::Number(_) => panic!("recorded cases carry already decoded numbers"),
-    }
+fn decode(datum: Datum, heap: &mut lash_kernel_state::paged::PagedHeap) -> Value {
+    testsupport::decode(heap, datum)
 }
 
-fn magnitude(value: &Value) -> u64 {
+fn magnitude(value: &Value, heap: &dyn NativeHeap) -> u64 {
     match value {
-        Value::Int(value) if !value.is_negative() => value.to_u64().unwrap_or(u64::MAX),
+        Value::Int(value) => {
+            let value = testsupport::integer(heap, value);
+            if value.is_negative() {
+                0
+            } else {
+                value.to_u64().unwrap_or(u64::MAX)
+            }
+        }
         Value::Float(value) if value.get().is_finite() && value.get() >= 0.0 => value.get() as u64,
         _ => 0,
     }
@@ -111,34 +67,48 @@ fn magnitude(value: &Value) -> u64 {
 
 fn size(value: &Value, heap: &dyn NativeHeap) -> u64 {
     match value {
-        Value::Int(value) => 1 + value.bits().div_ceil(64),
-        Value::Text(value) => 1 + value.len() as u64,
-        Value::Bytes(value) => 1 + value.as_slice().len() as u64,
-        Value::Tuple(values) => 1 + values.len() as u64,
-        Value::List(id) | Value::Set(id) | Value::Record(id) => 1 + heap.len(*id) as u64,
-        Value::Map(id) => 1 + 2 * heap.len(*id) as u64,
-        Value::Error(value) => 1 + (value.kind.len() + value.message.len()) as u64,
+        Value::Int(value) => {
+            1 + match value {
+                IntRef::Inline(i) => i.bits(),
+                IntRef::Paged { summary, .. } => summary.bits,
+            }
+            .div_ceil(64)
+        }
+        Value::Text(value) => 1 + value.summary.utf8_bytes,
+        Value::Bytes(value) => 1 + value.len,
+        Value::Tuple(values) => 1 + values.summary.len,
+        Value::List(id) | Value::Set(id) | Value::Record(id) => 1 + heap.len(*id).unwrap(),
+        Value::Map(id) => 1 + 2 * heap.len(*id).unwrap(),
+        Value::Error(value) => {
+            1 + (value.kind.summary.utf8_bytes + value.message.summary.utf8_bytes)
+        }
         _ => 1,
     }
 }
 
 fn nested_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
-    let held: Vec<&Value> = match value {
-        Value::Tuple(values) => values.iter().collect(),
-        Value::Error(error) => vec![&error.data],
+    let mut held = Vec::new();
+    match value {
+        Value::Tuple(values) => heap
+            .tuple_visit(values, &mut |value| {
+                held.push(value.clone());
+                std::ops::ControlFlow::Continue(())
+            })
+            .unwrap(),
+        Value::Error(error) => held.push(heap.error_data(error).unwrap()),
         _ => return 0,
     };
     held.into_iter()
         .map(|value| match value {
             Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
-            _ => size(value, heap) + nested_size(value, heap),
+            _ => size(&value, heap) + nested_size(&value, heap),
         })
         .sum()
 }
 
 fn deep_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
     let mut pending = vec![value.clone()];
-    let mut seen = HashSet::<ObjectId>::new();
+    let mut seen = HashSet::<EntityId>::new();
     let mut total = 0u64;
     while let Some(value) = pending.pop() {
         if let Some(id) = value.object()
@@ -148,8 +118,13 @@ fn deep_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
         }
         total = total.saturating_add(size(&value, heap));
         match value {
-            Value::Tuple(values) => pending.extend(values.iter().cloned()),
-            Value::Error(error) => pending.push(error.data.clone()),
+            Value::Tuple(values) => heap
+                .tuple_visit(&values, &mut |value| {
+                    pending.push(value.clone());
+                    std::ops::ControlFlow::Continue(())
+                })
+                .unwrap(),
+            Value::Error(error) => pending.push(heap.error_data(&error).unwrap()),
             Value::List(id) | Value::Set(id) | Value::Map(id) | Value::Record(id) => {
                 heap.visit(id, &mut |element| {
                     match element {
@@ -163,7 +138,8 @@ fn deep_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
                         }
                     }
                     std::ops::ControlFlow::Continue(())
-                });
+                })
+                .unwrap();
             }
             _ => {}
         }
@@ -187,7 +163,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 .get(&function)
                 .unwrap_or_else(|| panic!("{name}: missing function {function}"));
             let definition = &registered.definition;
-            let mut heap = Heap::default();
+            let mut heap = testsupport::heap();
             let args: Vec<Value> = case["args"]
                 .as_array()
                 .unwrap()
@@ -204,19 +180,34 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 heap: &mut heap,
                 counter: &mut counter,
             });
+            if let Some(prepared) = registered.native.as_ref().unwrap().prepare()
+                && let Some(prepared) = (prepared.entry)(&args)
+            {
+                assert_eq!(
+                    testsupport::datum(&heap, &prepared),
+                    testsupport::datum(&heap, result.as_ref().unwrap()),
+                    "{name} prepared/general"
+                );
+            }
             let outcome = &case["expected"]["outcome"];
             if let Some(datum) = outcome.get("returned") {
-                let expected = decode(serde_json::from_value(datum.clone()).unwrap(), &mut heap);
-                assert_eq!(result.as_ref().unwrap(), &expected, "{name}");
+                let expected: Datum = serde_json::from_value(datum.clone()).unwrap();
+                assert_eq!(
+                    testsupport::datum(&heap, result.as_ref().unwrap()),
+                    expected,
+                    "{name}"
+                );
             } else if let Some(error) = outcome.get("raised") {
                 let NativeError::Raised(actual) = result.as_ref().unwrap_err() else {
                     panic!("{name}: expected raised error");
                 };
-                let expected = decode(
-                    Datum::Error(Box::new(serde_json::from_value(error.clone()).unwrap())),
-                    &mut heap,
+                let expected: lash_kernel_doc::ErrorDatum =
+                    serde_json::from_value(error.clone()).unwrap();
+                assert_eq!(
+                    testsupport::datum(&heap, &Value::Error(actual.clone())),
+                    Datum::Error(Box::new(expected)),
+                    "{name}"
                 );
-                assert_eq!(Value::Error(Arc::new(actual.clone())), expected, "{name}");
             } else {
                 let NativeError::Guard(actual) = result.as_ref().unwrap_err() else {
                     panic!("{name}: expected guard failure");
@@ -243,7 +234,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                     value.map_or(0, |value| match measure {
                         Measure::Size => size(value, &heap),
                         Measure::DeepSize => deep_size(value, &heap),
-                        Measure::Magnitude => magnitude(value),
+                        Measure::Magnitude => magnitude(value, &heap),
                         Measure::NestedSize => nested_size(value, &heap),
                     })
                 })
@@ -264,7 +255,26 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 heap: &mut heap,
                 counter: &mut warm_counter,
             });
-            assert_eq!(warm, result, "{name} cold/warm outcome");
+            match (&warm, &result) {
+                (Ok(a), Ok(b)) => assert_eq!(
+                    testsupport::datum(&heap, a),
+                    testsupport::datum(&heap, b),
+                    "{name} cold/warm"
+                ),
+                (Err(NativeError::Raised(a)), Err(NativeError::Raised(b))) => assert_eq!(
+                    testsupport::datum(&heap, &Value::Error(a.clone())),
+                    testsupport::datum(&heap, &Value::Error(b.clone())),
+                    "{name} cold/warm"
+                ),
+                (Err(NativeError::Guard(a)), Err(NativeError::Guard(b))) => {
+                    assert_eq!(a, b, "{name} cold/warm")
+                }
+                (Err(NativeError::Memory), Err(NativeError::Memory)) => (),
+                (Err(NativeError::Heap(a)), Err(NativeError::Heap(b))) => {
+                    assert_eq!(a, b, "{name} cold/warm")
+                }
+                _ => panic!("{name} cold/warm outcome differs"),
+            }
             assert_eq!(
                 warm_counter.spent(),
                 counter.spent(),
@@ -279,22 +289,22 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
         .iter()
         .find(|(_, function)| function.definition.name.as_str() == "ref")
         .unwrap();
-    let mut heap = Heap::default();
+    let mut heap = testsupport::heap();
     let object = heap.allocate(Object::List(vec![])).unwrap();
     for _ in 0..2 {
         let mut counter = WorkCounter::new(None);
-        assert_eq!(
-            reference
-                .native
-                .as_ref()
-                .unwrap()
-                .call(NativeCall {
-                    args: &[Value::List(object)],
-                    heap: &mut heap,
-                    counter: &mut counter,
-                })
-                .unwrap(),
-            Value::Ref(lash_kernel_doc::Identity::Object(object)),
+        let value = reference
+            .native
+            .as_ref()
+            .unwrap()
+            .call(NativeCall {
+                args: &[Value::List(object)],
+                heap: &mut heap,
+                counter: &mut counter,
+            })
+            .unwrap();
+        assert!(
+            matches!(value, Value::Ref(lash_kernel_doc::Identity::Object(id)) if id == object),
             "ref object identity cold/warm"
         );
         assert_eq!(counter.spent(), 0);
@@ -324,6 +334,37 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
             let document =
                 lash_kernel_doc::parse_document(case["document"].as_str().unwrap()).unwrap();
             lash_kernel_doc::validate_document(&document, &registry).unwrap();
+            let mut machine = testsupport::start(
+                lash_kernel_vm::Program {
+                    release: lash_kernel_doc::heap::PageId([8; 32]),
+                    document: std::sync::Arc::new(document),
+                    library: lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::new(
+                        registry.clone(),
+                    )),
+                },
+                lash_kernel_vm::Bounds {
+                    charge: 10_000_000,
+                    memory: 64 << 20,
+                    call_depth: 100,
+                    live_tasks: 100,
+                    requests_per_park: 100,
+                    join_members: 100,
+                },
+                lash_kernel_vm::Layout::default(),
+            )
+            .unwrap();
+            let mut world = testsupport::World::default();
+            let lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(done)) =
+                lash_kernel_vm::Machine::run(&mut machine, &mut world, u64::MAX).unwrap()
+            else {
+                panic!("self-contained document corpus did not finish")
+            };
+            let expected: Datum =
+                serde_json::from_value(case["expected"]["end"]["finished"].clone()).unwrap();
+            let prints: Vec<Datum> =
+                serde_json::from_value(case["expected"]["prints"].clone()).unwrap();
+            assert_eq!(done.result, expected, "{}", case["name"]);
+            assert_eq!(world.prints, prints, "{}", case["name"]);
         }
     }
 }

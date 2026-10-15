@@ -5,8 +5,8 @@ use lash_kernel_doc::{
     Action, Atom, Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Start,
-    Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Step,
+    Target,
 };
 use std::sync::Arc;
 
@@ -97,13 +97,16 @@ const BOUNDS: Bounds = Bounds {
     join_members: 100,
 };
 fn start(program: Program) -> KernelMachine {
-    KernelMachine::start(
+    super::pages::start(
         program,
         BOUNDS,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
     )
     .unwrap()
@@ -113,6 +116,7 @@ fn start(program: Program) -> KernelMachine {
 fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
     let lowered = super::lower("function f(a: number) { return a; } f(1); f(); f(1, 2);").unwrap();
     let mut machine = start(Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: machine::prepared().clone(),
     });
@@ -150,7 +154,7 @@ fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
 }
 
 #[test]
-fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
+fn a_paged_positional_stack_resumes_with_a_new_layout() {
     let mut lowered = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap();
     // A host may edit the kernel document. Insert the wait at the base case
     // so the synchronous positional entry itself parks with the whole stack.
@@ -188,22 +192,50 @@ fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
         },
     ];
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: machine::prepared().clone(),
     };
-    let mut machine = start(program.clone());
+    let source = super::pages::Source::default();
+    let mut machine = super::pages::with_source(
+        program.clone(),
+        BOUNDS,
+        CellStart {
+            owner: super::pages::OWNER,
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+        Layout::default(),
+        &source,
+    )
+    .unwrap();
     let mut console = Console::default();
     let Step::Parked(park) = machine.run(&mut console, u64::MAX).unwrap() else {
         panic!("the deep call must park")
     };
-    let before = machine.export().unwrap();
-    assert_eq!(before.tasks[0].calls.len(), 62);
-    let bytes = serde_json::to_vec(&before).unwrap();
-    machine = KernelMachine::import_with_layout(program, BOUNDS, before, Layout(17)).unwrap();
-    assert_eq!(
-        serde_json::to_vec(&machine.export().unwrap()).unwrap(),
-        bytes
-    );
+    let sealed = machine.seal(super::pages::BUDGET).unwrap().unwrap();
+    let heap = lash_kernel_state::paged::PagedHeap::open_header(
+        sealed.root.heap,
+        Box::new(source.clone()),
+        lash_kernel_state::paged::EditEpoch(2),
+    )
+    .unwrap();
+    let tasks =
+        lash_kernel_state::paged::tree::Tree::<lash_kernel_state::paged::TaskRecord>::of_keyed(
+            &sealed.root.tasks,
+        );
+    let task = tasks
+        .get(
+            &lash_kernel_state::paged::directory::ordinal_key(0),
+            &heap.access,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(task.frames.len(), 62);
+    super::pages::reopen(&mut machine, &program, BOUNDS, &source, Layout(17));
     let [Request::Effect(effect)] = park.requests.as_slice() else {
         panic!("one base-case effect")
     };

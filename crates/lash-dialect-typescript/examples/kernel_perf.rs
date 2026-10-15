@@ -13,7 +13,7 @@
 //! function count, the time per run with and without `start`, the run's
 //! charge, and where it went. The split comes from a second run that stops
 //! after every unit of charge and reads the pending statement's site from the
-//! exported state (exporting changes no charge, `K-MACH-007`): the charge and
+//! sealed records (sealing changes no charge, `K-MACH-007`): the charge and
 //! the diagnostic wall time of each charge-sliced step go to TypeScript helper bodies, kernel library bodies
 //! or the document's own code. A helper's body is charged as it runs and
 //! its formula is not (`K-CHG-007`), so a step is a statement of the body
@@ -21,7 +21,7 @@
 //! the body of a library function with a native implementation is covered
 //! by its formula and runs within one step. `KERNEL_PERF_SPLIT=0` skips the
 //! second run, for a profiler. Split shares describe this altered dispatch
-//! geometry, perturbed by state export between steps; they are neither exact
+//! geometry, perturbed by sealing changed pages between steps; they are neither exact
 //! inclusive CPU shares nor shares of the ordinary unsplit run.
 //! Raw iteration times and allocator call counts
 //! accompany every row, with executable and source hashes and build identity.
@@ -79,10 +79,16 @@ use lash_kernel_doc::{
 };
 use lash_kernel_vm::observe::{GuestContext, GuestProfile, GuestSymbols, WorkReport};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, Start, Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, Step, Target,
 };
 use serde_json::{Value as Json, json};
+#[expect(
+    dead_code,
+    reason = "the benchmark shares the page fixture's start and source, not its session seeding helpers"
+)]
+#[path = "../src/tests/pages.rs"]
+mod pages;
 
 #[path = "../shared/gate_six.rs"]
 mod gate_six;
@@ -157,12 +163,26 @@ fn deliver_all(machine: &mut KernelMachine, requests: Vec<Request>) -> Option<Da
 }
 
 fn start(program: &Program) -> KernelMachine {
-    let start = Start {
+    start_on(program, &pages::Source::default())
+}
+fn start_on(program: &Program, source: &pages::Source) -> KernelMachine {
+    let session = pages::Session::default();
+    let start = CellStart {
+        owner: pages::OWNER,
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        modes: lash_kernel_vm::EffectModes::recorded(),
+        host: Vec::new(),
     };
-    KernelMachine::start(program.clone(), BOUNDS, start).unwrap_or_else(|error| panic!("{error}"))
+    KernelMachine::start(
+        program.clone(),
+        BOUNDS,
+        start,
+        Box::new(source.clone()),
+        session.census(BOUNDS.memory),
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// Runs a started machine to its end. Gives the charge and the value the
@@ -208,12 +228,13 @@ struct Split {
 /// Runs the program one unit of charge at a time, attributing each step's
 /// charge to the body its ready task's pending statement is in.
 fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
-    let mut machine = start(program);
+    let source = pages::Source::default();
+    let mut machine = start_on(program, &source);
     let mut console = Console::default();
     let mut split = Split::default();
     let mut charged = 0;
     loop {
-        let unit = pending_unit(&mut machine);
+        let unit = pending_unit(&mut machine, &source);
         let began = Instant::now();
         let step = machine
             .run(&mut console, 1)
@@ -255,12 +276,25 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
 }
 
 /// The site unit of the statement the next ready task runs next.
-fn pending_unit(machine: &mut KernelMachine) -> Option<Unit> {
-    let parked = machine.export().ok()?;
-    let ready = parked.run.ready.first()?;
-    let task = usize::try_from(ready.0).ok()?;
-    let call = parked.tasks.get(task)?.calls.last()?;
-    Some(call.call.statement.unit.clone())
+fn pending_unit(machine: &mut KernelMachine, source: &pages::Source) -> Option<Unit> {
+    use lash_kernel_state::paged::{EditEpoch, FrameRecord, PagedHeap, TaskRecord, tree::Tree};
+    let sealed = machine.seal(pages::BUDGET).ok()??;
+    let root = sealed.root;
+    let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(1)).ok()?;
+    let ready = Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready);
+    let (_, next) = ready.rank_get(0, &heap.access).ok()??;
+    let tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
+    let task = tasks
+        .get(
+            &lash_kernel_state::paged::directory::ordinal_key(next.0),
+            &heap.access,
+        )
+        .ok()??;
+    let (_, frame): (_, FrameRecord) = task
+        .frames
+        .rank_get(task.frames.len().checked_sub(1)?, &heap.access)
+        .ok()??;
+    Some(frame.statement.resolve(&heap.access).ok()?.unit.clone())
 }
 
 /// What one invocation does.
@@ -438,6 +472,7 @@ fn main() -> Result<(), String> {
         };
         let functions = lowered.manifest.functions.len();
         let program = Program {
+            release: pages::RELEASE,
             document: Arc::new(lowered),
             library: prepared.clone(),
         };

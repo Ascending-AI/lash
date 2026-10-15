@@ -7,8 +7,7 @@ use std::sync::Arc;
 use lash_kernel_dialect::NamedLibrary;
 use lash_kernel_doc::{Datum, ErrorDatum, Float, FunctionId, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step,
-    Target,
+    Bounds, CellStart, End, Host, Machine, PreparedLibrary, Program, Step, Target,
 };
 
 // The previous definitions are an independent oracle and exact old pins.
@@ -125,6 +124,7 @@ fn program(kernels: &Kernels, id: FunctionId) -> Program {
     document.manifest.functions =
         lash_kernel_check::requirements(&document, kernels.registry.as_ref()).functions;
     Program {
+        release: super::pages::RELEASE,
         document: Arc::new(document),
         library: kernels.prepared.clone(),
     }
@@ -159,14 +159,20 @@ struct Ran {
 }
 
 fn run(program: &Program, left: &Datum, right: &Datum, relay: bool) -> Ran {
-    let mut machine = KernelMachine::start(
+    let source = super::pages::Source::default();
+    let mut machine = super::pages::with_source(
         program.clone(),
         BOUNDS,
-        Start {
+        CellStart {
             target: Target::Entry(Name::new("probe")),
             args: vec![left.clone(), right.clone()],
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
+        lash_kernel_vm::Layout::default(),
+        &source,
     )
     .unwrap();
     loop {
@@ -175,8 +181,13 @@ fn run(program: &Program, left: &Datum, right: &Datum, relay: bool) -> Ran {
             .unwrap()
         {
             Step::Slice => {
-                let state = machine.export().unwrap();
-                machine = KernelMachine::import(program.clone(), BOUNDS, state).unwrap();
+                super::pages::reopen(
+                    &mut machine,
+                    program,
+                    BOUNDS,
+                    &source,
+                    lash_kernel_vm::Layout::default(),
+                );
             }
             Step::Ended(end) => {
                 assert!(

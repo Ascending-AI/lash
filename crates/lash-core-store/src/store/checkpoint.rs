@@ -66,8 +66,8 @@ pub struct SessionCheckpoint {
     /// A key absent here is deleted.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
-    /// The session's protocol execution state: a SessionExecution root the
-    /// manifest names as a typed child (FIG-5887 §3), or none.
+    /// The session's protocol execution state: the session descriptor page
+    /// the manifest names as a typed child (ADR 0145 §9), or none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_ref: Option<BlobRef>,
 }
@@ -459,7 +459,8 @@ pub struct HydratedSessionCheckpoint {
     pub execution: Option<CheckpointExecution>,
 }
 
-/// A session checkpoint's SessionExecution graph (FIG-5887 §3, §6).
+/// A session checkpoint's execution state: its descriptor page and the
+/// heap pages it stages (ADR 0145 §9).
 ///
 /// Committed, `nodes` are the nodes the root needs that the store may not
 /// hold yet: a store installs them with the manifest, and refuses the

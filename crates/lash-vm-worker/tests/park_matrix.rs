@@ -44,6 +44,7 @@ use lash_core_execution::runtime::actor::round::{
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
+use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_core_store::tool_run::{CompletionSource, MaterialOwner, MaterialRole};
@@ -54,25 +55,28 @@ use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, FormatSet, MailTx, Release,
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
+use lash_kernel_doc::graph_tokens::encode_body;
+use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{
     Datum, EffectIdentity, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
     NumberToken, Site, SpawnIdentity, TaskIdentity, Timestamp, Unit, parse_document,
 };
-use lash_kernel_vm::{
-    Bindings, Bounds, EffectRequest, End, Host, Outcome, Program, Request, Start, Step, Target,
-};
+use lash_kernel_state::paged::{PageBody, PageKind, PageSource as _, SessionRoot};
+use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
 use lash_sansio::{SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::kernel::graph::{
     ArgumentProjection, Disposition, EffectMembership, FrozenRequest, Projections,
 };
+use lash_vm_broker::kernel::pages::{PageLimits, ParentSeal, SharedPages, SpoolRoot};
 use lash_vm_broker::kernel::{
     AdmitAs, DrivenMachine as _, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, EndSave,
-    KernelBroker, KernelCeilings, KernelEffects, KernelEnd, Machines as _, ParkSave, ParkedState,
-    SessionGraph, Settled, datum_to_json,
+    KernelBroker, KernelCeilings, KernelEffects, KernelEnd, MachineStep, Machines as _, PagePlan,
+    ParkSave, ParkedState, Settled, datum_to_json,
 };
 use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,
 };
+use lash_vm_client::RunStart;
 use tokio_util::sync::CancellationToken;
 
 #[path = "support/park_store.rs"]
@@ -139,6 +143,7 @@ main {{
 "#
     );
     Program {
+        release: PageId([0; 32]),
         document: Arc::new(parse_document(&text).expect("a valid kernel fan-out document")),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     }
@@ -155,12 +160,31 @@ fn bounds() -> Bounds {
     }
 }
 
-fn start() -> Start {
-    Start {
+fn start() -> RunStart {
+    RunStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        modes: lash_kernel_vm::EffectModes::recorded(),
+        host: Vec::new(),
+        save: None,
     }
+}
+
+/// How the law's activations stage pages: each its own spool under this
+/// process's staging directory.
+fn page_plan() -> PagePlan {
+    static SPOOLS: std::sync::OnceLock<(tempfile::TempDir, Arc<SpoolRoot>)> =
+        std::sync::OnceLock::new();
+    let (_, spools) = SPOOLS.get_or_init(|| {
+        let dir = tempfile::tempdir().expect("a staging directory");
+        let spools = SpoolRoot::open(dir.path(), 1 << 30).expect("the staging directory opens");
+        (dir, Arc::new(spools))
+    });
+    PagePlan::over(
+        Arc::clone(spools),
+        PageLimits::within(lash_vm_protocol::DecodeLimits::standard()),
+    )
 }
 
 /// The identity of worker `index`'s `perform`: the task the `index`th run
@@ -287,6 +311,8 @@ struct Body {
 #[derive(Default)]
 struct Shared {
     backend: Mutex<Option<Backend>>,
+    /// The deployment's virtual clock, which a machine's call holds.
+    clock: Mutex<Option<Arc<SimClock>>>,
     bodies: Mutex<Vec<Body>>,
     tokens: AtomicUsize,
     /// Every admission the parent drafted: the effect's identity, its call
@@ -306,6 +332,21 @@ impl Shared {
             .expect("backend")
             .clone()
             .expect("the database opened first")
+    }
+
+    /// The run's machines, holding the virtual clock across each call.
+    fn machines(&self, program: &Program) -> Result<InProcess<NoReads>, String> {
+        let clock = self
+            .clock
+            .lock()
+            .expect("clock")
+            .clone()
+            .expect("the database opened first");
+        Ok(
+            InProcess::new(program.clone(), DIALECT, bounds(), start(), NoReads)
+                .map_err(|error| error.to_string())?
+                .with_hold(Arc::new(move || Box::new(clock.hold()))),
+        )
     }
 
     fn violation(&self, violation: String) {
@@ -334,6 +375,7 @@ struct ParkScenario {
 #[async_trait::async_trait]
 impl Scenario for ParkScenario {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.shared.clock.lock().expect("clock") = Some(Arc::clone(&clock));
         let (stores, durable) = park_store::open(self.tier, clock, &self.keep).await;
         *self.shared.backend.lock().expect("backend") = Some(Backend::for_testing(stores));
         durable
@@ -530,6 +572,7 @@ impl Activation for ParkActivation {
             store: Arc::clone(&store),
         };
         let identities = identities();
+        let plan = page_plan();
         let broker = KernelBroker {
             store: &store,
             effects: &host,
@@ -539,10 +582,12 @@ impl Activation for ParkActivation {
                 join_members: 16,
             },
             slice: u64::MAX,
+            pages: &plan,
         };
         for _ in 0..8 {
             if let Drive::TwoOrders = self.drive
-                && let Err(why) = two_orders(&self.shared, &store, &host, &self.program).await
+                && let Err(why) =
+                    Box::pin(two_orders(&self.shared, &broker, &host, &self.program)).await
             {
                 self.stop(&why);
                 if lost(&owned).await {
@@ -550,25 +595,29 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            let machines =
-                InProcess::new(self.program.clone(), DIALECT, bounds(), start(), NoReads)
-                    .expect("the document has an identity");
-            let run = broker.run(&machines, &CancellationToken::new()).await;
+            let machines = self
+                .shared
+                .machines(&self.program)
+                .expect("the document has an identity");
+            let run = Box::pin(broker.run(&machines, &CancellationToken::new())).await;
             match run {
                 Ok(KernelEnd::Ended {
                     end: End::Finished(finished),
                     owed,
+                    pages,
                 }) => {
                     let result = finished.result.clone();
-                    // A run that parked commits its end over its last root.
-                    if let Some(ledger) = owed
+                    // A run that parked commits its end over its last root,
+                    // the session it carries published with it.
+                    if let (Some(ledger), Some(pages)) = (owed, pages)
                         && let Err(failure) = store
                             .commit_run_end(
                                 EndSave {
                                     document: machines.document(),
                                     ledger: *ledger,
+                                    session: law_session(&pages, finished.carry.as_ref()).await,
                                     end: End::Finished(finished),
-                                    session: law_session(),
+                                    pages: &pages,
                                     with: Vec::new(),
                                 },
                                 &host,
@@ -611,10 +660,11 @@ impl Activation for ParkActivation {
 /// on from it.
 async fn two_orders(
     shared: &Shared,
-    store: &DurableSnapshotStore,
+    broker: &KernelBroker<'_>,
     host: &LawHost,
     program: &Program,
 ) -> Result<(), String> {
+    let store = broker.store;
     let refused = |error: &dyn std::fmt::Display| error.to_string();
     if store
         .latest_root()
@@ -626,24 +676,28 @@ async fn two_orders(
         // committed, and the broker resumes from it.
         return Ok(());
     }
-    let machines = InProcess::new(program.clone(), DIALECT, bounds(), start(), NoReads)
-        .map_err(|error| refused(&error))?;
+    let machines = shared.machines(program)?;
     let document = machines.document();
     let releases = machines.releases().map_err(|error| refused(&error))?;
-    let binding = lash_vm_broker::kernel::graph::owner_binding(&exec());
-    let mut machine = machines
-        .start(&binding)
+    let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec())
+        .map_err(|error| refused(&error))?;
+    let first = broker
+        .activation(None, binding, &machines)
         .await
         .map_err(|error| refused(&error))?;
-    let Step::Parked(park) = machine
+    let mut machine = machines
+        .start(binding, first.pages.clone())
+        .await
+        .map_err(|error| refused(&error))?;
+    let MachineStep::Parked(park) = machine
         .run(u64::MAX, false)
         .await
         .map_err(|error| refused(&error))?
     else {
         return Err("the run parks first".into());
     };
-    let state = machine
-        .export(&binding)
+    let state = broker
+        .sealed(&mut machine, &first, binding, &document)
         .await
         .map_err(|error| refused(&error))?;
     let committed = store
@@ -651,6 +705,7 @@ async fn two_orders(
             ParkSave {
                 document,
                 state: state.clone(),
+                pages: &first.pages,
                 releases,
                 ledger: EffectLedger::new(),
                 admit: admissions(host, 0, park.requests).await?,
@@ -660,10 +715,12 @@ async fn two_orders(
         )
         .await
         .map_err(|error| refused(&error))?;
+    broker.end_activation(first).await;
     let saved_ledger = committed.ledger;
     let parked_state = ParkedState {
-        whole: state,
-        document: document.to_string(),
+        exec_root: committed.root,
+        root: state.root,
+        header: state.header,
         admissions: store
             .admitted_waits(&saved_ledger)
             .map_err(|error| refused(&error))?,
@@ -710,8 +767,12 @@ async fn two_orders(
     }
     let mut parked = Vec::new();
     for order in [[0_usize, 1, 2], [2, 1, 0]] {
+        let activation = broker
+            .activation(Some(&parked_state), binding, &machines)
+            .await
+            .map_err(|error| refused(&error))?;
         let mut machine = machines
-            .resume(&parked_state, &binding)
+            .resume(&parked_state, binding, activation.pages.clone())
             .await
             .map_err(|error| refused(&error))?;
         let mut ledger = saved_ledger.clone();
@@ -724,13 +785,13 @@ async fn two_orders(
             ledger.consume(&outcome.identity);
         }
         match machine.run(u64::MAX, false).await {
-            Ok(Step::Parked(park)) => parked.push((machine, ledger, park)),
+            Ok(MachineStep::Parked(park)) => parked.push((machine, activation, ledger, park)),
             other => shared.violation(format!(
                 "delivery: after order {order:?} the machine did not park: {other:?}"
             )),
         }
     }
-    let [(_, _, forward), (_, _, reversed)] = &parked[..] else {
+    let [(_, _, _, forward), (_, _, _, reversed)] = &parked[..] else {
         return Err("both delivery orders park".into());
     };
     if forward != reversed {
@@ -740,11 +801,11 @@ async fn two_orders(
     }
     // The reversed order's park commits: its state consumed all three
     // outcomes, and the broker resumes from it.
-    let Some((mut machine, ledger, park)) = parked.pop() else {
+    let Some((mut machine, activation, ledger, park)) = parked.pop() else {
         return Err("both delivery orders park".into());
     };
-    let state = machine
-        .export(&binding)
+    let state = broker
+        .sealed(&mut machine, &activation, binding, &document)
         .await
         .map_err(|error| refused(&error))?;
     store
@@ -752,6 +813,7 @@ async fn two_orders(
             ParkSave {
                 document,
                 state,
+                pages: &activation.pages,
                 releases,
                 admit: admissions(host, ledger.next_park(), park.requests).await?,
                 ledger,
@@ -793,7 +855,7 @@ async fn admissions(
         };
         let call = identities.child_call_id(park, index as u64);
         let draft = host
-            .admit(&request, call, &[], &[])
+            .admit(&request, call, 0, 0)
             .await
             .map_err(|fault| fault.to_string())?
             .map_err(|refusal| refusal.message)?;
@@ -919,14 +981,24 @@ impl Projections for LawHost {
     }
 }
 
-/// The session state the law's cell leaves: one bare SessionExecution.
-fn law_session() -> SessionGraph {
-    let lash_core_execution::plugin::ExecutionGraphCapture::Replace { root, nodes } =
-        lash_core_execution::testing::store_fixtures::execution_graph("park-law")
-    else {
-        unreachable!("the fixture stages a root")
-    };
-    SessionGraph { root, nodes }
+/// The session the law's cell leaves: a descriptor over its carry, sealed
+/// into the activation's spool beside the pages the run staged.
+async fn law_session(pages: &SharedPages, carry: Option<&SessionRoot>) -> NodeId {
+    let carry = carry.expect("a finished cell carries its session");
+    let mut children = vec![carry.heap];
+    children.extend(carry.bindings.page());
+    children.extend(carry.functions.page());
+    children.sort_by_key(|page| page.id);
+    children.dedup_by_key(|page| page.id);
+    let mut service = pages.lock().await;
+    let page = ParentSeal(service.spool())
+        .seal(PageBody {
+            kind: PageKind::SESSION_ROOT,
+            tokens: encode_body(carry),
+            children,
+        })
+        .expect("the descriptor seals");
+    NodeId(page.id.0)
 }
 
 #[async_trait::async_trait]
@@ -935,8 +1007,8 @@ impl KernelEffects for LawHost {
         &self,
         request: &EffectRequest,
         call: ToolCallId,
-        _outstanding: &[lash_kernel_doc::TaskIdentity],
-        _live: &[lash_kernel_doc::TaskIdentity],
+        _outstanding: u64,
+        _live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
         let now = self
             .store

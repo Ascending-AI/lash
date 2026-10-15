@@ -180,7 +180,19 @@ impl World {
             .expect("the resolution answers")
     }
 
+    /// A collection: the page retirement drained, then the host's.
     async fn collect(&self) {
+        use lash_core::durable_port::domain::pages::{PageStore as _, RetirementBudget};
+        let store = self.stores.durable_store();
+        loop {
+            let step = store
+                .retire_step(RetirementBudget { nodes: 1024 })
+                .await
+                .expect("a retirement step completes");
+            if step.holds_advanced == 0 && step.nodes_deleted == 0 {
+                break;
+            }
+        }
         self.core
             .store_factory
             .gc_unreachable()

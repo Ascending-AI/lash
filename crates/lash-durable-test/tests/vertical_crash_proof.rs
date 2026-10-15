@@ -481,6 +481,10 @@ struct V0 {
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+    /// Every page a candidate published and every node a commit staged:
+    /// where the working-state law reads the committed execution's paged
+    /// texts.
+    published: Arc<Mutex<Published>>,
 }
 
 impl V0 {
@@ -498,6 +502,7 @@ impl V0 {
             clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
+            published: Arc::default(),
         }
     }
 
@@ -573,6 +578,15 @@ impl Scenario for V0 {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        let published = Arc::clone(&self.published);
+        nodes.script().observe_candidates(Arc::new(move |_, pages| {
+            published.lock_recover().insert(pages);
+        }));
+        let published = Arc::clone(&self.published);
+        nodes.script().observe_commits(Arc::new(move |_, tx| {
+            let staged: Vec<_> = tx.graph().values().cloned().collect();
+            published.lock_recover().insert(&staged);
+        }));
         self.send().await?;
         // A starts and claims first, B once A is settled: on a database that
         // runs the two claims concurrently, either could win a race, and
@@ -616,6 +630,7 @@ impl V0 {
             clock: Mutex::new(self.clock.lock_recover().clone()),
             core: Mutex::default(),
             keep: Mutex::default(),
+            published: Arc::clone(&self.published),
         }
     }
 
@@ -912,12 +927,20 @@ impl V0 {
             ));
             return violations;
         };
+        // The heap pages its texts out of its root: they are read through
+        // the pages the committed nodes reach.
+        let pages = self.published.lock_recover().reached(&execution.nodes);
         let holds = |needle: &str| {
-            execution.nodes.values().any(|node| {
-                node.bytes
-                    .windows(needle.len())
-                    .any(|window| window == needle.as_bytes())
-            })
+            execution
+                .nodes
+                .values()
+                .map(|node| &node.bytes)
+                .chain(&pages)
+                .any(|bytes| {
+                    bytes
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes())
+                })
         };
         let kept: &[&str] = match second {
             Second::Succeeds => &["carried_text", "twice_of", "second_total"],
@@ -935,7 +958,22 @@ impl V0 {
             ));
         }
         if !holds(&carried) {
-            violations.push("PC-WORKING: the committed execution lost A's text".to_owned());
+            let published = self.published.lock_recover();
+            let anywhere = published
+                .0
+                .values()
+                .filter(|bytes| {
+                    bytes
+                        .windows(carried.len())
+                        .any(|window| window == carried.as_bytes())
+                })
+                .count();
+            violations.push(format!(
+                "PC-WORKING: the committed execution lost A's text: its {} nodes reach {} of {} published pages, {anywhere} of which hold it",
+                execution.nodes.len(),
+                pages.len(),
+                published.0.len(),
+            ));
         }
         violations
     }
@@ -1571,12 +1609,116 @@ async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_
     }
 }
 
-/// Bytes actually staged on each park, including repeated node IDs. A
-/// content address deduplicates storage, not transmission to the store.
+/// The heap pages candidates published, by identity: where a law reads
+/// back a text the heap paged out of its root.
+#[derive(Clone, Debug, Default)]
+struct Published(BTreeMap<lash_core_store::checkpoint_graph::NodeId, Arc<[u8]>>);
+
+impl lash_core_store::checkpoint_graph::NodeSource for Published {
+    fn fetch(
+        &self,
+        id: &lash_core_store::checkpoint_graph::NodeId,
+    ) -> Option<lash_core_store::checkpoint_graph::StoredNode<'_>> {
+        self.0
+            .get(id)
+            .map(|bytes| lash_core_store::checkpoint_graph::StoredNode {
+                encoding: lash_core_store::checkpoint_graph::BlobEncoding::Graph,
+                bytes,
+            })
+    }
+}
+
+impl Published {
+    fn insert(&mut self, nodes: &[lash_core_store::checkpoint_graph::EncodedNode]) {
+        for node in nodes {
+            self.0.insert(node.id, Arc::clone(&node.bytes));
+        }
+    }
+
+    /// The text the payload tree at `page` spells, when `page` is a
+    /// published text payload page.
+    fn text(&self, page: lash_core_store::checkpoint_graph::NodeId) -> Option<String> {
+        use lash_core_store::checkpoint_graph::{
+            DecodeLimits, GraphDecoder, NodeId, TokenReader, parse_envelope,
+        };
+        use lash_kernel_state::paged::PageKind;
+        let kind = parse_envelope(self.0.get(&page)?, Some(page)).ok()?.kind;
+        let body = GraphDecoder::new(self, DecodeLimits::within_total(u64::MAX))
+            .logical_body(page, kind)
+            .ok()?;
+        let mut reader = TokenReader::new(&body);
+        if kind.0 == PageKind::PAYLOAD_LEAF.0 {
+            reader.expect_struct(3).ok()?;
+            if !reader.bool().ok()? {
+                return None;
+            }
+            reader.skip_tree().ok()?;
+            return reader.text().ok().map(str::to_owned);
+        }
+        if kind.0 != PageKind::PAYLOAD_INDEX.0 {
+            return None;
+        }
+        let mut text = String::new();
+        for _ in 0..reader.seq().ok()? {
+            reader.expect_struct(2).ok()?;
+            reader.skip_tree().ok()?;
+            text.push_str(&self.text(NodeId(reader.child().ok()?.0))?);
+        }
+        Some(text)
+    }
+
+    /// The published pages `nodes` reach, through pages: a hydrated node
+    /// that is a heap page is read as its published page.
+    fn reached(
+        &self,
+        nodes: &BTreeMap<
+            lash_core_store::checkpoint_graph::NodeId,
+            lash_core_store::checkpoint_graph::EncodedNode,
+        >,
+    ) -> Vec<Arc<[u8]>> {
+        use lash_core_store::checkpoint_graph::parse_envelope;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut next: Vec<_> = nodes
+            .values()
+            .filter_map(|node| parse_envelope(&node.bytes, Some(node.id)).ok())
+            .flat_map(|envelope| envelope.children.iter().collect::<Vec<_>>())
+            .chain(nodes.keys().copied())
+            .collect();
+        let mut reached = Vec::new();
+        while let Some(id) = next.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(bytes) = self.0.get(&id) {
+                if let Ok(envelope) = parse_envelope(bytes, Some(id)) {
+                    next.extend(envelope.children.iter());
+                }
+                reached.push(Arc::clone(bytes));
+            }
+        }
+        reached
+    }
+}
+
+/// Bytes actually staged on each park, including repeated node IDs: the
+/// nodes its transaction stages and the fresh pages its candidate
+/// publishes. A content address deduplicates storage, not transmission to
+/// the store.
 struct Transmissions {
     expected: std::collections::BTreeSet<String>,
-    parks: Vec<usize>,
-    large: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<CommitLabel>>,
+    /// Each park's commit number and bytes.
+    parks: Vec<(usize, usize)>,
+    /// The cell's literal text, a text leaf of its program: its commits.
+    literal: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<(CommitLabel, usize)>>,
+    /// Each large text the heap paged, by its payload tree's root page:
+    /// its commits, label and commit number.
+    large: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<(CommitLabel, usize)>>,
+    /// Each payload page's commits: a large text's pages, transmitted once.
+    payload: BTreeMap<lash_core_store::checkpoint_graph::NodeId, Vec<usize>>,
+    /// The fresh pages of the candidate whose owner commit is observed next.
+    pending: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
+    published: Published,
+    commits: usize,
 }
 
 impl Transmissions {
@@ -1589,29 +1731,64 @@ impl Transmissions {
         Self {
             expected,
             parks: Vec::new(),
+            literal: BTreeMap::new(),
             large: BTreeMap::new(),
+            payload: BTreeMap::new(),
+            pending: Vec::new(),
+            published: Published::default(),
+            commits: 0,
         }
     }
 
+    fn observe_candidate(&mut self, nodes: &[lash_core_store::checkpoint_graph::EncodedNode]) {
+        self.published.insert(nodes);
+        self.pending.extend_from_slice(nodes);
+    }
+
     fn observe(&mut self, label: CommitLabel, tx: &lash_durable::ActorTx) {
-        let bytes = tx.graph().values().map(|node| node.bytes.len()).sum();
+        use lash_core_store::checkpoint_graph::{NodeKind, TokenReader, parse_envelope};
+        self.commits += 1;
+        let commit = self.commits;
+        let pages = std::mem::take(&mut self.pending);
+        let bytes = tx
+            .graph()
+            .values()
+            .map(|node| node.bytes.len())
+            .sum::<usize>()
+            + pages.iter().map(|node| node.bytes.len()).sum::<usize>();
         for (id, node) in tx.graph() {
             if node.bytes.len() >= PAD {
-                use lash_core_store::checkpoint_graph::{NodeKind, TokenReader, parse_envelope};
                 let envelope = parse_envelope(&node.bytes, Some(*id)).expect("a staged envelope");
                 if envelope.kind == NodeKind::TEXT_LEAF {
                     let mut reader = TokenReader::new(envelope.body);
                     let text = reader.text().expect("a text leaf");
                     if self.expected.contains(text) {
-                        self.large.entry(*id).or_default().push(label);
+                        self.literal.entry(*id).or_default().push((label, commit));
                     }
                 }
+            }
+        }
+        // A paged large text is its payload tree's root page.
+        for page in &pages {
+            let kind = parse_envelope(&page.bytes, Some(page.id)).map(|envelope| envelope.kind.0);
+            if kind.is_ok_and(|kind| {
+                kind == lash_kernel_state::paged::PageKind::PAYLOAD_LEAF.0
+                    || kind == lash_kernel_state::paged::PageKind::PAYLOAD_INDEX.0
+            }) {
+                self.payload.entry(page.id).or_default().push(commit);
+            }
+            if self
+                .published
+                .text(page.id)
+                .is_some_and(|text| self.expected.contains(&text))
+            {
+                self.large.entry(page.id).or_default().push((label, commit));
             }
         }
         if label == CommitLabel::CELL_SNAPSHOT_ADMIT
             || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
         {
-            self.parks.push(bytes);
+            self.parks.push((commit, bytes));
         }
     }
 }
@@ -1632,6 +1809,10 @@ async fn large_values_install_once(pad: Pad) {
     script.observe_commits({
         let installs = Arc::clone(&installs);
         Arc::new(move |label, tx| installs.lock_recover().observe(label, tx))
+    });
+    script.observe_candidates({
+        let installs = Arc::clone(&installs);
+        Arc::new(move |_, pages| installs.lock_recover().observe_candidate(pages))
     });
     let nodes = SimNodes::new(
         Arc::clone(&database),
@@ -1661,21 +1842,39 @@ async fn large_values_install_once(pad: Pad) {
     }
     nodes.quiesce().await;
 
-    let (parks, large) = {
+    let (parks, literal, large, payload) = {
         let sent = installs.lock_recover();
-        (sent.parks.clone(), sent.large.clone())
+        (
+            sent.parks.clone(),
+            sent.literal.clone(),
+            sent.large.clone(),
+            sent.payload.clone(),
+        )
     };
-    // Fresh retains both the original pad and each pad+i, including the
-    // last one captured at the cell's end after its final await.
-    let expected_large = if pad == Pad::Repeated { 1 } else { AWAITS + 1 };
+    // The cell's source holds the pad once; the heap pages each text the
+    // cell keeps: the pad itself, or each pad+i, including the last one
+    // captured at the cell's end after its final await.
+    assert_eq!(
+        literal.len(),
+        1,
+        "{pad:?}: the cell's program stages its literal text: {literal:?}"
+    );
+    let expected_large = if pad == Pad::Repeated { 1 } else { AWAITS };
     assert_eq!(
         large.len(),
         expected_large,
-        "{pad:?}: the fixture stages its known large texts: {large:?}"
+        "{pad:?}: the heap pages its known large texts: {large:?}"
     );
     assert!(
-        large.values().all(|labels| labels.len() == 1),
-        "{pad:?}: each large text is transmitted once, including non-park commits: {large:?}"
+        literal
+            .values()
+            .chain(large.values())
+            .all(|commits| commits.len() == 1),
+        "{pad:?}: each large text is transmitted once, including non-park commits: {literal:?} {large:?}"
+    );
+    assert!(
+        payload.values().all(|commits| commits.len() == 1),
+        "{pad:?}: each page of a paged text is transmitted once: {payload:?}"
     );
     assert_eq!(
         parks.len(),
@@ -1683,16 +1882,19 @@ async fn large_values_install_once(pad: Pad) {
         "{pad:?}: one park per await: {parks:?}"
     );
     assert!(
-        parks[0] >= PAD,
+        parks[0].1 >= PAD,
         "{pad:?}: the first park installs the large text: {parks:?}"
     );
-    // A later park installs the kernel's whole structure and its new
-    // admission, plus, for a fresh text, that one text.
+    // A later park installs its new admission, the host's summary and the
+    // heap pages the await dirtied, each up to a leaf's target size, plus,
+    // for a fresh text, that one text: the pages the earlier texts do not
+    // share. It stays under one large text, so it never holds an earlier
+    // park's large text again.
     let bound = match pad {
-        Pad::Repeated => PAD / 2,
+        Pad::Repeated => PAD,
         Pad::Fresh => PAD + PAD / 2,
     };
-    for (index, bytes) in parks.iter().enumerate().skip(1) {
+    for (index, (commit, bytes)) in parks.iter().enumerate().skip(1) {
         assert!(
             *bytes < bound,
             "{pad:?}: park {} installs {bytes} bytes, not under {bound}: an earlier park's large text again: {parks:?}",
@@ -1700,8 +1902,10 @@ async fn large_values_install_once(pad: Pad) {
         );
         if pad == Pad::Fresh {
             assert!(
-                *bytes >= PAD,
-                "{pad:?}: park {} installs its fresh text: {parks:?}",
+                large
+                    .values()
+                    .any(|commits| commits.iter().any(|(_, at)| at == commit)),
+                "{pad:?}: park {} installs its fresh text: {parks:?} {large:?}",
                 index + 1
             );
         }
@@ -2062,23 +2266,46 @@ fn with_a_stale_continuation(
     root.format = u32::MAX;
 }
 
-/// The cell's root over a parked kernel state that states another kernel
-/// version than the one the root records: the root, its owner and its
-/// document are the image's.
+/// The cell's root over a parked checkpoint root that states another kernel
+/// version than the one the execution root records: the root, its owner and
+/// its document are the image's, and its pages are the image's own.
 fn with_bytes_of_another_kernel_version(
     graph: &lash_durable::domain::HydratedGraph,
     root: &mut lash_core_store::checkpoint_graph::bodies::ExecRoot,
     staging: &mut lash_core_store::checkpoint_graph::GraphStaging,
 ) {
-    use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
-    let mut whole: lash_kernel_state::KernelWhole =
-        GraphDecoder::new(graph, lash_durable::domain::graph::OWNER_READ_LIMITS)
-            .decode(root.state, NodeKind::KERNEL_WHOLE)
-            .expect("the image's cell stopped on a parked kernel run");
-    whole.kernel = root.format + 1;
-    root.state = staging
-        .encode_value(NodeKind::KERNEL_WHOLE, &whole)
-        .expect("the stale parked run encodes");
+    use lash_core_store::checkpoint_graph::node::{direct_logical, frame_direct};
+    use lash_core_store::checkpoint_graph::{
+        DecodeLimits, MAX_ROOT_BYTES, NodeKind, TokenCodec as _, TokenReader, TokenWriter,
+        check_envelope,
+    };
+    let page = graph
+        .nodes
+        .get(&root.state)
+        .expect("the image's cell stopped on a parked kernel run");
+    let envelope = check_envelope(
+        &page.bytes,
+        root.state,
+        &DecodeLimits::within_total(u64::MAX),
+    )
+    .expect("the parked checkpoint root frames");
+    let logical = direct_logical(&envelope, root.state).expect("its body is canonical");
+    let mut reader = TokenReader::new(&logical);
+    let mut header = lash_kernel_state::paged::CheckpointRoot::decode(&mut reader)
+        .expect("the image's checkpoint root decodes");
+    header.kernel = root.format + 1;
+    let mut body = TokenWriter::new();
+    header.encode(&mut body);
+    let stale = frame_direct(
+        NodeKind::CHECKPOINT_ROOT,
+        &body.into_bytes(),
+        MAX_ROOT_BYTES,
+    )
+    .expect("the stale checkpoint root frames");
+    root.state = stale.id;
+    staging
+        .adopt(stale)
+        .expect("the stale checkpoint root stages");
 }
 
 #[async_trait::async_trait]
@@ -2163,7 +2390,7 @@ async fn a_parked_run_whose_bytes_state_another_kernel_version_than_its_seal_is_
 {
     a_stale_cell_snapshot_is_refused(
         with_bytes_of_another_kernel_version,
-        "its state states kernel version",
+        "its checkpoint root states kernel version",
     )
     .await;
 }

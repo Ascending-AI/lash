@@ -4,17 +4,16 @@ mod bytes;
 mod classify;
 mod format;
 mod json;
-mod text;
-
 #[cfg(test)]
-mod tests;
+mod laws;
+mod text;
 
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    ErrorValue, Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, NativeHeap, Operand, Param,
-    RegistryError, Signature, Type, Value,
+    Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, KERNEL_VERSION,
+    Name, NativeCall, NativeError, NativeFunction, NativeHeap, Operand, Param, RegistryError,
+    Signature, Type, Value,
 };
 use num_traits::ToPrimitive;
 
@@ -116,7 +115,9 @@ fn definition(
 }
 
 fn raise(kind: &str, message: &str) -> NativeError {
-    NativeError::Raised(ErrorValue::new(kind, message))
+    NativeError::Raised(Arc::new(lash_kernel_doc::heap::ErrorRef::new(
+        kind, message,
+    )))
 }
 
 fn arg(args: &[Value], index: usize) -> Result<&Value, NativeError> {
@@ -124,21 +125,32 @@ fn arg(args: &[Value], index: usize) -> Result<&Value, NativeError> {
         .ok_or_else(|| raise("arity", "missing argument"))
 }
 
-fn text_arg(args: &[Value], index: usize) -> Result<&str, NativeError> {
+fn materialized_text(
+    args: &[Value],
+    index: usize,
+    heap: &mut dyn NativeHeap,
+) -> Result<Arc<str>, NativeError> {
+    match arg(args, index)? {
+        Value::Text(text) => match &text.body {
+            lash_kernel_doc::heap::Payload::Resident(text) => Ok(Arc::clone(text)),
+            _ => heap.materialize_text(text),
+        },
+        _ => Err(raise("type_error", "expected text")),
+    }
+}
+fn text_descriptor(
+    args: &[Value],
+    index: usize,
+) -> Result<&lash_kernel_doc::heap::TextRef, NativeError> {
     match arg(args, index)? {
         Value::Text(text) => Ok(text),
         _ => Err(raise("type_error", "expected text")),
     }
 }
-
-fn integer_arg(
+fn integer_value(
     args: &[Value],
     index: usize,
-) -> Result<std::borrow::Cow<'_, num_bigint::BigInt>, NativeError> {
-    Ok(integer_value(args, index)?.as_bigint())
-}
-
-fn integer_value(args: &[Value], index: usize) -> Result<&lash_kernel_doc::Integer, NativeError> {
+) -> Result<&lash_kernel_doc::heap::IntRef, NativeError> {
     match arg(args, index)? {
         Value::Int(integer) => Ok(integer),
         _ => Err(raise("type_error", "expected integer")),
@@ -146,7 +158,12 @@ fn integer_value(args: &[Value], index: usize) -> Result<&lash_kernel_doc::Integ
 }
 
 fn count_arg(args: &[Value], index: usize) -> Result<usize, NativeError> {
-    integer_value(args, index)?.to_usize().ok_or_else(|| {
+    let integer = integer_value(args, index)?;
+    let count = match integer {
+        lash_kernel_doc::heap::IntRef::Inline(i) => i.to_usize(),
+        _ => None,
+    };
+    count.ok_or_else(|| {
         raise(
             "number_range",
             "expected a nonnegative machine-sized integer",
@@ -182,7 +199,9 @@ fn room(bytes: usize) -> u64 {
 }
 
 fn int(value: impl Into<num_bigint::BigInt>) -> Value {
-    Value::Int(lash_kernel_doc::Integer::new(value))
+    Value::Int(lash_kernel_doc::heap::IntRef::Inline(
+        lash_kernel_doc::Integer::new(value),
+    ))
 }
 
 fn ordering(order: std::cmp::Ordering) -> Value {
@@ -195,10 +214,10 @@ fn ordering(order: std::cmp::Ordering) -> Value {
 
 fn sequence(call: &NativeCall<'_>, index: usize) -> Result<Vec<Value>, NativeError> {
     match arg(call.args, index)? {
-        Value::List(id) => (0..call.heap.len(*id))
+        Value::List(id) => (0..call.heap.len(*id)?)
             .map(|i| {
                 call.heap
-                    .list_get(*id, i)
+                    .list_get(*id, i)?
                     .ok_or_else(|| raise("type_error", "invalid list"))
             })
             .collect(),

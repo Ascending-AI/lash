@@ -31,7 +31,7 @@ impl CheckpointComponentKey {
 }
 
 /// Which capture of a session's execution state a graph capture is
-/// (FIG-5887 §6).
+/// (ADR 0145 §9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ExecutionGraphPurpose {
     /// The complete post-cell state a turn phase owns as its
@@ -42,17 +42,17 @@ pub enum ExecutionGraphPurpose {
     Final,
 }
 
-/// A capture of a session's execution state (FIG-5887 §4, §6): a complete
-/// SessionExecution root. Never a delta over an earlier root: the
-/// root owns every adopted binding and function, sharing immutable leaves
-/// and function bundles by reference.
+/// A capture of a session's execution state (ADR 0145 §9): its session
+/// descriptor page, which names the carried heap, binding and function
+/// roots. Never a delta over an earlier root: the descriptor names the
+/// complete state, and shares every unchanged heap page by reference.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionGraphCapture {
     /// The session holds no execution state.
     #[default]
     Clear,
     Replace {
-        /// A SessionExecution node.
+        /// The session descriptor page.
         root: crate::checkpoint_graph::NodeId,
         /// Nodes the root needs that no acknowledged root is known to have
         /// installed. A commit that finds a reference missing refuses, and
@@ -62,8 +62,9 @@ pub enum ExecutionGraphCapture {
     },
 }
 
-/// A session's execution state as a hydrated graph: the SessionExecution root
-/// and every node reachable from it.
+/// A session's execution state as a host graph read returns it: the
+/// descriptor page. A hydrate never descends into heap pages (ADR 0145
+/// §10); a binding's pages are read on demand under a root lease.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedExecutionGraph {
     pub root: crate::checkpoint_graph::NodeId,
