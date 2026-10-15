@@ -22,6 +22,9 @@ pub struct PagedHeap {
     next_family: u64,
     epoch: EditEpoch,
     pub(super) header: Option<PageRef>,
+    /// The accounting and population `header` records: a header sealed
+    /// before either changed is not this heap's (FIG-6318).
+    header_state: Option<(AccountingCertificate, DataOnlyCertificate)>,
     pub(super) accounting: AccountingCertificate,
     pub(super) population: DataOnlyCertificate,
     family_base: RefCell<Option<Box<dyn FamilyBase>>>,
@@ -32,6 +35,15 @@ pub struct PagedHeap {
     temporary: Vec<Value>,
     temporary_fresh: Vec<EntityId>,
     pub(super) reserved: u64,
+    /// Whether the installed task and join trees are the execution state's
+    /// current roots: a machine clears it once its state moves past what
+    /// it published, and no collection traces until it publishes again
+    /// (FIG-6318).
+    pub(super) roots_current: bool,
+    /// The bytes of the reservations a refinement owes since the roots
+    /// went stale: `Some` once one needed precision while no trace could
+    /// see the machine's holdings (FIG-6318).
+    pub(super) owed: Option<u64>,
 }
 /// The heap root a heap-header page holds: a keyed leaf of one current
 /// header record.
@@ -107,6 +119,7 @@ impl PagedHeap {
             next_family: root.next_family,
             epoch,
             header: Some(page),
+            header_state: Some((root.accounting, root.population)),
             accounting: root.accounting,
             population: root.population,
             family_base: RefCell::new(None),
@@ -116,6 +129,8 @@ impl PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            roots_current: true,
+            owed: None,
             reserved: 0,
         })
     }
@@ -151,6 +166,54 @@ impl PagedHeap {
     /// current membership has been proved by that reader.
     pub fn set_family_base(&mut self, base: Box<dyn FamilyBase>) {
         *self.family_base.borrow_mut() = Some(base);
+    }
+    /// The execution state moved past the roots last installed with
+    /// [`Self::set_execution_roots`]: until the next installation, the
+    /// refinement a reservation needs is deferred and any other trace of
+    /// them refused, so a machine that publishes lazily cannot have a live
+    /// value it has not published swept (FIG-6318).
+    pub fn execution_roots_moved(&mut self) {
+        self.roots_current = false;
+    }
+    /// Whether a refinement waits for the machine to publish its roots.
+    pub fn precision_owed(&self) -> bool {
+        self.owed.is_some()
+    }
+    /// Defers the refinement a reservation of `bytes` needs while the
+    /// installed roots are stale, granting it until the machine publishes:
+    /// a trace then could not see what the machine holds, and would free
+    /// it. `false` when the roots are current and the refinement runs now.
+    pub(super) fn defers_precision(&mut self, bytes: u64) -> bool {
+        if self.roots_current {
+            return false;
+        }
+        self.owed = Some(self.owed.unwrap_or(0).saturating_add(bytes));
+        true
+    }
+    /// Runs the refinement deferred while the roots were stale, now that
+    /// [`Self::set_execution_roots`] installed current ones: the verdict
+    /// the deferred reservations would have had, with what they allocated
+    /// counted (FIG-6318).
+    ///
+    /// # Errors
+    ///
+    /// [`HeapWriteError::Memory`] when what is live and still reserved
+    /// does not fit the bound; a fault reading the graph.
+    pub fn settle_precision(&mut self) -> Result<(), HeapWriteError> {
+        let Some(bytes) = self.owed.take() else {
+            return Ok(());
+        };
+        let mut census = self
+            .census
+            .take()
+            .ok_or_else(|| HeapFault::Malformed("an owed refinement has no census".into()))?;
+        let result = self.refine_installed(census.as_mut(), &[], bytes);
+        if self.accounting != census.certificate() {
+            self.accounting = census.certificate();
+            self.header = None;
+        }
+        self.census = Some(census);
+        result
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
         let before = self.accounting;
@@ -283,6 +346,7 @@ impl PagedHeap {
         &mut self,
         census: &mut dyn AllocationCensus,
         fresh: &[EntityId],
+        pending: u64,
     ) -> Result<(), HeapWriteError> {
         let registers = self.temporary.clone();
         let reserved = self.reserved;
@@ -298,7 +362,7 @@ impl PagedHeap {
                 reserved: LogicalBytes(reserved),
             },
             PendingReservation {
-                bytes: LogicalBytes(0),
+                bytes: LogicalBytes(pending),
                 overflowed: false,
             },
         ) {
@@ -318,12 +382,14 @@ impl PagedHeap {
     /// One exact refinement outside pressure: traces from the persistent
     /// roots and the installed statement roots, sweeps what it did not
     /// reach and makes U exact. Nothing is pending, so no verdict follows;
-    /// a heap with no census has nothing to refine.
-    pub(super) fn collect(&mut self) -> Result<(), HeapFault> {
+    /// a heap with no census has nothing to refine. Over roots the machine
+    /// has not published since they went stale, the trace is refused
+    /// (FIG-6318).
+    pub fn collect(&mut self) -> Result<(), HeapFault> {
         let Some(mut census) = self.census.take() else {
             return Ok(());
         };
-        let result = match self.refine_installed(census.as_mut(), &[]) {
+        let result = match self.refine_installed(census.as_mut(), &[], 0) {
             Ok(()) | Err(HeapWriteError::Memory) => Ok(()),
             Err(HeapWriteError::Fault(fault)) => Err(fault),
             Err(other) => Err(HeapFault::Malformed(format!("collection failed: {other}"))),
@@ -396,21 +462,19 @@ impl PagedHeap {
             self.directory
                 .write(entity_key(entity), head, &self.access)?;
             self.header = None;
-            match decision {
-                ReservationDecision::Granted(_) => {
-                    if before == 0 {
-                        census.added(LogicalBytes(after), 1).map_err(census_fault)?;
-                    } else {
-                        census
-                            .changed(LogicalBytes(before), LogicalBytes(after))
-                            .map_err(census_fault)?;
-                    }
-                    Ok(())
-                }
-                ReservationDecision::NeedsPrecision(_) => {
-                    self.refine_installed(&mut *census, &[entity])
-                }
+            if matches!(decision, ReservationDecision::NeedsPrecision(_))
+                && !self.defers_precision(0)
+            {
+                return self.refine_installed(&mut *census, &[entity], 0);
             }
+            if before == 0 {
+                census.added(LogicalBytes(after), 1).map_err(census_fault)?;
+            } else {
+                census
+                    .changed(LogicalBytes(before), LogicalBytes(after))
+                    .map_err(census_fault)?;
+            }
+            Ok(())
         })();
         self.accounting = census.certificate();
         self.census = Some(census);
@@ -646,6 +710,7 @@ impl SemanticHeap for PagedHeap {
             next_family: 1,
             epoch,
             header: None,
+            header_state: None,
             population: DataOnlyCertificate {
                 closure_entities: 0,
                 task_edges: 0,
@@ -663,6 +728,8 @@ impl SemanticHeap for PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            roots_current: true,
+            owed: None,
             reserved: 0,
         }
     }
@@ -680,6 +747,7 @@ impl SemanticHeap for PagedHeap {
             next_family: root.next_family,
             epoch,
             header: None,
+            header_state: None,
             accounting: root.accounting,
             population: root.population,
             family_base: RefCell::new(None),
@@ -689,6 +757,8 @@ impl SemanticHeap for PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            roots_current: true,
+            owed: None,
             reserved: 0,
         })
     }
@@ -963,6 +1033,11 @@ impl SemanticHeap for PagedHeap {
         };
         let result = match census.reserve(bytes) {
             ReservationDecision::Granted(_) => Ok(()),
+            ReservationDecision::NeedsPrecision(pending)
+                if self.defers_precision(pending.bytes.0) =>
+            {
+                Ok(())
+            }
             ReservationDecision::NeedsPrecision(pending) => {
                 match census.refine(self, transient, pending) {
                     Ok(RefinedDecision::Granted(_)) => Ok(()),
@@ -976,7 +1051,7 @@ impl SemanticHeap for PagedHeap {
         result
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
-        if self.header.is_some() {
+        if self.header.is_some() && self.header_state == Some((self.accounting, self.population)) {
             return Ok(Some(SealedHeap {
                 root: self.heap_root()?,
                 sealed_pages: 0,
@@ -1001,6 +1076,7 @@ impl SemanticHeap for PagedHeap {
             return Ok(None);
         }
         self.header = Some(self.access.seal(PageKind::KEYED_LEAF, tokens, children)?);
+        self.header_state = Some((root.accounting, root.population));
         self.epoch.0 = self
             .epoch
             .0

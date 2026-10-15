@@ -8,6 +8,8 @@ use std::cell::Cell;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Work {
     pub vm_steps: u64,
+    /// Publications of the run's execution roots to its heap (FIG-6318).
+    pub root_publishes: u64,
 }
 
 thread_local! {
@@ -30,6 +32,15 @@ pub(crate) fn step() {
     WORK.with(|work| {
         if let Some(mut counts) = work.get() {
             counts.vm_steps += 1;
+            work.set(Some(counts));
+        }
+    });
+}
+
+pub(crate) fn publish() {
+    WORK.with(|work| {
+        if let Some(mut counts) = work.get() {
+            counts.root_publishes += 1;
             work.set(Some(counts));
         }
     });

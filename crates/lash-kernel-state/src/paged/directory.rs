@@ -1059,6 +1059,9 @@ impl PagedHeap {
         pinned: &[Value],
         fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {
+        // The proposed roots are current: a precision check installing them
+        // traces them.
+        self.roots_current = true;
         let before = checked_sum(
             [self.tasks.cost(), self.joins.cost()]
                 .into_iter()
@@ -1141,6 +1144,10 @@ impl PagedHeap {
                     .changed(LogicalBytes(before), LogicalBytes(after))
                     .map_err(census_fault)
                     .map_err(HeapWriteError::from),
+                ReservationDecision::NeedsPrecision(_) if self.defers_precision(0) => census
+                    .changed(LogicalBytes(before), LogicalBytes(after))
+                    .map_err(census_fault)
+                    .map_err(HeapWriteError::from),
                 ReservationDecision::NeedsPrecision(_) => {
                     let registers = self.statement_roots().to_vec();
                     let fresh = self.fresh_roots().to_vec();
@@ -1210,6 +1217,13 @@ impl CensusGraph for PagedHeap {
         &mut self,
         visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
+        // Every collection traces from here: none may see execution roots
+        // the machine moved past without publishing (FIG-6318).
+        if !self.roots_current {
+            return Err(HeapFault::Malformed(
+                "a collection would trace execution roots the machine has not published".into(),
+            ));
+        }
         let binding =
             |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
                 match &binding.value {

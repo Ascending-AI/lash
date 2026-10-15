@@ -467,6 +467,10 @@ impl KernelMachine {
             ended: false,
             observer: None,
             ran: Vec::new(),
+            #[cfg(test)]
+            boundary: None,
+            #[cfg(test)]
+            boundaries: 0,
             save: None,
         })
     }
