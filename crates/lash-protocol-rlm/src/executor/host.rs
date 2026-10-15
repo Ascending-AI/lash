@@ -51,7 +51,7 @@ pub const TOOL_CALL_LIMIT: &str = "tool_call_limit";
 /// The error kind of a control call refused before its body ran. Its `data`
 /// is the typed cause ([`lash_core::ToolFailureCause`]): made from a task the
 /// cell spawned, made while a task is outstanding, or made after the cell's
-/// one control attempt was spent.
+/// one control attempt was spent, or finish must stand alone.
 pub const CONTROL_REFUSED: &str = "control_refused";
 /// The error kind of a tool call whose arguments JSON cannot carry.
 pub const TOOL_ARGUMENTS: &str = "tool_arguments";
@@ -192,6 +192,8 @@ impl CellHostLedgers {
 
 pub(super) struct CellHost<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
+    /// The running session's recorded placement rule, never a live default.
+    pub finish_placement: crate::FinishPlacement,
     /// The effects the cell was lowered against.
     pub boundary: HostBoundary,
     /// The grants the session's deferred resolutions recorded, for a tool
@@ -263,6 +265,9 @@ fn control_refused(
         lash_core::ToolFailureCause::ControlWithOutstandingTasks => format!(
             "`{effect}` ends the turn, and a task this cell started is still running or failed unobserved: await every task before calling it"
         ),
+        lash_core::ToolFailureCause::FinishNotAlone => {
+            "finish must be called on its own after the other calls return".to_owned()
+        }
         _ => format!("`{effect}` was refused: this cell already made its one turn-ending call"),
     };
     ErrorDatum {
@@ -462,22 +467,47 @@ impl KernelEffects for CellHost<'_> {
             )));
         }
         if control {
+            let ledgers = self.ledgers.lock_recover();
+            // Reads run outside the call ledger. The retained-output tool
+            // is presentation too; every other non-control admission counts,
+            // including process starts and calls that failed or settled.
+            let effecting_calls = ledgers
+                .calls
+                .iter()
+                .filter(|call| {
+                    !call.control(&self.boundary)
+                        && self.boundary.effect(&call.operation).is_some_and(|effect| {
+                            effect.tool.as_str() != crate::control_tools::READ_OUTPUT_TOOL_ID
+                        })
+                })
+                .count();
+            let finish = self
+                .boundary
+                .effect(&request.effect)
+                .is_some_and(|effect| effect.controls.finish_declaration().is_some());
             let cause = if request.identity.task != lash_kernel_doc::TaskIdentity::Main {
                 Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
             } else if !outstanding.is_empty() || !live.is_empty() {
                 Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
-            } else if self
-                .ledgers
-                .lock_recover()
+            } else if ledgers
                 .calls
                 .iter()
                 .any(|call| call.control(&self.boundary))
             {
                 Some(lash_core::ToolFailureCause::ControlAttemptSpent)
+            } else if finish
+                && self.finish_placement == crate::FinishPlacement::Alone
+                && effecting_calls > 0
+            {
+                Some(lash_core::ToolFailureCause::FinishNotAlone)
             } else {
                 None
             };
             if let Some(cause) = cause {
+                tracing::debug!(target: "lash::cell::control", effect = %request.effect,
+                    task = ?request.identity.task, ?outstanding, ?live,
+                    placement = ?self.finish_placement, effecting_calls, ?cause,
+                    "control admission refused");
                 return Ok(Err(control_refused(&request.effect, cause)));
             }
         }

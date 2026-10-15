@@ -802,7 +802,26 @@ async fn run_linked_cell(
         limit: ctx.max_tool_calls(),
         cell: ctx.engine_execution_id().unwrap_or("cell").to_owned(),
     });
+    let finish_placement = match ctx
+        .owner_config()
+        .decode::<crate::RlmRecordedConfig>(crate::RLM_PROTOCOL_PLUGIN_ID)
+    {
+        Ok(recorded) => recorded
+            .map(|recorded| recorded.behaviour.finish_placement)
+            .unwrap_or_default(),
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    format!("invalid recorded RLM session config: {error}"),
+                ),
+            );
+        }
+    };
     let host = CellHost {
+        finish_placement,
         entries,
         trace,
         sites: Mutex::new(open_sites),

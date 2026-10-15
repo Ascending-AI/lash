@@ -97,6 +97,9 @@ pub enum ToolFailureCause {
     /// The iteration's one control attempt is spent: an earlier control
     /// call was already admitted. The body did not run.
     ControlAttemptSpent,
+    /// The session requires finish to stand alone, and this cell already
+    /// admitted a non-control effecting call. The finish body did not run.
+    FinishNotAlone,
     /// A call beside this control call in its round failed or was
     /// cancelled, so the turn does not end on it. The body did not run.
     ControlSiblingFailed,

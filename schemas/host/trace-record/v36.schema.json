@@ -119,6 +119,19 @@
       "description": "A rule of a session's cells that a cell's program broke.",
       "oneOf": [
         {
+          "description": "Finish must stand alone, and the cell admitted a non-control\neffecting call before attempting it (FIG-6313).",
+          "properties": {
+            "kind": {
+              "const": "finish_not_alone",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The cell used a binding an earlier cell left that held a function or\na task: neither outlives the cell that created it, so the binding\nwas not carried.",
           "properties": {
             "binding": {

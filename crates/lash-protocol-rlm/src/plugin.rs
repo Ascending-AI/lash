@@ -20,8 +20,8 @@ pub(crate) const PROJECTED_ARGS: lash_core::plugin::HookKey =
     lash_core::hook_key!("projected-args");
 
 pub use config::{
-    RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
-    RlmRecordedBehaviour, UnsetBound, UnsetChannel,
+    FinishPlacement, RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig,
+    RlmProtocolPluginConfigBuilder, RlmRecordedBehaviour, UnsetBound, UnsetChannel,
 };
 pub use config_owner::{
     RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig,

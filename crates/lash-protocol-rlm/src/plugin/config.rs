@@ -1,5 +1,32 @@
 use super::{ExecutionBounds, InstructionBound, MemoryBound};
 
+/// Whether a finish may share a cell with effecting calls (FIG-6313).
+/// Set [`RlmProtocolPluginConfig::finish_placement`] before registering the
+/// protocol factory. The default is [`Self::Any`]. Session creation records
+/// the rule; reopen and replay keep it even under another deployment default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishPlacement {
+    /// A finish may follow effecting calls in the same cell.
+    #[default]
+    Any,
+    /// A finish requires a cell with no non-control effecting calls.
+    /// Tool calls and process starts count, even after they settle. Declared
+    /// reads, projection reads, prints, control calls and the built-in
+    /// retained-output reader do not. Values from earlier cells are allowed.
+    ///
+    /// A refused finish leaves completed calls in the cell's committed
+    /// ledger. The next model iteration receives their feedback (FIG-6293)
+    /// before it can finish in a later cell; the calls are not undone.
+    Alone,
+}
+
+impl FinishPlacement {
+    fn is_any(&self) -> bool {
+        *self == Self::Any
+    }
+}
+
 /// Prompt presentation. These choices are pinned with protocol behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -79,6 +106,9 @@ pub struct RlmProtocolPluginConfig {
     pub render: lash_rlm_types::RlmRenderPatch,
     #[serde(default)]
     pub presentation: RlmPresentationConfig,
+    /// The finish placement rule pinned at session creation.
+    #[serde(default, skip_serializing_if = "FinishPlacement::is_any")]
+    pub finish_placement: FinishPlacement,
     /// The discovery a new session records, if any.
     #[serde(skip)]
     pub discovery: Option<RlmDiscovery>,
@@ -129,6 +159,9 @@ pub struct RlmRecordedBehaviour {
     #[serde(deserialize_with = "deserialize_recorded_render")]
     pub render: lash_rlm_types::RlmRenderPatch,
     pub presentation: RlmPresentationConfig,
+    /// The finish placement rule pinned at session creation.
+    #[serde(default, skip_serializing_if = "FinishPlacement::is_any")]
+    pub finish_placement: FinishPlacement,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -194,6 +227,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             code_renderer: crate::render::CodeRendererSlot::default(),
             render: crate::render::ResolvedRlmRender::standard().as_patch(),
             presentation: RlmPresentationConfig::standard(),
+            finish_placement: FinishPlacement::Any,
             discovery: None,
             channel: self.channel,
             instruction_limit: self.instruction_limit,
@@ -247,6 +281,7 @@ impl RlmProtocolPluginConfig {
             render: crate::render::ResolvedRlmRender::resolve(&self.render, &Default::default())
                 .as_patch(),
             presentation: self.presentation,
+            finish_placement: self.finish_placement,
         }
     }
 
@@ -262,6 +297,7 @@ impl RlmProtocolPluginConfig {
         self.discovery = behaviour.discovery.clone();
         self.render = behaviour.render.clone();
         self.presentation = behaviour.presentation;
+        self.finish_placement = behaviour.finish_placement;
         self
     }
 }
