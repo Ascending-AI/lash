@@ -77,7 +77,8 @@ pub use engine::{
     AdmittedProcessIdentity, InspectedProcessDefinition, PerformedEffects, ProcessDocument,
     ProcessDocumentProvider, ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
+    ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
+    WeakProcessEngineRegistry,
 };
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,

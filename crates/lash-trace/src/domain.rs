@@ -2,11 +2,9 @@
 //! domain operations and of single provider attempts, and a decoded stream
 //! event.
 
-use lash_sansio::llm::types::StreamBlockEvent;
+use lash_sansio::llm::types::{LlmUsage, StreamBlockEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use lash_sansio::llm::types::LlmUsage;
 
 use crate::TraceFailureCode;
 
@@ -30,11 +28,12 @@ pub struct TraceAttemptObservation {
 }
 
 /// The durable domain operation a [`TraceEvent::DomainCompleted`] ends.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum TraceDomainSubject {
-    Process {},
+    Process { kind: String, label: Option<String> },
+    Workflow { kind: String, name: Option<String> },
     ToolIntent { kind: lash_sansio::ToolIntentKind },
 }
 
@@ -56,11 +55,6 @@ pub struct TraceDomainCompletion {
     /// start.
     pub started_at_ms: u64,
     pub status: TraceDomainStatus,
-    /// The provider the operation's work was served by, when it has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,8 +62,6 @@ pub struct TraceDomainCompletion {
     /// The typed failure code of a failed operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<TraceFailureCode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<LlmUsage>,
 }
 
 impl TraceDomainCompletion {
@@ -78,12 +70,9 @@ impl TraceDomainCompletion {
             subject,
             started_at_ms,
             status,
-            provider: None,
-            model: None,
             tool_name: None,
             tool_call_id: None,
             error_code: None,
-            usage: None,
         }
     }
 }
@@ -133,4 +122,52 @@ pub enum TraceRuntimeStreamPayload {
     },
     /// Usage the provider reported mid-stream.
     Usage { usage: LlmUsage },
+}
+
+/// Operational request facts retained until a logical model call closes.
+/// These contain no captured prompt, tool schema or host telemetry label.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceModelCall {
+    pub provider: Option<String>,
+    pub request_model: String,
+    pub stream: bool,
+    pub reasoning: Option<String>,
+    pub output_type: Option<String>,
+    pub generation: lash_sansio::llm::types::GenerationOptions,
+}
+
+/// One real provider attempt's trace identity and provider-seam clocks.
+/// Execution-local: none of these facts enters the stored execution ledger.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceModelAttemptSpan {
+    pub span_id: crate::W3cSpanId,
+    pub started_at_ms: u64,
+    pub ended_at_ms: u64,
+    pub provider: String,
+}
+
+/// The execution attempt's facts, with trace metadata only for an attempt
+/// that reached provider dispatch. A synthetic cut between attempts has no span.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceModelAttempt {
+    #[serde(flatten)]
+    pub attempt: lash_sansio::llm::types::AttemptRecord,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<TraceModelAttemptSpan>,
+}
+
+impl From<lash_sansio::llm::types::AttemptRecord> for TraceModelAttempt {
+    fn from(attempt: lash_sansio::llm::types::AttemptRecord) -> Self {
+        Self {
+            attempt,
+            span: None,
+        }
+    }
+}
+
+impl std::ops::Deref for TraceModelAttempt {
+    type Target = lash_sansio::llm::types::AttemptRecord;
+    fn deref(&self) -> &Self::Target {
+        &self.attempt
+    }
 }

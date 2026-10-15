@@ -721,6 +721,9 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// no part of the start, like [`Self::trace`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trace_nodes: bool,
+    /// The engine's taxonomy at creation. A terminal reads this retained
+    /// classification, including on a node that does not serve the engine.
+    pub trace_class: super::ProcessTraceClass,
     /// The claim requirements the process's actor is created with: one
     /// `component:<id>@fmt<format>` for every component its environment
     /// names (FIG-6034 §6.2). Start staging derives them from the held
@@ -747,6 +750,7 @@ impl<I> Clone for ProcessRegistration<I> {
             consumer_hold: self.consumer_hold.clone(),
             trace: self.trace.clone(),
             trace_nodes: self.trace_nodes,
+            trace_class: self.trace_class,
             requires: self.requires.clone(),
         }
     }
@@ -870,6 +874,7 @@ impl<I> ProcessRegistration<I> {
             consumer_hold: None,
             trace: lash_trace::TraceScopeOffer::default(),
             trace_nodes: false,
+            trace_class: super::ProcessTraceClass::Internal,
             requires: Vec::new(),
         }
     }
@@ -917,8 +922,15 @@ impl<I> ProcessRegistration<I> {
             consumer_hold: self.consumer_hold,
             trace: self.trace,
             trace_nodes: self.trace_nodes,
+            trace_class: self.trace_class,
             requires: self.requires,
         }
+    }
+
+    /// Sets the trace classification a process's first registration retains.
+    pub fn with_trace_class(mut self, trace_class: super::ProcessTraceClass) -> Self {
+        self.trace_class = trace_class;
+        self
     }
 
     /// Sets whether the process exports workflow node spans

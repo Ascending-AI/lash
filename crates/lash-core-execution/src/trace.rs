@@ -452,6 +452,7 @@ mod span_identity_tests {
                 (
                     TraceContext::default(),
                     TraceEvent::TurnCompleted {
+                        inputs: 1,
                         outcome: lash_trace::TraceTurnOutcome::Completed {
                             done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
                         },
@@ -637,7 +638,10 @@ mod span_identity_tests {
         // The emitted ladder is the sealed record, attempt for attempt: each
         // ordinal, the retry decision with its delay, and reported usage.
         let ladder = attempts.expect("emitted attempt ladder");
-        assert_eq!(ladder, record.attempts);
+        assert_eq!(
+            ladder.iter().map(|a| &a.attempt).collect::<Vec<_>>(),
+            record.attempts.iter().collect::<Vec<_>>()
+        );
         assert_eq!(
             ladder
                 .iter()

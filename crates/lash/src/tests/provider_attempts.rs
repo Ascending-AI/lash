@@ -182,7 +182,14 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
         })
         .build()
         .into_handle();
-    let core = core_over(sqlite_memory_store_backend().await, model);
+    let sink = Arc::new(crate::testing::RecordingTraceSink::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(model, mock_llm_profile_spec())
+    .trace_sink(sink.clone())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("core");
     let session = created(&core, "truncated-stream-retry").await;
     let output = session
         .send(crate::TurnInput::text("retry a truncated stream"))
@@ -203,6 +210,41 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
         failed.usage.as_ref().map(|usage| usage.input_tokens),
         Some(11)
     );
+    let records = sink.records();
+    let closing = records
+        .iter()
+        .find(|record| {
+            matches!(
+                record.event,
+                lash_trace::TraceEvent::LlmCallCompleted { .. }
+            )
+        })
+        .expect("logical call closed");
+    let lash_trace::TraceEvent::LlmCallCompleted {
+        model, attempts, ..
+    } = &closing.event
+    else {
+        unreachable!()
+    };
+    let model = model.as_ref().expect("operational model facts");
+    assert_eq!(model.provider.as_deref(), Some("openai-compatible"));
+    assert!(
+        model.stream,
+        "facts describe the actual streaming transport"
+    );
+    let attempts = attempts.as_ref().expect("sealed trace ledger");
+    assert_eq!(attempts.len(), 2);
+    let spans = attempts
+        .iter()
+        .map(|attempt| attempt.span.as_ref().expect("real dispatch clocks"))
+        .collect::<Vec<_>>();
+    assert_ne!(spans[0].span_id, spans[1].span_id);
+    let parent = closing.position.as_ref().expect("chat position");
+    for span in spans {
+        assert!(span.started_at_ms >= parent.started_at.unix_ms());
+        assert!(span.ended_at_ms >= span.started_at_ms);
+        assert!(span.ended_at_ms <= parent.ended_at.unwrap().unix_ms());
+    }
     core.shutdown().await.expect("shutdown");
 }
 

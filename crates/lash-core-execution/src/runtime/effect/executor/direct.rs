@@ -29,8 +29,12 @@ impl LocalDirectEffectRunner {
                     Some(&llm_call_id),
                     invocation.caused_by.as_ref(),
                 );
-                let call =
-                    super::super::emit_llm_trace_started(&standing, context.clone(), &request);
+                let call = super::super::emit_llm_trace_started(
+                    &standing,
+                    context.clone(),
+                    &request,
+                    provider.kind(),
+                );
                 (call, context, request.model.wire_model().to_string())
             });
         let (result, call_record) = self
@@ -140,10 +144,7 @@ impl LocalDirectEffectRunner {
         context.scope.llm_call_id = request.scope.llm_call_id.clone();
         let sideband = traced.map_or_else(
             || sideband.clone(),
-            |(call, context, _)| {
-                call.standing()
-                    .provider_attempts(sideband.clone(), context.clone())
-            },
+            |(call, context, _)| call.provider_attempts(sideband.clone(), context.clone()),
         );
         match lash_core_llm::core_internal::complete_prepared(
             &mut provider,

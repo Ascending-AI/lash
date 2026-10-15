@@ -912,8 +912,8 @@ pub mod plugins {
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
         InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
         ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-        ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
-        ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
+        ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
+        ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends

@@ -16,16 +16,30 @@ pub fn emit_llm_trace_started(
     standing: &crate::trace::TraceStanding,
     context: lash_trace::TraceContext,
     request: &CoreLlmRequest,
+    provider: &str,
 ) -> crate::trace::OpenSpan {
     let content = standing.content();
-    standing.open(lash_trace::TraceSpanKind::Model, || {
-        (
-            context,
-            lash_trace::TraceEvent::LlmCallStarted {
-                request: crate::trace::trace_llm_request(request, content),
+    standing
+        .open(lash_trace::TraceSpanKind::Model, || {
+            (
+                context,
+                lash_trace::TraceEvent::LlmCallStarted {
+                    request: crate::trace::trace_llm_request(request, content),
+                },
+            )
+        })
+        .with_model(|| lash_trace::TraceModelCall {
+            provider: Some(provider.to_string()),
+            request_model: request.model.wire_model().to_string(),
+            stream: request.stream_events.is_some(),
+            reasoning: match &request.model.reasoning {
+                crate::ReasoningSelection::ProviderDefault => None,
+                crate::ReasoningSelection::Disabled => Some("disabled".into()),
+                crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
             },
-        )
-    })
+            output_type: request.output_spec.as_ref().map(|_| "json".into()),
+            generation: request.generation.clone(),
+        })
 }
 
 /// Closes `call`, the model call [`emit_llm_trace_started`] opened, with its
@@ -45,6 +59,7 @@ pub fn emit_llm_trace_completed(
         (
             context,
             lash_trace::TraceEvent::LlmCallCompleted {
+                model: None,
                 response: crate::trace::trace_llm_response(
                     content.capture(|| response.full_text()),
                     duration_ms,
@@ -122,6 +137,7 @@ pub fn emit_llm_trace_failed(
         (
             context,
             lash_trace::TraceEvent::LlmCallFailed {
+                model: None,
                 error: lash_trace::TraceError {
                     retryable: failure.retryable,
                     terminal_reason: failure.terminal_reason,

@@ -164,7 +164,10 @@ pub(super) fn ended(
             || {
                 (
                     context(&row.session, &row.run, row.admission.input_ids().first()),
-                    TraceEvent::TurnCompleted { outcome },
+                    TraceEvent::TurnCompleted {
+                        outcome,
+                        inputs: row.admission.input_ids().len(),
+                    },
                 )
             },
         );

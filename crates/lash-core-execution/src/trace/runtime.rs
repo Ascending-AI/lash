@@ -1086,6 +1086,7 @@ impl TraceStanding {
             // A kind the detail policy turns off builds nothing, and by the
             // off rule nothing it could parent is built either.
             return OpenSpan {
+                model: None,
                 standing: Self {
                     silenced: true,
                     ..self.clone()
@@ -1097,6 +1098,7 @@ impl TraceStanding {
             // are this standing's, unpositioned.
             self.observe(record);
             return OpenSpan {
+                model: None,
                 standing: self.clone(),
             };
         };
@@ -1119,7 +1121,10 @@ impl TraceStanding {
             silenced: false,
         };
         standing.observe_as(SpanRole::Opens, None, record);
-        OpenSpan { standing }
+        OpenSpan {
+            standing,
+            model: None,
+        }
     }
 
     /// The standing of code inside the `kind` container keyed `key` under
@@ -1236,37 +1241,6 @@ impl TraceStanding {
             .emit(Some(permit), position, || identity, at_ms, record);
     }
 
-    pub fn provider_attempts(
-        &self,
-        sideband: lash_core_llm::core_internal::ProviderCompletionSideband,
-        context: TraceContext,
-    ) -> lash_core_llm::core_internal::ProviderCompletionSideband {
-        if !self.is_observed()
-            || !self
-                .runtime
-                .parts
-                .detail
-                .builds(TraceSpanKind::ModelAttempt)
-        {
-            return sideband;
-        }
-        let standing = self.clone();
-        sideband.with_attempt_observer(
-            Arc::new(move |attempt, observation| {
-                standing.observe(|| {
-                    (
-                        context.clone(),
-                        TraceEvent::LlmAttemptCompleted {
-                            attempt,
-                            observation,
-                        },
-                    )
-                });
-            }),
-            self.runtime.clock().clone(),
-        )
-    }
-
     /// The live permit of the body this standing is in, and none for shift
     /// code: what a live-class metric is recorded under.
     pub fn body_permit(&self) -> Option<&EmissionPermit> {
@@ -1318,44 +1292,31 @@ impl TraceStanding {
             TraceTransitionKind::Terminal => SpanRole::Closes,
             _ => SpanRole::Event,
         };
+        let (context, event) = record();
+        let mut position = self.position(role, at_ms);
+        if matches!(&event, TraceEvent::DomainCompleted { completion }
+            if matches!(completion.subject, lash_trace::TraceDomainSubject::Workflow { .. }))
+            && let Some(position) = &mut position
+        {
+            position.kind = TraceSpanKind::Workflow;
+        }
         self.runtime.parts.emitter.emit(
             Some(receipt),
-            self.position(role, at_ms),
+            position,
             || TraceRecordIdentity::Transition {
                 scope: scope.scope.clone(),
                 transition,
                 ordinal,
             },
             at_ms,
-            record,
+            || (context, event),
         );
     }
 }
 
-/// A leaf span this code opened ([`TraceStanding::open`]): records of its
-/// work are its events, and its one close publishes it.
-#[must_use = "an open span publishes only when it is closed"]
-pub struct OpenSpan {
-    standing: TraceStanding,
-}
-
-impl OpenSpan {
-    /// The standing of code inside this span: its records are the span's
-    /// events, and a leaf it opens is the span's child.
-    pub fn standing(&self) -> &TraceStanding {
-        &self.standing
-    }
-
-    /// Closes the span now with its closing record `record`.
-    pub fn close(self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
-        let role = if self.standing.leaf.is_some() {
-            SpanRole::Closes
-        } else {
-            SpanRole::Event
-        };
-        self.standing.observe_as(role, None, record);
-    }
-}
+#[path = "model_span.rs"]
+mod model_span;
+pub use model_span::OpenSpan;
 
 /// The scope of a call under its admitted logical owner, issued under
 /// `parent`, its issuing container (the cell it was called from, else its

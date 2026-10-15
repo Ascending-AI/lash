@@ -141,6 +141,7 @@ fn closing(
 fn completed_under(parent: &TraceCarrier, scope: &TraceScopeId) -> TraceRecord {
     record(
         TraceEvent::TurnCompleted {
+            inputs: 1,
             outcome: TraceTurnOutcome::Completed {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
             },
@@ -470,6 +471,14 @@ fn emitted_domain_shape_matches_registry() {
         with_span(&producer(), adapter.leaf_span_id()),
         2500,
         TraceEvent::LlmCallCompleted {
+            model: Some(crate::TraceModelCall {
+                provider: Some("openai".into()),
+                request_model: "model-x".into(),
+                stream: false,
+                reasoning: None,
+                output_type: None,
+                generation: Default::default(),
+            }),
             response: crate::TraceLlmResponse {
                 text: "answer".into(),
                 duration_ms: 500,
@@ -481,20 +490,23 @@ fn emitted_domain_shape_matches_registry() {
             usage: Some(usage.clone()),
             provider_usage: None,
             stream_summary: None,
-            attempts: Some(vec![AttemptRecord {
-                ordinal: 1,
-                outcome: AttemptOutcome::Completed,
-                protocol_position: ProtocolPosition::TerminalObserved,
-                retry_budget_consumed: true,
-                retry_decision: None,
-                error: None,
-                evidence: Some(ExecutionEvidence {
-                    served_model: Some("observed-model".into()),
-                    ..Default::default()
-                }),
-                generation_disposition: None,
-                usage: Some(usage),
-            }]),
+            attempts: Some(vec![
+                AttemptRecord {
+                    ordinal: 1,
+                    outcome: AttemptOutcome::Completed,
+                    protocol_position: ProtocolPosition::TerminalObserved,
+                    retry_budget_consumed: true,
+                    retry_decision: None,
+                    error: None,
+                    evidence: Some(ExecutionEvidence {
+                        served_model: Some("observed-model".into()),
+                        ..Default::default()
+                    }),
+                    generation_disposition: None,
+                    usage: Some(usage),
+                }
+                .into(),
+            ]),
         },
     );
     adapter.append(&model).unwrap();
@@ -552,6 +564,7 @@ fn emitted_domain_shape_matches_registry() {
     meter.force_flush().unwrap();
     let spans = exporter.get_finished_spans().unwrap();
     for span in &spans {
+        assert_semconv(span);
         assert_eq!(span.instrumentation_scope.name(), "lash");
         assert_eq!(span.instrumentation_scope.version(), Some("1.0"));
         assert!(span.instrumentation_scope.schema_url().is_none());
@@ -571,6 +584,11 @@ fn emitted_domain_shape_matches_registry() {
                 (AttributeType::String, opentelemetry::Value::String(_))
                     | (AttributeType::Integer, opentelemetry::Value::I64(_))
                     | (AttributeType::Boolean, opentelemetry::Value::Bool(_))
+                    | (AttributeType::Double, opentelemetry::Value::F64(_))
+                    | (
+                        AttributeType::StringArray,
+                        opentelemetry::Value::Array(opentelemetry::Array::String(_))
+                    )
             ));
         }
     }
@@ -583,7 +601,7 @@ fn emitted_domain_shape_matches_registry() {
         chat.attributes
             .contains(&A::ResponseModel.value("observed-model"))
     );
-    assert!(chat.attributes.contains(&A::InputTokens.value(10_i64)));
+    assert!(chat.attributes.contains(&A::InputTokens.value(15_i64)));
     assert!(chat.attributes.contains(&A::CacheReadTokens.value(3_i64)));
     assert!(chat.attributes.contains(&A::CacheWriteTokens.value(2_i64)));
     assert!(
@@ -693,17 +711,30 @@ fn unsampled_records_and_bounded_payloads_do_not_serialize_past_their_limit() {
 fn domain_subject_owns_the_span_and_intent_kind_attribute() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let subjects = std::iter::once(TraceDomainSubject::Process {}).chain(
+    let subjects = [
+        TraceDomainSubject::Process {
+            kind: "session_turn".into(),
+            label: None,
+        },
+        TraceDomainSubject::Workflow {
+            kind: "lashvm".into(),
+            name: Some("example".into()),
+        },
+    ]
+    .into_iter()
+    .chain(
         lash_sansio::ToolIntentKind::ALL
             .iter()
             .map(|kind| TraceDomainSubject::ToolIntent { kind: *kind }),
     );
     for subject in subjects {
-        let kind = match subject {
-            TraceDomainSubject::Process {} => TraceSpanKind::Process,
+        let kind = match &subject {
+            TraceDomainSubject::Process { .. } => TraceSpanKind::Process,
+            TraceDomainSubject::Workflow { .. } => TraceSpanKind::Workflow,
             TraceDomainSubject::ToolIntent { .. } => TraceSpanKind::ToolIntent,
         };
-        let completion = TraceDomainCompletion::new(subject, 4000, TraceDomainStatus::Completed);
+        let completion =
+            TraceDomainCompletion::new(subject.clone(), 4000, TraceDomainStatus::Completed);
         let span = derived(&producer(), &scope_id());
         adapter
             .append(&closing(
@@ -715,14 +746,26 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             .unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         let emitted = spans.last().unwrap();
+        assert_semconv(emitted);
         match subject {
-            TraceDomainSubject::Process {} => {
-                assert_eq!(emitted.name, DomainSpan::Process.definition().name);
+            TraceDomainSubject::Process { .. } => {
+                assert_eq!(emitted.name, "lash.process session_turn");
                 assert!(
                     !emitted
                         .attributes
                         .iter()
                         .any(|attr| attr.key.as_str() == "lash.tool_intent.kind")
+                );
+            }
+            TraceDomainSubject::Workflow { name, .. } => {
+                assert_eq!(
+                    emitted.name,
+                    format!("invoke_workflow {}", name.as_ref().unwrap())
+                );
+                assert!(
+                    emitted
+                        .attributes
+                        .contains(&A::WorkflowName.value(name.unwrap()))
                 );
             }
             TraceDomainSubject::ToolIntent { kind } => {
@@ -811,6 +854,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         adapter.append(&event).unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
+        assert_semconv(span);
         assert_eq!(span.name, name);
         assert_eq!(span.start_time, epoch_ms(start));
         assert_eq!(span.end_time, epoch_ms(9000));
@@ -1071,6 +1115,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         let container = derived(&producer(), &id);
         let mut model = record(
             TraceEvent::LlmCallFailed {
+                model: None,
                 error: crate::TraceError {
                     code: None,
                     retryable: false,
@@ -1189,6 +1234,7 @@ fn failure_attributes_preserve_typed_classes() {
         },
     ];
     let model = |code| TraceEvent::LlmCallFailed {
+        model: None,
         error: crate::TraceError {
             code: None,
             retryable: false,
@@ -1196,23 +1242,26 @@ fn failure_attributes_preserve_typed_classes() {
             failure_kind: crate::TraceProviderFailureKind::Http,
         },
         stream_summary: None,
-        attempts: Some(vec![AttemptRecord {
-            ordinal: 1,
-            outcome: AttemptOutcome::Failed,
-            protocol_position: ProtocolPosition::NoResponse,
-            retry_budget_consumed: true,
-            retry_decision: None,
-            evidence: None,
-            generation_disposition: None,
-            error: Some(crate::TraceNormalizedError {
-                class: crate::TraceProviderFailureKind::Http,
-                code,
-                http_status: Some(429),
-                provider_request_id: None,
-                retry_after: None,
-            }),
-            usage: None,
-        }]),
+        attempts: Some(vec![
+            AttemptRecord {
+                ordinal: 1,
+                outcome: AttemptOutcome::Failed,
+                protocol_position: ProtocolPosition::NoResponse,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                evidence: None,
+                generation_disposition: None,
+                error: Some(crate::TraceNormalizedError {
+                    class: crate::TraceProviderFailureKind::Http,
+                    code,
+                    http_status: Some(429),
+                    provider_request_id: None,
+                    retry_after: None,
+                }),
+                usage: None,
+            }
+            .into(),
+        ]),
     };
     let events = [
         (
@@ -1260,6 +1309,7 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
+                inputs: 1,
                 outcome: TraceTurnOutcome::Failed {
                     done_reason: crate::TraceTurnFailureReason::ContextOverflow,
                 },
@@ -1552,17 +1602,32 @@ fn the_enrichers_replacement_wins_over_lashs_default_and_lash_keys_are_refused()
         },
     )
     .bound(crate::TracePolicySnapshot::standard(), ledger.clone());
-    let mut completion = TraceDomainCompletion::new(
-        TraceDomainSubject::Process {},
-        4000,
-        TraceDomainStatus::Completed,
-    );
-    completion.provider = Some("openai".to_owned());
     let mut record = closing(
-        TraceSpanKind::Process,
-        derived(&producer(), &scope_id()),
+        TraceSpanKind::Model,
+        with_span(&producer(), adapter.leaf_span_id()),
         4000,
-        TraceEvent::DomainCompleted { completion },
+        TraceEvent::LlmCallCompleted {
+            model: Some(crate::TraceModelCall {
+                provider: Some("openai-compatible".into()),
+                request_model: "m".into(),
+                stream: true,
+                reasoning: None,
+                output_type: None,
+                generation: Default::default(),
+            }),
+            response: crate::TraceLlmResponse {
+                text: String::new(),
+                duration_ms: 5000,
+                request_model: "m".into(),
+                terminal_reason: None,
+                parts: None,
+                generation_disposition: None,
+            },
+            usage: None,
+            provider_usage: None,
+            stream_summary: None,
+            attempts: None,
+        },
     );
     record.context.turn_id = Some("lash-turn".into());
     adapter.append(&record).unwrap();
@@ -1605,4 +1670,393 @@ fn the_enrichers_replacement_wins_over_lashs_default_and_lash_keys_are_refused()
             vec!["reserved_key".into(), "use_replace".into()]
         )))
     );
+}
+
+/// L12's token half: cache reads and writes are billed input, and reasoning
+/// is an output subset. Overflow must never wrap or publish a false total.
+#[test]
+fn semconv_token_usage_includes_cache_and_marks_overflow() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    let mut model = closing(
+        TraceSpanKind::Model,
+        with_span(&producer(), adapter.leaf_span_id()),
+        2500,
+        TraceEvent::LlmCallCompleted {
+            model: None,
+            response: crate::TraceLlmResponse {
+                text: String::new(),
+                duration_ms: 6500,
+                request_model: "model-x".into(),
+                terminal_reason: None,
+                parts: None,
+                generation_disposition: None,
+            },
+            usage: Some(LlmUsage {
+                input_tokens: 10,
+                output_tokens: 8,
+                cache_read_input_tokens: 3,
+                cache_write_input_tokens: 2,
+                reasoning_output_tokens: 4,
+            }),
+            provider_usage: None,
+            stream_summary: None,
+            attempts: None,
+        },
+    );
+    adapter.append(&model).unwrap();
+    if let TraceEvent::LlmCallCompleted { usage, .. } = &mut model.event {
+        usage.as_mut().unwrap().input_tokens = i64::MAX;
+    }
+    model.position.as_mut().unwrap().span = with_span(&producer(), adapter.leaf_span_id());
+    adapter.append(&model).unwrap();
+    provider.provider().force_flush().unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    let value = |index: usize, key: &str| {
+        spans[index]
+            .attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .map(|attribute| attribute.value.clone())
+    };
+    assert_eq!(value(0, "gen_ai.usage.input_tokens"), Some(15_i64.into()));
+    assert_eq!(value(0, "gen_ai.usage.output_tokens"), Some(8_i64.into()));
+    assert_eq!(
+        value(0, "gen_ai.usage.reasoning.output_tokens"),
+        Some(4_i64.into())
+    );
+    assert_eq!(value(0, "lash.usage.reasoning_output_tokens"), None);
+    assert_eq!(value(1, "gen_ai.usage.input_tokens"), None);
+    assert_eq!(value(1, "lash.usage.overflow"), Some(true.into()));
+}
+
+/// L9: taxonomy must be declared before checking attributes. Otherwise a
+/// missing type can make the conformance check vacuous.
+#[test]
+fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
+    for (span, expected) in [
+        (DomainSpan::Model, "gen_ai.client.inference"),
+        (DomainSpan::Turn, "gen_ai.invoke_agent.internal"),
+        (DomainSpan::Tool, "gen_ai.execute_tool.internal"),
+        (DomainSpan::ExecCode, "gen_ai.execute_tool.internal"),
+        (DomainSpan::Workflow, "gen_ai.invoke_workflow.internal"),
+    ] {
+        assert_eq!(span.definition().semconv_type, Some(expected));
+    }
+    let contract = registry::contract_markdown();
+    for type_id in [
+        "gen_ai.client.inference",
+        "gen_ai.execute_tool.internal",
+        "gen_ai.invoke_agent.internal",
+        "gen_ai.invoke_workflow.internal",
+    ] {
+        assert!(contract.contains(type_id), "missing semconv type {type_id}");
+    }
+    assert_eq!(
+        GEN_AI_SEMCONV_SNAPSHOT,
+        "open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318"
+    );
+    for (kind, expected) in [
+        ("openai", "openai"),
+        ("codex", "openai"),
+        ("anthropic", "anthropic"),
+        ("google_oauth", "gcp.gen_ai"),
+        ("openai-compatible", "openai"),
+    ] {
+        let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+        let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+        let record = model_fixture(&adapter, kind);
+        adapter.append(&record).unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 3, "one logical chat and two real attempts");
+        let chat = &spans[0];
+        assert_eq!(chat.name, "chat model-x");
+        for attribute in [
+            A::GenAiProviderName.value(expected),
+            A::InputTokens.value(30_i64),
+            A::OutputTokens.value(16_i64),
+            A::ReasoningTokens.value(8_i64),
+            A::RequestStream.value(true),
+            A::ResponseId.value("response-2"),
+            A::ReasoningLevel.value("high"),
+            A::OutputType.value("json"),
+        ] {
+            assert!(
+                chat.attributes.contains(&attribute),
+                "missing {attribute:?}"
+            );
+        }
+        assert_eq!(
+            chat.parent_span_id,
+            span_context(record.position.as_ref().unwrap().parent.as_ref().unwrap())
+                .unwrap()
+                .span_id()
+        );
+        for (index, attempt) in spans[1..].iter().enumerate() {
+            assert_eq!(attempt.name, "lash.model.attempt");
+            assert_eq!(attempt.parent_span_id, chat.span_context.span_id());
+            assert_eq!(attempt.start_time, epoch_ms(4000 + index as u64 * 1000));
+            assert_eq!(attempt.end_time, epoch_ms(4500 + index as u64 * 1000));
+            assert!(
+                attempt
+                    .attributes
+                    .contains(&A::AttemptInputTokens.value(10_i64))
+            );
+            assert!(!attempt.attributes.iter().any(|attribute| {
+                attribute.key.as_str().starts_with("gen_ai.usage.")
+                    || attribute.key.as_str() == "gen_ai.operation.name"
+            }));
+        }
+        for span in &spans {
+            assert_semconv(span);
+        }
+        let TraceEvent::LlmCallCompleted {
+            model, attempts, ..
+        } = model_fixture(&adapter, kind).event
+        else {
+            unreachable!()
+        };
+        let failed = closing(
+            TraceSpanKind::Model,
+            with_span(&producer(), adapter.leaf_span_id()),
+            2500,
+            TraceEvent::LlmCallFailed {
+                model,
+                attempts,
+                error: crate::TraceError {
+                    retryable: false,
+                    terminal_reason: crate::TraceLlmTerminalReason::ProviderError,
+                    failure_kind: crate::TraceProviderFailureKind::Http,
+                    code: None,
+                },
+                stream_summary: None,
+            },
+        );
+        adapter.append(&failed).unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        assert!(spans[3].attributes.contains(&A::InputTokens.value(30_i64)));
+        assert_semconv(&spans[3]);
+    }
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    let mut cancelled = model_fixture(&adapter, "openai");
+    let TraceEvent::LlmCallCompleted {
+        model, attempts, ..
+    } = cancelled.event
+    else {
+        unreachable!()
+    };
+    cancelled.event = TraceEvent::LlmCallFailed {
+        model,
+        attempts,
+        error: crate::TraceError {
+            retryable: false,
+            terminal_reason: crate::TraceLlmTerminalReason::Cancelled,
+            failure_kind: crate::TraceProviderFailureKind::Unknown,
+            code: None,
+        },
+        stream_summary: None,
+    };
+    adapter.append(&cancelled).unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans[0].status, Status::Unset);
+    assert!(spans[0].attributes.contains(&A::Outcome.value("cancelled")));
+    assert!(
+        !spans[0]
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key.as_str() == "error.type")
+    );
+    for export_skip in [false, true] {
+        let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+        let mut options = OtelOptions::standard();
+        let mut policy = crate::TracePolicySnapshot::standard();
+        if export_skip {
+            options.export = TraceExportPolicy::builder()
+                .skip(TraceSpanKind::ModelAttempt)
+                .build()
+                .unwrap();
+        } else {
+            policy.detail = crate::TraceDetailPolicy::builder()
+                .set(TraceSpanKind::ModelAttempt, crate::TraceDetail::Off)
+                .build()
+                .unwrap();
+        }
+        let adapter = OtelTelemetry::new(&provider, &meter, options).bound(policy, Arc::default());
+        adapter
+            .append(&model_fixture(&adapter, "openai-compatible"))
+            .unwrap();
+        let spans = exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        assert!(
+            spans[0].attributes.contains(&A::InputTokens.value(30_i64)),
+            "attempt policy cannot change billed usage"
+        );
+    }
+}
+
+/// Resolve the pinned model's attribute groups, including requirement levels.
+fn semconv_attributes(
+    definition: &serde_json::Value,
+    model: &serde_json::Value,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let mut attributes = std::collections::BTreeMap::new();
+    for attribute in definition["attributes"].as_array().unwrap() {
+        if let Some(group) = attribute["ref_group"].as_str() {
+            let group = model["attribute_groups"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|candidate| candidate["id"] == group)
+                .expect("pinned attribute group");
+            attributes.extend(semconv_attributes(group, model));
+        } else {
+            let key = attribute["ref"].as_str().unwrap().to_string();
+            let previous = attributes
+                .entry(key)
+                .or_insert_with(|| serde_json::json!({}));
+            for (key, value) in attribute.as_object().unwrap() {
+                previous[key] = value.clone();
+            }
+        }
+    }
+    attributes
+}
+
+fn assert_semconv(span: &opentelemetry_sdk::trace::SpanData) {
+    let registry: serde_json::Value =
+        serde_yaml::from_str(include_str!("../../tests/semconv/gen-ai/registry.yaml")).unwrap();
+    let model: serde_json::Value =
+        serde_yaml::from_str(include_str!("../../tests/semconv/gen-ai/spans.yaml")).unwrap();
+    let definition = SPANS
+        .iter()
+        .find(|definition| {
+            span.name == definition.name
+                || span
+                    .name
+                    .strip_prefix(definition.name)
+                    .is_some_and(|suffix| suffix.starts_with(' '))
+        })
+        .expect("declared span kind");
+    let value = |key: &str| {
+        span.attributes
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+    };
+    if let Some(type_id) = definition.semconv_type {
+        let typed = model["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|typed| typed["type"] == type_id)
+            .unwrap_or_else(|| panic!("unknown semconv type {type_id}"));
+        for (key, attribute) in semconv_attributes(typed, &model) {
+            if attribute["requirement_level"] == "required" {
+                assert!(value(&key).is_some(), "{} requires {key}", span.name);
+            }
+        }
+        assert_eq!(
+            typed["kind"].as_str().unwrap(),
+            format!("{:?}", span.span_kind).to_lowercase()
+        );
+    }
+    for attribute in &span.attributes {
+        if !attribute.key.as_str().starts_with("gen_ai.") {
+            continue;
+        }
+        let registered = registry["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|registered| registered["key"] == attribute.key.as_str())
+            .unwrap_or_else(|| panic!("unregistered semconv key {}", attribute.key));
+        match registered["type"].as_str().unwrap_or("enum") {
+            "string" | "enum" => {
+                assert!(matches!(attribute.value, opentelemetry::Value::String(_)))
+            }
+            "int" => assert!(matches!(attribute.value, opentelemetry::Value::I64(_))),
+            "double" => assert!(matches!(attribute.value, opentelemetry::Value::F64(_))),
+            "boolean" => assert!(matches!(attribute.value, opentelemetry::Value::Bool(_))),
+            "string[]" => assert!(matches!(
+                attribute.value,
+                opentelemetry::Value::Array(opentelemetry::Array::String(_))
+            )),
+            other => panic!("unhandled semconv type {other}"),
+        }
+    }
+}
+
+fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
+    let attempts = (1..=2)
+        .map(|ordinal| crate::TraceModelAttempt {
+            attempt: AttemptRecord {
+                ordinal,
+                outcome: if ordinal == 1 {
+                    AttemptOutcome::Interrupted
+                } else {
+                    AttemptOutcome::Completed
+                },
+                protocol_position: ProtocolPosition::TerminalObserved,
+                retry_budget_consumed: true,
+                retry_decision: None,
+                error: (ordinal == 1).then(|| lash_sansio::llm::types::NormalizedError {
+                    class: crate::TraceProviderFailureKind::Http,
+                    code: None,
+                    http_status: Some(503),
+                    provider_request_id: Some("retry-request".into()),
+                    retry_after: None,
+                }),
+                evidence: (ordinal == 2).then(|| ExecutionEvidence {
+                    served_model: Some("served-model".into()),
+                    provider_response_id: Some("response-2".into()),
+                    provider_finish_reason: Some("stop".into()),
+                    ..Default::default()
+                }),
+                generation_disposition: None,
+                usage: Some(LlmUsage {
+                    input_tokens: 10,
+                    output_tokens: 8,
+                    cache_read_input_tokens: 3,
+                    cache_write_input_tokens: 2,
+                    reasoning_output_tokens: 4,
+                }),
+            },
+            span: Some(crate::TraceModelAttemptSpan {
+                span_id: adapter.leaf_span_id(),
+                provider: provider.into(),
+                started_at_ms: 3000 + u64::from(ordinal) * 1000,
+                ended_at_ms: 3500 + u64::from(ordinal) * 1000,
+            }),
+        })
+        .collect();
+    closing(
+        TraceSpanKind::Model,
+        with_span(&producer(), adapter.leaf_span_id()),
+        2500,
+        TraceEvent::LlmCallCompleted {
+            model: Some(crate::TraceModelCall {
+                provider: Some(provider.into()),
+                request_model: "model-x".into(),
+                stream: true,
+                reasoning: Some("high".into()),
+                output_type: Some("json".into()),
+                generation: Default::default(),
+            }),
+            response: crate::TraceLlmResponse {
+                text: String::new(),
+                duration_ms: 6500,
+                request_model: "model-x".into(),
+                terminal_reason: None,
+                parts: None,
+                generation_disposition: None,
+            },
+            usage: Some(LlmUsage {
+                input_tokens: 10,
+                ..Default::default()
+            }),
+            provider_usage: None,
+            stream_summary: None,
+            attempts: Some(attempts),
+        },
+    )
 }

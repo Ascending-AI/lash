@@ -845,6 +845,10 @@ impl lash_core::ProcessEngine for LawWorkflow {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash_core::ProcessTraceClass {
+        lash_core::ProcessTraceClass::Workflow
+    }
+
     fn kind(&self) -> &'static str {
         WORKFLOW_ENGINE
     }

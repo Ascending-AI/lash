@@ -40,6 +40,7 @@ pub use opentelemetry as api;
 pub use opentelemetry_sdk as sdk;
 
 mod enrich;
+mod model;
 mod payload;
 mod provider;
 pub use crate::telemetry::metrics::registry;
@@ -202,6 +203,19 @@ impl OtelTelemetry {
         let Some(projection) = Projection::for_record(record, position) else {
             return;
         };
+        self.export_projection(record, position, producer, projection);
+    }
+
+    fn export_projection(
+        &self,
+        record: &TraceRecord,
+        position: &TracePosition,
+        producer: Option<ProducerContributions>,
+        projection: Projection<'_>,
+    ) {
+        if !self.options.export.exports(position.kind) {
+            return;
+        }
         let Some(own) = span_context(&position.span) else {
             return;
         };
@@ -240,7 +254,9 @@ impl OtelTelemetry {
         attributes.push(A::EventType.value(record.event.kind().as_str()));
         correlation_attributes(position.scope.as_ref(), &record.context, &mut attributes);
         projection.attributes(record, &mut attributes);
-        payload::attributes(record, &mut attributes);
+        if position.kind != TraceSpanKind::ModelAttempt {
+            payload::attributes(record, &mut attributes);
+        }
         let definition = projection.span.definition();
         let mut name = projection.name();
         let (contributions, omissions) = match producer {
@@ -312,6 +328,7 @@ impl TraceSink for OtelTelemetry {
             .flatten();
         if position.publishes() && position.is_sampled() {
             self.export(record, position, producer);
+            self.export_model_attempts(record, position);
         }
         Ok(())
     }
@@ -561,6 +578,8 @@ struct Projection<'a> {
     span: DomainSpan,
     model: Option<&'a str>,
     tool: Option<&'a str>,
+    process: Option<&'a str>,
+    attempt: Option<&'a lash_sansio::llm::types::AttemptRecord>,
 }
 impl<'a> Projection<'a> {
     fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
@@ -568,6 +587,8 @@ impl<'a> Projection<'a> {
             span: DomainSpan::Turn,
             model: None,
             tool: None,
+            process: None,
+            attempt: None,
         };
         match (position.kind, &record.event) {
             (TraceSpanKind::Producer, TraceEvent::ProducerSettled { producer: kind, .. }) => {
@@ -578,13 +599,25 @@ impl<'a> Projection<'a> {
                 projection.span = DomainSpan::Model;
                 projection.model = Some(&response.request_model);
             }
-            (TraceSpanKind::Model, TraceEvent::LlmCallFailed { .. }) => {
+            (TraceSpanKind::Model, TraceEvent::LlmCallFailed { model, .. }) => {
                 projection.span = DomainSpan::Model;
+                projection.model = model.as_ref().map(|model| model.request_model.as_str());
+            }
+            (TraceSpanKind::ModelAttempt, TraceEvent::LlmAttemptCompleted { .. }) => {
+                projection.span = DomainSpan::ModelAttempt;
             }
             (TraceSpanKind::Process, TraceEvent::DomainCompleted { completion }) => {
                 projection.span = DomainSpan::Process;
-                projection.model = completion.model.as_deref();
-                projection.tool = completion.tool_name.as_deref();
+                projection.process = match &completion.subject {
+                    TraceDomainSubject::Process { kind, .. } => Some(kind.as_str()),
+                    _ => None,
+                };
+            }
+            (TraceSpanKind::Workflow, TraceEvent::DomainCompleted { completion }) => {
+                projection.span = DomainSpan::Workflow;
+                if let TraceDomainSubject::Workflow { name, .. } = &completion.subject {
+                    projection.process = name.as_deref();
+                }
             }
             (TraceSpanKind::ToolIntent, TraceEvent::DomainCompleted { completion }) => {
                 projection.span = DomainSpan::Intent;
@@ -612,6 +645,7 @@ impl<'a> Projection<'a> {
         let suffix = match self.span {
             DomainSpan::Model => self.model,
             DomainSpan::Tool | DomainSpan::ExecCode => self.tool,
+            DomainSpan::Process | DomainSpan::Workflow => self.process,
             _ => None,
         };
         match suffix {
@@ -620,14 +654,33 @@ impl<'a> Projection<'a> {
         }
     }
     fn failed(&self, record: &TraceRecord) -> bool {
+        if let Some(attempt) = self.attempt {
+            return matches!(
+                attempt.outcome,
+                lash_sansio::llm::types::AttemptOutcome::Failed
+                    | lash_sansio::llm::types::AttemptOutcome::Interrupted
+            );
+        }
         match &record.event {
             TraceEvent::DomainCompleted { completion } => {
                 completion.status == TraceDomainStatus::Failed
             }
+            TraceEvent::LlmCallFailed { error, .. } => {
+                error.terminal_reason != crate::TraceLlmTerminalReason::Cancelled
+            }
+            TraceEvent::LlmAttemptCompleted { attempt, .. } => matches!(
+                attempt.outcome,
+                lash_sansio::llm::types::AttemptOutcome::Failed
+                    | lash_sansio::llm::types::AttemptOutcome::Interrupted
+            ),
             _ => record.event.is_failed(),
         }
     }
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
+        if let Some(attempt) = self.attempt {
+            model::attempt_attributes(attempt, out);
+            return;
+        }
         if let Some(operation) = self.operation() {
             out.push(A::OperationName.value(operation));
         }
@@ -642,53 +695,44 @@ impl<'a> Projection<'a> {
                 }
             }
             TraceEvent::LlmCallCompleted {
+                model,
                 response,
                 usage,
                 attempts,
                 ..
             } => {
-                out.push(A::RequestModel.value(response.request_model.clone()));
-                if let Some(model) = attempts
-                    .iter()
-                    .flatten()
-                    .rev()
-                    .find_map(|attempt| attempt.evidence.as_ref()?.served_model.clone())
-                {
-                    out.push(A::ResponseModel.value(model));
-                }
-                if let Some(attempts) = attempts {
-                    out.push(
-                        A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)),
-                    );
-                }
-                if let Some(usage) = usage {
-                    usage_attributes(usage, out);
-                }
+                model::call_attributes(
+                    model.as_ref(),
+                    Some(response),
+                    attempts.as_deref(),
+                    usage.as_ref(),
+                    out,
+                );
             }
             TraceEvent::LlmCallFailed {
-                error, attempts, ..
+                model,
+                error,
+                attempts,
+                ..
             } => {
-                if let Some(attempts) = attempts {
-                    out.push(
-                        A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)),
-                    );
+                model::call_attributes(model.as_ref(), None, attempts.as_deref(), None, out);
+                if error.terminal_reason == crate::TraceLlmTerminalReason::Cancelled {
+                    out.push(A::Outcome.value("cancelled"));
+                    return;
                 }
                 let last = attempts
                     .iter()
                     .flatten()
                     .rev()
                     .find_map(|attempt| attempt.error.as_ref());
-                out.push(
-                    A::ErrorType.value(match (last, &error.code) {
-                        (Some(error), _) => error
-                            .code
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| error.class.code().to_owned()),
-                        (None, Some(code)) => code.to_string(),
-                        (None, None) => "provider_failure".to_owned(),
-                    }),
-                );
+                out.push(A::ErrorType.value(match (last, &error.code) {
+                    (Some(error), _) => model::error_type(error),
+                    (None, Some(code)) => code.to_string(),
+                    (None, None) => error.failure_kind.code().to_string(),
+                }));
+            }
+            TraceEvent::LlmAttemptCompleted { attempt, .. } => {
+                model::attempt_attributes(attempt, out)
             }
             TraceEvent::DomainCompleted { completion } => {
                 out.push(A::Outcome.value(match completion.status {
@@ -696,20 +740,26 @@ impl<'a> Projection<'a> {
                     TraceDomainStatus::Failed => "failed",
                     TraceDomainStatus::Cancelled => "cancelled",
                 }));
-                if let Some(model) = &completion.model {
-                    out.push(A::RequestModel.value(model.clone()));
-                }
-                if let Some(provider) = &completion.provider {
-                    out.push(A::GenAiProviderName.value(provider.clone()));
-                }
-                if let TraceDomainSubject::ToolIntent { kind } = completion.subject {
-                    out.push(A::ToolIntentKind.value(kind.as_str()));
+                match &completion.subject {
+                    TraceDomainSubject::Process { kind, label } => {
+                        out.push(A::ProcessKind.value(kind.clone()));
+                        if let Some(label) = label {
+                            out.push(A::ProcessLabel.value(label.clone()));
+                        }
+                    }
+                    TraceDomainSubject::Workflow { kind, name } => {
+                        out.push(A::ProcessKind.value(kind.clone()));
+                        if let Some(name) = name {
+                            out.push(A::ProcessLabel.value(name.clone()));
+                            out.push(A::WorkflowName.value(name.clone()));
+                        }
+                    }
+                    TraceDomainSubject::ToolIntent { kind } => {
+                        out.push(A::ToolIntentKind.value(kind.as_str()))
+                    }
                 }
                 if let Some(id) = &completion.tool_call_id {
                     out.push(A::ToolCallId.value(id.clone()));
-                }
-                if let Some(usage) = &completion.usage {
-                    usage_attributes(usage, out);
                 }
                 if let Some(code) = &completion.error_code {
                     out.push(A::ErrorType.value(code.to_string()));
@@ -719,10 +769,22 @@ impl<'a> Projection<'a> {
             }
             TraceEvent::ToolCallCompleted {
                 call_id,
+                provider_call_id,
+                name,
                 output,
                 attempts,
                 ..
             } => {
+                out.push(A::ToolType.value("function"));
+                out.push(A::ToolId.value(name.clone()));
+                if let Some(id) = provider_call_id {
+                    out.push(A::ProviderCallId.value(id.clone()));
+                }
+                if let Some(attempts) = attempts {
+                    out.push(
+                        A::ToolAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)),
+                    );
+                }
                 out.push(A::ToolCallId.value(call_id.to_string()));
                 out.push(A::Outcome.value(match output.status() {
                     crate::TraceToolCallStatus::Success => "completed",
@@ -759,7 +821,8 @@ impl<'a> Projection<'a> {
                     out.push(A::ErrorType.value(class.unwrap_or_else(|| "unknown".into())));
                 }
             }
-            TraceEvent::TurnCompleted { outcome } => {
+            TraceEvent::TurnCompleted { outcome, inputs } => {
+                out.push(A::TurnInputs.value(i64::try_from(*inputs).unwrap_or(i64::MAX)));
                 out.push(A::Outcome.value(match outcome {
                     TraceTurnOutcome::Completed { .. } => "completed",
                     TraceTurnOutcome::AgentFrameSwitch { .. } => "agent_frame_switch",
@@ -808,6 +871,7 @@ impl<'a> Projection<'a> {
         match self.span {
             DomainSpan::Turn => Some("invoke_agent"),
             DomainSpan::Model => Some("chat"),
+            DomainSpan::Workflow => Some("invoke_workflow"),
             DomainSpan::Tool | DomainSpan::ExecCode => Some("execute_tool"),
             _ => None,
         }
@@ -839,8 +903,11 @@ fn cell_attributes(
 }
 
 fn usage_attributes(usage: &LlmUsage, out: &mut Vec<KeyValue>) {
+    match usage.checked_input_total() {
+        Ok(total) => out.push(A::InputTokens.value(total)),
+        Err(_) => out.push(A::UsageOverflow.value(true)),
+    }
     out.extend([
-        A::InputTokens.value(usage.input_tokens),
         A::OutputTokens.value(usage.output_tokens),
         A::CacheReadTokens.value(usage.cache_read_input_tokens),
         A::CacheWriteTokens.value(usage.cache_write_input_tokens),

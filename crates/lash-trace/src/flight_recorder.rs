@@ -349,7 +349,7 @@ fn operation_outcome(event: &TraceEvent) -> Option<FlightRecorderOutcome> {
             TraceDomainStatus::Failed => Outcome::Failed,
             TraceDomainStatus::Cancelled => Outcome::Cancelled,
         }),
-        TraceEvent::TurnCompleted { outcome } => Some(match outcome {
+        TraceEvent::TurnCompleted { outcome, .. } => Some(match outcome {
             TraceTurnOutcome::Completed { .. } => Outcome::Completed,
             TraceTurnOutcome::Failed { .. } => Outcome::Failed,
             TraceTurnOutcome::Cancelled { .. } => Outcome::Cancelled,

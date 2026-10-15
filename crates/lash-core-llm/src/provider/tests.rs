@@ -1678,6 +1678,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
     let record = fixture_record(
         lash_trace::TraceContext::default(),
         lash_trace::TraceEvent::LlmCallCompleted {
+            model: None,
             response: crate::trace::trace_llm_response(
                 "ok".to_string(),
                 0,

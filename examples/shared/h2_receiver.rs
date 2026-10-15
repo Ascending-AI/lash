@@ -40,6 +40,10 @@ impl ProcessEngine for ReceiverEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
+        lash::plugins::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
@@ -178,6 +182,10 @@ impl ProcessEngine for SourceEngine {
         _output: &lash::plugins::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
+    }
+
+    fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
+        lash::plugins::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
@@ -327,6 +335,10 @@ impl ProcessEngine for SleeperEngine {
         _output: &lash::plugins::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
+    }
+
+    fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
+        lash::plugins::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(

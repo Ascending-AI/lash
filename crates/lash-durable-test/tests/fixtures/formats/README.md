@@ -177,3 +177,13 @@ This law reads every archive entry and both original 1.0 images. The owning
 `//:main_tests`, so the scheduled main run checks the entire retained corpus.
 FIG-6183 proved the law fails with the native fingerprint regression from
 before `82af350c06` restored: the pinned release node is missing.
+
+## FIG-6301 process trace classification
+
+The required `ProcessRecord.trace_class` intentionally changes the pre-cut
+process row shape. On the FIG-6301 tree rebased onto `4e86ad0702af036705f0631800350f73128c4d78`,
+the existing recorders re-recorded the `lashvm` baseline and the three kernel
+corpus images in place. Every source program and expected result is unchanged;
+all session image bytes, helper identities and kernel semantics are unchanged.
+The first registration retains the engine's explicit trace class, including
+when a different node without that engine cancels the process.

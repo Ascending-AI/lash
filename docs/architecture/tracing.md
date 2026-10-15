@@ -356,7 +356,7 @@ was acknowledged, which is the record's first-writer receipt:
 | --- | --- | --- | --- |
 | `turn_started` | opens `invoke_agent` (a live hint; the span is built from its close) | the session actor, after `turn.admit` | the scope's retained start |
 | `turn_completed` | `invoke_agent` | the session actor, after the commit that writes the turn's terminal (`turn.commit`, a refusal, a cancel, a session close) | the owner's clock at the acknowledgement |
-| `domain_completed` (process) | `lash.process` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
+| `domain_completed` (process) | `lash.process {kind}` or `invoke_workflow {name}` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
 | `domain_completed` (tool intent) | `lash.tool_intent`, `lash.tool_intent.executed`, `lash.tool_intent.refused` | the host ingress, after the ledger retains the settlement | the settlement's retained time |
 | none | `lash.parked_work.parks` | the session or process actor, after the commit that parks it | not timed |
 
@@ -399,3 +399,39 @@ observation.
 
 Recorded model usage and provider responses remain result data. Lash has no
 billing ledger, and tracing never resends a provider request.
+
+## GenAI projection contract (FIG-6301)
+
+The default projection follows
+`open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318`.
+A turn is `invoke_agent`; each logical model operation is one `chat {model}`,
+with `lash.model.attempt` children published only from its closing ledger.
+The detail and export policies independently select those children. Attempt
+spans carry diagnostic usage under `lash.usage.*`; only the logical chat carries
+`gen_ai.usage.*`, summed over every attempt that reported usage. Input tokens
+include fresh, cache-read and cache-write tokens. A counter that overflows is
+omitted and `lash.usage.overflow` is true. Reasoning tokens use
+`gen_ai.usage.reasoning.output_tokens` and remain a subset of output tokens.
+
+Adapter defaults are `openai` for `openai`, `openai-compatible` and `codex`,
+`anthropic` for `anthropic`, and `gcp.gen_ai` for the `google_oauth` adapter's
+Code Assist endpoint. The enricher can replace `RefinableKey::GenAiProviderName`; runtime
+retry labels keep the adapter kind. Successful provider evidence
+supplies the response model, response id and finish reasons. Failed calls keep
+the request facts and billed usage as well.
+
+Process engines explicitly declare `ProcessTraceClass`; the VM
+engine declares `Workflow`. The first registration records that choice, and
+every terminal reads it, including cancellation on a node without the engine.
+Workflows use the recorded label (the VM's definition entry name); an unavailable
+name is omitted. Internal processes have no model attributes or GenAI usage.
+
+Hosts that store this: `ProcessRegistration` and `ProcessRecord` gain required
+`trace_class: "internal" | "workflow"` beside the retained execution facts.
+Trace-record schema 37 changes in place to add operational model facts,
+trace-owned attempt metadata, typed process/workflow subjects and the turn's
+admitted-input count;
+it removes model/provider/usage fields from domain completions. The stored
+execution attempt ledger keeps its existing shape. The generated
+[instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
+lists the exact exported attributes and span type ids.

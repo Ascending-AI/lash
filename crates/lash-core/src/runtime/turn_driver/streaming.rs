@@ -216,7 +216,9 @@ impl RuntimeTurnDriver<'_> {
         // one whose derivation never ran here, is not this stream's.
         self.reset_assistant_stream_hooks().await;
         let LlmCallDispatch { provider } = dispatch;
-        let request = (*request).clone();
+        let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
+        let mut request = (*request).clone();
+        request.stream_events = transport_stream_events(&provider, Some(llm_stream_tx));
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
         let request_model = request.model.wire_model().to_string();
@@ -231,9 +233,9 @@ impl RuntimeTurnDriver<'_> {
                 crate::trace::trace_context_from_invocation(&invocation)
                     .for_llm_call(llm_call_id.clone()),
                 &request,
+                provider.kind(),
             )
         });
-        let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
         let provider_trace = call.as_ref().and_then(|call| {
             self.provider_trace_sender(call.standing(), protocol_iteration, &llm_call_id, &debug)
@@ -242,7 +244,6 @@ impl RuntimeTurnDriver<'_> {
         // attempt's live senders into its sideband; what is sent is the
         // admitted template, read under the admitted response context.
         let mut llm_request = LlmRequest {
-            stream_events: transport_stream_events(&provider, Some(llm_stream_tx)),
             provider_trace,
             ..request
         };
@@ -254,7 +255,7 @@ impl RuntimeTurnDriver<'_> {
         let mut call_provider = provider;
         let prepared = crate::provider::prepare_completion(&call_provider, &mut llm_request);
         let completion_sideband = match &call {
-            Some(call) => call.standing().provider_attempts(
+            Some(call) => call.provider_attempts(
                 prepared,
                 crate::trace::trace_context_from_invocation(&invocation)
                     .for_llm_call(llm_call_id.clone()),
@@ -837,6 +838,7 @@ impl RuntimeTurnDriver<'_> {
                                 self.session_id, self.turn_index, protocol_iteration
                             )),
                         TraceEvent::LlmCallCompleted {
+                            model: None,
                             response: crate::trace::trace_llm_response(
                                 response_text,
                                 0,
@@ -876,6 +878,7 @@ impl RuntimeTurnDriver<'_> {
                                 self.session_id, self.turn_index, protocol_iteration
                             )),
                         TraceEvent::LlmCallFailed {
+                            model: None,
                             error: TraceError {
                                 retryable,
                                 terminal_reason,

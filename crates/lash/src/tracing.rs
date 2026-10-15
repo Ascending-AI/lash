@@ -31,10 +31,11 @@ pub use lash_trace::{
     ProductObservationSink, SpanKey, SpanRole, TraceAttemptId, TraceAttemptLink,
     TraceAttemptObservation, TraceCall, TraceCaller, TraceCarrier, TraceCause,
     TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind, TraceIdentity,
-    TraceIds, TraceLinkMode, TraceLinks, TraceParent, TracePosition, TraceRecordIdentity,
-    TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    TraceSpanKind, TraceStateLimits, TraceTimestamp, TraceToolOwner, TraceTransitionKind,
-    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
+    TraceIds, TraceLinkMode, TraceLinks, TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall,
+    TraceParent, TracePosition, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,
+    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceStateLimits,
+    TraceTimestamp, TraceToolOwner, TraceTransitionKind, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState, derive_span,
 };
 pub use lash_trace::{TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 

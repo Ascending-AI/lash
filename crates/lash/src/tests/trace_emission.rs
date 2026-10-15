@@ -256,6 +256,7 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
     assert_eq!(
         completed[0].event,
         lash_trace::TraceEvent::TurnCompleted {
+            inputs: 1,
             outcome: lash_trace::TraceTurnOutcome::Completed {
                 done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
             },
@@ -462,7 +463,7 @@ async fn an_ended_process_exports_one_lash_process_span() -> Result<()> {
             matches!(
                 &record.event,
                 lash_trace::TraceEvent::DomainCompleted { completion }
-                    if completion.subject == lash_trace::TraceDomainSubject::Process {}
+                    if matches!(completion.subject, lash_trace::TraceDomainSubject::Process { .. })
             )
         })
         .collect();
@@ -539,6 +540,83 @@ async fn a_parked_process_counts_one_park() -> Result<()> {
     assert!(
         observed.spans("lash.process").is_empty(),
         "a parked process has no terminal"
+    );
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// L9: a cancellation on a node without the engine uses the process's
+/// recorded classification, so an admitted workflow remains a workflow.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_workflow_cancelled_without_its_engine_keeps_its_recorded_trace_class() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref()).await;
+    let registry = backend.process_registry();
+    let (observed, builder) = Observed::install(explicit_ephemeral_facets(
+        LashCore::standard_builder(backend),
+    ));
+    let core = builder.build(crate::testing::runtime_lease_owner())?;
+    let parent = lash_trace::TraceCarrier::parse_w3c(
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        None,
+    )
+    .unwrap();
+    let mut registration = lash_core::ProcessRegistration::new(
+        lash_core::ProcessInput::Engine {
+            kind: "absent-workflow-engine".into(),
+            payload: serde_json::json!({}),
+            launch: lash_core::EngineLaunch::new(
+                lash_core::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
+        },
+        lash_core::ProcessProvenance::host(),
+        lash_core::LifetimeDecision::Detached,
+    )
+    .with_trace_class(lash_core::ProcessTraceClass::Workflow)
+    .with_trace(lash_trace::TraceScopeOffer::new(
+        lash_trace::TraceCause::Parent(parent),
+        lash_trace::TraceLinks::new(),
+        None,
+    ));
+    registration.identity.label = Some("retained-workflow".into());
+    let record = registry.register_process(registration).await?;
+    registry
+        .request_process_cancel(
+            &record.id,
+            lash_core::CancelOrigin::OperatorRequested,
+            "trace-law".into(),
+            None,
+        )
+        .await?;
+    observed
+        .until("the terminal is published", |observed| {
+            observed
+                .records(&core, "domain_completed")
+                .iter()
+                .any(|record| record.context.process_id.is_some())
+                || !observed.spans("invoke_workflow").is_empty()
+                || !observed.spans("lash.process").is_empty()
+        })
+        .await;
+    let spans = observed.spans("invoke_workflow retained-workflow");
+    assert_eq!(
+        spans.len(),
+        1,
+        "the retained workflow must not become an internal process"
+    );
+    assert_eq!(
+        attribute(&spans[0], "gen_ai.operation.name").as_deref(),
+        Some("invoke_workflow")
+    );
+    assert_eq!(
+        attribute(&spans[0], "lash.outcome").as_deref(),
+        Some("cancelled")
+    );
+    assert!(!failed(&spans[0]));
+    assert_eq!(
+        registry.get_process(&record.id).await?.unwrap().trace_class,
+        lash_core::ProcessTraceClass::Workflow
     );
     core.shutdown().await?;
     Ok(())

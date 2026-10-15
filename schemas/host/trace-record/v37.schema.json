@@ -751,6 +751,54 @@
         }
       ]
     },
+    "GenerationOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "output_token_cap": {
+          "description": "Upper bound on output tokens. Unset means lash sends no cap on wires\nwhere one is optional; a wire that requires one takes the provider\noptions' `max_output_tokens` or refuses the call.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parallel_tool_calls": {
+          "description": "Whether the model may call several tools in one response. Unset sends\nnothing; a wire with no such control refuses a set value.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Sampling seed, a best-effort repeatability request. Carried by the\nOpenAI-compatible Chat Completions dialect and Google's\n`generationConfig`; every other wire refuses a set seed.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stop_sequences": {
+          "description": "Literal sequences that terminate generation. Wires without a native\nstop-sequence field refuse a non-empty list. A protocol whose grammar\nowns the response boundary may suppress this entire list; the resulting\ndisposition is `SuppressedProtocolOwned`, not `Applied`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "temperature": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NonNegativeFiniteF64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sampling temperature. A wire that has no temperature field, or a model\nthat pins sampling, refuses a set temperature before any I/O; `None`\nleaves the endpoint default in place."
+        }
+      },
+      "type": "object"
+    },
     "GenerationReceipt": {
       "description": "Per-call account of every host generation setting: resolution supplies\nwhat was requested, the adapter supplies what it emitted.\n\nThis is request-side, adapter-owned bookkeeping and deliberately separate\nfrom [`ExecutionEvidence`], which carries only facts the provider reported\nabout the execution.",
       "properties": {
@@ -1042,6 +1090,10 @@
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
+    },
+    "NonNegativeFiniteF64": {
+      "minimum": 0.0,
+      "type": "number"
     },
     "NormalizedError": {
       "description": "A journal-safe projection of a provider/transport failure.",
@@ -2524,19 +2576,6 @@
           ],
           "description": "The typed failure code of a failed operation."
         },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider": {
-          "description": "The provider the operation's work was served by, when it has one.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "started_at_ms": {
           "description": "Wall-clock epoch milliseconds the operation's scope retained as its\nstart.",
           "format": "uint64",
@@ -2559,16 +2598,6 @@
           "type": [
             "string",
             "null"
-          ]
-        },
-        "usage": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LlmUsage"
-            },
-            {
-              "type": "null"
-            }
           ]
         }
       },
@@ -2594,13 +2623,46 @@
         {
           "additionalProperties": false,
           "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "const": "process",
               "type": "string"
             }
           },
           "required": [
-            "type"
+            "type",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "workflow",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
           ],
           "type": "object"
         },
@@ -3148,6 +3210,160 @@
         "text",
         "duration_ms",
         "request_model"
+      ],
+      "type": "object"
+    },
+    "TraceModelAttempt": {
+      "description": "The execution attempt's facts, with trace metadata only for an attempt\nthat reached provider dispatch. A synthetic cut between attempts has no span.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalizedError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation_disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GenerationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which of the caller's generation options this attempt's request\ncarried, as reported by the adapter that built it."
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AttemptOutcome"
+        },
+        "protocol_position": {
+          "$ref": "#/$defs/ProtocolPosition"
+        },
+        "retry_budget_consumed": {
+          "type": "boolean"
+        },
+        "retry_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "span": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceModelAttemptSpan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LlmUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provider-reported usage only. Absence is not zero usage."
+        }
+      },
+      "required": [
+        "ordinal",
+        "outcome",
+        "protocol_position",
+        "retry_budget_consumed"
+      ],
+      "type": "object"
+    },
+    "TraceModelAttemptSpan": {
+      "description": "One real provider attempt's trace identity and provider-seam clocks.\nExecution-local: none of these facts enters the stored execution ledger.",
+      "properties": {
+        "ended_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "span_id": {
+          "$ref": "#/$defs/W3cSpanId"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "span_id",
+        "started_at_ms",
+        "ended_at_ms",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "TraceModelCall": {
+      "description": "Operational request facts retained until a logical model call closes.\nThese contain no captured prompt, tool schema or host telemetry label.",
+      "properties": {
+        "generation": {
+          "$ref": "#/$defs/GenerationOptions"
+        },
+        "output_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_model": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_model",
+        "stream",
+        "generation"
       ],
       "type": "object"
     },
@@ -4696,6 +4912,11 @@
         }
       ]
     },
+    "W3cSpanId": {
+      "description": "A nonzero W3C span id: 16 lowercase hex digits.",
+      "pattern": "^[0-9a-f]{16}$",
+      "type": "string"
+    },
     "WorkerFrameKind": {
       "description": "The worker message an encoder refused, without its guest data.",
       "enum": [
@@ -5144,11 +5365,21 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/$defs/AttemptRecord"
+            "$ref": "#/$defs/TraceModelAttempt"
           },
           "type": [
             "array",
             "null"
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceModelCall"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "provider_usage": true,
@@ -5181,7 +5412,7 @@
       "properties": {
         "attempts": {
           "items": {
-            "$ref": "#/$defs/AttemptRecord"
+            "$ref": "#/$defs/TraceModelAttempt"
           },
           "type": [
             "array",
@@ -5190,6 +5421,16 @@
         },
         "error": {
           "$ref": "#/$defs/TraceError"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceModelCall"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "stream_summary": true,
         "type": {
@@ -5718,6 +5959,11 @@
     },
     {
       "properties": {
+        "inputs": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "outcome": {
           "$ref": "#/$defs/TraceTurnOutcome"
         },
@@ -5728,6 +5974,7 @@
       },
       "required": [
         "type",
+        "inputs",
         "outcome"
       ],
       "type": "object"

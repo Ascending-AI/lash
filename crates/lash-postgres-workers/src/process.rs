@@ -76,6 +76,10 @@ impl ProcessEngine for WorkerEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash_core_execution::ProcessTraceClass {
+        lash_core_execution::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

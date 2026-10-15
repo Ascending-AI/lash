@@ -6,7 +6,17 @@ use opentelemetry::{KeyValue, Value};
 
 pub const LASH_INSTRUMENTATION_NAME: &str = "lash";
 pub const LASH_INSTRUMENTATION_CONTRACT: &str = "1.0";
-pub const GEN_AI_SEMCONV_SNAPSHOT: &str = "b31e9e8ea26ac1c086d3313d474e31d7c3f391ae";
+pub const GEN_AI_SEMCONV_SNAPSHOT: &str =
+    "open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318";
+
+/// The semantic-convention discriminator for an adapter's wire protocol.
+pub(crate) fn gen_ai_provider_name(kind: &str) -> &str {
+    match kind {
+        "openai" | "codex" | "openai-compatible" => "openai",
+        "google_oauth" => "gcp.gen_ai",
+        kind => kind,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ownership {
@@ -22,6 +32,7 @@ pub enum AttributeType {
     StringArray,
     Integer,
     Boolean,
+    Double,
 }
 
 /// Who may change an attribute lash sets.
@@ -50,11 +61,10 @@ use crate::{TraceSpanKind as K, TraceSpanKindSet};
 const EVERY: TraceSpanKindSet = TraceSpanKindSet::ALL;
 /// No span: a metric label.
 const NONE: TraceSpanKindSet = TraceSpanKindSet::EMPTY;
-/// The kinds a domain completion record closes, which carry its model,
-/// provider, tool and usage.
+/// Internal domain completions that carry intent correlation.
 const DOMAIN: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Process, K::ToolIntent]);
-const MODEL_OR_DOMAIN: TraceSpanKindSet =
-    TraceSpanKindSet::of(&[K::Model, K::Process, K::ToolIntent]);
+const MODEL: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Model]);
+const ATTEMPT: TraceSpanKindSet = TraceSpanKindSet::of(&[K::ModelAttempt]);
 
 macro_rules! attributes {
     (
@@ -117,36 +127,57 @@ attributes! {
         ProcessId => ("lash.process.id", String, EVERY),
         LlmCallId => ("lash.llm_call.id", String, EVERY),
         SendId => ("lash.send.id", String, EVERY),
-        HttpResponseStatusCode => ("http.response.status_code", Integer, NONE),
+        HttpResponseStatusCode => ("http.response.status_code", Integer, ATTEMPT),
         SessionId => ("lash.session.id", String, EVERY),
         TurnId => ("lash.turn.id", String, EVERY),
         AttemptInvocationId => ("lash.attempt.invocation_id", String, EVERY),
         OperationName => ("gen_ai.operation.name", String,
             TraceSpanKindSet::of(&[K::Agent, K::Model, K::Tool, K::Cell, K::Workflow])),
-        RequestModel => ("gen_ai.request.model", String, MODEL_OR_DOMAIN),
+        RequestModel => ("gen_ai.request.model", String, MODEL),
         ResponseModel => ("gen_ai.response.model", String, TraceSpanKindSet::of(&[K::Model])),
         ToolName => ("gen_ai.tool.name", String,
             TraceSpanKindSet::of(&[K::Tool, K::Cell, K::Process, K::ToolIntent])),
         ToolCallId => ("gen_ai.tool.call.id", String,
             TraceSpanKindSet::of(&[K::Tool, K::Process, K::ToolIntent])),
-        ToolType => ("gen_ai.tool.type", String, TraceSpanKindSet::of(&[K::Cell])),
         CellId => ("lash.cell.id", String, TraceSpanKindSet::of(&[K::Cell])),
         CellLanguage => ("lash.cell.language", String, TraceSpanKindSet::of(&[K::Cell])),
         CellToolCalls => ("lash.cell.tool_calls", Integer, TraceSpanKindSet::of(&[K::Cell])),
-        InputTokens => ("gen_ai.usage.input_tokens", Integer, MODEL_OR_DOMAIN),
-        OutputTokens => ("gen_ai.usage.output_tokens", Integer, MODEL_OR_DOMAIN),
-        CacheReadTokens => ("gen_ai.usage.cache_read.input_tokens", Integer, MODEL_OR_DOMAIN),
-        CacheWriteTokens => ("gen_ai.usage.cache_write.input_tokens", Integer, MODEL_OR_DOMAIN),
-        ReasoningTokens => ("lash.usage.reasoning_output_tokens", Integer, MODEL_OR_DOMAIN),
+        InputTokens => ("gen_ai.usage.input_tokens", Integer, MODEL),
+        OutputTokens => ("gen_ai.usage.output_tokens", Integer, MODEL),
+        CacheReadTokens => ("gen_ai.usage.cache_read.input_tokens", Integer, MODEL),
+        CacheWriteTokens => ("gen_ai.usage.cache_write.input_tokens", Integer, MODEL),
+        ReasoningTokens => ("gen_ai.usage.reasoning.output_tokens", Integer, MODEL),
         ModelAttemptOrdinal => ("lash.model.attempt.ordinal", Integer,
             TraceSpanKindSet::of(&[K::ModelAttempt])),
         ModelAttempts => ("lash.model.attempts", Integer, TraceSpanKindSet::of(&[K::Model])),
-        ModelVariant => ("lash.request.model_variant", String, NONE),
-        ResponseTextChars => ("lash.response.text_chars", Integer, NONE),
+        RequestStream => ("gen_ai.request.stream", Boolean, MODEL),
+        ReasoningLevel => ("gen_ai.request.reasoning.level", String, MODEL),
+        ReasoningDisabled => ("lash.request.reasoning", String, MODEL),
+        OutputType => ("gen_ai.output.type", String, MODEL),
+        RequestMaxTokens => ("gen_ai.request.max_tokens", Integer, MODEL),
+        RequestSeed => ("gen_ai.request.seed", Integer, MODEL),
+        RequestTemperature => ("gen_ai.request.temperature", Double, MODEL),
+        RequestStopSequences => ("gen_ai.request.stop_sequences", StringArray, MODEL),
+        ResponseId => ("gen_ai.response.id", String, MODEL),
+        ResponseFinishReasons => ("gen_ai.response.finish_reasons", StringArray, MODEL),
+        UsageOverflow => ("lash.usage.overflow", Boolean, MODEL),
+        AttemptInputTokens => ("lash.usage.input_tokens", Integer, ATTEMPT),
+        AttemptOutputTokens => ("lash.usage.output_tokens", Integer, ATTEMPT),
+        AttemptCacheReadTokens => ("lash.usage.cache_read_tokens", Integer, ATTEMPT),
+        AttemptCacheWriteTokens => ("lash.usage.cache_write_tokens", Integer, ATTEMPT),
+        AttemptReasoningTokens => ("lash.usage.reasoning_tokens", Integer, ATTEMPT),
+        ProviderRequestId => ("lash.provider.request_id", String, ATTEMPT),
+        ProcessKind => ("lash.process.kind", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
+        ProcessLabel => ("lash.process.label", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
+        WorkflowName => ("gen_ai.workflow.name", String, TraceSpanKindSet::of(&[K::Workflow])),
+        ToolId => ("lash.tool.id", String, TraceSpanKindSet::of(&[K::Tool])),
+        ToolAttempts => ("lash.tool.attempts", Integer, TraceSpanKindSet::of(&[K::Tool])),
+        ProviderCallId => ("lash.tool.provider_call_id", String, TraceSpanKindSet::of(&[K::Tool])),
         Outcome => ("lash.outcome", String, TraceSpanKindSet::of(&[
-            K::Agent, K::ModelAttempt, K::Tool, K::Cell, K::Process, K::Workflow,
+            K::Agent, K::Model, K::ModelAttempt, K::Tool, K::Cell, K::Process, K::Workflow,
             K::WorkflowNode, K::ToolIntent,
         ])),
+        TurnInputs => ("lash.turn.inputs", Integer, TraceSpanKindSet::of(&[K::Agent])),
         CancelOrigin => ("lash.cancel.origin", String, TraceSpanKindSet::of(&[K::Agent])),
         Payload => ("lash.payload.json", String, EVERY),
         PayloadTruncated => ("lash.payload.truncated", Boolean, EVERY),
@@ -168,7 +199,8 @@ attributes! {
         RecoveryLease => ("lash.recovery_leader.name", String, NONE),
     }
     refinable: {
-        GenAiProviderName => ("gen_ai.provider.name", String, MODEL_OR_DOMAIN),
+        ToolType => ("gen_ai.tool.type", String, TraceSpanKindSet::of(&[K::Tool, K::Cell])),
+        GenAiProviderName => ("gen_ai.provider.name", String, MODEL),
         ErrorType => ("error.type", String, EVERY),
     }
 }
@@ -204,31 +236,34 @@ pub struct SpanDefinition {
     pub name: &'static str,
     pub kind: SpanKind,
     pub ownership: Ownership,
+    pub semconv_type: Option<&'static str>,
 }
 #[cfg(feature = "otel")]
 macro_rules! spans {
-    ($($id:ident => ($name:literal, $kind:ident, $owner:ident)),+ $(,)?) => {
+    ($($id:ident => ($name:literal, $kind:ident, $owner:ident, $semconv:expr)),+ $(,)?) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum DomainSpan { $($id),+ }
         impl DomainSpan { pub const fn definition(self) -> SpanDefinition { match self {
-            $(Self::$id => SpanDefinition { name: $name, kind: SpanKind::$kind, ownership: Ownership::$owner }),+
+            $(Self::$id => SpanDefinition { name: $name, kind: SpanKind::$kind, ownership: Ownership::$owner, semconv_type: $semconv }),+
         }}}
-        pub const SPANS: &[SpanDefinition] = &[$(SpanDefinition { name: $name, kind: SpanKind::$kind, ownership: Ownership::$owner }),+];
+        pub const SPANS: &[SpanDefinition] = &[$(SpanDefinition { name: $name, kind: SpanKind::$kind, ownership: Ownership::$owner, semconv_type: $semconv }),+];
     }
 }
 #[cfg(feature = "otel")]
 spans! {
-    Send => ("lash.send", Producer, Live),
-    SendBatch => ("lash.send.batch", Producer, Live),
-    ProcessStart => ("lash.process.start", Producer, Live),
-    IntentSubmit => ("lash.tool_intent.submit", Producer, Live),
-    PluginInvoke => ("lash.plugin.invoke", Producer, Live),
-    Turn => ("invoke_agent", Internal, Transition),
-    Model => ("chat", Client, Live),
-    Tool => ("execute_tool", Internal, Transition),
-    Intent => ("lash.tool_intent", Internal, Transition),
-    Process => ("lash.process", Internal, Transition),
-    ExecCode => ("execute_tool", Internal, Transition),
+    Send => ("lash.send", Producer, Live, None),
+    SendBatch => ("lash.send.batch", Producer, Live, None),
+    ProcessStart => ("lash.process.start", Producer, Live, None),
+    IntentSubmit => ("lash.tool_intent.submit", Producer, Live, None),
+    PluginInvoke => ("lash.plugin.invoke", Producer, Live, None),
+    Turn => ("invoke_agent", Internal, Transition, Some("gen_ai.invoke_agent.internal")),
+    Model => ("chat", Client, Live, Some("gen_ai.client.inference")),
+    ModelAttempt => ("lash.model.attempt", Client, Live, None),
+    Tool => ("execute_tool", Internal, Transition, Some("gen_ai.execute_tool.internal")),
+    Intent => ("lash.tool_intent", Internal, Transition, None),
+    Process => ("lash.process", Internal, Transition, None),
+    Workflow => ("invoke_workflow", Internal, Transition, Some("gen_ai.invoke_workflow.internal")),
+    ExecCode => ("execute_tool", Internal, Transition, Some("gen_ai.execute_tool.internal")),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,13 +314,16 @@ metrics! {
 pub fn contract_markdown() -> String {
     use std::fmt::Write;
     let mut out = format!(
-        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n| Span name or prefix | Kind | Ownership |\n|---|---|---|\n"
+        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
     );
     for span in SPANS {
         let _ = writeln!(
             out,
-            "| `{}` | {:?} | {:?} |",
-            span.name, span.kind, span.ownership
+            "| `{}` | {:?} | {:?} | {} |",
+            span.name,
+            span.kind,
+            span.ownership,
+            span.semconv_type.unwrap_or("—")
         );
     }
     out.push_str("\n| Attribute | Type | Mutability | Set on |\n|---|---|---|---|\n");

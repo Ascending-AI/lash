@@ -198,7 +198,11 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
             .with_trace(offer)
     };
     let created = registry
-        .register_process_reporting_outcome(start(offer(FIRST, FIRST_SPAN)), &[])
+        .register_process_reporting_outcome(
+            start(offer(FIRST, FIRST_SPAN))
+                .with_trace_class(lash_core::ProcessTraceClass::Workflow),
+            &[],
+        )
         .await
         .expect("the first start");
     assert_eq!(created.outcome, crate::ProcessRegistrationOutcome::Created);
@@ -213,6 +217,10 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
         started_at_ms: created.record.created_at_ms,
     };
     assert_eq!(created.record.trace, Some(scope.clone()));
+    assert_eq!(
+        created.record.trace_class,
+        lash_core::ProcessTraceClass::Workflow
+    );
 
     // A host key fences the start's content, and the offer is not content:
     // a retry under another context and span is the retained process.
@@ -224,6 +232,10 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
         assert_eq!(retried.outcome, crate::ProcessRegistrationOutcome::Existing);
         assert_eq!(retried.record.id, created.record.id);
         assert_eq!(retried.record.trace, Some(scope.clone()));
+        assert_eq!(
+            retried.record.trace_class,
+            lash_core::ProcessTraceClass::Workflow
+        );
         assert!(
             TraceScopeAdmission::of(scope.clone(), retried.is_created())
                 .permit()

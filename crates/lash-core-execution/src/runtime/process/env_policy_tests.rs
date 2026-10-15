@@ -255,6 +255,10 @@ impl crate::ProcessEngine for SearchEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> crate::ProcessTraceClass {
+        crate::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

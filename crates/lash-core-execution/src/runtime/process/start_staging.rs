@@ -341,7 +341,9 @@ impl RegisteredProcessStart {
         &self,
         registration: impl Into<ProcessStartRegistration>,
     ) -> ProcessRegistration {
-        let registration = registration.into();
+        let registration = registration
+            .into()
+            .with_trace_class(self.record.trace_class);
         match registration.input.as_ref() {
             // The row holds the request with the default binding its
             // registration recorded; the process runs that (FIG-4531).
@@ -761,6 +763,11 @@ async fn stage<'a>(
     let submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
     let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
     let (definition, mut registration) = resolve_start_target(stores, &claim, registration).await?;
+    registration.trace_class = match registration.input.as_ref() {
+        ProcessInput::Engine { kind, .. } => stores.engines.require(kind)?.trace_class(),
+        ProcessInput::SessionTurn { .. } => super::ProcessTraceClass::Internal,
+    };
+    registration.trace_nodes &= registration.trace_class == super::ProcessTraceClass::Workflow;
     check_sealed_settings(stores, &registration)?;
     let loaded = load_staged_env(stores, env.as_ref()).await?;
     registration.requires = loaded

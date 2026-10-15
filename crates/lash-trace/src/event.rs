@@ -105,6 +105,8 @@ pub enum TraceEvent {
         request: TraceLlmRequest,
     },
     LlmCallCompleted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<crate::TraceModelCall>,
         response: TraceLlmResponse,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<LlmUsage>,
@@ -113,14 +115,16 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attempts: Option<Vec<AttemptRecord>>,
+        attempts: Option<Vec<crate::TraceModelAttempt>>,
     },
     LlmCallFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<crate::TraceModelCall>,
         error: TraceError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attempts: Option<Vec<AttemptRecord>>,
+        attempts: Option<Vec<crate::TraceModelAttempt>>,
     },
     /// One real provider request attempt of a model call, reported by the
     /// body that dispatched it when the attempt is sealed. `attempt` is the
@@ -248,6 +252,7 @@ pub enum TraceEvent {
         step: crate::StepBodyStarted,
     },
     TurnCompleted {
+        inputs: usize,
         outcome: TraceTurnOutcome,
     },
     /// A host call that admits durable work ended: its producer span's one

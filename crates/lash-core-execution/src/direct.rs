@@ -301,6 +301,7 @@ impl DirectLlmClient {
                 &standing,
                 TraceContext::default().for_llm_call(id.clone()),
                 &llm_request,
+                self.provider.kind(),
             );
             (call, id)
         });
@@ -309,9 +310,9 @@ impl DirectLlmClient {
         let sideband =
             lash_core_llm::core_internal::prepare_completion(&self.provider, &mut llm_request);
         let sideband = match &traced {
-            Some((call, id)) => call
-                .standing()
-                .provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone())),
+            Some((call, id)) => {
+                call.provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone()))
+            }
             None => sideband,
         };
         let template = match self.provider.lower(&llm_request).await {

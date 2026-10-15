@@ -34,7 +34,10 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
     );
     let trace =
         crate::trace::trace_llm_attempts(Some(&completion.call_record)).expect("typed retry trace");
-    assert_eq!(trace, completion.call_record.attempts);
+    assert_eq!(
+        trace.into_iter().map(|a| a.attempt).collect::<Vec<_>>(),
+        completion.call_record.attempts
+    );
 }
 
 #[tokio::test]
@@ -69,7 +72,10 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
     );
     let trace =
         crate::trace::trace_llm_attempts(Some(&failure.call_record)).expect("typed retry trace");
-    assert_eq!(trace, failure.call_record.attempts);
+    assert_eq!(
+        trace.into_iter().map(|a| a.attempt).collect::<Vec<_>>(),
+        failure.call_record.attempts
+    );
 }
 
 #[tokio::test]

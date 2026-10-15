@@ -120,7 +120,9 @@ impl TraceSpanKind {
     pub const fn children(self) -> TraceSpanKindSet {
         use TraceSpanKind as K;
         match self {
-            K::Producer => TraceSpanKindSet::of(&[K::Agent, K::Process, K::ToolIntent]),
+            K::Producer => {
+                TraceSpanKindSet::of(&[K::Agent, K::Process, K::Workflow, K::ToolIntent])
+            }
             K::Agent => TraceSpanKindSet::of(&[
                 K::Agent,
                 K::Model,
@@ -130,7 +132,9 @@ impl TraceSpanKind {
                 K::Point,
             ]),
             K::Model => TraceSpanKindSet::of(&[K::ModelAttempt]),
-            K::Tool => TraceSpanKindSet::of(&[K::Process, K::Model, K::Extension, K::Point]),
+            K::Tool => {
+                TraceSpanKindSet::of(&[K::Process, K::Workflow, K::Model, K::Extension, K::Point])
+            }
             K::Cell => TraceSpanKindSet::of(&[K::Tool, K::Extension, K::Point]),
             K::Process => {
                 TraceSpanKindSet::of(&[K::Agent, K::Tool, K::Model, K::Extension, K::Point])
@@ -144,7 +148,7 @@ impl TraceSpanKind {
                 K::Point,
             ]),
             K::WorkflowNode => TraceSpanKindSet::of(&[K::Tool, K::Model, K::Extension, K::Point]),
-            K::ToolIntent => TraceSpanKindSet::of(&[K::Tool, K::Process]),
+            K::ToolIntent => TraceSpanKindSet::of(&[K::Tool, K::Process, K::Workflow]),
             K::Extension => TraceSpanKindSet::of(&[K::Extension, K::Point, K::Model]),
             K::ModelAttempt | K::Point => TraceSpanKindSet::EMPTY,
         }

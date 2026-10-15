@@ -260,6 +260,10 @@ impl ProcessEngine for Integrator {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash::plugins::ProcessTraceClass {
+        lash::plugins::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &lash::messages::JsonValue,

@@ -14,7 +14,7 @@ struct ProviderCompletionSidebandState {
 }
 
 type AttemptObserver =
-    Arc<dyn Fn(AttemptRecord, lash_trace::TraceAttemptObservation) + Send + Sync>;
+    Arc<dyn Fn(lash_trace::TraceModelAttempt, lash_trace::TraceAttemptObservation) + Send + Sync>;
 
 /// Replay safety and sealed attempt facts shared with the runtime independently
 /// of the spawned LLM Provider task's terminal return. This is in-process
@@ -24,6 +24,7 @@ pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
     attempt_observer: Option<AttemptObserver>,
     attempt_clock: Option<Arc<dyn crate::Clock>>,
+    attempt_identity: Option<Arc<dyn lash_trace::TraceIdentity>>,
 }
 
 impl std::fmt::Debug for ProviderCompletionSideband {
@@ -43,9 +44,11 @@ impl ProviderCompletionSideband {
         mut self,
         observer: AttemptObserver,
         clock: Arc<dyn crate::Clock>,
+        identity: Arc<dyn lash_trace::TraceIdentity>,
     ) -> Self {
         self.attempt_observer = Some(observer);
         self.attempt_clock = Some(clock);
+        self.attempt_identity = Some(identity);
         self
     }
 
@@ -56,6 +59,7 @@ impl ProviderCompletionSideband {
         Self {
             attempt_observer: None,
             attempt_clock: None,
+            attempt_identity: None,
             state: Arc::new(Mutex::new(ProviderCompletionSidebandState {
                 serving_route,
                 replay_drops,
@@ -134,7 +138,15 @@ impl ProviderCompletionSideband {
                 .attempt_clock
                 .as_ref()
                 .map(|clock| clock.timestamp_ms());
-            observer(attempt, observation);
+            let span = self.attempt_identity.as_ref().and_then(|identity| {
+                Some(lash_trace::TraceModelAttemptSpan {
+                    span_id: identity.leaf_span_id(),
+                    started_at_ms: observation.started_at_ms?,
+                    ended_at_ms: observation.ended_at_ms?,
+                    provider: observation.provider.clone()?,
+                })
+            });
+            observer(lash_trace::TraceModelAttempt { attempt, span }, observation);
         }
     }
 

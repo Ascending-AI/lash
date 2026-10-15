@@ -883,7 +883,8 @@ PACKAGE_DEPS = {
         "dev": {
             "jsonschema": "//third-party/rust:p0184",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
-            "opentelemetry_sdk": "//third-party/rust:p0225"
+            "opentelemetry_sdk": "//third-party/rust:p0225",
+            "serde_yaml": "//third-party/rust:p0326"
         },
         "normal": {
             "chrono": "//third-party/rust:p0048",

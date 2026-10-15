@@ -6,7 +6,7 @@
 
 use lash_trace::TraceLlmResponse;
 
-use crate::llm::types::{AttemptRecord, LlmOutputPart};
+use crate::llm::types::LlmOutputPart;
 
 pub fn trace_llm_response(
     text: String,
@@ -32,6 +32,8 @@ pub fn trace_llm_response(
 }
 
 /// The sealed attempts of a call, as its record keeps them.
-pub fn trace_llm_attempts(record: Option<&crate::LlmCallRecord>) -> Option<Vec<AttemptRecord>> {
-    record.map(|record| record.attempts.clone())
+pub fn trace_llm_attempts(
+    record: Option<&crate::LlmCallRecord>,
+) -> Option<Vec<lash_trace::TraceModelAttempt>> {
+    record.map(|record| record.attempts.iter().cloned().map(Into::into).collect())
 }

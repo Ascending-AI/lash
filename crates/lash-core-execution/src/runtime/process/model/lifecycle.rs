@@ -143,6 +143,9 @@ pub struct ProcessRecord {
     /// exist is fixed before any child span exists.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub trace_nodes: bool,
+    /// The process taxonomy its first registration retained. Every owner
+    /// reads it rather than consulting its live engine registry.
+    pub trace_class: super::super::ProcessTraceClass,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -409,6 +412,7 @@ impl ProcessRecord {
             provenance: registration.provenance,
             trace: Some(trace),
             trace_nodes: registration.trace_nodes,
+            trace_class: registration.trace_class,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,

@@ -102,13 +102,25 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
 pub type PerformedEffects =
     std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>;
 
-/// No method has a default body: every engine answers every question
+/// Whether an engine is an internal process or a user-facing workflow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessTraceClass {
+    #[default]
+    Internal,
+    Workflow,
+}
+
+/// Every engine answers every execution question
 /// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
 /// `External`) are not registered here.
 #[async_trait::async_trait]
 pub trait ProcessEngine: Send + Sync {
     /// The kind every process of this engine is registered under.
     fn kind(&self) -> &'static str;
+
+    /// The span taxonomy this engine explicitly declares for its processes.
+    fn trace_class(&self) -> ProcessTraceClass;
 
     /// The encoding of this engine's state. L11's claim filter reads it.
     fn state_format(&self) -> EngineStateFormat;

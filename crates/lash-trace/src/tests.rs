@@ -14,7 +14,6 @@ fn domain_completion_refuses_an_untyped_intent_subject() {
     for subject in [
         serde_json::json!({"type": "tool_intent"}),
         serde_json::json!({"type": "tool_intent", "kind": "custom_intent"}),
-        serde_json::json!({"type": "process", "kind": "start_process"}),
     ] {
         assert!(
             serde_json::from_value::<TraceDomainCompletion>(serde_json::json!({
@@ -121,6 +120,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "llm call failed",
             TraceEvent::LlmCallFailed {
+                model: None,
                 error: TraceError {
                     retryable: false,
                     terminal_reason: crate::TraceLlmTerminalReason::Unknown,
@@ -193,6 +193,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
     ] {
         let case = done_reason.wire_tag();
         let event = TraceEvent::TurnCompleted {
+            inputs: 1,
             outcome: TraceTurnOutcome::Failed { done_reason },
         };
         assert!(event.is_failed(), "failed turn reason {case} was missed");
@@ -202,6 +203,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "completed turn",
             TraceEvent::TurnCompleted {
+                inputs: 1,
                 outcome: TraceTurnOutcome::Completed {
                     done_reason: TraceTurnCompletionReason::AssistantMessage,
                 },
@@ -210,6 +212,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "cancelled turn",
             TraceEvent::TurnCompleted {
+                inputs: 1,
                 outcome: TraceTurnOutcome::Cancelled {
                     evidence: TraceTurnCancellationEvidence {
                         request_id: "request-1".to_string(),

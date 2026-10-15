@@ -66,7 +66,8 @@ pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
     TraceAttemptObservation, TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject,
-    TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
+    TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall, TraceRuntimeStreamEvent,
+    TraceRuntimeStreamPayload,
 };
 pub use event::{TraceEvent, TraceEventKind};
 pub use flight_recorder::{

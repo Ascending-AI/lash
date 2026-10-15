@@ -224,6 +224,7 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::LlmCallCompleted {
+            model: None,
             response: TraceLlmResponse {
                 text: "hello".to_string(),
                 duration_ms: 12,
@@ -238,6 +239,7 @@ fn event_samples() -> Vec<TraceEvent> {
             attempts: None,
         },
         TraceEvent::LlmCallFailed {
+            model: None,
             error: TraceError {
                 retryable: true,
                 terminal_reason: lash_trace::TraceLlmTerminalReason::Unknown,
@@ -268,7 +270,10 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::DomainCompleted {
             completion: lash_trace::TraceDomainCompletion::new(
-                lash_trace::TraceDomainSubject::Process {},
+                lash_trace::TraceDomainSubject::Process {
+                    kind: "session_turn".into(),
+                    label: None,
+                },
                 1,
                 lash_trace::TraceDomainStatus::Completed,
             ),
@@ -445,6 +450,7 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::TurnCompleted {
+            inputs: 1,
             outcome: TraceTurnOutcome::Completed {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
             },
@@ -906,6 +912,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::LlmCallCompleted {
+            model: None,
             response: TraceLlmResponse {
                 text: CONTENT.to_string(),
                 duration_ms: 12,

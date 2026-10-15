@@ -169,7 +169,10 @@ fn failed_operation_triggers_a_snapshot() {
         },
         TraceEvent::DomainCompleted {
             completion: crate::TraceDomainCompletion::new(
-                crate::TraceDomainSubject::Process {},
+                crate::TraceDomainSubject::Process {
+                    kind: "session_turn".into(),
+                    label: None,
+                },
                 1000,
                 TraceDomainStatus::Failed,
             ),

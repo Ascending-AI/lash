@@ -474,6 +474,10 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         LASH_VM_ENGINE_KIND
     }
 
+    fn trace_class(&self) -> lash_core::ProcessTraceClass {
+        lash_core::ProcessTraceClass::Workflow
+    }
+
     fn state_format(&self) -> lash_core::EngineStateFormat {
         advance::state_format(self.writes)
     }

@@ -544,6 +544,10 @@ impl crate::ProcessEngine for ModuleNamingEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash_core::ProcessTraceClass {
+        lash_core::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

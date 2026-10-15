@@ -603,6 +603,10 @@ impl ProcessEngine for SubscriptionEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> lash_core::ProcessTraceClass {
+        lash_core::ProcessTraceClass::Internal
+    }
+
     fn kind(&self) -> &'static str {
         MCP_EVENTS_ENGINE
     }

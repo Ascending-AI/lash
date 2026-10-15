@@ -252,6 +252,23 @@ impl super::activation::ProcessActivation {
                 lash_trace::TraceDomainStatus::Failed
             }
         };
+        let subject = match record.input.as_ref() {
+            crate::ProcessInput::Engine { kind, .. }
+                if record.trace_class == crate::ProcessTraceClass::Workflow =>
+            {
+                lash_trace::TraceDomainSubject::Workflow {
+                    kind: kind.clone(),
+                    name: record.identity.label.clone(),
+                }
+            }
+            input => lash_trace::TraceDomainSubject::Process {
+                kind: match input {
+                    crate::ProcessInput::SessionTurn { .. } => "session_turn".into(),
+                    crate::ProcessInput::Engine { kind, .. } => kind.clone(),
+                },
+                label: record.identity.label.clone(),
+            },
+        };
         let started_at_ms = scope.started_at_ms;
         tracing.unreplayed(Some(scope)).transition(
             Some(&lash_trace::EmissionPermit::new_transition()),
@@ -263,7 +280,7 @@ impl super::activation::ProcessActivation {
                     lash_trace::TraceContext::default(),
                     lash_trace::TraceEvent::DomainCompleted {
                         completion: lash_trace::TraceDomainCompletion::new(
-                            lash_trace::TraceDomainSubject::Process {},
+                            subject,
                             started_at_ms,
                             status,
                         ),

@@ -161,6 +161,10 @@ impl crate::ProcessEngine for HeldProcessEngine {
         Vec::new()
     }
 
+    fn trace_class(&self) -> crate::ProcessTraceClass {
+        crate::ProcessTraceClass::Internal
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
@@ -286,6 +290,10 @@ impl crate::ProcessEngine for FixtureProcessEngine {
         _output: &crate::SettledOutput,
     ) -> Vec<(u32, u64)> {
         Vec::new()
+    }
+
+    fn trace_class(&self) -> crate::ProcessTraceClass {
+        crate::ProcessTraceClass::Internal
     }
 
     async fn performed_effects(
