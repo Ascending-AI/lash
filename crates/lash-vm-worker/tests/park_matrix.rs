@@ -769,7 +769,7 @@ async fn two_orders(
         .find(|(identity, _, _)| *identity == sum_identity())
         .map(|(_, _, request)| request.clone());
     let exact =
-        r#"{"effect":"tools.sum","args":[[9007199254740993,18446744073709551617,[5.0,1000.0]]]}"#;
+        r#"{"effect":"tools.sum","args":[[9007199254740993,18446744073709551617,[5,1000]]]}"#;
     if sum.as_deref() != Some(exact) {
         shared.violation(format!(
             "numbers: the arguments left as {sum:?}, not {exact}"

@@ -301,7 +301,6 @@ impl CellHost<'_> {
         })?;
         let projection = CellArgs {
             entries: &self.entries,
-            finish: effect.controls.finish_declaration().is_some(),
         };
         let args = projection
             .args(&request.args)
@@ -360,19 +359,15 @@ impl ArgsRefusal {
 }
 
 /// How a cell's arguments become a tool call's JSON: the guest's one input
-/// record, leaving the cell as a cell's value always has. A finish value's
-/// whole numbers are integers, in either dialect; any other call's
-/// attachments reach the tool as the attachments they are. A frozen request
-/// holds the guest's arguments under this projection's identity, never the
-/// JSON it makes (FIG-5887 §3).
+/// record, leaving the cell as a cell's value always has, its whole numbers
+/// below 2^53 integers in either dialect (`Float::json_number`). A frozen
+/// request holds the guest's arguments under this projection's identity,
+/// never the JSON it makes (FIG-5887 §3).
 pub(super) struct CellArgs<'h> {
     pub entries: &'h super::processes::CellEntries,
-    pub finish: bool,
 }
 
-/// The projection identity of a finish call's arguments.
-pub(super) const FINISH_ARGS: &str = "lash-cell-args/finish/v1";
-/// The projection identity of any other call's arguments.
+/// The projection identity of a call's arguments.
 pub(super) const CALL_ARGS: &str = "lash-cell-args/v1";
 
 impl<'h> CellArgs<'h> {
@@ -382,14 +377,7 @@ impl<'h> CellArgs<'h> {
         entries: &'h super::processes::CellEntries,
     ) -> Result<Self, String> {
         match id {
-            FINISH_ARGS => Ok(Self {
-                entries,
-                finish: true,
-            }),
-            CALL_ARGS => Ok(Self {
-                entries,
-                finish: false,
-            }),
+            CALL_ARGS => Ok(Self { entries }),
             other => Err(format!("no argument projection `{other}`")),
         }
     }
@@ -404,13 +392,6 @@ impl<'h> CellArgs<'h> {
                 .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
                 .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
                 .map(crate::projection::plain_json_for_transport)
-                .map(|args| {
-                    if self.finish {
-                        crate::cell_value::whole_numbers_as_integers(args)
-                    } else {
-                        crate::cell_value::attachments_as_written(args)
-                    }
-                })
                 .map_err(ArgsRefusal::NotJson),
             more => Err(ArgsRefusal::Arity(more.len())),
         }
@@ -419,7 +400,7 @@ impl<'h> CellArgs<'h> {
 
 impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs<'_> {
     fn id(&self) -> &str {
-        if self.finish { FINISH_ARGS } else { CALL_ARGS }
+        CALL_ARGS
     }
 
     fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {

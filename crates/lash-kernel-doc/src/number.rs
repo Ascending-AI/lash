@@ -288,6 +288,32 @@ impl Float {
         let digits = std::str::from_utf8(&digits[..len]).ok()?;
         Some((self.0.is_sign_negative(), digits, exponent))
     }
+
+    /// The float as a JSON number: the one spelling every path that turns a
+    /// kernel value into JSON uses (a tool's arguments, a cell's values, a
+    /// run's result). A whole float of magnitude below 2^53 is a JSON
+    /// integer, and any other finite float is a JSON float in the shortest
+    /// digits that read back as it. NaN and the infinities have no JSON
+    /// spelling and are `None`; each path keeps its own handling of them.
+    ///
+    /// JSON has one number kind, so a whole float and the integer it equals
+    /// are the same JSON value: TypeScript's `5` and Python's `5.0` both
+    /// leave as `5`, and `-0.0` leaves as `0`. Below 2^53 a whole float is
+    /// exactly one integer. From 2^53 on it also stands for integers it
+    /// cannot hold, so it stays a float: `2**53` leaves as
+    /// `9007199254740992.0`.
+    pub fn json_number(self) -> Option<serde_json::Number> {
+        const TWO_TO_53: f64 = 9_007_199_254_740_992.0;
+        let float = self.0;
+        if float.fract() == 0.0 && float.abs() < TWO_TO_53 {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a whole float below 2^53 is an exact i64"
+            )]
+            return Some((float as i64).into());
+        }
+        serde_json::Number::from_f64(float)
+    }
 }
 
 impl fmt::Display for Float {

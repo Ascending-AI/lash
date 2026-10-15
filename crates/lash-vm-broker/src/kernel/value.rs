@@ -6,8 +6,11 @@
 //! is lost before the machine decodes the number by the `perform`'s stated
 //! type or the manifest's bare-number policy. [`datum_to_json`] writes an
 //! effect's arguments: an integer as its decimal digits at any size, a float
-//! as the shortest digits that read back as the same float. A kind JSON
-//! cannot carry is refused with a typed [`NotJson`], never approximated.
+//! as [`Float::json_number`] spells it (a whole one below 2^53 as an
+//! integer). A kind JSON cannot carry is refused with a typed [`NotJson`],
+//! never approximated.
+//!
+//! [`Float::json_number`]: lash_kernel_doc::Float::json_number
 
 use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
 
@@ -77,8 +80,10 @@ fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<
         Datum::Null => out.push_str("null"),
         Datum::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
         Datum::Int(value) => out.push_str(&value.to_string()),
-        Datum::Float(value) if value.get().is_finite() => out.push_str(&value.to_string()),
-        Datum::Float(_) => return Err(NotJson::NonFiniteFloat),
+        Datum::Float(value) => match value.json_number() {
+            Some(number) => out.push_str(&number.to_string()),
+            None => return Err(NotJson::NonFiniteFloat),
+        },
         Datum::Number(token) => out.push_str(token.as_str()),
         Datum::Text(text) => write_text(text, out),
         Datum::Tuple(items) | Datum::List(items) => {
@@ -389,9 +394,10 @@ mod tests {
         );
     }
 
-    /// `K-EFF-002`: an integer leaves as its digits at any size and a float
-    /// as digits that read back as the same float; what JSON cannot carry
-    /// is refused by kind.
+    /// `K-EFF-002`: an integer leaves as its digits at any size, a whole
+    /// float below 2^53 as an integer and any other float as digits that
+    /// read back as the same float; what JSON cannot carry is refused by
+    /// kind.
     #[test]
     fn arguments_leave_without_loss_or_are_refused_by_kind() {
         let big = Integer::parse("18446744073709551617").expect("an integer");
@@ -410,13 +416,13 @@ mod tests {
         .expect("JSON");
         assert_eq!(
             written,
-            r#"{"int":18446744073709551617,"float":5.0,"tiny":1.5e-7,"map":{"k\"":[null]}}"#
+            r#"{"int":18446744073709551617,"float":5,"tiny":1.5e-7,"map":{"k\"":[null]}}"#
         );
         assert_eq!(
             datum_from_json(&written).expect("JSON"),
             Datum::Record(vec![
                 ("int".into(), token("18446744073709551617")),
-                ("float".into(), token("5.0")),
+                ("float".into(), token("5")),
                 ("tiny".into(), token("1.5e-7")),
                 (
                     "map".into(),

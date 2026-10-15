@@ -14,13 +14,15 @@
 //!   (`lash_vm_broker::kernel::datum_to_json`), which refuses what JSON
 //!   cannot carry.
 //!
+//! Both spell a float as [`Float::json_number`] does.
+//!
 //! [`bind_json`] goes the other way, for values a host seeds a session
 //! with: each array and object becomes a fresh heap object.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{Datum, Float, Integer, NumberPolicy, Object, ObjectId, Value};
-use serde_json::{Map, Number, Value as Json};
+use serde_json::{Map, Value as Json};
 
 /// The field that names the kind of a value JSON has no spelling for.
 pub(crate) const KIND_KEY: &str = "$kind";
@@ -47,27 +49,13 @@ fn integer_json(value: &Integer) -> Json {
     kinded("int", [("digits", Json::String(digits))])
 }
 
-/// A float as a JSON number, a whole one without a fraction; a non-finite
-/// one under the kind `float`.
+/// A float as a JSON number ([`Float::json_number`]); a non-finite one
+/// under the kind `float`.
 fn float_json(value: Float) -> Json {
-    let float = value.get();
-    if !float.is_finite() {
-        return kinded("float", [("value", Json::String(value.to_string()))]);
-    }
-    finite_float_json(float)
-}
-
-/// A finite float as a JSON number, a whole one without a fraction.
-fn finite_float_json(float: f64) -> Json {
-    // 2^53: every whole float below it is one exact integer.
-    if float.fract() == 0.0 && float.abs() < 9_007_199_254_740_992.0 {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "a whole float below 2^53 is an exact i64"
-        )]
-        return Json::Number((float as i64).into());
-    }
-    Number::from_f64(float).map_or(Json::Null, Json::Number)
+    value.json_number().map_or_else(
+        || kinded("float", [("value", Json::String(value.to_string()))]),
+        Json::Number,
+    )
 }
 
 fn entries_json<K, V>(
@@ -99,60 +87,6 @@ fn entries_json<K, V>(
             )],
         ),
     }
-}
-
-/// `value` with every whole number below 2^53 spelled as an integer, as
-/// [`datum_json`] spells a whole float: what a finish value's JSON is, so a
-/// dialect whose numbers are floats finishes with `7`, not `7.0`.
-pub(crate) fn whole_numbers_as_integers(value: Json) -> Json {
-    match value {
-        Json::Number(number) => match number.as_f64() {
-            Some(float) if number.is_f64() => finite_float_json(float),
-            _ => Json::Number(number),
-        },
-        Json::Array(values) => {
-            Json::Array(values.into_iter().map(whole_numbers_as_integers).collect())
-        }
-        Json::Object(entries) => Json::Object(
-            entries
-                .into_iter()
-                .map(|(key, value)| (key, whole_numbers_as_integers(value)))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
-/// `value` with every attachment it names spelled as the host wrote it. A
-/// dialect whose numbers are floats hands an attachment's sizes back as
-/// whole floats, and a record with a float size names no attachment; any
-/// other record keeps its numbers as the cell spelled them.
-pub(crate) fn attachments_as_written(value: Json) -> Json {
-    match value {
-        // A tagged attachment is a record of two fields: its tag and its
-        // reference.
-        Json::Object(entries) if entries.len() == 2 => {
-            let whole = whole_numbers_as_integers(Json::Object(entries.clone()));
-            match serde_json::from_value::<lash_core::ToolValue>(whole.clone()) {
-                Ok(lash_core::ToolValue::Attachment(_)) => whole,
-                _ => attachment_fields_as_written(entries),
-            }
-        }
-        Json::Object(entries) => attachment_fields_as_written(entries),
-        Json::Array(values) => {
-            Json::Array(values.into_iter().map(attachments_as_written).collect())
-        }
-        other => other,
-    }
-}
-
-fn attachment_fields_as_written(entries: Map<String, Json>) -> Json {
-    Json::Object(
-        entries
-            .into_iter()
-            .map(|(key, value)| (key, attachments_as_written(value)))
-            .collect(),
-    )
 }
 
 /// A value copied out of a run, as JSON. Total: see the module docs.

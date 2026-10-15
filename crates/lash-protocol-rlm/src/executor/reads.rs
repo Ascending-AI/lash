@@ -76,7 +76,6 @@ impl CellReads {
     ) -> Result<serde_json::Value, ErrorDatum> {
         let projection = CellArgs {
             entries: &self.entries,
-            finish: false,
         };
         let args = projection
             .args(args)
