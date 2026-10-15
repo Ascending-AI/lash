@@ -20,7 +20,7 @@ use opentelemetry::trace::{
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{IdGenerator, SamplingDecision, SdkTracer};
 
-use lash_sansio::llm::types::LlmUsage;
+use lash_sansio::llm::types::{LlmUsage, TokenUsageOverflow};
 
 use crate::policy::{Contributions, TraceAttributeWriter, TraceOmissionCounts};
 use crate::telemetry::{
@@ -269,6 +269,8 @@ impl OtelTelemetry {
                     ids: &ids,
                     position,
                     record,
+                    attempt: projection.attempt,
+                    usage: projection.usage.as_ref().and_then(|u| u.as_ref().ok()),
                     attributes: &attributes,
                     policy: &self.policy,
                 };
@@ -486,6 +488,8 @@ impl OtelTelemetry {
             ids: &spec.ids,
             position: &position,
             record: &record,
+            attempt: None,
+            usage: None,
             attributes: &attributes,
             policy: &self.policy,
         };
@@ -585,7 +589,8 @@ struct Projection<'a> {
     model: Option<&'a str>,
     tool: Option<&'a str>,
     process: Option<&'a str>,
-    attempt: Option<&'a lash_sansio::llm::types::AttemptRecord>,
+    attempt: Option<&'a crate::TraceModelAttempt>,
+    usage: Option<Result<LlmUsage, TokenUsageOverflow>>,
 }
 impl<'a> Projection<'a> {
     fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
@@ -595,6 +600,7 @@ impl<'a> Projection<'a> {
             tool: None,
             process: None,
             attempt: None,
+            usage: None,
         };
         match (position.kind, &record.event) {
             (TraceSpanKind::Producer, TraceEvent::ProducerSettled { producer: kind, .. }) => {
@@ -604,10 +610,12 @@ impl<'a> Projection<'a> {
             (TraceSpanKind::Model, TraceEvent::LlmCallCompleted { response, .. }) => {
                 projection.span = DomainSpan::Model;
                 projection.model = Some(&response.request_model);
+                projection.usage = model::logical_usage(&record.event);
             }
             (TraceSpanKind::Model, TraceEvent::LlmCallFailed { model, .. }) => {
                 projection.span = DomainSpan::Model;
                 projection.model = model.as_ref().map(|model| model.request_model.as_str());
+                projection.usage = model::logical_usage(&record.event);
             }
             (TraceSpanKind::ModelAttempt, TraceEvent::LlmAttemptCompleted { .. }) => {
                 projection.span = DomainSpan::ModelAttempt;
@@ -662,7 +670,7 @@ impl<'a> Projection<'a> {
     fn failed(&self, record: &TraceRecord) -> bool {
         if let Some(attempt) = self.attempt {
             return matches!(
-                attempt.outcome,
+                attempt.attempt.outcome,
                 lash_sansio::llm::types::AttemptOutcome::Failed
                     | lash_sansio::llm::types::AttemptOutcome::Interrupted
             );
@@ -684,7 +692,7 @@ impl<'a> Projection<'a> {
     }
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
         if let Some(attempt) = self.attempt {
-            model::attempt_attributes(attempt, out);
+            model::attempt_attributes(&attempt.attempt, out);
             return;
         }
         if let Some(operation) = self.operation() {
@@ -703,17 +711,11 @@ impl<'a> Projection<'a> {
             TraceEvent::LlmCallCompleted {
                 model,
                 response,
-                usage,
                 attempts,
                 ..
             } => {
-                model::call_attributes(
-                    model.as_ref(),
-                    Some(response),
-                    attempts.as_deref(),
-                    usage.as_ref(),
-                    out,
-                );
+                model::call_attributes(model.as_ref(), Some(response), attempts.as_deref(), out);
+                logical_usage_attributes(&self.usage, out);
             }
             TraceEvent::LlmCallFailed {
                 model,
@@ -721,7 +723,8 @@ impl<'a> Projection<'a> {
                 attempts,
                 ..
             } => {
-                model::call_attributes(model.as_ref(), None, attempts.as_deref(), None, out);
+                model::call_attributes(model.as_ref(), None, attempts.as_deref(), out);
+                logical_usage_attributes(&self.usage, out);
                 if error.terminal_reason == crate::TraceLlmTerminalReason::Cancelled {
                     out.push(A::Outcome.value("cancelled"));
                     return;
@@ -906,6 +909,19 @@ fn cell_attributes(
         out.push(A::CellToolCalls.value(i64::try_from(calls).unwrap_or(i64::MAX)));
     }
     out.push(A::Outcome.value(outcome));
+}
+
+/// Writes the projection's folded logical usage as `gen_ai.usage.*`, or the
+/// overflow marker when the fold overflowed; nothing when it folded none.
+fn logical_usage_attributes(
+    usage: &Option<Result<LlmUsage, TokenUsageOverflow>>,
+    out: &mut Vec<KeyValue>,
+) {
+    match usage {
+        Some(Ok(usage)) => usage_attributes(usage, out),
+        Some(Err(_)) => out.push(A::UsageOverflow.value(true)),
+        None => {}
+    }
 }
 
 fn usage_attributes(usage: &LlmUsage, out: &mut Vec<KeyValue>) {

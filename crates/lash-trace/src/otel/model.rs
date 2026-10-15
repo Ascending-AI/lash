@@ -3,7 +3,7 @@
 use super::*;
 use crate::{TraceLlmResponse, TraceModelAttempt, TraceModelCall};
 use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, GenerationOptionOutcome, NormalizedError,
+    AttemptOutcome, AttemptRecord, GenerationOptionOutcome, NormalizedError, TokenUsageOverflow,
 };
 
 pub(super) fn error_type(error: &NormalizedError) -> String {
@@ -18,7 +18,6 @@ pub(super) fn call_attributes(
     model: Option<&TraceModelCall>,
     response: Option<&TraceLlmResponse>,
     attempts: Option<&[TraceModelAttempt]>,
-    usage: Option<&LlmUsage>,
     out: &mut Vec<KeyValue>,
 ) {
     let last_success = attempts
@@ -101,42 +100,31 @@ pub(super) fn call_attributes(
     }
     if let Some(attempts) = attempts {
         out.push(A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)));
-        let usages: Vec<_> = attempts
-            .iter()
-            .filter_map(|attempt| attempt.usage.as_ref())
-            .collect();
-        if usages.is_empty() {
-            return;
+    }
+}
+
+/// The one fold behind a logical call's `gen_ai.usage.*` and
+/// `SpanView::usage`: the sum of every attempt that reported usage, or the
+/// call's own usage when it recorded no attempts. `Err` when the sum
+/// overflows.
+pub(super) fn logical_usage(event: &TraceEvent) -> Option<Result<LlmUsage, TokenUsageOverflow>> {
+    match event {
+        TraceEvent::LlmCallCompleted {
+            attempts: Some(attempts),
+            ..
         }
-        type Counter = fn(&LlmUsage) -> Option<i64>;
-        let counters: [(A, Counter); 5] = [
-            (A::InputTokens, |usage| usage.checked_input_total().ok()),
-            (A::OutputTokens, |usage| Some(usage.output_tokens)),
-            (A::CacheReadTokens, |usage| {
-                Some(usage.cache_read_input_tokens)
-            }),
-            (A::CacheWriteTokens, |usage| {
-                Some(usage.cache_write_input_tokens)
-            }),
-            (A::ReasoningTokens, |usage| {
-                Some(usage.reasoning_output_tokens)
-            }),
-        ];
-        let mut overflow = false;
-        for (key, counter) in counters {
-            match usages
+        | TraceEvent::LlmCallFailed {
+            attempts: Some(attempts),
+            ..
+        } => {
+            let mut usages = attempts
                 .iter()
-                .try_fold(0_i64, |sum, usage| sum.checked_add(counter(usage)?))
-            {
-                Some(total) => out.push(key.value(total)),
-                None => overflow = true,
-            }
+                .filter_map(|attempt| attempt.attempt.usage.as_ref());
+            let first = usages.next()?.clone();
+            Some(usages.try_fold(first, |usage, next| usage.checked_add(next)))
         }
-        if overflow {
-            out.push(A::UsageOverflow.value(true));
-        }
-    } else if let Some(usage) = usage {
-        usage_attributes(usage, out);
+        TraceEvent::LlmCallCompleted { usage, .. } => usage.clone().map(Ok),
+        _ => None,
     }
 }
 
@@ -222,7 +210,8 @@ impl OtelTelemetry {
                     model: None,
                     tool: None,
                     process: None,
-                    attempt: Some(&attempt.attempt),
+                    attempt: Some(attempt),
+                    usage: None,
                 },
             );
         }

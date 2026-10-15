@@ -12,6 +12,7 @@ use crate::policy::{
 };
 use crate::telemetry::metrics::registry::{AttributeKey, RefinableKey};
 use crate::{AttrKey, TraceIds, TracePolicySnapshot, TracePosition, TraceRecord, TraceSpanKind};
+use lash_sansio::llm::types::LlmUsage;
 
 /// The host's meaning for lash's spans, added at creation.
 ///
@@ -36,12 +37,33 @@ pub struct SpanView<'a> {
     pub position: &'a TracePosition,
     /// The closing or whole record. A producer's is built before its
     /// decision, as the record of a call that succeeds; the record sinks see
-    /// at settle carries the call's real outcome.
+    /// at settle carries the call's real outcome. On a `lash.model.attempt`
+    /// span it is the logical call's closing record, shared by every attempt
+    /// of the call; read `attempt` and `usage()` rather than re-deriving
+    /// from `record`.
     pub record: &'a TraceRecord,
+    /// The sealed provider attempt a `lash.model.attempt` span decorates;
+    /// `None` on every other span.
+    pub attempt: Option<&'a crate::TraceModelAttempt>,
+    /// The logical call's folded usage, exported on the span; see
+    /// [`SpanView::usage`].
+    pub(super) usage: Option<&'a LlmUsage>,
     /// Lash's attributes on the span, for reading.
     pub attributes: &'a [KeyValue],
     /// The policies in effect on the core.
     pub policy: &'a TracePolicySnapshot,
+}
+
+impl SpanView<'_> {
+    /// The logical usage lash exported as `gen_ai.usage.*` on this span,
+    /// from the same fold as those attributes (summed over attempts that
+    /// reported usage); `None` where lash exports no usage counters: every
+    /// non-model span, every attempt span (an attempt's own usage is
+    /// `attempt.attempt.usage`), a call that reported none, or a sum that
+    /// overflowed (the span then carries `lash.usage.overflow`).
+    pub fn usage(&self) -> Option<&LlmUsage> {
+        self.usage
+    }
 }
 
 /// The host's contribution to one span: added attributes, replaced semantic

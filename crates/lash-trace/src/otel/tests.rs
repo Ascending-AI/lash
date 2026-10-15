@@ -1640,6 +1640,93 @@ fn the_enrichers_replacement_wins_over_lashs_default_and_lash_keys_are_refused()
     );
 }
 
+/// FIG-6415: an attempt span's view names the attempt it decorates, and the
+/// logical span's view carries the same summed usage its `gen_ai.usage.*`
+/// attributes export; attempt views carry no logical usage.
+#[test]
+fn enrichers_see_the_attempt_they_decorate_and_the_usage_lash_exported() {
+    #[derive(Debug)]
+    struct Seen {
+        kind: TraceSpanKind,
+        ordinal: Option<u32>,
+        usage: Option<LlmUsage>,
+        event: &'static str,
+    }
+    struct Recorder(Arc<Mutex<Vec<Seen>>>);
+    impl SpanEnricher for Recorder {
+        fn enrich(&self, view: &SpanView<'_>, _: &mut SpanEnrichment) {
+            self.0.lock().unwrap().push(Seen {
+                kind: view.kind,
+                ordinal: view.attempt.map(|attempt| attempt.attempt.ordinal),
+                usage: view.usage().cloned(),
+                event: view.record.event.kind().as_str(),
+            });
+        }
+    }
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let adapter = OtelTelemetry::new(
+        &provider,
+        &meter,
+        OtelOptions {
+            enricher: Some(Arc::new(Recorder(seen.clone()))),
+            ..OtelOptions::standard()
+        },
+    )
+    .bound(crate::TracePolicySnapshot::standard(), Arc::default());
+    let mut record = model_fixture(&adapter, "openai-compatible");
+    let TraceEvent::LlmCallCompleted {
+        attempts: Some(attempts),
+        ..
+    } = &mut record.event
+    else {
+        unreachable!()
+    };
+    attempts[0].attempt.outcome = AttemptOutcome::Failed;
+    attempts[0].attempt.usage = Some(LlmUsage {
+        input_tokens: 7,
+        output_tokens: 2,
+        cache_read_input_tokens: 0,
+        cache_write_input_tokens: 5,
+        reasoning_output_tokens: 0,
+    });
+    attempts[1].attempt.usage = Some(LlmUsage {
+        input_tokens: 11,
+        output_tokens: 13,
+        cache_read_input_tokens: 17,
+        cache_write_input_tokens: 19,
+        reasoning_output_tokens: 3,
+    });
+    adapter.append(&record).unwrap();
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 3, "one chat view and one per attempt");
+    assert_eq!(seen[0].kind, TraceSpanKind::Model);
+    assert_eq!(seen[0].ordinal, None);
+    assert_eq!(
+        seen[0].usage,
+        Some(LlmUsage {
+            input_tokens: 18,
+            output_tokens: 15,
+            cache_read_input_tokens: 17,
+            cache_write_input_tokens: 24,
+            reasoning_output_tokens: 3,
+        })
+    );
+    for (view, ordinal) in seen[1..].iter().zip([1, 2]) {
+        assert_eq!(view.kind, TraceSpanKind::ModelAttempt);
+        assert_eq!(view.ordinal, Some(ordinal));
+        assert_eq!(view.usage, None);
+        assert_eq!(view.event, record.event.kind().as_str());
+    }
+    drop(seen);
+
+    let spans = exporter.get_finished_spans().unwrap();
+    let chat = &spans[0];
+    assert!(chat.attributes.contains(&A::CacheWriteTokens.value(24_i64)));
+    assert!(chat.attributes.contains(&A::InputTokens.value(59_i64)));
+}
+
 /// L12's token half: cache reads and writes are billed input, and reasoning
 /// is an output subset. Overflow must never wrap or publish a false total.
 #[test]

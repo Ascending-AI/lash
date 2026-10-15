@@ -346,6 +346,13 @@ a registered semantic default such as `gen_ai.provider.name`
 (`RefinableKey`); metric labels keep lash's values. A panicking enricher
 leaves the span with lash's attributes, counted as `EnricherFailed`.
 
+A `lash.model.attempt` span's view shares the logical call's closing record
+as `record`; `SpanView::attempt` names the attempt it decorates (`None` on
+every other span), and `SpanView::usage()` is the summed usage lash
+exported as `gen_ai.usage.*` on the logical `chat` span, from the same
+fold. Enrichers use `attempt` and `usage()` instead of re-deriving either
+from `record`.
+
 ## Integration status
 
 Production admission retains its scope, and with it its span, before it
@@ -409,8 +416,9 @@ with `lash.model.attempt` children published only from its closing ledger.
 The detail and export policies independently select those children. Attempt
 spans carry diagnostic usage under `lash.usage.*`; only the logical chat carries
 `gen_ai.usage.*`, summed over every attempt that reported usage. Input tokens
-include fresh, cache-read and cache-write tokens. A counter that overflows is
-omitted and `lash.usage.overflow` is true. Reasoning tokens use
+include fresh, cache-read and cache-write tokens. A sum that overflows exports
+no `gen_ai.usage.*` counter; an input total that overflows omits
+`gen_ai.usage.input_tokens`; either sets `lash.usage.overflow`. Reasoning tokens use
 `gen_ai.usage.reasoning.output_tokens` and remain a subset of output tokens.
 
 Adapter defaults are `openai` for `openai`, `openai-compatible` and `codex`,
