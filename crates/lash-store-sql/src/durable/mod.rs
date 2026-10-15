@@ -184,16 +184,6 @@ crate::statements! {
              WHERE actor_key = ?1 AND state <> 'terminal'
              RETURNING mail_seq, state, owner_node, owner_boot";
 
-        /// Owned actor `?1` at epoch `?2` with its unacknowledged mail, one
-        /// row per mail (or one row with NULL mail columns): the owner's
-        /// fenced read, in one snapshot.
-        open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms
-             FROM actors a
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
-             WHERE a.actor_key = ?1
-             ORDER BY m.seq";
-
         /// Actor `?1`'s row and pending mail count.
         snapshot = "SELECT a.kind, a.state, a.epoch, a.owner_node, a.owner_boot,
                     a.mail_seq, a.acked_seq, a.next_due_ms, a.state_revision, a.formats,

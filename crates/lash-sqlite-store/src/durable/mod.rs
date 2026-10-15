@@ -287,6 +287,33 @@ lash_store_sql::statements! {
              ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
              LIMIT ?3";
 
+        /// Actor `?1`'s epoch, state, revision and mail marks with each mail
+        /// past its acknowledgement, in order (one row with NULL mail columns
+        /// when none); and, when `?2` names its session, on every row that
+        /// session's unfinished turn with its phase row, in the turn read's
+        /// column order, and the cancel request the turn accepted, in the
+        /// cancel read's (FIG-6399). One statement, so one snapshot answers
+        /// the open; the turn is looked up once.
+        open = "WITH t AS MATERIALIZED (
+                 SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
+                        p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                        p.turn_deadline_ms, p.written_epoch, p.model_calls,
+                        p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                        c.request_id, c.origin, c.reason, c.disposition, c.mode
+                 FROM session_runs AS r
+                 JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
+                 LEFT JOIN turn_cancel_requests AS c
+                     ON c.session_id = r.session_id AND c.turn_id = r.run
+                 WHERE r.session_id = ?2 AND r.admission_json IS NOT NULL
+                   AND r.terminal_kind IS NULL)
+             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    m.seq, m.kind, m.body, m.appended_at_ms, t.*
+             FROM actors a
+             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
+             LEFT JOIN t ON TRUE
+             WHERE a.actor_key = ?1
+             ORDER BY m.seq";
+
         /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
         /// claim that finds no commit advanced the actor since the previous
         /// claim counts one more failed activation; any such commit resets
@@ -1335,66 +1362,85 @@ impl DurableStore for SqliteDurableStore {
             ),
             lash_durable::ActorKind::Process => None,
         };
-        self.read(move |tx| {
-            let mut statement = tx.prepare_cached(SQL.actor.open.sql())?;
-            let mut rows = statement.query([actor.as_str()])?;
-            let mut opened: Option<OpenedActor> = None;
-            while let Some(row) = rows.next()? {
-                let opened = match &mut opened {
-                    Some(opened) => opened,
-                    None => {
-                        let current = Epoch(row.get(0)?);
-                        let state: String = row.get(1)?;
-                        if current != epoch || state != ActorState::Owned.as_str() {
-                            return Ok(Err(DurableError::OwnershipLost(Fenced {
-                                actor: actor.clone(),
-                                held: epoch,
-                                current: Some(current),
-                            })));
+        // One statement: its own snapshot holds the actor, its mail and a
+        // session's unfinished turn with the cancel it accepted.
+        self.conn
+            .call(move |connection| {
+                let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
+                let mut rows = statement.query(rusqlite::params![
+                    actor.as_str(),
+                    session.as_ref().map(lash_sansio::SessionId::as_str)
+                ])?;
+                let mut opened: Option<(OpenedActor, Option<_>)> = None;
+                while let Some(row) = rows.next()? {
+                    let (opened, _) = match &mut opened {
+                        Some(opened) => opened,
+                        None => {
+                            let current = Epoch(row.get(0)?);
+                            let state: String = row.get(1)?;
+                            if current != epoch || state != ActorState::Owned.as_str() {
+                                return Ok(Err(DurableError::OwnershipLost(Fenced {
+                                    actor: actor.clone(),
+                                    held: epoch,
+                                    current: Some(current),
+                                })));
+                            }
+                            let turn = match row.get::<_, Option<String>>(9)? {
+                                Some(_) => Some((
+                                    turns::StoredTurn::read(row, 9)?,
+                                    row.get::<_, Option<String>>(23)?
+                                        .map(|_| turns::StoredCancel::read(row, 23))
+                                        .transpose()?,
+                                )),
+                                None => None,
+                            };
+                            opened.insert((
+                                OpenedActor {
+                                    actor: actor.clone(),
+                                    epoch,
+                                    revision: StateRevision(row.get(2)?),
+                                    acked: MailSeq(row.get(3)?),
+                                    seen: MailSeq(row.get(4)?),
+                                    mail: Vec::new(),
+                                    at,
+                                    turn_cancel: None,
+                                },
+                                turn,
+                            ))
                         }
-                        opened.insert(OpenedActor {
-                            actor: actor.clone(),
-                            epoch,
-                            revision: StateRevision(row.get(2)?),
-                            acked: MailSeq(row.get(3)?),
-                            seen: MailSeq(row.get(4)?),
-                            mail: Vec::new(),
-                            at,
-                            turn_cancel: None,
-                        })
+                    };
+                    if let Some(seq) = row.get::<_, Option<i64>>(5)?
+                        && seq <= opened.seen.0
+                    {
+                        opened.mail.push(Mail {
+                            seq: MailSeq(seq),
+                            kind: MailKind::new(row.get::<_, String>(6)?),
+                            body: row.get(7)?,
+                            appended_at: DurableInstant(row.get(8)?),
+                        });
                     }
-                };
-                if let Some(seq) = row.get::<_, Option<i64>>(5)?
-                    && seq <= opened.seen.0
-                {
-                    opened.mail.push(Mail {
-                        seq: MailSeq(seq),
-                        kind: MailKind::new(row.get::<_, String>(6)?),
-                        body: row.get(7)?,
-                        appended_at: DurableInstant(row.get(8)?),
-                    });
                 }
-            }
-            drop(rows);
-            drop(statement);
-            // A session's unfinished turn's accepted cancel, under the same
-            // read.
-            if let (Some(opened), Some(session)) = (&mut opened, &session) {
-                opened.turn_cancel = match turns::turn(tx, session)? {
-                    Ok(row) => row.and_then(|row| row.cancel),
-                    Err(error) => return Ok(Err(error)),
+                let Some((mut opened, turn)) = opened else {
+                    return Ok(Err(DurableError::OwnershipLost(Fenced {
+                        actor,
+                        held: epoch,
+                        current: None,
+                    })));
                 };
-            }
-            Ok(match opened {
-                Some(opened) => Ok(ActorTx::opened(opened)),
-                None => Err(DurableError::OwnershipLost(Fenced {
-                    actor,
-                    held: epoch,
-                    current: None,
-                })),
+                // The turn is decoded and refused as the turn read does.
+                if let (Some((turn, cancel)), Some(session)) = (turn, &session) {
+                    let decoded = turn.decode(session, |run| {
+                        Ok(cancel.map(|cancel| cancel.decode(session, run)).transpose())
+                    })?;
+                    opened.turn_cancel = match decoded {
+                        Ok(row) => row.cancel,
+                        Err(error) => return Ok(Err(error)),
+                    };
+                }
+                Ok(Ok(ActorTx::opened(opened)))
             })
-        })
-        .await
+            .await
+            .map_err(store_failure)?
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
@@ -1526,6 +1572,9 @@ impl DurableStore for SqliteDurableStore {
 #[cfg(test)]
 #[path = "../durable_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod actor_open_tests;
 
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]

@@ -581,36 +581,53 @@ fn cancel_of(
     let stored = tx
         .prepare_cached(SQL.cancel_of.sql())?
         .query_row([session.as_str(), run.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
+            StoredCancel::read(row, 0)
         })
         .optional()?;
-    let Some((request_id, origin, reason, disposition, mode)) = stored else {
-        return Ok(Ok(None));
-    };
-    let (Ok(undelivered), Ok(mode)) = (
-        turn_cancel_undelivered_from_wire(&disposition),
-        turn_cancel_mode_from_wire(&mode),
-    ) else {
-        return Ok(Err(corrupt(
-            "turn cancel request",
-            &format!("{disposition}/{mode}"),
-        )));
-    };
-    Ok(Ok(Some(TurnCancelRequest {
-        session: session.clone(),
-        run: run.clone(),
-        request_id,
-        origin,
-        reason,
-        undelivered,
-        mode,
-    })))
+    Ok(stored.map(|stored| stored.decode(session, run)).transpose())
+}
+
+/// A turn's accepted cancel request as stored: request id, origin, reason,
+/// disposition and mode.
+pub(super) struct StoredCancel(String, Option<String>, Option<String>, String, String);
+
+impl StoredCancel {
+    /// The five columns from `first` on.
+    pub(super) fn read(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Self> {
+        Ok(Self(
+            row.get(first)?,
+            row.get(first + 1)?,
+            row.get(first + 2)?,
+            row.get(first + 3)?,
+            row.get(first + 4)?,
+        ))
+    }
+
+    pub(super) fn decode(
+        self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<TurnCancelRequest, DurableError> {
+        let Self(request_id, origin, reason, disposition, mode) = self;
+        let (Ok(undelivered), Ok(mode)) = (
+            turn_cancel_undelivered_from_wire(&disposition),
+            turn_cancel_mode_from_wire(&mode),
+        ) else {
+            return Err(corrupt(
+                "turn cancel request",
+                &format!("{disposition}/{mode}"),
+            ));
+        };
+        Ok(TurnCancelRequest {
+            session: session.clone(),
+            run: run.clone(),
+            request_id,
+            origin,
+            reason,
+            undelivered,
+            mode,
+        })
+    }
 }
 
 pub(super) fn turn_end(
@@ -686,99 +703,114 @@ pub(super) fn turn_namespaces(
 }
 
 pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRow>> {
-    struct Stored {
-        run: String,
-        admission: String,
-        phase: String,
-        argument: Option<i64>,
-        iteration: i64,
-        checkpoint: Option<String>,
-        working: Option<String>,
-        answer: Option<String>,
-        request: Option<String>,
-        deadline: Option<i64>,
-        turn_deadline: Option<i64>,
-        epoch: i64,
-        model_calls: i64,
-        stream_from: Option<String>,
-    }
     let stored = tx
         .prepare_cached(SQL.unfinished.sql())?
-        .query_row([session.as_str()], |row| {
-            Ok(Stored {
-                run: row.get(0)?,
-                admission: row.get(1)?,
-                phase: row.get(2)?,
-                argument: row.get(3)?,
-                iteration: row.get(4)?,
-                checkpoint: row.get(5)?,
-                working: row.get(12)?,
-                answer: row.get(13)?,
-                request: row.get(6)?,
-                deadline: row.get(7)?,
-                turn_deadline: row.get(8)?,
-                epoch: row.get(9)?,
-                model_calls: row.get(10)?,
-                stream_from: row.get(11)?,
-            })
-        })
+        .query_row([session.as_str()], |row| StoredTurn::read(row, 0))
         .optional()?;
     let Some(stored) = stored else {
         return Ok(Ok(None));
     };
-    let Ok(run) = TurnId::try_from(stored.run.clone()) else {
-        return Ok(Err(corrupt("turn id", &stored.run)));
-    };
-    let admission = match RunAdmissionRecord::from_stored(&stored.admission) {
-        Ok(admission) => admission,
-        Err(error) => return Ok(Err(encoding(&error))),
-    };
-    let argument = stored.argument.map(integer::<u64>).transpose()?;
-    let iteration = integer::<u32>(stored.iteration)?;
-    let model_calls = integer::<u32>(stored.model_calls)?;
-    let pin = stored
-        .request
-        .zip(stored.deadline.map(DurableInstant))
-        .zip(stored.stream_from)
-        .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
-    let checkpoint = match stored.checkpoint.as_deref().map(node_ref).transpose() {
-        Ok(checkpoint) => checkpoint,
-        Err(error) => return Ok(Err(error)),
-    };
-    let working = match stored.working.as_deref().map(node_ref).transpose() {
-        Ok(working) => working,
-        Err(error) => return Ok(Err(error)),
-    };
-    let answer = match stored.answer.as_deref().map(node_ref).transpose() {
-        Ok(answer) => answer,
-        Err(error) => return Ok(Err(error)),
-    };
-    let Some(phase) = UnfinishedPhase::parse(
-        &stored.phase,
-        argument,
-        checkpoint,
-        pin,
-        model_calls,
-        answer,
-    ) else {
-        return Ok(Err(corrupt("turn phase", &stored.phase)));
-    };
-    let cancel = match cancel_of(tx, session, &run)? {
-        Ok(cancel) => cancel,
-        Err(error) => return Ok(Err(error)),
-    };
-    Ok(Ok(Some(TurnRow {
-        session: session.clone(),
-        run,
-        admission,
-        phase,
-        working,
-        iteration,
-        model_calls,
-        turn_deadline: stored.turn_deadline.map(DurableInstant),
-        written_epoch: Epoch(stored.epoch),
-        cancel,
-    })))
+    Ok(stored
+        .decode(session, |run| cancel_of(tx, session, run))?
+        .map(Some))
+}
+
+/// A session's unfinished turn as stored: its run row and phase row, in the
+/// column order of the `unfinished` statement.
+pub(super) struct StoredTurn {
+    run: String,
+    admission: String,
+    phase: String,
+    argument: Option<i64>,
+    iteration: i64,
+    checkpoint: Option<String>,
+    working: Option<String>,
+    answer: Option<String>,
+    request: Option<String>,
+    deadline: Option<i64>,
+    turn_deadline: Option<i64>,
+    epoch: i64,
+    model_calls: i64,
+    stream_from: Option<String>,
+}
+
+impl StoredTurn {
+    /// The fourteen columns from `first` on.
+    pub(super) fn read(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Self> {
+        Ok(Self {
+            run: row.get(first)?,
+            admission: row.get(first + 1)?,
+            phase: row.get(first + 2)?,
+            argument: row.get(first + 3)?,
+            iteration: row.get(first + 4)?,
+            checkpoint: row.get(first + 5)?,
+            working: row.get(first + 12)?,
+            answer: row.get(first + 13)?,
+            request: row.get(first + 6)?,
+            deadline: row.get(first + 7)?,
+            turn_deadline: row.get(first + 8)?,
+            epoch: row.get(first + 9)?,
+            model_calls: row.get(first + 10)?,
+            stream_from: row.get(first + 11)?,
+        })
+    }
+
+    /// The turn, refusing a corrupt column in column order, and then its
+    /// accepted cancel from `cancel`.
+    pub(super) fn decode(
+        self,
+        session: &SessionId,
+        cancel: impl FnOnce(&TurnId) -> Answer<Option<TurnCancelRequest>>,
+    ) -> Answer<TurnRow> {
+        let Ok(run) = TurnId::try_from(self.run.clone()) else {
+            return Ok(Err(corrupt("turn id", &self.run)));
+        };
+        let admission = match RunAdmissionRecord::from_stored(&self.admission) {
+            Ok(admission) => admission,
+            Err(error) => return Ok(Err(encoding(&error))),
+        };
+        let argument = self.argument.map(integer::<u64>).transpose()?;
+        let iteration = integer::<u32>(self.iteration)?;
+        let model_calls = integer::<u32>(self.model_calls)?;
+        let pin = self
+            .request
+            .zip(self.deadline.map(DurableInstant))
+            .zip(self.stream_from)
+            .map(|((request, deadline), stream_from)| (request, deadline, stream_from));
+        let checkpoint = match self.checkpoint.as_deref().map(node_ref).transpose() {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => return Ok(Err(error)),
+        };
+        let working = match self.working.as_deref().map(node_ref).transpose() {
+            Ok(working) => working,
+            Err(error) => return Ok(Err(error)),
+        };
+        let answer = match self.answer.as_deref().map(node_ref).transpose() {
+            Ok(answer) => answer,
+            Err(error) => return Ok(Err(error)),
+        };
+        let Some(phase) =
+            UnfinishedPhase::parse(&self.phase, argument, checkpoint, pin, model_calls, answer)
+        else {
+            return Ok(Err(corrupt("turn phase", &self.phase)));
+        };
+        let cancel = match cancel(&run)? {
+            Ok(cancel) => cancel,
+            Err(error) => return Ok(Err(error)),
+        };
+        Ok(Ok(TurnRow {
+            session: session.clone(),
+            run,
+            admission,
+            phase,
+            working,
+            iteration,
+            model_calls,
+            turn_deadline: self.turn_deadline.map(DurableInstant),
+            written_epoch: Epoch(self.epoch),
+            cancel,
+        }))
+    }
 }
 
 #[cfg(test)]
