@@ -175,13 +175,13 @@ fn a_process_record_decodes_one_lifecycle_state() {
         encoded["lifecycle"] = lifecycle;
         serde_json::from_value::<crate::ProcessRecord>(encoded)
     };
-    let outcome = serde_json::to_value(crate::ProcessTerminal::from_tool_output(
+    let outcome = serde_json::to_value(crate::Durable(&crate::ProcessTerminal::from_tool_output(
         crate::ToolCallOutput::success(serde_json::json!(1)),
-    ))
+    )))
     .expect("encode outcome");
-    let waits = serde_json::to_value(crate::ProcessLifecycleState::fixture(
+    let waits = serde_json::to_value(crate::Durable(&crate::ProcessLifecycleState::fixture(
         crate::ProcessStatus::Waiting,
-    ))
+    )))
     .expect("encode a waiting state")["waits"]
         .clone();
     assert!(
@@ -192,8 +192,9 @@ fn a_process_record_decodes_one_lifecycle_state() {
     for status in crate::ProcessStatus::ALL {
         let state = crate::ProcessLifecycleState::fixture(*status);
         assert_eq!(state.status(), *status, "a state derives its status");
-        let decoded = with_lifecycle(serde_json::to_value(&state).expect("encode state"))
-            .expect("every lifecycle state decodes");
+        let decoded =
+            with_lifecycle(serde_json::to_value(crate::Durable(&state)).expect("encode state"))
+                .expect("every lifecycle state decodes");
         assert_eq!(decoded.status(), *status);
         assert_eq!(decoded.is_terminal(), decoded.outcome().is_some());
         assert_eq!(
@@ -494,9 +495,10 @@ fn waiting_construction_and_fold_keep_one_entry_per_kind() {
     }
     .entering(&replacement);
     assert_eq!(waiting.waits(), std::slice::from_ref(&replacement));
-    let decoded: crate::ProcessLifecycleState =
-        serde_json::from_value(serde_json::to_value(&waiting).expect("encode waiting state"))
-            .expect("signed store milliseconds decode for both since and until");
+    let decoded: crate::ProcessLifecycleState = serde_json::from_value(
+        serde_json::to_value(crate::Durable(&waiting)).expect("encode waiting state"),
+    )
+    .expect("signed store milliseconds decode for both since and until");
     assert_eq!(decoded, waiting);
     assert_eq!(
         waiting.leaving(&replacement),

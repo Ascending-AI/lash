@@ -229,7 +229,7 @@ fn process_record_json(
 ) -> String {
     let mut record = serde_json::json!({
         "last_event_sequence": last_event_sequence,
-        "lifecycle": lash_core_execution::ProcessLifecycleState::fixture(status),
+        "lifecycle": lash_core_execution::Durable(&lash_core_execution::ProcessLifecycleState::fixture(status)),
     });
     if let Some(at) = cancel_requested_at_ms {
         record["cancel_request"] = serde_json::json!(lash_core_execution::CancelRequest::new(

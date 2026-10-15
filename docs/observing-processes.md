@@ -74,11 +74,19 @@ For event facts, use `ObservedProcessEvent::projection()`
 payload's `await_output` uses the same outcome projection as the observed row;
 the completion authority and other event facts are preserved.
 
-Direct serde of `ObservedProcess`, `ProcessTerminal` and `ObservedProcessEvent`,
-and `ProcessLifecycleFact::payload()`, are lash's internal record forms. They
-retain the trust envelope used by storage and replay. Projection is a separate,
-serde-serializable typed view; deserializing it does not restore an internal
-record or confer trust. Hosts define their own wire protocols.
+`ObservedProcess`, `ProcessTerminal`, `ProcessLifecycleState` and
+`ObservedProcessEvent` do not implement `Serialize`: a call such as
+`serde_json::to_value(&observed_process)` does not compile. Their enclosing
+observation snapshots, change pages and event pages also have no automatic
+serialization. Hosts explicitly serialize the projection.
+
+Store implementations and replay fixtures opt into the internal record form
+with `lash::persistence::Durable(&record)`. It retains the existing trust
+envelope, controls and model views; decoding still uses the original record's
+`Deserialize` implementation. `ProcessLifecycleFact::payload()` is also an
+internal record form. Projection is a separate, serde-serializable typed view;
+deserializing it does not restore an internal record or confer trust. Hosts
+define their own wire protocols.
 
 Lash formats nothing for display. A label for a process with none
 registered, a status line, a failure message and a key for a graph view are

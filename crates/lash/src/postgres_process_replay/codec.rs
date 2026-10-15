@@ -22,8 +22,16 @@ enum StoredPayload {
         observation: Box<lash_core::StepBodyStartedObservation>,
     },
     Committed {
+        #[serde(serialize_with = "serialize_event")]
         event: Box<ObservedProcessEvent>,
     },
+}
+
+fn serialize_event<S: serde::Serializer>(
+    event: &ObservedProcessEvent,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&lash_core::Durable(event), serializer)
 }
 
 fn codec_error(context: &str, error: impl std::fmt::Display) -> ProcessReplayStoreError {

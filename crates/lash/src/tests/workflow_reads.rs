@@ -431,11 +431,7 @@ async fn a_process_projector_resumes_after_the_middle_entry_without_skipping_cha
     let mut projected = Vec::new();
     let mut checkpoint = serde_json::Value::Null;
     for change in &page.changes[..3] {
-        let encoded = serde_json::to_value(change).expect("serialize entry");
-        checkpoint = encoded
-            .get("cursor")
-            .expect("every entry has a cursor")
-            .clone();
+        checkpoint = serde_json::to_value(change.cursor).expect("serialize cursor");
         let cursor: lash_core::ProcessChangeCursor =
             serde_json::from_value(checkpoint.clone()).expect("durable opaque checkpoint");
         assert_eq!(cursor, change.cursor);

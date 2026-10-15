@@ -333,7 +333,7 @@ impl ProcessLifecycleFact {
                 serde_json::json!({ "request": request, "refusal": refusal })
             }
             Self::Terminal { outcome, authority } => {
-                let mut payload = serde_json::json!({ "await_output": outcome });
+                let mut payload = serde_json::json!({ "await_output": super::Durable(outcome) });
                 if let Some(authority) = authority {
                     payload["completion_authority"] =
                         serde_json::to_value(authority).expect("completion authority serializes");
@@ -706,9 +706,9 @@ fn settled_status(output: &crate::ToolCallOutput) -> TerminalProcessStatus {
 /// It is the part of [`ProcessAwaitOutput`] that is an outcome, so its status
 /// is a total function of it ([`Self::status`]) and is stored nowhere beside
 /// it. It serializes exactly as the [`ProcessAwaitOutput`] it is. Hosts
-/// store or display [`Self::projection`]; direct serde is the internal record.
+/// store or display [`Self::projection`]; [`super::Durable`] writes the internal record.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(remote = "Self", tag = "type", rename_all = "snake_case")]
 pub enum ProcessTerminal {
     Settled {
         output: Box<crate::ToolCallOutput>,

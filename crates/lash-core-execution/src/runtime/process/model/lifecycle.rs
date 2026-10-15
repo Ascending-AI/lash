@@ -135,6 +135,7 @@ pub struct ProcessRecord {
     /// The one lifecycle state the process is in. Its status, waits and
     /// outcome are read from it ([`Self::status`], [`Self::waits`],
     /// [`Self::terminal`]) and stored nowhere beside it.
+    #[serde(serialize_with = "super::super::durable_serde::serialize")]
     pub lifecycle: ProcessLifecycleState,
 }
 
@@ -146,13 +147,19 @@ pub struct ProcessRecord {
 /// holds its outcome and the time of the committed fact that ended it: no
 /// later fact changes either.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    remote = "Self",
+    tag = "state",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ProcessLifecycleState {
     Running {},
     Waiting {
         waits: ProcessWaits,
     },
     Terminal {
+        #[serde(serialize_with = "super::super::durable_serde::serialize")]
         outcome: ProcessTerminal,
         /// When the committed fact that ended the process occurred. Held
         /// apart from the record's `updated_at_ms`, which every later fact

@@ -2256,8 +2256,13 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         let decoded: ProjectedObservedProcess =
             serde_json::from_value(projected_record.clone()).unwrap();
         assert_eq!(decoded, record_projection);
+        assert_eq!(
+            serde_json::to_value(lash::persistence::Durable(terminal)).unwrap(),
+            serde_json::to_value(terminal.clone().into_await_output()).unwrap(),
+            "durable terminals retain the existing await encoding"
+        );
         // All other observed facts survive the projection unchanged.
-        let mut internal_record = serde_json::to_value(record).unwrap();
+        let mut internal_record = serde_json::to_value(lash::persistence::Durable(record)).unwrap();
         internal_record["lifecycle"]["outcome"] = expected.clone();
         assert_eq!(projected_record, internal_record);
 
@@ -2289,7 +2294,7 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         let decoded: ProjectedProcessEvent = serde_json::from_value(event_json).unwrap();
         assert_eq!(decoded, projected_event);
         // Internal serde still round trips its trust envelope for replay.
-        let internal_event = serde_json::to_value(event).unwrap();
+        let internal_event = serde_json::to_value(lash::persistence::Durable(event)).unwrap();
         assert!(internal_event.to_string().contains("$lash_tool_value"));
         let decoded: lash::process::ObservedProcessEvent =
             serde_json::from_value(internal_event).unwrap();

@@ -835,3 +835,6 @@ pub use lash_core_execution::tool_live::{
 };
 
 pub use lash_core_execution::tool_live;
+
+/// Explicit internal process serialization for store implementations.
+pub use lash_core_execution::Durable;

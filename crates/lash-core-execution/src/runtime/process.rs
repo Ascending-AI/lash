@@ -16,6 +16,8 @@ pub use env_policy::{
     ProcessStartChoice, ResolvedStartTarget,
 };
 pub use link_check::{FitPolicy, check_links};
+pub(crate) mod durable_serde;
+pub use durable_serde::Durable;
 mod events;
 #[cfg(test)]
 mod guarded_surface_tests;

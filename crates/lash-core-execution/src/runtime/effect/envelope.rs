@@ -848,11 +848,13 @@ pub enum ProcessEffectOutcome {
         // Boxed so the fat durable record does not size the whole outcome enum
         // (and the runtime effect enum wrapping it) inline through the recursive
         // effect executor.
+        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
         record: Box<crate::facade_support::ObservedProcess>,
         /// Whether this start created the process or found it registered.
         disposition: crate::ProcessRegistrationOutcome,
     },
     List {
+        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
         entries: Vec<crate::facade_support::ObservedProcess>,
     },
     ValidateVisible {
@@ -868,6 +870,7 @@ pub enum ProcessEffectOutcome {
         output: Box<ProcessAwaitOutput>,
     },
     Cancel {
+        #[serde(serialize_with = "crate::runtime::process::durable_serde::serialize")]
         record: Box<crate::facade_support::ObservedProcess>,
     },
     Definition {

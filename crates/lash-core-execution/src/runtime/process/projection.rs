@@ -25,7 +25,7 @@ pub enum ProjectedProcessTerminal {
 
 impl ProcessTerminal {
     /// The host-readable outcome to store or display. Serializing `self`
-    /// directly retains the internal output, including controls and model views.
+    /// requires [`super::Durable`] and retains controls and model views.
     pub fn projection(&self) -> ProjectedProcessTerminal {
         match self {
             Self::Settled { output } => {
@@ -124,8 +124,8 @@ pub struct ProjectedObservedProcess {
 }
 
 impl ObservedProcess {
-    /// Projects this record for host storage or display. Direct record serde
-    /// retains lash's ToolValue trust envelope for internal persistence.
+    /// Projects this record for host storage or display. Internal persistence
+    /// explicitly uses [`super::Durable`] to retain ToolValue trust envelopes.
     pub fn projection(&self) -> ProjectedObservedProcess {
         ProjectedObservedProcess {
             process_id: self.process_id.clone(),
@@ -166,7 +166,7 @@ impl ProcessLifecycleFact {
 }
 
 /// A host-readable event, with the same projected outcome as its observed row.
-/// Direct [`ObservedProcessEvent`] serde remains the internal record form.
+/// Internal [`ObservedProcessEvent`] serde requires [`super::Durable`].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectedProcessEvent {
     pub sequence: u64,

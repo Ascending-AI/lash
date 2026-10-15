@@ -5,7 +5,7 @@
 //! authorities here govern writes. Hosts and plugins read
 //! [`crate::process::ObservedProcess`] through `processes()` or their
 //! runtime-provided services instead.
-pub use lash_core::ProcessAuthorityReads;
+pub use lash_core::{Durable, ProcessAuthorityReads};
 pub use lash_core_store::checkpoint_graph::{
     DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
 };

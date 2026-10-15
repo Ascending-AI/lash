@@ -175,7 +175,7 @@ pub async fn a_process_with_two_parked_calls_lists_both_without_their_keys(
         );
         let reads = [
             serde_json::to_string(&parked).map_err(|error| LawBroken(error.to_string()))?,
-            serde_json::to_string(&seen).map_err(|error| LawBroken(error.to_string()))?,
+            serde_json::to_string(&crate::Durable(&seen)).map_err(|error| LawBroken(error.to_string()))?,
         ];
         for call in &pinned {
             ensure!(

@@ -900,3 +900,6 @@ pub use tool_live::{
     ToolLivePolicyRelation, ToolLivePolicySnapshot, ToolLivePolicyValue, ToolLivePublisher,
     ToolLiveReadFault, ToolLiveRecord, ToolLiveReplay, ToolLiveRetention, ToolLiveSubscription,
 };
+
+/// Explicit internal process serialization for store implementations.
+pub use crate::runtime::process::Durable;

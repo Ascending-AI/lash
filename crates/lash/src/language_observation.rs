@@ -154,7 +154,7 @@ impl LanguageObservationPublisher {
         if self.closed.load(Ordering::Acquire) {
             return;
         }
-        let charge = self.charge(&(process, &event));
+        let charge = self.charge(&(process, lash_core::Durable(&event)));
         let base = ProcessSequence::new(event.sequence.saturating_sub(1));
         self.enqueue_process(process, charge, Some(base), || {
             ProcessReplayEventDraft::committed(event)
@@ -187,7 +187,7 @@ impl LanguageObservationPublisher {
         if self.closed.load(Ordering::Acquire) {
             return CommittedPublication::Stopped;
         }
-        let Some(charge) = self.charge(&(process, &event)) else {
+        let Some(charge) = self.charge(&(process, lash_core::Durable(&event))) else {
             return CommittedPublication::ContinuityLost;
         };
         let (completion, published) = tokio::sync::oneshot::channel();

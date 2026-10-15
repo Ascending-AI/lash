@@ -611,7 +611,7 @@ async fn read_run(State(host): State<Host>, Path(process): Path<String>) -> ApiR
     Ok(Json(json!({
         "status": format!("{:?}", view.process.status()),
         "waits": view.process.waits().iter().map(|wait| &wait.kind).collect::<Vec<_>>(),
-        "process": serde_json::to_value(&view.process).map_err(api_error)?,
+        "process": serde_json::to_value(view.process.projection()).map_err(api_error)?,
         "document": match &view.document {
             lash::process::ProcessDocumentIdentity::Available(reference) => {
                 serde_json::to_value(reference).map_err(api_error)?

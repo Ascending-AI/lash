@@ -24,14 +24,14 @@ pub struct ProcessWorkObserver {
     actors: Option<Arc<dyn lash_durable::DurableStore>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ProcessWorkSnapshot {
     pub session_id: SessionId,
     pub visible_processes: Vec<super::model::ProcessId>,
     pub items: Vec<ObservedWorkItem>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ObservedWorkItem {
     pub process: ObservedProcess,
     pub events: Vec<ObservedProcessEvent>,
@@ -54,9 +54,10 @@ pub enum ObservedWorkItemState {
 /// A process as a host reads it: the facts of its durable row at
 /// `last_event_sequence`, and its actor's park. Every read of a process
 /// (one process, a roster, a change, an observation snapshot) answers this
-/// shape. Hosts store or display [`Self::projection`]; direct serde is the
-/// internal record form and retains ToolValue trust envelopes.
+/// shape. Hosts store or display [`Self::projection`]. Only
+/// [`super::Durable`] serializes the internal trust envelopes for persistence.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ObservedProcess {
     pub process_id: ProcessId,
     /// Sequence of the newest event folded into this observed record.
@@ -66,6 +67,7 @@ pub struct ObservedProcess {
     /// waits for and the node that waits, never a key that would resolve
     /// it), or terminal with its typed outcome and the time of the
     /// committed fact that ended it.
+    #[serde(serialize_with = "super::durable_serde::serialize")]
     pub lifecycle: ProcessLifecycleState,
     /// The recorded lifetime decision: what ends the process.
     pub lifetime: crate::LifetimeDecision,
@@ -121,7 +123,7 @@ pub struct ProcessRosterPage {
 /// The host may atomically commit the projection and `cursor` in its own
 /// database, then resume strictly after that cursor following a crash. Lash
 /// provides no transaction spanning its store and the host's database.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ObservedProcessChange {
     pub cursor: ProcessChangeCursor,
     #[serde(flatten)]
@@ -129,7 +131,7 @@ pub struct ObservedProcessChange {
 }
 
 /// The current observed process or a pruned process's tombstone.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ObservedProcessChangeKind {
     Upsert { process: Box<ObservedProcess> },
@@ -141,6 +143,7 @@ pub enum ObservedProcessChangeKind {
 /// store or display [`Self::projection`] to project any output values.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
+    remote = "Self",
     into = "ObservedProcessEventRecord",
     try_from = "ObservedProcessEventRecord"
 )]
@@ -150,7 +153,7 @@ pub struct ObservedProcessEvent {
     pub occurred_at_ms: u64,
 }
 
-/// The wire form of an [`ObservedProcessEvent`].
+/// The durable form of an [`ObservedProcessEvent`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ObservedProcessEventRecord {
     sequence: u64,
