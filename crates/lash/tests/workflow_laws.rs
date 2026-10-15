@@ -347,7 +347,7 @@ main { finish null }
         .manifest
         .effects
         .insert(effect.clone(), checked.effects()[&effect].clone());
-    let draft = Draft::open(document, None).expect("list draft");
+    let draft = Draft::open(document).expect("list draft");
     let publication = published(
         artifacts
             .publish_workflow(&pin, &draft, &Name::new("list"), &list_env)
@@ -440,7 +440,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("draft"),
+                &Draft::open(document).expect("draft"),
                 &Name::new("supervisor"),
                 &candidate,
             )
@@ -630,7 +630,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
 
     let document: Document =
         lash::workflow::document::parse_document(GUARDED).expect("the document parses");
-    let draft = Draft::open(document.clone(), None).expect("the document opens");
+    let draft = Draft::open(document.clone()).expect("the document opens");
     let first = published(
         artifacts
             .publish_workflow(&pin, &draft, &entry, &environment)
@@ -675,7 +675,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
         .expect("the first statement of the try body")
         .clone();
     let mut draft =
-        Draft::open(inspection.document.document().clone(), None).expect("the document opens");
+        Draft::open(inspection.document.document().clone()).expect("the document opens");
     let applied = draft
         .apply(
             &Transaction {
@@ -761,7 +761,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("draft"),
+                &Draft::open(document).expect("draft"),
                 &Name::new("guarded"),
                 &environment,
             )
@@ -933,7 +933,7 @@ main { finish null }
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("draft"),
+                &Draft::open(document).expect("draft"),
                 &Name::new("computed"),
                 &environment,
             )
@@ -1038,7 +1038,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("the document opens"),
+                &Draft::open(document).expect("the document opens"),
                 &entry,
                 &environment,
             )
@@ -1172,7 +1172,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("the document opens"),
+                &Draft::open(document).expect("the document opens"),
                 &Name::new("supervisor"),
                 &environment,
             )
@@ -1278,7 +1278,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("the document opens"),
+                &Draft::open(document).expect("the document opens"),
                 &Name::new("guarded"),
                 &environment,
             )
@@ -1373,7 +1373,7 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("the document opens"),
+                &Draft::open(document).expect("the document opens"),
                 &Name::new("guarded"),
                 &environment,
             )
@@ -1474,7 +1474,7 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
         artifacts
             .publish_workflow(
                 &pin,
-                &Draft::open(document, None).expect("the document opens"),
+                &Draft::open(document).expect("the document opens"),
                 &Name::new("echoed"),
                 &environment,
             )
@@ -1571,10 +1571,7 @@ async fn typescript_import_reports_front_end_errors_with_source_spans() {
         "export const digest = async (inbox: string) => { return inbox; };",
         "export async function digest(inbox: string) { return inbox; }",
     ] {
-        let WorkflowImport::Imported {
-            document,
-            annotations,
-        } = artifacts
+        let WorkflowImport::Imported { document } = artifacts
             .import_typescript_workflow(source, &environment)
             .await
             .expect("import answers")
@@ -1587,9 +1584,6 @@ async fn typescript_import_reports_front_end_errors_with_source_spans() {
                 .entries
                 .contains_key(&Name::new("digest"))
         );
-        assert_eq!(annotations.document, document.identity());
-        lash::workflow::document::validate_annotations(&annotations, document.document())
-            .expect("annotations name the imported document");
     }
     let source = "export const broken = ;";
     let WorkflowImport::Refused(diagnostics) = artifacts

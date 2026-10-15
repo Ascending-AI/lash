@@ -52,7 +52,7 @@ execution sites) is a function of the document and the definitions it
 reaches (`K-ADM-009`); nothing stores it as authority. An execution's start
 names its document by reference (`WorkflowDocumentRef`: the document identity
 and the entry) and carries no copy of it; events name exact sites, and a host
-looks labels up in the document's annotations (`K-DOC-007`). A host needs no
+keys its own labels by site. A host needs no
 pairing table or secondary id. The process and RLM emitters name the same
 document contract.
 

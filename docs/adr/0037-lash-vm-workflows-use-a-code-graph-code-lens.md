@@ -43,8 +43,9 @@ The lens laws are:
 2. Parsing rendered source preserves the span-insensitive IR.
 3. Projecting a rendered projected graph recovers that graph, the PutGet law.
 
-Formatting and ordinary comments are outside these laws. Semantic labels
-survive through statement JSDoc `@label` comments. Invalid structure is a
+Formatting and comments are outside these laws. A step label is host data
+keyed by site; the former statement JSDoc `@label` comment is ordinary
+trivia (FIG-6377). Invalid structure is a
 typed document error from the IR crate. A valid document without a canonical
 TypeScript spelling is a typed lens refusal rather than plausible source, and
 stays a valid document.

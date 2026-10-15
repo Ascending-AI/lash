@@ -13,7 +13,6 @@ mod diagnostics;
 mod generated_operators;
 mod intrinsics;
 mod lower;
-mod node_label;
 mod package;
 mod printer;
 mod regex;

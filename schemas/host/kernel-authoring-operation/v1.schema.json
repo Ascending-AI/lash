@@ -313,7 +313,7 @@
       "type": "object"
     },
     "Edit": {
-      "description": "One typed change to a document or to its annotations.",
+      "description": "One typed change to a document.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -390,7 +390,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Copies a statement and everything under it, annotations included.\nThe copy is new: no node of it corresponds to a node of the base.",
+          "description": "Copies a statement and everything under it. The copy is new: no node\nof it corresponds to a node of the base.",
           "properties": {
             "clone_statement": {
               "additionalProperties": false,
@@ -640,65 +640,6 @@
           },
           "required": [
             "rename_variable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Sets or clears a node's label.",
-          "properties": {
-            "set_label": {
-              "additionalProperties": false,
-              "properties": {
-                "label": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/Label"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "node": {
-                  "$ref": "#/$defs/Site"
-                }
-              },
-              "required": [
-                "node"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_label"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Sets or clears one entry of what a host keeps on a node.",
-          "properties": {
-            "set_data": {
-              "additionalProperties": false,
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "node": {
-                  "$ref": "#/$defs/Site"
-                },
-                "value": true
-              },
-              "required": [
-                "node",
-                "key"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_data"
           ],
           "type": "object"
         },
@@ -1240,24 +1181,6 @@
           "type": "string"
         }
       ]
-    },
-    "Label": {
-      "additionalProperties": false,
-      "properties": {
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title"
-      ],
-      "type": "object"
     },
     "Literal": {
       "oneOf": [

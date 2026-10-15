@@ -13,8 +13,8 @@ use lash_kernel_check::{
     Graph, NodeKind, PlaceNode, Reference, StmtNode, admit, derive, requirements,
 };
 use lash_kernel_doc::{
-    Action, Annotations, Atom, Block, Callee, Document, DocumentId, Expr, FunctionCatalog,
-    FunctionId, Literal, Name, Node, NodeAnnotation, Place, Site, Stmt, Unit,
+    Action, Atom, Block, Callee, Document, DocumentId, Expr, FunctionCatalog, FunctionId, Literal,
+    Name, Node, Place, Site, Stmt, Unit,
 };
 
 use crate::edit::{Edit, Position};
@@ -42,7 +42,6 @@ fn plain(kind: EditDiagnosticKind) -> Fault {
 /// What a transaction leaves when it is admitted.
 pub(crate) struct Published {
     pub(crate) document: Document,
-    pub(crate) annotations: Annotations,
     pub(crate) admitted: Admitted,
     pub(crate) correspondence: Correspondence,
 }
@@ -195,9 +194,8 @@ fn rewrite(
 }
 
 impl Working {
-    /// A copy of `document`, every node of which is a node of the base, with
-    /// `annotations` on the nodes they are attached to.
-    pub(crate) fn open(document: &Document, annotations: &Annotations) -> Self {
+    /// A copy of `document`, every node of which is a node of the base.
+    pub(crate) fn open(document: &Document) -> Self {
         let mut shadows = BTreeMap::new();
         let main = Site::new(Unit::Main, []);
         shadows.insert(Unit::Main, Shadow::base(Node::Block(&document.main), main));
@@ -205,12 +203,6 @@ impl Working {
             let unit = Unit::Function(name.clone());
             let site = Site::new(unit.clone(), []);
             shadows.insert(unit, Shadow::base(Node::Block(&function.body), site));
-        }
-        for annotation in &annotations.nodes {
-            if let Some(shadow) = shadow(&mut shadows, &annotation.site) {
-                shadow.note.label = annotation.label.clone();
-                shadow.note.data = annotation.data.clone();
-            }
         }
         Self {
             document: document.clone(),
@@ -354,7 +346,7 @@ impl Working {
             Edit::CloneStatement { statement, to } => {
                 let (block, index) = self.statement(statement)?;
                 let copy = self.block(&block)[index].clone();
-                let shadow = self.shadow(&block).children[index].copy();
+                let shadow = Shadow::fresh(Node::Stmt(&copy));
                 let (block, index) = self.position(to)?;
                 self.insert(&block, index, copy, shadow);
             }
@@ -458,22 +450,6 @@ impl Working {
                 name,
                 to,
             } => self.rename_variable(declared_at, name, to, catalog)?,
-            Edit::SetLabel { node, label } => {
-                let site = self.locate(node)?;
-                self.shadow(&site).note.label = label.clone();
-            }
-            Edit::SetData { node, key, value } => {
-                let site = self.locate(node)?;
-                let data = &mut self.shadow(&site).note.data;
-                match value {
-                    Some(value) => {
-                        data.insert(key.clone(), value.clone());
-                    }
-                    None => {
-                        data.remove(key);
-                    }
-                }
-            }
             Edit::InsertFunction { name, function } => {
                 if self.document.functions.contains_key(name) {
                     return Err(plain(EditDiagnosticKind::FunctionExists {
@@ -779,11 +755,10 @@ impl Working {
     }
 
     /// Derives the manifest the code now requires (`K-EDIT-005`), admits
-    /// the document and publishes it with its annotations and the
-    /// correspondence from `base`.
+    /// the document and publishes it with the correspondence from `base`.
     pub(crate) fn publish(
         mut self,
-        base: &Annotations,
+        base: DocumentId,
         environment: &Environment<'_>,
     ) -> Result<Published, EditRefusal> {
         let required = requirements(&self.document, environment.functions);
@@ -803,54 +778,33 @@ impl Working {
 
         let admitted =
             admit(&self.document, environment).map_err(|refusal| refused(None, refusal))?;
-        let (annotations, correspondence) = self.records(base, admitted.identity)?;
+        let correspondence = self.correspondence(base, admitted.identity)?;
         Ok(Published {
             document: self.document,
-            annotations,
             admitted,
             correspondence,
         })
     }
 
-    /// The annotation layer and the correspondence the shadows hold, for a
-    /// document of identity `result` edited from the one `base` annotates.
-    fn records(
+    /// The correspondence the shadows hold, from `base` to the document of
+    /// identity `result`.
+    fn correspondence(
         &self,
-        base: &Annotations,
+        base: DocumentId,
         result: DocumentId,
-    ) -> Result<(Annotations, Correspondence), EditRefusal> {
-        let mut nodes = Vec::new();
+    ) -> Result<Correspondence, EditRefusal> {
         let mut survivors = Vec::new();
         for (unit, root) in &self.shadows {
             root.walk(&mut Vec::new(), &mut |path, shadow| {
-                let site = Site::new(unit.clone(), path);
-                if !shadow.note.is_empty() {
-                    nodes.push(NodeAnnotation {
-                        site: site.clone(),
-                        label: shadow.note.label.clone(),
-                        data: shadow.note.data.clone(),
-                    });
-                }
                 if let Some(origin) = &shadow.origin {
                     survivors.push(Survivor {
                         from: origin.clone(),
-                        to: site,
+                        to: Site::new(unit.clone(), path),
                         edited: shadow.edited,
                     });
                 }
             });
         }
-        nodes.sort_by(|a, b| a.site.cmp(&b.site));
-        let annotations = Annotations {
-            document: result,
-            dialect: base.dialect.clone(),
-            // Authored source is the text the base was lowered from; it is
-            // not the text of a document that behaves differently.
-            source: base.source.clone().filter(|_| base.document == result),
-            nodes,
-        };
-        let correspondence = Correspondence::of(base.document, result, survivors)
-            .ok_or_else(invalid_correspondence)?;
-        Ok((annotations, correspondence))
+        Correspondence::of(base, result, survivors).ok_or_else(invalid_correspondence)
     }
 }

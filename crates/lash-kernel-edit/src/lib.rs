@@ -7,7 +7,7 @@
 //! `lash-kernel-check` admit the result, and either publishes it with a
 //! [`lash_kernel_doc::Correspondence`] (which node of the old document is which node of the
 //! new one) or refuses it with typed [`EditDiagnostic`]s and changes
-//! nothing. Annotations move with the node they are attached to.
+//! nothing.
 //!
 //! Edits, transactions and correspondences are data: they serialise, and a
 //! transaction means the same against any copy of its base document. The

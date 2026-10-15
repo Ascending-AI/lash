@@ -307,8 +307,6 @@ impl Names {
             Edit::RemoveStatement { .. }
             | Edit::MoveStatement { .. }
             | Edit::CloneStatement { .. }
-            | Edit::SetLabel { .. }
-            | Edit::SetData { .. }
             | Edit::SetEffectSignature { .. }
             | Edit::SetNumberPolicy { .. }
             | Edit::ReplaceFunctionIdentity { .. } => {}
@@ -319,7 +317,9 @@ impl Names {
 #[cfg(test)]
 mod tests {
     use lash_kernel_check::Environment;
-    use lash_kernel_doc::{FunctionRegistry, NumberPolicy, Param, Signature, Site, Unit};
+    use lash_kernel_doc::{
+        DocumentId, FunctionRegistry, NumberPolicy, Param, Signature, Site, Unit,
+    };
 
     use super::*;
 
@@ -334,62 +334,158 @@ mod tests {
         }
     }
 
-    /// The authoring wire preserves planning and closes structural objects,
-    /// while nested edit data retains arbitrary JSON values.
+    /// The schema positions that admit any JSON value at all.
+    fn open_positions(schema: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+        use serde_json::Value;
+        match schema {
+            Value::Bool(true) => out.push(path.to_owned()),
+            Value::Object(object) if object.is_empty() => out.push(path.to_owned()),
+            Value::Object(object) => {
+                for (key, value) in object {
+                    let path = format!("{path}/{key}");
+                    match (key.as_str(), value) {
+                        ("properties" | "$defs", Value::Object(members)) => {
+                            for (member, schema) in members {
+                                open_positions(schema, &format!("{path}/{member}"), out);
+                            }
+                        }
+                        ("oneOf" | "anyOf" | "allOf" | "prefixItems", Value::Array(schemas)) => {
+                            for (index, schema) in schemas.iter().enumerate() {
+                                open_positions(schema, &format!("{path}/{index}"), out);
+                            }
+                        }
+                        ("items" | "additionalProperties", schema)
+                            if *schema != Value::Bool(false) =>
+                        {
+                            open_positions(schema, &path, out);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// EDIT-CLOSED: the authoring wire carries document edits only. Host
+    /// labels and node data are not edits: their spellings refuse to decode
+    /// and no schema position admits open JSON. The expanded transaction is
+    /// the exact replay record: decoded and applied to a fresh draft on its
+    /// base, it publishes the same document and correspondence.
     #[test]
-    fn operation_wire_round_trips_plans_and_refuses_unknown_structure() {
-        let draft = Draft::open(
-            Document::new(NumberPolicy::Float, vec![binding("input")]),
-            None,
+    fn edit_wire_is_closed_and_transactions_replay_exactly() {
+        let node = serde_json::json!({"unit": "main", "path": [0]});
+        serde_json::from_value::<Edit>(
+            serde_json::json!({"remove_statement": {"statement": node}}),
         )
         .unwrap();
+        for retired in [
+            serde_json::json!({"set_label": {"node": node, "label": {"title": "host"}}}),
+            serde_json::json!({"set_data": {"node": node, "key": "host", "value": {"x": 9}}}),
+        ] {
+            assert!(serde_json::from_value::<Edit>(retired.clone()).is_err());
+            assert!(
+                serde_json::from_value::<Operation>(serde_json::json!({"edit": retired.clone()}))
+                    .is_err()
+            );
+            let transaction = serde_json::json!({
+                "base": DocumentId::from_bytes([0; 32]).to_string(),
+                "edits": [retired],
+            });
+            assert!(Transaction::from_json(&transaction.to_string()).is_err());
+        }
+        for schema in [
+            serde_json::to_value(schemars::schema_for!(Operation)).unwrap(),
+            serde_json::to_value(schemars::schema_for!(Transaction)).unwrap(),
+        ] {
+            let mut open = Vec::new();
+            open_positions(&schema, "", &mut open);
+            assert_eq!(open, Vec::<String>::new());
+            let text = schema.to_string();
+            assert!(!text.contains("set_label") && !text.contains("set_data"));
+        }
+
+        let base = Document::new(
+            NumberPolicy::Float,
+            vec![
+                binding("input"),
+                Stmt::Print {
+                    value: variable("input"),
+                },
+            ],
+        );
+        let functions = FunctionRegistry::default();
+        let mut environment = Environment::new(&functions);
+        let effect = EffectName::new("mock.collect").unwrap();
+        environment.effects.insert(
+            effect.clone(),
+            Signature {
+                params: vec![Param {
+                    name: Name::new("items"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+        );
+        let mut first = Draft::open(base.clone()).unwrap();
+        let print = Site::new(Unit::Main, [1]);
         let operations = vec![
             Operation::InsertEffect {
-                at: Position::end(Site::new(Unit::Main, [])),
-                effect: EffectName::new("mock.collect").unwrap(),
+                at: Position::before(print.clone()).unwrap(),
+                effect,
                 args: vec![Expr::List(vec![variable("input")])],
                 result: Type::Any,
                 binding: Name::new("output"),
             },
-            Operation::Edit(Edit::SetData {
-                node: Site::new(Unit::Main, [0]),
-                key: "host".to_owned(),
-                value: Some(serde_json::json!({"arbitrary": {"unknown": [1, true, null]}})),
+            Operation::Edit(Edit::CloneStatement {
+                statement: print.clone(),
+                to: Position::end(Site::new(Unit::Main, [])),
             }),
         ];
         let encoded = serde_json::to_value(&operations).unwrap();
-        assert!(encoded[0].get("insert_effect").is_some());
-        assert!(encoded[1].get("edit").is_some());
-        let decoded: Vec<Operation> = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(plan(&draft, operations), plan(&draft, decoded));
-        assert!(serde_json::from_value::<Operation>(serde_json::json!({"unknown": {}})).is_err());
-        let mut extra = encoded[0].clone();
-        extra["insert_effect"]["unknown"] = serde_json::json!(true);
-        assert!(serde_json::from_value::<Operation>(extra).is_err());
-        let mut extra = encoded[1].clone();
-        extra["edit"]["set_data"]["unknown"] = serde_json::json!(true);
-        assert!(serde_json::from_value::<Operation>(extra).is_err());
-        let mut extra = encoded[1].clone();
-        extra["unknown"] = serde_json::json!({});
-        assert!(serde_json::from_value::<Operation>(extra).is_err());
+        for (index, variant) in [(0, "insert_effect"), (1, "edit")] {
+            let mut extra = encoded[index].clone();
+            extra[variant]["unknown"] = serde_json::json!(true);
+            assert!(serde_json::from_value::<Operation>(extra).is_err());
+        }
+        let decoded: Vec<Operation> = serde_json::from_value(encoded).unwrap();
+        let transaction = plan(&first, operations);
+        assert_eq!(plan(&first, decoded), transaction);
+        let applied = first.apply(&transaction, &environment).unwrap();
+
+        let replayed = Transaction::from_json(&transaction.to_json().unwrap()).unwrap();
+        assert_eq!(replayed, transaction);
+        let mut second = Draft::open(base).unwrap();
+        let again = second.apply(&replayed, &environment).unwrap();
+        assert_eq!(second.document(), first.document());
+        assert_eq!(again, applied);
+        // The clone is new: only the original print survives from the base.
+        assert_eq!(
+            applied.correspondence.successor(&print),
+            Some(&Site::new(Unit::Main, [3]))
+        );
+        assert_eq!(
+            applied
+                .correspondence
+                .predecessor(&Site::new(Unit::Main, [4])),
+            None
+        );
     }
 
     /// K-EDIT-001/002: helpers preserve base anchors and commit as one batch.
     /// Fresh temporaries must not capture a name supplied anywhere in it.
     #[test]
     fn mixed_helpers_reserve_the_whole_batch_and_refuse_atomically() {
-        let mut draft = Draft::open(
-            Document::new(
-                NumberPolicy::Float,
-                vec![
-                    binding("__authoring_arg_0"),
-                    Stmt::Print {
-                        value: variable("__authoring_arg_0"),
-                    },
-                ],
-            ),
-            None,
-        )
+        let mut draft = Draft::open(Document::new(
+            NumberPolicy::Float,
+            vec![
+                binding("__authoring_arg_0"),
+                Stmt::Print {
+                    value: variable("__authoring_arg_0"),
+                },
+            ],
+        ))
         .unwrap();
         let functions = FunctionRegistry::default();
         let mut environment = Environment::new(&functions);
@@ -435,7 +531,7 @@ mod tests {
             }),
         ];
         let transaction = plan(&draft, steps.clone());
-        let original = (draft.document().clone(), draft.annotations().clone());
+        let original = draft.document().clone();
         let mut invalid = steps;
         invalid.push(Operation::Edit(Edit::InsertStatement {
             at,
@@ -445,10 +541,7 @@ mod tests {
         }));
         let refused = plan(&draft, invalid);
         assert!(draft.apply(&refused, &environment).is_err());
-        assert_eq!(
-            (draft.document().clone(), draft.annotations().clone()),
-            original
-        );
+        assert_eq!(draft.document(), &original);
 
         let applied = draft.apply(&transaction, &environment).unwrap();
         let names: Vec<_> = draft

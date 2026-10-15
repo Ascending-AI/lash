@@ -8,9 +8,9 @@ use lash_kernel_check::{
     Environment, RefusalReason, admit, derive, derive_definition, requirements,
 };
 use lash_kernel_doc::{
-    Annotations, Document, FunctionDefinition, FunctionRegistry, Implementation, InvalidReason,
-    Label, Name, NativeCall, NativeError, NativeFunction, Node, NodeAnnotation, Site, Unit, Value,
-    parse_definition, parse_document, print_definition, print_document, validate_annotations,
+    Document, FunctionDefinition, FunctionRegistry, Implementation, InvalidReason, Name,
+    NativeCall, NativeError, NativeFunction, Node, Site, SourceLanguage, SourceMap, SourceSite,
+    Span, Unit, Value, parse_definition, parse_document, print_definition, print_document,
     validate_definition, validate_document,
 };
 use lash_kernel_vm::{
@@ -81,7 +81,7 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
                 InvalidReason::LoopControlOutsideLoop { .. }
             ));
         }
-        "K-DOC-007" | "K-ADM-009" => annotations(shard, registry),
+        "K-ADM-009" => source_map_independence(shard, registry),
         "K-ID-001" | "K-ID-003" => identity_document(shard),
         "K-ID-002" | "K-VER-002" => identity_definition(),
         "K-LIB-001" => definition_parts(),
@@ -345,27 +345,27 @@ fn native_repeat() {
     assert_eq!(check_case(&mut cold, &case).unwrap(), first);
 }
 
-fn annotations(shard: &Shard, registry: &FunctionRegistry) {
+/// A source map of the first statement, over `source`.
+fn statement_map(document: &Document, source: &str) -> SourceMap {
+    let site = SourceSite {
+        site: Site::new(Unit::Main, [0]),
+        ranges: vec![Span::new(0, source.len()).unwrap()],
+        implicit: None,
+    };
+    SourceMap::new(document, source, SourceLanguage::TypeScript, vec![site]).unwrap()
+}
+
+fn source_map_independence(shard: &Shard, registry: &FunctionRegistry) {
     let document = doc(&shard.cases[0].document);
     let id = document.identity().unwrap();
     let graph = derive(&document, registry).unwrap();
-    let mut layer = Annotations::new(id);
-    layer.source = Some("arbitrary authored source".into());
-    layer.dialect = Some("arbitrary dialect".into());
-    layer.nodes.push(NodeAnnotation {
-        site: Site::new(Unit::Main, [0]),
-        label: Some(Label {
-            title: "a label".into(),
-            description: None,
-        }),
-        data: BTreeMap::from([("layout".into(), serde_json::json!({"x": 9}))]),
-    });
-    validate_annotations(&layer, &document).unwrap();
+    let map = statement_map(&document, "let x = 1 // arbitrary authored source");
+    assert_eq!(map.document, id);
     let stored = Document::from_json(&document.to_json().unwrap()).unwrap();
     assert_eq!(stored.identity().unwrap(), id);
     assert_eq!(derive(&stored, registry).unwrap(), graph);
     assert!(!print_document(&document).contains("arbitrary"));
-    drop(layer);
+    drop(map);
     assert_eq!(derive(&document, registry).unwrap(), graph);
 }
 
@@ -629,6 +629,14 @@ fn identity_document(shard: &Shard) {
         "aaaced107a063053435c79613097364cfe8afdda36f476681a9e0f912b7e2b3b"
     };
     assert_eq!(document.identity().unwrap().to_string(), expected);
+    if shard.rule == "K-ID-001" {
+        // Two sources mapped onto one document share its identity.
+        let first = statement_map(&document, "return 7");
+        let second = statement_map(&document, "finish(7)  # another spelling");
+        assert_ne!(first.source, second.source);
+        let id = document.identity().unwrap();
+        assert_eq!((first.document, second.document), (id, id));
+    }
     let different = doc(&format!("{HEADER}main {{ finish 8 }}"));
     assert_ne!(document.identity().unwrap(), different.identity().unwrap());
 }

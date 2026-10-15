@@ -76,8 +76,8 @@ pub enum EffectControl {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lowered {
     pub document: Document,
-    /// Where each statement came from in the source, and the labels the
-    /// source gave. They never change behaviour (`K-DOC-007`).
+    /// Where each statement came from in the source. It never changes
+    /// behaviour or the document's identity (`K-ID-001`).
     pub annotations: Annotations,
 }
 

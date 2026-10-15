@@ -81,11 +81,6 @@ fn k_doc_005() {
 }
 
 #[test]
-fn k_doc_007() {
-    super::run_rule("K-DOC-007", include_str!("../corpus/doc/K-DOC-007.json"));
-}
-
-#[test]
 fn k_eff_005() {
     super::run_rule("K-EFF-005", include_str!("../corpus/eff/K-EFF-005.json"));
 }

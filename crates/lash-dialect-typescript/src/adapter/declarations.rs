@@ -142,7 +142,6 @@ impl Checker {
     fn statement(&mut self, stmt: &Stmt, span: Option<SourceSpan>) -> Result<(), Diagnostic> {
         match stmt {
             Stmt::Spanned(span, stmt) => self.statement(stmt, Some(*span)),
-            Stmt::Labeled { stmt, .. } => self.statement(stmt, span),
             Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => Ok(()),
             Stmt::Expr(expr) | Stmt::Throw(expr) => self.expr(expr),
             Stmt::Return(expr) => expr.iter().try_for_each(|expr| self.expr(expr)),
@@ -177,7 +176,7 @@ impl Checker {
                 body,
             } => {
                 if let Some(init) = init {
-                    if let Stmt::Var { kind, declarations } = init.unlabeled()
+                    if let Stmt::Var { kind, declarations } = init.unspanned()
                         && *kind != VarKind::Var
                     {
                         let mut names = Vec::new();
@@ -439,7 +438,7 @@ fn lexically_declared<'a>(
     let mut names = Vec::new();
     for stmt in body {
         let span = statement_span(stmt);
-        match stmt.unlabeled() {
+        match stmt.unspanned() {
             Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
                 for declaration in declarations {
                     pattern_names(&declaration.pattern, span, &mut names);
@@ -458,7 +457,7 @@ fn lexically_declared<'a>(
 /// A var scope's own function declarations, which are var-scoped there.
 fn top_level_functions(body: &[Stmt]) -> Vec<Declared> {
     body.iter()
-        .filter_map(|stmt| match stmt.unlabeled() {
+        .filter_map(|stmt| match stmt.unspanned() {
             Stmt::Function { name, .. } => Some(Declared {
                 name: name.clone(),
                 span: statement_span(stmt),
@@ -482,7 +481,6 @@ fn var_declared<'a>(
 fn var_declared_in(stmt: &Stmt, span: Option<SourceSpan>, names: &mut Vec<Declared>) {
     match stmt {
         Stmt::Spanned(span, stmt) => var_declared_in(stmt, Some(*span), names),
-        Stmt::Labeled { stmt, .. } => var_declared_in(stmt, span, names),
         Stmt::Var {
             kind: VarKind::Var,
             declarations,
@@ -553,7 +551,6 @@ fn var_declared_in(stmt: &Stmt, span: Option<SourceSpan>, names: &mut Vec<Declar
 fn statement_span(stmt: &Stmt) -> Option<SourceSpan> {
     match stmt {
         Stmt::Spanned(span, _) => Some(*span),
-        Stmt::Labeled { stmt, .. } => statement_span(stmt),
         _ => None,
     }
 }

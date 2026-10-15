@@ -41,7 +41,7 @@ impl Lowerer<'_> {
     /// block and are not live until their declarations run.
     pub(super) fn declare_block(&mut self, statements: &[ast::Stmt]) -> Lowering<()> {
         for statement in statements {
-            match statement.unlabeled() {
+            match statement.unspanned() {
                 ast::Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
                     let mut names = Vec::new();
                     for declaration in declarations {
@@ -103,7 +103,7 @@ impl Lowerer<'_> {
             self.lower_statement(statement)?;
         }
         for statement in statements {
-            if let ast::Stmt::Function { name, function } = statement.unlabeled() {
+            if let ast::Stmt::Function { name, function } = statement.unspanned() {
                 let entry = self
                     .binding_mut(name)
                     .and_then(|(_, binding)| binding.positional.clone());
@@ -123,7 +123,7 @@ impl Lowerer<'_> {
                 test,
                 consequent,
                 alternate: None,
-            } = statement.unlabeled()
+            } = statement.unspanned()
                 && walk::always_leaves(consequent)
             {
                 let shown = self.narrowing(test).when_false;
@@ -165,18 +165,6 @@ impl Lowerer<'_> {
                 let result = self.lower_statement(inner);
                 self.span = outer;
                 result
-            }
-            ast::Stmt::Labeled { label, stmt } => {
-                let emitted = self.buf.notes.len();
-                self.lower_statement(stmt)?;
-                // The label names the statement that does the work, which
-                // is the last one the source statement lowered to.
-                if self.buf.notes.len() > emitted
-                    && let Some(note) = self.buf.notes.last_mut()
-                {
-                    note.label = Some(label.clone());
-                }
-                Ok(())
             }
             ast::Stmt::Empty | ast::Stmt::TypeAlias { .. } | ast::Stmt::Function { .. } => Ok(()),
             ast::Stmt::Expr(expr) => {
@@ -445,7 +433,7 @@ impl Lowerer<'_> {
     ) -> Lowering<()> {
         let mut per_pass = Vec::new();
         if let Some(init) = init {
-            if let ast::Stmt::Var { kind, declarations } = init.unlabeled()
+            if let ast::Stmt::Var { kind, declarations } = init.unspanned()
                 && *kind != VarKind::Var
             {
                 let mut names = Vec::new();

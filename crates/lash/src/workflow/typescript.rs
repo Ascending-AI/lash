@@ -1,6 +1,5 @@
 //! Whole source import: lowering followed by admission, without publication.
 use lash_kernel_dialect::Environment;
-use lash_kernel_doc::Annotations;
 
 use super::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
 
@@ -14,10 +13,7 @@ pub use lash_kernel_dialect::{
 pub enum WorkflowImport {
     /// The source lowered and its document was admitted. Nothing was published.
     /// The reference selects `main`; all process entries remain in the document.
-    Imported {
-        document: WorkflowDocument,
-        annotations: Annotations,
-    },
+    Imported { document: WorkflowDocument },
     /// The front end refused the source, with its original byte spans.
     Refused(Vec<WorkflowSourceDiagnostic>),
     /// The lowered document cannot run against the supplied environment.
@@ -52,7 +48,7 @@ pub(crate) async fn import(
         Ok(lowered) => lowered,
         Err(error) => return source_refusal(error),
     };
-    Ok(admit(lowered.document, lowered.annotations, checker))
+    Ok(admit(lowered.document, checker))
 }
 
 pub(crate) fn source_refusal(
@@ -83,15 +79,11 @@ pub(crate) fn source_refusal(
 
 pub(crate) fn admit(
     document: lash_kernel_doc::Document,
-    annotations: Annotations,
     checker: &lash_kernel_check::Environment<'_>,
 ) -> WorkflowImport {
     let document = match WorkflowDocument::admit(document, WorkflowDocumentEntry::Main, checker) {
         Ok(document) => document,
         Err(refusal) => return WorkflowImport::Admission(refusal),
     };
-    WorkflowImport::Imported {
-        document,
-        annotations,
-    }
+    WorkflowImport::Imported { document }
 }

@@ -3,7 +3,7 @@
 use std::fmt;
 
 use lash_kernel_check::{Refusal, RefusalReason};
-use lash_kernel_doc::{DocumentId, FunctionId, Invalid, InvalidReason, Name, Site};
+use lash_kernel_doc::{DocumentId, FunctionId, InvalidReason, Name, Site};
 
 use crate::tree::NodeClass;
 
@@ -105,7 +105,7 @@ pub enum EditDiagnosticKind {
     /// Surviving nodes do not define a one-to-one relation.
     #[error("surviving nodes do not form an injective correspondence")]
     InvalidCorrespondence,
-    /// The document or its annotations cannot be read at all.
+    /// The document cannot be read at all.
     #[error("{0}")]
     Invalid(InvalidReason),
     /// `K-EDIT-003`: the edited document is not admitted.
@@ -138,18 +138,6 @@ impl EditDiagnosticKind {
             Self::InvalidCorrespondence => "invalid_correspondence",
             Self::Invalid(_) => "invalid",
             Self::Refused(_) => "refused",
-        }
-    }
-}
-
-impl From<Invalid> for EditRefusal {
-    fn from(invalid: Invalid) -> Self {
-        Self {
-            diagnostics: vec![EditDiagnostic {
-                edit: None,
-                location: invalid.site.map(Location::Edited),
-                kind: EditDiagnosticKind::Invalid(*invalid.reason),
-            }],
         }
     }
 }

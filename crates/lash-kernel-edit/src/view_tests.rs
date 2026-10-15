@@ -312,7 +312,7 @@ main {
 "#,
     )
     .expect("base workflow");
-    let mut draft = Draft::open(document.clone(), None).expect("draft");
+    let mut draft = Draft::open(document.clone()).expect("draft");
     let functions = FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
     environment.effects = document.manifest.effects.clone();

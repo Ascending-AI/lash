@@ -26,9 +26,7 @@ fn function_reads_arguments(function: &ast::Function) -> bool {
 
 pub(super) fn statement_reads_arguments(statement: &Stmt) -> bool {
     match statement {
-        Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => {
-            statement_reads_arguments(inner)
-        }
+        Stmt::Spanned(_, inner) => statement_reads_arguments(inner),
         Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => false,
         Stmt::Function { function, .. } => function_reads_arguments(function),
         Stmt::Expr(expr) | Stmt::Throw(expr) => reads_arguments(expr),

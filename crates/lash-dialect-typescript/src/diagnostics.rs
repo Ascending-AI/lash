@@ -63,7 +63,6 @@ pub enum DiagnosticCode {
     ControlCallPlacement,
     MutualRecursionUnsupported,
     DuplicateBinding,
-    DuplicateNodeLabel,
     TemporalDeadZone,
     UnknownBinding,
     /// Printed helper identities and declarations require their base document.
@@ -148,7 +147,6 @@ impl DiagnosticCode {
         Self::ControlCallPlacement,
         Self::MutualRecursionUnsupported,
         Self::DuplicateBinding,
-        Self::DuplicateNodeLabel,
         Self::TemporalDeadZone,
         Self::UnknownBinding,
         Self::PrintedSourceNeedsBase,
@@ -411,7 +409,6 @@ impl DiagnosticCode {
             | Self::ParseResourcesUnavailable
             | Self::MissingInitializer
             | Self::DuplicateBinding
-            | Self::DuplicateNodeLabel
             | Self::TemporalDeadZone
             | Self::UnknownBinding
             | Self::AssignConst
@@ -481,7 +478,6 @@ impl DiagnosticCode {
             Self::ControlCallPlacement => "TS_CONTROL_CALL_PLACEMENT",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
-            Self::DuplicateNodeLabel => "TS_DUPLICATE_NODE_LABEL",
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",

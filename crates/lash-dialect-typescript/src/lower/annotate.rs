@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Annotations, Document, Label, Node, NodeAnnotation, Site, Stmt, Unit};
+use lash_kernel_doc::{Annotations, Document, Node, NodeAnnotation, Site, Stmt, Unit};
 
 use super::{Lowering, Note};
 use crate::{Diagnostic, DiagnosticCode};
@@ -32,7 +32,7 @@ fn block(statements: &[Stmt], notes: &[Note], site: &Site, out: &mut Vec<NodeAnn
     for (index, (statement, note)) in statements.iter().zip(notes).enumerate() {
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let statement_site = site.child(index);
-        if note.span.is_some() || note.label.is_some() || note.written.is_some() {
+        if note.span.is_some() || note.written.is_some() {
             let mut data = BTreeMap::new();
             if let Some(written) = &note.written {
                 data.insert(lash_kernel_dialect::WRITTEN.to_string(), written.clone());
@@ -45,10 +45,7 @@ fn block(statements: &[Stmt], notes: &[Note], site: &Site, out: &mut Vec<NodeAnn
             }
             out.push(NodeAnnotation {
                 site: statement_site.clone(),
-                label: note.label.as_ref().map(|label| Label {
-                    title: label.title.clone(),
-                    description: label.description.clone(),
-                }),
+                label: None,
                 data,
             });
         }

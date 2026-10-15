@@ -80,11 +80,8 @@ pub(crate) async fn import_source(
         .import_typescript_workflow(&request.source, &environment)
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
-    let (document, annotations) = match imported {
-        WorkflowImport::Imported {
-            document,
-            annotations,
-        } => (document, annotations),
+    let document = match imported {
+        WorkflowImport::Imported { document } => document,
         WorkflowImport::Refused(diagnostics) => {
             return Err(ErrorResponse::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -114,7 +111,7 @@ pub(crate) async fn import_source(
             "Select an exported workflow function",
         ));
     }
-    let draft = Draft::open(document.document().clone(), Some(annotations))
+    let draft = Draft::open(document.document().clone())
         .map_err(|error| ErrorResponse::invalid("document", error))?;
     let checked = state.environment().await?;
     let (saved, _) = state.install(draft, request.entry).await;

@@ -142,8 +142,7 @@ impl AppState {
         let (document, entry) = catalog::document(catalog::DEFAULT_WORKFLOW, &environment)
             .ok_or_else(|| StartupError("the catalog has no default workflow".into()))?
             .map_err(|error| StartupError(error.to_string()))?;
-        let draft =
-            Draft::open(document, None).map_err(|error| StartupError(format!("{error:?}")))?;
+        let draft = Draft::open(document).map_err(|error| StartupError(format!("{error:?}")))?;
         state.install(draft, entry).await;
         Ok(state)
     }
@@ -255,7 +254,7 @@ async fn select_workflow(
     let (document, entry) = catalog::document(&request.id, &environment)
         .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?
         .map_err(|error| ErrorResponse::invalid("document", error))?;
-    let draft = Draft::open(document, None)
+    let draft = Draft::open(document)
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
     let (saved, _) = state.install(draft, entry).await;
@@ -271,7 +270,7 @@ async fn open_workflow(
     let environment = state.environment().await?;
     let document = runtime::complete(*request.document, &environment)
         .map_err(|error| ErrorResponse::invalid("document", error))?;
-    let draft = Draft::open(document, None)
+    let draft = Draft::open(document)
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
     let (saved, _) = state.install(draft, request.entry).await;

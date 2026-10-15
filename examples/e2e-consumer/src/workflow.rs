@@ -388,7 +388,7 @@ async fn open_draft(State(host): State<Host>, Json(request): Json<OpenDraft>) ->
             }
         }
     };
-    let draft = Draft::open(document, None).map_err(api_error)?;
+    let draft = Draft::open(document).map_err(api_error)?;
     let answer = draft_json(&draft).map_err(api_error)?;
     *host.draft.lock_recover() = Some(draft);
     Ok(Json(answer))

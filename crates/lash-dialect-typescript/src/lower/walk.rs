@@ -45,7 +45,7 @@ fn is_constant(expr: &Expr) -> bool {
 /// function, so that nothing can be called while it runs.
 pub(super) fn declares_constants(statement: &Stmt) -> bool {
     match statement {
-        Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => declares_constants(inner),
+        Stmt::Spanned(_, inner) => declares_constants(inner),
         Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Function { .. } => true,
         Stmt::Var { declarations, .. } => declarations.iter().all(|declaration| {
             matches!(declaration.pattern, Pattern::Ident(..))
@@ -58,7 +58,7 @@ pub(super) fn declares_constants(statement: &Stmt) -> bool {
 /// Whether a statement never runs to its end: it returns, throws, or
 /// leaves or restarts a loop.
 pub(super) fn always_leaves(statement: &Stmt) -> bool {
-    match statement.unlabeled() {
+    match statement.unspanned() {
         Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break | Stmt::Continue => true,
         Stmt::Block(body) => body.last().is_some_and(always_leaves),
         _ => false,
@@ -101,7 +101,7 @@ pub(super) fn var_names(statements: &[Stmt], names: &mut Vec<String>) {
 
 fn var_names_of(statement: &Stmt, names: &mut Vec<String>) {
     match statement {
-        Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => var_names_of(inner, names),
+        Stmt::Spanned(_, inner) => var_names_of(inner, names),
         Stmt::Var {
             kind: VarKind::Var,
             declarations,
@@ -171,9 +171,7 @@ fn var_names_of(statement: &Stmt, names: &mut Vec<String>) {
 /// a loop's body captures that iteration's bindings.
 pub(super) fn statement_makes_function(statement: &Stmt) -> bool {
     match statement {
-        Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => {
-            statement_makes_function(inner)
-        }
+        Stmt::Spanned(_, inner) => statement_makes_function(inner),
         Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => false,
         Stmt::Function { .. } => true,
         Stmt::Expr(expr) | Stmt::Throw(expr) => makes_function(expr),

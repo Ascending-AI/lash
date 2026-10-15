@@ -5,10 +5,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_kernel_check::{Environment, RefusalReason};
-use lash_kernel_doc::{
-    Action, Annotations, Expr, Label, Literal, Name, NodeAnnotation, Stmt, parse_definition,
-    parse_document,
-};
+use lash_kernel_doc::{Action, Expr, Literal, Name, Stmt, parse_definition, parse_document};
 use lash_kernel_edit::{
     Applied, Draft, Edit, EditDiagnostic, EditDiagnosticKind, Location, Position, Transaction,
 };
@@ -46,7 +43,7 @@ pub(super) fn check(rule: &str, case: &Case) {
     let mut env = Environment::new(registry.as_ref());
     let document = parse_document(&case.document).expect("base document");
     env.effects = document.manifest.effects.clone();
-    let mut draft = Draft::open(document.clone(), None).expect("open draft");
+    let mut draft = Draft::open(document.clone()).expect("open draft");
     match rule {
         "K-EDIT-001" => {
             let original = draft.clone();
@@ -68,7 +65,6 @@ pub(super) fn check(rule: &str, case: &Case) {
                 }]
             );
             assert_eq!(draft.document(), original.document());
-            assert_eq!(draft.annotations(), original.annotations());
             assert_eq!(
                 draft.correspondence_since_open(),
                 original.correspondence_since_open()
@@ -218,64 +214,6 @@ pub(super) fn check(rule: &str, case: &Case) {
             apply(&mut draft, vec![remove(0)], &env);
             assert!(draft.document().manifest.effects.is_empty());
         }
-        "K-EDIT-006" => {
-            let label = Label {
-                title: "first".into(),
-                description: None,
-            };
-            let mut annotations = Annotations::new(draft.identity());
-            annotations.dialect = Some("typescript".into());
-            annotations.source = Some("authored source".into());
-            annotations.nodes = vec![NodeAnnotation {
-                site: main(&[0]),
-                label: Some(label.clone()),
-                data: Default::default(),
-            }];
-            draft = Draft::open(document.clone(), Some(annotations)).unwrap();
-            let first = apply(
-                &mut draft,
-                vec![Edit::SetLabel {
-                    node: main(&[1]),
-                    label: Some(label.clone()),
-                }],
-                &env,
-            );
-            assert_eq!(first.correspondence.base, first.correspondence.result);
-            assert_eq!(
-                draft.annotations().source.as_deref(),
-                Some("authored source")
-            );
-            apply(
-                &mut draft,
-                vec![
-                    Edit::CloneStatement {
-                        statement: main(&[0]),
-                        to: Position::end(main(&[])),
-                    },
-                    Edit::MoveStatement {
-                        statement: main(&[0]),
-                        to: Position::end(main(&[])),
-                    },
-                    remove(1),
-                ],
-                &env,
-            );
-            assert_eq!(
-                draft
-                    .annotations()
-                    .nodes
-                    .iter()
-                    .map(|n| (&n.site, &n.label))
-                    .collect::<Vec<_>>(),
-                vec![
-                    (&main(&[1]), &Some(label.clone())),
-                    (&main(&[2]), &Some(label))
-                ]
-            );
-            assert_eq!(draft.annotations().document, draft.identity());
-            assert_eq!(draft.annotations().dialect.as_deref(), Some("typescript"));
-            assert_eq!(draft.annotations().source, None);
-        }
         "K-EDIT-007" => {
             apply(
                 &mut draft,
@@ -288,7 +226,7 @@ pub(super) fn check(rule: &str, case: &Case) {
             );
             let expected = parse_document("kernel 1\nnumbers by_spelling\nprivate sum\nmain { let sum = 1 if true { let x = 2 print x } print sum finish null }").unwrap();
             assert_eq!(draft.document(), &expected);
-            let mut capture = Draft::open(parse_document("kernel 1\nnumbers by_spelling\nmain { let x = 1 if true { let y = 2 print x } }").unwrap(), None).unwrap();
+            let mut capture = Draft::open(parse_document("kernel 1\nnumbers by_spelling\nmain { let x = 1 if true { let y = 2 print x } }").unwrap()).unwrap();
             let refusal = capture
                 .apply(
                     &Transaction {
@@ -336,7 +274,7 @@ pub(super) fn check(rule: &str, case: &Case) {
                 }],
                 &env,
             );
-            let mut empty = Draft::open(parse_document("kernel 1\nnumbers by_spelling\nfn f() { return 3 }\nentry f() -> Int\nmain { finish null }").unwrap(), None).unwrap();
+            let mut empty = Draft::open(parse_document("kernel 1\nnumbers by_spelling\nfn f() { return 3 }\nentry f() -> Int\nmain { finish null }").unwrap()).unwrap();
             apply(
                 &mut empty,
                 vec![Edit::RemoveFunction {
@@ -364,7 +302,7 @@ pub(super) fn check(rule: &str, case: &Case) {
             };
             let env = Environment::new(&library);
             let written = parse_document(&case.document).unwrap();
-            let mut draft = Draft::open(written, None).unwrap();
+            let mut draft = Draft::open(written).unwrap();
             let held = draft.document().clone();
             let refusal = draft
                 .apply(

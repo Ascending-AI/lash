@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use lash_kernel_check::{Environment, RefusalReason};
 use lash_kernel_doc::{
-    Action, Annotations, Atom, Catch, Datum, Document, EffectName, ErrorDatum, Expr, Function,
-    FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Handle, Integer, Label,
-    Literal, Member, Name, Node, NodeAnnotation, NumberPolicy, Param, Rhs, Signature, Site, Stmt,
-    Timestamp, Type, Unit, parse_definition, parse_document, validate_annotations,
+    Action, Atom, Catch, Datum, Document, EffectName, ErrorDatum, Expr, Function,
+    FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Handle, Integer, Literal,
+    Member, Name, Node, NumberPolicy, Param, Rhs, Signature, Site, Stmt, Timestamp, Type, Unit,
+    parse_definition, parse_document,
 };
 
 use lash_kernel_vm::{
@@ -138,7 +138,7 @@ fn sites(document: &Document) -> Vec<Site> {
 }
 
 fn open(text: &str) -> Draft {
-    Draft::open(document(text), None).unwrap()
+    Draft::open(document(text)).unwrap()
 }
 
 fn transaction(draft: &Draft, edits: Vec<Edit>) -> Transaction {
@@ -149,15 +149,12 @@ fn transaction(draft: &Draft, edits: Vec<Edit>) -> Transaction {
 }
 
 fn refused(draft: &mut Draft, edits: Vec<Edit>, environment: &Environment<'_>) -> EditRefusal {
-    let held = (draft.document().clone(), draft.annotations().clone());
+    let held = draft.document().clone();
     let refusal = draft
         .apply(&transaction(draft, edits), environment)
         .expect_err("the transaction was published");
     // `K-EDIT-001`: a refused transaction changes nothing.
-    assert_eq!(
-        held,
-        (draft.document().clone(), draft.annotations().clone())
-    );
+    assert_eq!(&held, draft.document());
     refusal
 }
 
@@ -579,26 +576,6 @@ fn cases(library: &Library) -> Vec<Case> {
             &[main(&[2]), main(&[3, 0, 0, 0])],
         ),
         case(
-            Edit::SetLabel {
-                node: main(&[1]),
-                label: Some(Label {
-                    title: "Check".to_string(),
-                    description: None,
-                }),
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::SetData {
-                node: main(&[1]),
-                key: "layout".to_string(),
-                value: Some(serde_json::json!({"x": 1})),
-            },
-            vec![],
-            &[],
-        ),
-        case(
             Edit::InsertFunction {
                 name: name("extra"),
                 function: returns("extra"),
@@ -713,8 +690,6 @@ fn kind(edit: &Edit) -> &'static str {
         Edit::SetCatch { .. } => "set_catch",
         Edit::SetFinally { .. } => "set_finally",
         Edit::RenameVariable { .. } => "rename_variable",
-        Edit::SetLabel { .. } => "set_label",
-        Edit::SetData { .. } => "set_data",
         Edit::InsertFunction { .. } => "insert_function",
         Edit::RemoveFunction { .. } => "remove_function",
         Edit::ReplaceFunction { .. } => "replace_function",
@@ -730,7 +705,7 @@ fn kind(edit: &Edit) -> &'static str {
     }
 }
 
-const EDIT_KINDS: usize = 26;
+const EDIT_KINDS: usize = 24;
 
 /// `K-EDIT-004`: after each kind of edit, every node of the base that
 /// survives maps to the node it became and to no other, a node that does
@@ -1094,90 +1069,6 @@ fn a_transaction_applies_whole_against_its_base_or_not_at_all() {
     assert!(since_open.survivor(&main(&[3])).unwrap().edited);
 }
 
-/// `K-EDIT-006`: annotations move with their node, a copy carries them, a
-/// removed node's are dropped, the layer is keyed to the new identity, and
-/// authored source is kept only while the document behaves the same.
-#[test]
-fn annotations_move_with_their_node() {
-    let library = library();
-    let environment = environment(&library);
-    let base = document(&subject(&library));
-    let label = |title: &str| {
-        Some(Label {
-            title: title.to_string(),
-            description: None,
-        })
-    };
-    let annotation = |site: Site, title: &str| NodeAnnotation {
-        site,
-        label: label(title),
-        data: BTreeMap::new(),
-    };
-    let annotations = Annotations {
-        document: base.identity().unwrap(),
-        dialect: Some("typescript".to_string()),
-        source: Some("authored".to_string()),
-        nodes: vec![
-            annotation(main(&[1]), "Check"),
-            annotation(main(&[1, 1, 0]), "Say"),
-            annotation(main(&[5]), "Call"),
-        ],
-    };
-    let mut draft = Draft::open(base, Some(annotations)).unwrap();
-
-    // Annotation edits leave behaviour, and so the authored source, alone.
-    let relabel = Edit::SetLabel {
-        node: main(&[5]),
-        label: label("Start"),
-    };
-    let applied = draft
-        .apply(&transaction(&draft, vec![relabel]), &environment)
-        .unwrap();
-    assert_eq!(applied.correspondence.base, applied.correspondence.result);
-    assert_eq!(draft.annotations().source.as_deref(), Some("authored"));
-
-    let edits = vec![
-        Edit::CloneStatement {
-            statement: main(&[1]),
-            to: Position::end(main(&[3, 0])),
-        },
-        Edit::MoveStatement {
-            statement: main(&[1]),
-            to: before(main(&[3])),
-        },
-        Edit::RemoveStatement {
-            statement: main(&[5]),
-        },
-        Edit::SetData {
-            node: main(&[6]),
-            key: "layout".to_string(),
-            value: Some(serde_json::json!([1, 2])),
-        },
-    ];
-    draft
-        .apply(&transaction(&draft, edits), &environment)
-        .unwrap();
-    let found = draft.annotations();
-    assert_eq!(
-        found.nodes,
-        vec![
-            annotation(main(&[2]), "Check"),
-            annotation(main(&[2, 1, 0]), "Say"),
-            annotation(main(&[3, 0, 1]), "Check"),
-            annotation(main(&[3, 0, 1, 1, 0]), "Say"),
-            NodeAnnotation {
-                site: main(&[5]),
-                label: None,
-                data: BTreeMap::from([("layout".to_string(), serde_json::json!([1, 2]))]),
-            },
-        ]
-    );
-    assert_eq!(found.document, draft.identity());
-    assert_eq!(found.dialect.as_deref(), Some("typescript"));
-    assert_eq!(found.source, None);
-    validate_annotations(found, draft.document()).unwrap();
-}
-
 /// `K-EDIT-005`, `K-EDIT-009`: the manifest a draft publishes is the one the edited code
 /// derives. An effect newly performed is listed with the environment's
 /// signature, one no longer performed is dropped, an adopted function is
@@ -1456,10 +1347,7 @@ main {
     let mut document = document(source);
     let reading = document.clone();
     let all = sites(&reading);
-    assert_eq!(
-        Working::open(&reading, &Annotations::new(reading.identity().unwrap())).sites(),
-        all
-    );
+    assert_eq!(Working::open(&reading).sites(), all);
     for site in all {
         let body = match &site.unit {
             Unit::Main => &mut document.main,
@@ -1533,7 +1421,7 @@ main {{
     assert_eq!(extraction.requirements, effects.effects);
     let transaction = extraction.transaction;
     assert_eq!(transaction.base, source.identity().unwrap());
-    let mut draft = Draft::open(source.clone(), None).unwrap();
+    let mut draft = Draft::open(source.clone()).unwrap();
     draft.apply(&transaction, &environment).unwrap();
     let extracted = draft.document();
     assert_eq!(

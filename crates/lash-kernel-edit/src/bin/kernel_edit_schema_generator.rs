@@ -3,8 +3,8 @@
 //! a host edits against.
 //!
 //! These are owned by [`KERNEL_VERSION`]: their payloads are the forms and
-//! sites of that version. Structural objects are closed; arbitrary JSON data
-//! in nested edit payloads retains its existing encoding.
+//! sites of that version. Every object is closed and no position admits
+//! arbitrary JSON: an edit carries no host data.
 
 use lash_kernel_doc::KERNEL_VERSION;
 use lash_kernel_edit::Transaction;

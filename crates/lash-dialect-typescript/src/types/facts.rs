@@ -451,7 +451,7 @@ impl<'a> Collector<'a> {
 
     fn statement(&mut self, statement: &'a Stmt) {
         match statement {
-            Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => self.statement(inner),
+            Stmt::Spanned(_, inner) => self.statement(inner),
             Stmt::Empty | Stmt::Break | Stmt::Continue => {}
             Stmt::TypeAlias { name, ty } => self.aliases.push((name, ty)),
             Stmt::Expr(expr) => self.expr(expr),
@@ -889,7 +889,7 @@ fn numeric_function(name: &str, function: &Function) -> bool {
     // return facts hold inductively for every terminating numeric invocation.
     fn statement(stmt: &Stmt, name: &str, parameter: &str) -> Option<bool> {
         match stmt {
-            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => statement(stmt, name, parameter),
+            Stmt::Spanned(_, stmt) => statement(stmt, name, parameter),
             Stmt::Empty => Some(false),
             Stmt::Return(Some(value)) if number(value, name, parameter) => Some(true),
             Stmt::If {

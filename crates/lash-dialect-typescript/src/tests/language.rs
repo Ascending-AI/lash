@@ -125,20 +125,19 @@ fn the_manifest_lists_functions_reached_through_helpers() {
     }
 }
 
-/// A statement's source span, and the label its `@label` comment gives it,
-/// are annotations on the site of the statement that does the work.
+/// A statement's source span is an annotation on the site of the statement
+/// that does the work. A former `@label` doc comment is ordinary trivia: it
+/// names nothing and is no node's label.
 #[test]
-fn spans_and_labels_annotate_sites() {
+fn spans_annotate_sites_and_label_comments_are_trivia() {
     let source = "/** @label Greet — say hello */\nconsole.log('hi');\nlet z = 1;";
     let lowered = lower(source).unwrap();
     assert_eq!(lowered.annotations.dialect.as_deref(), Some("typescript"));
     let nodes = &lowered.annotations.nodes;
-    let labelled: Vec<_> = nodes.iter().filter(|node| node.label.is_some()).collect();
-    assert_eq!(labelled.len(), 1);
-    assert_eq!(labelled[0].site.path, [1]);
-    assert_eq!(labelled[0].label.as_ref().unwrap().title, "Greet");
+    assert!(nodes.iter().all(|node| node.label.is_none()));
     let call = source.find("console").unwrap();
-    assert_eq!(labelled[0].data["span"][0], call);
+    let logged = nodes.iter().find(|node| node.site.path == [1]).unwrap();
+    assert_eq!(logged.data["span"][0], call);
     let last = nodes.last().unwrap();
     assert_eq!(last.site.path, [2]);
     assert_eq!(last.data["span"][0], source.find("let z").unwrap());

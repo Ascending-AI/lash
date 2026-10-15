@@ -29,7 +29,6 @@ use lash_kernel_doc::{
 
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
-use crate::node_label::NodeLabel;
 use crate::types::{Facts, PlainRecord, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
@@ -212,7 +211,6 @@ struct Positional {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Note {
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) label: Option<NodeLabel>,
     /// What the function the statement binds is, as its source wrote it.
     pub(crate) written: Option<serde_json::Value>,
     /// The notes of the statement's blocks, in the order a walk of its
@@ -858,7 +856,6 @@ impl Lowerer<'_> {
         self.buf.stmts.push(stmt);
         self.buf.notes.push(Note {
             span: self.span,
-            label: None,
             written: None,
             blocks,
         });

@@ -4,7 +4,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use swc_common::comments::SingleThreadedComments;
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 use swc_ecma_parser::error::{Error, SyntaxError};
@@ -39,7 +38,6 @@ pub(super) struct Parsed<'a> {
     /// Every respelled word's position, with the error SWC reported there.
     pub(super) respellings: BTreeMap<u32, Error>,
     pub(super) items: Vec<swc::ModuleItem>,
-    pub(super) comments: SingleThreadedComments,
 }
 
 /// Parses `source` under the first goal, from `first` on, that it satisfies.
@@ -51,14 +49,13 @@ pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
     if first == Goal::Module {
         loop {
             match parse_goal(&text, Goal::Module) {
-                Ok((items, comments)) => {
+                Ok(items) => {
                     return Ok(Parsed {
                         goal: Goal::Module,
                         text,
                         respelled_awaits: BTreeSet::new(),
                         respellings,
                         items,
-                        comments,
                     });
                 }
                 Err(errors) if respell_escaped_keywords(&mut text, &errors, &mut respellings) => {}
@@ -72,14 +69,13 @@ pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
     let mut respelled_awaits = BTreeSet::new();
     loop {
         match parse_goal(&text, Goal::Script) {
-            Ok((items, comments)) => {
+            Ok(items) => {
                 return Ok(Parsed {
                     goal: Goal::Script,
                     text,
                     respelled_awaits,
                     respellings,
                     items,
-                    comments,
                 });
             }
             Err(errors)
@@ -101,14 +97,10 @@ pub(super) fn parse(source: &str, first: Goal) -> Result<Parsed<'_>, Error> {
     }
 }
 
-type GoalResult = Result<(Vec<swc::ModuleItem>, SingleThreadedComments), Vec<Error>>;
+type GoalResult = Result<Vec<swc::ModuleItem>, Vec<Error>>;
 
 fn parse_goal(text: &str, goal: Goal) -> GoalResult {
     let end = u32::try_from(text.len()).unwrap_or(u32::MAX);
-    // Comments are trivia to the language and carry no semantics, but one
-    // shape of doc comment names a graph node (see `crate::node_label`), so
-    // the lexer has to keep them for the adapter to read back.
-    let comments = SingleThreadedComments::default();
     let mut lexer = Lexer::new(
         Syntax::Typescript(TsSyntax {
             tsx: true,
@@ -117,7 +109,7 @@ fn parse_goal(text: &str, goal: Goal) -> GoalResult {
         }),
         Default::default(),
         StringInput::new(text, BytePos(0), BytePos(end)),
-        Some(&comments),
+        None,
     );
     if goal == Goal::Script {
         // The dialect has one mode: a cell is strict code under either goal.
@@ -133,7 +125,7 @@ fn parse_goal(text: &str, goal: Goal) -> GoalResult {
     };
     let mut errors = parser.take_errors();
     match body {
-        Ok(items) if errors.is_empty() => Ok((items, comments.clone())),
+        Ok(items) if errors.is_empty() => Ok(items),
         Ok(_) => Err(errors),
         Err(error) => {
             errors.insert(0, error);

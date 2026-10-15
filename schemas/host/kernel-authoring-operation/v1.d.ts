@@ -117,7 +117,7 @@ export type Closure = {
 };
 
 /**
- * One typed change to a document or to its annotations.
+ * One typed change to a document.
  */
 export type Edit = ({
   "insert_statement": {
@@ -179,17 +179,6 @@ export type Edit = ({
     "declared_at": Site;
     "name": Name;
     "to": Name;
-  };
-} | {
-  "set_label": {
-    "label"?: (Label | null);
-    "node": Site;
-  };
-} | {
-  "set_data": {
-    "key": string;
-    "node": Site;
-    "value"?: unknown;
   };
 } | {
   "insert_function": {
@@ -294,11 +283,6 @@ export type FunctionId = string;
 export type Integer = string;
 
 export type JoinMode = ("all" | "all_settled" | "race" | "any");
-
-export type Label = {
-  "description"?: (string | null);
-  "title": string;
-};
 
 export type Literal = (("null" | "absent") | {
   "bool": boolean;

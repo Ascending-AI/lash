@@ -1,10 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::node_label::{NodeLabel, is_label_comment, parse_label_comment};
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
-use swc_common::comments::{CommentKind, Comments, SingleThreadedComments};
-use swc_common::{BytePos, Spanned};
+use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
 mod assignments;
@@ -52,14 +50,6 @@ pub(crate) struct Program {
 pub(crate) enum Stmt {
     Spanned(SourceSpan, Box<Stmt>),
     Empty,
-    /// A statement carrying the label its leading `@label` doc comment named.
-    ///
-    /// The wrapper is inert: it names the statement below it and changes
-    /// nothing about how that statement runs.
-    Labeled {
-        label: NodeLabel,
-        stmt: Box<Stmt>,
-    },
     Expr(Expr),
     /// `type Name = ...` or `interface Name { ... }`: it runs nothing, and
     /// the type analysis reads what `Name` stands for.
@@ -129,14 +119,13 @@ pub(crate) enum Stmt {
 }
 
 impl Stmt {
-    /// The statement itself, with any `@label` wrapper peeled off.
+    /// The statement itself, with its source span peeled off.
     ///
-    /// The label names a node; it never changes what the statement *is*, so
-    /// every pass that asks what kind of statement this is — hoisting,
+    /// Every pass that asks what kind of statement this is — hoisting,
     /// pre-declaration, loop analysis — asks through here.
-    pub(crate) fn unlabeled(&self) -> &Self {
+    pub(crate) fn unspanned(&self) -> &Self {
         match self {
-            Self::Spanned(_, stmt) | Self::Labeled { stmt, .. } => stmt.unlabeled(),
+            Self::Spanned(_, stmt) => stmt.unspanned(),
             other => other,
         }
     }
@@ -480,7 +469,6 @@ fn parse_from_goal(
         goal: parsed.goal,
         respelled_awaits: parsed.respelled_awaits,
         respellings: parsed.respellings,
-        comments: parsed.comments.clone(),
         ..Adapter::default()
     };
     let converted = adapter.convert_module_items(&parsed.items);
@@ -526,7 +514,6 @@ struct Adapter<'a> {
     /// Whether the adapter stands in an arrow function's parameters, where an
     /// `await` expression is an early error.
     in_arrow_parameters: Cell<bool>,
-    comments: SingleThreadedComments,
     nesting_depth: Cell<usize>,
     enum_constants: RefCell<Vec<BTreeMap<String, BTreeMap<String, ConstEnumValue>>>>,
     inline_enums: RefCell<Vec<BTreeSet<String>>>,
@@ -596,42 +583,8 @@ impl Adapter<'_> {
     }
 
     fn convert_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
-        let label = self.statement_label(stmt.span().lo)?;
-        let converted = self.convert_unlabeled_stmt(stmt)?;
-        let labeled = match label {
-            Some(label) => Stmt::Labeled {
-                label,
-                stmt: Box::new(converted),
-            },
-            None => converted,
-        };
-        Ok(Stmt::Spanned(source_span(stmt.span()), Box::new(labeled)))
-    }
-
-    /// The label named by the statement's own leading doc comments.
-    ///
-    /// Every other comment is trivia. Two labels on one statement is the one
-    /// refusal: the author wrote two names for one node and no rule for
-    /// picking between them would be the one they meant.
-    fn statement_label(&self, start: BytePos) -> Result<Option<NodeLabel>, Diagnostic> {
-        let Some(comments) = self.comments.get_leading(start) else {
-            return Ok(None);
-        };
-        let mut labels = comments
-            .iter()
-            .filter(|comment| comment.kind == CommentKind::Block)
-            .filter(|comment| is_label_comment(&comment.text));
-        let Some(first) = labels.next() else {
-            return Ok(None);
-        };
-        if let Some(second) = labels.next() {
-            return Err(Diagnostic::new(
-                DiagnosticCode::DuplicateNodeLabel,
-                "this statement already carries an `@label` doc comment",
-                Some(source_span(second.span)),
-            ));
-        }
-        Ok(parse_label_comment(&first.text))
+        let converted = self.convert_unspanned_stmt(stmt)?;
+        Ok(Stmt::Spanned(source_span(stmt.span()), Box::new(converted)))
     }
 
     /// The body of an `if`/`else` or a loop is a Statement, never a
@@ -654,7 +607,7 @@ impl Adapter<'_> {
         self.convert_stmt(stmt)
     }
 
-    fn convert_unlabeled_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
+    fn convert_unspanned_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         if !matches!(
             stmt,
             swc::Stmt::If(_)

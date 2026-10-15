@@ -282,9 +282,8 @@ main {{
     }
 
     // The actual gate-3 edit vocabulary applied to its frontend fixture.
-    let mut draft = Draft::open(
-        document(
-            r#"effect fetch(url: Text) -> Any
+    let mut draft = Draft::open(document(
+        r#"effect fetch(url: Text) -> Any
 effect notify(text: Text) -> Any
 main {
   let t1 = "https://a"
@@ -293,9 +292,7 @@ main {
   if t2 { let t3 = "done" do perform notify(t3) as Any }
   finish page
 }"#,
-        ),
-        None,
-    )
+    ))
     .unwrap();
     let mut environment = lash_kernel_check::Environment::new(&library);
     environment.effects = draft.document().manifest.effects.clone();

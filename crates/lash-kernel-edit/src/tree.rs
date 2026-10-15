@@ -3,13 +3,11 @@
 //!
 //! A [`Shadow`] mirrors a unit's tree node for node, in the child order of
 //! [`lash_kernel_doc::Node::children`]. It carries what the document does
-//! not: the site the node had in the base document, whether an edit wrote
-//! the node, and the node's annotations. Every edit changes the document and
-//! its shadow together, so a node's shadow travels with it.
+//! not: the site the node had in the base document and whether an edit
+//! wrote the node. Every edit changes the document and its shadow together,
+//! so a node's shadow travels with it.
 
-use std::collections::BTreeMap;
-
-use lash_kernel_doc::{Action, Block, Expr, Label, Member, Node, Place, Rhs, Site, Stmt};
+use lash_kernel_doc::{Action, Block, Expr, Member, Node, Place, Rhs, Site, Stmt};
 
 /// Any node of the tree, for writing.
 pub(crate) enum NodeMut<'a> {
@@ -157,19 +155,6 @@ fn push_member<'a>(member: &'a mut Member, out: &mut Vec<NodeMut<'a>>) {
     }
 }
 
-/// What a host keeps on a node.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Note {
-    pub(crate) label: Option<Label>,
-    pub(crate) data: BTreeMap<String, serde_json::Value>,
-}
-
-impl Note {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.label.is_none() && self.data.is_empty()
-    }
-}
-
 /// One node's record; see the module.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Shadow {
@@ -178,7 +163,6 @@ pub(crate) struct Shadow {
     pub(crate) origin: Option<Site>,
     /// An edit wrote this node itself.
     pub(crate) edited: bool,
-    pub(crate) note: Note,
     pub(crate) children: Vec<Shadow>,
 }
 
@@ -201,17 +185,6 @@ impl Shadow {
             origin: Some(site),
             children,
             ..Self::default()
-        }
-    }
-
-    /// A copy that is no node of the base document: it keeps the
-    /// annotations and nothing else.
-    pub(crate) fn copy(&self) -> Self {
-        Self {
-            origin: None,
-            edited: false,
-            note: self.note.clone(),
-            children: self.children.iter().map(Self::copy).collect(),
         }
     }
 

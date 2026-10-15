@@ -292,7 +292,6 @@ impl HostArtifacts {
         base: &crate::workflow::document::Document,
         environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowImport> {
-        use crate::workflow::WorkflowImport;
         let (_, _, checked) = match self.import_context(environment).await? {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
@@ -305,25 +304,8 @@ impl HostArtifacts {
             Ok(document) => document,
             Err(error) => return crate::workflow::typescript::source_refusal(error),
         };
-        let identity = match document.identity() {
-            Ok(identity) => identity,
-            Err(error) => {
-                return Ok(WorkflowImport::Refused(vec![
-                    lash_kernel_dialect::Diagnostic {
-                        code: "GENERATED_SOURCE_INVALID".into(),
-                        message: error.to_string(),
-                        span: None,
-                        kind: lash_kernel_dialect::DiagnosticKind::ProgramDefect,
-                        repairs: Vec::new(),
-                    },
-                ]));
-            }
-        };
-        let mut annotations = lash_kernel_doc::Annotations::new(identity);
-        annotations.dialect = Some(format.dialect().into());
         Ok(crate::workflow::typescript::admit(
             document,
-            annotations,
             &checked.checker(),
         ))
     }

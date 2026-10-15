@@ -4,9 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Annotations, Document, EffectName, FunctionDefinition, FunctionId, InvalidReason, Label, Name,
-    Node, NodeAnnotation, Param, Signature, Site, Type, Unit, parse_definition, parse_document,
-    validate_annotations,
+    Document, EffectName, FunctionDefinition, FunctionId, InvalidReason, Name, Node, Param,
+    Signature, Site, SourceLanguage, SourceMap, SourceSite, Span, Type, Unit, parse_definition,
+    parse_document,
 };
 
 use crate::{
@@ -390,7 +390,7 @@ fn walking_the_graph_view_reaches_every_node_and_slot() {
 
 /// `K-ADM-009`, `K-SITE-005`: ids and sites are a function of the document
 /// alone. Two derivations agree, an independent walk of the document's tree
-/// numbers the nodes the same way, and annotating every node changes
+/// numbers the nodes the same way, and a source map of every node changes
 /// neither the identity nor anything derived.
 #[test]
 fn derived_ids_and_sites_are_a_function_of_the_document_alone() {
@@ -409,26 +409,20 @@ fn derived_ids_and_sites_are_a_function_of_the_document_alone() {
         assert_eq!(graph.node(node.id).site, *site);
     }
 
-    // Every derived site is an address annotations can attach to, and a
-    // document annotated at every one derives the same view.
-    let mut sites: Vec<Site> = graph.nodes().iter().map(|node| node.site.clone()).collect();
-    sites.sort();
-    let mut annotations = Annotations::new(document.identity().unwrap());
-    annotations.dialect = Some("typescript".into());
-    annotations.source = Some("// authored".into());
-    annotations.nodes = sites
-        .into_iter()
-        .map(|site| NodeAnnotation {
-            site,
-            label: Some(Label {
-                title: "a host's label".into(),
-                description: None,
-            }),
-            data: BTreeMap::new(),
+    // Every derived site is an address a source map can attach to, and a
+    // document mapped at every one derives the same view.
+    let source = "// authored";
+    let sites = graph
+        .nodes()
+        .iter()
+        .map(|node| SourceSite {
+            site: node.site.clone(),
+            ranges: vec![Span::new(0, source.len()).unwrap()],
+            implicit: None,
         })
         .collect();
-    validate_annotations(&annotations, &document).unwrap();
-    assert_eq!(annotations.document, stored.identity().unwrap());
+    let map = SourceMap::new(&document, source, SourceLanguage::TypeScript, sites).unwrap();
+    assert_eq!(map.document, stored.identity().unwrap());
     assert_eq!(derive(&document, &library.catalog).unwrap(), graph);
 }
 

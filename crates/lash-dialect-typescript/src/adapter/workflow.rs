@@ -15,7 +15,7 @@ pub(crate) fn parse(source: &str, limits: SourceLimits) -> Result<Program, Diagn
 /// lowering as a const-bound async function. Keep its labels and byte spans.
 fn declaration(statement: &mut Stmt) {
     match statement {
-        Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => declaration(inner),
+        Stmt::Spanned(_, inner) => declaration(inner),
         Stmt::Function { name, function } if function.is_async => {
             *statement = Stmt::Var {
                 kind: VarKind::Const,

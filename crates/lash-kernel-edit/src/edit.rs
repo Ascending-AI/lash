@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{
-    Action, Atom, Block, Catch, DocumentId, EffectName, Expr, Function, FunctionId, Label, Name,
+    Action, Atom, Block, Catch, DocumentId, EffectName, Expr, Function, FunctionId, Name,
     NumberPolicy, Signature, Site, Stmt,
 };
 use schemars::JsonSchema;
@@ -66,7 +66,7 @@ impl Position {
     }
 }
 
-/// One typed change to a document or to its annotations.
+/// One typed change to a document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Edit {
@@ -84,8 +84,8 @@ pub enum Edit {
         statement: Site,
         to: Position,
     },
-    /// Copies a statement and everything under it, annotations included.
-    /// The copy is new: no node of it corresponds to a node of the base.
+    /// Copies a statement and everything under it. The copy is new: no node
+    /// of it corresponds to a node of the base.
     CloneStatement {
         statement: Site,
         to: Position,
@@ -145,19 +145,6 @@ pub enum Edit {
         declared_at: Site,
         name: Name,
         to: Name,
-    },
-    /// Sets or clears a node's label.
-    SetLabel {
-        node: Site,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        label: Option<Label>,
-    },
-    /// Sets or clears one entry of what a host keeps on a node.
-    SetData {
-        node: Site,
-        key: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        value: Option<serde_json::Value>,
     },
     InsertFunction {
         name: Name,

@@ -1,7 +1,7 @@
 //! A draft: a document a host is editing.
 
 use lash_kernel_check::{Admitted, Environment};
-use lash_kernel_doc::{Annotations, Document, DocumentId, InvalidReason, validate_annotations};
+use lash_kernel_doc::{Document, DocumentId, InvalidReason};
 
 use crate::apply::{FaultKind, Working};
 use crate::edit::Transaction;
@@ -10,8 +10,8 @@ use crate::refusal::{
 };
 use lash_kernel_doc::Correspondence;
 
-/// A document, its annotations, and the correspondence from the document
-/// the draft was opened on to the one it holds now.
+/// A document and the correspondence from the document the draft was
+/// opened on to the one it holds now.
 ///
 /// A draft holds nothing derived. Each transaction is applied to a copy,
 /// admitted against the environment the host passes, and either replaces
@@ -19,7 +19,7 @@ use lash_kernel_doc::Correspondence;
 #[derive(Clone, Debug)]
 pub struct Draft {
     document: Document,
-    annotations: Annotations,
+    identity: DocumentId,
     since_open: Correspondence,
 }
 
@@ -33,25 +33,18 @@ pub struct Applied {
 }
 
 impl Draft {
-    /// Opens a draft on `document`. `annotations` must be that document's;
-    /// with none the draft starts with an empty layer.
+    /// Opens a draft on `document`.
     ///
     /// The document need not be admitted anywhere yet: a host may open one
     /// its environment refuses in order to repair it.
-    pub fn open(document: Document, annotations: Option<Annotations>) -> Result<Self, EditRefusal> {
-        let annotations = match annotations {
-            Some(annotations) => {
-                validate_annotations(&annotations, &document)?;
-                annotations
-            }
-            None => Annotations::new(identity(&document)?),
-        };
-        let sites = Working::open(&document, &annotations).sites();
-        let since_open = Correspondence::identity(annotations.document, sites)
-            .ok_or_else(invalid_correspondence)?;
+    pub fn open(document: Document) -> Result<Self, EditRefusal> {
+        let identity = identity(&document)?;
+        let sites = Working::open(&document).sites();
+        let since_open =
+            Correspondence::identity(identity, sites).ok_or_else(invalid_correspondence)?;
         Ok(Self {
             document,
-            annotations,
+            identity,
             since_open,
         })
     }
@@ -62,12 +55,7 @@ impl Draft {
 
     /// The identity of [`Self::document`]: the base a transaction names.
     pub fn identity(&self) -> DocumentId {
-        self.annotations.document
-    }
-
-    /// The annotation layer of [`Self::document`].
-    pub fn annotations(&self) -> &Annotations {
-        &self.annotations
+        self.identity
     }
 
     /// The correspondence from the document the draft was opened on to
@@ -95,7 +83,7 @@ impl Draft {
                 }],
             });
         }
-        let mut working = Working::open(&self.document, &self.annotations);
+        let mut working = Working::open(&self.document);
         for (index, edit) in (0u32..).zip(&transaction.edits) {
             working
                 .edit(edit, environment.functions)
@@ -110,12 +98,12 @@ impl Draft {
                     FaultKind::Unlinked(refusal) => refused(Some(index), refusal),
                 })?;
         }
-        let published = working.publish(&self.annotations, environment)?;
+        let published = working.publish(self.identity, environment)?;
         if let Some(since_open) = self.since_open.then(&published.correspondence) {
             self.since_open = since_open;
         }
         self.document = published.document;
-        self.annotations = published.annotations;
+        self.identity = published.admitted.identity;
         Ok(Applied {
             correspondence: published.correspondence,
             admitted: published.admitted,

@@ -98,9 +98,9 @@ A host that vendors lash reads the schema's TypeScript declaration from
 `lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
 checked-in `v1.d.ts` — to check its own copy hermetically.
 
-A document carries no labels and no presentation. The kernel's annotation
-layer (labels and host data per node) lives beside a draft, not in the
-document lash stores. Wording, icons and layout are the host's.
+A document carries no labels and no presentation. Lash keeps no per-node
+host data either: wording, icons, layout and step labels are the host's,
+keyed by site.
 
 ### Reading one
 
@@ -181,7 +181,7 @@ Open the document as a `Draft` and apply kernel edits to it.
 ```rust,ignore
 use lash::workflow::edit::{Draft, Edit, Position, Transaction};
 
-let mut draft = Draft::open(document, None)?;
+let mut draft = Draft::open(document)?;
 
 let applied = draft.apply(
     &Transaction {
@@ -218,10 +218,13 @@ the edit or the site they are about.
 | Entries | `InsertEntry`, `RemoveEntry`, `RenameEntry`, `SetEntrySignature` |
 | The manifest | `SetEffectSignature`, `SetNumberPolicy`, `ReplaceFunctionIdentity` |
 | `main`'s own variables | `SetPrivateBindings` |
-| The annotation layer beside the draft | `SetLabel`, `SetData` |
 
 `Edit`, `Transaction` and `Correspondence` are serializable, so a client can
 send a transaction as JSON and get the correspondence back.
+
+No edit carries host data. Labels, layout and anything else a host keeps
+about a node live with the host, keyed by site; after an edit, carry them to
+the new sites through the transaction's `Correspondence`.
 
 Statements, expressions and actions in an edit are kernel AST values. A host
 that takes text from a person can accept kernel notation and parse it; a
@@ -396,8 +399,7 @@ only code; the manifest, entries, helper identities and renames come from
 `base`, and the result is admitted against `environment`. An edit the reader
 has no exact inverse for is a typed refusal naming the construct.
 
-`WorkflowImport::Imported { document, annotations }` carries the admitted
-workflow and source annotations. `Refused(diagnostics)` carries front-end
+`WorkflowImport::Imported { document }` carries the admitted workflow. `Refused(diagnostics)` carries front-end
 diagnostics with byte spans, `Admission(WorkflowAdmissionRefusal)` names a
 checker or catalogue refusal, and `Unsupported(WorkflowImportUnsupported)`
 names a missing kernel workflow engine or an unusable named library. These types live under

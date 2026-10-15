@@ -372,8 +372,8 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
             .with_context(|| format!("this host offers no effect `{effect}`"))?
             .clone();
     }
-    let draft = Draft::open(document, None)
-        .map_err(|error| anyhow::anyhow!("workflow draft: {error:?}"))?;
+    let draft =
+        Draft::open(document).map_err(|error| anyhow::anyhow!("workflow draft: {error:?}"))?;
     let pin = HostArtifactPin::mint();
     let publication = match within(
         "workflow publication",
