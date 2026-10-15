@@ -1181,7 +1181,6 @@ pub fn code_execution_context_for_process<'run>(
         .with_process_execution(
             &crate::ProcessRecord::from_registration(registration.clone(), process_id),
             None,
-            None,
         )
 }
 

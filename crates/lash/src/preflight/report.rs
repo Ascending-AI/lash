@@ -375,18 +375,6 @@ pub struct ComponentReadability {
     /// investigable without a second run.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub undecodable_reasons: Vec<String>,
-    /// How many items this build refuses without a version integer to name.
-    ///
-    /// The identity-only formats need this: a program identity that is not this
-    /// build's is a refusal, and there is no "found version" to report for it
-    /// because no version was ever stored. Counting these as undecodable would
-    /// call a decided refusal undecided.
-    #[serde(skip_serializing_if = "is_zero")]
-    pub refused_without_version: u64,
-}
-
-fn is_zero(count: &u64) -> bool {
-    *count == 0
 }
 
 impl ComponentReadability {
@@ -528,18 +516,6 @@ impl PreflightReport {
             })
             .collect();
         for component in self.refusals() {
-            // The identity-only formats refuse without a version to print:
-            // a start stamp names the generation that produced it, so there
-            // is no found integer, and rendering an empty list would leave
-            // the operator reading "`kernel version` is at  and this build
-            // writes ...".
-            if component.found.is_empty() {
-                reasons.push(format!(
-                    "`{}` holds {} item(s) written by another build, and this build writes {}",
-                    component.format, component.refused_without_version, component.expected
-                ));
-                continue;
-            }
             let found = component
                 .found
                 .iter()
@@ -618,27 +594,12 @@ pub(super) struct FormatTally {
     pub(super) found: BTreeMap<u32, u64>,
     pub(super) undecodable: u64,
     pub(super) undecodable_reasons: Vec<String>,
-    pub(super) refused_without_version: u64,
 }
 
 impl FormatTally {
     pub(super) fn record(&mut self, version: u32) {
         self.scanned += 1;
         *self.found.entry(version).or_default() += 1;
-    }
-
-    #[cfg(feature = "codemode")]
-    pub(super) fn identity_match(&mut self) {
-        self.scanned += 1;
-    }
-
-    /// Record an item this build refuses for a reason no version integer
-    /// expresses — the identity-only case.
-    ///
-    #[cfg(feature = "codemode")]
-    pub(super) fn refuse_without_version(&mut self) {
-        self.scanned += 1;
-        self.refused_without_version += 1;
     }
 
     pub(super) fn undecodable(&mut self, reason: impl Into<String>, limit: usize) {
@@ -656,11 +617,10 @@ impl FormatTally {
         probe: FormatProbe,
         evidence: FormatEvidence,
     ) -> ComponentReadability {
-        let refused = self.refused_without_version > 0
-            || self
-                .found
-                .keys()
-                .any(|found| !reads_version(expected, *found));
+        let refused = self
+            .found
+            .keys()
+            .any(|found| !reads_version(expected, *found));
         let verdict = if self.scanned == 0 {
             ComponentVerdict::Empty
         } else if refused {
@@ -689,7 +649,6 @@ impl FormatTally {
                 .collect(),
             undecodable: self.undecodable,
             undecodable_reasons: self.undecodable_reasons,
-            refused_without_version: self.refused_without_version,
         }
     }
 }

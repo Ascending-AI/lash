@@ -13,14 +13,13 @@ use std::num::NonZeroUsize;
 
 use super::ProcessCompletionOutcome;
 use super::events::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendRequest,
+    ProcessEventPage, ProcessEventQueryMode, ProcessEventReadOutcome,
 };
 use super::model::{
-    PreparedProcessRegistration, ProcessChange, ProcessChangeCursor,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessId, ProcessListFilter,
-    ProcessObserverBy, ProcessRecord, ProcessRegistration, ProcessRegistrationReceipt,
-    ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
+    PreparedProcessRegistration, ProcessChange, ProcessChangeCursor, ProcessExternalRef, ProcessId,
+    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationReceipt, ProcessSessionDeleteReport, SessionId,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{
@@ -352,52 +351,16 @@ pub trait ProcessObserverRegistry: ProcessQuery {
     ) -> Result<ProcessSessionDeleteReport, PluginError>;
 }
 
-/// The per-process append-only event log.
+/// The per-process append-only event log's reads.
 ///
-/// Authority-fenced appends plus sequence-cursor reads. Process engines
-/// append no event themselves: lash appends every lifecycle fact an
-/// activation commits, and a cancel request goes through
+/// Sequence-cursor reads only. Lash appends every lifecycle fact an
+/// activation commits in that activation's owner transaction, fenced by its
+/// actor epoch, and a cancel request goes through
 /// [`ProcessLifecycle::request_process_cancel`].
 /// Requires [`ProcessQuery`]: reads resolve a process's retention through
 /// point reads.
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
-    /// Append one execution-owned event: a batch of one
-    /// ([`Self::append_events`]).
-    async fn append_event_with_authority(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        self.append_events(process_id, vec![request], authority)
-            .await?
-            .pop()
-            .ok_or_else(|| {
-                PluginError::Session(format!(
-                    "process `{process_id}` answered a one-event append with no receipt"
-                ))
-            })
-    }
-
-    /// Append `requests`, in order, as one atomic batch under `authority`
-    /// (FIG-3571).
-    ///
-    /// Implementations validate `authority` once and run the whole batch in one
-    /// transaction: sequences are allocated in request order, each request
-    /// goes through the same append rules a single append does (the ADR 0046
-    /// fold, replay-key coalescing, the conflicting-payload refusal), the
-    /// process record is rewritten once and the change clock advances once.
-    /// A refusal of any request commits none of them. The receipts answer the
-    /// requests in order. An empty batch writes nothing and answers no
-    /// receipts.
-    async fn append_events(
-        &self,
-        process_id: &ProcessId,
-        requests: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError>;
-
     /// Read one event by its append replay key, at or below `through_sequence`.
     ///
     /// Missing keys answer `Retained(None)`. A released event answers the
@@ -448,8 +411,8 @@ pub trait ProcessEventLog: ProcessQuery {
 
 /// Durable execution lifecycle transitions.
 ///
-/// The started fact, wait markers, the abandon request, authority-bound
-/// terminal completion, and the ended-scope rows that fence a late start.
+/// The cancel request, authority-bound terminal completion, and the
+/// ended-scope rows that fence a late start.
 #[async_trait::async_trait]
 pub trait ProcessLifecycle: Send + Sync {
     /// Complete a process under an explicit, auditable completion authority.
@@ -502,20 +465,6 @@ pub trait ProcessLifecycle: Send + Sync {
         parent: &crate::ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError>;
 
-    /// Record the durable "execution started" fact (ADR 0110).
-    ///
-    /// The first attempt stores `started`. An identical replay is idempotent.
-    /// A successor execution the engine resumes from its journal replaces the
-    /// retained fact with the next consecutive attempt; any other attempt is
-    /// refused. Whether a start may run at all is the engine's decision, made
-    /// before this write: lash never re-runs started work from scratch.
-    async fn record_first_started_with_authority(
-        &self,
-        process_id: &ProcessId,
-        started: ProcessStarted,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessStartOutcome, PluginError>;
-
     /// Request cancellation of one process.
     ///
     /// The registry stamps the first accepted request with its injected clock.
@@ -556,28 +505,6 @@ pub trait ProcessLifecycle: Send + Sync {
             .await?;
         Ok((record, crate::StoreRealization::Realized))
     }
-
-    /// Enter `wait` (`process.waiting`) as a run boundary (FIG-3571): the
-    /// run's pending `prelude` is appended ahead of the transition in the same
-    /// transaction, under the same append rules as
-    /// [`ProcessEventLog::append_events`], and the record is rewritten once.
-    /// An unchanged wait still commits the prelude.
-    async fn set_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        wait: WaitState,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
-
-    /// Leave the oldest wait the record lists (`process.resumed`) as a run boundary, with the
-    /// same `prelude` contract as [`Self::set_process_wait_with_authority`].
-    async fn clear_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError>;
 }
 
 /// Durable tool-intent submission admission and settlement.

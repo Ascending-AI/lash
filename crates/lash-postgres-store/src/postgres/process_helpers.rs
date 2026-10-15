@@ -241,26 +241,6 @@ impl ProcessEventBatch {
     }
 }
 
-/// Stage `requests` in order as one batch (FIG-3571): each goes through the
-/// append sequence against the in-memory projection, and the process is saved
-/// once, one save on the change feed, when any of them moved it. The
-/// caller owns the transaction, so a refusal of any request commits none.
-pub(crate) async fn append_process_event_batch_tx(
-    tx: &mut GuardedTx<'_>,
-    record: &mut ProcessRecord,
-    requests: Vec<ProcessEventAppendRequest>,
-    occurred_at_ms: u64,
-    fleet_format: lash_core_execution::FleetFormat,
-) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
-    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-    let mut receipts = Vec::with_capacity(requests.len());
-    for request in requests {
-        receipts.push(batch.stage(tx, record, request, occurred_at_ms).await?);
-    }
-    batch.commit(tx, record).await?;
-    Ok(receipts)
-}
-
 /// One process-event append for the PostgreSQL store: the append sequence
 /// ([`stage_process_event_append_tx`]) followed by the process save when the
 /// append moved the projection.
@@ -381,23 +361,6 @@ pub(crate) async fn append_process_event_tx(
     apply_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format)
         .await
         .map(|(receipt, _)| receipt)
-}
-
-pub(crate) fn validate_process_execution_authority(
-    process_id: &ProcessId,
-    record: &ProcessRecord,
-    authority: &ProcessExecutionWriteAuthority,
-    start: Option<&ProcessStarted>,
-) -> Result<(), PluginError> {
-    if let Some(started) = start {
-        authority.validate_invocation_for_start(
-            process_id,
-            started,
-            record.first_started.as_deref(),
-        )
-    } else {
-        authority.validate_invocation_for_write(process_id, record)
-    }
 }
 
 /// What recording a cancel request found (L6, FIG-5175).

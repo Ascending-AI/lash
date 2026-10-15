@@ -6,10 +6,7 @@ use crate::plugin::PluginError;
 use super::events::{
     ProcessEvent, ProcessEventAppendRequest, ProcessLifecycleFact, ProcessTerminal,
 };
-use super::model::{
-    ProcessLifecycleState, ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus,
-    WaitState,
-};
+use super::model::{ProcessLifecycleState, ProcessRecord, ProcessRegistration, ProcessStatus};
 
 /// A lifecycle append as its process's log stores it: the one fact a replay
 /// lookup, a replay comparison, a released-payload digest and the inserted
@@ -112,12 +109,6 @@ pub enum ProcessEventAppendPlan {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProcessStartPlan {
-    Append,
-    AlreadyApplied,
-}
-
 /// A registry-owned lifecycle transition whose append disposition is shared
 /// across every process-store implementation.
 #[derive(Clone, Debug, PartialEq)]
@@ -126,10 +117,6 @@ pub enum ProcessTransition {
     SetExternalRef(super::model::ProcessExternalRef),
     /// Record a typed process cancellation request.
     RequestCancel(lash_sansio::CancelRequest),
-    /// Enter a durable wait, beside any the process already has.
-    EnterWait(WaitState),
-    /// End the oldest wait the record lists.
-    ClearWait,
 }
 
 /// The store action selected for a registry-owned lifecycle transition.
@@ -157,43 +144,6 @@ pub fn allocate_process_event_sequence(last_sequence: Option<u64>) -> Result<u64
         ));
     }
     Ok(sequence)
-}
-
-/// Plan the write of an execution-started fact.
-///
-/// The engine decides whether a start may run (ADR 0110): lash never re-runs
-/// started work from scratch. Recovery continues from committed state; a
-/// started `Once` execution without an outcome is interrupted. The registry
-/// only keeps the fact consistent: the same execution is idempotent, and a
-/// successor execution resumed from committed state takes the next attempt.
-pub fn prepare_process_start(
-    record: &ProcessRecord,
-    started: &ProcessStarted,
-) -> Result<ProcessStartPlan, PluginError> {
-    if record.is_terminal() {
-        return Err(PluginError::Session(format!(
-            "terminal process `{}` cannot start an execution attempt",
-            record.id
-        )));
-    }
-    if record
-        .first_started
-        .as_deref()
-        .is_some_and(|existing| existing.same_execution(started))
-    {
-        return Ok(ProcessStartPlan::AlreadyApplied);
-    }
-    let expected_attempt = record
-        .first_started
-        .as_deref()
-        .map_or(1, |existing| existing.attempt.saturating_add(1));
-    if started.attempt != expected_attempt {
-        return Err(PluginError::Session(format!(
-            "process `{}` execution attempt must be {}, got {}",
-            record.id, expected_attempt, started.attempt
-        )));
-    }
-    Ok(ProcessStartPlan::Append)
 }
 
 /// Prepare one registry-owned lifecycle transition for the shared append path.
@@ -265,22 +215,6 @@ pub fn prepare_process_transition(
             }
             append
         }
-        ProcessTransition::EnterWait(wait) => {
-            if record.waits().contains(&wait) {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            }
-            let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
-            if record.is_terminal() {
-                route_transition_refusal_to_fold(&mut append)?;
-            }
-            append
-        }
-        ProcessTransition::ClearWait => {
-            let Some(wait) = record.waits().first() else {
-                return Ok(ProcessTransitionPlan::Unchanged);
-            };
-            ProcessEventAppendRequest::wait_cleared(&record.id, wait)
-        }
     };
     Ok(ProcessTransitionPlan::Append(Box::new(append)))
 }
@@ -299,11 +233,9 @@ fn route_transition_refusal_to_fold(
 }
 
 /// Whether `request`, a cancel, ends `record` as it stands: a start that
-/// failed before its process ran anything is cancelled by its own request.
+/// failed before it was handed to any owner is cancelled by its own request.
 fn start_failed_cancel_ends(record: &ProcessRecord, request: &lash_sansio::CancelRequest) -> bool {
-    request.origin == CancelOrigin::StartFailed
-        && record.first_started.is_none()
-        && record.external_ref.is_none()
+    request.origin == CancelOrigin::StartFailed && record.external_ref.is_none()
 }
 
 /// The outcome a start-failed cancel ends its process in.
@@ -331,19 +263,6 @@ pub fn apply_process_event_projection(
 
     let mut ends: Option<ProcessTerminal> = None;
     match &event.fact {
-        ProcessLifecycleFact::Started { started } => match record.first_started.as_deref() {
-            None => record.first_started = Some(Box::new(started.clone())),
-            Some(existing) if existing.same_execution(started) => {}
-            Some(existing) if started.attempt == existing.attempt.saturating_add(1) => {
-                record.first_started = Some(Box::new(started.clone()));
-            }
-            Some(_) => {
-                return Err(PluginError::Session(format!(
-                    "process `{}` has an invalid execution-started attempt",
-                    record.id
-                )));
-            }
-        },
         ProcessLifecycleFact::Waiting { wait } => match &record.lifecycle {
             ProcessLifecycleState::Terminal { .. } => {
                 return Err(PluginError::Session(format!(

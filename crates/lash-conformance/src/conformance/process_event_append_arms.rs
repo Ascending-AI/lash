@@ -12,8 +12,8 @@ use pretty_assertions::assert_eq;
 /// it persists nothing, so nothing a later read sees may move.
 ///
 /// Each backend spells the sequence once and reaches it from two entry points
-/// — a runner's authority-fenced append and workflow-key completion. Both are exercised
-/// here. The completion path settles its repeat call on the already-terminal
+/// — the append an owner's commit makes and workflow-key completion. Both are
+/// exercised here. The completion path settles its repeat call on the already-terminal
 /// row rather than the replay arm proper; the observable contract is the same
 /// either way, and asserting it per entry point is what catches an event row
 /// escaping onto a path that persisted nothing.
@@ -24,14 +24,13 @@ use pretty_assertions::assert_eq;
 pub async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    // Entry point 1: a runner's append, which reaches the replay arm proper
+    // Entry point 1: an owner's append, which reaches the replay arm proper
     // through a repeated replay key.
     let host_id = registry
         .register_process(registration("append-arm-host"))
         .await
         .expect("register host-append arm process")
         .id;
-    let runner = start_runner(registry.as_ref(), &host_id).await;
     let host_request = || {
         call_wait_event(
             &host_id,
@@ -42,11 +41,11 @@ pub async fn process_event_append_arms_are_ordered(
         .with_replay_key("append-arm-host:wait:1")
     };
     let baseline = append_arm_footprint(&registry, &host_id).await;
-    assert_eq!(baseline, 1, "a started process holds its start event");
+    assert_eq!(baseline, 0, "a registered process holds no event");
     let inserted = registry
-        .append_event_with_authority(&host_id, host_request(), &runner)
+        .append_event_for_testing(&host_id, host_request())
         .await
-        .expect("the runner's append takes the insert arm");
+        .expect("the owner's append takes the insert arm");
     assert_eq!(inserted.last_event_sequence, inserted.event.sequence);
     assert_eq!(
         registry
@@ -64,7 +63,7 @@ pub async fn process_event_append_arms_are_ordered(
         "the insert arm writes one event row"
     );
     let later = registry
-        .append_event_with_authority(
+        .append_event_for_testing(
             &host_id,
             call_wait_event(
                 &host_id,
@@ -73,14 +72,13 @@ pub async fn process_event_append_arms_are_ordered(
                 serde_json::json!({"call_label": "later append"}),
             )
             .with_replay_key("append-arm-host:wait:2"),
-            &runner,
         )
         .await
         .expect("a later append takes the insert arm");
     let replayed = registry
-        .append_event_with_authority(&host_id, host_request(), &runner)
+        .append_event_for_testing(&host_id, host_request())
         .await
-        .expect("the runner's append takes the replay arm");
+        .expect("the owner's append takes the replay arm");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
     assert_eq!(
         replayed.last_event_sequence, later.event.sequence,
@@ -153,8 +151,8 @@ async fn append_arm_footprint(
         .len()
 }
 
-/// The runtime's effect-summary appends go through execution authority.
-/// A lost acknowledgement recovers the
+/// The runtime's effect-summary appends commit with their owner's
+/// transaction. A lost acknowledgement recovers the
 /// original event; a changed payload under the same effect key is refused;
 /// and a redrive that reaches the append after the run terminalised the
 /// process recovers it too.
@@ -172,19 +170,6 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect("register effect-summary process")
         .id;
-    let authority =
-        crate::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "effect-worker:1")
-            .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &process_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record the invocation's execution start");
     let recorded = lash_core::ProcessEffectOccurrence::new(
         lash_sansio::effect_identity_fixture("node:tool", 1),
         "tool:fixture",
@@ -197,10 +182,10 @@ async fn durable_effect_outcome_event_crash_windows(
     );
 
     let inserted = registry
-        .append_event_with_authority(&process_id, recorded.append_request(), &authority)
+        .append_event_for_testing(&process_id, recorded.append_request())
         .await
         .expect("incorporate the recorded failure");
-    assert_eq!(inserted.event.sequence, 2);
+    assert_eq!(inserted.event.sequence, 1);
     assert_eq!(
         inserted.event.fact.event_type(),
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
@@ -208,7 +193,7 @@ async fn durable_effect_outcome_event_crash_windows(
 
     // The acknowledgement is lost; the redrive recovers the original append.
     let replayed = registry
-        .append_event_with_authority(&process_id, recorded.append_request(), &authority)
+        .append_event_for_testing(&process_id, recorded.append_request())
         .await
         .expect("recover the append after a lost acknowledgement");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
@@ -219,7 +204,7 @@ async fn durable_effect_outcome_event_crash_windows(
         "fixture:changed",
     ));
     let error = registry
-        .append_event_with_authority(&process_id, changed.append_request(), &authority)
+        .append_event_for_testing(&process_id, changed.append_request())
         .await
         .expect_err("a changed outcome under the same effect key is refused");
     assert!(
@@ -234,11 +219,11 @@ async fn durable_effect_outcome_event_crash_windows(
             .await
             .expect("read events")
             .len(),
-        2
+        1
     );
 
-    // A durable substrate may replay the invocation that already completed
-    // the process, reaching the append again after terminalisation.
+    // A redrive of the owner that already completed the process reaches the
+    // append again after terminalisation.
     let invoked_id = registry
         .register_process(
             ProcessRegistration::new(
@@ -264,27 +249,12 @@ async fn durable_effect_outcome_event_crash_windows(
             )),
         )
         .await
-        .expect("register invocation-owned effect-summary process")
+        .expect("register the redriven effect-summary process")
         .id;
-    let invocation = crate::ProcessExecutionWriteAuthority::invocation(
-        invoked_id.clone(),
-        "effect-summary-invocation",
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &invoked_id,
-            invocation
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &invocation,
-        )
-        .await
-        .expect("record the invocation's execution start");
     let invoked = registry
-        .append_event_with_authority(&invoked_id, recorded.append_request(), &invocation)
+        .append_event_for_testing(&invoked_id, recorded.append_request())
         .await
-        .expect("incorporate under invocation authority");
+        .expect("incorporate the recorded outcome");
     registry
         .complete_process(
             &invoked_id,
@@ -296,7 +266,7 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect("terminalise the process");
     let terminal_replay = registry
-        .append_event_with_authority(&invoked_id, recorded.append_request(), &invocation)
+        .append_event_for_testing(&invoked_id, recorded.append_request())
         .await
         .expect("a redrive after terminalisation recovers the append");
     assert_eq!(terminal_replay.event.sequence, invoked.event.sequence);
@@ -305,7 +275,7 @@ async fn durable_effect_outcome_event_crash_windows(
         invoked.event.fact.payload()
     );
     registry
-        .append_event_with_authority(&invoked_id, changed.append_request(), &invocation)
+        .append_event_for_testing(&invoked_id, changed.append_request())
         .await
         .expect_err("a changed outcome after terminalisation is refused");
     let events = registry

@@ -15,15 +15,12 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core_execution::ProcessIdMint;
-use lash_core_execution::ProcessStatus;
 use lash_core_execution::store::SessionCheckpoint;
 use lash_core_execution::{
     ArtifactReferrer, BlobRef, DurablePayload, DurableScan, DurableSurface, HostArtifactPin,
     ModuleArtifactStore, ReferrerClaim, ScanCoverage, StorePreflight,
 };
 use lash_postgres_store::PostgresStorePreflight;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
 #[allow(dead_code)]
@@ -60,7 +57,6 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
     let preflight = PostgresStorePreflight::from_pool(empty_pool.clone());
 
     for surface in [
-        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ] {
@@ -134,44 +130,6 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     scratch.cleanup().await;
 }
 
-/// C8 (FIG-3571): every live process is walked with its record, which carries
-/// the start stamp the probe judges; a terminal one is not.
-#[tokio::test]
-async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping preflight durable walk: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    let live = ProcessId::fixture("proc-live");
-    let record = seed_process(&scratch, &live, ProcessStatus::Running).await;
-    seed_process(
-        &scratch,
-        &ProcessId::fixture("proc-done"),
-        ProcessStatus::Completed,
-    )
-    .await;
-
-    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
-    let page = preflight
-        .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 10))
-        .await
-        .expect("a provisioned deployment walks");
-
-    assert_eq!(page.coverage, ScanCoverage::Scanned);
-    assert_eq!(page.items.len(), 1, "{:?}", page.items);
-    let item = &page.items[0];
-    assert_eq!(item.surface, DurableSurface::StartedProcess);
-    assert_eq!(item.cursor, live.as_str());
-    assert_eq!(item.process_id.as_ref(), Some(&live));
-    assert_eq!(item.session_id, None);
-    assert_eq!(item.status.as_deref(), Some("running"));
-    assert_eq!(item.payload, DurablePayload::Json(record));
-    assert!(page.next.is_none());
-
-    scratch.cleanup().await;
-}
-
 #[tokio::test]
 async fn paging_a_surface_one_item_at_a_time_is_exact() {
     let Some(database_url) = database_url() else {
@@ -179,29 +137,27 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    let ids: Vec<ProcessId> = (1..=3)
-        .map(ProcessIdMint::sequential_id_for_testing)
+    let sessions: Vec<SessionId> = ["session-1", "session-2", "session-3"]
+        .into_iter()
+        .map(SessionId::from)
         .collect();
-    for (id, status) in ids.iter().zip([
-        ProcessStatus::Waiting,
-        ProcessStatus::Running,
-        ProcessStatus::Waiting,
-    ]) {
-        seed_process(&scratch, id, status).await;
+    for session in &sessions {
+        // Each root dangles: the walk still names its session as an item.
+        seed_session(&scratch, session, &format!("collected-{session}")).await;
     }
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
-    let mut walked: Vec<ProcessId> = Vec::new();
+    let mut walked: Vec<SessionId> = Vec::new();
     let mut after: Option<String> = None;
     for _ in 0..8 {
         let scan = DurableScan {
-            surface: DurableSurface::StartedProcess,
+            surface: DurableSurface::SessionCheckpoint,
             after: after.clone(),
             limit: 1,
         };
         let page = preflight.scan_durable(&scan).await.expect("walk one item");
         assert!(page.items.len() <= 1, "a page never exceeds its limit");
-        walked.extend(page.items.iter().filter_map(|item| item.process_id.clone()));
+        walked.extend(page.items.iter().filter_map(|item| item.session_id.clone()));
         match page.next {
             Some(cursor) => after = Some(cursor),
             None => break,
@@ -209,8 +165,8 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
     }
 
     assert_eq!(
-        walked, ids,
-        "every process appears exactly once, in key order"
+        walked, sessions,
+        "every session appears exactly once, in key order"
     );
 
     scratch.cleanup().await;
@@ -356,41 +312,6 @@ fn execution_root_node() -> (
         unreachable!("the fixture stages a root")
     };
     (root, nodes[&root].bytes.to_vec())
-}
-
-/// Seed a process row and answer the record it stores. The row's status is
-/// the database's projection of its record's lifecycle, so the fixture
-/// states the lifecycle.
-async fn seed_process(
-    scratch: &ScratchSchema,
-    process_id: &ProcessId,
-    status: ProcessStatus,
-) -> String {
-    let lifecycle =
-        serde_json::to_value(lash_core_execution::ProcessLifecycleState::fixture(status))
-            .expect("encode the fixture lifecycle");
-    let record = serde_json::json!({
-        "process": process_id.as_str(),
-        "last_event_sequence": 0,
-        "lifecycle": lifecycle,
-    })
-    .to_string();
-    scratch
-        .apply(&format!(
-            "INSERT INTO lash_processes (
-                 process_id, start_key, originator_id,
-                 identity_kind, identity_label, created_at_ms, updated_at_ms,
-                 change_seq, lifetime_scope_kind, lifetime_scope_id,
-                 lifetime,
-                 record_json
-             ) VALUES (
-                 '{process_id}', NULL, 'originator',
-                 'program', NULL, 0, 0, 1, NULL, NULL, 'detached',
-                 '{record}'
-             )",
-        ))
-        .await;
-    record
 }
 
 /// Seeds the session past the foreign keys: a dangling checkpoint root is

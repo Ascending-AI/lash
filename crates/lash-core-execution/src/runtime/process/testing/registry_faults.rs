@@ -47,7 +47,6 @@ struct ReadFaultPlan {
     external_ref_write_error: Option<crate::PluginError>,
     external_ref_write_hold: Option<ExternalRefWriteHold>,
     cancel_request_write_error: Option<crate::PluginError>,
-    event_append_error: Option<crate::PluginError>,
     non_terminal_page_reads: Vec<NonTerminalPageRead>,
     non_terminal_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     non_terminal_page_pause: Option<NonTerminalPagePause>,
@@ -204,12 +203,6 @@ impl ProcessRegistryFaults {
     /// reaching the wrapped registry.
     pub fn fail_next_cancel_request(&self, error: crate::PluginError) {
         self.faults.lock_recover().cancel_request_write_error = Some(error);
-    }
-
-    /// The next event append fails with `error`, once, without reaching the
-    /// wrapped registry.
-    pub fn fail_next_event_append(&self, error: crate::PluginError) {
-        self.faults.lock_recover().event_append_error = Some(error);
     }
 
     /// After `successful_reads` more non-terminal-page reads pass, the following
@@ -489,36 +482,6 @@ delegate_process_observer_registry!(ProcessRegistryFaults, inner, delete_session
 
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {
-    async fn append_event_with_authority(
-        &self,
-        process_id: &ProcessId,
-        request: crate::ProcessEventAppendRequest,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
-        let injected = self.faults.lock_recover().event_append_error.take();
-        if let Some(error) = injected {
-            return Err(error);
-        }
-        self.inner
-            .append_event_with_authority(process_id, request, authority)
-            .await
-    }
-
-    async fn append_events(
-        &self,
-        process_id: &ProcessId,
-        requests: Vec<crate::ProcessEventAppendRequest>,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<Vec<crate::ProcessEventAppendReceipt>, crate::PluginError> {
-        let injected = self.faults.lock_recover().event_append_error.take();
-        if let Some(error) = injected {
-            return Err(error);
-        }
-        self.inner
-            .append_events(process_id, requests, authority)
-            .await
-    }
-
     // `event_page` keeps the trait's provided body, which reads through
     // `event_page_after`: a by-id read sees the same fault.
     async fn event_by_replay_key(
@@ -593,17 +556,6 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         self.inner.get_parent_end_plan(parent).await
     }
 
-    async fn record_first_started_with_authority(
-        &self,
-        process_id: &ProcessId,
-        started: crate::ProcessStarted,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessStartOutcome, crate::PluginError> {
-        self.inner
-            .record_first_started_with_authority(process_id, started, authority)
-            .await
-    }
-
     async fn request_process_cancel(
         &self,
         process_id: &crate::ProcessId,
@@ -639,29 +591,6 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
                 requester,
                 attribution,
             )
-            .await
-    }
-
-    async fn set_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        wait: crate::WaitState,
-        prelude: Vec<crate::ProcessEventAppendRequest>,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .set_process_wait_with_authority(process_id, wait, prelude, authority)
-            .await
-    }
-
-    async fn clear_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        prelude: Vec<crate::ProcessEventAppendRequest>,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .clear_process_wait_with_authority(process_id, prelude, authority)
             .await
     }
 }

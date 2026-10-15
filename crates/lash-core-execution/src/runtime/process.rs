@@ -98,19 +98,18 @@ pub use model::{
     ProcessChangeKind, ProcessCompletionOutcome, ProcessComponentConfig, ProcessComponentEntry,
     ProcessComponentId, ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder,
     ProcessEnvLoadError, ProcessEnvRef, ProcessEnvRefusal, ProcessEnvStore,
-    ProcessExecutionContext, ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView,
-    ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLimits,
-    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessModel, ProcessObserverBy,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
-    ProcessSessionDeleteReport, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone, ProcessWaits,
-    RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
-    StoreRealization, TerminalProcessStatus, WaitKind, WaitState, artifact_referrer_ended,
-    artifact_store_plugin_error, lifetime, load_process_env, mint_process_id,
-    process_child_session_id, process_session_id, process_session_turn_id,
+    ProcessExecutionContext, ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint,
+    ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessLimits, ProcessLineage,
+    ProcessListFilter, ProcessListMode, ProcessModel, ProcessObserverBy, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessSessionDeleteReport,
+    ProcessStartDeclaration, ProcessStartOptions, ProcessStartReceipt, ProcessStartRegistration,
+    ProcessStartRequest, ProcessStartTarget, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
+    ProcessWaits, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId,
+    ScopeRef, ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError,
+    StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitState,
+    artifact_referrer_ended, artifact_store_plugin_error, lifetime, load_process_env,
+    mint_process_id, process_child_session_id, process_session_id, process_session_turn_id,
 };
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
@@ -166,10 +165,10 @@ pub use testing::*;
 pub(crate) use validation::apply_successor_input;
 pub use validation::{
     CanonicalProcessEventAppend, ProcessEventAppendPlan, ProcessRegistrationRefusal,
-    ProcessStartPlan, ProcessTransition, ProcessTransitionPlan, abandoned_consumer_refusal,
+    ProcessTransition, ProcessTransitionPlan, abandoned_consumer_refusal,
     allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
     fold_process_record, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition,
+    prepare_process_transition,
 };
 
 pub fn current_epoch_ms() -> u64 {

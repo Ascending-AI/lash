@@ -115,7 +115,6 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
             "automation",
         )),
         enclosing: None,
-        event_context: None,
     });
     assert_eq!(
         envelope(&host_process, "host").invocation.attribution,
@@ -128,7 +127,6 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
         process_id: crate::process_id_for_test("session-process"),
         provenance: crate::ProcessProvenance::session(crate::SessionScope::new("origin-session")),
         enclosing: None,
-        event_context: None,
     });
     assert_eq!(
         envelope(&session_process, "session-origin")

@@ -1,224 +1,6 @@
-use crate::ProcessId;
 use serde::{Deserialize, Serialize};
 
 use super::ProcessRecord;
-
-/// Durable execution-attempt fact. The fold retains the latest attempt, so a
-/// successor execution the engine resumes takes exactly the next attempt.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessStarted {
-    pub owner: crate::LeaseOwnerIdentity,
-    #[serde(default = "first_process_attempt")]
-    pub attempt: u32,
-    pub started_at_ms: u64,
-    /// The executable generation this incarnation runs as (FIG-3571): its
-    /// engine's program identity, stamped once at the first claim and copied
-    /// onto every later attempt, never derived or defaulted on recovery. An
-    /// attempt or segment whose engine names another generation, or a record
-    /// with no stamp, parks `RetiredGeneration` before its first step: the
-    /// incarnation began under an executable this build no longer runs.
-    /// `None` for an engine whose runs carry no generation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<crate::ExecutableGeneration>,
-}
-
-const fn first_process_attempt() -> u32 {
-    1
-}
-
-impl ProcessStarted {
-    /// Compares invocation identity and attempt for process-store implementors
-    /// deciding whether two facts belong to the same execution generation.
-    pub fn same_execution(&self, other: &Self) -> bool {
-        self.owner.same_incarnation(&other.owner) && self.attempt == other.attempt
-    }
-}
-
-/// Correctness fence presented by the engine execution that writes process
-/// lifecycle facts. Successor segments within one attempt share the root
-/// execution id, so this authority fences attempts rather than segments.
-#[derive(Clone, Debug)]
-pub struct ProcessExecutionWriteAuthority {
-    process_id: ProcessId,
-    execution_id: String,
-    admission: Option<Box<ProcessExecutionAdmission>>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct ProcessExecutionAdmission {
-    attempt: Option<u32>,
-    segment: Option<crate::tool_run::SegmentOrdinal>,
-}
-
-impl ProcessExecutionWriteAuthority {
-    /// Constructs a `ProcessExecutionWriteAuthority` using invocation semantics for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn invocation(process_id: impl Into<ProcessId>, execution_id: impl Into<String>) -> Self {
-        Self {
-            process_id: process_id.into(),
-            execution_id: execution_id.into(),
-            admission: None,
-        }
-    }
-
-    /// Binds invocation authority to the process attempt admitted by the engine.
-    pub fn bind_attempt(&self, attempt: u32) -> Self {
-        let mut bound = self.clone();
-        bound.admission.get_or_insert_with(Box::default).attempt = Some(attempt);
-        bound
-    }
-
-    /// Bind the physical segment admitted by the process substrate. This
-    /// does not change the attempt fence used by lifecycle transactions.
-    pub fn bind_segment(&self, segment: crate::tool_run::SegmentOrdinal) -> Self {
-        let mut bound = self.clone();
-        bound.admission.get_or_insert_with(Box::default).segment = Some(segment);
-        bound
-    }
-
-    /// The admitted physical segment, when the substrate supplied one.
-    pub fn segment(&self) -> Option<crate::tool_run::SegmentOrdinal> {
-        self.admission
-            .as_deref()
-            .and_then(|admission| admission.segment)
-    }
-
-    /// The one-based process attempt this authority was admitted for.
-    pub fn attempt(&self) -> Option<u32> {
-        self.admission
-            .as_deref()
-            .and_then(|admission| admission.attempt)
-    }
-
-    /// Returns the bound attempt only when this authority names `process_id`.
-    pub fn attempt_for(&self, process_id: &ProcessId) -> Option<u32> {
-        (self.process_id == *process_id)
-            .then_some(self.attempt())
-            .flatten()
-    }
-
-    /// Projects a replay-stable started fact only after invocation authority is attempt-bound.
-    pub fn invocation_started(&self) -> Option<ProcessStarted> {
-        Some(ProcessStarted {
-            owner: self.owner_identity(),
-            attempt: self.attempt()?,
-            started_at_ms: 0,
-            generation: None,
-        })
-    }
-
-    /// The execution identity recorded when this invocation starts a process.
-    pub fn owner_identity(&self) -> crate::LeaseOwnerIdentity {
-        crate::LeaseOwnerIdentity::engine_process_execution(
-            &self.process_id,
-            crate::LeaseIncarnationId::new(self.execution_id.clone()),
-        )
-    }
-
-    /// The process this invocation may write.
-    pub fn process_id(&self) -> &ProcessId {
-        &self.process_id
-    }
-
-    /// The stable engine invocation id bound to this authority.
-    pub fn execution_id(&self) -> &str {
-        &self.execution_id
-    }
-
-    /// Returns the engine execution ID only after this authority
-    /// is bound to the named process and one execution attempt.
-    pub fn engine_execution_id(&self, process_id: &ProcessId) -> Option<&str> {
-        (self.process_id == *process_id && self.attempt().is_some())
-            .then_some(self.execution_id.as_str())
-    }
-
-    fn trace_invocation_denial(
-        &self,
-        process_id: &ProcessId,
-        proposed_start: Option<&ProcessStarted>,
-        retained: Option<&ProcessStarted>,
-        reason: &'static str,
-    ) {
-        let presented_owner = self.owner_identity();
-        tracing::warn!(
-            process_id = process_id.as_str(),
-            presented_process_id = self.process_id.as_str(),
-            presented_owner_id = presented_owner.owner_id,
-            presented_invocation_id = self.execution_id,
-            presented_attempt = ?self.attempt(),
-            proposed_owner_id = proposed_start.map(|started| started.owner.owner_id.as_str()),
-            proposed_invocation_id =
-                proposed_start.map(|started| started.owner.incarnation_id.as_str()),
-            proposed_attempt = proposed_start.map(|started| started.attempt),
-            retained_owner_id = retained.map(|started| started.owner.owner_id.as_str()),
-            retained_invocation_id =
-                retained.map(|started| started.owner.incarnation_id.as_str()),
-            retained_attempt = retained.map(|started| started.attempt),
-            verdict = "denied",
-            reason,
-            "process invocation fence decision"
-        );
-    }
-
-    /// Rejects a durable invocation start as superseded unless its process ID and complete
-    /// execution identity match the presented authority.
-    pub fn validate_invocation_for_start(
-        &self,
-        process_id: &ProcessId,
-        started: &ProcessStarted,
-        retained: Option<&ProcessStarted>,
-    ) -> Result<(), crate::PluginError> {
-        if self.process_id != *process_id
-            || self
-                .invocation_started()
-                .is_none_or(|authority| !authority.same_execution(started))
-        {
-            self.trace_invocation_denial(
-                process_id,
-                Some(started),
-                retained,
-                "presented start identity does not match authority",
-            );
-            return Err(crate::PluginError::ProcessExecutionSuperseded {
-                process_id: process_id.clone(),
-            });
-        }
-        Ok(())
-    }
-
-    /// Rejects a durable invocation write as superseded unless its process ID and complete
-    /// execution identity match the record's retained current execution.
-    pub fn validate_invocation_for_write(
-        &self,
-        process_id: &ProcessId,
-        record: &ProcessRecord,
-    ) -> Result<(), crate::PluginError> {
-        let current = record.first_started.as_deref();
-        if self.process_id != *process_id
-            || self.invocation_started().is_none_or(|authority| {
-                current.is_none_or(|current| !current.same_execution(&authority))
-            })
-        {
-            self.trace_invocation_denial(
-                process_id,
-                None,
-                current,
-                "presented write identity does not match retained execution",
-            );
-            return Err(crate::PluginError::ProcessExecutionSuperseded {
-                process_id: process_id.clone(),
-            });
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum ProcessStartOutcome {
-    Started(ProcessRecord),
-    AlreadyApplied(ProcessRecord),
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "completion", rename_all = "snake_case")]
@@ -265,14 +47,6 @@ impl std::ops::Deref for ProcessCompletionOutcome {
     }
 }
 
-impl ProcessStartOutcome {
-    pub fn into_record(self) -> ProcessRecord {
-        match self {
-            Self::Started(record) | Self::AlreadyApplied(record) => record,
-        }
-    }
-}
-
 /// Execution-local context for process runners. Durable edges live on the
 /// process record.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -282,11 +56,6 @@ pub struct ProcessExecutionContext {
     pub segment_ordinal: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub causal_invocation: Option<crate::RuntimeInvocation>,
-    /// Execution-local correctness fence. Substrate handlers reconstruct it
-    /// from their replay-stable invocation identity, so it is deliberately not
-    /// serialized.
-    #[serde(skip)]
-    pub execution_write_authority: Option<ProcessExecutionWriteAuthority>,
 }
 
 impl ProcessExecutionContext {
@@ -294,16 +63,6 @@ impl ProcessExecutionContext {
     /// process-engine implementors while persisting and coordinating durable process execution.
     pub fn with_causal_invocation(mut self, invocation: Option<crate::RuntimeInvocation>) -> Self {
         self.causal_invocation = invocation;
-        self
-    }
-
-    /// Sets the execution write authority carried by a `ProcessExecutionContext` for store and
-    /// process-engine implementors while persisting and coordinating durable process execution.
-    pub fn with_execution_write_authority(
-        mut self,
-        authority: ProcessExecutionWriteAuthority,
-    ) -> Self {
-        self.execution_write_authority = Some(authority);
         self
     }
 

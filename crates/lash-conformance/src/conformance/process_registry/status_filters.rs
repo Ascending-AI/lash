@@ -6,8 +6,9 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_roster_pages_match_status_sets_and_definition(
-    registry: Arc<dyn ProcessRegistry>,
+    seeding: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
+    let registry: Arc<dyn ProcessRegistry> = seeding.clone();
     let record = registry
         .register_process(crate::started_until_starter(
             executed_registration("filter-target")
@@ -35,34 +36,20 @@ pub async fn process_roster_pages_match_status_sets_and_definition(
         .await
         .expect("register filter target");
     let process_id = record.id.clone();
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        process_id.clone(),
-        "filter-target:execution",
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
+    seeding
+        .append_event_for_testing(
             &process_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record filter target execution start");
-    registry
-        .set_process_wait_with_authority(
-            &process_id,
-            WaitState {
-                since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
-                kind: crate::WaitKind::Call {
-                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-                    tool_id: lash_sansio::ToolId::new("process_wait"),
+            ProcessEventAppendRequest::wait_entered(
+                &process_id,
+                &WaitState {
+                    since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
+                    kind: crate::WaitKind::Call {
+                        call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                        tool_id: lash_sansio::ToolId::new("process_wait"),
+                    },
+                    site: None,
                 },
-                site: None,
-            },
-            Vec::new(),
-            &authority,
+            ),
         )
         .await
         .expect("set filter target waiting");

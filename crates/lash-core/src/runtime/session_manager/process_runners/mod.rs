@@ -60,7 +60,7 @@ impl RuntimeSessionServices {
         .with_fleet_format(core.session_store_factory().fleet_format())
         .with_tool_material_store(core.backend().tool_material_store())
         .with_process_work(self.current.host.work.process_wiring().cloned())
-        .with_process_execution(process, Some(env), None);
+        .with_process_execution(process, Some(env));
         let tools = context
             .round_tools(crate::EffectOpener::Process {
                 process_id: process.id.clone(),

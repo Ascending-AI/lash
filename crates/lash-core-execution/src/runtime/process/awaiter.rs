@@ -281,24 +281,7 @@ delegate_process_registrar!(
 
 delegate_process_observer_registry!(WatchedProcessRegistry, inner);
 
-delegate_process_event_log!(
-    WatchedProcessRegistry,
-    inner,
-    event | watched,
-    process_id,
-    forwarded | {
-        let event_path = watched.event_path(process_id);
-        let _guard = event_path.lock().await;
-        let sink_cursor = watched.sink_cursor(process_id).await;
-        let result = forwarded.await?;
-        watched.appended(process_id);
-        watched
-            .emit_event_pages_since(process_id, sink_cursor, 0)
-            .await;
-        watched.emitted.notify(process_id);
-        Ok(result)
-    }
-);
+delegate_process_event_log!(WatchedProcessRegistry, inner);
 
 delegate_process_lifecycle!(
     WatchedProcessRegistry,

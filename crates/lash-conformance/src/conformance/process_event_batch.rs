@@ -1,17 +1,14 @@
-//! Cross-backend law L10 (FIG-3571): a process-event batch is one commit.
+//! Cross-backend law L10 (FIG-3571): a terminal completion commits its
+//! prelude in its own transaction.
 //!
 //! A run commits its effect summary at boundaries, as the prelude of the
-//! boundary's own write (ADR 0100 R4). Every such write — a bare batch
-//! ([`ProcessEventLog::append_events`](crate::ProcessEventLog::append_events)),
-//! a wait's enter or clear, a terminal completion — is one transaction that
+//! boundary's own write (ADR 0100 R4). The terminal completion's prelude
 //! folds its events exactly as appending them one at a time would (ADR 0046),
 //! rewrites the process record once and advances the change clock once, so a
-//! change-feed consumer sees one committed batch per boundary. A refusal of
-//! any event commits none of them.
+//! change-feed consumer sees one committed batch for the boundary.
 
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use crate::ProcessExecutionWriteAuthority;
 use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
@@ -30,32 +27,17 @@ fn batch_registration() -> ProcessRegistration {
     )
 }
 
-/// Register a process and start its first engine invocation.
+/// Register a process for the law.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn started(
-    registry: &Arc<dyn ProcessRegistry>,
-    label: &str,
-) -> (ProcessId, ProcessExecutionWriteAuthority) {
-    let id = registry
+async fn registered(registry: &Arc<dyn ProcessRegistry>) -> ProcessId {
+    registry
         .register_process(batch_registration())
         .await
         .expect("register the batch process")
-        .id;
-    let authority = ProcessExecutionWriteAuthority::invocation(id.clone(), label).bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &id,
-            authority
-                .invocation_started()
-                .expect("the authority is bound to attempt one"),
-            &authority,
-        )
-        .await
-        .expect("record the attempt's start");
-    (id, authority)
+        .id
 }
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
@@ -68,41 +50,6 @@ fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppe
         lash_core::FleetFormat::current(),
     )
     .append_request()
-}
-
-/// The run's summary so far: two occurrences of one node, one of another,
-/// then the omission record a terminal batch closes with.
-fn summary() -> Vec<ProcessEventAppendRequest> {
-    vec![
-        occurrence("node:a", 1, "batch-law:a:1"),
-        occurrence("node:a", 2, "batch-law:a:2"),
-        occurrence("node:b", 1, "batch-law:b:1"),
-        lash_core::ProcessEffectOmissions::new(
-            [(
-                "node:a".to_string(),
-                lash_core::ProcessEffectOmittedCounts {
-                    success: 3,
-                    failure: 0,
-                    cancelled: 0,
-                },
-            )]
-            .into(),
-            8,
-            lash_core::FleetFormat::current(),
-        )
-        .append_request("batch-law:omissions"),
-    ]
-}
-
-fn call_wait(_id: &ProcessId) -> crate::WaitState {
-    crate::WaitState {
-        since_ms: 1,
-        kind: crate::WaitKind::Call {
-            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_sansio::ToolId::new("process_wait"),
-        },
-        site: None,
-    }
 }
 
 /// The change clock's current position: the change feed drained to its end.
@@ -183,121 +130,8 @@ fn event_types(events: &[(String, u64, serde_json::Value)]) -> Vec<&str> {
         .collect()
 }
 
-/// L10: a batch folds exactly as its events appended singly do, in one
-/// commit — one record rewrite, one change-clock tick — and a refusal of any
-/// event commits none of them.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegistry>) {
-    let (single, single_authority) = started(&registry, "batch-law-single").await;
-    let (batched, batched_authority) = started(&registry, "batch-law-batched").await;
-
-    let before = change_clock(&registry).await;
-    for request in summary() {
-        registry
-            .append_event_with_authority(&single, request, &single_authority)
-            .await
-            .expect("append one event");
-    }
-    let after_singles = change_clock(&registry).await;
-    assert_eq!(
-        after_singles - before,
-        summary().len() as u64,
-        "each single append is its own commit"
-    );
-
-    let receipts = registry
-        .append_events(&batched, summary(), &batched_authority)
-        .await
-        .expect("append the batch");
-    let after_batch = change_clock(&registry).await;
-    assert_eq!(
-        after_batch - after_singles,
-        1,
-        "the batch rewrites the record once and ticks the change clock once"
-    );
-    let (single_events, single_record) = folded(&registry, &single).await;
-    let (batched_events, batched_record) = folded(&registry, &batched).await;
-    // Each process's start names its own invocation; what follows it is the
-    // summary under test.
-    assert_eq!(
-        batched_events[1..],
-        single_events[1..],
-        "the batch appends the events the singles do, in order, at the same sequences"
-    );
-    assert_eq!(
-        batched_record, single_record,
-        "the batch folds to the record the singles fold to"
-    );
-    assert_eq!(
-        receipts
-            .iter()
-            .map(|receipt| (receipt.event.sequence, receipt.realization))
-            .collect::<Vec<_>>(),
-        batched_events[1..]
-            .iter()
-            .map(|(_, sequence, _)| (*sequence, lash_core::StoreRealization::Realized))
-            .collect::<Vec<_>>(),
-        "the receipts answer the requests in order"
-    );
-
-    // A re-committed batch is a replay-key no-op: nothing is written.
-    let replayed = registry
-        .append_events(&batched, summary(), &batched_authority)
-        .await
-        .expect("re-commit the batch");
-    assert!(
-        replayed
-            .iter()
-            .all(|receipt| receipt.realization == lash_core::StoreRealization::Coalesced),
-        "every re-committed event coalesces onto its first write"
-    );
-    assert_eq!(change_clock(&registry).await, after_batch);
-    assert_eq!(folded(&registry, &batched).await.0, batched_events);
-
-    // An empty batch writes nothing.
-    assert!(
-        registry
-            .append_events(&batched, Vec::new(), &batched_authority)
-            .await
-            .expect("an empty batch")
-            .is_empty()
-    );
-    assert_eq!(change_clock(&registry).await, after_batch);
-
-    // A refusal mid-batch commits nothing: a fresh occurrence ahead of a
-    // payload that conflicts with the one already under its key.
-    let mut conflicting = occurrence("node:b", 1, "batch-law:b:1");
-    if let lash_core::ProcessLifecycleFact::EffectOutcome(occurrence) = &mut conflicting.fact {
-        occurrence.outcome_class = lash_core::ProcessEffectOutcomeClass::Cancelled;
-    }
-    let refused = registry
-        .append_events(
-            &batched,
-            vec![occurrence("node:c", 1, "batch-law:c:1"), conflicting],
-            &batched_authority,
-        )
-        .await
-        .expect_err("a conflicting payload under a recorded key is refused");
-    assert!(
-        refused
-            .to_string()
-            .contains("conflicts with an existing event"),
-        "the refusal is the replay-conflict rule: {refused}"
-    );
-    assert_eq!(
-        folded(&registry, &batched).await,
-        (batched_events, batched_record),
-        "the refused batch appended nothing, not even the event ahead of the conflict"
-    );
-    assert_eq!(change_clock(&registry).await, after_batch);
-}
-
-/// L10: a run boundary's write — a wait's enter, its clear, the terminal
-/// completion — commits the run's pending prelude ahead of its own event in
-/// its one transaction, with one change-clock tick.
+/// L10: the terminal completion commits the run's pending prelude ahead of
+/// its own event in its one transaction, with one change-clock tick.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -305,97 +139,7 @@ pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegist
 pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let (id, authority) = started(&registry, "batch-law-boundary").await;
-
-    let clock = change_clock(&registry).await;
-    let waiting = registry
-        .set_process_wait_with_authority(
-            &id,
-            call_wait(&id),
-            vec![
-                occurrence("node:a", 1, "boundary-law:a:1"),
-                occurrence("node:a", 2, "boundary-law:a:2"),
-            ],
-            &authority,
-        )
-        .await
-        .expect("enter the wait with its prelude");
-    assert!(!waiting.waits().is_empty(), "the process waits");
-    assert_eq!(
-        change_clock(&registry).await - clock,
-        1,
-        "the enter is one commit"
-    );
-    let (events, _) = folded(&registry, &id).await;
-    assert_eq!(
-        event_types(&events)[events.len() - 3..],
-        [
-            lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-            lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-            "process.waiting",
-        ],
-        "the prelude precedes the wait it rode"
-    );
-
-    // A replayed enter re-commits its prelude as a no-op and leaves the wait.
-    let clock = change_clock(&registry).await;
-    registry
-        .set_process_wait_with_authority(
-            &id,
-            call_wait(&id),
-            vec![occurrence("node:a", 1, "boundary-law:a:1")],
-            &authority,
-        )
-        .await
-        .expect("replay the enter");
-    assert_eq!(
-        change_clock(&registry).await,
-        clock,
-        "a replayed enter writes nothing"
-    );
-
-    let clock = change_clock(&registry).await;
-    let resumed = registry
-        .clear_process_wait_with_authority(
-            &id,
-            vec![occurrence("node:b", 1, "boundary-law:b:1")],
-            &authority,
-        )
-        .await
-        .expect("clear the wait with its prelude");
-    assert!(resumed.waits().is_empty(), "the process resumed");
-    assert_eq!(
-        change_clock(&registry).await - clock,
-        1,
-        "the clear is one commit"
-    );
-    let (events, _) = folded(&registry, &id).await;
-    assert_eq!(
-        event_types(&events)[events.len() - 2..],
-        [
-            lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-            "process.resumed"
-        ],
-        "the prelude precedes the resume it rode"
-    );
-
-    // A refused prelude refuses its boundary: neither is written.
-    let mut conflicting = occurrence("node:b", 1, "boundary-law:b:1");
-    if let lash_core::ProcessLifecycleFact::EffectOutcome(occurrence) = &mut conflicting.fact {
-        occurrence.outcome_class = lash_core::ProcessEffectOutcomeClass::Failure;
-    }
-    let before = folded(&registry, &id).await;
-    let clock = change_clock(&registry).await;
-    registry
-        .set_process_wait_with_authority(&id, call_wait(&id), vec![conflicting], &authority)
-        .await
-        .expect_err("the conflicting prelude refuses the enter");
-    assert_eq!(
-        folded(&registry, &id).await,
-        before,
-        "neither the prelude nor the wait"
-    );
-    assert_eq!(change_clock(&registry).await, clock);
+    let id = registered(&registry).await;
 
     // The terminal batch: the last occurrence, the omission record, the
     // terminal, one commit.

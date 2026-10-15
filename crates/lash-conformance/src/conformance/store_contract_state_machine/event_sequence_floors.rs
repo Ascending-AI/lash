@@ -69,11 +69,6 @@ mod floor_tests {
         let register = StoreContractOp::Register { process: 0 };
         for operation in [
             register.clone(),
-            StoreContractOp::FirstStart {
-                process: 0,
-                owner: 0,
-                attempt: 0,
-            },
             StoreContractOp::Terminal {
                 process: 0,
                 disposition: 0,

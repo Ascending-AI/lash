@@ -153,7 +153,6 @@ pub async fn probe_store(
     };
     for surface in [
         DurableSurface::ModuleArtifact,
-        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ] {
@@ -198,9 +197,8 @@ enum SurfaceRelation {
     Unwalkable(&'static str),
 }
 
-const PRIMARY_FORMATS: [DurableFormat; 4] = [
+const PRIMARY_FORMATS: [DurableFormat; 3] = [
     DurableFormat::KernelDocument,
-    DurableFormat::KernelVersion,
     DurableFormat::SessionCheckpointManifest,
     DurableFormat::CodeModeSnapshotEnvelope,
 ];
@@ -282,12 +280,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: carried by TurnCheckpoint; refused when either RLM channel resumes",
         ),
         DurableFormat::Engine(format) => SurfaceRelation::Unwalkable(format.unwalkable_reason),
-        // Every started process's start stamp is the generation it runs
-        // under (FIG-3571), which names the kernel version.
-        DurableFormat::KernelVersion => SurfaceRelation::Walk {
-            surface: DurableSurface::StartedProcess,
-            primary: true,
-        },
+        DurableFormat::KernelVersion => SurfaceRelation::Unwalkable(
+            "no bounded surface: a process's engine state names the kernel it was written \
+             under in its actor's format requirement, refused at claim rather than at rest",
+        ),
     }
 }
 
@@ -377,28 +373,6 @@ impl Walk {
                         .entry(format)
                         .or_default()
                         .undecodable(reason, self.max_undecodable_reasons);
-                }
-                #[cfg(feature = "codemode")]
-                Extraction::IdentityMismatch { format, detail } => {
-                    self.tallies
-                        .entry(format)
-                        .or_default()
-                        .refuse_without_version();
-                    self.drain.push(DrainBlocker {
-                        process_id: item.process_id.clone(),
-                        session_id: item.session_id.clone(),
-                        status: item.status.clone(),
-                        format: format.name().to_string(),
-                        expected: crate::formats::durable_format(format)
-                            .map(|entry| entry.version.to_string())
-                            .unwrap_or_else(|| "not in this build".to_string()),
-                        found: None,
-                        detail: format!("{}: {detail}", owner(item)),
-                    });
-                }
-                #[cfg(feature = "codemode")]
-                Extraction::IdentityMatch { format } => {
-                    self.tallies.entry(format).or_default().identity_match();
                 }
             }
         }

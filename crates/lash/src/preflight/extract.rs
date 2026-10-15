@@ -37,25 +37,6 @@ pub(super) enum Extraction {
         /// What stopped the read, in operator-facing words.
         reason: String,
     },
-    /// The item carries a stored identity that is not this build's.
-    ///
-    /// Distinct from a version mismatch because there is no found version to
-    /// report: the identity is a hash whose preimage includes a format version,
-    /// so a mismatch is a decided refusal that no integer describes.
-    ///
-    /// Available when this build carries the optional Lash VM verifier.
-    #[cfg(feature = "codemode")]
-    IdentityMismatch {
-        /// Which format the identity belongs to.
-        format: DurableFormat,
-        /// The refusal, in operator-facing words.
-        detail: String,
-    },
-    /// The stored identity was successfully verified. Identity-only formats
-    /// have no found version integer to report, so this increments the scan
-    /// count without inventing one.
-    #[cfg(feature = "codemode")]
-    IdentityMatch { format: DurableFormat },
 }
 
 /// The format a surface's payload primarily carries, used to attribute a
@@ -98,7 +79,6 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
         }
     };
     match item.surface {
-        DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
         DurableSurface::ModuleArtifact => kernel_document(payload),
@@ -175,71 +155,6 @@ impl<'a> Payload<'a> {
             Payload::Graph(_) => "a checkpoint graph node",
         }
     }
-}
-
-/// The start stamp of a started process (FIG-3571), a recompute: the stamp
-/// names the executable generation the incarnation runs under, and the only
-/// honest check is to recompute the generation this build would run its input
-/// as. A process that has not started carries no stamp and yields nothing; a
-/// started one whose stamp is missing or another build's parks at its next
-/// claim, so it is a refusal.
-fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
-    let format = DurableFormat::KernelVersion;
-    let record = match payload.json(format) {
-        Ok(record) => record,
-        Err(extraction) => return vec![extraction],
-    };
-    let Some(started) = record
-        .get("first_started")
-        .filter(|started| !started.is_null())
-    else {
-        return Vec::new();
-    };
-    let stamp = started
-        .get("generation")
-        .and_then(serde_json::Value::as_str);
-    start_generation(&record, stamp).into_iter().collect()
-}
-
-#[cfg(feature = "codemode")]
-fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<Extraction> {
-    let format = DurableFormat::KernelVersion;
-    let input = record.get("input")?;
-    // Only a kernel engine process runs under a generation; a tool-call or
-    // session-turn process has nothing to recompute and is not a gap.
-    if input.get("type").and_then(serde_json::Value::as_str) != Some("engine")
-        || input.get("kind").and_then(serde_json::Value::as_str)
-            != Some(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-    {
-        return None;
-    }
-    let payload = input.get("payload")?;
-    let Ok(parsed) = lash_vm_runtime::KernelProcessDefinition::from_payload(payload) else {
-        return Some(Extraction::Undecodable {
-            format,
-            reason: "started process payload is not a kernel process input".to_string(),
-        });
-    };
-    let current = parsed.executable_generation();
-    Some(if stamp == Some(current.as_str()) {
-        Extraction::IdentityMatch { format }
-    } else {
-        Extraction::IdentityMismatch {
-            format,
-            detail: format!(
-                "the process was started under executable generation {}; kernel version {} \
-                 runs it as {current}, so its next claim parks it as a retired generation",
-                stamp.unwrap_or("none"),
-                crate::formats::LASH_KERNEL_VERSION
-            ),
-        }
-    })
-}
-
-/// A build without the language cannot recompute a start stamp.
-#[cfg(not(feature = "codemode"))]
-fn start_generation(_record: &serde_json::Value, _stamp: Option<&str>) -> Option<Extraction> {
-    None
 }
 
 /// A checkpoint manifest answers for itself and for every component descriptor
@@ -457,80 +372,6 @@ mod tests {
         assert!(
             undecodable(&extractions, DurableFormat::CheckpointComponentEncoding).is_empty(),
             "a checkpoint that stores no components has nothing unreadable"
-        );
-    }
-
-    /// C8 (FIG-3571): a started process carries its executable generation on
-    /// its start record. The probe recomputes
-    /// the generation this build runs its input as: a matching stamp is
-    /// readable, a foreign or missing stamp is a decided refusal, and a
-    /// process that has not started yields nothing.
-    #[cfg(feature = "codemode")]
-    #[tokio::test]
-    async fn a_started_process_is_judged_by_its_start_stamp() {
-        let input = lash_vm_runtime::KernelProcessInput {
-            document: lash_kernel_doc::DocumentId::from_bytes([0xff; 32]),
-            entry: lash_kernel_doc::Name::new("worker"),
-            args: serde_json::Map::new(),
-        };
-        let current = input.definition().executable_generation();
-        let record = |first_started: serde_json::Value| {
-            item(
-                DurableSurface::StartedProcess,
-                DurablePayload::Json(
-                    serde_json::json!({
-                        "input": {
-                            "type": "engine",
-                            "kind": lash_vm_runtime::LASH_VM_ENGINE_KIND,
-                            "payload": serde_json::to_value(&input).expect("the input serializes"),
-                        },
-                        "first_started": first_started,
-                    })
-                    .to_string(),
-                ),
-            )
-        };
-        let refused = |extractions: &[Extraction]| {
-            extractions.iter().any(|extraction| {
-                matches!(
-                    extraction,
-                    Extraction::IdentityMismatch {
-                        format: DurableFormat::KernelVersion,
-                        ..
-                    }
-                )
-            })
-        };
-
-        let stamped = extract(&record(
-            serde_json::json!({ "generation": current.as_str() }),
-        ))
-        .await;
-        assert!(
-            matches!(
-                stamped.as_slice(),
-                [Extraction::IdentityMatch {
-                    format: DurableFormat::KernelVersion
-                }]
-            ),
-            "a start stamped with the generation this build runs is readable"
-        );
-        assert!(
-            refused(
-                &extract(&record(
-                    serde_json::json!({ "generation": "blake3:another-build" })
-                ))
-                .await
-            ),
-            "a start another build stamped is a decided refusal"
-        );
-        assert!(
-            refused(&extract(&record(serde_json::json!({ "attempt": 1 }))).await),
-            "a start written before the stamp existed is a decided refusal"
-        );
-        assert!(
-            extract(&record(serde_json::Value::Null)).await.is_empty(),
-            "a process that has not started carries no stamp"
         );
     }
 }

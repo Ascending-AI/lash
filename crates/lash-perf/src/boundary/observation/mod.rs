@@ -47,6 +47,9 @@ pub(super) struct Node {
     /// The node's product stores, for a workload that writes facts through a
     /// store port instead of executing them.
     pub(super) stores: Arc<dyn lash_core::StoreSet>,
+    /// The node's process registry with its seeding probe, for a workload
+    /// that appends process facts as an owner's commit would.
+    pub(super) seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
     pub(super) process_replay: Arc<ProcessReplayProbe>,
     pub(super) live_replay: Arc<LiveReplayProbe>,
 }
@@ -73,6 +76,7 @@ pub(super) struct Fleet {
 type Wiring = (
     lash::Backend,
     Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_core::ConformanceProcessRegistry>,
     Arc<dyn lash_core::ProcessReplayStore>,
     Arc<dyn lash_core::LiveReplayStore>,
 );
@@ -181,7 +185,7 @@ impl Fleet {
         // One replay schema pair per run, shared by its replicas.
         let run = uuid::Uuid::new_v4().simple().to_string();
         for index in 0..nodes {
-            let (backend, stores, process_replay, live_replay): Wiring =
+            let (backend, stores, seeding, process_replay, live_replay): Wiring =
                 if let Some(url) = args.postgres_url.as_deref() {
                     let host = postgres_host(url, &run).await?;
                     let backend = lash::durable::DurableBackendBuilder::postgres(
@@ -195,19 +199,23 @@ impl Fleet {
                         host.storage(),
                         Arc::new(lash_core::attachments::UnavailableAttachmentStore),
                     ));
+                    let seeding = stores.process_registry();
                     fleet.hosts.push(host);
-                    (backend, stores, process, live)
+                    (backend, stores, seeding, process, live)
                 } else {
-                    let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
+                    let sqlite = Arc::new(
                         lash_sqlite_store::SqliteStoreSet::open(
                             args.store_dir.join("lash.db"),
                             lash_sqlite_store::SqliteSynchronous::Full,
                         )
                         .await?,
                     );
+                    let seeding = sqlite.process_registry();
+                    let stores: Arc<dyn lash_core::StoreSet> = sqlite;
                     (
                         facade::backend(stores.clone())?,
                         stores,
+                        seeding,
                         Arc::new(lash_core::InMemoryProcessReplayStore::new(
                             lash_core::InMemoryProcessReplayStoreConfig::standard(),
                         )),
@@ -251,6 +259,7 @@ impl Fleet {
             fleet.nodes.push(Node {
                 core,
                 stores,
+                seeding,
                 process_replay,
                 live_replay,
             });

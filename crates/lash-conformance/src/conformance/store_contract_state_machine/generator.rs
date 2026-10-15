@@ -53,12 +53,6 @@ pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec
 fn operation() -> impl Strategy<Value = StoreContractOp> {
     prop_oneof![
         4 => (0..PROCESS_COUNT).prop_map(|process| StoreContractOp::Register { process }),
-        4 => (0..PROCESS_COUNT, 0_u8..3, 1_u8..5)
-            .prop_map(|(process, owner, attempt)| StoreContractOp::FirstStart { process, owner, attempt }),
-        2 => (0..PROCESS_COUNT, any::<bool>())
-            .prop_map(|(process, stale)| StoreContractOp::EnterWait { process, stale }),
-        2 => (0..PROCESS_COUNT, any::<bool>())
-            .prop_map(|(process, stale)| StoreContractOp::ClearWait { process, stale }),
         2 => (0..PROCESS_COUNT, 0_u8..3)
             .prop_map(|(process, value)| StoreContractOp::SetExternalRef { process, value }),
         2 => (0..PROCESS_COUNT, any::<u8>())

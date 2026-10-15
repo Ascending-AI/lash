@@ -17,7 +17,7 @@ pub(crate) use crate::{
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessIdentity, ProcessInput,
     ProcessListFilter, ProcessLiveReferenceView, ProcessOriginatorFilter, ProcessProvenance,
     ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessStatusFilter, SessionScope,
-    WaitKind, WaitState,
+    WaitState,
 };
 pub(crate) use lash_sansio::{
     AttachmentCreateMeta, AttachmentTypeMetadata, EffectAddress, MediaType, SessionId,

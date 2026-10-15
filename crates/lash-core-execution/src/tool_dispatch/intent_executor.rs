@@ -219,7 +219,6 @@ pub(crate) async fn realize_declared_start(
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
                     process_id: handle.process_id.clone(),
-                    attempt: None,
                     child_entry_name: start
                         .start()
                         .declaration
@@ -490,7 +489,6 @@ async fn execute_one(
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
                     process_id: staged.record.id.clone(),
-                    attempt: None,
                     child_entry_name: None,
                 });
             }

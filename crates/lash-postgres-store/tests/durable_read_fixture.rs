@@ -228,20 +228,6 @@ async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
 }
 
 async fn normalize_fixture_rows(storage: &PostgresStorage) {
-    let pinned = sqlx::query(
-        "UPDATE lash_process_events
-         SET event_json = jsonb_set(event_json::jsonb, '{occurred_at}', to_jsonb($1::bigint))::text
-         WHERE event_type = 'process.first_started'",
-    )
-    .bind(fixture::FIXTURE_WRITE_MS as i64)
-    .execute(storage.pool())
-    .await
-    .expect("pin the fixture first-started event time");
-    assert_eq!(
-        pinned.rows_affected(),
-        1,
-        "the fixture seeds one first-started event"
-    );
     // The release stamp records `clock_timestamp()` on the server, so it is
     // server-authoritative in exactly the sense this function exists for:
     // without the rewrite every regeneration would emit a different dump.

@@ -3,19 +3,17 @@ use super::*;
 pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
     let operations = vec![
         StoreContractOp::Register { process: 0 },
-        StoreContractOp::FirstStart {
+        StoreContractOp::SetExternalRef {
             process: 0,
-            owner: 0,
-            attempt: 1,
+            value: 0,
         },
-        StoreContractOp::FirstStart {
+        StoreContractOp::AddObserver {
             process: 0,
-            owner: 1,
-            attempt: 2,
+            session: 0,
         },
-        StoreContractOp::EnterWait {
+        StoreContractOp::CancelRequest {
             process: 0,
-            stale: true,
+            requester: 0,
         },
         StoreContractOp::Register { process: 1 },
         StoreContractOp::Terminal {

@@ -10,8 +10,8 @@ use super::events::{ProcessEvent, ProcessTerminal};
 use super::model::{
     ProcessChangeCursor, ProcessEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
     ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, ProcessTombstone,
-    SessionScope, WaitState,
+    ProcessOriginatorFilter, ProcessRecord, ProcessStatus, ProcessTombstone, SessionScope,
+    WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -76,9 +76,6 @@ pub struct ObservedProcess {
     /// When the newest folded event occurred. A fact appended after the
     /// process ended moves it; the terminal time is in `lifecycle`.
     pub updated_at_ms: u64,
-    /// Durable execution-started fact, if the row has begun executing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_started: Option<ProcessStarted>,
     /// The first accepted process cancellation request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<CancelRequest>,
@@ -610,7 +607,6 @@ impl ObservedProcess {
             identity: record.identity,
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
-            first_started: record.first_started.map(|started| *started),
             cancel_request: record.cancel_request.map(|request| *request),
             originator: record.provenance.originator,
             env_ref,

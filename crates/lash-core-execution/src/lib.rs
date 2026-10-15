@@ -268,7 +268,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
     pub use crate::runtime::ProcessRuntimeHost;
-    pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessToolVisibilityFilter;
     pub use crate::runtime::ProcessTransition;
     pub use crate::runtime::ProcessTransitionPlan;
@@ -651,8 +650,6 @@ pub use runtime::ConformanceProcessRegistry;
 pub use runtime::ProcessEventLogTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
-#[cfg(any(test, feature = "testing"))]
-pub use runtime::TestProcessRegistryWriteExt;
 pub(crate) use runtime::default_queued_drain_policy;
 
 // This block includes the effect / process-control types consumed by host
@@ -704,28 +701,27 @@ pub use runtime::{
     ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
     ProcessEventLog, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext,
-    ProcessExecutionDocumentRead, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
-    ProcessLifecycle, ProcessLifecycleFact, ProcessLimits, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessListSelection, ProcessLiveReferenceView, ProcessModel,
-    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessParkReason,
-    ProcessParkState, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
-    ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRosterCursor, ProcessRosterRecords, ProcessRosterTokenError, ProcessRunOutcome,
-    ProcessService, ProcessSessionDeleteReport, ProcessSignature, ProcessStartChoice,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolIntents, ProcessWaits, ProcessWorkSubstrate, ProcessWorkWiring,
-    ProjectionWatermark, ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily,
-    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority,
-    QueuedWorkBatchingConfig, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRefusal,
-    RecordedRender, RefusedWriteRange, ReleasedProcessEvent, RenderFault, RenderRefusal,
-    Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, ResolvedStartTarget,
-    RetainedRevision, Retention, RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal,
-    RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides,
-    RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
+    ProcessExecutionDocumentRead, ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint,
+    ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLifecycleFact,
+    ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessListSelection,
+    ProcessLiveReferenceView, ProcessModel, ProcessObserverBy, ProcessObserverRegistry,
+    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
+    ProcessOutcomeObserver, ProcessParkReason, ProcessParkState, ProcessProvenance,
+    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
+    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry, ProcessRegistryCursor,
+    ProcessResumeRefusal, ProcessRetention, ProcessRosterCursor, ProcessRosterRecords,
+    ProcessRosterTokenError, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport,
+    ProcessSignature, ProcessStartChoice, ProcessStartDeclaration, ProcessStartOptions,
+    ProcessStartReceipt, ProcessStartRequest, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalWait, ProcessTombstone, ProcessToolIntents, ProcessWaits, ProcessWorkSubstrate,
+    ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension, QueuedDrainCandidate,
+    QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, RecordedKeyFence, RecordedKeyRange,
+    RecordedKeys, RecordedRefusal, RecordedRender, RefusedWriteRange, ReleasedProcessEvent,
+    RenderFault, RenderRefusal, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
+    ResolvedStartTarget, RetainedRevision, Retention, RunAggregateWakePolicy, RunDefinition,
+    RunDefinitionRefusal, RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner,
+    RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
     RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
@@ -751,7 +747,7 @@ pub(crate) use runtime::{
     AdmissionBoundary, AdmittedQueuedWork, QueuedCheckpointTurnInput, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkPayload,
     RuntimeSubject, load_process_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, process_event_invocation,
+    prepare_process_transition, process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
 pub use runtime::{
@@ -844,18 +840,6 @@ pub mod core_internal {
     pub use crate::runtime::effect::executor::{sleep_duration, sleep_with_cancellation};
     pub use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps;
     pub use lash_core_store::process_identity::StartKeyDerivation;
-    pub fn attach_process_invocation_correlation(
-        turn_context: &mut crate::TurnContext,
-        process_id: &crate::ProcessId,
-        authority: &crate::ProcessExecutionWriteAuthority,
-    ) {
-        crate::session::attach_process_invocation_correlation(turn_context, process_id, authority);
-    }
-
-    pub fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
-        crate::session::clear_process_invocation_correlation(turn_context);
-    }
-
     /// The cut a model call's renderers read (ADR 0133 §4): built only by
     /// the runtime, from committed state, at the call's admission.
     pub fn prompt_cut(

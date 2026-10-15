@@ -4,7 +4,7 @@ use super::super::validation::prepare_process_registration;
 use super::{
     Ancestry, EngineLaunch, EngineSettings, LifetimeDecision, ProcessEnvRef, ProcessExternalRef,
     ProcessId, ProcessIdentity, ProcessInput, ProcessLineage, ProcessOutcome, ProcessProvenance,
-    ProcessRegistration, ProcessStarted, ProcessStatus, SessionId, StartKey, process_session_id,
+    ProcessRegistration, ProcessStatus, SessionId, StartKey, process_session_id,
 };
 use lash_sansio::CancelRequest;
 use serde::{Deserialize, Serialize};
@@ -126,14 +126,10 @@ pub struct ProcessRecord {
     pub updated_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<ProcessExternalRef>,
-    /// Durable execution-started fact (ADR 0110). `None` until a
-    /// runner records it immediately before executing. Boxed so these
-    /// usually-absent facts do not enlarge the pervasive `ProcessRecord` that
-    /// flows through the runtime; serde treats `Option<Box<T>>` identically to
-    /// `Option<T>`, so the persisted JSON is unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_started: Option<Box<ProcessStarted>>,
     /// The first accepted cancellation request, retained across retries.
+    /// Boxed so this usually-absent fact does not enlarge the pervasive
+    /// `ProcessRecord` that flows through the runtime; serde treats
+    /// `Option<Box<T>>` identically to `Option<T>`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<Box<CancelRequest>>,
     /// The one lifecycle state the process is in. Its status, waits and
@@ -385,7 +381,6 @@ impl ProcessRecord {
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,
-            first_started: None,
             cancel_request: None,
             lifecycle: ProcessLifecycleState::running(),
         }

@@ -148,9 +148,10 @@ pub enum DurableFormat {
     /// registry as this engine-neutral handle rather than as a variant
     /// spelled for the engine.
     Engine(EngineFormat),
-    /// The kernel version this build's workers run. A started process's
-    /// start stamp names the generation it runs as, which includes it:
-    /// identity, not a stored integer — see [`FormatProbe::IdentityOnly`].
+    /// The kernel version this build's workers run. A process's engine state
+    /// names it in its actor's format requirement, so a node that runs
+    /// another kernel never claims it: identity, not a stored integer — see
+    /// [`FormatProbe::IdentityOnly`].
     KernelVersion,
 }
 

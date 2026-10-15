@@ -304,33 +304,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
     // W0459: lash::plugins::ProcessEngineContributionContext::trace_runtime [function]
     let _ = lash::plugins::ProcessEngineContributionContext::trace_runtime;
-    // W0482: lash::persistence::ProcessExecutionWriteAuthority [struct]
-    type_witness::<lash::persistence::ProcessExecutionWriteAuthority>();
-    // W0483: lash::persistence::ProcessExecutionWriteAuthority::attempt [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::attempt;
-    // W0484: lash::persistence::ProcessExecutionWriteAuthority::attempt_for [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::attempt_for;
-    // W0485: lash::persistence::ProcessExecutionWriteAuthority::engine_execution_id [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::engine_execution_id;
-    // W0486: lash::persistence::ProcessExecutionWriteAuthority::execution_id [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::execution_id;
-    // W0487: lash::persistence::ProcessExecutionWriteAuthority::owner_identity [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::owner_identity;
-    // W0488: lash::persistence::ProcessExecutionWriteAuthority::process_id [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::process_id;
-    // W0490: lash::persistence::ProcessExecutionWriteAuthority::bind_attempt [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::bind_attempt;
-    // W0491: lash::persistence::ProcessExecutionWriteAuthority::invocation [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::invocation(
-        lash::ProcessId::fixture("x"),
-        String::new(),
-    );
-    // W0493: lash::persistence::ProcessExecutionWriteAuthority::invocation_started [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::invocation_started;
-    // W0496: lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_start [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_start;
-    // W0497: lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_write [function]
-    let _ = lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_write;
     // W0498: lash::process::ProcessId [type_alias]
     type_witness::<lash::ProcessId>();
     // W0499: lash::plugins::ProcessInfraError [struct]
@@ -351,31 +324,6 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash::plugins::ProcessRunOutcome| {
         let lash::plugins::ProcessRunOutcome::Terminal { output, .. } = value;
         let _ = output;
-    });
-    // W0512: lash::persistence::ProcessStartOutcome [enum]
-    type_witness::<lash::persistence::ProcessStartOutcome>();
-    // W0513: lash::persistence::ProcessStartOutcome::AlreadyApplied [variant]
-    variant_witness(|value: &lash::persistence::ProcessStartOutcome| {
-        matches!(
-            value,
-            lash::persistence::ProcessStartOutcome::AlreadyApplied(..)
-        )
-    });
-    // W0514: lash::persistence::ProcessStartOutcome::AlreadyApplied::0 [field]
-    field_witness(|value: &lash::persistence::ProcessStartOutcome| {
-        if let lash::persistence::ProcessStartOutcome::AlreadyApplied(f0) = value {
-            let _ = f0;
-        }
-    });
-    // W0522: lash::persistence::ProcessStartOutcome::Started [variant]
-    variant_witness(|value: &lash::persistence::ProcessStartOutcome| {
-        matches!(value, lash::persistence::ProcessStartOutcome::Started(..))
-    });
-    // W0523: lash::persistence::ProcessStartOutcome::Started::0 [field]
-    field_witness(|value: &lash::persistence::ProcessStartOutcome| {
-        if let lash::persistence::ProcessStartOutcome::Started(f0) = value {
-            let _ = f0;
-        }
     });
     // W0527: lash::process::ProcessTombstone [struct]
     type_witness::<lash::process::ProcessTombstone>();
@@ -408,20 +356,6 @@ fn processes_area_witnesses_b() {
         String::new(),
         todo!(),
     );
-    // W0540: lash_core::TestProcessRegistryWriteExt [trait]
-    fn trait_witness_0540<T: lash_core::TestProcessRegistryWriteExt>() {}
-    // W0541: lash_core::TestProcessRegistryWriteExt::clear_process_wait [function]
-    fn meth_0541<T: lash_core::TestProcessRegistryWriteExt>(_: &T) {
-        let _ = T::clear_process_wait;
-    }
-    // W0542: lash_core::TestProcessRegistryWriteExt::record_first_started [function]
-    fn meth_0542<T: lash_core::TestProcessRegistryWriteExt>(_: &T) {
-        let _ = T::record_first_started;
-    }
-    // W0543: lash_core::TestProcessRegistryWriteExt::set_process_wait [function]
-    fn meth_0543<T: lash_core::TestProcessRegistryWriteExt>(_: &T) {
-        let _ = T::set_process_wait;
-    }
     // W0600: lash_core::facade_support::AgentFrameRun::into_final_turn [function]
     let _ = lash_core::facade_support::AgentFrameRun::into_final_turn;
     // W0606: lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS [constant]

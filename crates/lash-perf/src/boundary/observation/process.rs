@@ -442,12 +442,12 @@ async fn append_facts(
     meter: &Meter,
 ) -> Result<(lash::ProcessId, lash_core::ProcessObservation)> {
     use lash_core::{
-        ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
-        ProcessRegistration, ToolCallId, ToolId, WaitKind, WaitState,
+        ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessRegistration, ToolCallId,
+        ToolId, WaitKind, WaitState,
     };
     lash_core::testing::process_execution_env_fixture(node.stores.process_env_store().as_ref())
         .await;
-    let registry = node.stores.process_registry();
+    let registry = &node.seeding;
     let process = registry
         .register_process(ProcessRegistration::new(
             lash_core::testing::held_engine_input(serde_json::Value::Null),
@@ -456,16 +456,6 @@ async fn append_facts(
         ))
         .await?
         .id;
-    let authority =
-        ProcessExecutionWriteAuthority::invocation(process.clone(), "reconcile-workload")
-            .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &process,
-            authority.invocation_started().context("a bound attempt")?,
-            &authority,
-        )
-        .await?;
     let held = snapshot(&process).await?;
     let window = Instant::now();
     for n in 0..facts {
@@ -478,10 +468,9 @@ async fn append_facts(
             site: None,
         };
         registry
-            .append_event_with_authority(
+            .append_event_for_testing(
                 &process,
                 ProcessEventAppendRequest::wait_entered(&process, &wait),
-                &authority,
             )
             .await?;
     }

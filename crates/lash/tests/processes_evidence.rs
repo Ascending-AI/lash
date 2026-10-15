@@ -90,13 +90,6 @@ fn processes_area_witnesses() {
             lash::observe::SessionProcessEventKind::Cancelled { .. }
         )
     });
-    // W0093: lash::observe::SessionProcessEventKind::Started [variant]
-    variant_witness(|value: &lash::observe::SessionProcessEventKind| {
-        matches!(
-            value,
-            lash::observe::SessionProcessEventKind::Started { .. }
-        )
-    });
     // W0094: lash::persistence::LeaseOwnerIdentity::engine_process_execution [function]
     let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution(
         todo!(),
@@ -323,8 +316,6 @@ fn processes_area_witnesses() {
     let _ = lash::persistence::ProcessEventAppendRequest::cancel_requested;
     // W0178: lash::persistence::ProcessEventAppendRequest::external_ref_set [function]
     let _ = lash::persistence::ProcessEventAppendRequest::external_ref_set;
-    // W0179: lash::persistence::ProcessEventAppendRequest::first_started [function]
-    let _ = lash::persistence::ProcessEventAppendRequest::first_started;
     // W0180: lash::persistence::ProcessEventAppendRequest::observer_added [function]
     let _ = lash::persistence::ProcessEventAppendRequest::observer_added;
     // W0181: lash::persistence::ProcessEventAppendRequest::observer_removed [function]
@@ -349,16 +340,10 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessExecutionContext| {
         let _ = &value.causal_invocation;
     });
-    // W0192: lash::process::ProcessExecutionContext::execution_write_authority [field]
-    field_witness(|value: &lash::process::ProcessExecutionContext| {
-        let _ = &value.execution_write_authority;
-    });
     // W0193: lash::process::ProcessExecutionContext::is_empty [function]
     let _ = lash::process::ProcessExecutionContext::is_empty;
     // W0194: lash::process::ProcessExecutionContext::with_causal_invocation [function]
     let _ = lash::process::ProcessExecutionContext::with_causal_invocation;
-    // W0195: lash::process::ProcessExecutionContext::with_execution_write_authority [function]
-    let _ = lash::process::ProcessExecutionContext::with_execution_write_authority;
     // W0196: lash::process::ProcessEnv::from_store_bytes [function]
     let _ = lash::process::ProcessEnv::from_store_bytes;
     // W0197: lash::process::ProcessEnv::components [function]
@@ -470,14 +455,6 @@ fn processes_area_witnesses() {
     fn meth_0236<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::add_observer;
     }
-    // W0237: lash::persistence::ProcessRegistry::append_event_with_authority [function]
-    fn meth_0237<T: lash::persistence::ProcessRegistry>(_: &T) {
-        let _ = T::append_event_with_authority;
-    }
-    // W0239: lash::persistence::ProcessRegistry::clear_process_wait_with_authority [function]
-    fn meth_0239<T: lash::persistence::ProcessRegistry>(_: &T) {
-        let _ = T::clear_process_wait_with_authority;
-    }
     // W0242: lash::persistence::ProcessRegistry::delete_session_process_state [function]
     fn meth_0242<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::delete_session_process_state;
@@ -497,14 +474,6 @@ fn processes_area_witnesses() {
     // W0250: lash::persistence::ProcessRegistry::processes_changed_since [function]
     fn meth_0250<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::processes_changed_since;
-    }
-    // W0252: lash::persistence::ProcessRegistry::record_first_started_with_authority [function]
-    fn meth_0252<T: lash::persistence::ProcessRegistry>(_: &T) {
-        let _ = T::record_first_started_with_authority;
-    }
-    // W0255: lash::persistence::ProcessRegistry::set_process_wait_with_authority [function]
-    fn meth_0255<T: lash::persistence::ProcessRegistry>(_: &T) {
-        let _ = T::set_process_wait_with_authority;
     }
     // W0258: lash::persistence::ProcessRegistry::with_runtime_clock [function]
     fn meth_0258<T: lash::persistence::ProcessRegistry>(_: &T) {

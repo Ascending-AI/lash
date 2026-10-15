@@ -55,16 +55,6 @@ lash_store_sql::statements! {
              SELECT NULL, NULL, terminal_label, pruned_at_ms
              FROM process_tombstones WHERE process_id = ?1";
 
-        /// The preflight's started-process walk (FIG-3571): every live
-        /// process strictly after key `?1` (`NULL` from the start), at most
-        /// `?2`, in key order.
-        list_live_for_preflight = "SELECT process_id, status, record_json
-             FROM processes
-             WHERE {{live_process_status(status)}}
-               AND (?1::text IS NULL OR process_id > ?1::text)
-             ORDER BY process_id
-             LIMIT ?2";
-
         /// The stored record for `?1`, under its write lock.
         ///
         /// `FOR UPDATE` is the fork: every decision this store makes about a

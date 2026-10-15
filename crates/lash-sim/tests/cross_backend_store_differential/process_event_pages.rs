@@ -14,42 +14,14 @@ fn page_wait(id: &lash_sansio::ProcessId, label: &str) -> lash_core::ProcessEven
 
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
-
-/// Start `process_id`'s first execution attempt, and answer the authority
-/// its runner appends under.
-#[expect(
-    clippy::expect_used,
-    reason = "differential fixture: setup and oracle failures stop the comparison"
-)]
-async fn start_runner<R>(
-    registry: &R,
-    process_id: &lash_sansio::ProcessId,
-) -> lash_core::ProcessExecutionWriteAuthority
-where
-    R: lash_core::ProcessLifecycle + ?Sized,
-{
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "page-runner:1")
-            .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            process_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record the runner's execution start");
-    authority
-}
+use lash_core::ProcessRegistryTestSupport as _;
 
 #[expect(
     clippy::expect_used,
     reason = "differential fixture: setup and oracle failures stop the comparison"
 )]
 async fn release_observations(
-    registry: &dyn lash_core::ProcessRegistry,
+    registry: &dyn lash_core::ConformanceProcessRegistry,
 ) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
     let bounds = registry
         .process_change_bounds()
@@ -74,8 +46,6 @@ async fn release_observations(
         .await
         .expect("register release process")
         .id;
-    // The runner's start is event 1; the compared events follow it.
-    let runner = start_runner(registry, &process_id).await;
     let request = |ordinal: u64| {
         page_wait(
             &process_id,
@@ -86,12 +56,12 @@ async fn release_observations(
     for ordinal in 1..=3 {
         assert_eq!(
             registry
-                .append_event_with_authority(&process_id, request(ordinal), &runner)
+                .append_event_for_testing(&process_id, request(ordinal))
                 .await
                 .expect("append release event")
                 .event
                 .sequence,
-            ordinal + 1
+            ordinal
         );
     }
     let mut releases = Vec::new();
@@ -115,26 +85,26 @@ async fn release_observations(
                 .expect("read released prefix"),
             lash_core::ProcessEventReadOutcome::NoLongerRetained(
                 lash_core::ProcessEventHistoryRetention::Released {
-                    released_through: 4,
+                    released_through: 3,
                 }
             )
         );
     }
     let replay = registry
-        .append_event_with_authority(&process_id, request(1), &runner)
+        .append_event_for_testing(&process_id, request(1))
         .await
         .expect("replay released event");
-    assert_eq!(replay.event.sequence, 2);
+    assert_eq!(replay.event.sequence, 1);
     assert_eq!(replay.event.fact.payload(), request(1).fact.payload());
     assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
     assert_eq!(
         registry
-            .append_event_with_authority(&process_id, request(4), &runner)
+            .append_event_for_testing(&process_id, request(4))
             .await
             .expect("append retained suffix")
             .event
             .sequence,
-        5
+        4
     );
     (process_id, releases)
 }
@@ -168,8 +138,8 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
                 released_events: 0,
             },
             lash_core::ProcessEventRelease {
-                released_through: 4,
-                released_events: 2,
+                released_through: 3,
+                released_events: 1,
             },
         ]
     );
@@ -215,13 +185,7 @@ where
         };
         for (sequence, event_type) in metadata {
             assert_eq!(sequence, expected_sequence);
-            // The runner's start precedes the seeded waits.
-            let expected_type = if sequence == 1 {
-                "process.first_started"
-            } else {
-                "process.waiting"
-            };
-            assert_eq!(event_type, expected_type);
+            assert_eq!(event_type, "process.waiting");
             expected_sequence += 1;
         }
         after_sequence = match page.more {
@@ -279,15 +243,13 @@ pub(super) async fn compare_bounded_process_event_pages(
         page_wait(&process_id, "payload excluded by lite projection")
             .with_replay_key("page-event-1")
     };
-    let sqlite_runner = start_runner(&sqlite, &process_id).await;
-    let postgres_runner = start_runner(&postgres_registry, &process_id).await;
     let first = sqlite
-        .append_event_with_authority(&process_id, request(), &sqlite_runner)
+        .append_event_for_testing(&process_id, request())
         .await
         .expect("append SQLite seed event")
         .event;
     postgres_registry
-        .append_event_with_authority(&process_id, request(), &postgres_runner)
+        .append_event_for_testing(&process_id, request())
         .await
         .expect("append PostgreSQL seed event");
     let seeded_from = first.sequence + 1;
@@ -387,26 +349,6 @@ pub(super) async fn compare_bounded_process_event_pages(
         "the paired mints name both effect rows alike"
     );
     let effect_id = sqlite_effect_record.id.clone();
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        effect_id.clone(),
-        "effect-differential:1",
-    )
-    .bind_attempt(1);
-    for registry in [
-        &sqlite as &dyn lash_core::ProcessRegistry,
-        &postgres_registry as &dyn lash_core::ProcessRegistry,
-    ] {
-        registry
-            .record_first_started_with_authority(
-                &effect_id,
-                authority
-                    .invocation_started()
-                    .expect("bound differential invocation has a started fact"),
-                &authority,
-            )
-            .await
-            .expect("record differential invocation start");
-    }
     // Ten occurrences of one node: the writer records the first
     // fixture cut of eight one by one and counts the rest, by
     // class, in one omission record.
@@ -447,7 +389,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         lash_core::FleetFormat::current(),
     );
     // The run commits its summary at its boundaries (FIG-3571): a bare
-    // batch, a wait's enter and its clear, each with a prelude, and the
+    // batch, a wait's enter and its clear, each after its prelude, and the
     // terminal batch closing with the omission record. Each boundary is
     // written twice, as a redrive after a lost acknowledgement writes it.
     let wait = lash_core::WaitState {
@@ -462,32 +404,35 @@ pub(super) async fn compare_bounded_process_event_pages(
         lash_core::ToolCallOutput::success(serde_json::json!({ "summary": "committed" })),
     );
     for registry in [
-        &sqlite as &dyn lash_core::ProcessRegistry,
-        &postgres_registry as &dyn lash_core::ProcessRegistry,
+        &sqlite as &dyn lash_core::ConformanceProcessRegistry,
+        &postgres_registry as &dyn lash_core::ConformanceProcessRegistry,
     ] {
         for _ in 0..2 {
             let receipts = registry
-                .append_events(&effect_id, recorded[..4].to_vec(), &authority)
+                .append_events_for_testing(&effect_id, recorded[..4].to_vec())
                 .await
-                .expect("append a summary batch under execution authority");
+                .expect("append a summary batch");
             assert_eq!(receipts.len(), 4);
         }
         for _ in 0..2 {
+            let mut boundary = recorded[4..6].to_vec();
+            boundary.push(lash_core::ProcessEventAppendRequest::wait_entered(
+                &effect_id, &wait,
+            ));
             registry
-                .set_process_wait_with_authority(
-                    &effect_id,
-                    wait.clone(),
-                    recorded[4..6].to_vec(),
-                    &authority,
-                )
+                .append_events_for_testing(&effect_id, boundary)
                 .await
-                .expect("enter a wait with its summary prelude");
+                .expect("enter a wait after its summary prelude");
         }
         for _ in 0..2 {
+            let mut boundary = recorded[6..].to_vec();
+            boundary.push(lash_core::ProcessEventAppendRequest::wait_cleared(
+                &effect_id, &wait,
+            ));
             registry
-                .clear_process_wait_with_authority(&effect_id, recorded[6..].to_vec(), &authority)
+                .append_events_for_testing(&effect_id, boundary)
                 .await
-                .expect("clear the wait with its summary prelude");
+                .expect("clear the wait after its summary prelude");
         }
         for _ in 0..2 {
             registry

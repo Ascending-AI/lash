@@ -10,22 +10,24 @@ use lash_core::{
 struct Fixture {
     _dir: tempfile::TempDir,
     registry: Arc<dyn ProcessRegistry>,
+    /// The same registry, seeding the history an owner's commits append.
+    seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
     process_id: ProcessId,
-    authority: lash_core::ProcessExecutionWriteAuthority,
 }
 
 impl Fixture {
-    /// A registered, started engine process, which may write runtime-owned
+    /// A registered engine process, whose history carries runtime-owned
     /// effect-summary events.
     async fn new(label: &str) -> Self {
         let dir = tempfile::tempdir().expect("history tempdir");
-        let registry: Arc<dyn ProcessRegistry> = Arc::new(
+        let seeding: Arc<dyn lash_core::ConformanceProcessRegistry> = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open_standalone_for_testing(
                 &dir.path().join("processes.db"),
             )
             .await
             .expect("open SQLite process registry"),
         );
+        let registry: Arc<dyn ProcessRegistry> = seeding.clone();
         let process_id = registry
             .register_process(
                 lash_core::ProcessRegistration::new(
@@ -55,26 +57,11 @@ impl Fixture {
             .await
             .expect("register the history process")
             .id;
-        let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-            process_id.clone(),
-            "history-invocation",
-        )
-        .bind_attempt(1);
-        registry
-            .record_first_started_with_authority(
-                &process_id,
-                authority
-                    .invocation_started()
-                    .expect("the authority is bound to attempt one"),
-                &authority,
-            )
-            .await
-            .expect("record the execution start");
         Self {
             _dir: dir,
             registry,
+            seeding,
             process_id,
-            authority,
         }
     }
 
@@ -88,12 +75,8 @@ impl Fixture {
             format!("history-effect:{occurrence}"),
             lash_core::FleetFormat::current(),
         );
-        self.registry
-            .append_event_with_authority(
-                &self.process_id,
-                outcome.append_request(),
-                &self.authority,
-            )
+        self.seeding
+            .append_event_for_testing(&self.process_id, outcome.append_request())
             .await
             .expect("commit an effect outcome")
             .event
@@ -493,8 +476,8 @@ impl Fixture {
                 },
             );
         }
-        self.registry
-            .append_events(&self.process_id, pending, &self.authority)
+        self.seeding
+            .append_events_for_testing(&self.process_id, pending)
             .await
             .expect("commit retained occurrences");
         lash_core::ProcessEffectOmissions::new(omitted, cap, lash_core::FleetFormat::current())

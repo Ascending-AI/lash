@@ -223,11 +223,8 @@ macro_rules! __process_registry_register {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $registry_law() {
                 let (_fixture_guard, make) = $fixture;
-                let registry: std::sync::Arc<
-                    dyn $crate::registration_macro_support::ProcessRegistry,
-                > =
-                    make($registry_label).open;
-                $crate::registration_macro_support::$registry_law(registry).await;
+                $crate::registration_macro_support::$registry_law(make($registry_label).open)
+                    .await;
             }
         )*
     };
@@ -256,7 +253,6 @@ macro_rules! process_registry_tests {
                 (live_reference_summary_tracks_non_terminal_reference_counts, "live-reference-summary"),
                 (registration_and_observers_are_atomic, "registration-observers"),
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
-                (a_process_event_batch_is_one_commit, "process-event-batch"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
@@ -298,7 +294,6 @@ macro_rules! process_registry_tests {
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
                 (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
                 (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
-                (every_execution_write_refuses_a_superseded_invocation_without_mutation, "invocation-write-matrix"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
             ]

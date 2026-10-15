@@ -83,8 +83,8 @@ pub async fn terminal_retention_ignores_later_observer_facts(registry: Arc<dyn P
     ));
 }
 
-/// Lifecycle event timestamps belong to the injected registry clock, including
-/// wait entry and exit. Advancing it between writes pins each write's source.
+/// Lifecycle event timestamps belong to the injected registry clock.
+/// Advancing it between writes pins each write's source.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -101,42 +101,38 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
         .await
         .expect("register clock process")
         .id;
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        process_id.clone(),
-        "lifecycle-clock:execution",
-    )
-    .bind_attempt(1);
     clock.advance(10);
     registry
-        .record_first_started_with_authority(
+        .set_external_ref(
             &process_id,
-            authority.invocation_started().expect("bound invocation"),
-            &authority,
-        )
-        .await
-        .expect("record first start");
-    clock.advance(10);
-    registry
-        .set_process_wait_with_authority(
-            &process_id,
-            crate::WaitState {
-                since_ms: 10_020,
-                kind: crate::WaitKind::Call {
-                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-                    tool_id: lash_sansio::ToolId::new("process_wait"),
-                },
-                site: None,
+            crate::ProcessExternalRef {
+                backend: "lifecycle-clock".to_string(),
+                id: "external".to_string(),
+                metadata: None,
+                segment_ordinal: None,
             },
-            Vec::new(),
-            &authority,
         )
         .await
-        .expect("enter wait");
+        .expect("set the external reference");
     clock.advance(10);
     registry
-        .clear_process_wait_with_authority(&process_id, Vec::new(), &authority)
+        .add_observer(
+            &SessionId::from("lifecycle-clock-observer"),
+            &process_id,
+            crate::ProcessObserverBy::host("lifecycle-clock"),
+        )
         .await
-        .expect("clear wait");
+        .expect("add an observer");
+    clock.advance(10);
+    registry
+        .request_process_cancel(
+            &process_id,
+            lash_core::CancelOrigin::OperatorRequested,
+            "lifecycle-clock".to_string(),
+            None,
+        )
+        .await
+        .expect("request cancellation");
     let page = registry
         .event_page(
             &process_id,
@@ -158,9 +154,9 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
             .map(|event| (event.fact.event_type(), event.occurred_at))
             .collect::<Vec<_>>(),
         vec![
-            ("process.first_started", 10_010),
-            ("process.waiting", 10_020),
-            ("process.resumed", 10_030),
+            ("process.external_ref_set", 10_010),
+            ("process.observer_added", 10_020),
+            ("process.cancel_requested", 10_030),
         ],
         "every lifecycle event must retain its injected clock instant"
     );
@@ -290,28 +286,13 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     let registered = registry
         .register_process(executed_registration("resume-after-terminal"))
         .await
         .expect("register the process");
     let process_id = registered.id.clone();
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        process_id.clone(),
-        "resume-after-terminal:execution",
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &process_id,
-            authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &authority,
-        )
-        .await
-        .expect("record the execution start");
     registry
         .complete_process(
             &process_id,
@@ -341,10 +322,9 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
         site: None,
     };
     let error = registry
-        .append_event_with_authority(
+        .append_event_for_testing(
             &process_id,
             ProcessEventAppendRequest::wait_cleared(&process_id, &wait),
-            &authority,
         )
         .await
         .expect_err("a resume cannot take an outcome back");

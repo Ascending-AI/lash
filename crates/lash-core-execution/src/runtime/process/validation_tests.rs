@@ -8,7 +8,7 @@ use crate::runtime::process::{
 };
 use crate::{
     ProcessEventAppendRequest, ProcessExternalRef, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessStarted, WaitKind, WaitState,
+    ProcessRegistration, WaitKind, WaitState,
 };
 
 fn fixture_registration(_label: &str) -> ProcessRegistration {
@@ -399,18 +399,6 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
         site: None,
     };
     let requests = [
-        ProcessEventAppendRequest::first_started(
-            &record.id,
-            &ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::opaque(
-                    crate::LeaseOwnerId::new("owner"),
-                    crate::LeaseIncarnationId::new("incarnation"),
-                ),
-                attempt: 1,
-                started_at_ms: 2,
-                generation: None,
-            },
-        ),
         ProcessEventAppendRequest::wait_entered(&record.id, &wait),
         ProcessEventAppendRequest::wait_cleared(&record.id, &wait),
         ProcessEventAppendRequest::external_ref_set(
@@ -442,7 +430,6 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
         };
         record = projected_record;
     }
-    assert!(record.first_started.is_some());
     assert!(record.waits().is_empty());
     assert!(record.external_ref.is_some());
 }

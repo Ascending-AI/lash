@@ -4,8 +4,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::super::OpenerState;
 use super::{
-    RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionProcessEventContext,
-    RuntimeExecutionTracing, RuntimeProcessExecution, ToolDispatchContext,
+    RecordedTurnCancel, RuntimeExecutionContext, RuntimeExecutionTracing, RuntimeProcessExecution,
+    ToolDispatchContext,
 };
 
 impl RuntimeExecutionContext<'_> {
@@ -54,7 +54,6 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
         self,
         process: &crate::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
-        event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self;
 
     /// Starts this execution's recorded turn-cancel fact, unset: `lent` is
@@ -150,7 +149,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
         mut self,
         process: &crate::ProcessRecord,
         env: Option<Arc<crate::ProcessEnv>>,
-        event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
@@ -164,7 +162,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             process_id: process.id.clone(),
             provenance: process.provenance.clone(),
             enclosing: enclosing_process(process, env),
-            event_context: event_context.into(),
         });
         self
     }

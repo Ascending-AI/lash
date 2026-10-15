@@ -91,7 +91,7 @@ async fn a_follower_behind_the_bridge_bound_gaps_and_republishes_nothing() {
     let snapshot = observed.snapshot().await.expect("snapshot");
     let window = snapshot.cursor.clone();
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
-    fixture.observe_node(1, "node kept").await;
+    fixture.observe_node(0, "node kept").await;
     expect_event(next(&mut feed).await, "node kept");
 
     fixture.commit().await;

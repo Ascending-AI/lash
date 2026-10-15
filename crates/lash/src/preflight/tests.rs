@@ -518,22 +518,22 @@ async fn a_report_always_names_the_formats_no_walk_enumerates() {
 #[tokio::test]
 async fn a_backend_that_cannot_walk_a_surface_says_so_verbatim() {
     let store = healthy_store().unscannable(
-        DurableSurface::StartedProcess,
-        "the deployment declared no process registry",
+        DurableSurface::ModuleArtifact,
+        "the deployment declared no module store",
     );
     let report = probe_store(&store, PreflightOptions::summary())
         .await
         .expect("the probe reads the store");
     assert!(
         report.not_scanned.iter().any(|entry| {
-            entry.what() == DurableSurface::StartedProcess.name()
-                && entry.reason() == "the deployment declared no process registry"
+            entry.what() == DurableSurface::ModuleArtifact.name()
+                && entry.reason() == "the deployment declared no module store"
         }),
         "{:?}",
         report.not_scanned
     );
     assert_eq!(
-        component(&report, DurableFormat::KernelVersion).verdict,
+        component(&report, DurableFormat::KernelDocument).verdict,
         ComponentVerdict::NotScanned,
         "an unwalked surface must never read as an empty one"
     );

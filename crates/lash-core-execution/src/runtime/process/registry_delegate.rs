@@ -193,43 +193,12 @@ macro_rules! delegate_process_registrar {
 }
 pub(crate) use delegate_process_registrar;
 
-/// The supplied hook wraps each event-producing operation. Incarnation-pinned
-/// operations are still forwarded directly to the inner registry, so its
-/// atomic pair check remains authoritative through the decorator.
+/// The event log's reads, forwarded: lash appends every lifecycle event an
+/// activation commits through its owner transaction, never through a registry.
 macro_rules! delegate_process_event_log {
-    (
-        $wrapper:ty,
-        $inner:ident,
-        event |$event_self:ident, $event_process_id:ident, $event_call:ident| $event_hook:block
-    ) => {
+    ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
         impl $crate::runtime::process::registry_concerns::ProcessEventLog for $wrapper {
-            async fn append_event_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                request: $crate::ProcessEventAppendRequest,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .append_event_with_authority(process_id, request, authority);
-                $event_hook
-            }
-
-            async fn append_events(
-                &self,
-                process_id: &$crate::ProcessId,
-                requests: Vec<$crate::ProcessEventAppendRequest>,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<Vec<$crate::ProcessEventAppendReceipt>, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.append_events(process_id, requests, authority);
-                $event_hook
-            }
-
             async fn event_by_replay_key(
                 &self,
                 process_id: &$crate::ProcessId,
@@ -321,20 +290,6 @@ macro_rules! delegate_process_lifecycle {
                 self.$inner.get_parent_end_plan(parent).await
             }
 
-            async fn record_first_started_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                started: $crate::ProcessStarted,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessStartOutcome, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .record_first_started_with_authority(process_id, started, authority);
-                $event_hook
-            }
-
             async fn request_process_cancel(
                 &self,
                 process_id: &$crate::ProcessId,
@@ -366,35 +321,6 @@ macro_rules! delegate_process_lifecycle {
                     requester,
                     attribution,
                 );
-                $event_hook
-            }
-
-            async fn set_process_wait_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                wait: $crate::WaitState,
-                prelude: Vec<$crate::ProcessEventAppendRequest>,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .set_process_wait_with_authority(process_id, wait, prelude, authority);
-                $event_hook
-            }
-
-            async fn clear_process_wait_with_authority(
-                &self,
-                process_id: &$crate::ProcessId,
-                prelude: Vec<$crate::ProcessEventAppendRequest>,
-                authority: &$crate::ProcessExecutionWriteAuthority,
-            ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = process_id;
-                let $event_self = self;
-                let $event_call = self
-                    .$inner
-                    .clear_process_wait_with_authority(process_id, prelude, authority);
                 $event_hook
             }
         }

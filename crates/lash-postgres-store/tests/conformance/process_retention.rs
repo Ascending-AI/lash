@@ -3,9 +3,11 @@
 
 use super::*;
 
-/// Execute one process into `waiting` and assert the retention contract: live rows
+/// Seed one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
-async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
+async fn assert_waiting_process_is_live_not_prunable(
+    registry: &dyn lash_core_execution::ConformanceProcessRegistry,
+) {
     let process_id = &registry
         .register_process(lash_core_execution::ProcessRegistration::new(
             lash_core_execution::ProcessInput::Engine {
@@ -22,34 +24,26 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
         .await
         .expect("register waiting retention process")
         .id;
-    let authority = lash_core_execution::ProcessExecutionWriteAuthority::invocation(
-        process_id,
-        "waiting-retention-run",
-    )
-    .bind_attempt(1);
-    let started = authority
-        .invocation_started()
-        .expect("invocation authority carries its start fact");
+    let wait = lash_core_execution::WaitState {
+        since_ms: 1,
+        kind: lash_core_execution::WaitKind::Call {
+            call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
+            tool_id: lash_core_execution::ToolId::new("retention"),
+        },
+        site: None,
+    };
     registry
-        .record_first_started_with_authority(process_id, started, &authority)
-        .await
-        .expect("start waiting retention process");
-    let waiting = registry
-        .set_process_wait_with_authority(
+        .append_event_for_testing(
             process_id,
-            lash_core_execution::WaitState {
-                since_ms: 1,
-                kind: lash_core_execution::WaitKind::Call {
-                    call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
-                    tool_id: lash_core_execution::ToolId::new("retention"),
-                },
-                site: None,
-            },
-            Vec::new(),
-            &authority,
+            lash_core_execution::ProcessEventAppendRequest::wait_entered(process_id, &wait),
         )
         .await
         .expect("enter wait");
+    let waiting = registry
+        .get_process(process_id)
+        .await
+        .expect("read the waiting process")
+        .expect("the waiting process is registered");
     assert_eq!(
         waiting.status().label(),
         "waiting",

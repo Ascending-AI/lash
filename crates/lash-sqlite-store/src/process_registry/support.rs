@@ -397,27 +397,6 @@ impl SqliteProcessRegistry {
         Ok((receipt, arm))
     }
 
-    /// Stage `requests` in order as one batch (FIG-3571): each goes through
-    /// the append sequence against the in-memory projection, and the process
-    /// is saved once, advancing the change clock once, when any of them moved
-    /// it. The caller owns the transaction, so a refusal of any request
-    /// commits none.
-    pub(crate) fn append_event_batch_conn(
-        conn: &Connection,
-        record: &mut ProcessRecord,
-        requests: Vec<ProcessEventAppendRequest>,
-        occurred_at_ms: u64,
-        fleet_format: lash_core_execution::FleetFormat,
-    ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
-        let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-        let receipts = requests
-            .into_iter()
-            .map(|request| batch.stage(conn, record, request, occurred_at_ms))
-            .collect::<Result<Vec<_>, _>>()?;
-        batch.commit(conn, record)?;
-        Ok(receipts)
-    }
-
     /// The one process-event append sequence for the SQLite store, short of
     /// the process save.
     ///

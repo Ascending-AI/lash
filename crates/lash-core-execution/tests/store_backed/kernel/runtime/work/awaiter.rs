@@ -11,8 +11,7 @@ mod tests {
 
     use crate::{
         ProcessEventSink, ProcessExternalRef, ProcessInput, ProcessProvenance, ProcessRegistration,
-        ProcessStarted, TestProcessRegistryWriteExt, WaitState, WatchedRegistry,
-        watch_process_registry,
+        WatchedRegistry, watch_process_registry,
     };
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
@@ -368,37 +367,6 @@ mod tests {
             .expect("register")
             .id;
         registry
-            .record_first_started(
-                &lifecycle_id,
-                ProcessStarted {
-                    owner: crate::LeaseOwnerIdentity::engine_process_execution(
-                        &lifecycle_id,
-                        crate::LeaseIncarnationId::new("lifecycle-test"),
-                    ),
-                    attempt: 1,
-                    started_at_ms: 1,
-                    generation: None,
-                },
-            )
-            .await
-            .expect("record first start");
-        let wait = WaitState {
-            kind: crate::WaitKind::Call {
-                call_id: crate::ToolCallId::fixture("lifecycle-call"),
-                tool_id: crate::ToolId::from("lifecycle-tool"),
-            },
-            since_ms: 2,
-            site: None,
-        };
-        registry
-            .set_process_wait(&lifecycle_id, wait)
-            .await
-            .expect("enter wait");
-        registry
-            .clear_process_wait(&lifecycle_id)
-            .await
-            .expect("clear wait");
-        registry
             .set_external_ref(
                 &lifecycle_id,
                 ProcessExternalRef {
@@ -459,13 +427,7 @@ mod tests {
                 .iter()
                 .map(|(event_type, _)| event_type.as_str())
                 .collect::<Vec<_>>(),
-            vec![
-                "process.first_started",
-                "process.waiting",
-                "process.resumed",
-                "process.external_ref_set",
-                "process.cancel_requested",
-            ],
+            vec!["process.external_ref_set", "process.cancel_requested"],
             "the sink must observe every runtime lifecycle append"
         );
         assert!(

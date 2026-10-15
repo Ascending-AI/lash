@@ -363,37 +363,6 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
-    async fn append_events(
-        &self,
-        process_id: &ProcessId,
-        requests: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
-        if requests.is_empty() {
-            return Ok(Vec::new());
-        }
-        let process_id = process_id.clone();
-        let authority = authority.clone();
-        let occurred_at_ms = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
-                    Self::append_event_batch_conn(
-                        tx,
-                        &mut record,
-                        requests,
-                        occurred_at_ms,
-                        fleet_format,
-                    )
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
     async fn event_by_replay_key(
         &self,
         process_id: &ProcessId,
@@ -629,41 +598,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         parent_end::get(self, parent).await
     }
 
-    async fn record_first_started_with_authority(
-        &self,
-        process_id: &ProcessId,
-        started: ProcessStarted,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessStartOutcome, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let authority = authority.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority(
-                        &process_id,
-                        &record,
-                        &authority,
-                        Some(&started),
-                    )?;
-                    match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
-                        ProcessStartPlan::AlreadyApplied => {
-                            return Ok(ProcessStartOutcome::AlreadyApplied(record));
-                        }
-                        ProcessStartPlan::Append => {}
-                    }
-                    let request = ProcessEventAppendRequest::first_started(&process_id, &started);
-                    Self::append_event_conn(tx, &mut record, request, now, fleet_format)?;
-                    Ok(ProcessStartOutcome::Started(record))
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
     async fn request_process_cancel(
         &self,
         process_id: &ProcessId,
@@ -736,81 +670,6 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
             .await
             .map_err(process_sqlite_error)?
     }
-
-    async fn set_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        wait: lash_core_execution::WaitState,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let authority = authority.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
-                    // The run's pending prelude commits ahead of the
-                    // transition, in its transaction (FIG-3571).
-                    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-                    for request in prelude {
-                        batch.stage(tx, &mut record, request, now)?;
-                    }
-                    if let ProcessTransitionPlan::Append(request) =
-                        lash_core_execution::runtime::prepare_process_transition(
-                            &record,
-                            ProcessTransition::EnterWait(wait),
-                        )?
-                    {
-                        batch.stage(tx, &mut record, *request, now)?;
-                    }
-                    batch.commit(tx, &record)?;
-                    Ok(record)
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
-    async fn clear_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
-        let process_id = process_id.clone();
-        let authority = authority.clone();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let fleet_format = tx.fleet();
-                Ok(tx_outcome((|| {
-                    let mut record = Self::require_process_conn(tx, &process_id)?;
-                    validate_process_execution_authority(&process_id, &record, &authority, None)?;
-                    // The run's pending prelude commits ahead of the
-                    // transition, in its transaction (FIG-3571).
-                    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
-                    for request in prelude {
-                        batch.stage(tx, &mut record, request, now)?;
-                    }
-                    if let ProcessTransitionPlan::Append(request) =
-                        lash_core_execution::runtime::prepare_process_transition(
-                            &record,
-                            ProcessTransition::ClearWait,
-                        )?
-                    {
-                        batch.stage(tx, &mut record, *request, now)?;
-                    }
-                    batch.commit(tx, &record)?;
-                    Ok(record)
-                })()))
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
 }
 
 #[async_trait::async_trait]
@@ -861,25 +720,34 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
     }
 }
 
-fn validate_process_execution_authority(
-    process_id: &ProcessId,
-    record: &ProcessRecord,
-    authority: &ProcessExecutionWriteAuthority,
-    start: Option<&ProcessStarted>,
-) -> Result<(), lash_core_execution::PluginError> {
-    if let Some(started) = start {
-        authority.validate_invocation_for_start(
-            process_id,
-            started,
-            record.first_started.as_deref(),
-        )
-    } else {
-        authority.validate_invocation_for_write(process_id, record)
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessRegistryTestSupport for SqliteProcessRegistry {
+    async fn append_events_for_testing(
+        &self,
+        process_id: &ProcessId,
+        requests: Vec<ProcessEventAppendRequest>,
+    ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
+        let process_id = process_id.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let fleet_format = tx.fleet();
+                Ok(tx_outcome((|| {
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
+                    requests
+                        .into_iter()
+                        .map(|request| {
+                            Self::append_event_conn(tx, &mut record, request, now, fleet_format)
+                                .map(|(receipt, _)| receipt)
+                        })
+                        .collect()
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)?
     }
 }
-
-#[cfg(any(test, feature = "testing"))]
-impl lash_core_execution::ProcessRegistryTestSupport for SqliteProcessRegistry {}
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessAuthorityReads for SqliteProcessRegistry {

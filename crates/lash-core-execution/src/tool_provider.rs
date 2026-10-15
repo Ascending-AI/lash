@@ -732,8 +732,6 @@ pub(crate) struct ToolContext<'run> {
 pub struct ToolChildProcessStarted {
     /// The minted id of the child process that started.
     pub process_id: ProcessId,
-    /// Durable execution attempt, when the observer saw the child after admission.
-    pub attempt: Option<u32>,
     /// Optional tool-defined name for the child entry point.
     pub child_entry_name: Option<String>,
 }

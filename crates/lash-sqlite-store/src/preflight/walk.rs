@@ -64,8 +64,7 @@ pub(super) async fn scan_durable(
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
     let target: DatabaseTarget = match scan.surface {
-        DurableSurface::StartedProcess
-        | DurableSurface::ModuleArtifact
+        DurableSurface::ModuleArtifact
         | DurableSurface::SessionCheckpoint
         | DurableSurface::SessionExecutionState => preflight.location.target(),
         // `DurableSurface` is `#[non_exhaustive]`: a surface added upstream
@@ -142,7 +141,6 @@ fn read_page(
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
     match surface {
         DurableSurface::ModuleArtifact => read_module_artifacts(conn, after, limit),
-        DurableSurface::StartedProcess => read_started_processes(conn, after, limit),
         DurableSurface::SessionCheckpoint => read_session_checkpoints(conn, after, limit),
         DurableSurface::SessionExecutionState => read_session_execution_state(conn, after, limit),
         // Unreachable: `scan_durable` routes unknown surfaces to `NotScanned`
@@ -220,38 +218,6 @@ fn limit_binding(limit: usize) -> i64 {
 /// by the emptiness check rather than by arithmetic.
 fn next_cursor(last: Option<String>, scanned_rows: usize, limit: usize) -> Option<String> {
     if scanned_rows == limit { last } else { None }
-}
-
-/// One start record per live process (FIG-3571), in key order.
-///
-/// The payload is the process record: its start stamp names the executable
-/// generation the process runs under, and only its input lets the probe
-/// recompute the generation this build would run it as. A process that has not
-/// started yet carries no stamp, and the probe reads nothing from it.
-fn read_started_processes(
-    conn: &Connection,
-    after: Option<&str>,
-    limit: usize,
-) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
-        crate::process_registry::sql::process_sql()
-            .process_sqlite
-            .list_live_for_preflight
-            .sql(),
-    )?;
-    let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        let record: String = row.get(2)?;
-        Ok(DurableItem {
-            surface: DurableSurface::StartedProcess,
-            cursor: row.get(0)?,
-            process_id: Some(crate::row_process_id(row, 0)?),
-            status: Some(row.get(1)?),
-            session_id: None,
-            owner_record: Some(record.clone()),
-            payload: DurablePayload::Json(record),
-        })
-    })?;
-    collect_page(rows, limit)
 }
 
 /// Every session that has published a checkpoint root, with the manifest blob

@@ -17,10 +17,10 @@ use lash::runtime::{ProcessCommand, ProcessListSelection};
 use lash::persistence::{
     NonTerminalProcessPage, ProcessCancelReceipt, ProcessChange, ProcessChangeKind,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessEventAppendRequest, ProcessEventLog, ProcessExecutionWriteAuthority, ProcessHandleView,
-    ProcessLifecycle, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry,
-    ProcessOpScope, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistry,
-    ProcessRetention, ProcessStartOutcome, ProcessToolIntents,
+    ProcessEventAppendRequest, ProcessEventLog, ProcessHandleView, ProcessLifecycle,
+    ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry, ProcessOpScope,
+    ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistry, ProcessRetention,
+    ProcessToolIntents,
 };
 use lash::process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
@@ -38,12 +38,11 @@ use lash::process::{
     ProcessLineage, ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter,
     ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessRegistration,
     ProcessRegistryCursor, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
-    ProcessSignature, ProcessStartOptions, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone, ProcessToolVisibilityFilter,
-    ProcessWorkObserver, ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, Processes,
-    ProjectionWatermark, ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope,
-    SessionScopeId, StartCx, StartCxError, WaitKind, WaitState, WatchedRegistry, lifetime,
-    watch_process_registry,
+    ProcessSignature, ProcessStartOptions, ProcessStartRequest, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalWait, ProcessTombstone, ProcessToolVisibilityFilter, ProcessWorkObserver,
+    ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark,
+    ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx,
+    StartCxError, WaitKind, WaitState, WatchedRegistry, lifetime, watch_process_registry,
 };
 // FIG-4656: the lifecycle state a record holds, the outcome a terminal state
 // owns, the statuses derived from them, and the start target a request names.

@@ -398,6 +398,8 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
 /// chooses, whose feeds look at the durable process only when told to.
 struct Dispatch {
     registry: Arc<dyn lash_core::ProcessRegistry>,
+    /// The same registry, seeding the commits an owner makes.
+    seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
     replay: Arc<dyn ProcessReplayStore>,
     publisher: Arc<LanguageObservationPublisher>,
 }
@@ -412,10 +414,12 @@ impl Dispatch {
             events,
             bytes,
         ));
+        let registry = crate::tests::sqlite_memory_store_set()
+            .await
+            .process_registry();
         Self {
-            registry: crate::tests::sqlite_memory_store_set()
-                .await
-                .process_registry(),
+            registry: registry.clone(),
+            seeding: registry,
             replay,
             publisher,
         }
@@ -450,24 +454,23 @@ impl Dispatch {
         }
     }
 
-    /// Commit the process's execution start, unpublished, and answer the
-    /// authority its later appends are written under.
-    async fn commit_started(
-        &self,
-        process: &ProcessId,
-    ) -> lash_core::ProcessExecutionWriteAuthority {
-        let authority =
-            lash_core::ProcessExecutionWriteAuthority::invocation(process.clone(), "dispatched")
-                .bind_attempt(1);
-        self.registry
-            .record_first_started_with_authority(
+    /// Commit one lifecycle fact of `process` as its owner does, unpublished.
+    async fn commit_fact(&self, process: &ProcessId) {
+        let wait = lash_core::WaitState {
+            since_ms: 0,
+            kind: lash_core::WaitKind::Call {
+                call_id: lash_core::ToolCallId::fixture("dispatched"),
+                tool_id: lash_core::ToolId::from("dispatched"),
+            },
+            site: None,
+        };
+        self.seeding
+            .append_event_for_testing(
                 process,
-                authority.invocation_started().expect("started fact"),
-                &authority,
+                lash_core::ProcessEventAppendRequest::wait_entered(process, &wait),
             )
             .await
             .expect("commit without publishing");
-        authority
     }
 
     /// Admit one language observation of `process` without waking the
@@ -540,7 +543,7 @@ async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() 
     // follower discovers a durable commit. Keep it queued until recovery
     // starts the publisher, making the ordering independent of scheduling.
     dispatch.admit_language(&process, "accepted-first");
-    dispatch.commit_started(&process).await;
+    dispatch.commit_fact(&process).await;
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let first = next(&mut feed).await;
     assert!(
@@ -613,7 +616,7 @@ async fn a_feed_whose_reconcile_publication_overflowed_gaps_and_keeps_delivering
     let noisy = ProcessId::fixture("noisy-process");
     let observed = dispatch.observe(&followed);
     let snapshot = observed.snapshot().await.expect("snapshot before commit");
-    dispatch.commit_started(&followed).await;
+    dispatch.commit_fact(&followed).await;
 
     // The worker takes the noisy process's observation first and stalls in
     // the store; the feed's reconciled fact waits behind that round.
@@ -677,7 +680,7 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
         };
         let large = dispatch.register().await;
         let other = dispatch.register().await;
-        let authority = dispatch.commit_started(&large).await;
+        dispatch.commit_fact(&large).await;
         let observed = dispatch.observe(&large);
         let snapshot = observed.snapshot().await.expect("snapshot");
         let mut large_feed = observed.subscribe_and_recover(snapshot.cursor);
@@ -697,11 +700,10 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
             site: None,
         };
         let oversized = dispatch
-            .registry
-            .append_event_with_authority(
+            .seeding
+            .append_event_for_testing(
                 &large,
                 lash_core::ProcessEventAppendRequest::wait_entered(&large, &wait),
-                &authority,
             )
             .await
             .expect("commit the oversized fact")

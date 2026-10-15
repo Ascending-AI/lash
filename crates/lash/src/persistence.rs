@@ -17,11 +17,11 @@ pub use lash_core::{
 pub use lash_core::{
     NonTerminalProcessPage, ProcessCancelReceipt, ProcessChange, ProcessChangeKind,
     ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessEventAppendRequest, ProcessEventLog, ProcessExecutionWriteAuthority, ProcessHandleView,
-    ProcessLifecycle, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry,
-    ProcessOpScope, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistrationReceipt,
-    ProcessRegistry, ProcessRetention, ProcessRosterRecords, ProcessStartOutcome,
-    ProcessStartReceipt, ProcessToolIntents, StagedProcessStart,
+    ProcessEventAppendRequest, ProcessEventLog, ProcessHandleView, ProcessLifecycle,
+    ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry, ProcessOpScope,
+    ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistrationReceipt, ProcessRegistry,
+    ProcessRetention, ProcessRosterRecords, ProcessStartReceipt, ProcessToolIntents,
+    StagedProcessStart,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).

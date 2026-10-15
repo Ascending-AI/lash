@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::effect_summary::{ProcessEffectOccurrence, ProcessEffectOmissions};
-use super::model::{ProcessExternalRef, ProcessId, ProcessObserverBy, ProcessStarted, WaitState};
+use super::model::{ProcessExternalRef, ProcessId, ProcessObserverBy, WaitState};
 
 /// Who wrote an [`ProcessStatus::Abandoned`] terminal (ADR 0110).
 ///
@@ -164,7 +164,6 @@ macro_rules! process_event_kinds {
 }
 
 process_event_kinds! {
-    FirstStarted => "process.first_started",
     Waiting => "process.waiting",
     Resumed => "process.resumed",
     EffectOutcome => "process.effect_outcome",
@@ -236,8 +235,6 @@ impl std::fmt::Display for ProcessEventKind {
 /// ([`Self::payload`]), and read back through [`Self::decode`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessLifecycleFact {
-    /// An execution attempt started.
-    Started { started: ProcessStarted },
     /// The process parked on a wait.
     Waiting { wait: WaitState },
     /// The wait the process was parked on ended.
@@ -280,7 +277,6 @@ impl ProcessLifecycleFact {
     /// This fact's kind.
     pub fn kind(&self) -> ProcessEventKind {
         match self {
-            Self::Started { .. } => ProcessEventKind::FirstStarted,
             Self::Waiting { .. } => ProcessEventKind::Waiting,
             Self::Resumed { .. } => ProcessEventKind::Resumed,
             Self::EffectOutcome(_) => ProcessEventKind::EffectOutcome,
@@ -316,7 +312,6 @@ impl ProcessLifecycleFact {
     )]
     pub fn payload(&self) -> serde_json::Value {
         match self {
-            Self::Started { started } => serde_json::json!({ "started": started }),
             Self::Waiting { wait } | Self::Resumed { wait } => serde_json::json!({ "wait": wait }),
             Self::EffectOutcome(occurrence) => {
                 serde_json::to_value(occurrence).expect("an effect occurrence serializes")
@@ -398,12 +393,6 @@ impl ProcessLifecycleFact {
             })
         };
         Ok(match kind {
-            ProcessEventKind::FirstStarted => {
-                let fields: StartedPayload = serde_json::from_value(payload).map_err(invalid)?;
-                Self::Started {
-                    started: fields.started,
-                }
-            }
             ProcessEventKind::Waiting => Self::Waiting {
                 wait: serde_json::from_value::<WaitPayload>(payload)
                     .map_err(invalid)?
@@ -488,12 +477,6 @@ impl ProcessLifecycleFact {
         }
         identity
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StartedPayload {
-    started: ProcessStarted,
 }
 
 #[derive(Deserialize)]
@@ -1247,18 +1230,6 @@ impl ProcessEventAppendRequest {
     pub fn cancel_requested(process_id: &ProcessId, request: &CancelRequest) -> Self {
         Self::new(ProcessLifecycleFact::CancelRequested(request.clone()))
             .with_replay_key(cancellation_replay_key(process_id, request))
-    }
-
-    /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
-    /// cannot alias the preceding execution attempt.
-    pub fn first_started(process_id: &ProcessId, started: &ProcessStarted) -> Self {
-        Self::new(ProcessLifecycleFact::Started {
-            started: started.clone(),
-        })
-        .with_replay_key(format!(
-            "process:{process_id}:first-started:attempt:{}",
-            started.attempt
-        ))
     }
 
     /// Builds a wait-entry event for process-store implementors keyed by wait identity and start

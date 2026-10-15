@@ -3,7 +3,7 @@
 use super::events::{AbandonEvidence, ProcessEventKind, ProcessLifecycleFact, ProcessTerminal};
 use super::model::{
     ProcessEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessLifecycleState, ProcessOriginator, ProcessStarted, ProcessWaits, SessionId,
+    ProcessLifecycleState, ProcessOriginator, ProcessWaits, SessionId,
 };
 use super::observation::{ObservedProcess, ObservedProcessEvent, ProcessParkState};
 use lash_sansio::CancelRequest;
@@ -106,9 +106,6 @@ pub struct ProjectedObservedProcess {
     /// When the newest folded event occurred. A fact appended after the
     /// process ended moves it; the terminal time is in `lifecycle`.
     pub updated_at_ms: u64,
-    /// Durable execution-started fact, if the row has begun executing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub first_started: Option<ProcessStarted>,
     /// The first accepted process cancellation request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<CancelRequest>,
@@ -139,7 +136,6 @@ impl ObservedProcess {
             identity: self.identity.clone(),
             created_at_ms: self.created_at_ms,
             updated_at_ms: self.updated_at_ms,
-            first_started: self.first_started.clone(),
             cancel_request: self.cancel_request.clone(),
             input: self.input.clone(),
             originator: self.originator.clone(),

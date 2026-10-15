@@ -207,7 +207,8 @@ mod tests {
     #[tokio::test]
     async fn an_observed_process_carries_its_typed_outcome_or_its_wait_in_one_read() {
         let stores = crate::support::sqlite_memory_process_store_set().await;
-        let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
+        let seeding = stores.process_registry();
+        let registry: Arc<dyn ProcessRegistry> = seeding.clone();
         let observer = observer(Arc::clone(&registry));
         let actor_observer = observer
             .clone()
@@ -273,16 +274,6 @@ mod tests {
             .await
             .expect("register")
             .id;
-        let authority = crate::ProcessExecutionWriteAuthority::invocation(&id, "observation-law")
-            .bind_attempt(1);
-        registry
-            .record_first_started_with_authority(
-                &id,
-                authority.invocation_started().expect("an invocation start"),
-                &authority,
-            )
-            .await
-            .expect("start the process");
         let wait = crate::WaitState {
             kind: crate::WaitKind::Call {
                 call_id: crate::ToolCallId::fixture("observation-law"),
@@ -291,10 +282,13 @@ mod tests {
             since_ms: 3,
             site: None,
         };
-        registry
-            .set_process_wait_with_authority(&id, wait.clone(), Vec::new(), &authority)
-            .await
-            .expect("enter the wait");
+        crate::ProcessRegistryTestSupport::append_event_for_testing(
+            seeding.as_ref(),
+            &id,
+            crate::ProcessEventAppendRequest::wait_entered(&id, &wait),
+        )
+        .await
+        .expect("enter the wait");
         let seen = observer
             .process(&id)
             .await

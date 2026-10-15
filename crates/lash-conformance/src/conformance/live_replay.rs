@@ -254,7 +254,7 @@ async fn session_payloads_and_turns_survive_the_store(store: Arc<dyn LiveReplayS
         revision,
         None,
         SessionObservationEventPayload::ProcessChanged {
-            kind: SessionProcessEventKind::Started { sequence: 1 },
+            kind: SessionProcessEventKind::Waiting { sequence: 1 },
             process_ids: vec![crate::ProcessId::fixture("proc-b")],
         },
     )
@@ -287,8 +287,8 @@ async fn session_payloads_and_turns_survive_the_store(store: Arc<dyn LiveReplayS
     else {
         panic!("a replay from the session's first cursor continues");
     };
-    let started = format!(
-        "process:Started {{ sequence: 1 }}:{}",
+    let waiting = format!(
+        "process:Waiting {{ sequence: 1 }}:{}",
         crate::ProcessId::fixture("proc-b")
     );
     assert_eq!(
@@ -296,7 +296,7 @@ async fn session_payloads_and_turns_survive_the_store(store: Arc<dyn LiveReplayS
             .iter()
             .map(|event| live_replay_event_label(event))
             .collect::<Vec<_>>(),
-        ["alpha one", started.as_str(), "queue:Enqueued:batch-a"]
+        ["alpha one", waiting.as_str(), "queue:Enqueued:batch-a"]
     );
     assert_eq!(replayed[0].turn_id.as_deref(), Some("alpha-turn"));
     assert_eq!(replayed[1].turn_id, None);

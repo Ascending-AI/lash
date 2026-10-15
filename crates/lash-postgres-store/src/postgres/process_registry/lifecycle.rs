@@ -67,31 +67,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         parent_end::get(&self.pool, parent, self.fence.fleet()).await
     }
 
-    async fn record_first_started_with_authority(
-        &self,
-        process_id: &ProcessId,
-        started: ProcessStarted,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessStartOutcome, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = self.clock.timestamp_ms();
-        validate_process_execution_authority(process_id, &record, authority, Some(&started))?;
-        match lash_core_execution::runtime::prepare_process_start(&record, &started)? {
-            ProcessStartPlan::AlreadyApplied => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(ProcessStartOutcome::AlreadyApplied(record));
-            }
-            ProcessStartPlan::Append => {}
-        }
-        let request = ProcessEventAppendRequest::first_started(process_id, &started);
-        append_process_event_tx(&mut tx, &mut record, request, now, self.fence.fleet()).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(ProcessStartOutcome::Started(record))
-    }
-
     async fn request_process_cancel(
         &self,
         process_id: &ProcessId,
@@ -138,73 +113,6 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             }
         })
         .await
-    }
-
-    async fn set_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        wait: lash_core_execution::WaitState,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        validate_process_execution_authority(process_id, &record, authority, None)?;
-        let occurred_at_ms = self.clock.timestamp_ms();
-        // The run's pending prelude commits ahead of the transition, in its
-        // transaction (FIG-3571).
-        let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
-        for request in prelude {
-            batch
-                .stage(&mut tx, &mut record, request, occurred_at_ms)
-                .await?;
-        }
-        if let ProcessTransitionPlan::Append(request) =
-            lash_core_execution::runtime::prepare_process_transition(
-                &record,
-                ProcessTransition::EnterWait(wait),
-            )?
-        {
-            batch
-                .stage(&mut tx, &mut record, *request, occurred_at_ms)
-                .await?;
-        }
-        batch.commit(&mut tx, &record).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
-    }
-
-    async fn clear_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let now = self.clock.timestamp_ms();
-        validate_process_execution_authority(process_id, &record, authority, None)?;
-        // The run's pending prelude commits ahead of the transition, in its
-        // transaction (FIG-3571).
-        let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
-        for request in prelude {
-            batch.stage(&mut tx, &mut record, request, now).await?;
-        }
-        if let ProcessTransitionPlan::Append(request) =
-            lash_core_execution::runtime::prepare_process_transition(
-                &record,
-                ProcessTransition::ClearWait,
-            )?
-        {
-            batch.stage(&mut tx, &mut record, *request, now).await?;
-        }
-        batch.commit(&mut tx, &record).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(record)
     }
 }
 

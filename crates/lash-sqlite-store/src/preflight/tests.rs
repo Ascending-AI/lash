@@ -255,50 +255,15 @@ mod walk {
     use lash_core_execution::{
         DurablePayload, DurableScan, DurableSurface, ScanCoverage, StorePreflight,
     };
-    use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
-    use lash_sansio::ProcessId;
 
     use super::super::SqliteStorePreflight;
-    use crate::{SqliteProcessRegistry, SqliteStore};
+    use crate::SqliteStore;
 
-    const EVERY_SURFACE: [DurableSurface; 4] = [
+    const EVERY_SURFACE: [DurableSurface; 3] = [
         DurableSurface::ModuleArtifact,
-        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ];
-
-    fn registration() -> lash_core_execution::ProcessRegistration {
-        lash_core::testing::held_engine_registration(
-            serde_json::Value::Null,
-            lash_core_execution::ProcessProvenance::session(
-                lash_core_execution::SessionScope::new("session"),
-            ),
-            lash_core_execution::Lifetime::Detached,
-        )
-    }
-
-    /// Register a live process and answer the id the registrar minted.
-    async fn live_process(registry: &SqliteProcessRegistry) -> ProcessId {
-        registry
-            .register_process(registration())
-            .await
-            .expect("register process")
-            .id
-    }
-
-    async fn complete(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
-        registry
-            .complete_process(
-                process_id,
-                lash_core_execution::ProcessAwaitOutput::from_tool_output(
-                    lash_core_execution::ToolCallOutput::success(serde_json::json!({"ok": true})),
-                ),
-                lash_core_execution::ProcessCompletionAuthority::workflow_key(process_id),
-            )
-            .await
-            .expect("complete process");
-    }
 
     #[tokio::test]
     async fn an_unprovisioned_deployment_scans_every_surface_and_creates_nothing() {
@@ -364,68 +329,53 @@ mod walk {
         }
     }
 
-    /// C8 (FIG-3571): every live process is walked with its record, which
-    /// carries the start stamp the probe judges; a terminal one is not.
-    #[tokio::test]
-    async fn a_live_process_is_walked_with_its_record_and_a_terminal_one_is_not() {
-        let root = super::temp_root();
-        let path = root.path().join("lash.db");
-        let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
-            .await
-            .expect("open registry");
-        let live = registry
-            .register_process(registration())
-            .await
-            .expect("register process")
-            .id;
-        let done = registry
-            .register_process(registration())
-            .await
-            .expect("register process")
-            .id;
-        complete(&registry, &done).await;
-        drop(registry);
-
-        let page = SqliteStorePreflight::for_database_file(root.path().join("lash.db"))
-            .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 10))
-            .await
-            .expect("walk started processes");
-
-        assert_eq!(page.coverage, ScanCoverage::Scanned);
-        assert_eq!(page.next, None, "a short page ends the surface");
-        assert_eq!(page.items.len(), 1, "{:?}", page.items);
-        let item = &page.items[0];
-        assert_eq!(item.surface, DurableSurface::StartedProcess);
-        assert_eq!(item.process_id.as_ref(), Some(&live));
-        assert_eq!(item.cursor, live.as_str());
-        match &item.payload {
-            DurablePayload::Json(json) => assert!(json.contains(live.as_str()), "{json}"),
-            other => panic!("expected the stored record JSON, got {other:?}"),
-        }
+    /// Publish a kernel document whose main returns `answer`, answering the
+    /// identity its module artifact is keyed by.
+    async fn publish_module(store: &SqliteStore, answer: &str) -> String {
+        let document = lash_kernel_doc::parse_document(&format!(
+            "numbers by_spelling\nkernel 1\nmain {{ return \"{answer}\" }}"
+        ))
+        .expect("kernel document");
+        let identity = document.identity().expect("document identity").to_string();
+        let json = document.to_json().expect("canonical document JSON");
+        lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+            store,
+            &lash_core_execution::ReferrerClaim::unguarded(
+                lash_core_execution::ArtifactReferrer::HostPin(
+                    lash_core_execution::HostArtifactPin::mint(),
+                ),
+            )
+            .expect("host pin claim"),
+            identity.as_str(),
+            json.as_bytes(),
+        )
+        .await
+        .expect("persist module artifact");
+        identity
     }
 
     #[tokio::test]
     async fn paging_returns_every_item_exactly_once() {
         let root = super::temp_root();
-        let path = root.path().join("lash.db");
-        let registry = SqliteProcessRegistry::open_standalone_for_testing(&path)
+        let core = root.path().join("lash.db");
+        let store = SqliteStore::open_file_for_testing(&core)
             .await
-            .expect("open registry");
-        let first_process = live_process(&registry).await;
-        let second_process = live_process(&registry).await;
-        drop(registry);
+            .expect("provision durable core");
+        let mut identities = [
+            publish_module(&store, "first").await,
+            publish_module(&store, "second").await,
+        ];
+        identities.sort();
+        drop(store);
 
         let preflight = SqliteStorePreflight::for_database_file(root.path().join("lash.db"));
 
         let first = preflight
-            .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 1))
+            .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 1))
             .await
             .expect("first page");
         assert_eq!(first.items.len(), 1);
-        assert_eq!(
-            first.items[0].process_id.as_deref(),
-            Some(first_process.as_str())
-        );
+        assert_eq!(first.items[0].cursor, identities[0]);
         let cursor = first
             .next
             .clone()
@@ -434,7 +384,7 @@ mod walk {
 
         let second = preflight
             .scan_durable(&DurableScan::after(
-                DurableSurface::StartedProcess,
+                DurableSurface::ModuleArtifact,
                 cursor,
                 1,
             ))
@@ -442,14 +392,13 @@ mod walk {
             .expect("second page");
         assert_eq!(second.items.len(), 1);
         assert_eq!(
-            second.items[0].process_id.as_deref(),
-            Some(second_process.as_str()),
+            second.items[0].cursor, identities[1],
             "resuming after a cursor must not repeat the item it names"
         );
 
         let third = preflight
             .scan_durable(&DurableScan::after(
-                DurableSurface::StartedProcess,
+                DurableSurface::ModuleArtifact,
                 second.items[0].cursor.clone(),
                 1,
             ))

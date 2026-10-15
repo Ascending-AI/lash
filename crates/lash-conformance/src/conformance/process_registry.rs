@@ -72,7 +72,7 @@ pub async fn process_registry_cancellation_reopen_contract(handles: ReopenablePr
 }
 
 pub async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     event_release::releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(registry)
         .await;
@@ -84,7 +84,9 @@ pub async fn long_cancellation_requester_replay_is_backend_safe(
     event_replay::long_cancellation_requester_replay_is_backend_safe(registry).await;
 }
 
-pub async fn an_unstamped_cancelled_terminal_replay_coalesces(registry: Arc<dyn ProcessRegistry>) {
+pub async fn an_unstamped_cancelled_terminal_replay_coalesces(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
     event_replay::an_unstamped_cancelled_terminal_replay_coalesces(registry).await;
 }
 
@@ -473,7 +475,7 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
     reason = "conformance fixture establishes each result"
 )]
 pub async fn record_fold_and_retention_hold_for_every_registry_writer(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     refolded_process_record_matches_stored_projection(
         Arc::clone(&registry),
@@ -481,6 +483,7 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
         "process-refold-hot",
     )
     .await;
+    let registry: Arc<dyn ProcessRegistry> = registry;
     let base = registry
         .register_process(registration("refold-completed"))
         .await
@@ -600,7 +603,9 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
     );
 }
 
-pub async fn process_event_pages_reject_out_of_range_sequences(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_event_pages_reject_out_of_range_sequences(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
     event_paging::assert_out_of_range_sequences_are_rejected(registry).await;
 }
 
@@ -624,7 +629,7 @@ pub async fn lifecycle_transition_refusals_are_backend_invariant(
 /// return to: it is refused typed, writes no event, and the record keeps the
 /// status its outcome derives (FIG-4656 F17).
 pub async fn a_resume_event_cannot_return_an_ended_process_to_running(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     lifecycle::a_resume_event_cannot_return_an_ended_process_to_running(registry).await;
 }
@@ -953,10 +958,11 @@ pub async fn non_terminal_page_bound_defers_beyond_bound_insert(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn refolded_process_record_matches_stored_projection(
-    writer: Arc<dyn ProcessRegistry>,
+    writer: Arc<dyn crate::ConformanceProcessRegistry>,
     reader: Arc<dyn ProcessRegistry>,
     case: &str,
 ) {
+    let cold = !Arc::ptr_eq(&(Arc::clone(&writer) as Arc<dyn ProcessRegistry>), &reader);
     let base = writer
         .register_process(ProcessRegistration::new(
             ProcessInput::Engine {
@@ -974,25 +980,6 @@ async fn refolded_process_record_matches_stored_projection(
         .expect("register refold process");
     let process_id = &base.id.clone();
     assert_refold_matches_stored_projection(&reader, &base, process_id, "registration").await;
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        (*process_id).clone(),
-        format!("refold-worker:{process_id}"),
-    )
-    .bind_attempt(1);
-    writer
-        .record_first_started_with_authority(
-            process_id,
-            crate::ProcessStarted {
-                owner: authority.owner_identity(),
-                attempt: 1,
-                started_at_ms: base.created_at_ms,
-                generation: None,
-            },
-            &authority,
-        )
-        .await
-        .expect("record refold first start");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
     let wait = WaitState {
         since_ms: i64::try_from(base.created_at_ms).unwrap_or(i64::MAX),
         kind: crate::WaitKind::Call {
@@ -1002,12 +989,18 @@ async fn refolded_process_record_matches_stored_projection(
         site: None,
     };
     writer
-        .set_process_wait_with_authority(process_id, wait, Vec::new(), &authority)
+        .append_event_for_testing(
+            process_id,
+            ProcessEventAppendRequest::wait_entered(process_id, &wait),
+        )
         .await
         .expect("enter refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait entered").await;
     writer
-        .clear_process_wait_with_authority(process_id, Vec::new(), &authority)
+        .append_event_for_testing(
+            process_id,
+            ProcessEventAppendRequest::wait_cleared(process_id, &wait),
+        )
         .await
         .expect("clear refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait cleared").await;
@@ -1017,7 +1010,7 @@ async fn refolded_process_record_matches_stored_projection(
             crate::ProcessExternalRef {
                 backend: "refold-conformance".to_string(),
                 id: format!("external:{process_id}"),
-                metadata: Some(serde_json::json!({"cold": !Arc::ptr_eq(&writer, &reader)})),
+                metadata: Some(serde_json::json!({ "cold": cold })),
                 segment_ordinal: None,
             },
         )
@@ -1031,12 +1024,12 @@ async fn refolded_process_record_matches_stored_projection(
         serde_json::json!({"call": "ready"}),
     );
     let first_wait = writer
-        .append_event_with_authority(process_id, entered_wait.clone(), &authority)
+        .append_event_for_testing(process_id, entered_wait.clone())
         .await
         .expect("append refold wait");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait appended").await;
     let replayed_wait = writer
-        .append_event_with_authority(process_id, entered_wait, &authority)
+        .append_event_for_testing(process_id, entered_wait)
         .await
         .expect("replay refold wait");
     assert_eq!(
@@ -1045,21 +1038,20 @@ async fn refolded_process_record_matches_stored_projection(
     );
     assert_refold_matches_stored_projection(&reader, &base, process_id, "wait replayed").await;
     writer
-        .append_event_with_authority(
+        .append_event_for_testing(
             process_id,
             call_wait_event(
                 process_id,
                 "ready",
-                "authorized",
-                serde_json::json!("authorized append"),
+                "single",
+                serde_json::json!("single append"),
             ),
-            &authority,
         )
         .await
-        .expect("authorized event writer");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "authorized append").await;
+        .expect("single event writer");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "single append").await;
     let batch = writer
-        .append_events(
+        .append_events_for_testing(
             process_id,
             vec![
                 call_wait_event(
@@ -1075,7 +1067,6 @@ async fn refolded_process_record_matches_stored_projection(
                     serde_json::json!("batch second"),
                 ),
             ],
-            &authority,
         )
         .await
         .expect("batch event writer");
@@ -1123,57 +1114,6 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("remove refold observer");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "observer removed").await;
-    let faults = Arc::new(crate::testing::ProcessRegistryFaults::new(writer.clone()));
-    let watched = lash_core::facade_support::watch_process_registry(faults.clone());
-    let sink = Arc::new(RefoldSink::default());
-    let _sink_guard = watched.add_event_sink(sink.clone());
-    let before = reader
-        .full_event_window(process_id, 0)
-        .await
-        .expect("event preimage");
-    faults.fail_next_event_append(PluginError::Session("injected failed commit".to_string()));
-    assert!(
-        watched
-            .registry()
-            .append_event_with_authority(
-                process_id,
-                call_wait_event(process_id, "ready", "failed", serde_json::json!("failed")),
-                &authority
-            )
-            .await
-            .is_err()
-    );
-    assert!(
-        sink.0.lock().expect("sink lock").is_empty(),
-        "a failed append publishes no event"
-    );
-    assert_eq!(
-        serde_json::to_value(
-            reader
-                .full_event_window(process_id, 0)
-                .await
-                .expect("failed append log")
-        )
-        .expect("serialize log"),
-        serde_json::to_value(before).expect("serialize preimage")
-    );
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "failed append").await;
-    watched
-        .registry()
-        .append_event_with_authority(
-            process_id,
-            call_wait_event(
-                process_id,
-                "ready",
-                "committed",
-                serde_json::json!("committed"),
-            ),
-            &authority,
-        )
-        .await
-        .expect("positive publication control");
-    assert_eq!(sink.0.lock().expect("sink lock").len(), 1);
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "published append").await;
     writer
         .complete_process_with_prelude(
             process_id,
@@ -1223,7 +1163,10 @@ async fn assert_refold_matches_stored_projection(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn ProcessRegistry>) {
+pub async fn waiting_processes_remain_in_the_non_terminal_scan(
+    seeding: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    let registry: Arc<dyn ProcessRegistry> = seeding.clone();
     let definition = serde_json::json!({"suite": "waiting-non-terminal-scan"});
     let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     let count_before = registry
@@ -1254,34 +1197,20 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
         .await
         .expect("register waiting process");
     let process_id = record.id.clone();
-    let authority = crate::ProcessExecutionWriteAuthority::invocation(
-        process_id.clone(),
-        format!("waiting-scan:{process_id}"),
-    )
-    .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
+    seeding
+        .append_event_for_testing(
             &process_id,
-            authority
-                .invocation_started()
-                .expect("the authority is bound to attempt one"),
-            &authority,
-        )
-        .await
-        .expect("start the waiting process");
-    registry
-        .set_process_wait_with_authority(
-            &process_id,
-            WaitState {
-                since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
-                kind: crate::WaitKind::Call {
-                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
-                    tool_id: lash_sansio::ToolId::new("process_wait"),
+            ProcessEventAppendRequest::wait_entered(
+                &process_id,
+                &WaitState {
+                    since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
+                    kind: crate::WaitKind::Call {
+                        call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                        tool_id: lash_sansio::ToolId::new("process_wait"),
+                    },
+                    site: None,
                 },
-                site: None,
-            },
-            Vec::new(),
-            &authority,
+            ),
         )
         .await
         .expect("park process");
@@ -1477,7 +1406,10 @@ pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessReg
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn ProcessRegistry>) {
+pub async fn tombstones_make_pruned_processes_distinguishable(
+    seeding: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    let registry: Arc<dyn ProcessRegistry> = seeding.clone();
     let process_id = registry
         .register_process(registration("pruned-tombstone"))
         .await
@@ -1544,15 +1476,10 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
     ));
     event_paging::assert_pruned_history(&registry, &process_id, pruned_at_ms).await;
     assert!(matches!(
-        registry
-            .append_event_with_authority(
+        seeding
+            .append_event_for_testing(
                 &process_id,
                 call_wait_event(&process_id, "after-prune", "1", serde_json::Value::Null),
-                &crate::ProcessExecutionWriteAuthority::invocation(
-                    process_id.clone(),
-                    "after-prune",
-                )
-                .bind_attempt(1),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
@@ -1634,7 +1561,7 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
     let open: Arc<dyn ProcessRegistry> = handles.open.clone();
     let reopen: Arc<dyn ProcessRegistry> = handles.reopen.clone();
     refolded_process_record_matches_stored_projection(
-        Arc::clone(&open),
+        Arc::clone(&handles.open),
         Arc::clone(&reopen),
         "process-refold-cold",
     )
@@ -1675,18 +1602,6 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
     assert_process_count_conservation(&reopen, conservation)
         .await
         .expect("process counts conserve after reopen");
-}
-
-#[derive(Default)]
-struct RefoldSink(std::sync::Mutex<Vec<crate::ProcessEvent>>);
-#[async_trait::async_trait]
-impl crate::ProcessEventSink for RefoldSink {
-    async fn emit(&self, event: &crate::ProcessEvent) {
-        self.0
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .push(event.clone());
-    }
 }
 
 struct ReattachingWorkPort {

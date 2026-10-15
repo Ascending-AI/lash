@@ -274,6 +274,13 @@ impl LashCore {
         self.substrate_slot.setup.process.watched().hub()
     }
 
+    /// The watch over this core's process registry, which publishes what an
+    /// owner's commit appended.
+    #[cfg(test)]
+    pub(crate) fn process_watch(&self) -> &lash_core::runtime::WatchedRegistry {
+        self.substrate_slot.setup.process.watched()
+    }
+
     /// The hub that ticks once this core's sinks, its observation
     /// dispatcher among them, were handed what a commit appended to a
     /// process's log, and when another node appended to it.

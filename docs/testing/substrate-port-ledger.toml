@@ -21859,9 +21859,9 @@ lane = "L7b"
 laws = [
   "a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name",
 ]
-disposition = "covered-by:crates/lash/src/preflight/extract.rs::a_started_process_is_judged_by_its_start_stamp"
+disposition = "subject-deleted"
 status = "deleted"
-note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; FIG-6292 deleted the start stamp preflight judged a started process by, so a kernel is refused at claim by its actor's format requirement"
 
 [[row]]
 path = "crates/lash/src/preflight/tests.rs"

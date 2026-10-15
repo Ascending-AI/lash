@@ -73,12 +73,11 @@ use lash_core::{
     ExecutionScope, LlmUsage, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput,
     ProcessChangeCursor, ProcessChangeKind, ProcessCompletionAuthority, ProcessEnv, ProcessEnvRef,
-    ProcessEnvStore, ProcessEventLogTestSupport as _, ProcessExecutionWriteAuthority,
-    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessStatus, ProjectionWatermark, ReferrerClaim, RuntimeCommit,
-    RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload,
-    SessionRelation, SessionStoreCreateRequest, StoreError, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    ProcessEnvStore, ProcessEventLogTestSupport as _, ProcessIdentity, ProcessInput,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
+    ProjectionWatermark, ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode,
+    SessionCreationHead, SessionNodePayload, SessionRelation, SessionStoreCreateRequest,
+    StoreError, TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -421,45 +420,21 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         waiting_process_id(),
         "the seed's registry mints sequentially"
     );
-    let authority =
-        ProcessExecutionWriteAuthority::invocation(waiting_process_id(), "durable-read-fixture")
-            .bind_attempt(1);
-    let started = authority
-        .invocation_started()
-        .expect("bound fixture invocation has a started fact");
     handles
         .processes
-        .record_first_started_with_authority(&waiting_process_id(), started, &authority)
-        .await
-        .expect("record fixture invocation start");
-    handles
-        .processes
-        .set_process_wait_with_authority(
+        .append_events_for_testing(
             &waiting_process_id(),
-            fixture_wait_state(),
-            Vec::new(),
-            &authority,
+            vec![
+                lash_core::ProcessEventAppendRequest::wait_entered(
+                    &waiting_process_id(),
+                    &fixture_wait_state(),
+                ),
+                fixture_effect_outcome().append_request(),
+                fixture_effect_omissions().append_request(FIXTURE_EFFECT_OMISSIONS_KEY),
+            ],
         )
         .await
-        .expect("persist fixture process wait state");
-    handles
-        .processes
-        .append_event_with_authority(
-            &waiting_process_id(),
-            fixture_effect_outcome().append_request(),
-            &authority,
-        )
-        .await
-        .expect("persist fixture effect outcome");
-    handles
-        .processes
-        .append_event_with_authority(
-            &waiting_process_id(),
-            fixture_effect_omissions().append_request(FIXTURE_EFFECT_OMISSIONS_KEY),
-            &authority,
-        )
-        .await
-        .expect("persist fixture effect omissions");
+        .expect("persist fixture process wait state and effect events");
 
     lash_core::testing::process_execution_env_fixture(handles.process_envs.as_ref()).await;
     let running_process_id = handles
@@ -816,7 +791,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .full_event_window(&waiting_process_id(), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
-    assert_eq!(process_events.len(), 5);
+    assert_eq!(process_events.len(), 4);
     assert_eq!(process_events[0].sequence, 1);
     assert_eq!(
         process_events[0].fact.event_type(),
@@ -831,33 +806,31 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: observer-added event payload changed"
     );
     assert_eq!(process_events[1].sequence, 2);
-    assert_eq!(process_events[1].fact.event_type(), "process.first_started");
-    assert_eq!(process_events[2].sequence, 3);
-    assert_eq!(process_events[2].fact.event_type(), "process.waiting");
+    assert_eq!(process_events[1].fact.event_type(), "process.waiting");
     assert_eq!(
-        process_events[2].fact.payload(),
+        process_events[1].fact.payload(),
         serde_json::json!({"wait": fixture_wait_state()}),
         "durable fixture semantic drift: waiting-process event payload changed"
     );
     assert_eq!(
-        process_events[3].fact.event_type(),
+        process_events[2].fact.event_type(),
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectOccurrence::decode(
-            process_events[3].fact.payload(),
+            process_events[2].fact.payload(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect outcome"),
         fixture_effect_outcome()
     );
     assert_eq!(
-        process_events[4].fact.event_type(),
+        process_events[3].fact.event_type(),
         lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectOmissions::decode(
-            process_events[4].fact.payload(),
+            process_events[3].fact.payload(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect omissions"),

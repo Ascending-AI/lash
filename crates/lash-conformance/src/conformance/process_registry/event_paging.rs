@@ -4,16 +4,17 @@ use super::*;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn ProcessRegistry>) {
+pub(super) async fn assert_out_of_range_sequences_are_rejected(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
     let process_id = registry
         .register_process(registration("process-event-page-sql-cursor-range"))
         .await
         .expect("register cursor-range process")
         .id;
-    let runner = start_runner(registry.as_ref(), &process_id).await;
     for index in 0..2 {
         registry
-            .append_event_with_authority(
+            .append_event_for_testing(
                 &process_id,
                 call_wait_event(
                     &process_id,
@@ -21,7 +22,6 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
                     &index.to_string(),
                     serde_json::json!({ "index": index }),
                 ),
-                &runner,
             )
             .await
             .expect("append cursor-range event");

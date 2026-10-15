@@ -67,9 +67,8 @@ pub async fn a_failed_observer_transfer_leaves_no_partial_mutation(
         .expect("register the first process")
         .id;
     // Seed lifecycle state to compare after the failed transfer.
-    let runner = start_runner(registry.as_ref(), &first).await;
     registry
-        .append_event_with_authority(
+        .append_event_for_testing(
             &first,
             call_wait_event(
                 &first,
@@ -78,7 +77,6 @@ pub async fn a_failed_observer_transfer_leaves_no_partial_mutation(
                 serde_json::json!({"wake_input": "seed"}),
             )
             .with_replay_key("observer-transfer:seed"),
-            &runner,
         )
         .await
         .expect("seed lifecycle state");

@@ -64,13 +64,12 @@ use lash_core_execution::store::{
 use lash_core_execution::{
     AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
     ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, SessionCommitStore,
+    ProcessEventAppendRequest, ProcessExternalRef, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, SessionCommitStore,
     SessionListFilter, SessionMeta, SessionNodeRecord, SessionRelationKind,
     SessionStoreCreateRequest, SessionView, StoreError, StoreMaintenance, VacuumReport,
-    facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgRow};

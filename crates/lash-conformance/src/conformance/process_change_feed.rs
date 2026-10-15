@@ -29,7 +29,7 @@ struct ReaderProgress {
     reason = "conformance-law fixture: the read is established by the setup above"
 )]
 async fn terminal_labels_after(
-    registry: &Arc<dyn ProcessRegistry>,
+    registry: &Arc<dyn crate::ConformanceProcessRegistry>,
     mut cursor: ProcessChangeCursor,
     expected_ids: &BTreeSet<String>,
 ) -> BTreeSet<String> {
@@ -60,7 +60,7 @@ async fn terminal_labels_after(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     const WRITER_COUNT: usize = 48;
     const PAGE_LIMIT: usize = 2;
@@ -156,8 +156,6 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                 .expect("concurrent writer register")
                 .id;
 
-            let runner = start_runner(writer_registry.as_ref(), &process_id).await;
-
             if writer_index % 3 == 0 {
                 tokio::time::sleep(Duration::from_millis(1)).await;
             } else {
@@ -165,7 +163,7 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
             }
 
             writer_registry
-                .append_event_with_authority(
+                .append_event_for_testing(
                     &process_id,
                     call_wait_event(
                         &process_id,
@@ -173,7 +171,6 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
                         &writer_index.to_string(),
                         serde_json::json!({ "writer": writer_index }),
                     ),
-                    &runner,
                 )
                 .await
                 .expect("concurrent writer mutate");

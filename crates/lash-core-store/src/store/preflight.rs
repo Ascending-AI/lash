@@ -497,10 +497,6 @@ impl std::fmt::Display for StoreSchemaStatus {
 pub enum DurableSurface {
     /// One persisted JSON module artifact per content-addressed module ref.
     ModuleArtifact,
-    /// One start record per non-terminal process that has started: the
-    /// executable generation its incarnation runs under (FIG-3571), which a
-    /// process carries on its record.
-    StartedProcess,
     /// One checkpoint manifest per session that has published a checkpoint
     /// root.
     SessionCheckpoint,
@@ -513,7 +509,6 @@ impl DurableSurface {
     pub fn name(self) -> &'static str {
         match self {
             DurableSurface::ModuleArtifact => "module artifacts",
-            DurableSurface::StartedProcess => "started processes",
             DurableSurface::SessionCheckpoint => "session checkpoints",
             DurableSurface::SessionExecutionState => "session execution state",
         }

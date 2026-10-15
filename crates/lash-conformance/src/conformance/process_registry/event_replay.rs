@@ -45,7 +45,7 @@ pub(super) async fn long_cancellation_requester_replay_is_backend_safe(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn an_unstamped_cancelled_terminal_replay_coalesces(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     for released in [false, true] {
         let process_id = registry
@@ -55,7 +55,6 @@ pub(super) async fn an_unstamped_cancelled_terminal_replay_coalesces(
             .await
             .expect("register the process a cancel ends")
             .id;
-        let authority = start_runner(registry.as_ref(), &process_id).await;
         registry
             .request_process_cancel(
                 &process_id,
@@ -73,7 +72,7 @@ pub(super) async fn an_unstamped_cancelled_terminal_replay_coalesces(
             None,
         );
         let first = registry
-            .append_event_with_authority(&process_id, request.clone(), &authority)
+            .append_event_for_testing(&process_id, request.clone())
             .await
             .expect("append the unstamped cancelled terminal");
         let Some(crate::ProcessTerminal::Settled { output }) = first.event.terminal() else {
@@ -94,7 +93,7 @@ pub(super) async fn an_unstamped_cancelled_terminal_replay_coalesces(
                 .expect("release the terminal's payload");
         }
         let replay = registry
-            .append_event_with_authority(&process_id, request, &authority)
+            .append_event_for_testing(&process_id, request)
             .await
             .unwrap_or_else(|error| {
                 panic!(

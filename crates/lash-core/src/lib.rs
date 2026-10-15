@@ -289,7 +289,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
     pub use crate::runtime::ProcessRuntimeHost;
-    pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessToolVisibilityFilter;
     pub use crate::runtime::ProcessTransition;
     pub use crate::runtime::ProcessTransitionPlan;
@@ -592,13 +591,9 @@ pub(crate) use provider::{ProviderCompletion, ProviderCompletionError};
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ConformanceProcessRegistry;
 #[cfg(any(test, feature = "testing"))]
-pub use runtime::EffectSummaryAppendFaults;
-#[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessEventLogTestSupport;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::ProcessRegistryTestSupport;
-#[cfg(any(test, feature = "testing"))]
-pub use runtime::TestProcessRegistryWriteExt;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime::{ObservationSource, work_with_observations};
 
@@ -660,57 +655,57 @@ pub use runtime::{
     ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
     ProcessEventLog, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext,
-    ProcessExecutionDocumentRead, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
-    ProcessLifecycle, ProcessLifecycleFact, ProcessLimits, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessListSelection, ProcessLiveReferenceView, ProcessModel,
-    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessParkReason,
-    ProcessParkState, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
-    ProcessRegistry, ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal,
-    ProcessRetention, ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords,
-    ProcessRosterTokenError, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport,
-    ProcessSignature, ProcessStartChoice, ProcessStartDeclaration, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents, ProcessWaits,
-    ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension,
-    QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, RecordedKeyFence,
-    RecordedKeyRange, RecordedKeys, RecordedRefusal, RecordedRender, RefusedWriteRange,
-    RenderFault, RenderRefusal, Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun,
-    ResolvedStartTarget, RetainedRevision, Retention, RunAggregateWakePolicy, RunDefinition,
-    RunDefinitionRefusal, RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner,
-    RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSessionAuthority, RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant,
-    ScopeId, ScopeRef, ScopeStorageError, SegmentProgress, ServedOnly, ServedOnlyRange,
-    SessionAdministration, SessionCreationHead, SessionCursor, SessionCursorError,
-    SessionDeleteContext, SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter,
-    SessionObservationEvent, SessionObservationEventPayload, SessionProcessEventKind,
-    SessionQueueEventKind, SessionRelationKind, SessionRevision, SessionScope,
-    SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SleepSpec, SlotId,
-    StagedProcessStart, StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization,
-    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent, TurnFailureCause,
-    TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
-    TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
-    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
-    TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState,
-    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
-    admit_session_state_generation, artifact_store_plugin_error, check_links, hold_process_env,
-    lifetime, mint_process_id, tool_failure_code,
+    ProcessExecutionDocumentRead, ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint,
+    ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLifecycleFact,
+    ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessListSelection,
+    ProcessLiveReferenceView, ProcessModel, ProcessObserverBy, ProcessObserverRegistry,
+    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
+    ProcessOutcomeObserver, ProcessParkReason, ProcessParkState, ProcessProvenance,
+    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
+    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry,
+    ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
+    ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords, ProcessRosterTokenError,
+    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
+    ProcessStartChoice, ProcessStartDeclaration, ProcessStartOptions, ProcessStartReceipt,
+    ProcessStartRequest, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone,
+    ProcessToolIntents, ProcessWaits, ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark,
+    ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy,
+    QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig,
+    RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRefusal, RecordedRender,
+    RefusedWriteRange, RenderFault, RenderRefusal, Resolution, ResolveOutcome,
+    ResolvedProcessDefinition, ResolvedRun, ResolvedStartTarget, RetainedRevision, Retention,
+    RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions,
+    RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides, RunResolveError,
+    RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionAuthority,
+    RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, SegmentProgress, ServedOnly, ServedOnlyRange, SessionAdministration,
+    SessionCreationHead, SessionCursor, SessionCursorError, SessionDeleteContext,
+    SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter, SessionObservationEvent,
+    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
+    SessionRelationKind, SessionRevision, SessionScope, SessionStateVersionRefusal,
+    SessionStoreCreateRequest, SessionView, SleepSpec, SlotId, StagedProcessStart, StartCx,
+    StartCxError, StartKey, StepName, StepRequest, StoreRealization, StoredDataCorruption, Target,
+    ToolAttemptLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelInputOutcome, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancelWait,
+    TurnContext, TurnEvent, TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput,
+    TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
+    TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef,
+    TurnPreludeStore, WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
+    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
+    artifact_store_plugin_error, check_links, hold_process_env, lifetime, mint_process_id,
+    tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     AdmissionBoundary, AdmittedQueuedWork, QueuedCheckpointTurnInput, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkPayload,
     RuntimeSubject, load_process_env, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, process_event_invocation,
+    prepare_process_transition, process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
 /// Process observation: the snapshot, cursor, stream events and bounded
@@ -809,7 +804,6 @@ pub mod core_internal {
     pub use lash_core_execution::core_internal::RuntimeService;
     pub use lash_core_execution::core_internal::{
         RuntimeEffectLocalRunner, RuntimeExecutionContextRuntimeOps, StartKeyDerivation,
-        attach_process_invocation_correlation, clear_process_invocation_correlation,
         owned_runner_executor,
     };
 }

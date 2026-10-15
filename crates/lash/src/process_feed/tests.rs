@@ -37,13 +37,15 @@ struct Fixture {
     replay: Arc<InMemoryProcessReplayStore>,
     limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
-    authority: lash_core::ProcessExecutionWriteAuthority,
+    /// The registry beneath the watch, seeding the commits an owner makes.
+    seeding: Arc<dyn lash_core::ConformanceProcessRegistry>,
+    /// The watch an owner publishes its commits through.
+    watched: lash_core::runtime::WatchedRegistry,
     ticks: std::sync::atomic::AtomicU64,
 }
 
 impl Fixture {
-    /// A registered, started process: its durable sequence is 1, and
-    /// nothing was published.
+    /// A registered process: nothing was committed or published.
     async fn new() -> Self {
         Self::with_replay(InMemoryProcessReplayStoreConfig::standard()).await
     }
@@ -51,11 +53,11 @@ impl Fixture {
     /// The same process over a replay store that retains what `config` says.
     async fn with_replay(config: InMemoryProcessReplayStoreConfig) -> Self {
         // Watched, so a commit ticks `commits`, as a core's registry does.
-        let watched = lash_core::runtime::watch_process_registry(
-            crate::tests::sqlite_memory_store_set()
-                .await
-                .process_registry(),
-        );
+        let sqlite = crate::tests::sqlite_memory_store_set()
+            .await
+            .process_registry();
+        let seeding: Arc<dyn lash_core::ConformanceProcessRegistry> = sqlite.clone();
+        let watched = lash_core::runtime::watch_process_registry(sqlite);
         let registry = Arc::clone(watched.registry());
         let commits = watched.emitted_hub().clone();
         let process_id = registry
@@ -67,21 +69,6 @@ impl Fixture {
             .await
             .expect("register the feed process")
             .id;
-        let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-            process_id.clone(),
-            "feed-invocation",
-        )
-        .bind_attempt(1);
-        registry
-            .record_first_started_with_authority(
-                &process_id,
-                authority
-                    .invocation_started()
-                    .expect("the authority is bound to attempt one"),
-                &authority,
-            )
-            .await
-            .expect("record the execution start");
         let replay = Arc::new(InMemoryProcessReplayStore::new(config));
         let publisher = Arc::new(
             crate::language_observation::LanguageObservationPublisher::new(
@@ -102,7 +89,8 @@ impl Fixture {
             replay,
             limits: lash_trace::ObservationWorkLimits::standard(),
             process_id,
-            authority,
+            seeding,
+            watched,
             ticks: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -125,21 +113,27 @@ impl Fixture {
         }
     }
 
-    /// Commit one durable event, unpublished.
+    /// Commit one durable event as an owner does, then hand it to this
+    /// node's sinks as the owner's publication does; the replay store has
+    /// not been published to.
     async fn commit(&self) -> ProcessEvent {
-        self.registry
-            .append_event_with_authority(
+        let event = self
+            .seeding
+            .append_event_for_testing(
                 &self.process_id,
                 tick(
                     &self.process_id,
                     self.ticks
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 ),
-                &self.authority,
             )
             .await
             .expect("commit a tick")
-            .event
+            .event;
+        self.watched
+            .publish_committed(&self.process_id, event.sequence - 1)
+            .await;
+        event
     }
 
     /// The after-commit publisher delivering `event`.
@@ -362,7 +356,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
 #[tokio::test]
 async fn an_attach_replays_the_retained_window_and_delivers_each_later_commit_once() {
     let fixture = Fixture::new().await;
-    fixture.observe_node(1, "node before").await;
+    fixture.observe_node(0, "node before").await;
     let reflected = fixture.commit_published().await;
 
     let observed = fixture.observe();
@@ -416,7 +410,7 @@ async fn a_commit_without_its_bridge_is_one_gap_with_the_durable_process() {
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     quiet(&mut feed).await;
 
-    fixture.observe_node(1, "node kept").await;
+    fixture.observe_node(0, "node kept").await;
     expect_event(next(&mut feed).await, "node kept");
     let _lost = fixture.commit().await;
     let unbridged = fixture.commit_published().await;
@@ -504,7 +498,7 @@ async fn a_replay_that_loses_continuity_is_one_gap_and_the_feed_resumes() {
     let observed = fixture.observe();
     let snapshot = observed.snapshot().await.expect("snapshot");
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
-    fixture.observe_node(1, "node lost").await;
+    fixture.observe_node(0, "node lost").await;
     expect_event(next(&mut feed).await, "node lost");
 
     fixture
@@ -584,7 +578,7 @@ async fn a_snapshot_of_an_unretained_id_takes_no_replay_window() {
     .await;
     let observed = fixture.observe();
     let snapshot = observed.snapshot().await.expect("snapshot");
-    fixture.observe_node(1, "node kept").await;
+    fixture.observe_node(0, "node kept").await;
 
     let unknown = fixture
         .observe_process(&ProcessId::fixture("never-registered"))

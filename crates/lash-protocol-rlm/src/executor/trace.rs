@@ -12,9 +12,9 @@ use lash_core::plugin::PluginExecutionTrace;
 use lash_kernel_doc::{DocumentId, EffectIdentity};
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeFact, TraceRuntimeScope,
-    TraceRuntimeSubject, WorkflowDocumentEntry, WorkflowDocumentRef,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentEntry,
+    WorkflowDocumentRef,
 };
 
 #[derive(Clone)]
@@ -43,12 +43,6 @@ impl CellTrace {
         let invocation = ctx.parent_invocation()?;
         let effect_id = invocation.effect_id()?;
         let address = invocation.effect_address()?.clone();
-        let generation = match ctx.admitted_process() {
-            Some(_) => Some(TraceLanguageExecutionGeneration::new(
-                ctx.admitted_process_attempt()?,
-            )),
-            None => None,
-        };
         Some(Self {
             tracing,
             language: language.to_owned(),
@@ -68,8 +62,10 @@ impl CellTrace {
                     entry: WorkflowDocumentEntry::Main,
                 },
                 entry_name: "main".to_owned(),
-                engine_execution_id: ctx.engine_execution_id().map(str::to_owned),
-                generation,
+                engine_execution_id: None,
+                // A process names its lifetime by its minted id; it records
+                // no execution attempt to tell generations apart.
+                generation: None,
             },
             held: ctx.held_response().cloned(),
         })

@@ -27,7 +27,7 @@ mod tests {
     #[tokio::test]
     async fn process_feed_cursor_fault_reports_one_degradation_and_absence_reports_none() {
         use crate::testing::{ProcessRegistryFaults, trace_capture::capturing};
-        use crate::{ProcessExecutionWriteAuthority, ProcessProvenance, ProcessRegistrar};
+        use crate::{ProcessProvenance, ProcessRegistrar};
         let backend = sqlite_memory_process_store_set().await;
         let faults = Arc::new(ProcessRegistryFaults::new(backend.process_registry()));
         let record = faults
@@ -40,14 +40,19 @@ mod tests {
             .expect("registered process");
         let watched = watch_process_registry(faults.clone());
         let _registration = watched.add_event_sink(Arc::new(TestSink));
-        let authority = ProcessExecutionWriteAuthority::invocation(record.id.clone(), "feed-law");
+        // A repeated cancel request is a no-op on the row, yet each one
+        // reads the feed's cursor as a lifecycle write does.
+        let cancel = || {
+            watched.registry().request_process_cancel(
+                &record.id,
+                crate::CancelOrigin::OperatorRequested,
+                "feed-law".to_string(),
+                None,
+            )
+        };
         let (_, absent) = capturing(|| async {
             faults.set_process_read_absent(true);
-            watched
-                .registry()
-                .append_events(&record.id, Vec::new(), &authority)
-                .await
-                .expect("empty append");
+            cancel().await.expect("cancel request");
         })
         .await;
         assert!(absent.named("process_feed.degraded").is_empty());
@@ -57,11 +62,9 @@ mod tests {
                 crate::store::StoreFault::Contended,
             )));
             for _ in 0..3 {
-                watched
-                    .registry()
-                    .append_events(&record.id, Vec::new(), &authority)
+                cancel()
                     .await
-                    .expect("cursor failure does not alter append");
+                    .expect("cursor failure does not alter the write");
             }
         })
         .await;
@@ -72,11 +75,7 @@ mod tests {
         assert_eq!(diagnostic.field("operation"), "process_cursor");
         let (_, recovered) = capturing(|| async {
             faults.set_process_read_error(None);
-            watched
-                .registry()
-                .append_events(&record.id, Vec::new(), &authority)
-                .await
-                .expect("recovered append");
+            cancel().await.expect("recovered cancel request");
         })
         .await;
         assert_eq!(

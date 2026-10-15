@@ -1,4 +1,5 @@
 use crate::ProcessId;
+#[cfg(any(test, feature = "testing"))]
 use crate::plugin::PluginError;
 
 use super::model::{ProcessChangeCursor, ProcessRecord};
@@ -96,8 +97,40 @@ pub struct ParentEndPlan {
 /// same gate they forward to `lash-core/testing`; the production trait never
 /// requires a testing method, and a build with `lash-core/testing` on but a
 /// backend's `testing` off still compiles.
+///
+/// Its one probe seeds a process's event history the way an owner commits
+/// it: each request goes through the append rules the store's
+/// `ProcessWrite::AppendEvent` arm applies (the ADR 0046 fold, replay-key
+/// coalescing, the conflicting-payload refusal), all in one transaction, and
+/// a refusal of any request commits none. It skips only the owner's actor
+/// epoch fence, which the durable store laws own.
 #[cfg(any(test, feature = "testing"))]
-pub trait ProcessRegistryTestSupport: Send + Sync {}
+#[async_trait::async_trait]
+pub trait ProcessRegistryTestSupport: Send + Sync {
+    /// Append `requests` to `process_id`'s event log, in order, answering
+    /// one receipt per request.
+    async fn append_events_for_testing(
+        &self,
+        process_id: &ProcessId,
+        requests: Vec<super::events::ProcessEventAppendRequest>,
+    ) -> Result<Vec<super::events::ProcessEventAppendReceipt>, PluginError>;
+
+    /// [`Self::append_events_for_testing`] for one request.
+    async fn append_event_for_testing(
+        &self,
+        process_id: &ProcessId,
+        request: super::events::ProcessEventAppendRequest,
+    ) -> Result<super::events::ProcessEventAppendReceipt, PluginError> {
+        self.append_events_for_testing(process_id, vec![request])
+            .await?
+            .pop()
+            .ok_or_else(|| {
+                PluginError::Session(format!(
+                    "process `{process_id}` answered a one-event append with no receipt"
+                ))
+            })
+    }
+}
 
 /// Small-fixture event-log convenience, excluded from production builds.
 ///

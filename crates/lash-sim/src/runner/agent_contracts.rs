@@ -1404,15 +1404,6 @@ fn normalize_contract_process_event_payload(event_type: &str, payload: Value) ->
             // comparison masks it, as it does for other per-run identities.
             object.insert("replay_key".to_owned(), json!("<opaque>"));
         }
-        if event_type == "process.first_started"
-            && let Some(started) = object.get_mut("started").and_then(Value::as_object_mut)
-        {
-            started.remove("started_at_ms");
-            if let Some(owner) = started.get_mut("owner").and_then(Value::as_object_mut) {
-                owner.remove("owner_id");
-                owner.remove("incarnation_id");
-            }
-        }
     }
     payload
 }

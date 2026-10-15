@@ -617,22 +617,6 @@ impl ProcessObserverRegistry for Integrator {
 
 #[lash::async_trait]
 impl ProcessEventLog for Integrator {
-    async fn append_event_with_authority(
-        &self,
-        process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn append_events(
-        &self,
-        process_id: &ProcessId,
-        requests: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn event_by_replay_key(
         &self,
         process_id: &ProcessId,
@@ -693,14 +677,6 @@ impl ProcessLifecycle for Integrator {
     ) -> Result<Option<ParentEndPlan>, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn record_first_started_with_authority(
-        &self,
-        process_id: &ProcessId,
-        started: ProcessStarted,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessStartOutcome, PluginError> {
-        unreachable!("external signature witness")
-    }
     async fn request_process_cancel(
         &self,
         process_id: &ProcessId,
@@ -717,23 +693,6 @@ impl ProcessLifecycle for Integrator {
         requester: String,
         attribution: Option<RuntimeReplayAttribution>,
     ) -> Result<(ProcessRecord, StoreRealization), PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn set_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        wait: WaitState,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
-        unreachable!("external signature witness")
-    }
-    async fn clear_process_wait_with_authority(
-        &self,
-        process_id: &ProcessId,
-        prelude: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessRecord, PluginError> {
         unreachable!("external signature witness")
     }
 }

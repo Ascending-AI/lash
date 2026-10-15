@@ -189,7 +189,6 @@ pub(super) async fn contract(
         .register_process(owned_registration("cancel-unrun-start-failed"))
         .await
         .expect("register unrun target");
-    assert!(unrun.first_started.is_none());
     assert!(unrun.external_ref.is_none());
     assert!(!unrun.is_terminal());
     let unrun_ref = unrun.id.clone();
@@ -225,41 +224,6 @@ pub(super) async fn contract(
         "the failed start is recorded as its own cancel: {:?}",
         events[0].fact
     );
-    let started = writer
-        .register_process(owned_registration("cancel-started-start-failed"))
-        .await
-        .expect("register started target");
-    let started_authority = crate::ProcessExecutionWriteAuthority::invocation(
-        started.id.clone(),
-        "cancel-worker:started",
-    )
-    .bind_attempt(1);
-    writer
-        .record_first_started_with_authority(
-            &started.id,
-            started_authority
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &started_authority,
-        )
-        .await
-        .expect("record actual first start");
-    let started_ref = started.id.clone();
-    assert!(read(&reader, &started_ref).await.first_started.is_some());
-    let pending = writer
-        .request_process_cancel(
-            &started_ref,
-            CancelOrigin::StartFailed,
-            "start:started".to_string(),
-            None,
-        )
-        .await
-        .expect("started work receives a pending request");
-    assert!(
-        !pending.is_terminal(),
-        "started work must observe cancellation itself"
-    );
-
     let external = writer
         .register_process(owned_registration("cancel-external-start-failed"))
         .await

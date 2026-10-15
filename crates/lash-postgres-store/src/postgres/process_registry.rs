@@ -506,33 +506,6 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
-    async fn append_events(
-        &self,
-        process_id: &ProcessId,
-        requests: Vec<ProcessEventAppendRequest>,
-        authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
-        if requests.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        validate_process_execution_authority(process_id, &record, authority, None)?;
-        let occurred_at_ms = self.clock.timestamp_ms();
-        let receipts = append_process_event_batch_tx(
-            &mut tx,
-            &mut record,
-            requests,
-            occurred_at_ms,
-            self.fence.fleet(),
-        )
-        .await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(receipts)
-    }
-
     async fn event_by_replay_key(
         &self,
         process_id: &ProcessId,
@@ -918,7 +891,35 @@ impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {
     }
 }
 #[cfg(any(test, feature = "testing"))]
-impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry {}
+#[async_trait::async_trait]
+impl lash_core_execution::ProcessRegistryTestSupport for PostgresProcessRegistry {
+    async fn append_events_for_testing(
+        &self,
+        process_id: &ProcessId,
+        requests: Vec<ProcessEventAppendRequest>,
+    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(plugin_store_error)?;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
+        let occurred_at_ms = self.clock.timestamp_ms();
+        let mut receipts = Vec::with_capacity(requests.len());
+        for request in requests {
+            receipts.push(
+                append_process_event_tx(
+                    &mut tx,
+                    &mut record,
+                    request,
+                    occurred_at_ms,
+                    self.fence.fleet(),
+                )
+                .await?,
+            );
+        }
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(receipts)
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessAuthorityReads for PostgresProcessRegistry {

@@ -804,7 +804,7 @@ async fn run_linked_cell(
         boundary: boundary.clone(),
         entries: Arc::clone(&entries),
         limit: ctx.max_tool_calls(),
-        cell: ctx.engine_execution_id().unwrap_or("cell").to_owned(),
+        cell: "cell".to_owned(),
     });
     let finish_placement = match ctx
         .owner_config()

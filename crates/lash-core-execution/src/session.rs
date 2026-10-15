@@ -15,12 +15,11 @@ mod settlement_incorporation;
 mod tool_attempt;
 pub(crate) mod tool_execution;
 
+pub use execution_context::RuntimeExecutionTracing;
 pub(crate) use execution_context::runtime_ops;
 pub use execution_context::{CellEndHandoff, EndedCell, HeldResponse, RuntimeExecutionContext};
-pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
-    attach_process_invocation_correlation, attach_process_lineage,
-    clear_process_invocation_correlation, execution_claim_of, process_lineage_of,
+    attach_process_lineage, execution_claim_of, process_lineage_of,
 };
 pub use opener_run::OpenerState;
 pub use settlement_incorporation::{Incorporated, IncorporationLedger, SettlementSource};

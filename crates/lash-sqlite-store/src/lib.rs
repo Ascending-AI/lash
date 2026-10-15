@@ -79,13 +79,11 @@ use lash_core_execution::store::{
 use lash_core_execution::{
     AttachmentId, AttachmentReferrers, BlobRef, DeliveryPolicy, GcReport, ProcessAwaitOutput,
     ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
-    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted,
+    ProcessEventAppendRequest, ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
     SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest, SessionView,
-    StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
-    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
-    facade_support::registry_transitions,
+    StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessTransition,
+    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 

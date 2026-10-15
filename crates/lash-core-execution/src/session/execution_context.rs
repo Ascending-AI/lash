@@ -225,17 +225,6 @@ pub(crate) struct RuntimeProcessExecution {
     /// process whose runtime loaded them: what its children may inherit and
     /// the capability refs its execution binds.
     pub enclosing: Option<Arc<crate::EnclosingProcess>>,
-    pub event_context: Option<RuntimeExecutionProcessEventContext>,
-}
-
-#[derive(Clone)]
-pub struct RuntimeExecutionProcessEventContext {
-    pub execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    pub process_work: crate::ProcessWorkWiring,
-    pub store: Option<Arc<dyn crate::RuntimeStore>>,
-    pub session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-
-    pub clock: Arc<dyn crate::Clock>,
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
@@ -586,20 +575,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// must name its opener (ADR 0099 §1) reads it back.
     pub fn admitted_process(&self) -> Option<crate::ProcessId> {
         self.dispatch.effect_controller.admitted_process().cloned()
-    }
-
-    /// The durable process attempt admitted for this execution, when it runs
-    /// under a process whose engine installed execution authority.
-    pub fn admitted_process_attempt(&self) -> Option<u32> {
-        if let Some(execution) = self.process_execution.as_ref() {
-            return execution
-                .event_context
-                .as_ref()?
-                .execution_write_authority
-                .attempt_for(&execution.process_id);
-        }
-        let correlation = correlation::process_invocation_of(&self.turn_context)?;
-        correlation.authority.attempt_for(&correlation.process_id)
     }
 
     /// The session scope of the frame this execution was admitted on, or
@@ -969,22 +944,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.process_execution.as_ref().map(|exec| &exec.process_id)
     }
 
-    /// Engine execution that owns the enclosing process execution, when this
-    /// context runs inside an attempt-bound engine process.
-    pub fn engine_execution_id(&self) -> Option<&str> {
-        if let Some(execution) = self.process_execution.as_ref() {
-            return execution
-                .event_context
-                .as_ref()?
-                .execution_write_authority
-                .engine_execution_id(&execution.process_id);
-        }
-        let correlation = correlation::process_invocation_of(&self.turn_context)?;
-        correlation
-            .authority
-            .engine_execution_id(&correlation.process_id)
-    }
-
     pub(crate) fn is_run_local_process(&self, process_id: &ProcessId) -> bool {
         self.started_process_ids.lock_recover().contains(process_id)
     }
@@ -1263,10 +1222,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 }
 
 mod correlation;
-pub(crate) use correlation::{
-    attach_process_invocation_correlation, attach_process_lineage,
-    clear_process_invocation_correlation, process_lineage_of,
-};
+pub(crate) use correlation::{attach_process_lineage, process_lineage_of};
 
 #[cfg(test)]
 mod tests;

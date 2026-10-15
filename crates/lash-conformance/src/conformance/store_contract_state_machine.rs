@@ -7,9 +7,8 @@ use super::process_references::{ProcessCountConservation, assert_process_count_c
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
 use crate::{
-    ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
-    fold_process_record,
+    ProcessCompletionOutcome, ProcessExternalRef, ProcessObserverBy, ProcessRecord,
+    ProjectionWatermark, fold_process_record,
 };
 use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
@@ -48,9 +47,6 @@ pub struct StoreContractHandles {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StoreContractOp {
     Register { process: u8 },
-    FirstStart { process: u8, owner: u8, attempt: u8 },
-    EnterWait { process: u8, stale: bool },
-    ClearWait { process: u8, stale: bool },
     SetExternalRef { process: u8, value: u8 },
     CancelRequest { process: u8, requester: u8 },
     Terminal { process: u8, disposition: u8 },
@@ -62,8 +58,8 @@ pub enum StoreContractOp {
 
 /// Stateful driver for the shared generated store-contract operation language.
 /// This deliberately performs only the operation semantics and the small
-/// amount of bookkeeping needed by later operations (current authorities,
-/// wake claims, and queue selections). The property harness layers its
+/// amount of bookkeeping needed by later operations (wake claims and queue
+/// selections). The property harness layers its
 /// reference-model laws on top; cross-backend differential tests use the same
 /// driver but provide their own backend-agreement oracle.
 pub struct StoreContractScenario {
@@ -120,8 +116,6 @@ struct ModelProcess {
     lifecycle: ProcessLifecycle,
     observers: BTreeSet<SessionId>,
     lifecycle_replay_keys: BTreeSet<String>,
-    current_authority: Option<ProcessExecutionWriteAuthority>,
-    superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -366,28 +360,6 @@ where
         make,
         seed,
         &SessionId::from("prop-runtime-session"),
-        |handles| async move { assert_replay_key_idempotency(&handles.registry).await },
-    )
-    .await?;
-    assert_on_fresh_handles(
-        make,
-        seed,
-        &SessionId::from("prop-runtime-session"),
-        |handles| async move { assert_attempt_monotonicity(&handles.registry).await },
-    )
-    .await?;
-    assert_on_fresh_handles(
-        make,
-        seed,
-        &SessionId::from("prop-runtime-session"),
-        |handles| async move { assert_stale_authority_non_mutation(&handles.registry).await },
-    )
-    .await?;
-
-    assert_on_fresh_handles(
-        make,
-        seed,
-        &SessionId::from("prop-runtime-session"),
         |handles| async move { assert_prune_tombstone_watermark_safety(&handles.registry).await },
     )
     .await?;
@@ -449,33 +421,6 @@ fn registration(label: &str) -> ProcessRegistration {
     )
 }
 
-fn invocation_authority(
-    process_id: &ProcessId,
-    owner: u8,
-    attempt: u32,
-) -> ProcessExecutionWriteAuthority {
-    ProcessExecutionWriteAuthority::invocation(
-        process_id,
-        format!("owner-{owner}-attempt-{attempt}"),
-    )
-    .bind_attempt(attempt)
-}
-
-fn stale_authority(process_id: &ProcessId) -> ProcessExecutionWriteAuthority {
-    invocation_authority(process_id, 250, 250)
-}
-
-fn wait_state(_process_id: &ProcessId) -> WaitState {
-    WaitState {
-        since_ms: 1,
-        kind: WaitKind::Call {
-            call_id: lash_sansio::ToolCallId::fixture("store-call"),
-            tool_id: lash_sansio::ToolId::new("store_call"),
-        },
-        site: None,
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -509,87 +454,6 @@ async fn apply_operation(
                 entry.install_fresh(record);
                 model.process_counts.record_spawn();
                 shape[RunShapeCounter::Spawns] = shape[RunShapeCounter::Spawns].saturating_add(1);
-            }
-        }
-        StoreContractOp::FirstStart {
-            process,
-            owner,
-            attempt,
-        } => {
-            let id = model.slot_id(*process);
-            let authority = invocation_authority(&id, *owner, u32::from(*attempt));
-            let Some(started) = authority.invocation_started() else {
-                unreachable!()
-            };
-            let outcome = handles
-                .registry
-                .record_first_started_with_authority(&id, started.clone(), &authority)
-                .await
-                .map_err(|error| error.to_string());
-            if let Ok(ProcessStartOutcome::Started(_)) = outcome {
-                let entry = model.process_mut(&id);
-                if let Some(previous) = entry.current_authority.replace(authority) {
-                    entry.superseded_authorities.push(previous);
-                }
-                if let Some(expected) = entry.expected_mut() {
-                    event_sequences.advance(expected);
-                    expected.first_started = Some(Box::new(started));
-                }
-            }
-        }
-        StoreContractOp::EnterWait { process, stale } => {
-            let id = model.slot_id(*process);
-            let authority = selected_authority(model, &id, *stale);
-            let must_reject = *stale && has_current_authority(model, &id);
-            let before = registry_snapshot(&handles.registry, &id).await;
-            let result = handles
-                .registry
-                .set_process_wait_with_authority(&id, wait_state(&id), Vec::new(), &authority)
-                .await;
-            assert_typed_stale_authority_rejection(&result, must_reject, &id, "enter wait")?;
-            assert_rejected_write_is_noop(
-                &handles.registry,
-                &id,
-                before,
-                result.is_err(),
-                "Stale-authority non-mutation",
-            )
-            .await?;
-            if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_mut()
-            {
-                if !expected.waits().contains(&wait_state(&id)) {
-                    event_sequences.advance(expected);
-                }
-                expected.lifecycle = crate::ProcessLifecycleState::Waiting {
-                    waits: lash_core::ProcessWaits::new(wait_state(&id)),
-                };
-            }
-        }
-        StoreContractOp::ClearWait { process, stale } => {
-            let id = model.slot_id(*process);
-            let authority = selected_authority(model, &id, *stale);
-            let must_reject = *stale && has_current_authority(model, &id);
-            let before = registry_snapshot(&handles.registry, &id).await;
-            let result = handles
-                .registry
-                .clear_process_wait_with_authority(&id, Vec::new(), &authority)
-                .await;
-            assert_typed_stale_authority_rejection(&result, must_reject, &id, "clear wait")?;
-            assert_rejected_write_is_noop(
-                &handles.registry,
-                &id,
-                before,
-                result.is_err(),
-                "Stale-authority non-mutation",
-            )
-            .await?;
-            if result.is_ok()
-                && let Some(expected) = model.process_mut(&id).expected_mut()
-                && !expected.waits().is_empty()
-            {
-                event_sequences.advance(expected);
-                expected.lifecycle = crate::ProcessLifecycleState::running();
             }
         }
         StoreContractOp::SetExternalRef { process, value } => {
@@ -771,50 +635,6 @@ async fn apply_operation(
     Ok(())
 }
 
-fn selected_authority(
-    model: &ReferenceModel,
-    id: &ProcessId,
-    stale: bool,
-) -> ProcessExecutionWriteAuthority {
-    if let Some(process) = model.processes.get(id) {
-        if stale && let Some(authority) = process.superseded_authorities.last() {
-            return authority.clone();
-        }
-        if !stale && let Some(authority) = process.current_authority.clone() {
-            return authority;
-        }
-    }
-    stale_authority(id)
-}
-
-fn has_current_authority(model: &ReferenceModel, id: &ProcessId) -> bool {
-    model
-        .processes
-        .get(id)
-        .and_then(|process| process.current_authority.as_ref())
-        .is_some()
-}
-
-fn assert_typed_stale_authority_rejection<T>(
-    result: &Result<T, crate::PluginError>,
-    must_reject: bool,
-    id: &ProcessId,
-    operation: &str,
-) -> Result<(), String> {
-    if must_reject
-        && !matches!(
-            result,
-            Err(crate::PluginError::ProcessExecutionSuperseded { process_id })
-                if process_id == id
-        )
-    {
-        return Err(format!(
-            "Stale-authority non-mutation: superseded authority {operation} for `{id}` did not return ProcessExecutionSuperseded"
-        ));
-    }
-    Ok(())
-}
-
 fn terminal_output(index: u8) -> ProcessAwaitOutput {
     match index % 4 {
         0 => ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
@@ -839,32 +659,6 @@ fn terminal_output(index: u8) -> ProcessAwaitOutput {
             control: None,
         },
     }
-}
-
-async fn assert_rejected_write_is_noop(
-    registry: &Arc<dyn ProcessRegistry>,
-    id: &ProcessId,
-    before: serde_json::Value,
-    rejected: bool,
-    law: &str,
-) -> Result<(), String> {
-    if rejected {
-        let after = registry_snapshot(registry, id).await;
-        if before != after {
-            return Err(format!("{law}: rejected operation mutated `{id}`"));
-        }
-    }
-    Ok(())
-}
-
-async fn registry_snapshot(
-    registry: &Arc<dyn ProcessRegistry>,
-    id: &ProcessId,
-) -> serde_json::Value {
-    let record = registry.get_process(id).await.ok().flatten();
-    let events = registry.full_event_window(id, 0).await.unwrap_or_default();
-    let observers = registry.observers_for_process(id).await.unwrap_or_default();
-    serde_json::json!({"record": record, "events": events, "observers": observers})
 }
 
 async fn assert_fold_law(
@@ -899,182 +693,6 @@ async fn assert_fold_law(
             ));
         }
     }
-    Ok(())
-}
-
-async fn assert_replay_key_idempotency(
-    registry: &Arc<dyn ProcessRegistry>,
-) -> Result<(), TestCaseError> {
-    let id = registry
-        .register_process(registration("law-replay-key"))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    let runner = start_runner(registry.as_ref(), &id).await;
-    let request = call_wait_event(
-        &id,
-        "store-contract",
-        "fixture",
-        serde_json::json!({"value": 1}),
-    )
-    .with_replay_key("law-replay-key:stable");
-    let first = registry
-        .append_event_with_authority(&id, request.clone(), &runner)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let replay = registry
-        .append_event_with_authority(&id, request, &runner)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        serde_json::to_value(first.event)
-            .map_err(|error| TestCaseError::fail(error.to_string()))?,
-        serde_json::to_value(replay.event)
-            .map_err(|error| TestCaseError::fail(error.to_string()))?,
-        "Replay-key idempotency: identical retry returned a different event"
-    );
-    prop_assert_eq!(
-        registry
-            .full_event_window(&id, 0)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .len(),
-        2
-    );
-    let conflict = registry
-        .append_event_with_authority(
-            &id,
-            call_wait_event(
-                &id,
-                "store-contract",
-                "fixture",
-                serde_json::json!({"value": 2}),
-            )
-            .with_replay_key("law-replay-key:stable"),
-            &runner,
-        )
-        .await;
-    prop_assert!(
-        conflict.is_err(),
-        "Replay-key idempotency: same key with a different payload must conflict"
-    );
-    prop_assert_eq!(
-        registry
-            .full_event_window(&id, 0)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .len(),
-        2
-    );
-    Ok(())
-}
-
-/// The registry keeps the execution-started fact consistent; the engine alone
-/// decides whether a start may run (ADR 0110). The same execution is
-/// idempotent, and a successor execution takes exactly the next attempt.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn assert_attempt_monotonicity(
-    registry: &Arc<dyn ProcessRegistry>,
-) -> Result<(), TestCaseError> {
-    let executed = registry
-        .register_process(registration("law-attempt-monotonicity"))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    for attempt in 1..=2 {
-        let authority = invocation_authority(&executed, attempt as u8, attempt);
-        let started = authority.invocation_started().expect("bound invocation");
-        let outcome = registry
-            .record_first_started_with_authority(&executed, started, &authority)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?;
-        prop_assert!(matches!(outcome, ProcessStartOutcome::Started(_)));
-    }
-    let current = invocation_authority(&executed, 2, 2);
-    let repeated = registry
-        .record_first_started_with_authority(
-            &executed,
-            current.invocation_started().expect("bound invocation"),
-            &current,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        matches!(repeated, ProcessStartOutcome::AlreadyApplied(_)),
-        "Attempt monotonicity: the current execution's start was not idempotent"
-    );
-    let skipped = invocation_authority(&executed, 3, 4);
-    prop_assert!(
-        registry
-            .record_first_started_with_authority(
-                &executed,
-                skipped.invocation_started().expect("bound invocation"),
-                &skipped,
-            )
-            .await
-            .is_err(),
-        "Attempt monotonicity: a start that skipped an attempt was accepted"
-    );
-
-    Ok(())
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn assert_stale_authority_non_mutation(
-    registry: &Arc<dyn ProcessRegistry>,
-) -> Result<(), TestCaseError> {
-    let id = registry
-        .register_process(registration("law-stale-authority"))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    let current = invocation_authority(&id, 1, 1);
-    registry
-        .record_first_started_with_authority(
-            &id,
-            current.invocation_started().expect("bound invocation"),
-            &current,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let successor = invocation_authority(&id, 2, 2);
-    registry
-        .record_first_started_with_authority(
-            &id,
-            successor.invocation_started().expect("bound invocation"),
-            &successor,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let before = registry_snapshot(registry, &id).await;
-    let stale = registry
-        .append_event_with_authority(
-            &id,
-            call_wait_event(
-                &id,
-                "store-contract",
-                "fixture",
-                serde_json::json!({"stale": true}),
-            )
-            .with_replay_key("law:stale"),
-            &current,
-        )
-        .await;
-    prop_assert!(
-        stale.is_err(),
-        "Stale-authority non-mutation: superseded attempt append succeeded"
-    );
-    prop_assert_eq!(
-        registry_snapshot(registry, &id).await,
-        before,
-        "Stale-authority non-mutation: superseded attempt changed durable state"
-    );
     Ok(())
 }
 
@@ -1223,21 +841,6 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
-    let runner = start_runner(registry.as_ref(), &id).await;
-    registry
-        .append_event_with_authority(
-            &id,
-            call_wait_event(
-                &id,
-                "store-contract",
-                "fixture",
-                serde_json::json!({"identity": "old"}),
-            )
-            .with_replay_key("law:prune-reregister:old"),
-            &runner,
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
     registry
         .complete_process(
             &id,

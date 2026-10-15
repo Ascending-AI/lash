@@ -45,14 +45,13 @@ fn retained_sequences(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(
-    registry: Arc<dyn ProcessRegistry>,
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     let process_id = registry
         .register_process(registration("release-event-prefix"))
         .await
         .expect("register a process whose prefix the host releases")
         .id;
-    let runner = start_runner(registry.as_ref(), &process_id).await;
     let blob = serde_json::json!({ "blob": "x".repeat(4096) });
     let tick = |replay: &str, payload: serde_json::Value| {
         call_wait_event(&process_id, "tick", replay, payload)
@@ -71,7 +70,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
     ] {
         sequences.push(
             registry
-                .append_event_with_authority(&process_id, request, &runner)
+                .append_event_for_testing(&process_id, request)
                 .await
                 .expect("append an event before the release")
                 .event
@@ -96,7 +95,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
         release(horizon).await,
         crate::ProcessEventRelease {
             released_through: horizon,
-            released_events: 4,
+            released_events: 3,
         },
         "a release reports the horizon and every event at or below it"
     );
@@ -139,7 +138,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
         "the recent tail never returns a released event"
     );
     let replayed = registry
-        .append_event_with_authority(&process_id, tick("1", blob.clone()), &runner)
+        .append_event_for_testing(&process_id, tick("1", blob.clone()))
         .await
         .expect("a released event's replay key coalesces on the same payload");
     assert_eq!(
@@ -156,11 +155,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
         "the replay answers the released event with the re-presented payload"
     );
     let conflict = registry
-        .append_event_with_authority(
-            &process_id,
-            tick("1", serde_json::json!({ "n": 0 })),
-            &runner,
-        )
+        .append_event_for_testing(&process_id, tick("1", serde_json::json!({ "n": 0 })))
         .await
         .expect_err("another payload under a released replay key conflicts");
     assert!(
@@ -169,11 +164,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
     );
 
     let next = registry
-        .append_event_with_authority(
-            &process_id,
-            tick("4", serde_json::json!({ "n": 5 })),
-            &runner,
-        )
+        .append_event_for_testing(&process_id, tick("4", serde_json::json!({ "n": 5 })))
         .await
         .expect("append after the release")
         .event
@@ -198,11 +189,7 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
     );
     assert_eq!(
         registry
-            .append_event_with_authority(
-                &process_id,
-                tick("5", serde_json::json!({ "n": 6 })),
-                &runner
-            )
+            .append_event_for_testing(&process_id, tick("5", serde_json::json!({ "n": 6 })))
             .await
             .expect("append after releasing every event")
             .event

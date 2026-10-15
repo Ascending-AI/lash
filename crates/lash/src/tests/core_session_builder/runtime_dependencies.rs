@@ -35,39 +35,26 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .await
         .expect("register clock-wiring process")
         .id;
-    let wait = lash_core::WaitState {
-        since_ms: i64::try_from(NOW_MS).expect("fixture time"),
-        kind: lash_core::WaitKind::Call {
-            call_id: lash_core::ToolCallId::fixture("builder-clock-call"),
-            tool_id: lash_core::ToolId::from("builder-clock-tool"),
-        },
-        site: None,
-    };
-    let runner = lash_core::ProcessExecutionWriteAuthority::invocation(
-        builder_clock_process_id.clone(),
-        "builder-clock-runner",
-    )
-    .bind_attempt(1);
     registry
-        .record_first_started_with_authority(
+        .set_external_ref(
             &builder_clock_process_id,
-            runner
-                .invocation_started()
-                .expect("a bound invocation names its execution"),
-            &runner,
+            lash_core::ProcessExternalRef {
+                backend: "builder-clock".to_string(),
+                id: "builder-clock-ref".to_string(),
+                metadata: None,
+                segment_ordinal: None,
+            },
         )
         .await
-        .expect("record the clock-wiring execution start");
+        .expect("set the clock-wiring external reference");
     let appended = registry
-        .append_event_with_authority(
-            &builder_clock_process_id,
-            lash_core::ProcessEventAppendRequest::wait_entered(&builder_clock_process_id, &wait),
-            &runner,
-        )
+        .recent_events(&builder_clock_process_id, 1)
         .await
-        .expect("append clock-wiring lifecycle event");
+        .expect("read the clock-wiring lifecycle event")
+        .pop()
+        .expect("setting an external reference appends its event");
 
-    assert_eq!(appended.event.occurred_at, NOW_MS);
+    assert_eq!(appended.occurred_at, NOW_MS);
 }
 
 #[tokio::test]

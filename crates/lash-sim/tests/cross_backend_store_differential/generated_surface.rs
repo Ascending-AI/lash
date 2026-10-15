@@ -32,9 +32,6 @@ const SURFACE_RUNTIME_SESSION: &str = "prop-runtime-session";
 
 const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "register",
-    "first_start",
-    "enter_wait",
-    "clear_wait",
     "set_external_ref",
     "cancel_request",
     "terminal",
@@ -55,9 +52,6 @@ impl SurfaceOperation {
         match self {
             Self::StoreContract(operation) => match operation {
                 StoreContractOp::Register { .. } => "register",
-                StoreContractOp::FirstStart { .. } => "first_start",
-                StoreContractOp::EnterWait { .. } => "enter_wait",
-                StoreContractOp::ClearWait { .. } => "clear_wait",
                 StoreContractOp::SetExternalRef { .. } => "set_external_ref",
                 StoreContractOp::CancelRequest { .. } => "cancel_request",
                 StoreContractOp::Terminal { .. } => "terminal",
