@@ -424,7 +424,7 @@ no `gen_ai.usage.*` counter; an input total that overflows omits
 Adapter defaults are `openai` for `openai`, `openai-compatible` and `codex`,
 `anthropic` for `anthropic`, and `gcp.gen_ai` for the `google_oauth` adapter's
 Code Assist endpoint. The enricher can replace `RefinableKey::GenAiProviderName`; runtime
-retry labels keep the adapter kind. Successful provider evidence
+retry labels keep the semantic provider default. Successful provider evidence
 supplies the response model, response id and finish reasons. Failed calls keep
 the request facts and billed usage as well.
 
@@ -443,3 +443,33 @@ it removes model/provider/usage fields from domain completions. The stored
 execution attempt ledger keeps its existing shape. The generated
 [instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
 lists the exact exported attributes and span type ids.
+
+## GenAI metrics (FIG-6306)
+
+Installing `OtelTelemetry` records both families by default.
+`OtelOptions::metrics` selects `Off`, `Runtime`, `GenAi` or `All`; each disabled
+family uses no-op instruments. The generated instrumentation contract lists
+the names, types and units. Hosts own histogram views, cardinality limits and
+exporters through their meter provider.
+
+GenAI durations, token counters and per-call token histograms come from the
+same closing records as their spans. They retain the projection's default
+labels, before host enrichment, and include no session, turn or call ids.
+Sampling and span export selection do not suppress metrics. Removing a leaf's
+record through detail selection also removes its metrics. First-chunk timing
+observes streamed output or usage, excluding request evidence and retry notices.
+`lash.trace.omissions{reason}` belongs to `Runtime` and records at the omission
+ledger, including omissions with no published record.
+
+The agent's closing record carries its admitted inference and tool counts,
+including failed calls. Tool admissions update their counter with the admission
+facts, so replay and takeover do not count a call again. The live owner's close
+uses its loaded row plus acknowledged appends; cold terminals use the stored
+row. A refusal reloads that row once on its exceptional path.
+
+Hosts that store this: the baseline `turn_phases` table gains nonnegative
+`tool_calls`, default zero (`INTEGER` on SQLite, `BIGINT` on PostgreSQL), beside
+`model_calls`. The canonical admission writer stages `TurnWrite::AddToolCalls`
+with each new turn or cell round. A cell belonging to a session operation has
+no turn row to update. Trace-record schema 37 adds optional `inference_calls`
+and `tool_calls` to `TurnCompleted` in place, without a version bump.

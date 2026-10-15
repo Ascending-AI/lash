@@ -77,7 +77,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.turn.inputs` | Integer | Provenance | agent |
 | `lash.cancel.origin` | String | Provenance | agent |
 | `gen_ai.system_instructions` | String | Provenance | model |
-| `gen_ai.input.messages` | String | Provenance | model |
+| `gen_ai.input.messages` | String | Provenance | agent, model |
 | `gen_ai.output.messages` | String | Provenance | model |
 | `gen_ai.tool.definitions` | String | Provenance | model |
 | `gen_ai.tool.call.arguments` | String | Provenance | tool, cell |
@@ -108,7 +108,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | Span kind | Attribute reserve |
 |---|---|
 | `producer` | 20 |
-| `agent` | 23 |
+| `agent` | 24 |
 | `model` | 45 |
 | `model_attempt` | 28 |
 | `tool` | 31 |
@@ -122,6 +122,21 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 
 | Metric | Kind | Unit | Ownership |
 |---|---|---|---|
+| `gen_ai.client.inference.duration` | Histogram | `s` | Live |
+| `gen_ai.client.inference.time_to_first_chunk` | Histogram | `s` | Live |
+| `gen_ai.client.inference.usage.input_tokens` | Counter | `{token}` | Live |
+| `gen_ai.client.inference.usage.output_tokens` | Counter | `{token}` | Live |
+| `gen_ai.client.inference.usage.cache_read.input_tokens` | Counter | `{token}` | Live |
+| `gen_ai.client.inference.usage.cache_write.input_tokens` | Counter | `{token}` | Live |
+| `gen_ai.client.inference.usage.reasoning.output_tokens` | Counter | `{token}` | Live |
+| `gen_ai.client.inference.operation.input_tokens` | Histogram | `{token}` | Live |
+| `gen_ai.client.inference.operation.output_tokens` | Histogram | `{token}` | Live |
+| `gen_ai.invoke_agent.duration` | Histogram | `s` | Transition |
+| `gen_ai.invoke_agent.inference_calls` | Histogram | `{inference_call}` | Transition |
+| `gen_ai.invoke_agent.tool_calls` | Histogram | `{tool_call}` | Transition |
+| `gen_ai.execute_tool.duration` | Histogram | `s` | Transition |
+| `gen_ai.invoke_workflow.duration` | Histogram | `s` | Transition |
+| `lash.trace.omissions` | Counter | `` | Live |
 | `lash.provider.retries` | Counter | `` | Live |
 | `lash.provider.throttle_wait.duration` | Histogram | `ms` | Live |
 | `lash.store.pool.acquire_wait.duration` | Histogram | `ms` | Physical |

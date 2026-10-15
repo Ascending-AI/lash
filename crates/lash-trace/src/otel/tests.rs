@@ -142,6 +142,8 @@ fn completed_under(parent: &TraceCarrier, scope: &TraceScopeId) -> TraceRecord {
     record(
         TraceEvent::TurnCompleted {
             input: Vec::new(),
+            inference_calls: None,
+            tool_calls: None,
             inputs: 1,
             outcome: TraceTurnOutcome::Completed {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
@@ -568,6 +570,7 @@ fn emitted_domain_shape_matches_registry() {
         .metrics
         .obligations
         .record_leadership("recovery", true, 1);
+    metrics::emit_remaining_metrics(&adapter);
     meter.force_flush().unwrap();
     let spans = exporter.get_finished_spans().unwrap();
     for span in &spans {
@@ -1281,6 +1284,8 @@ fn failure_attributes_preserve_typed_classes() {
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
                 input: Vec::new(),
+                inference_calls: None,
+                tool_calls: None,
                 inputs: 1,
                 outcome: TraceTurnOutcome::Failed {
                     done_reason: crate::TraceTurnFailureReason::ContextOverflow,
@@ -1398,10 +1403,14 @@ fn host_and_lash_versions_accompany_exported_spans_and_metric_points() {
     assert_eq!(scopes.len(), 1);
     assert_eq!(scopes[0].scope(), &spans[0].1.instrumentation_scope);
     let points: Vec<_> = scopes[0].metrics().collect();
-    assert_eq!(points.len(), 1);
+    assert_eq!(points.len(), 2);
+    let point = points
+        .iter()
+        .find(|point| point.name() == "lash.store.pool.acquire_wait.duration")
+        .unwrap();
     let opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(
         opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
-    ) = points[0].data()
+    ) = point.data()
     else {
         panic!("latency histogram");
     };
@@ -1797,6 +1806,34 @@ fn semconv_token_usage_includes_cache_and_marks_overflow() {
 /// missing type can make the conformance check vacuous.
 #[test]
 fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
+    let definitions: Vec<serde_json::Value> = [
+        include_str!("../../tests/semconv/gen-ai/metrics.yaml"),
+        include_str!("../../tests/semconv/gen-ai/token-metrics.yaml"),
+    ]
+    .into_iter()
+    .map(|source| serde_yaml::from_str(source).unwrap())
+    .collect();
+    for metric in METRICS
+        .iter()
+        .filter(|metric| metric.name.starts_with("gen_ai."))
+    {
+        let pinned = definitions
+            .iter()
+            .flat_map(|model| model["metrics"].as_array().unwrap())
+            .find(|definition| definition["name"] == metric.name)
+            .expect("metric is pinned in semconv");
+        assert_eq!(pinned["unit"], metric.unit, "{} unit", metric.name);
+        assert_eq!(
+            pinned["instrument"],
+            match metric.kind {
+                registry::MetricKind::Counter => "counter",
+                registry::MetricKind::Histogram => "histogram",
+                registry::MetricKind::Gauge => "gauge",
+            },
+            "{} instrument",
+            metric.name
+        );
+    }
     for (span, expected) in [
         (DomainSpan::Model, "gen_ai.client.inference"),
         (DomainSpan::Turn, "gen_ai.invoke_agent.internal"),
@@ -2297,3 +2334,5 @@ fn a_turn_closer_exports_input_with_the_global_meter_provider() {
         serde_json::json!([{"role":"user","parts":[{"type":"text","content":"turn input"}]}])
     );
 }
+
+mod metrics;

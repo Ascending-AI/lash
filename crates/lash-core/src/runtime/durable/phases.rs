@@ -250,6 +250,7 @@ pub async fn run_phases(
     // How many model calls the turn admitted: a new call takes the next
     // ordinal, a resend keeps its own.
     let mut calls = row.model_calls;
+    let tool_calls_at_start = cx.tool_call_admissions();
     // Whether the last admitted call is unsettled, its request still held:
     // the call a model phase pins. The commit that leaves the model phase,
     // or admits the next call, settles it (FIG-5946).
@@ -933,6 +934,15 @@ pub async fn run_phases(
                     traced,
                     &drive.delivered_inputs(),
                     input,
+                    (
+                        calls,
+                        Some(
+                            row.tool_calls.saturating_add(
+                                cx.tool_call_admissions()
+                                    .saturating_sub(tool_calls_at_start),
+                            ),
+                        ),
+                    ),
                 );
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
@@ -1053,6 +1063,11 @@ pub(super) async fn refuse(
             "the turn was refused; the turn ends with the refusal"
         );
     }
+    let current = cx.durable_reads()?.turn(&row.session).await?;
+    let row = current
+        .as_ref()
+        .filter(|current| current.run == row.run)
+        .unwrap_or(row);
     let mut tx = cx.begin().await?;
     let cancelled = tool_round::cancel_open_round(cx, &mut tx, row).await?;
     let cause = crate::store::RunTerminalCause::Refused {
@@ -1069,7 +1084,14 @@ pub(super) async fn refuse(
     let input = turn_trace::input(cx, tracing, row, &[]).await;
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
     turn_trace::members_ended(tracing, row, &cancelled, turn_trace::MemberEnd::Cancelled);
-    turn_trace::ended(tracing, row, traced, &[], input);
+    turn_trace::ended(
+        tracing,
+        row,
+        traced,
+        &[],
+        input,
+        (row.model_calls, Some(row.tool_calls)),
+    );
     Ok(())
 }
 

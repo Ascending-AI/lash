@@ -277,6 +277,9 @@ pub struct TurnRow {
     /// How many model calls the turn admitted: the latest call's ordinal,
     /// and the pinned one's in the model phase; 0 before the first.
     pub model_calls: u32,
+    /// Tool calls admitted by this turn, including cells and failed calls.
+    /// Incremented atomically with their admission facts, never on replay.
+    pub tool_calls: u64,
     /// The host's turn deadline, recorded at admission.
     pub turn_deadline: Option<DurableInstant>,
     /// The epoch of the commit that last wrote the row.
@@ -317,6 +320,14 @@ pub enum TurnWrite {
         phase: PhaseAdvance,
         /// The protocol iteration.
         iteration: u32,
+    },
+    /// Add the newly admitted `calls` to the matching unfinished turn,
+    /// atomically with their run facts. A cell belonging to an operation
+    /// rather than a turn has no phase row and changes nothing.
+    AddToolCalls {
+        session: SessionId,
+        run: TurnId,
+        calls: u64,
     },
     /// Record `answer`, a receipt of the model call the unfinished turn's
     /// model phase pins, beside its phase (`model.answer`): the phase and

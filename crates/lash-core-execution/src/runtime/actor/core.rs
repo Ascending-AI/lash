@@ -2,7 +2,7 @@
 //! the cancel token, the replay probe and the due times.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use lash_durable::{
     ActorCommit, ActorKey, ActorTx, CommitLabel, DueSource, Dues, DurableError, DurableInstant,
@@ -100,6 +100,7 @@ pub(super) struct Inner {
     /// The turn drives built under the context, which
     /// [`ActorContext::next_drive`] numbers.
     drives: AtomicU32,
+    tool_call_admissions: AtomicU64,
 }
 
 impl std::fmt::Debug for ActorContext {
@@ -145,6 +146,7 @@ impl ActorContext {
                 dues: Dues::new(),
                 obligations: None,
                 drives: AtomicU32::new(0),
+                tool_call_admissions: AtomicU64::new(0),
             }),
             scope: Scope::new(admitted),
         }
@@ -185,6 +187,7 @@ impl ActorContext {
                         )
                     }),
                 drives: AtomicU32::new(0),
+                tool_call_admissions: AtomicU64::new(0),
             }),
             scope: Scope::new(admitted),
         }
@@ -215,6 +218,7 @@ impl ActorContext {
                 dues: Dues::new(),
                 obligations: None,
                 drives: AtomicU32::new(0),
+                tool_call_admissions: AtomicU64::new(0),
             }),
             scope: Scope::new(AdmittedScope::runtime_operation("unavailable")),
         }
@@ -421,11 +425,46 @@ impl ActorContext {
         .await
     }
 
+    /// Tool calls admitted by acknowledged commits of this activation.
+    /// A turn takes a mark beside its loaded row and adds the later delta
+    /// at close. Nothing is retained or reconstructed from this projection.
+    #[doc(hidden)]
+    pub fn tool_call_admissions(&self) -> u64 {
+        self.inner.tool_call_admissions.load(Ordering::Relaxed)
+    }
+
+    async fn with_obligations<F, Fut>(
+        &self,
+        tx: ActorTx,
+        owing: Option<&super::claim_obligations::ExecutionDebts>,
+        commit: F,
+    ) -> Result<ActorCommit, DurableError>
+    where
+        F: FnOnce(ActorTx) -> Fut,
+        Fut: std::future::Future<Output = Result<ActorCommit, DurableError>>,
+    {
+        let calls = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                lash_durable::DomainWrite::Turn(
+                    lash_durable::domain::TurnWrite::AddToolCalls { calls, .. },
+                ) => Some(*calls),
+                _ => None,
+            })
+            .sum::<u64>();
+        let committed = self.commit_with_obligations(tx, owing, commit).await?;
+        self.inner
+            .tool_call_admissions
+            .fetch_add(calls, Ordering::Relaxed);
+        Ok(committed)
+    }
+
     /// Commit `tx` through `commit`; a claimed session's
     /// commit carries the claim requirements its records leave it owing
     /// (S7), and its commits are serialized. `owing` states what a root
     /// `tx` publishes owes, as its writer staged it.
-    async fn with_obligations<F, Fut>(
+    async fn commit_with_obligations<F, Fut>(
         &self,
         tx: ActorTx,
         owing: Option<&super::claim_obligations::ExecutionDebts>,

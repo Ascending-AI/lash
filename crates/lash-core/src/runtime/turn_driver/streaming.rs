@@ -1163,6 +1163,19 @@ impl RuntimeTurnDriver<'_> {
         stream_event: LlmStreamEvent,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
+        if self.trace.is_observed()
+            && matches!(
+                stream_event,
+                LlmStreamEvent::Block(_) | LlmStreamEvent::Part(_) | LlmStreamEvent::Usage(_)
+            )
+        {
+            let elapsed = state.debug.elapsed_ms(self.host.core.clock.as_ref());
+            state
+                .debug
+                .summary
+                .first_chunk_latency_ms
+                .get_or_insert(elapsed);
+        }
         match stream_event {
             LlmStreamEvent::AttemptReset => {
                 self.reset_assistant_stream_hooks().await;

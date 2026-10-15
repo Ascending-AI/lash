@@ -468,3 +468,8 @@ claim_law!(
     a_retired_owner_claims_only_its_registry_callbacks,
     |store, _advance| { laws::a_retired_owner_claims_only_its_registry_callbacks(store) }
 );
+
+law!(
+    a_turn_counts_its_tool_admissions_atomically,
+    |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
+);

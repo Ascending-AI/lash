@@ -186,6 +186,7 @@ pub(super) struct LlmStreamState<'a> {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct LlmStreamSummary {
+    pub(super) first_chunk_latency_ms: Option<u64>,
     pub(super) first_visible_token_latency_ms: Option<u64>,
     pub(super) last_visible_chunk_latency_ms: Option<u64>,
     pub(super) text_delta_count: u64,
@@ -251,6 +252,7 @@ impl LlmStreamSummary {
             _ => None,
         };
         json!({
+            "first_chunk_latency_ms": self.first_chunk_latency_ms,
             "first_visible_token_latency_ms": self.first_visible_token_latency_ms,
             "stream_duration_ms": stream_duration_ms,
             "text_delta_count": self.text_delta_count,

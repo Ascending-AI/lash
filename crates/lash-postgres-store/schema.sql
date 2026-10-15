@@ -1041,6 +1041,7 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
+    tool_calls BIGINT NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -1261,9 +1262,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 057f0e8420e8e700); a call
+    -- Generated from this build's statements (registry bc781abc8ef8a8dc); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '057f0e8420e8e700'
+    IF p_registry IS DISTINCT FROM 'bc781abc8ef8a8dc'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1482,6 +1483,11 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
+        WHEN 'durable_turn.add_tool_calls' THEN
+            UPDATE lash_turn_phases SET tool_calls = tool_calls + ((v_p->>2)::BIGINT)
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_turn.open_named_run' THEN
             v_rows := 0;
             FOR v_row IN SELECT run FROM lash_session_runs

@@ -158,17 +158,34 @@ const TURN: &str = "emission-turn";
 /// One served turn that calls `echo_tool` and answers, sent twice under one
 /// turn id: the second send is answered from the committed run.
 async fn served_turn() -> Result<(Observed, LashCore)> {
+    let mut calls = vec![
+        tool_call("call-echo", "echo_tool", r#"{"value":"emitted"}"#),
+        text_call("done"),
+    ];
+    calls[0].stream_events = vec![lash_sansio::llm::types::LlmStreamEvent::Evidence(
+        Default::default(),
+    )];
+    calls[1].stream_events = vec![lash_sansio::llm::types::LlmStreamEvent::Part(
+        lash_sansio::llm::types::LlmOutputPart::Text {
+            text: "done".into(),
+            response_meta: None,
+        },
+    )];
+    calls[0]
+        .response
+        .as_mut()
+        .expect("successful fixture")
+        .usage = lash_sansio::llm::types::LlmUsage {
+        input_tokens: 10,
+        cache_read_input_tokens: 3,
+        cache_write_input_tokens: 2,
+        output_tokens: 4,
+        reasoning_output_tokens: 1,
+    };
     let builder = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))
-    .serve_test_llm_profile(
-        mock_provider(vec![
-            tool_call("call-echo", "echo_tool", r#"{"value":"emitted"}"#),
-            text_call("done"),
-        ])
-        .into_handle(),
-        mock_llm_profile_spec(),
-    )
+    .serve_test_llm_profile(mock_provider(calls).into_handle(), mock_llm_profile_spec())
     .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool));
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(crate::testing::runtime_lease_owner())?;
@@ -257,6 +274,8 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
         completed[0].event,
         lash_trace::TraceEvent::TurnCompleted {
             input: Vec::new(),
+            inference_calls: Some(2),
+            tool_calls: Some(1),
             inputs: 1,
             outcome: lash_trace::TraceTurnOutcome::Completed {
                 done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
@@ -286,6 +305,82 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
         "the send whose acceptance admitted the turn parents it: {sends:#?}"
     );
     assert!(span.start_time <= span.end_time);
+    // L12 on the production SQLite engine: a resend reads the terminal,
+    // so its chats and their metrics are observed only once.
+    let chats = observed.spans("chat");
+    assert_eq!(chats.len(), 2);
+    let seconds: f64 = chats
+        .iter()
+        .map(|chat| {
+            chat.end_time
+                .duration_since(chat.start_time)
+                .unwrap()
+                .as_secs_f64()
+        })
+        .sum();
+    observed.meter.force_flush().expect("flush metrics");
+    let exported = observed.metrics.get_finished_metrics().expect("metrics");
+    let latest = exported.last().expect("metric export");
+    let mut checked = 0;
+    for metric in latest.scope_metrics().flat_map(|scope| scope.metrics()) {
+        match metric.name() {
+            "gen_ai.client.inference.duration" => {
+                let AggregatedMetrics::F64(MetricData::Histogram(h)) = metric.data() else {
+                    panic!("duration histogram")
+                };
+                assert_eq!(h.data_points().map(|point| point.count()).sum::<u64>(), 2);
+                assert!(
+                    (h.data_points().map(|point| point.sum()).sum::<f64>() - seconds).abs() < 1e-9
+                );
+                checked += 1;
+            }
+            "gen_ai.client.inference.usage.input_tokens" => {
+                let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+                    panic!("token counter")
+                };
+                assert_eq!(
+                    sum.data_points().map(|point| point.value()).sum::<u64>(),
+                    15
+                );
+                let tokens: u64 = chats
+                    .iter()
+                    .filter_map(|chat| attribute(chat, "gen_ai.usage.input_tokens"))
+                    .map(|tokens| tokens.parse::<u64>().unwrap())
+                    .sum();
+                assert_eq!(tokens, 15);
+                checked += 1;
+            }
+            "gen_ai.client.inference.time_to_first_chunk" => {
+                let AggregatedMetrics::F64(MetricData::Histogram(h)) = metric.data() else {
+                    panic!("first chunk histogram")
+                };
+                assert_eq!(
+                    h.data_points().map(|point| point.count()).sum::<u64>(),
+                    1,
+                    "evidence is not a response chunk"
+                );
+                checked += 1;
+            }
+            "gen_ai.invoke_agent.tool_calls" => {
+                let AggregatedMetrics::U64(MetricData::Histogram(h)) = metric.data() else {
+                    panic!("tool call histogram")
+                };
+                assert_eq!(h.data_points().map(|point| point.count()).sum::<u64>(), 1);
+                assert_eq!(h.data_points().map(|point| point.sum()).sum::<u64>(), 1);
+                checked += 1;
+            }
+            "gen_ai.invoke_agent.inference_calls" => {
+                let AggregatedMetrics::U64(MetricData::Histogram(h)) = metric.data() else {
+                    panic!("call histogram")
+                };
+                assert_eq!(h.data_points().map(|point| point.count()).sum::<u64>(), 1);
+                assert_eq!(h.data_points().map(|point| point.sum()).sum::<u64>(), 2);
+                checked += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(checked, 5);
     core.shutdown().await?;
     Ok(())
 }

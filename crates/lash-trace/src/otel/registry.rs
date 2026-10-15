@@ -297,6 +297,21 @@ macro_rules! metrics {
     }
 }
 metrics! {
+    InferenceDuration => ("gen_ai.client.inference.duration", Histogram, "s", Live),
+    FirstChunk => ("gen_ai.client.inference.time_to_first_chunk", Histogram, "s", Live),
+    InputTokens => ("gen_ai.client.inference.usage.input_tokens", Counter, "{token}", Live),
+    OutputTokens => ("gen_ai.client.inference.usage.output_tokens", Counter, "{token}", Live),
+    CacheReadTokens => ("gen_ai.client.inference.usage.cache_read.input_tokens", Counter, "{token}", Live),
+    CacheWriteTokens => ("gen_ai.client.inference.usage.cache_write.input_tokens", Counter, "{token}", Live),
+    ReasoningTokens => ("gen_ai.client.inference.usage.reasoning.output_tokens", Counter, "{token}", Live),
+    OperationInputTokens => ("gen_ai.client.inference.operation.input_tokens", Histogram, "{token}", Live),
+    OperationOutputTokens => ("gen_ai.client.inference.operation.output_tokens", Histogram, "{token}", Live),
+    AgentDuration => ("gen_ai.invoke_agent.duration", Histogram, "s", Transition),
+    AgentInferenceCalls => ("gen_ai.invoke_agent.inference_calls", Histogram, "{inference_call}", Transition),
+    AgentToolCalls => ("gen_ai.invoke_agent.tool_calls", Histogram, "{tool_call}", Transition),
+    ToolDuration => ("gen_ai.execute_tool.duration", Histogram, "s", Transition),
+    WorkflowDuration => ("gen_ai.invoke_workflow.duration", Histogram, "s", Transition),
+    TraceOmissions => ("lash.trace.omissions", Counter, "", Live),
     ProviderRetries => ("lash.provider.retries", Counter, "", Live),
     ProviderThrottleWait => ("lash.provider.throttle_wait.duration", Histogram, "ms", Live),
     PoolAcquireWait => ("lash.store.pool.acquire_wait.duration", Histogram, "ms", Physical),

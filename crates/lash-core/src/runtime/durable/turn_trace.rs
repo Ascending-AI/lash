@@ -221,6 +221,7 @@ pub(super) fn ended(
     outcome: Option<TraceTurnOutcome>,
     delivered: &[crate::AdmittedTurnInputs],
     input: Vec<lash_trace::TraceLlmMessage>,
+    counts: (u32, Option<u64>),
 ) {
     let (Some(tracing), Some(scope), Some(outcome)) = (tracing, row.admission.trace(), outcome)
     else {
@@ -238,6 +239,8 @@ pub(super) fn ended(
                     context(&row.session, &row.run, row.admission.input_ids().first()),
                     TraceEvent::TurnCompleted {
                         input,
+                        inference_calls: Some(counts.0),
+                        tool_calls: counts.1,
                         outcome,
                         inputs: row.admission.input_ids().len(),
                     },

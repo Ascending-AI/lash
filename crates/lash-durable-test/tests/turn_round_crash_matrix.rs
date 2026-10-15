@@ -439,6 +439,8 @@ struct Seen {
     /// How many times a drive published what its turn held for its commit.
     published: usize,
     publication: Vec<PublicationEvent>,
+    /// The committed tool count read by each cold turn restore.
+    restored_tool_counts: Vec<u64>,
     /// The completion key each approval handed the host, by call.
     approvals: Vec<(ToolCallId, String)>,
 }
@@ -515,6 +517,10 @@ impl TurnServices for L4Services {
         restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
         let row = restore.row().clone();
+        self.seen
+            .lock_recover()
+            .restored_tool_counts
+            .push(row.tool_calls);
         let restored = restore
             .restore(machine_config(&row.session, &row.run))
             .await?;
@@ -2117,4 +2123,58 @@ async fn an_until_scope_end_park_is_revoked_when_its_turn_ends() {
         lash_durable::domain::ResolveAnswer::Revoked,
         "a late resolution of the revoked park's tombstone answers Revoked"
     );
+}
+
+/// The turn's stored tool count is its ledger's call count, including a
+/// pending call, after another node resumes the turn. Resume admits no
+/// second copy of the call and never increments the count again.
+#[tokio::test]
+async fn a_turns_tool_count_equals_its_ledger_after_takeover() {
+    let scenario = L4::new(Mode::Approval);
+    let (clock, nodes, parked) = until_waiting(&scenario).await;
+    let count = |nodes: Arc<SimNodes>| async move {
+        let row = nodes.database().turn(&session()).await.unwrap().unwrap();
+        let facts = nodes.database().run_facts(&owner()).await.unwrap();
+        let waits = round::PinnedWaits::read(nodes.database().as_ref(), &facts)
+            .await
+            .unwrap();
+        let fold = round::fold(&facts, &PolicyView::default(), &waits).unwrap();
+        let calls: usize = fold.rounds().map(|round| round.members().len()).sum();
+        assert_eq!(calls, 1, "one admitted approval, even while pending");
+        assert_eq!(
+            row.tool_calls, calls as u64,
+            "the stored count equals its ledger"
+        );
+    };
+    count(nodes.clone()).await;
+    nodes.kill("a");
+    nodes.kill("b");
+    nodes.start("c");
+    let (call, key) = approval(&scenario);
+    let backend = scenario.backend.lock_recover().clone().unwrap();
+    waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+        .await
+        .unwrap();
+    until_done(&scenario, &clock, &nodes).await;
+    let resumed = nodes.database().actor(&actor()).await.unwrap().unwrap();
+    assert!(
+        resumed.epoch > parked.epoch,
+        "the successor claimed the turn"
+    );
+    let facts = nodes.database().run_facts(&owner()).await.unwrap();
+    let fold = round::fold(
+        &facts,
+        &PolicyView::default(),
+        &round::PinnedWaits::ledger(),
+    )
+    .unwrap();
+    let calls: usize = fold.rounds().map(|round| round.members().len()).sum();
+    assert_eq!(calls, 1, "takeover did not admit a second copy");
+    assert_eq!(
+        scenario.seen.lock_recover().restored_tool_counts,
+        vec![calls as u64],
+        "the successor restored the stored count of its ledger's calls"
+    );
+    let violations = scenario.check(&nodes, None).await;
+    assert!(violations.is_empty(), "{violations:#?}");
 }

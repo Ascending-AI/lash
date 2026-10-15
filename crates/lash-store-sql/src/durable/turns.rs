@@ -59,6 +59,11 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2
              RETURNING run";
 
+        /// Count `?3` newly admitted tool calls of the matching unfinished
+        /// turn. No phase row for a cell of an operation means no turn to count.
+        add_tool_calls = "UPDATE turn_phases SET tool_calls = tool_calls + ?3
+             WHERE session_id = ?1 AND run = ?2";
+
         /// Record receipt `?3` of the call run `?2` of session `?1` pins in
         /// its model phase, at epoch `?4`. No row when the run has no phase
         /// row, is not in its model phase, or holds a receipt.
@@ -159,7 +164,7 @@ crate::statements! {
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.working_execution_ref, p.answer_ref
+                    p.working_execution_ref, p.answer_ref, p.tool_calls
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

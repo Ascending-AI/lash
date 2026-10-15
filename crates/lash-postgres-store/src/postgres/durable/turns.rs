@@ -148,6 +148,11 @@ pub(super) static ADVANCE_PHASE: Entry = Entry::new(
     ],
     Shape::Returning,
 );
+pub(super) static ADD_TOOL_CALLS: Entry = Entry::new(
+    || &SQL.add_tool_calls,
+    &[Ty::Text, Ty::Text, Ty::Int],
+    Shape::Exec,
+);
 pub(super) static ANSWER_SET: Entry = Entry::new(
     || &SQL.answer_set,
     &[Ty::Text, Ty::Text, Ty::Text, Ty::Int],
@@ -429,6 +434,15 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Step::one(&ADVANCE_PHASE, values),
             ]
         }
+        TurnWrite::AddToolCalls {
+            session,
+            run,
+            calls,
+        } => {
+            let mut values = turn(session, run);
+            values.push(Value::int(integer::<i64>(*calls)?));
+            vec![Step::any(&ADD_TOOL_CALLS, values)]
+        }
         TurnWrite::Answer {
             session,
             run,
@@ -534,6 +548,11 @@ pub(super) async fn apply(
     write: &TurnWrite,
 ) -> Result<(), DurableError> {
     match write {
+        TurnWrite::AddToolCalls { .. } => {
+            let program = steps(commit.epoch, write)?.unwrap_or_default();
+            steps::run(tx, &program, &commit.steps()).await?;
+            Ok(())
+        }
         TurnWrite::Admit { session, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
             match steps::run(tx, &program, &commit.steps()).await? {
@@ -891,6 +910,7 @@ pub(super) async fn turn(
         working,
         iteration,
         model_calls,
+        tool_calls: integer::<u64>(row.try_get::<i64, _>(14).map_err(decode)?)?,
         turn_deadline: turn_deadline.map(DurableInstant),
         written_epoch,
         cancel,

@@ -41,6 +41,7 @@ pub use opentelemetry_sdk as sdk;
 
 mod content_attributes;
 mod enrich;
+mod genai;
 mod model;
 mod provider;
 pub use crate::telemetry::metrics::registry;
@@ -92,6 +93,7 @@ pub struct OtelTelemetry {
     tracer: SdkTracer,
     provider: LashTracerProvider,
     metrics: TelemetryMetrics,
+    genai: genai::GenAiMetrics,
     options: OtelOptions,
     policy: Arc<TracePolicySnapshot>,
     omissions: Arc<TraceOmissionLedger>,
@@ -109,6 +111,13 @@ impl OtelTelemetry {
         } else {
             TelemetryMetrics::default()
         };
+        let genai_meter = if options.metrics.records_gen_ai() {
+            meter_provider.meter_with_scope(instrumentation_scope())
+        } else {
+            crate::telemetry::metrics::unobserved_meter()
+        };
+        let omissions = Arc::new(TraceOmissionLedger::default());
+        omissions.bind_metrics(metrics.runtime_tuning.clone());
         let policy = TracePolicySnapshot {
             export: Some(options.export),
             metrics: Some(options.metrics),
@@ -121,9 +130,10 @@ impl OtelTelemetry {
                 .tracer_with_scope(instrumentation_scope()),
             provider: tracer_provider.clone(),
             metrics,
+            genai: genai::GenAiMetrics::new(genai_meter),
             options,
             policy: Arc::new(policy),
-            omissions: Arc::default(),
+            omissions,
             producers: Arc::default(),
         }
     }
@@ -150,6 +160,7 @@ impl OtelTelemetry {
             enricher: self.options.enricher.is_some(),
             ..policy
         });
+        omissions.bind_metrics(self.metrics.runtime_tuning.clone());
         self.omissions = omissions;
         self
     }
@@ -334,6 +345,9 @@ impl TraceSink for OtelTelemetry {
                     .remove(&position.span.span_id())
             })
             .flatten();
+        if position.publishes() {
+            self.genai.record(record, position);
+        }
         if position.publishes() && position.is_sampled() {
             self.export(record, position, producer);
             self.export_model_attempts(record, position);

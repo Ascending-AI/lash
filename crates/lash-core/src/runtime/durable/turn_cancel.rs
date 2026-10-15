@@ -618,7 +618,17 @@ async fn end(
         );
         discarded.close.publish();
     }
-    super::turn_trace::ended(services.tracing(), row, traced, &delivered, input);
+    super::turn_trace::ended(
+        services.tracing(),
+        row,
+        traced,
+        &delivered,
+        input,
+        (
+            current.unwrap_or(row).model_calls,
+            Some(current.unwrap_or(row).tool_calls),
+        ),
+    );
     if let Some(mut drive) = drive {
         drive.committed().await;
         // The commit moved the head: the next turn loads it again.

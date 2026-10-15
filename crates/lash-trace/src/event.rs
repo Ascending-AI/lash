@@ -262,6 +262,15 @@ pub enum TraceEvent {
     TurnCompleted {
         /// Admitted input messages, captured by the terminal owner from durable input.
         input: Vec<crate::TraceLlmMessage>,
+        /// Model calls admitted by this turn, including failed calls; absent
+        /// when the terminal owner cannot recover that fact.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inference_calls: Option<u32>,
+        /// Tool calls admitted by the turn and its cells, including failures.
+        /// The terminal owner reads the stored count plus acknowledged appends;
+        /// absent only for a record with no known execution counts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_calls: Option<u64>,
         inputs: usize,
         outcome: TraceTurnOutcome,
     },

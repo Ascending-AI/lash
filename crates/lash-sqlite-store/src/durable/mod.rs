@@ -299,7 +299,7 @@ lash_store_sql::statements! {
                  SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                         p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                         p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                        p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                        p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
                         c.request_id, c.origin, c.reason, c.disposition, c.mode
                  FROM session_runs AS r
                  JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
@@ -1355,8 +1355,8 @@ impl DurableStore for SqliteDurableStore {
                             let turn = match row.get::<_, Option<String>>(9)? {
                                 Some(_) => Some((
                                     turns::StoredTurn::read(row, 9)?,
-                                    row.get::<_, Option<String>>(23)?
-                                        .map(|_| turns::StoredCancel::read(row, 23))
+                                    row.get::<_, Option<String>>(24)?
+                                        .map(|_| turns::StoredCancel::read(row, 24))
                                         .transpose()?,
                                 )),
                                 None => None,

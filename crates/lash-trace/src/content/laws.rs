@@ -445,6 +445,8 @@ fn content_shapes_validate_against_the_pinned_semconv_schemas() {
 #[test]
 fn turn_closer_input_obeys_capture_redaction_and_bounds() {
     let event = || TraceEvent::TurnCompleted {
+        inference_calls: None,
+        tool_calls: None,
         input: vec![TraceLlmMessage {
             role: "user".into(),
             blocks: vec![TraceContentBlock::Text {

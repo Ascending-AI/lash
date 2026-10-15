@@ -43,9 +43,10 @@ mod enabled {
     const RECOVERY_LEASE_ATTRIBUTE: &str = AttributeKey::RecoveryLease.definition().key;
 
     /// Runtime-facing OpenTelemetry instruments for host-tunable operational limits.
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct RuntimeTuningMetrics {
         provider_retries: Counter<u64>,
+        trace_omissions: Counter<u64>,
         provider_throttle_wait_duration: Histogram<u64>,
         pool_acquire_wait_duration: Histogram<u64>,
         runtime_commit_budgeted_size: Histogram<u64>,
@@ -61,6 +62,7 @@ mod enabled {
         pub fn new(meter: Meter) -> Self {
             Self {
                 provider_retries: counter(&meter, Metric::ProviderRetries),
+                trace_omissions: counter(&meter, Metric::TraceOmissions),
                 provider_throttle_wait_duration: histogram(&meter, Metric::ProviderThrottleWait),
                 pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
                 runtime_commit_budgeted_size: histogram(&meter, Metric::CommitBudgetedSize),
@@ -76,11 +78,19 @@ mod enabled {
             }
         }
 
+        pub(crate) fn record_trace_omissions(&self, reason: &'static str, count: u32) {
+            self.trace_omissions
+                .add(u64::from(count), &[KeyValue::new("reason", reason)]);
+        }
+
         pub fn record_provider_retry(&self, provider: &str, kind: &'static str) {
             self.provider_retries.add(
                 1,
                 &[
-                    KeyValue::new(PROVIDER_ATTRIBUTE, provider.to_string()),
+                    KeyValue::new(
+                        PROVIDER_ATTRIBUTE,
+                        super::registry::gen_ai_provider_name(provider).to_string(),
+                    ),
                     KeyValue::new(PROVIDER_RETRY_KIND_ATTRIBUTE, kind),
                 ],
             );
@@ -89,7 +99,10 @@ mod enabled {
         pub fn record_provider_throttle_wait(&self, provider: &str, wait: std::time::Duration) {
             self.provider_throttle_wait_duration.record(
                 duration_millis(wait),
-                &[KeyValue::new(PROVIDER_ATTRIBUTE, provider.to_string())],
+                &[KeyValue::new(
+                    PROVIDER_ATTRIBUTE,
+                    super::registry::gen_ai_provider_name(provider).to_string(),
+                )],
             );
         }
 
@@ -270,9 +283,10 @@ pub use enabled::*;
 
 #[cfg(not(feature = "otel"))]
 mod disabled {
-    #[derive(Clone, Default)]
+    #[derive(Clone, Debug, Default)]
     pub struct RuntimeTuningMetrics;
     impl RuntimeTuningMetrics {
+        pub(crate) fn record_trace_omissions(&self, _reason: &'static str, _count: u32) {}
         pub fn record_provider_retry(&self, provider: &str, kind: &'static str) {
             let _ = (provider, kind);
         }
@@ -356,12 +370,7 @@ impl Default for TelemetryMetrics {
     fn default() -> Self {
         #[cfg(feature = "otel")]
         {
-            // InstrumentProvider's defaults build no-op instruments without global state.
-            struct Unobserved;
-            impl opentelemetry::metrics::InstrumentProvider for Unobserved {}
-            Self::new(opentelemetry::metrics::Meter::new(std::sync::Arc::new(
-                Unobserved,
-            )))
+            Self::new(unobserved_meter())
         }
         #[cfg(not(feature = "otel"))]
         {
@@ -373,6 +382,14 @@ impl Default for TelemetryMetrics {
             }
         }
     }
+}
+
+#[cfg(feature = "otel")]
+pub(crate) fn unobserved_meter() -> opentelemetry::metrics::Meter {
+    // InstrumentProvider defaults create no-op handles without global state.
+    struct Unobserved;
+    impl opentelemetry::metrics::InstrumentProvider for Unobserved {}
+    opentelemetry::metrics::Meter::new(std::sync::Arc::new(Unobserved))
 }
 
 #[cfg(test)]
@@ -422,6 +439,9 @@ mod tests {
         metrics
             .runtime_tuning
             .record_runtime_commit_budgeted_size(42, "admitted");
+        metrics
+            .runtime_tuning
+            .record_trace_omissions("held_observations", 1);
         metrics.parked_work.record_park("session", "pass_loop");
         metrics.tool_intent.record_executed("start_process");
         metrics
@@ -460,11 +480,12 @@ mod tests {
         actual.sort_unstable_by_key(|entry| entry.0);
         let mut expected = registry::METRICS
             .iter()
+            .filter(|definition| !definition.name.starts_with("gen_ai."))
             .map(|definition| (definition.name, definition.unit, definition.kind))
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 17);
+        assert_eq!(actual.len(), 18);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()

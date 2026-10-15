@@ -320,3 +320,72 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     );
     Ok(())
 }
+
+/// The tool count is part of the owner commit: an advance preserves it,
+/// and a refused commit rolls its increment back with every other write.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_turn_counts_its_tool_admissions_atomically(store: &dyn DurableStore) -> LawOutcome {
+    let id = SessionId::try_from("tool-count-session".to_owned())
+        .map_err(|_| LawBroken("session id".into()))?;
+    let run =
+        TurnId::try_from("tool-count-turn".to_owned()).map_err(|_| LawBroken("turn id".into()))?;
+    let actor = session(id.as_str())?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    let owner = node(store, "tool-count-owner").await?;
+    let epoch = store.claim(&owner, 1).await?[0].epoch;
+    let mut tx = store.begin(&actor, epoch).await?;
+    tx.write(DomainWrite::Turn(TurnWrite::Admit {
+        session: id.clone(),
+        run: run.clone(),
+        admission: RunAdmissionRecord::Turn {
+            took: AdmittedTurnRows::Inputs {
+                ids: lash_core_store::store::AdmittedInputIds::one("tool-count-input".into()),
+            },
+            trace: None,
+        },
+        turn_deadline: None,
+    }));
+    store.commit(tx, LABEL).await?;
+    let count = || async {
+        store
+            .turn(&id)
+            .await?
+            .map(|row| row.tool_calls)
+            .ok_or_else(|| LawBroken("the turn vanished".into()))
+    };
+    ensure!(count().await? == 0, "new turn has no tool admissions");
+    let increment = |calls| {
+        DomainWrite::Turn(TurnWrite::AddToolCalls {
+            session: id.clone(),
+            run: run.clone(),
+            calls,
+        })
+    };
+    let mut tx = store.begin(&actor, epoch).await?;
+    tx.write(increment(2));
+    tx.write(increment(3));
+    store.commit(tx, LABEL).await?;
+    ensure!(count().await? == 5, "the commit lost an increment");
+    let mut tx = store.begin(&actor, epoch).await?;
+    tx.write(increment(7));
+    // A receipt is refused outside a model phase, after the increment ran.
+    let (root, body) = super::tagged_node("refused-tool-count");
+    tx.stage(Some(body));
+    tx.write(DomainWrite::Turn(TurnWrite::Answer {
+        session: id.clone(),
+        run: run.clone(),
+        answer: root,
+    }));
+    ensure!(
+        matches!(
+            store.commit(tx, LABEL).await,
+            Err(crate::DurableError::Domain(_))
+        ),
+        "the invalid receipt committed"
+    );
+    ensure!(count().await? == 5, "a refused commit counted calls");
+    Ok(())
+}

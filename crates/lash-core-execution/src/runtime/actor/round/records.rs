@@ -286,6 +286,15 @@ pub(super) fn admit_record(
     drafts: &[ExecutionDraft],
     admissions: Vec<NodeId>,
 ) {
+    if let OwnerKey::Turn(session, turn) | OwnerKey::Cell(session, turn, _) = owner {
+        tx.write(DomainWrite::Turn(
+            lash_durable::domain::TurnWrite::AddToolCalls {
+                session: session.clone(),
+                run: turn.clone(),
+                calls: drafts.len() as u64,
+            },
+        ));
+    }
     append(
         tx,
         owner,

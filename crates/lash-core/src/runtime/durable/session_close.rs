@@ -275,7 +275,14 @@ pub async fn run_session_close(
                         &discarded,
                         super::turn_trace::MemberEnd::Discarded,
                     );
-                    super::turn_trace::ended(tracing, turn, traced, &[], input);
+                    super::turn_trace::ended(
+                        tracing,
+                        turn,
+                        traced,
+                        &[],
+                        input,
+                        (turn.model_calls, Some(turn.tool_calls)),
+                    );
                 }
                 continue_scope_ends(cx, session).await?;
             }

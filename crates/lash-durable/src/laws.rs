@@ -60,7 +60,7 @@ pub use formats::{
 pub use hand_back::an_abandoned_activation_hands_back_only_its_original_grant;
 pub use model_calls::{
     a_receipt_stands_beside_its_model_phase_until_the_next_phase,
-    a_turn_counts_the_model_calls_it_admitted,
+    a_turn_counts_its_tool_admissions_atomically, a_turn_counts_the_model_calls_it_admitted,
 };
 pub use parks::a_boot_redrives_only_the_session_parks_it_names;
 pub use prompts::{

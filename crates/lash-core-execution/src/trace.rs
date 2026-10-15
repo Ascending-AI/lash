@@ -537,6 +537,8 @@ mod span_identity_tests {
                     TraceContext::default(),
                     TraceEvent::TurnCompleted {
                         input: Vec::new(),
+                        inference_calls: None,
+                        tool_calls: None,
                         inputs: 1,
                         outcome: lash_trace::TraceTurnOutcome::Completed {
                             done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,

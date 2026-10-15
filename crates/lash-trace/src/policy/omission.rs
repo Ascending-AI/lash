@@ -278,6 +278,7 @@ impl TraceOmissionReport {
 /// it is first counted.
 #[derive(Debug)]
 pub struct TraceOmissionLedger {
+    metrics: std::sync::OnceLock<crate::telemetry::metrics::RuntimeTuningMetrics>,
     counts: [[AtomicU64; TraceOmission::COUNT]; TraceOmissionSiteKind::COUNT],
 }
 
@@ -285,15 +286,24 @@ impl Default for TraceOmissionLedger {
     fn default() -> Self {
         Self {
             counts: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
+            metrics: std::sync::OnceLock::new(),
         }
     }
 }
 
 impl TraceOmissionLedger {
+    #[cfg(feature = "otel")]
+    pub(crate) fn bind_metrics(&self, metrics: crate::telemetry::metrics::RuntimeTuningMetrics) {
+        let _already_bound = self.metrics.set(metrics);
+    }
+
     /// Counts `counts` at `site`.
     pub fn record(&self, site: &TraceOmissionSite, counts: &TraceOmissionCounts) {
         let kind = site.kind();
         for (reason, count) in counts.iter() {
+            if let Some(metrics) = self.metrics.get() {
+                metrics.record_trace_omissions(reason.as_str(), count);
+            }
             let previous = self.counts[kind as usize][reason.index()]
                 .fetch_add(u64::from(count), Ordering::Relaxed);
             if previous == 0 {

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
     model_calls INTEGER NOT NULL DEFAULT 0,
+    tool_calls INTEGER NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -210,6 +211,19 @@ pub(super) fn apply(
                     run: run.clone(),
                 }),
             }
+        }
+        TurnWrite::AddToolCalls {
+            session,
+            run,
+            calls,
+        } => {
+            tx.prepare_cached(SQL.add_tool_calls.sql())?
+                .execute(rusqlite::params![
+                    session.as_str(),
+                    run.as_str(),
+                    integer::<i64>(*calls)?,
+                ])?;
+            Ok(Ok(()))
         }
         TurnWrite::Answer {
             session,
@@ -731,11 +745,12 @@ pub(super) struct StoredTurn {
     turn_deadline: Option<i64>,
     epoch: i64,
     model_calls: i64,
+    tool_calls: i64,
     stream_from: Option<String>,
 }
 
 impl StoredTurn {
-    /// The fourteen columns from `first` on.
+    /// The fifteen columns from `first` on.
     pub(super) fn read(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Self> {
         Ok(Self {
             run: row.get(first)?,
@@ -751,6 +766,7 @@ impl StoredTurn {
             turn_deadline: row.get(first + 8)?,
             epoch: row.get(first + 9)?,
             model_calls: row.get(first + 10)?,
+            tool_calls: row.get(first + 14)?,
             stream_from: row.get(first + 11)?,
         })
     }
@@ -794,6 +810,7 @@ impl StoredTurn {
         else {
             return Ok(Err(corrupt("turn phase", &self.phase)));
         };
+        let tool_calls = integer::<u64>(self.tool_calls)?;
         let cancel = match cancel(&run)? {
             Ok(cancel) => cancel,
             Err(error) => return Ok(Err(error)),
@@ -806,6 +823,7 @@ impl StoredTurn {
             working,
             iteration,
             model_calls,
+            tool_calls,
             turn_deadline: self.turn_deadline.map(DurableInstant),
             written_epoch: Epoch(self.epoch),
             cancel,
