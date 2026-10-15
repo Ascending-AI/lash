@@ -583,6 +583,17 @@ async fn test_parks_are_typed_fenced_and_redrivable(stores: Arc<dyn lash_core::S
             .park,
         crate::process::ProcessParkState::NotParked
     );
+    // The outcome commits before the actor finishes its terminal cascade
+    // (ADR 0132 §11). Wait for that release before testing a terminal actor.
+    lash_core::testing::poll_until(
+        std::time::Duration::from_secs(30),
+        "the process actor to finish its terminal cascade",
+        || async {
+            let row = store.actor(&process_actor).await.unwrap().unwrap();
+            (row.state == ActorState::Terminal).then_some(())
+        },
+    )
+    .await;
     assert!(matches!(
         crate::testing::park_process(&backend, &process_id, process_reason).await,
         Err(DurableError::MailRefused(MailRefusal::ActorTerminal(_)))
