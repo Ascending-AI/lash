@@ -5841,9 +5841,6 @@
     {
       "description": "A code cell's span opens: once per execution of the cell, starting at\nthe cell's retained first start.",
       "properties": {
-        "code": {
-          "type": "string"
-        },
         "code_chars": {
           "format": "uint",
           "minimum": 0,
@@ -5860,7 +5857,6 @@
       "required": [
         "type",
         "language",
-        "code",
         "code_chars"
       ],
       "type": "object"
@@ -6172,6 +6168,13 @@
     },
     {
       "properties": {
+        "input": {
+          "description": "Admitted input messages, captured by the terminal owner from durable input.",
+          "items": {
+            "$ref": "#/$defs/TraceLlmMessage"
+          },
+          "type": "array"
+        },
         "inputs": {
           "format": "uint",
           "minimum": 0,
@@ -6187,6 +6190,7 @@
       },
       "required": [
         "type",
+        "input",
         "inputs",
         "outcome"
       ],

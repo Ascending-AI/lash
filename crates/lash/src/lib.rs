@@ -260,6 +260,8 @@ pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryP
 pub use lash_core::runtime::durable::session::{
     ParkedTurnState, SessionParkReason, SessionPassFailure,
 };
+/// Display labels for the shipped kernel and dialect helpers.
+pub use lash_helper_labels as helper_labels;
 mod pacing;
 pub use lash_core::execution_limits::{
     CompositionCacheLimitsBuilder, DiagnosticLimitsBuilder, EvidenceLimitsBuilder, LimitBounds,
@@ -1043,6 +1045,12 @@ pub mod secrets {
 /// Hosts and plugins read [`ObservedProcess`]. Raw rows and their store ports
 /// live in [`crate::persistence`].
 pub mod process {
+    /// Statement observation requested by a kernel-engine start.
+    #[cfg(feature = "codemode")]
+    pub use lash_vm_runtime::Observe;
+    /// Typed settings for a kernel-engine start.
+    #[cfg(feature = "codemode")]
+    pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{
         ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessStartDeclaration,

@@ -412,7 +412,6 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::ExecCodeStarted {
             language: "python".to_string(),
-            code: "print(1)".to_string(),
             code_chars: 8,
         },
         exec_code_completed_event(),
@@ -458,6 +457,7 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::TurnCompleted {
+            input: Vec::new(),
             inputs: 1,
             outcome: TraceTurnOutcome::Completed {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
@@ -892,6 +892,25 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         },
     };
     vec![
+        TraceEvent::TurnCompleted {
+            input: vec![lash_trace::TraceLlmMessage {
+                role: "user".into(),
+                blocks: vec![lash_trace::TraceContentBlock::Text {
+                    text: CONTENT.into(),
+                    cache_breakpoint: false,
+                }],
+            }],
+            inputs: 1,
+            outcome: TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::AssistantMessage,
+            },
+        },
+        TraceEvent::ExecCodeDiscarded {
+            code: CONTENT.into(),
+            language: "typescript".into(),
+            started_at_ms: 0,
+            duration_ms: 1,
+        },
         TraceEvent::AttachmentDegraded {
             attachment_id: Some("attachment-id".to_string()),
             label: Some(CONTENT.to_string()),
@@ -1053,11 +1072,6 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             duration_ms: 3,
             issuing_node_id: None,
             attempts: failed_tool_attempt(),
-        },
-        TraceEvent::ExecCodeStarted {
-            language: "python".to_string(),
-            code: CONTENT.to_string(),
-            code_chars: 14,
         },
         TraceEvent::ExecCodeCompleted {
             code: String::new(),

@@ -10,8 +10,7 @@ pub(super) fn attributes(record: &TraceRecord, out: &mut Vec<KeyValue>) {
             "gen_ai.tool.call.arguments" => {
                 if matches!(
                     record.event,
-                    crate::TraceEvent::ExecCodeStarted { .. }
-                        | crate::TraceEvent::ExecCodeCompleted { .. }
+                    crate::TraceEvent::ExecCodeCompleted { .. }
                         | crate::TraceEvent::ExecCodeFailed { .. }
                         | crate::TraceEvent::ExecCodeDiscarded { .. }
                 ) {

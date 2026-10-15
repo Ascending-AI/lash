@@ -3207,6 +3207,7 @@ dependencies = [
  "insta",
  "lash-dialect-python",
  "lash-dialect-typescript",
+ "lash-helper-labels",
  "lash-internal-conformance",
  "lash-internal-core",
  "lash-internal-core-store",

@@ -586,6 +586,11 @@ async fn end(
     // FIG-6164).
     // A head commit the session store refuses for its content is the stop's
     // runtime refusal, as it is `turn.commit`'s (FIG-5352).
+    let delivered = drive
+        .as_ref()
+        .map(|drive| drive.delivered_inputs())
+        .unwrap_or_default();
+    let input = super::turn_trace::input(cx, services.tracing(), row, &delivered).await;
     cx.commit(tx, CommitLabel::TURN_CANCEL)
         .await
         .map_err(|error| {
@@ -595,10 +600,6 @@ async fn end(
             };
             refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
         })?;
-    let delivered = drive
-        .as_ref()
-        .map(|drive| drive.delivered_inputs())
-        .unwrap_or_default();
     super::turn_trace::members_ended(
         services.tracing(),
         row,
@@ -617,7 +618,7 @@ async fn end(
         );
         discarded.close.publish();
     }
-    super::turn_trace::ended(services.tracing(), row, traced, &delivered);
+    super::turn_trace::ended(services.tracing(), row, traced, &delivered, input);
     if let Some(mut drive) = drive {
         drive.committed().await;
         // The commit moved the head: the next turn loads it again.

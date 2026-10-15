@@ -180,7 +180,7 @@ attributes! {
         TurnInputs => ("lash.turn.inputs", Integer, TraceSpanKindSet::of(&[K::Agent])),
         CancelOrigin => ("lash.cancel.origin", String, TraceSpanKindSet::of(&[K::Agent])),
         SystemInstructions => ("gen_ai.system_instructions", String, TraceSpanKindSet::of(&[K::Model])),
-        InputMessages => ("gen_ai.input.messages", String, TraceSpanKindSet::of(&[K::Model])),
+        InputMessages => ("gen_ai.input.messages", String, TraceSpanKindSet::of(&[K::Model, K::Agent])),
         OutputMessages => ("gen_ai.output.messages", String, TraceSpanKindSet::of(&[K::Model])),
         ToolDefinitions => ("gen_ai.tool.definitions", String, TraceSpanKindSet::of(&[K::Model])),
         ToolArguments => ("gen_ai.tool.call.arguments", String, TraceSpanKindSet::of(&[K::Tool,K::Cell])),

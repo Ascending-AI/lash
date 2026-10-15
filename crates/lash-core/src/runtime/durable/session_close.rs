@@ -257,6 +257,11 @@ pub async fn run_session_close(
                     // claim requirement holds the rest of the close back.
                     tx.set_requires(Vec::new());
                 }
+                let input = if let Some(turn) = &cancelled {
+                    super::turn_trace::input(cx, tracing, turn, &[]).await
+                } else {
+                    Vec::new()
+                };
                 commit_step(cx, tx, session, step).await?;
                 // The close's cancel is the open turn's terminal.
                 if let Some(turn) = &cancelled {
@@ -270,7 +275,7 @@ pub async fn run_session_close(
                         &discarded,
                         super::turn_trace::MemberEnd::Discarded,
                     );
-                    super::turn_trace::ended(tracing, turn, traced, &[]);
+                    super::turn_trace::ended(tracing, turn, traced, &[], input);
                 }
                 continue_scope_ends(cx, session).await?;
             }

@@ -180,6 +180,12 @@ impl KernelRecordedSettings {
         self
     }
 
+    /// The engine settings a start records, including its typed observation choice.
+    #[must_use]
+    pub fn into_engine_settings(self) -> lash_core::EngineSettings {
+        lash_core::EngineSettings::new(serde_json::json!(self))
+    }
+
     /// The level a process recorded with `settings` is observed at: `off`
     /// when it recorded none, or settings that do not decode.
     #[must_use]

@@ -264,7 +264,11 @@ fn cell_builder(
             lash::tool_provider_key!("tools"),
             Arc::new(DeferredTool { keys }),
         )
-        .trace_runtime(telemetry.runtime())
+        .trace_runtime(
+            telemetry
+                .runtime()
+                .with_content(lash::tracing::ContentPolicy::captured()),
+        )
     }
 }
 
@@ -273,7 +277,7 @@ fn cell_builder(
 /// taking-over owner, whose commit consumes the cell's answer, closes it
 /// once, from the first start the suspended owner's phase retained, and the
 /// cell's call is the cell span's child.
-async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
+async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     let telemetry = Telemetry::default();
     let (keys, mut parked) = tokio::sync::mpsc::unbounded_channel();
     let settings = lash_core_execution::DurableSettings {
@@ -292,6 +296,7 @@ async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
     let session = world.session(name, served::spec(8)).await;
     let sent = session
         .send(lash::TurnInput::text(name))
+        .id("trace-suspended-cell-run".into())
         .await
         .expect("the input is accepted");
     let key = tokio::time::timeout(WATCHDOG, parked.recv())
@@ -310,13 +315,29 @@ async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
             cell_builder(&telemetry.restarted(), &keys),
         )
         .await;
-    lash_core::waits::resolve_host(
-        &world.backend,
-        &key,
-        lash_core::Resolution::Ok(serde_json::json!({ "answered": true })),
-    )
-    .await
-    .expect("the deferred call's wait resolves");
+    if discard {
+        world
+            .core
+            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .durable()
+            .await
+            .unwrap()
+            .cancel(lash::CancelTarget::Run(
+                lash::RunId::parse("trace-suspended-cell-run").unwrap(),
+            ))
+            .mode(lash::TurnCancelMode::Immediate)
+            .request_id("takeover-discard")
+            .await
+            .unwrap();
+    } else {
+        lash_core::waits::resolve_host(
+            &world.backend,
+            &key,
+            lash_core::Resolution::Ok(serde_json::json!({ "answered": true })),
+        )
+        .await
+        .expect("the deferred call's wait resolves");
+    }
     drop(sent);
     let session = world
         .core
@@ -324,12 +345,68 @@ async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
         .durable()
         .await
         .expect("the session is open on the taking-over node");
-    let output = world.send(&session, "after the takeover").await;
-    served::assert_answered("the follow-up turn", &output);
+    if discard {
+        tokio::time::timeout(
+            WATCHDOG,
+            session
+                .run(lash::RunId::parse("trace-suspended-cell-run").unwrap())
+                .output(),
+        )
+        .await
+        .expect("the terminal owner answers")
+        .expect("the cancelled turn settles");
+    } else {
+        let output = world.send(&session, "after the takeover").await;
+        served::assert_answered("the follow-up turn", &output);
+    }
     let mut violations = telemetry.first_turn_violations(name, false);
     violations.extend(telemetry.publication_violations(&[]));
     violations.extend(telemetry.first_turn_cell_violations(name, false));
     let closes = telemetry.first_turn_cell_closes(name);
+    let code = format!("await tools.{DEFERRED}({{}});");
+    let published = telemetry.published();
+    let closing_code: Vec<_> = published
+        .iter()
+        .filter_map(|record| {
+            if record
+                .context
+                .session_id
+                .as_ref()
+                .is_none_or(|session| session.as_str() != name)
+            {
+                return None;
+            }
+            match &record.event {
+                lash::tracing::TraceEvent::ExecCodeCompleted { code, .. }
+                | lash::tracing::TraceEvent::ExecCodeDiscarded { code, .. } => Some(code.as_str()),
+                _ => None,
+            }
+        })
+        .collect();
+    assert_eq!(
+        closing_code,
+        [code.as_str()],
+        "the closing owner needs no opening record to export code"
+    );
+    let first_turn_input = published
+        .iter()
+        .find_map(|record| match &record.event {
+            lash::tracing::TraceEvent::TurnCompleted { input, .. }
+                if record
+                    .context
+                    .turn_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == "trace-suspended-cell-run") =>
+            {
+                Some(input)
+            }
+            _ => None,
+        })
+        .expect("the takeover exports the turn's closer");
+    assert_eq!(
+        serde_json::to_value(first_turn_input).unwrap()[0]["blocks"][0]["text"],
+        name
+    );
     world.shutdown().await;
     if !suspended.is_empty() {
         violations.push(format!(
@@ -347,6 +424,15 @@ async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
         "the suspended cell broke its one span:\n  {}",
         violations.join("\n  ")
     );
+}
+
+async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
+    suspended_cell_closes_on_takeover(tier, false).await;
+}
+
+/// A terminal owner restores only the retained cell start and checkpoint.
+async fn a_suspended_cell_discarded_on_a_takeover_node_exports_its_code(tier: Tier) {
+    suspended_cell_closes_on_takeover(tier, true).await;
 }
 
 /// The tool a code cell's call runs, which holds on the node the law
@@ -574,4 +660,5 @@ tiered_laws!(
     a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once,
     a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once,
     a_suspended_cell_answered_on_a_takeover_node_is_one_span,
+    a_suspended_cell_discarded_on_a_takeover_node_exports_its_code,
 );

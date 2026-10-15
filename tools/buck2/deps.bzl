@@ -1367,6 +1367,7 @@ PACKAGE_DEPS = {
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_http_transport": "//crates/lash-http-transport:lash-http-transport",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",

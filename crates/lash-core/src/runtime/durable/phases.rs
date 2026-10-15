@@ -886,6 +886,9 @@ pub async fn run_phases(
                 // for the deployment or the state it holds is the pass's
                 // failure: the session parks at the activation-loop budget
                 // with the turn and its input kept (FIG-5398).
+                let input =
+                    turn_trace::input(cx, services.tracing(), &row, &drive.delivered_inputs())
+                        .await;
                 let released = cx.draining();
                 let committed = if released {
                     let more = tx.domain().iter().any(|write| {
@@ -924,7 +927,13 @@ pub async fn run_phases(
                     );
                     discarded.close.publish();
                 }
-                turn_trace::ended(services.tracing(), &row, traced, &drive.delivered_inputs());
+                turn_trace::ended(
+                    services.tracing(),
+                    &row,
+                    traced,
+                    &drive.delivered_inputs(),
+                    input,
+                );
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
@@ -1057,9 +1066,10 @@ pub(super) async fn refuse(
         head_revision: None,
     }));
     end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
+    let input = turn_trace::input(cx, tracing, row, &[]).await;
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
     turn_trace::members_ended(tracing, row, &cancelled, turn_trace::MemberEnd::Cancelled);
-    turn_trace::ended(tracing, row, traced, &[]);
+    turn_trace::ended(tracing, row, traced, &[], input);
     Ok(())
 }
 

@@ -67,7 +67,24 @@ fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) 
             f,
         );
     }
-    for (i, message) in req.messages.iter_mut().enumerate() {
+    input_messages(&mut req.messages, f);
+    tools(&mut req.tools, f);
+    if let Some(spec) = &mut req.output_spec
+        && spec.get("type").and_then(Value::as_str) == Some("json_schema")
+    {
+        if let Some(schema) = spec.get_mut("schema") {
+            json(C::OutputSchema, "output_schema", schema, f);
+        }
+    } else if req
+        .output_spec
+        .as_ref()
+        .is_some_and(|spec| spec.get("type").and_then(Value::as_str) != Some("json_object"))
+    {
+        json(C::OutputSchema, "output_schema", &mut req.output_spec, f);
+    }
+}
+fn input_messages(messages: &mut [TraceLlmMessage], f: &mut dyn FnMut(&mut ContentField<'_>)) {
+    for (i, message) in messages.iter_mut().enumerate() {
         for (j, block) in message.blocks.iter_mut().enumerate() {
             let path = format!("input_messages[{i}].parts[{j}]");
             match block {
@@ -107,20 +124,6 @@ fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) 
                 }
             }
         }
-    }
-    tools(&mut req.tools, f);
-    if let Some(spec) = &mut req.output_spec
-        && spec.get("type").and_then(Value::as_str) == Some("json_schema")
-    {
-        if let Some(schema) = spec.get_mut("schema") {
-            json(C::OutputSchema, "output_schema", schema, f);
-        }
-    } else if req
-        .output_spec
-        .as_ref()
-        .is_some_and(|spec| spec.get("type").and_then(Value::as_str) != Some("json_object"))
-    {
-        json(C::OutputSchema, "output_schema", &mut req.output_spec, f);
     }
 }
 fn tools(tools: &mut [TraceToolSpec], f: &mut dyn FnMut(&mut ContentField<'_>)) {
@@ -389,10 +392,9 @@ impl TraceEvent {
                 }
             }
             Self::ExecCodeStarted {
-                code,
                 language: _,
                 code_chars: _,
-            } => text(C::Code, "code", code, f),
+            } => {}
             Self::ExecCodeCompleted {
                 code,
                 output,
@@ -500,6 +502,11 @@ impl TraceEvent {
                 started_at_ms: _,
                 duration_ms: _,
             } => text(C::Code, "code", code, f),
+            Self::TurnCompleted {
+                input,
+                inputs: _,
+                outcome: _,
+            } => input_messages(input, f),
             Self::Custom { payload, name: _ } => json(C::Extension, "extension", payload, f),
             Self::TurnStarted { metadata: _ }
             | Self::PromptBuilt {
@@ -536,10 +543,6 @@ impl TraceEvent {
                 conflict: _,
             }
             | Self::ObservationProjection { projections: _ }
-            | Self::TurnCompleted {
-                outcome: _,
-                inputs: _,
-            }
             | Self::ProducerSettled {
                 producer: _,
                 outcome: _,
@@ -556,6 +559,11 @@ impl TraceEvent {
                 tool.input_schema = Value::Null;
                 tool.output_schema = Value::Null;
             }
+        }
+        if let Self::TurnCompleted { input, .. } = self
+            && !policy.captures(C::InputMessages)
+        {
+            input.clear();
         }
         // Remove reasoning parts, rather than leave empty reasoning in a message.
         if let Some(req) = self.request_mut() {

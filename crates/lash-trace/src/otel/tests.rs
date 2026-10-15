@@ -141,6 +141,7 @@ fn closing(
 fn completed_under(parent: &TraceCarrier, scope: &TraceScopeId) -> TraceRecord {
     record(
         TraceEvent::TurnCompleted {
+            input: Vec::new(),
             inputs: 1,
             outcome: TraceTurnOutcome::Completed {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
@@ -197,8 +198,12 @@ fn carrier_sdk_conversion_preserves_unsampled_flags_state_and_remote_provenance(
 /// record and a record with no position build nothing.
 #[test]
 fn a_sampled_closing_record_exports_lash_ids_parent_links_and_times() {
-    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOff);
-    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let (provider, _meter, exporter, _) = providers(Sampler::AlwaysOff);
+    let adapter = OtelTelemetry::new(
+        &provider,
+        opentelemetry::global::meter_provider().as_ref(),
+        OtelOptions::default(),
+    );
     let producer = producer();
     let turn = derived(&producer, &scope_id());
     let consumed = with_span(&context(1), W3cSpanId::from_bytes([7; 8]).unwrap());
@@ -1275,6 +1280,7 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
+                input: Vec::new(),
                 inputs: 1,
                 outcome: TraceTurnOutcome::Failed {
                     done_reason: crate::TraceTurnFailureReason::ContextOverflow,
@@ -2253,5 +2259,41 @@ fn content_hooks_reach_sinks_and_spans_and_references_share_the_enrichment_budge
     assert_eq!(
         remaining.lock().unwrap().unwrap().attributes,
         initial.attributes - 16
+    );
+}
+
+/// An exporter on a closing owner has never received this turn's opener.
+#[test]
+fn a_turn_closer_exports_input_with_the_global_meter_provider() {
+    let (provider, _meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(
+        &provider,
+        opentelemetry::global::meter_provider().as_ref(),
+        OtelOptions::default(),
+    );
+    let mut closer = completed();
+    if let TraceEvent::TurnCompleted { input, .. } = &mut closer.event {
+        input.push(crate::TraceLlmMessage {
+            role: "user".into(),
+            blocks: vec![crate::TraceContentBlock::Text {
+                text: "turn input".into(),
+                cache_breakpoint: false,
+            }],
+        });
+    }
+    let closer = closer.governed(crate::ContentPolicy::captured());
+    adapter.append(&closer).unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 1);
+    let input = spans[0]
+        .attributes
+        .iter()
+        .find(|attr| attr.key.as_str() == "gen_ai.input.messages")
+        .expect("the closer alone supplies the span's input")
+        .value
+        .to_string();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&input).unwrap(),
+        serde_json::json!([{"role":"user","parts":[{"type":"text","content":"turn input"}]}])
     );
 }

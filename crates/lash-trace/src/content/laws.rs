@@ -68,6 +68,20 @@ fn categories_require_direction_and_reasoning_consent() {
             }
         }
     }
+    for system in [Capture::Omitted, Capture::Captured] {
+        let record = record(model_event())
+            .governed(ContentPolicy::omitted().with(ContentCategory::SystemInstructions, system));
+        let attrs = attributes(&record.event);
+        assert_eq!(
+            attrs
+                .iter()
+                .find(|(key, _)| *key == "gen_ai.system_instructions")
+                .map(|(_, value)| value.clone()),
+            (system == Capture::Captured)
+                .then(|| json!([{"type":"text","content":"system secret"}]))
+        );
+        assert!(!attrs.iter().any(|(key, _)| *key == "gen_ai.input.messages"));
+    }
     let record = record(model_event())
         .governed(ContentPolicy::captured().with(ContentCategory::OutputSchema, Capture::Omitted));
     let TraceEvent::LlmCallCompleted { request, .. } = record.event else {
@@ -423,5 +437,41 @@ fn content_shapes_validate_against_the_pinned_semconv_schemas() {
                 .unwrap();
             assert!(validator.is_valid(&value), "{key}: {value}");
         }
+    }
+}
+
+/// A turn's exported input obeys the same capture, hook and byte limits
+/// as model input, using the one exhaustive content visitor.
+#[test]
+fn turn_closer_input_obeys_capture_redaction_and_bounds() {
+    let event = || TraceEvent::TurnCompleted {
+        input: vec![TraceLlmMessage {
+            role: "user".into(),
+            blocks: vec![TraceContentBlock::Text {
+                text: "secret ".repeat(100_000),
+                cache_breakpoint: false,
+            }],
+        }],
+        inputs: 1,
+        outcome: TraceTurnOutcome::Completed {
+            done_reason: TraceTurnCompletionReason::AssistantMessage,
+        },
+    };
+    let omitted = record(event()).governed(ContentPolicy::omitted());
+    assert!(!serde_json::to_string(&omitted).unwrap().contains("secret"));
+    assert!(attributes(&omitted.event).is_empty());
+    let policy = TracePolicySnapshot {
+        content: ContentPolicy::omitted().with(ContentCategory::InputMessages, Capture::Captured),
+        ..Default::default()
+    };
+    let mut captured = record(event());
+    captured.apply_content(&policy, Some(&Rewrite));
+    assert!(!serde_json::to_string(&captured).unwrap().contains("secret"));
+    assert!(!captured.content.truncated.is_empty() || !captured.content.oversize.is_empty());
+    for (_, value) in attributes(&captured.event) {
+        assert!(
+            serde_json::to_vec(&value).unwrap().len() as u64
+                <= policy.content_limits.max_attribute_bytes()
+        );
     }
 }

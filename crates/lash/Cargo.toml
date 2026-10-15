@@ -34,6 +34,7 @@ lash-vm-worker = { workspace = true, optional = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+lash-helper-labels = { workspace = true }
 lash-core = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }

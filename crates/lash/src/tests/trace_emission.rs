@@ -256,6 +256,7 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
     assert_eq!(
         completed[0].event,
         lash_trace::TraceEvent::TurnCompleted {
+            input: Vec::new(),
             inputs: 1,
             outcome: lash_trace::TraceTurnOutcome::Completed {
                 done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,

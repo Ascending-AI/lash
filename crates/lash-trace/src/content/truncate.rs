@@ -86,6 +86,12 @@ impl TraceEvent {
                 marks.dropped_messages += 1;
             }
         }
+        if let Self::TurnCompleted { input, .. } = self {
+            while input.len() > 1 && size(&super::semconv_input(input)) > attribute {
+                input.remove(0);
+                marks.dropped_messages += 1;
+            }
+        }
         self.visit_content(&mut |field| {
             let bytes = match field.value() {
                 ContentValue::Text(value) => size(value),
@@ -139,6 +145,9 @@ impl TraceEvent {
                     if let Some(req) = self.request_mut() {
                         req.messages.clear();
                     }
+                    if let Self::TurnCompleted { input, .. } = self {
+                        input.clear();
+                    }
                 }
                 "gen_ai.tool.definitions" => {
                     if let Some(req) = self.request_mut() {
@@ -159,8 +168,7 @@ impl TraceEvent {
                     Self::ToolCallCompleted { args, .. } | Self::ToolCallStarted { args, .. } => {
                         *args = Value::Null
                     }
-                    Self::ExecCodeStarted { code, .. }
-                    | Self::ExecCodeCompleted { code, .. }
+                    Self::ExecCodeCompleted { code, .. }
                     | Self::ExecCodeFailed { code, .. }
                     | Self::ExecCodeDiscarded { code, .. } => code.clear(),
                     _ => {}

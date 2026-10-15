@@ -188,7 +188,6 @@ pub enum TraceEvent {
     /// the cell's retained first start.
     ExecCodeStarted {
         language: String,
-        code: String,
         code_chars: usize,
     },
     /// A code cell answered, and the commit that consumed its answer closes
@@ -261,6 +260,8 @@ pub enum TraceEvent {
         step: crate::StepBodyStarted,
     },
     TurnCompleted {
+        /// Admitted input messages, captured by the terminal owner from durable input.
+        input: Vec<crate::TraceLlmMessage>,
         inputs: usize,
         outcome: TraceTurnOutcome,
     },

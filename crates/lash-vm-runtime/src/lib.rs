@@ -79,3 +79,6 @@ pub use process::{
     retired_functions_reached, survey_helper_processes, survey_kernel_processes, with_definitions,
 };
 pub use process_plugin::KernelProcessPluginFactory;
+
+/// Statement observation requested by recorded kernel settings.
+pub use lash_kernel_vm::{Bounds as KernelBounds, Observe};

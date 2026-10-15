@@ -638,6 +638,32 @@ impl Processes {
             .default_settings(kind, payload)?)
     }
 
+    /// This kernel engine's defaults, ready for a typed `observing` choice.
+    /// Unknown settings fields are refused by the kernel's strict decoder.
+    ///
+    /// # Errors
+    ///
+    /// The kernel engine is absent or its settings do not decode.
+    #[cfg(feature = "codemode")]
+    pub fn kernel_engine_defaults(&self) -> Result<crate::process::KernelRecordedSettings> {
+        let settings = self
+            .engine_defaults(
+                lash_vm_runtime::LASH_VM_ENGINE_KIND,
+                &serde_json::Value::Null,
+            )?
+            .ok_or_else(|| {
+                crate::error::EmbedError::Plugin(lash_core::PluginError::Registration(
+                    "the kernel engine returned no settings".to_owned(),
+                ))
+            })?;
+        serde_json::from_value(settings.into_value()).map_err(|error| {
+            lash_core::PluginError::Registration(format!(
+                "the kernel settings do not decode: {error}"
+            ))
+            .into()
+        })
+    }
+
     /// Read the process with its park state from this core's actor store.
     /// A retained terminal reports `NotParked`; this read never reports `NotRead`.
     pub async fn get(

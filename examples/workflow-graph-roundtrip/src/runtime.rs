@@ -123,16 +123,13 @@ pub(crate) async fn publish(
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
     let environment = environment()?;
-    // The kernel settings a run of the saved version states: this build's
-    // dialect and bounds, chosen once at publication, observed at `counts`
-    // so the overlay says how often each statement ran and a finished run
-    // replays to its path (FIG-6370). The facade has no typed setter for
-    // the kernel's recorded settings yet; `observe` is their documented
-    // member.
-    let settings = core
-        .processes()
-        .engine_defaults(LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?
-        .map(counted);
+    // Choose statement counts once, with the settings the published start records.
+    let settings = Some(
+        core.processes()
+            .kernel_engine_defaults()?
+            .observing(lash::process::Observe::Counts)
+            .into_engine_settings(),
+    );
     let result = async {
         let offered = artifacts
             .workflow_environment(&environment)
@@ -172,15 +169,6 @@ pub(crate) async fn publish(
         artifacts.release(pin).await?;
     }
     result
-}
-
-/// `settings` observed at `counts`.
-fn counted(settings: EngineSettings) -> EngineSettings {
-    let mut value = settings.into_value();
-    if let Some(members) = value.as_object_mut() {
-        members.insert("observe".into(), serde_json::json!("counts"));
-    }
-    EngineSettings::new(value)
 }
 
 /// Follows `process` on its one recovering feed and sends what the execution

@@ -101,7 +101,7 @@ pub struct OtelTelemetry {
 impl OtelTelemetry {
     pub fn new(
         tracer_provider: &LashTracerProvider,
-        meter_provider: &impl MeterProvider,
+        meter_provider: &dyn MeterProvider,
         options: OtelOptions,
     ) -> Self {
         let metrics = if options.metrics.records_runtime() {
@@ -830,7 +830,9 @@ impl<'a> Projection<'a> {
                     out.push(A::ErrorType.value(class.unwrap_or_else(|| "unknown".into())));
                 }
             }
-            TraceEvent::TurnCompleted { outcome, inputs } => {
+            TraceEvent::TurnCompleted {
+                outcome, inputs, ..
+            } => {
                 out.push(A::TurnInputs.value(i64::try_from(*inputs).unwrap_or(i64::MAX)));
                 out.push(A::Outcome.value(match outcome {
                     TraceTurnOutcome::Completed { .. } => "completed",

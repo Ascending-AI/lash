@@ -229,20 +229,15 @@ impl Counted {
         let payload = self.payload().await;
         let env_ref = self.publish_env(2).await;
         let kind = lash_vm_runtime::LASH_VM_ENGINE_KIND;
-        let defaults = core
+        let recorded = core
             .processes()
-            .engine_defaults(kind, &payload)
-            .map_err(|error| format!("the kernel's settings: {error}"))?
-            .expect("the kernel records settings");
-        let recorded: lash_vm_runtime::KernelRecordedSettings =
-            serde_json::from_value(defaults.value().clone()).expect("the defaults decode");
+            .kernel_engine_defaults()
+            .map_err(|error| format!("the kernel's settings: {error}"))?;
         let observe = match self.plan {
-            Plan::Unobserved => lash_kernel_vm::Observe::Off,
-            Plan::Counted | Plan::Carried => lash_kernel_vm::Observe::Counts,
+            Plan::Unobserved => lash::process::Observe::Off,
+            Plan::Counted | Plan::Carried => lash::process::Observe::Counts,
         };
-        let settings = lash_core::EngineSettings::new(
-            serde_json::to_value(recorded.observing(observe)).expect("the settings encode"),
-        );
+        let settings = recorded.observing(observe).into_engine_settings();
         core.processes()
             .start(
                 lash_core::ProcessStartRequest::engine(

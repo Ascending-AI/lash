@@ -138,6 +138,77 @@ pub(super) fn outcome(
     })
 }
 
+/// Capture the admitted input before the terminal settles its rows. Every
+/// closing owner reads the same durable inputs; no opener or resident drive
+/// is needed. Trace read failures omit content without changing the answer.
+pub(super) async fn input(
+    cx: &crate::ActorContext,
+    tracing: Option<&TraceRuntime>,
+    row: &TurnRow,
+    delivered: &[crate::AdmittedTurnInputs],
+) -> Vec<lash_trace::TraceLlmMessage> {
+    let Some(tracing) = tracing.filter(|tracing| tracing.is_observed()) else {
+        return Vec::new();
+    };
+    let standing = tracing.unreplayed(row.admission.trace().cloned()).selected(
+        lash_trace::TraceSpanKind::Agent,
+        &context(&row.session, &row.run, row.admission.input_ids().first()).ids(),
+    );
+    if !standing
+        .content()
+        .captures(lash_trace::ContentCategory::InputMessages)
+    {
+        return Vec::new();
+    }
+    let store = cx.backend().session_store_factory();
+    let mut inputs = Vec::new();
+    for id in row.admission.input_ids() {
+        match store.pending_turn_input(&row.session, id).await {
+            Ok(Some(read)) => inputs.push(read.input),
+            result => {
+                tracing::warn!(session = %row.session, input = %id, ?result,
+                    "turn trace input could not be read");
+                return Vec::new();
+            }
+        }
+    }
+    for batch in delivered {
+        for input in &batch.inputs {
+            if !inputs.iter().any(|prior| prior.input_id == input.input_id) {
+                inputs.push(input.clone());
+            }
+        }
+    }
+    inputs
+        .iter()
+        .map(|pending| lash_trace::TraceLlmMessage {
+            role: "user".to_owned(),
+            blocks: pending
+                .input
+                .items
+                .iter()
+                .map(|item| match item {
+                    crate::InputItem::Text { text } => lash_trace::TraceContentBlock::Text {
+                        text: text.clone(),
+                        cache_breakpoint: false,
+                    },
+                    crate::InputItem::Attachment { reference } => {
+                        lash_trace::TraceContentBlock::Attachment {
+                            reference: Box::new(lash_trace::TraceAttachment {
+                                id: reference.id.to_string(),
+                                media_type: reference.media_type.to_string(),
+                                byte_len: reference.byte_len,
+                                position: "message".to_owned(),
+                                delivery_form: None,
+                            }),
+                        }
+                    }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// Emit `turn_completed` with `outcome` for `row`'s turn, whose terminal
 /// commit was just acknowledged, under the trace scope its admission
 /// retained, linking what it consumed: the producers of `delivered`, the
@@ -149,6 +220,7 @@ pub(super) fn ended(
     row: &TurnRow,
     outcome: Option<TraceTurnOutcome>,
     delivered: &[crate::AdmittedTurnInputs],
+    input: Vec<lash_trace::TraceLlmMessage>,
 ) {
     let (Some(tracing), Some(scope), Some(outcome)) = (tracing, row.admission.trace(), outcome)
     else {
@@ -165,6 +237,7 @@ pub(super) fn ended(
                 (
                     context(&row.session, &row.run, row.admission.input_ids().first()),
                     TraceEvent::TurnCompleted {
+                        input,
                         outcome,
                         inputs: row.admission.input_ids().len(),
                     },

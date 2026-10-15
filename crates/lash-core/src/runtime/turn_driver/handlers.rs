@@ -593,10 +593,8 @@ impl RuntimeTurnDriver<'_> {
             let standing = cell_trace
                 .standing(&self.trace)
                 .selected(lash_trace::TraceSpanKind::Cell, &cell_trace.context.ids());
-            let content = standing.content();
             let event = lash_trace::TraceEvent::ExecCodeStarted {
                 language: language.clone(),
-                code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                 code_chars: code.chars().count(),
             };
             let context = cell_trace.context.clone();
@@ -1022,7 +1020,19 @@ impl RuntimeTurnDriver<'_> {
             .core
             .tracing
             .unreplayed(self.trace.scope().cloned());
-        let standing = cell.standing(&committed);
+        let standing = cell
+            .standing(&committed)
+            .selected(lash_trace::TraceSpanKind::Cell, &cell.context.ids());
+        // The waiting execution is retained in the turn checkpoint and is
+        // available even when this owner never ran the cell's body.
+        let code = standing
+            .content()
+            .capture(lash_trace::ContentCategory::Code, || {
+                machine
+                    .waiting_exec()
+                    .map(|(_, code, _)| code.to_owned())
+                    .unwrap_or_default()
+            });
         let clock = Arc::clone(self.host.core.tracing.clock());
         let CellTrace {
             language,
@@ -1036,7 +1046,7 @@ impl RuntimeTurnDriver<'_> {
                 (
                     context,
                     lash_trace::TraceEvent::ExecCodeDiscarded {
-                        code: String::new(),
+                        code,
                         language,
                         started_at_ms: first_started_at_ms,
                         duration_ms: ended_at_ms.saturating_sub(first_started_at_ms),
