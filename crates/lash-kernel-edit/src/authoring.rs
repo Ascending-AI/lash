@@ -12,6 +12,9 @@
 
 use std::collections::BTreeSet;
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
 use crate::{Draft, Edit, Position, Transaction};
 use lash_kernel_doc::{
     Action, Atom, Callee, Document, EffectName, Expr, Function, Literal, Name, Node, Place, Rhs,
@@ -20,17 +23,24 @@ use lash_kernel_doc::{
 
 /// One host authoring operation, lowered by [`plan`] to canonical edits.
 ///
-/// Operations have no serialized representation. Hosts own their request
-/// contracts; the resulting [`Transaction`] uses the existing edit encoding.
-#[derive(Clone, Debug)]
+/// Lash owns this operation data and its serialized representation. Hosts own
+/// their transport, revision and authentication envelope, embedding batches as
+/// `Vec<Operation>`. Save the expanded [`Transaction`] as the exact edit record
+/// to replay against its base and admission context. Re-planning operations
+/// later is a new plan, not a replay: generated temporary names are not part of
+/// the operation contract.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Operation {
     /// The complete existing edit vocabulary, with base-document targets.
+    #[serde(rename = "edit")]
     Edit(Edit),
     /// Insert a named effect result. Computed inputs become preceding `let`s.
     ///
     /// `binding` is the caller's name, preserved verbatim. Ordinary admission
     /// decides whether the name, scope, effect and result type are valid.
+    #[serde(rename = "insert_effect")]
     InsertEffect {
         /// Insertion position in the transaction's base document.
         at: Position,
@@ -322,6 +332,46 @@ mod tests {
             name: Name::new(name),
             value: Rhs::Expr(Expr::Literal(Literal::Text(name.to_owned()))),
         }
+    }
+
+    /// The authoring wire preserves planning and closes structural objects,
+    /// while nested edit data retains arbitrary JSON values.
+    #[test]
+    fn operation_wire_round_trips_plans_and_refuses_unknown_structure() {
+        let draft = Draft::open(
+            Document::new(NumberPolicy::Float, vec![binding("input")]),
+            None,
+        )
+        .unwrap();
+        let operations = vec![
+            Operation::InsertEffect {
+                at: Position::end(Site::new(Unit::Main, [])),
+                effect: EffectName::new("mock.collect").unwrap(),
+                args: vec![Expr::List(vec![variable("input")])],
+                result: Type::Any,
+                binding: Name::new("output"),
+            },
+            Operation::Edit(Edit::SetData {
+                node: Site::new(Unit::Main, [0]),
+                key: "host".to_owned(),
+                value: Some(serde_json::json!({"arbitrary": {"unknown": [1, true, null]}})),
+            }),
+        ];
+        let encoded = serde_json::to_value(&operations).unwrap();
+        assert!(encoded[0].get("insert_effect").is_some());
+        assert!(encoded[1].get("edit").is_some());
+        let decoded: Vec<Operation> = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(plan(&draft, operations), plan(&draft, decoded));
+        assert!(serde_json::from_value::<Operation>(serde_json::json!({"unknown": {}})).is_err());
+        let mut extra = encoded[0].clone();
+        extra["insert_effect"]["unknown"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<Operation>(extra).is_err());
+        let mut extra = encoded[1].clone();
+        extra["edit"]["set_data"]["unknown"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<Operation>(extra).is_err());
+        let mut extra = encoded[1].clone();
+        extra["unknown"] = serde_json::json!({});
+        assert!(serde_json::from_value::<Operation>(extra).is_err());
     }
 
     /// K-EDIT-001/002: helpers preserve base anchors and commit as one batch.

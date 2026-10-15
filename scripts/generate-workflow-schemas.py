@@ -17,10 +17,10 @@ OUTPUT = ROOT / "schemas" / "host"
 
 
 def typescript_declarations(schema: dict[str, object]) -> str:
-    """Render the view's schema graph, with JSON constraints kept in the schema.
+    """Render the host schema graph, with JSON constraints kept in the schema.
 
     Fail on unsupported schema forms rather than silently widening host types.
-    Every local definition is exported so hosts can name nested view facts.
+    Every local definition is exported so hosts can name nested facts.
     """
     definitions = schema.get("$defs", {})
     title = schema["title"]
@@ -115,7 +115,7 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
             raise ValueError("generator returned an invalid shape registration")
         relative = Path(shape) / f"v{version}.schema.json"
         documents[relative] = json.dumps(schema, indent=2) + "\n"
-        if shape == "kernel-workflow-view":
+        if shape in {"kernel-workflow-view", "kernel-authoring-operation"}:
             documents[Path(shape) / f"v{version}.d.ts"] = typescript_declarations(schema)
     return documents
 

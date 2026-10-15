@@ -197,12 +197,12 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     let planned = answer(
         client
             .post(format!("{base}/workflow/plan"))
-            .json(&json!({"version": opened["version"], "steps": [
-                {"direct": {"replace_expression": {
+            .json(&json!({"version": opened["version"], "operations": [
+                {"edit": {"replace_expression": {
                     "expression": literal,
                     "with": {"literal": {"text": "Edited as a kernel document"}},
                 }}},
-                {"effect": {
+                {"insert_effect": {
                     "at": {"block": {"unit": {"function": "onboarding"}, "path": []}, "before": bound["site"]},
                     "effect": "display.show_message",
                     "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],

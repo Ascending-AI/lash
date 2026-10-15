@@ -130,11 +130,15 @@ let applied = draft.apply(&transaction, &environment)?;
 ```
 
 The same helpers accept documents imported from TypeScript or changed by direct
-edits. Hosts retain their own templates, HTTP contracts, revisions, layout and
-publication policy. The example converts its private HTTP request enum to the
-public operations. Those operations are Rust construction values, with no new
-wire format; the returned `Transaction` retains its existing serialization.
-Host layout and presentation do not belong in the authoring API.
+edits. Hosts retain their own templates, HTTP transport, revisions, layout and
+publication policy. Lash owns the serialized operation data: `edit` and
+`insert_effect` are externally tagged cases, with unknown tags and structural
+fields refused. The example sends `{ version, operations: Operation[] }`
+directly to `/workflow/plan`. Its JSON Schema and generated TypeScript types are
+in `schemas/host/kernel-authoring-operation/`. Save the expanded `Transaction`
+for exact edit replay against its base and admission context; re-planning an
+operation batch later is a new plan because temporary names are not part of the
+contract. Host layout and presentation do not belong in the authoring API.
 
 Admission diagnostics index the flattened canonical edits, including generated
 argument bindings. Temporary-name spelling is an implementation detail. Name

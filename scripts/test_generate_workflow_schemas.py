@@ -88,30 +88,32 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
             },
             "required": ["site", "kind", "uses"],
         }
-        expected = MODULE.rendered_documents([
-            {"shape": "kernel-workflow-view", "version": 1, "schema": schema}
-        ])
-        declaration = Path("kernel-workflow-view/v1.d.ts")
-        self.assertIn('export type WorkflowView = {', expected[declaration])
-        self.assertIn('"site": Site;', expected[declaration])
-        self.assertIn('"parent"?: (Site | null);', expected[declaration])
-        self.assertIn('"kind": ("sleep" | "perform");', expected[declaration])
-        self.assertIn('"uses": Array<Site>;', expected[declaration])
-        self.assertIn('export type Site = {', expected[declaration])
-        self.assertIn('"path": Array<number>;', expected[declaration])
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            generated, output = root / "generated", root / "output"
-            for relative, contents in expected.items():
-                path = generated / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(contents)
-            self.assertEqual(MODULE.generate(False, generated=generated, output=output), 0)
-            self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
-            (output / declaration).write_text("export type WorkflowView = unknown;\n")
-            with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
-                self.assertEqual(MODULE.generate(True, generated=generated, output=output), 1)
-            self.assertIn("v1.d.ts differs", errors.getvalue())
+        for shape in ["kernel-workflow-view", "kernel-authoring-operation"]:
+            with self.subTest(shape=shape):
+                expected = MODULE.rendered_documents([
+                    {"shape": shape, "version": 1, "schema": schema}
+                ])
+                declaration = Path(shape) / "v1.d.ts"
+                self.assertIn('export type WorkflowView = {', expected[declaration])
+                self.assertIn('"site": Site;', expected[declaration])
+                self.assertIn('"parent"?: (Site | null);', expected[declaration])
+                self.assertIn('"kind": ("sleep" | "perform");', expected[declaration])
+                self.assertIn('"uses": Array<Site>;', expected[declaration])
+                self.assertIn('export type Site = {', expected[declaration])
+                self.assertIn('"path": Array<number>;', expected[declaration])
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    generated, output = root / "generated", root / "output"
+                    for relative, contents in expected.items():
+                        path = generated / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(contents)
+                    self.assertEqual(MODULE.generate(False, generated=generated, output=output), 0)
+                    self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
+                    (output / declaration).write_text("export type WorkflowView = unknown;\n")
+                    with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:
+                        self.assertEqual(MODULE.generate(True, generated=generated, output=output), 1)
+                    self.assertIn("v1.d.ts differs", errors.getvalue())
 
     def test_generator_failure_does_not_write_a_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

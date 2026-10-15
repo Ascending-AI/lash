@@ -5,7 +5,7 @@ The backend listens on `http://127.0.0.1:3031` by default;
 and `OPTIONS` with a `content-type` header.
 
 Property names of the example's own objects are camelCase. A kernel
-document, a site, an edit, a correspondence and a workflow view are lash's
+document, a site, an edit, an authoring operation, a correspondence and a workflow view are lash's
 own serialized shapes and pass through unchanged (snake_case).
 
 ## Endpoints
@@ -20,7 +20,7 @@ own serialized shapes and pass through unchanged (snake_case).
 | `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
 | `GET` | `/workflow/templates` | TypeScript source templates for the visual editor |
 | `POST` | `/workflow/source` | `{ version, source, entry }`: import and admit source before replacing the current document |
-| `POST` | `/workflow/plan` | `{ version, steps }`: preview helper/direct edits without publishing; `{ version, transaction, preview, correspondence }` |
+| `POST` | `/workflow/plan` | `{ version, operations }`: preview Lash authoring operations without publishing; `{ version, transaction, preview, correspondence }` |
 | `POST` | `/run` | `{ version?, inputs? }`: start a run with named input values; its `text/event-stream` |
 | `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
@@ -102,15 +102,21 @@ A refused transaction is HTTP 422 `edit_refused` with
 `details.diagnostics: [{ edit, site, message }]`, and the saved version is
 unchanged.
 
-`POST /workflow/plan` accepts this example's `steps` request vocabulary:
-`{ "direct": <Edit> }` or `{ "effect": { at, effect, args, result, binding } }`.
-The adapter converts these to `lash::workflow::authoring::Operation` and calls
-`plan` before admitting the transaction against a cloned draft. It returns the
-canonical transaction and preview without changing the saved version. Send the
-returned edits to `/workflow/edits` to save against that same version.
-The HTTP operation format belongs to this example; the public authoring API
-defines no additional serialization protocol. Planning refusals are HTTP 422
-`plan_refused`, with diagnostic indices into the expanded canonical edits.
+`POST /workflow/plan` accepts `{ version, operations: Operation[] }` using
+Lash's `lash::workflow::authoring::Operation` wire contract:
+`{ "edit": <Edit> }` or `{ "insert_effect": { at, effect, args, result, binding } }`.
+Unknown operation tags and structural fields are refused during decoding.
+Lash publishes its JSON Schema and TypeScript declarations under
+`schemas/host/kernel-authoring-operation/`. The example owns the HTTP transport,
+revision and authentication envelope; Lash owns the operation data.
+The adapter calls `plan` before admitting the transaction against a cloned
+draft. It returns the canonical transaction and preview without changing the
+saved version. Send the returned edits to `/workflow/edits` to save against that
+same version. Save the expanded `Transaction` for exact edit replay against its
+base and admission context. Re-planning operations later is a new plan because
+generated temporary names are not part of the operation contract.
+Planning refusals are HTTP 422 `plan_refused`, with diagnostic indices into the
+expanded canonical edits.
 
 ## Running
 

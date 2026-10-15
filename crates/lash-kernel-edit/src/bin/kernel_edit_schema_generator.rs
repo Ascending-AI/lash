@@ -1,11 +1,13 @@
 //! Emits the checked-in JSON Schema documents for the kernel's edit data:
-//! an edit [`Transaction`], the [`Correspondence`] it publishes and the
-//! [`WorkflowView`] a host edits against.
+//! an authoring [`Operation`], an edit [`Transaction`], the [`Correspondence`]
+//! it publishes and the [`WorkflowView`] a host edits against.
 //!
-//! Both are owned by [`KERNEL_VERSION`]: their payloads are the forms and
-//! sites of that version. Every object in them is closed.
+//! These are owned by [`KERNEL_VERSION`]: their payloads are the forms and
+//! sites of that version. Structural objects are closed; arbitrary JSON data
+//! in nested edit payloads retains its existing encoding.
 
 use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_edit::authoring::Operation;
 use lash_kernel_edit::view::WorkflowView;
 use lash_kernel_edit::{Correspondence, Transaction};
 use schemars::JsonSchema;
@@ -15,6 +17,7 @@ const VERSION_CONSTANT: &str = "KERNEL_VERSION";
 
 fn main() -> Result<(), String> {
     let documents = vec![
+        document::<Operation>("kernel-authoring-operation")?,
         document::<Transaction>("kernel-edit-transaction")?,
         document::<Correspondence>("kernel-correspondence")?,
         document::<WorkflowView>("kernel-workflow-view")?,

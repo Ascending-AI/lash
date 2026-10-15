@@ -63,7 +63,11 @@ document panes must now show the new greeting. Save `03-edited.json` and
 The `lash-kernel-edit` authoring law separately checks a helper/direct/helper
 batch, fresh names across the complete batch, base-document anchors, and atomic
 refusal. The visual **Add step** flow must use the public
-`lash::workflow::authoring::plan` API and the same admission path.
+`lash::workflow::authoring::plan` API and the same admission path. Inspect the
+`/workflow/plan` request: its host envelope is `{ version, operations }`, and
+operations use Lash's `edit` and `insert_effect` tags from the published
+`kernel-authoring-operation` schema. The expanded transaction is the exact edit
+record; planning the request again is a new plan.
 
 ## 4. Run and approve
 

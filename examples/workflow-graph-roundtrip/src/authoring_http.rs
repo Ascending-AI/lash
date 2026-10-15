@@ -6,8 +6,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
 use lash::workflow::authoring::{Operation, plan};
-use lash::workflow::document::{EffectName, Expr, Name, Type};
-use lash::workflow::edit::{Correspondence, Draft, Edit, Position, Transaction};
+use lash::workflow::document::Name;
+use lash::workflow::edit::{Correspondence, Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, ErrorResponse, WorkflowView, runtime};
@@ -120,46 +120,11 @@ pub(crate) async fn import_source(
     Ok(Json(saved.view(checked.functions())))
 }
 
-/// The example owns this JSON contract. It is not a Lash SDK wire format.
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) enum StepInput {
-    Direct(Edit),
-    Effect {
-        at: Position,
-        effect: EffectName,
-        args: Vec<Expr>,
-        result: Type,
-        binding: Name,
-    },
-}
-
-impl From<StepInput> for Operation {
-    fn from(value: StepInput) -> Self {
-        match value {
-            StepInput::Direct(edit) => Self::Edit(edit),
-            StepInput::Effect {
-                at,
-                effect,
-                args,
-                result,
-                binding,
-            } => Self::InsertEffect {
-                at,
-                effect,
-                args,
-                result,
-                binding,
-            },
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PlanRequest {
     version: u64,
-    steps: Vec<StepInput>,
+    operations: Vec<Operation>,
 }
 
 #[derive(Serialize)]
@@ -177,10 +142,7 @@ pub(crate) async fn preview(
     let environment = state.environment().await?;
     let mut current = state.current();
     check_version(request.version, current.version)?;
-    let transaction = plan(
-        &current.draft,
-        request.steps.into_iter().map(Operation::from),
-    );
+    let transaction = plan(&current.draft, request.operations);
     let applied = current
         .draft
         .apply(&transaction, &environment.checker())

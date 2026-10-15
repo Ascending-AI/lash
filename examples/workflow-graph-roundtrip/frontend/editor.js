@@ -39,7 +39,7 @@ let workflow,
   observationGap = false,
   expandedValues = new Map(),
   selected,
-  steps = [],
+  operations = [],
   plan,
   tab = "source",
   busy = false,
@@ -98,7 +98,7 @@ function controls() {
     )
     .forEach((button) => (button.disabled = busy || running || !workflow));
   $("apply").disabled = busy || running || !plan;
-  $("preview").disabled = busy || running || !steps.length;
+  $("preview").disabled = busy || running || !operations.length;
   $("run").disabled = busy || running || !workflow?.definition;
   $("rename").disabled ||= !statementNodes.get(
     key(selected?.site ?? { unit: "main" }),
@@ -224,26 +224,26 @@ function invalidate() {
 }
 function renderQueue() {
   $("queue-count").textContent =
-    `${steps.length} operation${steps.length === 1 ? "" : "s"}`;
+    `${operations.length} operation${operations.length === 1 ? "" : "s"}`;
   $("queue").replaceChildren(
-    ...steps.map((step, index) => {
+    ...operations.map((step, index) => {
       const row = document.createElement("div");
       row.className = "queue-step";
       const label = document.createElement("span");
-      label.textContent = `${index + 1}. ${step.effect ? step.effect.effect : Object.keys(step.direct)[0]}`;
+      label.textContent = `${index + 1}. ${step.insert_effect ? step.insert_effect.effect : Object.keys(step.edit)[0]}`;
       const remove = document.createElement("button");
       remove.textContent = "×";
       remove.setAttribute("aria-label", `Remove operation ${index + 1}`);
       remove.disabled = busy || running;
       remove.onclick = () => {
-        steps.splice(index, 1);
+        operations.splice(index, 1);
         invalidate();
       };
       row.append(label, remove);
       return row;
     }),
   );
-  if (!steps.length)
+  if (!operations.length)
     $("queue").textContent = "Queue helpers and direct edits in any order.";
 }
 $("queue-helper").onclick = () =>
@@ -260,7 +260,7 @@ $("queue-helper").onclick = () =>
     effect.binding = $("binding").value.trim();
     if (!effect.binding)
       throw Error("Enter a result binding before queuing this effect.");
-    steps.push({ effect });
+    operations.push({ insert_effect: effect });
     invalidate();
     report("Effect queued. Preview checks the complete transaction.");
   });
@@ -269,7 +269,7 @@ $("queue-direct").onclick = () =>
     const edits = JSON.parse($("direct").value);
     if (!Array.isArray(edits) || !edits.length)
       throw Error("Enter a non-empty JSON list of typed edits.");
-    steps.push(...edits.map((direct) => ({ direct })));
+    operations.push(...edits.map((edit) => ({ edit })));
     invalidate();
     report("Direct edits queued in order.");
   });
@@ -317,7 +317,7 @@ $("placement").onchange = () => {
 $("preview").onclick = () =>
   action(async () => {
     plan = undefined;
-    plan = await call("/workflow/plan", { version: workflow.version, steps });
+    plan = await call("/workflow/plan", { version: workflow.version, operations });
     renderPane();
     report(
       `Preview ready · ${plan.transaction.edits.length} typed edits · saved revision ${workflow.version} unchanged.`,
@@ -330,7 +330,7 @@ $("apply").onclick = () =>
       version: plan.version,
       edits: plan.transaction.edits,
     });
-    steps = [];
+    operations = [];
     plan = undefined;
     show(answer.workflow, answer.correspondence);
     renderQueue();
@@ -339,13 +339,13 @@ $("apply").onclick = () =>
     );
   });
 $("clear").onclick = () => {
-  steps = [];
+  operations = [];
   invalidate();
   report("Pending changes cleared.");
 };
 $("import").onclick = () =>
   action(async () => {
-    if (steps.length)
+    if (operations.length)
       throw Error("Apply or clear pending changes before importing source.");
     const next = await call("/workflow/source", {
       version: workflow.version,
@@ -359,7 +359,7 @@ $("import").onclick = () =>
   });
 $("load").onclick = () =>
   action(async () => {
-    if (steps.length)
+    if (operations.length)
       throw Error("Apply or clear pending changes before loading an example.");
     const template = templates.find((t) => t.id === $("template").value);
     if (!template) throw Error("Choose an example.");
@@ -1161,11 +1161,11 @@ function fields(parent, info, values) {
     );
 }
 async function applyVisual(changes) {
-  if (steps.length)
+  if (operations.length)
     throw Error("Apply or clear the pending changes in Advanced first.");
   const planned = await call("/workflow/plan", {
     version: workflow.version,
-    steps: changes,
+    operations: changes,
   });
   const answer = await call("/workflow/edits", {
     version: planned.version,
@@ -1213,7 +1213,7 @@ function newNode(effect) {
       const values = read();
       await applyVisual([
         {
-          effect: {
+          insert_effect: {
             at: insertAt,
             effect,
             args: [expression(values)],
@@ -1437,7 +1437,7 @@ function freshBinding(base = "value") {
   return availableName(workflow, base);
 }
 function replacePort(port, value) {
-  return planInputEdit(workflow, port, value).map((direct) => ({ direct }));
+  return planInputEdit(workflow, port, value).map((edit) => ({ edit }));
 }
 function connectPort(port, source) {
   if (busy || running) return;
@@ -1622,7 +1622,7 @@ function openPort(node, port) {
     action(async () => {
       const binding = name.value.trim();
       const changes = planConstantPromotion(workflow, port, read(), binding);
-      await applyVisual(changes.map((direct) => ({ direct })));
+      await applyVisual(changes.map((edit) => ({ edit })));
       const created = viewOf(workflow).dataflow.bindings.find(
         (item) => item.name === binding,
       );
@@ -1672,8 +1672,8 @@ function openEndStep(node, source) {
   save.onclick = () =>
     action(() =>
       applyVisual(
-        planEndAfter(workflow, node, source, select.value).map((direct) => ({
-          direct,
+        planEndAfter(workflow, node, source, select.value).map((edit) => ({
+          edit,
         })),
       ),
     );
@@ -1822,7 +1822,7 @@ function openNode(node) {
         action(() =>
           applyVisual([
             {
-              direct: {
+              edit: {
                 rename_variable: {
                   declared_at: node.binding.site,
                   name: node.binding.name,
@@ -1875,7 +1875,7 @@ function openNode(node) {
       remove.onclick = () =>
         action(() =>
           applyVisual([
-            { direct: { remove_statement: { statement: node.s.site } } },
+            { edit: { remove_statement: { statement: node.s.site } } },
           ]),
         );
       container.append(remove);
