@@ -283,6 +283,7 @@ impl lash_core::ProcessEngine for ScriptEngine {
             lash_core::EngineState {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
+                pages: None,
             },
             action,
         ))
@@ -726,6 +727,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 serves: lash::testing::node_serves(&core),
                 max_active: 1,
                 claim_batch: 1,
+                retirement: lash_durable::RetirementSettings::standard(),
             },
             Arc::new(MeasuredActivation {
                 inner,

@@ -216,6 +216,7 @@ impl ProcessEngine for BenchEngine {
             EngineState {
                 format: self.state_format(),
                 bytes,
+                pages: None,
             },
             action,
         ))

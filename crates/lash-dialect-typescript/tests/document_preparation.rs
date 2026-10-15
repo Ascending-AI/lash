@@ -6,15 +6,17 @@ use std::sync::Arc;
 
 use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
 use lash_kernel_doc::{EffectName, Name};
-use lash_kernel_vm::{
-    Bindings, Bounds, KernelMachine, Machine, PreparedLibrary, Program, Start, Target,
-};
+use lash_kernel_vm::{Bounds, CellStart, Machine, PreparedLibrary, Program, Target};
 
 #[path = "../shared/gate_six.rs"]
 mod gate_six;
 
 #[path = "../shared/gate_six_registry.rs"]
 mod gate_six_registry;
+
+#[expect(dead_code, reason = "this law only needs the ordinary start fixture")]
+#[path = "../src/tests/pages.rs"]
+mod pages;
 
 #[global_allocator]
 static ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> = &stats_alloc::INSTRUMENTED_SYSTEM;
@@ -42,6 +44,7 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
         .find(|(name, _)| *name == "baseline")
         .unwrap();
     let program = Program {
+        release: pages::RELEASE,
         document: Arc::new(
             lash_dialect_typescript::lower(&source, &environment)
                 .unwrap()
@@ -57,14 +60,17 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
         requests_per_park: 100,
         join_members: 100,
     };
-    let start = || Start {
+    let start = || CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        owner: pages::OWNER,
+        modes: Default::default(),
+        host: Vec::new(),
     };
-    drop(KernelMachine::start(program.clone(), bounds, start()).unwrap());
+    drop(pages::start(program.clone(), bounds, start()).unwrap());
     let counts = stats_alloc::Region::new(ALLOCATOR);
-    let machine = KernelMachine::start(program, bounds, start()).unwrap();
+    let machine = pages::start(program, bounds, start()).unwrap();
     let counts = counts.change();
     eprintln!("baseline start: {counts:?}");
     assert!(counts.allocations <= 1_000, "baseline start: {counts:?}");
@@ -113,6 +119,7 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
     };
     for (name, source) in gate_six::programs() {
         let program = Program {
+            release: pages::RELEASE,
             document: Arc::new(
                 lash_dialect_typescript::lower(&source, &environment)
                     .unwrap()
@@ -123,7 +130,7 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
         let ordinals = program.document.site_ordinals();
         let mut natural = None;
         for slice in [u64::MAX, 1, 0] {
-            let mut machine = KernelMachine::start(
+            let mut machine = pages::start(
                 program.clone(),
                 Bounds {
                     charge: 1_000_000_000,
@@ -133,10 +140,13 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
                     requests_per_park: 100,
                     join_members: 100,
                 },
-                Start {
+                CellStart {
                     target: Target::Main,
                     args: Vec::new(),
-                    bindings: Bindings::default(),
+                    session: None,
+                    owner: pages::OWNER,
+                    modes: Default::default(),
+                    host: Vec::new(),
                 },
             )
             .unwrap();
@@ -147,7 +157,12 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
                 let step = machine.run(&mut Console, slice).unwrap();
                 let delta: BTreeMap<_, _> = machine.take_ran().into_iter().collect();
                 let mut trace = BTreeMap::<u32, u64>::new();
-                for site in machine.take_path().into_iter().flat_map(|(_, sites)| sites) {
+                for site in machine
+                    .take_path()
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(|(_, sites)| sites)
+                {
                     *trace.entry(ordinals[&site]).or_default() += 1;
                 }
                 assert_eq!(delta, trace, "{name}, slice {slice}");

@@ -14,13 +14,13 @@
 //! the [`Host`] the embedder passes to [`Machine::run`]. The machine parks;
 //! the embedder commits.
 //!
-//! A run that is not executing is a `ParkedRun` of `lash-kernel-state`:
-//! [`Machine::export`] writes one at any safe point and [`Machine::import`]
-//! resumes it against its admitted document preparation.
+//! [`Machine::seal`] freezes changed semantic pages and returns a bounded
+//! checkpoint root. [`Machine::open`] resumes that root against the admitted
+//! document, loading each continuation path as execution needs it.
 //!
 //! An embedder prepares its registry once as a [`PreparedLibrary`], which
 //! compiles every library body, and hands it to every [`Program`]: a run's
-//! starts and imports reuse each live document's admission and compiled code.
+//! starts and opens reuse each live document's admission and compiled code.
 //!
 //! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder
 //! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
@@ -34,9 +34,12 @@ mod heap;
 mod interface;
 mod machine;
 pub mod observe;
+/// The machine's face after the persistent-heap cutover (FIG-6195):
+/// implemented by the paged kernel machine.
+pub mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
-mod whole;
+mod session_editor;
 
 #[cfg(test)]
 mod laws;
@@ -45,11 +48,12 @@ pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
 pub use observe::{Observe, RanDelta, StatementPath};
-pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
+pub use paged::{TaskFilter, TaskPage};
+pub use session_editor::{SessionEditor, SessionValue};
 
 pub use interface::{
-    Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectMode, EffectModes,
-    EffectRequest, End, ExportError, Finished, Host, HostFault, ImportError, Machine, MachineError,
-    Meters, Outcome, Park, Program, Request, RunError, SleepRequest, Start, StartError, Step,
-    Target, WaitId,
+    Bound, BoundExceeded, Bounds, CellSave, CellStart, DeliverError, Delivered, EffectMode,
+    EffectModes, EffectRequest, End, Finished, Host, HostFault, Machine, MachineError, Meters,
+    OpenError, Outcome, Park, Program, Request, RunError, SaveCell, SavedCell, SealError,
+    SleepRequest, StartError, Step, Target, WaitId,
 };

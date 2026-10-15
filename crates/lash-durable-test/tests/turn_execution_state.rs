@@ -117,11 +117,19 @@ fn state_of(
         lash_core::durable_port::domain::checkpoint_graph::EncodedNode,
     >,
 ) -> Vec<u8> {
-    use lash_core::durable_port::domain::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeKind};
-    GraphDecoder::new(nodes, DecodeLimits::within_total(1 << 20))
-        .decode::<String>(root, NodeKind::SESSION_EXECUTION)
+    use lash_core::durable_port::domain::checkpoint_graph::node::direct_logical;
+    use lash_core::durable_port::domain::checkpoint_graph::{
+        DecodeLimits, TokenReader, check_envelope,
+    };
+    let node = nodes.get(&root).expect("the law's root is among its nodes");
+    let envelope = check_envelope(&node.bytes, root, &DecodeLimits::within_total(1 << 20))
+        .expect("the law's root frames");
+    let logical = direct_logical(&envelope, root).expect("the law's root is canonical");
+    TokenReader::new(&logical)
+        .text()
         .expect("the law's root holds its state's text")
-        .into_bytes()
+        .as_bytes()
+        .to_vec()
 }
 
 /// The protocol session: it restores the executor from the head's state,

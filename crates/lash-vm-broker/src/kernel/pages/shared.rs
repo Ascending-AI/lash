@@ -1,0 +1,124 @@
+//! A session turn's shared staging, and the parent's own seals (FIG-6193).
+//!
+//! The cells of one turn stage into one spool: a cell's carry names pages
+//! an earlier cell of the turn staged, and the turn's commit publishes
+//! what the last cell left. Each cell's activation is its own page service
+//! over the shared spool ([`SharedSpool`]); the turn drops the spool when
+//! its commit settles. An activation's page service is shared in turn
+//! between the worker's exchanges and the broker's publication
+//! ([`SharedPages`]).
+
+use std::sync::{Arc, Mutex};
+
+use lash_core_store::checkpoint_graph::stage::{
+    CandidateManifest, StageFault, StageLeaseId, StageSpool, StageUsage,
+};
+use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
+use lash_durable::domain::pages::PageStore;
+use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_vm_protocol::page::{PageReply, PageRequest};
+
+use super::{ActivationPages, DiskSpool, PageExchange, frame_page, local};
+
+/// One spool shared by the activations of a session turn. Discarding an
+/// activation's handle keeps the spool: the turn's last handle deletes it.
+#[derive(Clone)]
+pub struct SharedSpool(Arc<Mutex<DiskSpool>>);
+
+impl SharedSpool {
+    #[must_use]
+    pub fn new(spool: DiskSpool) -> Self {
+        Self(Arc::new(Mutex::new(spool)))
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, DiskSpool> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl StageSpool for SharedSpool {
+    fn lease(&self) -> StageLeaseId {
+        self.lock().lease()
+    }
+
+    fn seal(
+        &mut self,
+        page: EncodedNode,
+        protected: &dyn Fn(&NodeId) -> bool,
+    ) -> Result<(), StageFault> {
+        self.lock().seal(page, protected)
+    }
+
+    fn read(&self, page: &NodeId) -> Result<Arc<[u8]>, StageFault> {
+        self.lock().read(page)
+    }
+
+    fn contains(&self, page: &NodeId) -> bool {
+        self.lock().contains(page)
+    }
+
+    fn retain(&mut self, roots: &[NodeId]) -> Result<(), StageFault> {
+        self.lock().retain(roots)
+    }
+
+    fn candidate(
+        &mut self,
+        root: NodeId,
+        base: Option<NodeId>,
+        commit: CommitId,
+    ) -> Result<Box<dyn CandidateManifest>, StageFault> {
+        self.lock().candidate(root, base, commit)
+    }
+
+    fn settle(&mut self, commit: CommitId) -> Result<(), StageFault> {
+        self.lock().settle(commit)
+    }
+
+    fn withdraw(&mut self, commit: CommitId) -> Result<(), StageFault> {
+        self.lock().withdraw(commit)
+    }
+
+    fn discard(self: Box<Self>) {}
+
+    fn usage(&self) -> StageUsage {
+        self.lock().usage()
+    }
+}
+
+/// One activation's page service, shared by the machine that answers its
+/// worker's exchanges and the broker that publishes its candidates.
+pub type SharedPages = Arc<tokio::sync::Mutex<ActivationPages<dyn PageStore>>>;
+
+#[async_trait::async_trait]
+impl PageExchange for SharedPages {
+    async fn serve(&mut self, request: PageRequest) -> PageReply {
+        self.lock().await.serve(request).await
+    }
+}
+
+/// The parent's own seals into a spool: a session descriptor over a
+/// carried session, which names pages the spool staged or the store holds.
+/// It reads nothing; every child is taken as protected, and publication
+/// checks each one is stored or staged.
+pub struct ParentSeal<'a>(pub &'a mut dyn StageSpool);
+
+impl PageSource for ParentSeal<'_> {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        Err(HeapFault::Unauthorized {
+            page: pages.first().map_or(PageId([0; 32]), |page| page.id),
+        })
+    }
+
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        let node = frame_page(&page)?;
+        let id = PageId(node.id.0);
+        self.0.seal(node, &|_| true).map_err(local::staging)?;
+        Ok(PageRef {
+            id,
+            grant: PageGrant::NONE,
+        })
+    }
+}

@@ -8,8 +8,8 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::{
-    Bindings, Delivered, EffectModes, Host, HostFault, Machine, MachineError, PreparedLibrary,
-    Program, Request, Start, StartError, Step, Target,
+    CellStart, Delivered, EffectModes, Host, HostFault, Machine, MachineError, PreparedLibrary,
+    Program, Request, StartError, Step, Target,
 };
 
 use crate::{Case, DocumentRunner, ExpectedEnd, HarnessError, HostAnswer, Observations, Trace};
@@ -36,8 +36,11 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
                 return Ok(at.machine);
             }
             let mut machine = at.machine;
-            let parked = machine.export().map_err(|e| HarnessError(e.to_string()))?;
-            M::import(at.program.clone(), at.bounds, parked)
+            let sealed = machine
+                .seal(crate::pages::BUDGET)
+                .map_err(|e| HarnessError(e.to_string()))?
+                .ok_or_else(|| HarnessError("unbounded seal incomplete".into()))?;
+            crate::pages::open::<M>(at.program.clone(), at.bounds, &sealed.root, at.source)
                 .map_err(|e| HarnessError(e.to_string()))
         })
     }
@@ -46,15 +49,14 @@ impl<M: Machine> DocumentRunner for MachineRunner<M> {
 /// A run at one of its parks, after the park's requests are recorded and
 /// before its scripted outcomes are delivered.
 pub(crate) struct Park<'a, M> {
-    /// Which park of the run this is, from 1.
-    pub(crate) number: usize,
-    /// How many requests the run has issued so far.
-    pub(crate) issued: usize,
     pub(crate) machine: M,
     /// The program the run goes on under; a harness that carries the run
     /// to another document replaces it.
     pub(crate) program: &'a mut Program,
     pub(crate) bounds: lash_kernel_vm::Bounds,
+    pub(crate) source: &'a crate::pages::Source,
+    #[cfg(test)]
+    pub(crate) requests: &'a [Request],
 }
 
 /// Runs `case` under its script. `at_park` is handed the machine at every
@@ -86,17 +88,31 @@ pub(crate) fn run_case<M: Machine>(
         return Ok(refused());
     }
     let mut program = Program {
+        release: crate::pages::RELEASE,
         document: Arc::new(document),
         library: library.clone(),
     };
     let bounds = env.bounds.into();
-    let start = Start {
+    let source = crate::pages::Source::default();
+    let session = crate::pages::Session {
+        root: None,
+        source: source.clone(),
+    };
+    let start = CellStart {
         target: env.entry.clone().map_or(Target::Main, Target::Entry),
         args: env.args.clone(),
-        bindings: Bindings::default(),
+        session: None,
+        owner: crate::pages::OWNER,
+        modes: EffectModes::reading(env.reads.iter().cloned()),
+        host: Vec::new(),
     };
-    let modes = EffectModes::reading(env.reads.iter().cloned());
-    let mut machine = match M::start_reading(program.clone(), bounds, start, modes) {
+    let mut machine = match M::start(
+        program.clone(),
+        bounds,
+        start,
+        Box::new(source.clone()),
+        session.census(bounds.memory),
+    ) {
         Ok(machine) => machine,
         Err(StartError::NotAdmitted(_) | StartError::UndeclaredRead { .. }) => {
             return Ok(refused());
@@ -156,32 +172,33 @@ pub(crate) fn run_case<M: Machine>(
             }
             Step::Parked(park) => {
                 parks += 1;
-                for request in park.requests {
+                for request in &park.requests {
                     match request {
                         Request::Effect(effect) => {
                             waits.push(effect.wait);
                             trace.push(Trace::Effect {
-                                identity: Some(effect.identity),
+                                identity: Some(effect.identity.clone()),
                                 effect: effect.effect.to_string(),
-                                args: effect.args,
-                                result: effect.result,
+                                args: effect.args.clone(),
+                                result: effect.result.clone(),
                             });
                         }
                         Request::Sleep(sleep) => {
                             waits.push(sleep.wait);
                             trace.push(Trace::Sleep {
-                                identity: Some(sleep.identity),
+                                identity: Some(sleep.identity.clone()),
                                 nanoseconds: sleep.duration.as_nanos(),
                             });
                         }
                     }
                 }
                 machine = at_park(Park {
-                    number: parks,
-                    issued: trace.len(),
                     machine,
                     program: &mut program,
                     bounds,
+                    source: &source,
+                    #[cfg(test)]
+                    requests: &park.requests,
                 })?;
                 let batch = batches.next().ok_or_else(|| {
                     HarnessError(format!("park {parks} has no scripted delivery batch"))

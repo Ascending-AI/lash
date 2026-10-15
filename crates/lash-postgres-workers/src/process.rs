@@ -205,6 +205,7 @@ impl ProcessEngine for WorkerEngine {
             EngineState {
                 format: self.state_format(),
                 bytes,
+                pages: None,
             },
             action,
         ))

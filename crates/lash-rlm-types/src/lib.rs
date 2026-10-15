@@ -767,15 +767,11 @@ pub struct RlmSeedPluginBody {
         skip_serializing_if = "CodeModeProjectedSeedSnapshot::is_empty"
     )]
     pub projected: CodeModeProjectedSeedSnapshot,
-    /// The saved functions the session is created with, by binding: each
-    /// value is a kernel saved function as the RLM protocol stores one.
-    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-    pub functions: serde_json::Map<String, serde_json::Value>,
 }
 
 impl RlmSeedPluginBody {
     pub fn is_empty(&self) -> bool {
-        self.globals.is_empty() && self.projected.is_empty() && self.functions.is_empty()
+        self.globals.is_empty() && self.projected.is_empty()
     }
 }
 

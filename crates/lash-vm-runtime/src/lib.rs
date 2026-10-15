@@ -75,7 +75,7 @@ pub use process::{
     Unreplayable, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
     WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest,
     admit_kernel_process, definition_draft, definition_of_entry, entry_signature,
-    kernel_process_engine_registration, migrate_run, migrate_saved_function, migration_refusal,
+    kernel_process_engine_registration, migrate_saved_function, migration_refusal,
     plan_helper_adoption, plan_migration, retired_functions_reached, survey_helper_processes,
     survey_kernel_processes, with_definitions,
 };

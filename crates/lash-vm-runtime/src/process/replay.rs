@@ -12,27 +12,37 @@
 //! path it did not verify.
 //!
 //! A replay is a read. It drives nothing and performs nothing: the run
-//! binds every effect as recorded, and a park ends it.
+//! binds every effect as recorded, and a park ends it. On the persistent
+//! heap the state a segment resumed is the page the previous segment's
+//! output published, which that output's record owns while the journal
+//! retains it: the replay reads it under a reader's lease on that record,
+//! and answers `Pruned` once the record is gone. What it seals at a park
+//! is compared by its content-addressed root and never published.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{ProcessId, SettledOutput};
-use lash_core_execution::runtime::process::steps::{RecordedProcessStep, process_step_call};
+use lash_core_execution::runtime::process::steps::{
+    RecordedProcessStep, StepFact, process_step_call,
+};
+use lash_durable::domain::pages::PageStore;
+use lash_durable::domain::{ExecKey, OwnerKey, RootOwner};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
-use lash_kernel_vm::{Start, Step, Target};
+use lash_kernel_vm::Target;
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::KernelFailure;
+use lash_vm_broker::kernel::{KernelFailure, MachineStep, Machines as _};
 use lash_vm_client::wire::OutcomeWire;
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
-use lash_vm_protocol::{GraphStateRefusal, KernelRestoreRefusal, RunRefusal};
+use lash_vm_protocol::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::run::{Resumed, admission_of, drive, entry_args, outcome_of_end};
+use super::pages::{ParkedUnder, StepActivation};
+use super::run::{admission_of, entry_args, outcome_of_end, run_machine};
 use super::state::{
     Admission, DeliverySource, HostReads, Issued, KERNEL_RUN_STEP, KernelProcessInput,
-    KernelRunOutput, RecordedAdmission, RecordedDelivery, RecordedStart, SealedRun, StartedFrom,
+    KernelRunOutput, ParkedPage, RecordedAdmission, RecordedDelivery, RecordedStart, StartedFrom,
     outcome_digest, refused,
 };
 use super::{KernelProcessEngine, KernelRecordedSettings};
@@ -47,9 +57,11 @@ pub enum ReplaySegments {
 }
 
 /// What a host asks a replay of: the process, its recorded settings and
-/// current payload, the steps its run journal retains, and the segments.
-#[derive(Clone, Debug)]
+/// current payload, the steps its run journal retains, the segments, and
+/// the store whose pages those steps' records own.
+#[derive(Clone)]
 pub struct ProcessReplayRequest {
+    pub pages: Arc<dyn PageStore>,
     pub process: ProcessId,
     pub settings: Option<lash_core::EngineSettings>,
     pub payload: serde_json::Value,
@@ -208,9 +220,10 @@ impl RunHost for ReplayHost {
     }
 }
 
-/// The segment's start, resolved from the records it refers to.
+/// The segment's start, resolved from the records it refers to: the page
+/// it resumed with the run fact whose record holds it.
 struct Start_ {
-    parked: Option<SealedRun>,
+    parked: Option<(ParkedPage, StepFact)>,
     admissions: Vec<Admission>,
     deliver: Vec<(u64, OutcomeWire)>,
 }
@@ -219,13 +232,18 @@ struct Start_ {
 struct Journal<'a> {
     process: &'a ProcessId,
     steps: &'a [RecordedProcessStep],
-    /// Each `kernel_run`'s recorded output, by its ordinal.
-    outputs: Vec<Option<KernelRunOutput>>,
+    /// Each `kernel_run`'s recorded output, by its ordinal, with the run
+    /// fact that records it.
+    outputs: Vec<Option<(KernelRunOutput, Option<StepFact>)>>,
 }
 
 impl Journal<'_> {
-    fn parked(&self, run: u64) -> Option<(&SealedRun, &[Issued])> {
-        match self.outputs.get(usize::try_from(run).ok()?)?.as_ref()? {
+    fn output(&self, run: u64) -> Option<&(KernelRunOutput, Option<StepFact>)> {
+        self.outputs.get(usize::try_from(run).ok()?)?.as_ref()
+    }
+
+    fn parked(&self, run: u64) -> Option<(&ParkedPage, &[Issued])> {
+        match &self.output(run)?.0 {
             KernelRunOutput::Parked { state, issued, .. } => Some((state, issued)),
             KernelRunOutput::Ended { .. } => None,
         }
@@ -285,11 +303,17 @@ impl Journal<'_> {
     fn start(&self, start: &RecordedStart) -> Result<Start_, Unreplayable> {
         let parked = match &start.from {
             StartedFrom::Entry => None,
-            StartedFrom::Output { run, root } => match self.parked(*run) {
-                Some((state, _)) if StartedFrom::root_of(state) == *root => Some(state.clone()),
-                _ => return Err(Unreplayable::Pruned),
-            },
-            StartedFrom::Whole(state) => Some(state.clone()),
+            StartedFrom::Output { run, root } => {
+                match (
+                    self.parked(*run),
+                    self.output(*run).and_then(|output| output.1),
+                ) {
+                    (Some((page, _)), Some(fact)) if page.root.to_hex() == *root => {
+                        Some((*page, fact))
+                    }
+                    _ => return Err(Unreplayable::Pruned),
+                }
+            }
         };
         let admissions = start
             .admissions
@@ -345,8 +369,8 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
             RunRefusal::Restore {
                 refusal: KernelRestoreRefusal::KernelVersion { .. },
             }
-            | RunRefusal::GraphState {
-                refusal: GraphStateRefusal::KernelOutsideReadRange { .. },
+            | RunRefusal::Checkpoint {
+                refusal: CheckpointRefusal::KernelOutsideReadRange { .. },
             } => unreplayable(Unreplayable::KernelVersion),
             _ => Err(ReplayFault(failure.to_string())),
         },
@@ -389,7 +413,9 @@ impl KernelProcessEngine {
                     }
                     match step.outcome.as_ref()? {
                         SettledOutput::Completed(material) => {
-                            serde_json::from_str(material.payload()).ok()
+                            serde_json::from_str(material.payload())
+                                .ok()
+                                .map(|output| (output, step.outcome_fact))
                         }
                         _ => None,
                     }
@@ -435,11 +461,7 @@ impl KernelProcessEngine {
         segment: u64,
     ) -> Result<SegmentAnswer, ReplayFault> {
         let unreplayable = |reason| Ok(SegmentAnswer::Unreplayable { reason });
-        let Some(recorded) = usize::try_from(segment)
-            .ok()
-            .and_then(|segment| journal.outputs.get(segment))
-            .and_then(Option::as_ref)
-        else {
+        let Some((recorded, _)) = journal.output(segment) else {
             return unreplayable(Unreplayable::NoTape);
         };
         let observed = recorded.observed();
@@ -458,8 +480,9 @@ impl KernelProcessEngine {
         if start
             .parked
             .iter()
+            .map(|(page, _)| page)
             .chain(recorded_state)
-            .any(|state| state.0.kernel() != writes)
+            .any(|page| page.kernel != writes)
         {
             return unreplayable(Unreplayable::KernelVersion);
         }
@@ -487,35 +510,90 @@ impl KernelProcessEngine {
             Arc::clone(&host) as Arc<dyn RunHost>,
             &document,
             &settings.dialect,
-            Start {
+            lash_vm_client::RunStart {
                 target: Target::Entry(input.entry.clone()),
                 args,
-                bindings: Default::default(),
+                session: None,
+                modes: lash_kernel_vm::EffectModes::recorded(),
+                host: Vec::new(),
+                save: None,
             },
-            lash_kernel_vm::EffectModes::recorded(),
             settings.bounds(),
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
-        let driven = drive(
-            &machines,
+        let lease = self.policy.replay_lease;
+        if lease.is_zero() || lease > super::KernelRunPolicy::MAX_REPLAY_LEASE {
+            return Err(ReplayFault(format!(
+                "the replay lease of {lease:?} is outside (0, {:?}]",
+                super::KernelRunPolicy::MAX_REPLAY_LEASE
+            )));
+        }
+        let binding = lash_vm_broker::kernel::graph::owner_binding_node(&ExecKey::Process(
+            request.process.clone(),
+        ))
+        .map_err(|refusal| ReplayFault(refusal.to_string()))?;
+        let config = self.workers.config();
+        let spools = self
+            .workers
+            .spools()
+            .map_err(|failure| ReplayFault(failure.to_string()))?;
+        let releases = machines
+            .releases()
+            .map_err(|failure| ReplayFault(failure.to_string()))?;
+        let parked = start.parked.map(|(page, fact)| {
+            (
+                page,
+                ParkedUnder::Record {
+                    owner: RootOwner::RunFact {
+                        owner: OwnerKey::Process(request.process.clone()),
+                        run: fact.run,
+                        ordinal: fact.ordinal,
+                    },
+                    record: fact.record,
+                    ttl: lease,
+                },
+            )
+        });
+        let opened = StepActivation::open(
+            Arc::clone(&request.pages),
             &request.process,
-            &recorded_start.document.to_string(),
-            Resumed {
-                parked: start.parked,
-                admissions: &start.admissions,
-                deliver: start.deliver,
-            },
-            self.workers.config().tuning.slice,
+            parked,
+            start
+                .admissions
+                .iter()
+                .map(|admission| admission.0.clone())
+                .collect(),
+            binding,
+            releases,
+            &spools,
+            lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
+        )
+        .await;
+        let mut activation = match opened {
+            Ok(activation) => activation,
+            Err(KernelFailure::Lease(lash_durable::DurableError::Graph(
+                lash_core_store::checkpoint_graph::GraphRefusal::RootRetired
+                | lash_core_store::checkpoint_graph::GraphRefusal::RevisionConflict,
+            ))) => return unreplayable(Unreplayable::Pruned),
+            Err(failure) => return failed(&host, failure),
+        };
+        let driven = run_machine(
+            &machines,
+            &mut activation,
+            binding,
+            start.deliver,
+            config.tuning.slice,
             &CancellationToken::new(),
         )
         .await;
+        activation.end_reads().await;
         let driven = match driven {
             Ok(driven) => driven,
             Err(failure) => return failed(&host, failure),
         };
         let reached = match (&driven.step, recorded) {
             (
-                Step::Parked(park),
+                MachineStep::Parked(park),
                 KernelRunOutput::Parked {
                     state,
                     issued,
@@ -534,11 +612,11 @@ impl KernelProcessEngine {
                     .iter()
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();
-                driven.state.as_ref() == Some(state)
+                driven.parked.as_ref().map(|(page, _)| page) == Some(state)
                     && replayed == *withdrawn
                     && asked == recorded_asks
             }
-            (Step::Ended(end), KernelRunOutput::Ended { outcome, .. }) => {
+            (MachineStep::Ended(end), KernelRunOutput::Ended { outcome, .. }) => {
                 let durable = |outcome: &lash_core::ProcessOutcome| {
                     serde_json::to_value(lash_sansio::Durable(outcome)).ok()
                 };

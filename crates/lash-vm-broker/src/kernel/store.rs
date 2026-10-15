@@ -4,7 +4,9 @@
 //!
 //! [`DurableSnapshotStore::commit_park`] commits, in one
 //! `cell.snapshot+admit` transaction, the execution's next root graph
-//! (FIG-5887 §5): the machine's KernelWhole at the next revision, the
+//! (ADR 0145 §6): the machine's CheckpointRoot at the next revision, its
+//! changed heap pages published from the activation's spool as one
+//! candidate (S6, FIG-6193), the
 //! effect membership that matches its [`EffectLedger`], one Admission per
 //! effect requested since the last park (holding its one frozen request),
 //! the round admission and `x_start` of every admitted execution (one
@@ -14,7 +16,8 @@
 //! the run records no saved state can reach again. No effect's body starts
 //! before that commit; each runs through the admitted-execution lifecycle
 //! (ADR 0132 §5) and its outcome commits as `round.outcome`. The root
-//! depends on no earlier root: a restore reads it alone.
+//! depends on no earlier root: a restore reads its header alone, and the
+//! machine faults in the pages it touches.
 //!
 //! # Delivery
 //!
@@ -59,13 +62,14 @@ use lash_core_execution::runtime::actor::round::{
 use lash_core_execution::runtime::actor::waits;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{
-    CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphStaging, NodeId,
-    NodeKind,
+    CommitId, EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeId, NodeKind,
 };
-use lash_durable::domain::graph::{HydratedGraph, ReleasePinWrite, RootOwner};
+use lash_durable::domain::graph::{HydratedGraph, RootOwner};
+use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
-use lash_durable::{CommitLabel, DomainWrite, DurableInstant};
+use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, EffectName, ErrorDatum, KERNEL_VERSION};
+use lash_kernel_state::paged::CheckpointRoot;
 use lash_kernel_vm::{End, Outcome, WaitId};
 use tokio_util::sync::CancellationToken;
 
@@ -74,8 +78,9 @@ use super::graph::{
     Projections, ResolvedAdmission, RootParts, stage_exec_root,
 };
 use super::ledger::{AdmittedEffect, EffectLedger, PendingEffect, Standing};
+use super::pages::{Resolution, SharedPages};
 use super::run::KernelEffects;
-use super::state::{ReleaseGraph, WholeState};
+use super::state::{EndRecord, ReleaseGraph, admission_of, checkpoint_header};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
 use crate::members::{Decide, Driven, Undriven};
@@ -145,12 +150,23 @@ pub struct HostParts {
     pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
 }
 
+/// A park's sealed checkpoint root: its page, staged in the activation's
+/// spool, and its decoded header.
+#[derive(Clone, Debug)]
+pub struct SealedPark {
+    pub root: NodeId,
+    pub header: CheckpointRoot,
+}
+
 /// What one park commits.
 pub struct ParkSave<'a> {
     /// The document the run executes.
     pub document: DocumentId,
-    /// The machine's state at this park.
-    pub state: WholeState,
+    /// The machine's checkpoint root at this park.
+    pub state: SealedPark,
+    /// The activation's page service, whose spool holds the root's
+    /// changed pages: the candidate the park publishes.
+    pub pages: &'a SharedPages,
     /// The helper releases the state may pin.
     pub releases: &'a ReleaseGraph,
     /// The ledger that matches it, before this park's admissions.
@@ -161,22 +177,16 @@ pub struct ParkSave<'a> {
     pub with: Vec<DomainWrite>,
 }
 
-/// A SessionExecution graph: its root and the nodes a capture staged.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SessionGraph {
-    pub root: NodeId,
-    pub nodes: BTreeMap<NodeId, EncodedNode>,
-}
-
 /// What a run's end commits.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EndSave {
+pub struct EndSave<'a> {
     pub document: DocumentId,
     /// The ledger as the run left it.
     pub ledger: EffectLedger,
     pub end: End,
-    /// The session state the cell leaves, which the turn adopts.
-    pub session: SessionGraph,
+    /// The session descriptor page the cell leaves, which the turn adopts:
+    /// staged in `pages`' spool, it is the candidate the end publishes.
+    pub session: NodeId,
+    pub pages: &'a SharedPages,
     pub with: Vec<DomainWrite>,
 }
 
@@ -205,29 +215,15 @@ pub enum FirstPark {
 }
 
 /// A run's state at its latest park, as a machine resumes from it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ParkedState {
-    /// The KernelWhole and every node it reaches but its release's.
-    pub whole: WholeState,
-    /// The document it was written under.
-    pub document: String,
+    /// The execution root the row holds: what an activation leases.
+    pub exec_root: NodeId,
+    /// Its CheckpointRoot page and header.
+    pub root: NodeId,
+    pub header: CheckpointRoot,
     /// Each wait's request, taken from the one admission that holds it.
     pub admissions: Vec<lash_kernel_state::AdmittedWait>,
-}
-
-impl ParkedState {
-    /// The state as a worker resumes it, sealed under `owner`.
-    #[must_use]
-    pub fn sealed(&self, owner: lash_vm_protocol::VmOwner) -> lash_vm_protocol::ParkedGraph {
-        lash_vm_protocol::ParkedGraph {
-            state: self.whole.sealed(owner, &self.document),
-            admissions: self
-                .admissions
-                .iter()
-                .map(super::state::admission)
-                .collect(),
-        }
-    }
 }
 
 /// An execution's latest root as read back: its row, its body and every
@@ -241,7 +237,11 @@ pub struct RootRead {
 }
 
 /// What a run's latest root holds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "read once per claim and matched at once; a parked state is the common case"
+)]
 pub enum Checkpoint {
     /// A parked state and the ledger its membership names.
     Parked {
@@ -377,16 +377,20 @@ fn final_output<'a>(
     }
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per park transaction, consumed by its commit"
+)]
 enum SavePhase<'a> {
     Parked {
-        state: WholeState,
+        state: SealedPark,
         releases: &'a ReleaseGraph,
         /// The model response a fresh run's first park commits (FIG-6000).
         response: Option<&'a lash_core_execution::HeldResponse>,
     },
     Ended {
         end: End,
-        session: SessionGraph,
+        session: NodeId,
     },
 }
 
@@ -452,6 +456,12 @@ fn staging() -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
 }
 
+/// Whether a refused publication is ambiguous: its acknowledgement was
+/// lost, so the owner's row decides it (D-SPOOL).
+fn ambiguous(error: &DurableError) -> bool {
+    matches!(error, DurableError::AckLost { .. })
+}
+
 impl DurableSnapshotStore {
     /// Commit `save` in one transaction (see the module docs), with the
     /// host's own state `host` stages.
@@ -496,6 +506,7 @@ impl DurableSnapshotStore {
         let ParkSave {
             document,
             state,
+            pages,
             releases,
             ledger,
             admit,
@@ -510,6 +521,7 @@ impl DurableSnapshotStore {
                 releases,
                 response,
             },
+            pages,
             admit,
             with,
         )
@@ -525,7 +537,7 @@ impl DurableSnapshotStore {
     /// As [`commit_park`](Self::commit_park).
     pub async fn commit_run_end(
         &self,
-        save: EndSave,
+        save: EndSave<'_>,
         host: &dyn KernelEffects,
     ) -> Result<Saved, QuietPointRefusal> {
         self.commit_checkpoint(
@@ -536,6 +548,7 @@ impl DurableSnapshotStore {
                 end: save.end,
                 session: save.session,
             },
+            save.pages,
             Vec::new(),
             save.with,
         )
@@ -584,6 +597,7 @@ impl DurableSnapshotStore {
 
     #[expect(
         clippy::too_many_lines,
+        clippy::too_many_arguments,
         reason = "one park transaction, in its commit order"
     )]
     async fn commit_checkpoint(
@@ -592,6 +606,7 @@ impl DurableSnapshotStore {
         document: &DocumentId,
         mut ledger: EffectLedger,
         phase: SavePhase<'_>,
+        pages: &SharedPages,
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
     ) -> Result<FirstPark, QuietPointRefusal> {
@@ -810,8 +825,9 @@ impl DurableSnapshotStore {
         let parts = host
             .stage_host(&mut staging, &mut reads, &calls)
             .map_err(refused)?;
-        let mut parked = BTreeSet::new();
-        let (status, state, format, membership) = match phase {
+        // The candidate the commit publishes: the park's checkpoint root, or
+        // the session descriptor an end hands the turn.
+        let (status, state, format, membership, candidate) = match phase {
             SavePhase::Parked {
                 state, releases, ..
             } => {
@@ -819,52 +835,42 @@ impl DurableSnapshotStore {
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
                 }
-                self.pin_release(&mut tx, &state, releases, expected.is_none())
-                    .await?;
-                let (root, kernel) = (state.root, state.kernel);
-                // The park exports the whole state; a node the latest root
-                // reaches is stored, so only the others are staged and a
-                // large value an earlier park kept is never carried again.
-                let stored = self.stored_nodes();
-                parked = state.nodes.keys().copied().collect();
-                tx.stage(
-                    state
-                        .nodes
-                        .into_values()
-                        .filter(|node| !stored.contains(&node.id)),
-                );
-                (ExecStatus::Parked, root, kernel, Some(membership))
+                releases
+                    .pin(
+                        self.cx.durable_reads().map_err(refused)?,
+                        &mut tx,
+                        NodeId(state.header.release.0),
+                        expected.is_none(),
+                    )
+                    .await
+                    .map_err(refused)?;
+                (
+                    ExecStatus::Parked,
+                    state.root,
+                    state.header.kernel,
+                    Some(membership),
+                    state.root,
+                )
             }
             SavePhase::Ended { end, session } => {
                 for write in book.retire_unnamed(&self.exec, &EffectMembership::default()) {
                     tx.write(write);
                 }
-                let terminal = super::state::export_end_state(&end, KERNEL_VERSION, u64::MAX)
+                let end = EndRecord::stage(&end, &mut staging)
                     .map_err(refused)?
                     .ok_or_else(|| refused("a cancelled run records no end"))?;
                 let (Some(host_root), Some(envelope)) = (parts.host, parts.envelope) else {
                     return Err(refused("a cell's end names its host state and envelope"));
                 };
                 let end = CellEnd {
-                    terminal: terminal.root,
-                    session: session.root,
+                    end,
+                    session,
                     host: host_root,
                     envelope,
                 }
                 .stage(&mut staging)
                 .map_err(refused)?;
-                // The terminal export is whole, and the session's state
-                // shares the run's values: what the latest root reaches is
-                // stored, and the end's root reaches it in turn.
-                let stored = self.stored_nodes();
-                tx.stage(
-                    terminal
-                        .nodes
-                        .into_values()
-                        .chain(session.nodes.into_values())
-                        .filter(|node| !stored.contains(&node.id)),
-                );
-                (ExecStatus::Ended, end, KERNEL_VERSION, None)
+                (ExecStatus::Ended, end, KERNEL_VERSION, None, session)
             }
         };
         let owing = ExecutionDebts {
@@ -876,6 +882,7 @@ impl DurableSnapshotStore {
                 Vec::new()
             },
         };
+        let commit = CommitId::mint();
         let (root, write) = stage_exec_root(
             &mut staging,
             &self.exec,
@@ -893,9 +900,14 @@ impl DurableSnapshotStore {
                 expected.map(|held| held.rev),
                 expected.map(|held| held.root),
             ),
-            CommitId::mint(),
+            commit,
         )
         .map_err(refused)?;
+        let manifest = pages
+            .lock()
+            .await
+            .candidate(candidate, expected.map(|held| held.root), root, commit)
+            .map_err(refused)?;
         tx.stage_all(staging);
         for read in reads {
             tx.require(read);
@@ -908,17 +920,27 @@ impl DurableSnapshotStore {
         } else {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
-        let committed = self.commit(tx, label, &owing, &mut members).await?;
+        let committed = self
+            .commit_candidate(
+                tx,
+                CandidatePublication {
+                    owner: CandidateOwner::ExecRootPut(self.exec.clone()),
+                    manifest,
+                    admission: admission_of(candidate, commit),
+                },
+                label,
+                &owing,
+                &mut members,
+                pages,
+                (root, commit),
+            )
+            .await?;
         // What the cell published while the response was held is
         // published now, before anything it admitted starts.
         if let Some(response) = response {
             response.committed(label);
         }
         let stopped = response.is_some_and(|response| response.stops_in(&committed));
-        *self
-            .stored
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = parked;
         host.host_committed();
         *self
             .book
@@ -938,65 +960,68 @@ impl DurableSnapshotStore {
         Ok(FirstPark::Saved(Saved { rev, root, ledger }))
     }
 
-    /// Pins the helper release `state` pins: the store installs a release's
-    /// nodes with its pin once, under its dialect's key
-    /// ([`lash_vm_releases::HeldManifests::pin_key`]), on the first root of
-    /// the first execution that pins it; every later root requires them.
-    async fn pin_release(
+    /// Commits `tx` with `candidate`, which publishes the execution's root
+    /// `published` (its wrapper and commit) owing `owing`, and settles the
+    /// candidate in `pages`' spool. A publication whose acknowledgement was
+    /// lost is resolved against the execution's row (D-SPOOL): the spool
+    /// settles when the row holds `published`, and either way the save is
+    /// refused here: this activation ends, and the next resumes from
+    /// whichever root the row holds, its admissions committed with it.
+    #[expect(clippy::too_many_arguments, reason = "one publication, in its parts")]
+    async fn commit_candidate(
         &self,
-        tx: &mut lash_durable::ActorTx,
-        state: &WholeState,
-        releases: &ReleaseGraph,
-        first: bool,
-    ) -> Result<(), QuietPointRefusal> {
-        // The state omits the release manifest it pins; a whole that places
-        // a large value is read over the release's nodes, which tell its
-        // typed children from its leaves.
-        let source = super::state::Layered {
-            state: &state.nodes,
-            release: &releases.nodes,
-        };
-        let whole: lash_kernel_state::KernelWhole = GraphDecoder::new(&source, self.read_limits())
-            .decode(state.root, NodeKind::KERNEL_WHOLE)
-            .map_err(refused)?;
-        let release = NodeId(whole.release.0);
-        if !first {
-            tx.require(release);
-            return Ok(());
-        }
-        let key = releases
-            .manifests
-            .pin_key(&release.child_ref())
-            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
-        // A release this store already pins is stored whole: the commit
-        // rechecks the requirement under its protection. A pin this read
-        // cannot confirm is installed again, and the commit compares it.
-        let pinned = self
+        tx: lash_durable::ActorTx,
+        candidate: CandidatePublication,
+        label: CommitLabel,
+        owing: &ExecutionDebts,
+        members: &mut crate::members::Members,
+        pages: &SharedPages,
+        published: (NodeId, CommitId),
+    ) -> Result<lash_durable::ActorCommit, QuietPointRefusal> {
+        members.forget();
+        *self
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        match self
             .cx
-            .durable_reads()
-            .map_err(refused)?
-            .hydrate(
-                RootOwner::ReleasePin {
-                    release: key.clone(),
-                },
-                Some(release),
-                self.read_limits(),
-            )
+            .commit_candidate_owing(tx, candidate, label, Some(owing))
             .await
-            .is_ok();
-        if pinned {
-            tx.require(release);
-            return Ok(());
+        {
+            Ok(committed) => {
+                pages.lock().await.settle(published.1).map_err(refused)?;
+                Ok(committed)
+            }
+            Err(error) => {
+                self.forget_root();
+                if ambiguous(&error) {
+                    let row = self
+                        .cx
+                        .pages()
+                        .map_err(refused)?
+                        .candidate_state(&self.exec)
+                        .await
+                        .map_err(refused)?;
+                    let resolved = pages.lock().await.resolve(row).map_err(refused)?;
+                    let committed = matches!(resolved, Resolution::Committed);
+                    return Err(refused(format!(
+                        "the publication's acknowledgement was lost; the row {} it",
+                        if committed { "holds" } else { "does not hold" }
+                    )));
+                }
+                Err(refused(error))
+            }
         }
-        let (_, nodes) = releases
-            .pinned(release)
-            .ok_or_else(|| refused("the state pins a release this build does not hold"))?;
-        tx.stage(nodes.into_values());
-        tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-            release: key,
-            root: release,
-        }));
-        Ok(())
+    }
+
+    /// Forgets the root and the nodes this activation knew stored: the
+    /// next write reads them back.
+    fn forget_root(&self) {
+        *self.held() = None;
+        self.stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 
     /// The execution's latest root, read whole under one protection; none
@@ -1104,18 +1129,23 @@ impl DurableSnapshotStore {
                     .book
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
-                let whole = WholeState::parked_in(
-                    &read.graph,
-                    read.body.state,
-                    read.body.format,
-                    &self.read_limits(),
-                )
-                .map_err(refused)?;
+                // The hydrated root holds its CheckpointRoot page as a leaf:
+                // the header, and nothing of the heap.
+                let page = read
+                    .graph
+                    .nodes
+                    .get(&read.body.state)
+                    .ok_or_else(|| refused("the root omits its checkpoint root"))?;
+                let header = checkpoint_header(read.body.state, &page.bytes).map_err(refused)?;
+                if header.kernel != read.body.format {
+                    return Err(refused("the root states another kernel than its header"));
+                }
                 Ok(Some(Checkpoint::Parked {
                     rev: read.held.rev,
                     state: ParkedState {
-                        whole,
-                        document: read.body.executable_identity.clone(),
+                        exec_root: read.held.root,
+                        root: read.body.state,
+                        header,
                         admissions,
                     },
                     ledger,
@@ -1123,8 +1153,7 @@ impl DurableSnapshotStore {
             }
             (ExecStatus::Ended, None) => {
                 let cell = CellEnd::load(&mut decoder, read.body.state).map_err(refused)?;
-                let end = super::state::read_end_in(&read.graph, cell.terminal, self.read_limits())
-                    .map_err(refused)?;
+                let end = cell.end.end(&mut decoder).map_err(refused)?;
                 Ok(Some(Checkpoint::Ended {
                     rev: read.held.rev,
                     end,

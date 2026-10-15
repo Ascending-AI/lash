@@ -29,7 +29,7 @@ use std::sync::Arc;
 use lash_kernel_doc as doc;
 use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, NativeFunction,
-    PreparedNative, Site, Type, Unit, Value,
+    PreparedNative, Site, Type, Unit,
 };
 use lash_kernel_exec::{
     BoundaryKind, KirError, LocalRef, Op, OpRange, StepEdge, StmtRanges, Tables as StreamTables,
@@ -98,7 +98,6 @@ struct Tables {
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
-    block_at: BTreeMap<Site, BlockId>,
 }
 
 impl Tables {
@@ -500,11 +499,6 @@ impl Executable {
         self.tables_of(&site.unit)?.code_at.get(site).copied()
     }
 
-    /// The block whose site is `site`.
-    pub(crate) fn block_at(&self, site: &Site) -> Option<BlockId> {
-        self.tables_of(&site.unit)?.block_at.get(site).copied()
-    }
-
     /// How many codes, library functions and statements the executable
     /// numbers.
     pub(crate) fn code_count(&self) -> usize {
@@ -547,10 +541,14 @@ pub(crate) struct Code {
     pub(crate) params: Vec<Local>,
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
-    /// Where each slot sits in a frame.
-    pub(crate) positions: Vec<u32>,
+    pub(crate) slots_by_at: Vec<u32>,
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
+    /// The names a document function reads that no scope of it declares,
+    /// each at a variable of its own that a call of a saved function binds
+    /// to a fresh instance of its frozen capture (`K-SES-004`). A variable
+    /// no call binds reads as unbound.
+    pub(crate) free: Vec<(Name, Local)>,
     /// Whether the code's forms are charged: those of the body of a library
     /// function with a native implementation are not (`K-CHG-007`). That
     /// body calls only functions with a native implementation (`K-LIB-004`),
@@ -559,6 +557,7 @@ pub(crate) struct Code {
 }
 
 pub(crate) struct SlotInfo {
+    pub(crate) key: Vec<u8>,
     pub(crate) name: Name,
     /// The node that declares the variable: its `let`, the block it is a
     /// parameter, a loop binding or a `catch` binding of, or, for a
@@ -622,7 +621,7 @@ pub(crate) enum Var {
 #[derive(Default)]
 pub(crate) struct Stream {
     pub(crate) ops: Vec<Op>,
-    pub(crate) consts: Vec<Value>,
+    pub(crate) consts: Vec<doc::Literal>,
     pub(crate) names: Vec<Name>,
     pub(crate) fields: Vec<String>,
     pub(crate) field_lists: Vec<Box<[String]>>,
@@ -741,7 +740,7 @@ pub(crate) enum Callee {
 
 pub(crate) enum Atom {
     Var(Var),
-    Literal(Value),
+    Literal(doc::Literal),
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
@@ -780,6 +779,9 @@ struct Scopes {
     blocks: Vec<Vec<(Name, Declared)>>,
     slots: Vec<SlotInfo>,
     captures: Vec<Capture>,
+    /// A document function's free names, each with its variable; `None`
+    /// for any other code, whose free names are unbound.
+    free: Option<Vec<(Name, Slot)>>,
 }
 
 #[derive(Clone, Copy)]
@@ -971,12 +973,6 @@ impl<'a> Compiler<'a> {
             .enumerate()
             .map(|(index, code)| (code.site.clone(), CodeId(base.codes + index as u32)))
             .collect();
-        let block_at = self
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| (block.site.clone(), BlockId(base.blocks + index as u32)))
-            .collect();
         let edges = step_edges(&codes, &self.blocks, &self.stmts, base);
         Tables {
             codes,
@@ -985,7 +981,6 @@ impl<'a> Compiler<'a> {
             stream: self.stream,
             edges,
             code_at,
-            block_at,
         }
     }
 }
@@ -1066,15 +1061,23 @@ impl Compiler<'_> {
         charged: bool,
     ) {
         let main = unit == Unit::Main;
+        let free = matches!(unit, Unit::Function(_));
         self.unit = unit;
         self.path.clear();
-        let compiled = self.code(params, body, main, charged);
+        let compiled = self.code(params, body, main, charged, free);
         self.codes[(code.0 - self.base.codes) as usize] = Some(compiled);
     }
 
     /// Compiles a function body in a scope of its own. The path addresses
     /// the body block.
-    fn code(&mut self, params: &[Name], body: &doc::Block, main: bool, charged: bool) -> Code {
+    pub(crate) fn code(
+        &mut self,
+        params: &[Name],
+        body: &doc::Block,
+        main: bool,
+        charged: bool,
+        free: bool,
+    ) -> Code {
         let site = self.site();
         self.scopes.push(Scopes {
             main,
@@ -1082,6 +1085,7 @@ impl Compiler<'_> {
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
+            free: free.then(Vec::new),
         });
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
@@ -1090,6 +1094,7 @@ impl Compiler<'_> {
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
+            free: None,
         });
         let mut positions: Vec<u32> = (0..scopes.slots.len() as u32).collect();
         self.shuffler.shuffle(self.layout, &mut positions);
@@ -1100,6 +1105,12 @@ impl Compiler<'_> {
         let params = params
             .into_iter()
             .map(|slot| placer.placed(Local::unplaced(slot)))
+            .collect();
+        let free = scopes
+            .free
+            .iter()
+            .flatten()
+            .map(|(name, slot)| (name.clone(), placer.placed(Local::unplaced(*slot))))
             .collect();
         let mut captures = scopes.captures;
         for capture in &mut captures {
@@ -1115,13 +1126,18 @@ impl Compiler<'_> {
         if moved || scopes.slots.iter().any(|slot| slot.shared) {
             self.place(body, &placer);
         }
+        let mut slots_by_at = vec![0; positions.len()];
+        for (slot, at) in positions.iter().enumerate() {
+            slots_by_at[*at as usize] = slot as u32;
+        }
         Code {
             site,
             params,
             body,
             slots: scopes.slots,
-            positions,
+            slots_by_at,
             captures,
+            free,
             charged,
         }
     }
@@ -1159,6 +1175,28 @@ impl Compiler<'_> {
         }
     }
 
+    /// The variable of the document function being compiled that holds its
+    /// free name `name`, taken on its first read; none for other code.
+    fn free_slot(&mut self, name: &Name) -> Option<Slot> {
+        let scopes = self.scopes.first_mut()?;
+        let free = scopes.free.as_mut()?;
+        if let Some((_, slot)) = free.iter().find(|(taken, _)| taken == name) {
+            return Some(*slot);
+        }
+        let slot = scopes.slots.len() as Slot;
+        scopes.slots.push(SlotInfo {
+            key: lash_kernel_state::paged::metadata::metadata_key(&(
+                scopes.body.clone(),
+                name.clone(),
+            )),
+            name: name.clone(),
+            declared: scopes.body.clone(),
+            shared: false,
+        });
+        free.push((name.clone(), slot));
+        Some(slot)
+    }
+
     /// Declares a variable at the node being compiled.
     fn declare(&mut self, name: &Name) -> Slot {
         let declared = self.site();
@@ -1167,6 +1205,10 @@ impl Compiler<'_> {
         };
         let slot = scopes.slots.len() as Slot;
         scopes.slots.push(SlotInfo {
+            key: lash_kernel_state::paged::metadata::metadata_key(&(
+                declared.clone(),
+                name.clone(),
+            )),
             name: name.clone(),
             declared,
             shared: false,
@@ -1254,10 +1296,12 @@ impl Compiler<'_> {
             None | Some(Declared::ScopedSlot(_)) => {}
         }
         if level == 0 {
-            return if scopes.main {
-                Var::Session(name.clone())
-            } else {
-                Var::Unbound(name.clone())
+            if scopes.main {
+                return Var::Session(name.clone());
+            }
+            return match self.free_slot(name) {
+                Some(slot) => Var::Local(Local::unplaced(slot)),
+                None => Var::Unbound(name.clone()),
             };
         }
         // A capture already taken for this name is the same variable: the
@@ -1276,6 +1320,10 @@ impl Compiler<'_> {
                 let scopes = &mut self.scopes[level];
                 let inner = scopes.slots.len() as Slot;
                 scopes.slots.push(SlotInfo {
+                    key: lash_kernel_state::paged::metadata::metadata_key(&(
+                        scopes.body.clone(),
+                        name.clone(),
+                    )),
                     name: name.clone(),
                     declared: scopes.body.clone(),
                     shared: true,
@@ -1409,18 +1457,5 @@ impl Placer<'_> {
                 self.var(var);
             }
         }
-    }
-}
-
-fn literal_value(literal: &doc::Literal) -> Value {
-    match literal {
-        doc::Literal::Null => Value::Null,
-        doc::Literal::Absent => Value::Absent,
-        doc::Literal::Bool(flag) => Value::Bool(*flag),
-        doc::Literal::Int(integer) => Value::Int(integer.clone()),
-        doc::Literal::Float(float) => Value::Float(*float),
-        doc::Literal::Text(text) => Value::text(text.as_str()),
-        doc::Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
-        doc::Literal::Function(name) => Value::Function(name.clone()),
     }
 }

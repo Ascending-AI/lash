@@ -884,7 +884,7 @@ impl AdmissionBook {
 /// membership.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootParts {
-    /// A KernelWhole while parked; a CellEnd once ended.
+    /// A CheckpointRoot page while parked; a CellEnd once ended.
     pub state: NodeId,
     pub status: lash_core_store::checkpoint_graph::bodies::ExecStatus,
     /// The document the run executes.
@@ -913,6 +913,19 @@ pub fn owner_binding(exec: &ExecKey) -> lash_core_store::checkpoint_graph::bodie
             process: process.as_str().to_owned(),
         },
     }
+}
+
+/// The OwnerBinding node of `exec`, which every checkpoint root of its run
+/// names and every root it publishes stages.
+///
+/// # Errors
+///
+/// The staging area's refusal.
+pub fn owner_binding_node(exec: &ExecKey) -> Result<NodeId, GraphRefusal> {
+    let mut staging = GraphStaging::new(lash_core_store::checkpoint_graph::EncodeBudget::new(
+        lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+    ));
+    staging.encode_value(NodeKind::OWNER_BINDING, &owner_binding(exec))
 }
 
 /// Stages `exec`'s complete execution root over `parts` and `membership`,
@@ -972,14 +985,14 @@ pub fn stage_exec_root(
 
 // --- A cell's end --------------------------------------------------------
 
-/// Kind 28: how a cell ended, as its last root names it: the kernel's
-/// terminal whole, the post-cell session state the turn adopts, the host's
-/// state and the cell's envelope.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Kind 28: how a cell that parked ended, as its last root names it: the
+/// run's end, the session descriptor page the turn adopts (a SessionRoot
+/// page over the carried heap, FIG-6193), the host's state and the cell's
+/// envelope.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CellEnd {
-    /// A TerminalWhole.
-    pub terminal: NodeId,
-    /// A SessionExecution.
+    pub end: super::state::EndRecord,
+    /// A SessionRoot page.
     pub session: NodeId,
     /// A HostRoot.
     pub host: NodeId,
@@ -990,7 +1003,7 @@ pub struct CellEnd {
 impl TokenCodec for CellEnd {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(4);
-        self.terminal.encode(out);
+        self.end.encode(out);
         self.session.encode(out);
         self.host.encode(out);
         self.envelope.encode(out);
@@ -999,7 +1012,7 @@ impl TokenCodec for CellEnd {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(4)?;
         Ok(Self {
-            terminal: NodeId::decode(input)?,
+            end: super::state::EndRecord::decode(input)?,
             session: NodeId::decode(input)?,
             host: NodeId::decode(input)?,
             envelope: NodeId::decode(input)?,
@@ -1018,6 +1031,8 @@ impl CellEnd {
     }
 
     /// Reads end `id`, checking each reference names a node of its kind.
+    /// The session page is read as a host read reads a heap page: itself,
+    /// never what it reaches.
     ///
     /// # Errors
     ///
@@ -1025,8 +1040,7 @@ impl CellEnd {
     pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {
         let end: Self = decoder.decode(id, NodeKind::CELL_END)?;
         for (child, kind) in [
-            (end.terminal, NodeKind::TERMINAL_WHOLE),
-            (end.session, NodeKind::SESSION_EXECUTION),
+            (end.session, NodeKind::SESSION_ROOT),
             (end.host, NodeKind::HOST_ROOT),
             (end.envelope, NodeKind::CELL_ENVELOPE),
         ] {
@@ -1039,77 +1053,3 @@ impl CellEnd {
 #[cfg(test)]
 #[path = "graph_tests.rs"]
 mod tests;
-
-// --- A parked root carried onto a rewritten document ---------------------
-
-/// A parked execution's admissions as a kernel migration leaves them: each
-/// wait its state stands on re-keyed to the effect identity the rewritten
-/// document gives it, under a new admission of the same request, and each
-/// released execution as it was.
-#[derive(Clone, Debug)]
-pub struct Reidentified {
-    pub membership: EffectMembership,
-    /// The rows that remove each re-keyed admission's lookup and publish
-    /// its successor's.
-    pub writes: Vec<DomainWrite>,
-    /// Each re-keyed wait's new identity and admission, by its old
-    /// identity.
-    pub admissions: BTreeMap<EffectIdentity, (EffectIdentity, NodeId)>,
-}
-
-/// `membership` of `exec`, whose admissions `resolved` holds, with each
-/// pending wait re-keyed as `identities` says, staged into `staging`.
-///
-/// # Errors
-///
-/// [`GraphRefusal::AdmissionMissing`] for a pending wait `identities` or
-/// `resolved` does not name, [`GraphRefusal::DuplicateEffect`] for two
-/// waits re-keyed to one identity, or any refusal of the staging area.
-pub fn reidentify(
-    staging: &mut GraphStaging,
-    exec: &ExecKey,
-    membership: &EffectMembership,
-    resolved: &BTreeMap<EffectIdentity, ResolvedAdmission>,
-    identities: &BTreeMap<EffectIdentity, EffectIdentity>,
-) -> Result<Reidentified, GraphRefusal> {
-    let missing =
-        |effect: &EffectIdentity| GraphRefusal::AdmissionMissing(Box::new(effect.clone()));
-    let mut entries = Vec::with_capacity(membership.entries.len());
-    let mut writes = Vec::new();
-    let mut admissions = BTreeMap::new();
-    for entry in &membership.entries {
-        if entry.status == MemberStatus::Released {
-            entries.push(entry.clone());
-            continue;
-        }
-        let identity = identities
-            .get(&entry.effect)
-            .ok_or_else(|| missing(&entry.effect))?;
-        let old = resolved
-            .get(&entry.effect)
-            .ok_or_else(|| missing(&entry.effect))?;
-        let admission = Admission {
-            effect: identity.clone(),
-            ..old.admission.clone()
-        };
-        let node = admission.stage(staging)?;
-        writes.push(DomainWrite::EffectAdmission(EffectAdmissionWrite::Remove {
-            exec: exec.clone(),
-            effect: effect_key(&entry.effect),
-            expected: old.node,
-        }));
-        writes.push(admission.write(node));
-        admissions.insert(entry.effect.clone(), (identity.clone(), node));
-        entries.push(MemberEntry {
-            effect: identity.clone(),
-            wait: entry.wait,
-            admission: node,
-            status: MemberStatus::Pending,
-        });
-    }
-    Ok(Reidentified {
-        membership: EffectMembership::new(membership.next_park, entries)?,
-        writes,
-        admissions,
-    })
-}

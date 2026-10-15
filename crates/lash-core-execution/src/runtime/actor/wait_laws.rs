@@ -568,6 +568,7 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
             lease: backend.config().lease(),
             max_active: 4,
             claim_batch: 4,
+            retirement: backend.config().settings().retirement,
         },
         Arc::new(SettleOnClaim {
             backend: backend.clone(),

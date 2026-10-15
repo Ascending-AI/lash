@@ -1,13 +1,13 @@
-//! Saved functions as checkpoint graph nodes (FIG-5887 §3, §4).
+//! Saved function bundles reference immutable capture pages (S8).
 //!
 //! A session keeps each function it holds as one immutable
 //! [`Bundle`]: the function and every saved function it uses, transitively,
 //! each once, in a member table sorted by the name each is declared under.
 //! Functions that use one another share one member table, and a member
-//! links to another by its index there, so no bundle names another bundle
-//! and no content hash is cyclic. A member's document is a node of its own,
-//! shared by every bundle that holds it; its captures and token are frozen
-//! data in the member's row, and the release its helpers come from is named
+//! refers to another by name, so no bundle names another bundle and no
+//! content hash is cyclic. A member's document is a node of its own, shared
+//! by every bundle that holds it; its captures and token data are frozen
+//! page references in the member's row, and its exact helper release is named
 //! by an exact manifest reference.
 //!
 //! This module writes and reads the bundle's logical body. Nodes are staged
@@ -19,9 +19,11 @@ use lash_kernel_doc::graph_tokens::{
     ChildRef, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
     encode_body,
 };
-use lash_kernel_doc::{Datum, Document, EffectName, Name, Signature, ValueKind};
+use lash_kernel_doc::heap::PageRef;
+use lash_kernel_doc::{Document, EffectName, Name, Signature, ValueKind};
+use lash_kernel_state::paged::FrozenRef;
 
-use super::{CaptureRefusal, Constant, NotSaved, SavedFunction, Token};
+use super::{CaptureRefusal, NotSaved, SavedFunction, Token};
 use crate::Written;
 
 /// The registry number of a Document node (`checkpoint_graph::NodeKind::DOCUMENT`).
@@ -33,7 +35,7 @@ pub const FUNCTION_BUNDLE_NODE_KIND: u32 = 30;
 
 /// A saved function's bundle: it and every saved function it uses,
 /// transitively, by the name each is declared under.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Bundle {
     members: BTreeMap<Name, SavedFunction>,
 }
@@ -51,7 +53,7 @@ pub enum BundleRefusal {
 
 impl Bundle {
     /// The bundle of the function bound to `root` in `functions`, keyed by
-    /// binding as [`super::closure_of`] reads them. A function a member uses
+    /// binding under their saved names. A function a member uses
     /// that `functions` does not hold is left out: a cell that installs the
     /// member is refused for it as ever ([`super::Unusable::Missing`]).
     /// `None` when `root` holds no function.
@@ -123,8 +125,8 @@ impl Bundle {
     }
 
     /// Stages the bundle: each member's document as a Document node, then
-    /// the bundle itself, naming `release`, the exact manifest of the helper
-    /// release its members were written against. Answers the bundle's
+    /// the bundle itself. Each member names its exact helper release and
+    /// frozen capture pages. Answers the bundle's
     /// reference.
     ///
     /// # Errors
@@ -132,7 +134,6 @@ impl Bundle {
     /// The first error `stage` answers.
     pub fn stage<E>(
         &self,
-        release: ChildRef,
         mut stage: impl FnMut(u32, &[u8]) -> Result<ChildRef, E>,
     ) -> Result<ChildRef, E> {
         let mut members = Vec::with_capacity(self.members.len());
@@ -142,6 +143,8 @@ impl Bundle {
                 name: name.clone(),
                 document,
                 captures: function.captures.clone(),
+                release: function.release,
+                references: function.references.clone(),
                 helper_owners: function.helper_owners.clone(),
                 written: function.written.clone(),
                 token: function.token.clone(),
@@ -150,7 +153,6 @@ impl Bundle {
         let body = BundleBody {
             members,
             effects: self.required_effects(),
-            release,
         };
         stage(FUNCTION_BUNDLE_NODE_KIND, &encode_body(&body))
     }
@@ -165,13 +167,15 @@ impl Bundle {
     pub fn assemble<E: From<BundleRefusal>>(
         body: BundleBody,
         mut document: impl FnMut(ChildRef) -> Result<Document, E>,
-    ) -> Result<(Self, ChildRef), E> {
+    ) -> Result<Self, E> {
         let mut members = BTreeMap::new();
         for member in body.members {
             let function = SavedFunction {
                 name: member.name.clone(),
                 document: document(member.document)?,
                 captures: member.captures,
+                release: member.release,
+                references: member.references,
                 helper_owners: member.helper_owners,
                 written: member.written,
                 token: member.token,
@@ -188,27 +192,27 @@ impl Bundle {
         if bundle.required_effects() != body.effects {
             return Err(BundleRefusal::RequiredEffects.into());
         }
-        Ok((bundle, body.release))
+        Ok(bundle)
     }
 }
 
 /// A FunctionBundle node's logical body.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct BundleBody {
     /// Sorted by name, each once.
     pub members: Vec<MemberBody>,
     /// [`Bundle::required_effects`].
     pub effects: Vec<(EffectName, Signature)>,
-    /// The exact ReleaseManifest the members' helpers come from.
-    pub release: ChildRef,
 }
 
 /// One member's row: a [`SavedFunction`] with its document by reference.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct MemberBody {
     pub name: Name,
     pub document: ChildRef,
-    pub captures: BTreeMap<Name, Datum>,
+    pub captures: BTreeMap<Name, FrozenRef>,
+    pub release: PageRef,
+    pub references: BTreeSet<Name>,
     pub helper_owners: BTreeSet<Name>,
     pub written: Option<Written>,
     pub token: Option<Token>,
@@ -216,7 +220,7 @@ pub struct MemberBody {
 
 impl TokenCodec for BundleBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(2);
         self.members.encode(out);
         out.seq(self.effects.len() as u64);
         for (effect, signature) in &self.effects {
@@ -224,11 +228,10 @@ impl TokenCodec for BundleBody {
             effect.encode(out);
             signature.encode(out);
         }
-        self.release.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(2)?;
         let members = Vec::<MemberBody>::decode(input)?;
         check_ascending(
             &members
@@ -242,31 +245,31 @@ impl TokenCodec for BundleBody {
             input.expect_struct(2)?;
             effects.push((EffectName::decode(input)?, Signature::decode(input)?));
         }
-        Ok(Self {
-            members,
-            effects,
-            release: ChildRef::decode(input)?,
-        })
+        Ok(Self { members, effects })
     }
 }
 
 impl TokenCodec for MemberBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(8);
         self.name.encode(out);
         self.document.encode(out);
         self.captures.encode(out);
+        self.release.encode(out);
+        self.references.encode(out);
         self.helper_owners.encode(out);
         self.written.encode(out);
         self.token.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
+        input.expect_struct(8)?;
         Ok(Self {
             name: Name::decode(input)?,
             document: ChildRef::decode(input)?,
             captures: BTreeMap::decode(input)?,
+            release: PageRef::decode(input)?,
+            references: BTreeSet::decode(input)?,
             helper_owners: BTreeSet::decode(input)?,
             written: Option::decode(input)?,
             token: Option::decode(input)?,
@@ -289,16 +292,6 @@ impl TokenCodec for Token {
             before: Vec::decode(input)?,
             after: Vec::decode(input)?,
         })
-    }
-}
-
-impl TokenCodec for Constant {
-    fn encode(&self, out: &mut TokenWriter) {
-        self.0.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Self::try_from(Datum::decode(input)?).map_err(|why| TokenError::Invalid(why.to_owned()))
     }
 }
 
@@ -501,7 +494,3 @@ fn value_kind(variant: u32) -> Result<ValueKind, TokenError> {
         .and_then(|at| VALUE_KINDS.get(at).copied())
         .ok_or(TokenError::UnsupportedVariant { variant })
 }
-
-#[cfg(test)]
-#[path = "graph_tests.rs"]
-mod tests;

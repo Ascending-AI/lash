@@ -452,6 +452,7 @@ impl Counted {
         let replay = |steps: Vec<RecordedProcessStep>, segment: u64| {
             let engine = engine.clone();
             let request = lash_vm_runtime::ProcessReplayRequest {
+                pages: core.effect_host().pages().expect("the store's pages"),
                 process: process.clone(),
                 settings: launch.settings.clone(),
                 payload: payload.clone(),
@@ -539,35 +540,34 @@ impl Counted {
             },
         );
 
-        // A start recorded whole, as a carry boundary records it, replays
-        // to the same path as its reference.
-        let entry_state = kernel_output(&steps[*entry])["state"].clone();
-        let whole = retaped(&steps, *middle, process, |output| {
-            output["start"]["from"] = serde_json::json!({ "whole": entry_state });
+        // On the heap a start names the page it resumed by the output that
+        // holds it, read under that output's run fact: no carry rewrites a
+        // parked page, so no start is recorded whole. A start naming a page
+        // its output does not hold answers `Pruned`, never a path, and so
+        // does an output whose run fact no longer records it.
+        let elsewhere = retaped(&steps, *middle, process, |output| {
+            output["start"]["from"]["output"]["root"] = serde_json::json!("00".repeat(32));
         });
-        let carried = replay(whole, 1).await;
-        if carried != untouched {
-            violations.push(format!(
-                "a whole start replayed {carried:?}, its reference {untouched:?}"
-            ));
-        }
+        expect(
+            &mut violations,
+            "a start naming another page",
+            replay(elsewhere, 1).await,
+            SegmentAnswer::Unreplayable {
+                reason: Unreplayable::Pruned,
+            },
+        );
+        let mut unowned = steps.clone();
+        unowned[*entry].outcome_fact = None;
+        expect(
+            &mut violations,
+            "a start whose output's run fact is gone",
+            replay(unowned, 1).await,
+            SegmentAnswer::Unreplayable {
+                reason: Unreplayable::Pruned,
+            },
+        );
         violations
     }
-}
-
-/// The kernel output a retained `kernel_run` step settled, as its variant's
-/// fields.
-fn kernel_output(step: &RecordedProcessStep) -> serde_json::Value {
-    let Some(lash_core::SettledOutput::Completed(material)) = &step.outcome else {
-        panic!("the kernel run completed: {step:?}");
-    };
-    let output: serde_json::Value =
-        serde_json::from_str(material.payload()).expect("the output is JSON");
-    let (_, fields) = output
-        .as_object()
-        .and_then(|output| output.iter().next())
-        .expect("a tagged output");
-    fields.clone()
 }
 
 /// `steps` with the kernel output of `steps[at]` changed by `edit`.

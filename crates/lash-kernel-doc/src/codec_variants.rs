@@ -9,8 +9,7 @@
 use crate::graph_tokens::CodecVariant;
 use crate::{
     Action, Atom, Callee, Datum, Expr, Formula, Identity, Implementation, JoinMode, Literal,
-    Measure, Member, NumberPolicy, Object, Operand, Place, Rhs, Stmt, TaskIdentity, Type, Unit,
-    Value,
+    Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity, Type, Unit, Value,
 };
 
 #[doc(hidden)]
@@ -61,20 +60,6 @@ impl CodecVariant for Datum {
             Self::Error(..) => 14,
             Self::Function(..) => 15,
             Self::Handle(..) => 16,
-        }
-    }
-}
-
-#[doc(hidden)]
-impl CodecVariant for Object {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::List(..) => 0,
-            Self::Map(..) => 1,
-            Self::Set(..) => 2,
-            Self::Record(..) => 3,
-            Self::Closure(..) => 4,
-            Self::Variable(..) => 5,
         }
     }
 }

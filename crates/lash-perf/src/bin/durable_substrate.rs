@@ -60,9 +60,6 @@ struct Args {
     /// Retained heap sizes; default spans 100x, with fixed guest changes/reads.
     #[arg(long, default_value = "100,1000,5000,10000", value_delimiter = ',')]
     heap_sizes: Vec<usize>,
-    /// Test-only full heap walk: checkpoint, resume or carry.
-    #[arg(long)]
-    heap_walk: Option<String>,
     #[arg(long, env = "LASH_POSTGRES_DATABASE_URL", hide_env_values = true)]
     database_url: Option<String>,
     #[arg(long)]
@@ -291,7 +288,7 @@ async fn bench_main() -> Result<()> {
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {
             Kind::Reads => reads::run(&run, &args.read_populations).await?,
-            Kind::Heap => heap::run(&run, &args.heap_sizes, args.heap_walk.as_deref()).await?,
+            Kind::Heap => heap::run(&run, &args.heap_sizes).await?,
             Kind::Operations => operations::run(&run).await?,
             Kind::Counted => turns::counted(&run, &case).await?,
             Kind::Rounds { sessions } => turns::rounds(&run, &case, sessions).await?,

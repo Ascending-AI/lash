@@ -36,15 +36,15 @@ type GraphNodes = std::collections::BTreeMap<
     crate::checkpoint_graph::EncodedNode,
 >;
 
-/// The session's SessionExecution graph as resident state holds it
-/// (FIG-5887 §6).
+/// The session's execution state, its descriptor page, as resident state
+/// holds it (ADR 0145 §9).
 #[derive(Clone, Debug, Default)]
 enum ResidentExecution {
     /// The session holds no execution state.
     #[default]
     None,
     Held {
-        /// A SessionExecution node.
+        /// The session descriptor page.
         root: crate::checkpoint_graph::NodeId,
         /// The nodes the next commit installs: the capture's nodes no
         /// commit has installed. Empty once a commit adopted the root.

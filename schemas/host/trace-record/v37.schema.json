@@ -5114,7 +5114,7 @@
         "slice",
         "ended",
         "delivered",
-        "exported",
+        "sealed",
         "cancelled",
         "reset_done",
         "prepared"

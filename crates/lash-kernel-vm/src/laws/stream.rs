@@ -1,21 +1,16 @@
 //! The flat stream (`lash_kernel_exec::Op`): each statement runs as one
 //! range of decoded ops. Its expression nodes are charged at their
 //! pre-order positions by `Charge` ops that coalesce adjacent events
-//! (`K-CHG-002`), and its steps end at the Boundaries of the statements it
-//! was lowered from (`K-MACH-007`). An odd layout runs the general path:
-//! no charge joined to a read, no prepared native entry (`K-MACH-008`).
+//! (`K-CHG-002`). An odd layout runs the general path: no charge joined to
+//! a read, no prepared native entry (`K-MACH-008`).
 
+use lash_kernel_doc::heap::PageId;
 use lash_kernel_doc::{Datum, Name, parse_document};
-use lash_kernel_state::{Baseline, Root, SavedFragment};
 
-use super::embedder::{Embedder, ROOMY, Setup, World, library};
-use super::parked::{
-    CALLBACK_IN_MAP, CLEANUP_WITH_A_WAIT, EXPRESSIONS, HELPER_FROM_TWO_PLACES,
-    REQUESTS_OUT_OF_TASK_ORDER, TABLE_CHURN, deliver_next,
-};
+use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{
-    Bindings, Bound, Bounds, End, KernelMachine, Layout, Machine, PreparedLibrary, Program,
-    RunError, Start, Step, Target,
+    Bound, Bounds, CellStart, End, KernelMachine, Layout, Machine, PreparedLibrary, Program,
+    RunError, Step, Target,
 };
 
 /// A generated expression over two variables, `a` (7) and `b` (`[1, 2,
@@ -291,6 +286,7 @@ fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
     );
     let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
     Program {
+        release: PageId([8; 32]),
         document: std::sync::Arc::new(document),
         library: PreparedLibrary::with_layout(library.registry, layout),
     }
@@ -299,14 +295,24 @@ fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
 /// How the run of `program` under a charge bound of `charge` ends, and
 /// what it charged.
 fn ends(program: &Program, layout: Layout, charge: u64) -> (End, u64) {
-    let start = Start {
+    let start = CellStart {
         target: Target::Entry(Name::new("go")),
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        owner: PageId([9; 32]),
+        modes: crate::EffectModes::recorded(),
+        host: Vec::new(),
     };
     let bounds = Bounds { charge, ..ROOMY };
-    let mut machine = KernelMachine::start_with_layout(program.clone(), bounds, start, layout)
-        .unwrap_or_else(|error| panic!("{error}"));
+    let mut machine = KernelMachine::start_with_layout(
+        program.clone(),
+        bounds,
+        start,
+        layout,
+        Box::new(Source::default()),
+        census(bounds.memory),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     match machine.run(&mut World::default(), u64::MAX) {
         Ok(Step::Ended(end)) => (end, machine.meters().charged),
         other => panic!("the run waits on nothing: {other:?}"),
@@ -383,98 +389,11 @@ fn every_charge_bound_ends_where_charging_one_event_at_a_time_ends() {
     println!("charge bounds: trees={trees} raising={raising} bounds={bounds}");
 }
 
-/// What a step saves: the header and every root's fragment, written whole.
-type Image = (Vec<u8>, Vec<(Root, SavedFragment)>);
-
-/// Runs `text` to its end with a slice of 0, saving the run whole at the
-/// end of every step.
-fn images(text: &str, layout: Layout) -> (Vec<Image>, End, Vec<Datum>, u64) {
-    let mut embedder = Embedder::with(
-        text,
-        Setup {
-            layout,
-            slice: 0,
-            ..Setup::default()
-        },
-    );
-    let mut images = Vec::new();
-    let end = loop {
-        let step = embedder.run();
-        if let Step::Ended(end) = step {
-            break end;
-        }
-        let saved = embedder
-            .machine
-            .export()
-            .unwrap()
-            .save(&Baseline::default())
-            .unwrap();
-        images.push((saved.header, saved.fragments.into_iter().collect()));
-        if matches!(step, Step::Parked(_)) {
-            deliver_next(&mut embedder);
-        }
-    };
-    let charged = embedder.machine.meters().charged;
-    (images, end, embedder.world.printed, charged)
-}
-
-/// `K-MACH-007`, `K-MACH-008`: the stream ends its steps where the
-/// statements it was lowered from end theirs. A run sliced after every
-/// step saves, at each, the same bytes in every layout: with its charges
-/// joined to reads and the prepared native entries, and without.
-#[test]
-fn every_step_saves_the_same_image_in_every_layout() {
-    let programs = [
-        ("expression-heavy code", EXPRESSIONS),
-        (
-            "an effectful helper called from two places",
-            HELPER_FROM_TWO_PLACES,
-        ),
-        ("a callback inside map", CALLBACK_IN_MAP),
-        ("a cleanup block with a wait", CLEANUP_WITH_A_WAIT),
-        ("live map and set iteration through removals", TABLE_CHURN),
-        (
-            "requests made out of task order",
-            REQUESTS_OUT_OF_TASK_ORDER,
-        ),
-    ];
-    let mut steps = 0;
-    for (name, text) in programs {
-        let stream = images(text, Layout(0));
-        assert!(
-            matches!(stream.1, End::Finished(_)),
-            "{name}: {:?}",
-            stream.1
-        );
-        assert!(stream.0.len() > 1, "{name} has steps");
-        for layout in [Layout(1), Layout(2), Layout(0x5eed)] {
-            let other = images(text, layout);
-            assert_eq!(
-                other.0.len(),
-                stream.0.len(),
-                "{name}: steps in layout {layout:?}"
-            );
-            for (at, (image, expected)) in other.0.iter().zip(&stream.0).enumerate() {
-                assert!(
-                    image == expected,
-                    "{name}: step {at} saves other bytes in layout {layout:?}"
-                );
-            }
-            assert_eq!(
-                (&other.1, &other.2, other.3),
-                (&stream.1, &stream.2, stream.3),
-                "{name}: layout {layout:?}"
-            );
-        }
-        steps += stream.0.len();
-    }
-    println!("saved images: programs={} steps={steps}", programs.len());
-}
-
 /// K-EVAL-001/002, K-CHG-002 and K-MACH-008: only a selected branch
 /// runs, bindings evaluate once, and jumps preserve that contract in every layout.
 #[test]
 fn conditional_regions_are_lazy_and_expression_bindings_evaluate_once_in_every_layout() {
+    use super::embedder::{Embedder, Setup};
     let mut charge = None;
     for layout in [Layout(0), Layout(1), Layout(0x5eed)] {
         for skipped in ["null.missing", "(clock, clock, clock)"] {
@@ -491,13 +410,16 @@ main {{ finish null }}
                 &program,
                 Setup {
                     layout,
-                    start: Start {
+                    start: CellStart {
                         target: Target::Entry(Name::new("go")),
                         args: vec![Datum::Handle(lash_kernel_doc::Handle {
                             kind: "table".into(),
                             id: "one".into(),
                         })],
-                        bindings: Bindings::default(),
+                        session: None,
+                        owner: PageId([9; 32]),
+                        modes: crate::EffectModes::recorded(),
+                        host: Vec::new(),
                     },
                     ..Setup::default()
                 },

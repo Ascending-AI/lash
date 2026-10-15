@@ -266,11 +266,14 @@ journal-engine window.
 
 ### 8. The VM snapshots at quiet points
 
-Lash runs one heap VM; TypeScript lowers to it. A `VmContinuation` captures
-all mutable execution state and resumes from it.
+Lash runs one kernel machine; every dialect lowers to it. Its execution
+state is one persistent heap, and a snapshot is a checkpoint root over that
+heap's pages
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)).
 
 - The VM runs until it blocks on an await, or until its fuel slice ends. The
-  host then commits, in one transaction, the next snapshot revision, the
+  worker then seals the changed pages into a candidate root, and the host
+  commits, in one transaction, that root as the next snapshot revision, the
   broker ledger that matches it, and the admission of every operation the VM
   issued since its last snapshot. Bodies start only after that commit.
 - Broker ordinals are admitted operation identities, not journal positions.

@@ -2,7 +2,9 @@ worker protocol 1
 frame header 8 bytes
 testing true
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , bindings : BTreeSet < Name > , functions : BTreeMap < Name , lash_kernel_dialect :: SavedFunction > , helpers : u32 , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , ImportTypeScriptWorkflow { source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , max_bytes : usize , max_nesting : usize , } , Print { format : lash_kernel_dialect :: SourceFormat , # [serde (with = "serde_bytes")] document : Vec < u8 > , options : lash_kernel_dialect :: PrintOptions , } , Read { format : lash_kernel_dialect :: SourceFormat , source : String , # [serde (with = "serde_bytes")] base : Vec < u8 > , limits : lash_kernel_dialect :: GeneratedSourceLimits , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , bindings : BTreeSet < Name > , functions : BTreeMap < Name , LowerFunction > , helpers : u32 , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , ImportTypeScriptWorkflow { source : String , effects : BTreeMap < EffectName , Signature > , tool_roots : BTreeSet < Name > , controls : BTreeMap < EffectName , BTreeSet < lash_kernel_dialect :: EffectControl > > , max_bytes : usize , max_nesting : usize , } , Print { format : lash_kernel_dialect :: SourceFormat , # [serde (with = "serde_bytes")] document : Vec < u8 > , options : lash_kernel_dialect :: PrintOptions , } , Read { format : lash_kernel_dialect :: SourceFormat , source : String , # [serde (with = "serde_bytes")] base : Vec < u8 > , limits : lash_kernel_dialect :: GeneratedSourceLimits , } }
+
+# [serde (deny_unknown_fields)] struct LowerFunction { name : Name , document : lash_kernel_doc :: Document , helper_owners : BTreeSet < Name > , references : BTreeSet < Name > , written : Option < lash_kernel_dialect :: Written > , token : Option < String > , }
 
 # [serde (deny_unknown_fields)] struct DialectRefusal { code : String , message : String , span : Option < (usize , usize) > , unsupported : bool , repairs : Vec < String > , }
 
@@ -10,7 +12,13 @@ testing true
 
 # [serde (deny_unknown_fields)] struct Sites { entered : Vec < EffectIdentity > , ran : lash_kernel_vm :: RanDelta , # [serde (default , skip_serializing_if = "Vec::is_empty")] path : OrdinalPath , }
 
-# [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , # [serde (default , skip_serializing_if = "Vec::is_empty")] reads : Vec < EffectName > , }
+# [serde (rename_all = "snake_case")] enum PageLink { Granted (PageCapability) , Carried ([u8 ; 32]) }
+
+# [serde (deny_unknown_fields)] struct CarryWire { # [serde (with = "serde_bytes")] root : Vec < u8 > , pages : Vec < PageLink > , }
+
+# [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , # [serde (default , skip_serializing_if = "Option::is_none")] session : Option < CarryWire > , # [serde (default , skip_serializing_if = "Vec::is_empty")] reads : Vec < EffectName > , # [serde (default , skip_serializing_if = "Vec::is_empty")] host : Vec < (Name , Datum) > , }
+
+# [serde (deny_unknown_fields)] struct SaveWire { controls : std :: collections :: BTreeMap < EffectName , std :: collections :: BTreeSet < lash_kernel_dialect :: EffectControl > , > , # [serde (with = "lash_kernel_dialect::written_table")] written : std :: collections :: BTreeMap < lash_kernel_doc :: Site , lash_kernel_dialect :: Written > , }
 
 # [serde (deny_unknown_fields)] struct EffectRead { effect : EffectName , args : Vec < Datum > , site : lash_kernel_doc :: Site , }
 
@@ -18,9 +26,13 @@ testing true
 
 # [serde (rename_all = "snake_case" , deny_unknown_fields)] enum RequestWire { Effect { wait : WaitId , identity : EffectIdentity , effect : EffectName , args : Vec < Datum > , result : Type , } , Sleep { wait : WaitId , identity : EffectIdentity , seconds : u64 , nanoseconds : SubsecondNanos , } }
 
-# [serde (deny_unknown_fields)] struct ParkWire { requests : Vec < RequestWire > , withdrawn : Vec < WaitId > , outstanding : Vec < lash_kernel_doc :: TaskIdentity > , live : Vec < lash_kernel_doc :: TaskIdentity > , }
+# [serde (deny_unknown_fields)] struct ParkWire { requests : Vec < RequestWire > , withdrawn : Vec < WaitId > , outstanding : u64 , live : u64 , }
 
 # [serde (rename_all = "snake_case" , deny_unknown_fields)] enum OutcomeWire { Completed (Datum) , Failed (ErrorDatum) , Elapsed }
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum BoundWire { Charge , Memory , CallDepth , LiveTasks , RequestsPerPark , JoinMembers , Guard { function : FunctionId } }
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum EndWire { Finished { result : Datum , finish : bool , carry : Option < CarryWire > , not_carried : Vec < (Name , String) > , } , Failed (Datum) , Uncaught (Datum) , TasksOutstanding { unfinished : Vec < TaskIdentity > , unobserved : Vec < TaskIdentity > , } , Deadlock { waiting : Vec < TaskIdentity > , } , Bound { bound : BoundWire , limit : u64 , function : Option < FunctionName > , } , Cancelled }
 
 # [serde (deny_unknown_fields)] struct ProjectionRead { handle : Handle , request : Datum , }
 

@@ -5,8 +5,9 @@
 //! declared raw-blob arm names the component's opaque blob, so the collector
 //! retains every component through ordinary graph edges and no manifest is
 //! ever opened to find them. Component bodies stay opaque bytes their
-//! owning codecs read. The session's SessionExecution root is a typed child
-//! of the manifest, so its graph is retained the same way.
+//! owning codecs read. The session's execution state, its SessionRoot
+//! descriptor page, is a typed child of the manifest, so its pages are
+//! retained the same way.
 
 use std::collections::BTreeMap;
 
@@ -23,7 +24,7 @@ use super::{BlobRef, CheckpointComponentDescriptor, SessionCheckpoint};
 pub const SESSION_COMPONENT_CODEC: &str = "lash.session.component";
 
 /// The manifest body: the schema stamp, the turn state, each component's
-/// name, encoding and OpaqueLeaf, by name, and the SessionExecution root.
+/// name, encoding and OpaqueLeaf, by name, and the execution state's SessionRoot descriptor page.
 struct ManifestBody {
     schema_version: u32,
     turn_state: serde_json::Value,
@@ -74,7 +75,7 @@ pub struct NamedManifest {
     pub schema_version: u32,
     /// Each component's name and encoding version, by name.
     pub components: Vec<(String, u32)>,
-    /// The SessionExecution root.
+    /// The execution state's SessionRoot descriptor page.
     pub execution: Option<NodeId>,
 }
 
@@ -240,7 +241,7 @@ impl SessionCheckpoint {
             );
         }
         if let Some(execution) = body.execution {
-            decoder.child_kind(root, execution, &[NodeKind::SESSION_EXECUTION])?;
+            decoder.child_kind(root, execution, &[NodeKind::SESSION_ROOT])?;
         }
         Ok(Self {
             schema_version: body.schema_version,

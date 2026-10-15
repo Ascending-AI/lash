@@ -1,0 +1,273 @@
+//! A carried session as its host reads and edits it between cells
+//! (`K-SES-001`): the host's view of the bindings a cell hands on, over the
+//! same pages, with nothing copied out but what it asks for.
+//!
+//! The editor opens the session's heap header and nothing else. A binding
+//! is read by its name's key, and copied out of the heap as data only when
+//! the host asks for its value; a binding the host sets is frozen in from
+//! data, and the session it seals names every page it did not touch as it
+//! was.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
+use lash_kernel_doc::{Datum, Name, Value};
+use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::paged::family_impl::FrozenBase;
+use lash_kernel_state::paged::metadata::metadata_key;
+use lash_kernel_state::paged::tree::Tree;
+use lash_kernel_state::paged::{
+    AllocationCensus, BindingRecord, BoundRecord, CarryRoots, EditEpoch, FunctionRecord,
+    HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, PagedHeap, SemanticHeap,
+    SessionRoot, SiteRef,
+};
+
+/// A binding a host reads: its value as data, or why it is none.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionValue {
+    Data(Datum),
+    /// A value that is no data (a function's reference): its host lists it
+    /// by name.
+    Opaque,
+}
+
+/// A carried session opened for its host.
+pub struct SessionEditor {
+    heap: PagedHeap,
+    bindings: Tree<BindingRecord>,
+    functions: KeyedRoot,
+    changed: bool,
+}
+
+/// The most a host's edit may hold of the heap, in logical bytes: the
+/// census bounds what an edit adds, never what the session already holds.
+const EDIT_BOUND: LogicalBytes = LogicalBytes(u64::MAX >> 2);
+
+impl SessionEditor {
+    /// The session `session` carries, read through `source`; an empty one
+    /// for `None`.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults reading the session's header.
+    pub fn open(
+        session: Option<&SessionRoot>,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, HeapFault> {
+        let mut heap = match session {
+            Some(session) => PagedHeap::open_header(session.heap, source, EditEpoch(0))?,
+            None => PagedHeap::fresh(source, EditEpoch(0)),
+        };
+        let census = Census::restore(heap.certificate(), EDIT_BOUND)
+            .map_err(|fault| HeapFault::Malformed(format!("the session's census: {fault}")))?;
+        heap.set_census(Box::new(census))?;
+        heap.set_family_base(Box::new(FrozenBase::default()));
+        let (bindings, functions) = match session {
+            Some(session) => (Tree::of_keyed(&heap.adopt(session)?), session.functions),
+            None => (Tree::new(false), KeyedRoot::Empty),
+        };
+        Ok(Self {
+            heap,
+            bindings,
+            functions,
+            changed: false,
+        })
+    }
+
+    /// Every binding's name, in name order. Reads every page of the
+    /// bindings: a host keeps what it read.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn names(&self) -> Result<BTreeSet<Name>, HeapFault> {
+        let mut names = Vec::new();
+        self.bindings.visit(&self.heap.access, &mut |_, record| {
+            names.push(record.name.clone());
+            true
+        })?;
+        names
+            .iter()
+            .map(|name| name.resolve(&self.heap.access))
+            .collect()
+    }
+
+    /// The names whose bindings differ between `older` and `newer`, two
+    /// versions of one session, each with whether `older` and `newer` bind
+    /// it: read over only the pages the two do not share.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn changed(
+        &self,
+        older: &KeyedRoot,
+        newer: &KeyedRoot,
+    ) -> Result<BTreeMap<Name, (bool, bool)>, HeapFault> {
+        let older = Tree::<BindingRecord>::of_keyed(older);
+        let newer = Tree::<BindingRecord>::of_keyed(newer);
+        let mut changed = Vec::new();
+        older.diff(&newer, &self.heap.access, &mut |(_, old, new)| {
+            if let Some(record) = new.or(old) {
+                changed.push((record.name.clone(), (old.is_some(), new.is_some())));
+            }
+        })?;
+        changed
+            .into_iter()
+            .map(|(name, held)| Ok((name.resolve(&self.heap.access)?, held)))
+            .collect()
+    }
+
+    /// The saved functions whose records differ between `older` and
+    /// `newer`, two versions of one session's functions, by declared name:
+    /// each with its description in `newer`, none for one `newer` does not
+    /// hold. Reads only the pages the two do not share.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults, and a description that is not text.
+    pub fn changed_functions(
+        &self,
+        older: &KeyedRoot,
+        newer: &KeyedRoot,
+    ) -> Result<BTreeMap<Name, Option<String>>, HeapFault> {
+        let older = Tree::<FunctionRecord>::of_keyed(older);
+        let newer = Tree::<FunctionRecord>::of_keyed(newer);
+        let mut changed = Vec::new();
+        older.diff(&newer, &self.heap.access, &mut |(_, old, new)| {
+            if let Some(record) = new.or(old) {
+                changed.push((record.name.clone(), new.cloned()));
+            }
+        })?;
+        changed
+            .into_iter()
+            .map(|(name, record)| {
+                let name = name.resolve(&self.heap.access)?;
+                let meta = record.map(|record| self.meta(&name, &record)).transpose()?;
+                Ok((name, meta))
+            })
+            .collect()
+    }
+
+    fn meta(&self, name: &Name, record: &FunctionRecord) -> Result<String, HeapFault> {
+        match crate::data::copy_out(&self.heap, &record.meta) {
+            Ok(Datum::Text(meta)) => Ok(meta),
+            Err(crate::data::CopyError::Heap(fault)) => Err(fault),
+            Ok(_) | Err(crate::data::CopyError::Raised(_)) => Err(HeapFault::Malformed(format!(
+                "saved function `{name}`'s description is not text"
+            ))),
+        }
+    }
+
+    /// The binding `name`'s value, copied out as data.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn get(&mut self, name: &Name) -> Result<Option<SessionValue>, HeapFault> {
+        let Some(record) = self.bindings.get(&metadata_key(name), &self.heap.access)? else {
+            return Ok(None);
+        };
+        let value = match record.value {
+            BoundRecord::Value(value) => value,
+            BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+        };
+        Ok(Some(match crate::data::copy_out(&self.heap, &value) {
+            Ok(datum) => SessionValue::Data(datum),
+            Err(crate::data::CopyError::Heap(fault)) => return Err(fault),
+            Err(crate::data::CopyError::Raised(_)) => SessionValue::Opaque,
+        }))
+    }
+
+    /// Binds `name` to `value`, declared at `main` of no cell.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults, and a value the heap refuses.
+    pub fn set(&mut self, name: &Name, value: &Datum) -> Result<(), HeapFault> {
+        let frozen = self.heap.freeze_datum(value).map_err(write_fault)?;
+        let value: Value = self.heap.instantiate(&frozen).map_err(write_fault)?;
+        let record = BindingRecord {
+            name: NameRef::new(name, &self.heap.access)?,
+            declared: SiteRef::new(
+                &lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, Vec::new()),
+                &self.heap.access,
+            )?,
+            value: BoundRecord::Value(value),
+        };
+        self.bindings
+            .write(metadata_key(name), record, &self.heap.access)?;
+        self.changed = true;
+        Ok(())
+    }
+
+    /// Unbinds `name`. Answers whether it was bound.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn remove(&mut self, name: &Name) -> Result<bool, HeapFault> {
+        let removed = self
+            .bindings
+            .remove(&metadata_key(name), &self.heap.access)?
+            .is_some();
+        self.changed |= removed;
+        Ok(removed)
+    }
+
+    /// Every saved function the session holds, by its declared name, with
+    /// the text its dialect described it in.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults, and a description that is not text.
+    pub fn functions(&self) -> Result<BTreeMap<Name, String>, HeapFault> {
+        let mut records = Vec::new();
+        Tree::<FunctionRecord>::of_keyed(&self.functions).visit(
+            &self.heap.access,
+            &mut |_, record| {
+                records.push(record.clone());
+                true
+            },
+        )?;
+        let mut functions = BTreeMap::new();
+        for record in records {
+            let name = record.name.resolve(&self.heap.access)?;
+            let meta = self.meta(&name, &record)?;
+            functions.insert(name, meta);
+        }
+        Ok(functions)
+    }
+
+    /// Whether an edit changed the session.
+    #[must_use]
+    pub fn edited(&self) -> bool {
+        self.changed
+    }
+
+    /// The session as edited, sealed into pages through the source.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
+        let mut work =
+            lash_kernel_state::paged::tree::SealWork::new(lash_kernel_state::paged::SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            });
+        self.bindings.seal(&self.heap.access, &mut work)?;
+        let bindings = self.bindings.keyed_root()?;
+        self.heap.carry(CarryRoots {
+            bindings,
+            functions: self.functions,
+        })
+    }
+}
+
+fn write_fault(error: HeapWriteError) -> HeapFault {
+    match error {
+        HeapWriteError::Fault(fault) => fault,
+        other => HeapFault::Malformed(format!("the session refused a host value: {other}")),
+    }
+}

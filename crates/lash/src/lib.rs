@@ -789,16 +789,15 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        AfterTurnDecisions, CarriedCell, CellCallReferences, CheckpointApplication,
-        CheckpointComponentKey, CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture,
-        ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceEntry, NamespaceValues,
-        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
-        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
-        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        AfterTurnDecisions, CellCallReferences, CheckpointApplication, CheckpointComponentKey,
+        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
+        HydratedExecutionGraph, NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
+        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
+        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, StoredCell,
-        TurnPreparation,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, SessionPages,
+        StoredCell, TurnPreparation,
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core
@@ -931,7 +930,7 @@ pub mod plugins {
         EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
         EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps,
         EngineWake, KeyName, Material, NamesMaterial, SettledOutput, SettledOutputRefusal,
-        StepName, StepRequest,
+        StepCandidate, StepName, StepPages, StepPublication, StepRequest,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
@@ -1246,6 +1245,7 @@ pub mod runtime {
 
     /// The one effect context of an actor's activation (ADR 0132 §1).
     pub use lash_core::ActorContext;
+    pub use lash_core::ExecutionDebts;
     /// The lazy binding of a recorded model that
     /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
     /// unjournaled completion's body runs.

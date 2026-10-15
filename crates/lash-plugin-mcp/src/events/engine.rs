@@ -202,6 +202,7 @@ fn encode_state(subscription: &Subscription) -> Result<EngineState, ProcessInfra
     Ok(EngineState {
         format: format(),
         bytes: serde_json::to_vec(subscription).map_err(infra)?,
+        pages: None,
     })
 }
 

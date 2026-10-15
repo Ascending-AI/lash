@@ -51,6 +51,7 @@ base64 = { workspace = true }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-core-ids = { workspace = true }
+lash-durable = { workspace = true }
 lash-vm-broker = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
@@ -64,6 +65,7 @@ lash-dialect-typescript = { workspace = true, optional = true }
 lash-dialect-python = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true }

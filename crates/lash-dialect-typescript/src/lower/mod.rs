@@ -465,36 +465,10 @@ fn lower_program(
     )?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
-    let mut main = std::mem::take(&mut lowerer.buf);
-    // A saved function the cell uses is the token it was saved in, which
-    // the session starts as a reference to its declaration: made once, and
-    // bound to each of its names the cell uses, so they stay one function.
-    let mut made: BTreeMap<&Name, &Name> = BTreeMap::new();
-    let remade: Vec<(Stmt, Note)> = lowerer
-        .saved_used
-        .iter()
-        .filter_map(|name| {
-            let function = environment.functions.get(name)?;
-            let value = match made.get(&function.name) {
-                Some(first) => Expr::Variable((*first).clone()),
-                None => {
-                    let token = function.value()?;
-                    made.insert(&function.name, name);
-                    token
-                }
-            };
-            Some((
-                Stmt::Assign {
-                    place: Place::Variable(name.clone()),
-                    value: Rhs::Expr(value),
-                },
-                Note::default(),
-            ))
-        })
-        .collect();
-    let (stmts, notes): (Vec<Stmt>, Vec<Note>) = remade.into_iter().unzip();
-    main.stmts.splice(0..0, stmts);
-    main.notes.splice(0..0, notes);
+    let main = std::mem::take(&mut lowerer.buf);
+    // Saved function values are already bound by S8 adoption. Their token
+    // and frozen captures stay in heap pages; lowering never reconstructs
+    // those payloads as source expressions.
     let mut document = Document::new(NumberPolicy::Float, main.stmts);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;

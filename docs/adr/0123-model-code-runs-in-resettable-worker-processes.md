@@ -26,8 +26,8 @@ embedder at every park and fuel slice. Where it runs is the embedder's choice
 
 ### 1. One machine owns each run's mutable bytes
 
-A worker hosts one `lash_kernel_vm::KernelMachine` for one execution between
-resets: its tasks, heap, scratch and parked-state export. No mutable
+A worker hosts one `lash_kernel_vm::paged::Machine` for one execution between
+resets: its tasks, its heap's resident and dirty pages, and its scratch. No mutable
 run state lives in a `static`, `thread_local!`, `OnceLock` or
 `LazyLock`:
 
@@ -84,27 +84,32 @@ or timeout discards the worker instead.
 
 The parent drives the machine. `Run { slice, cancel }` runs ready tasks until
 none is ready, the run ends, or `slice` charge units are spent; the worker
-answers `Parked` (the effects and sleeps requested since the last park, and
-the waits withdrawn since), `Slice` (still ready) or `Ended`. `Deliver`
+answers `Parked` (the effects and sleeps requested since the last park, the
+waits withdrawn since, and, when the park requested something, the
+candidate checkpoint it sealed), `Slice` (still ready) or `Ended`. `Deliver`
 hands the machine one committed outcome for the wait it named, in any order;
-`Delivered { dropped }` says whether that wait had been withdrawn. `Export`
-writes the run's state between slices, where every task is between
-statements. Host reads (clock, random, projection reads) cross to the parent
+`Delivered` says it was taken or dropped. `Seal` seals the run as it stands
+at a safe point, where every task is between statements, into a candidate
+(`Sealed`). Host reads (clock, random, projection reads) cross to the parent
 in the middle of a slice as `HostRead` and are answered by `HostAnswer`;
-prints arrive in order as `Printed`, with no authority. A run cancel is the
+the heap's page reads and seals cross the same way as `Pages`
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§3); prints arrive in order as `Printed`, with no authority. A run cancel is the
 flag sent with a slice and is observed at the machine's next safe point.
 
 These cross in as few exchanges as fit one frame (FIG-5921): a `Run` carries
 the run's `Start` when it begins the run and the outcomes delivered since the
-last slice, and a `Parked` whose requests the parent saves carries the run's
-state, exported under the execution the start named. Parts that outgrow one
-frame together cross alone, as `Start`, `Deliver` and `Export`. A cell's
+last slice, and a `Parked` whose requests the parent saves carries the
+capability of the candidate root it sealed under the execution the start
+named. Parts that outgrow one frame together cross alone, as `Start`,
+`Deliver` and `Seal`. A cell's
 lowering `Prepare` and its run's start share one lease with no reset between:
 a reset there would drop no machine, and the start drops what it would.
 
 A parked run names sites and identities, never code positions, so it
 resumes in another worker, after a rebuilt executable, under the same
-document. Laws in `crates/lash-vm-worker/tests/pool_laws.rs`:
+document. A worker started from a checkpoint reads the root's header, then
+only the pages its next steps touch. Laws in `crates/lash-vm-worker/tests/pool_laws.rs`:
 `a_parked_run_carries_on_in_another_worker_without_asking_again`,
 `a_typescript_cell_lowered_in_the_worker_parks_and_resumes`,
 `a_parked_run_is_refused_under_another_document`,
@@ -130,14 +135,17 @@ model, not host policy.
 
 ### 5. The parent never decodes machine state
 
-At the broker boundary a parked run is `lash_vm_protocol::SealedGraphState`:
-the owner, the kernel version, the identity of the document it runs, a
-KernelWhole graph root with the nodes staged for it, and a seal over all of
-them (FIG-5887). The parent checks those structurally against the run it
-expects (`GraphStateExpectation`): the owner, the document, an admitted
-kernel version, the root's kind and the node bounds. Only the worker imports
-the graph into a machine, which refuses state written under another document.
-The protocol crate depends on nothing that could decode the machine's state.
+At the broker boundary a parked run is a `CheckpointRoot` page in the
+activation's staging, named by a stage capability
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§2, §6). The parent re-hashes every page the worker seals, checks each
+child's authority, and reads only the root's header: its owner binding,
+document, kernel version and pinned release. It never decodes a heap page.
+A run resumes from a committed root (`StartFrom::Checkpoint`): the root's
+capability under the activation's root lease and the admission of every
+wait it holds. Only the worker opens the root into a machine, which refuses
+a root written under another document. The protocol crate depends on
+nothing that could decode the machine's state.
 
 ### 6. The protocol
 
@@ -145,13 +153,14 @@ The protocol crate depends on nothing that could decode the machine's state.
 transport or pool:
 
 - **Messages.** Parent to worker: `Start` (the owner, the admitted document's
-  encoding, a fresh start or sealed parked graph state, and the run's bounds),
-  `Prepare` (pure work with no parent authority: lowering source to a
-  document, printing a document as source), `Run`, `Deliver`, `HostAnswer`,
-  `Export`, `Cancel`, `Reset`, `Shutdown`. Worker to parent: `Ready`,
-  `Started`, `HostRead`, `Printed`, `Parked`, `Slice`, `Ended`,
-  `Delivered`, `Exported`, `Prepared`, `Progress`, `LimitExceeded`,
-  `Refused`, `Cancelled`, `ResetDone`. The parent compiles no model code: the
+  encoding, a fresh start or a committed checkpoint root, the run's bounds
+  and its owner binding), `Prepare` (pure work with no parent authority:
+  lowering source to a document, printing a document as source), `Run`,
+  `Deliver`, `HostAnswer`, `Pages`, `Seal`, `Cancel`, `Reset`, `Shutdown`.
+  Worker to parent: `Ready`, `Started`, `HostRead`, `Pages`, `Printed`,
+  `Parked`, `Slice`, `Ended`, `Delivered`, `Sealed`, `Prepared`,
+  `Progress`, `LimitExceeded`, `Refused`, `Cancelled`, `ResetDone`. A
+  `Pages` exchange carries at most 64 pages and 4 MiB. The parent compiles no model code: the
   worker validates and compiles the document it is started with.
 - **Headers.** Every message carries its execution lease, owner and frame
   epochs and a transport sequence. `MessageFence` admits only the next
@@ -197,16 +206,18 @@ transport or pool:
 ### 7. Durability
 
 Determinism is not a goal; durability is. The machine parks; the broker
-commits. Each time a run parks with new requests, the broker exports its
-state and commits it, in one transaction, with the ledger of the waits it
-stands on and the admission of every effect requested since the last park;
-effects start only after that commit
-([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8). A
-park that requests nothing saves nothing. When a worker dies, the parent
-fences the transport lease and returns a typed retryable infrastructure
-failure. The run resumes from its last committed park: the state is imported
-into a new machine and the first delivery answers, from their records, every
-effect whose outcome committed. Whatever ran after that park runs again; no
+commits. Each time a run parks with new requests, the worker seals the
+changed pages into a candidate root, and the broker publishes it, in one
+transaction, with the ledger of the waits it stands on and the admission of
+every effect requested since the last park; effects start only after that
+commit ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md)
+§8, [ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§6). A park that requests nothing saves nothing. When a worker dies, the
+parent fences the transport lease and returns a typed retryable
+infrastructure failure. The run resumes from its last committed park: a new
+machine opens the committed root under a fresh root lease and the first
+delivery answers, from their records, every effect whose outcome
+committed. Whatever ran after that park runs again; no
 committed effect does. Cancellation stays the recorded checkpoint
 observation of ADR 0039: a physical kill after a grace period does not decide
 precedence.
@@ -220,8 +231,10 @@ parks (`KernelBroker`), and number-exact effect values (`value`). The broker
 does not know where the machine lives: it drives a `DrivenMachine` that a
 `Machines` starts or resumes. Lash's is a machine in a pooled worker
 (`lash-vm-client`'s `machine` module); `lash-vm-worker::in_process::InProcess` is the testing-only adapter for
-broker laws. Machine construction and graph import/export adapters live in
-the worker crate, alongside source import.
+broker laws. Machine construction and the page source a machine reads and
+seals through live in the worker crate, alongside source import; the page
+service, its capabilities and the activation's spool are the broker's
+(`kernel::pages`).
 
 - **Every effect is brokered.** `KernelEffects` admits each request against
   the run's bindings before any tool runs. A refused request takes no
@@ -240,7 +253,7 @@ the worker crate, alongside source import.
   that awaits a process it started.
 
 Laws: `crates/lash-vm-worker/tests/park_matrix.rs`
-(`a_run_of_three_tasks_resumes_from_its_parks_at_every_cut_on_sqlite_memory`,
+(`sqlite_memory::a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut`,
 `committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers`),
 the ledger and ceiling laws in `crates/lash-vm-broker/src/kernel`, and in
 `pool_laws.rs` `worker_crash_mid_run_leaves_the_parent_running` and

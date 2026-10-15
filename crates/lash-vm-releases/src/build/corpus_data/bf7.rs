@@ -47,6 +47,7 @@ pub(super) const DATA: &str = r####"{
 "f748b33692692549b7681a57edf63cb2788f6b3dde7837495ea0c0b07f74e6bf":{"charge":6,"outcome":"ok {\"float\":\"-2.370623588678906e-156\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f74e1724337e83c064ae833ae1ee8016cd68e9b9ca5a348002260ed2a10f2b3a":{"charge":24,"outcome":"ok {\"record\":[]}","prepared_difference":null,"reservations":[[1,0]],"reserved":16,"spent":0},
 "f7509d92c6d35a387f18e3f28329249ab407e0cbb7bd37301585576297d9151c":[{"int":"-1683953203369194162"}],
+"f750d8c4eb406f5537d6638cc33f9ca53b5981fbd5f04f156538ab767fdeecea":{"charge":59,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f751794e6dd1c69f96bfcf9dd75a7445a3515ccb8b25cc93b01e6bd8dc7f7a5f":[{"text":"𝃎򣋯ᝊ𡯤𲣓򓴢󑷘󃏣򣅄񟀦񽱆񫹾󁪂򧨷򝤃񓉱񬁕񌒕񧁜𭞼𠜓򛏝󃿺񋬅񣜳񍌞𕔸󺆒򨑑􏤙񛢫󜼚􌀄򧂄𠭥􃠳񈂃𽝂񨹬󜱰򟏨򞐏𢈇𿆃󷂠􀙁񣀍񲤭򮈿򤀻򪑻𸗳񯠸𻯈󓒿񌴖󛜌򘭢򌫴󪹡􄵽􌂧񣳦򄜟򼁑􋖑򏊺򞷟󲗄񫢏񝘾򮰒򊽊򼺔󮈉񹞍󪧢𨀱񐽱󝔯𾝅𷯋񗿼򥰃𝡻򩌋򳻭򈷐񀛋􈰆󕪞򟆫󢒈Á򹪀󌦵񿽦򲌘򳵞򱒤򃆍誮򱈻󠣟󈼎򸎐򝂗򆻶󡖫󱅀"}],
 "f75217bd8ca86b680520c242f2bed39147ea9152152748f2b1ae36e9ff04f62e":[{"text":"񤼪𕴴󁂎񐜯񞃡񲕠󢤪񀧸􇗫񟟀󊈯󢂫󃠪򅋚𔻿򓆢񭅁􅂣򲃂𖈃񙸇􀣻􁘪񋒆𵡯󰔟𬃕񞘔𘳘񩿁󄪾󻎫񊸌𨱐󹕈􂉢󅲦񉖟񾵴󌖮򾮥񲌲󥟴񒉛򻳟󐁦􇯦󎂑"},{"text":"number"},{"text":"by_spelling"}],
 "f752847a7f7f2b6a7f44569c0789713f86564e3da9fc3e1375de6a7e8f476d5c":{"charge":4,"outcome":"ok {\"float\":\"3.25\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

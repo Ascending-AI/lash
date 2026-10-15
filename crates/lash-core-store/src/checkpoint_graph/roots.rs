@@ -50,6 +50,13 @@ pub enum RootSource {
     /// phase pins, from its `model.answer` commit until the turn's next
     /// phase or its end consumes it.
     ModelAnswer = 14,
+    /// `root_leases.root_ref`: the exact committed root an activation reads
+    /// lazily, while its lease row stands (released, or reaped by a
+    /// retirement step once expired).
+    ReadLease = 15,
+    /// `retirement_holds.root_ref`: a retired root, or the frontier of one,
+    /// that a bounded retirement step has not peeled yet (FIG-6191).
+    RetirementHold = 16,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -63,7 +70,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -78,6 +85,8 @@ impl RootSource {
         Self::RevisionConfig,
         Self::TerminalConfig,
         Self::ModelAnswer,
+        Self::ReadLease,
+        Self::RetirementHold,
     ];
 
     /// The `source` column of the root catalog view.
@@ -98,6 +107,8 @@ impl RootSource {
             Self::RevisionConfig => "revision_config",
             Self::TerminalConfig => "terminal_config",
             Self::ModelAnswer => "answer",
+            Self::ReadLease => "lease",
+            Self::RetirementHold => "retirement",
         }
     }
 
@@ -148,6 +159,8 @@ impl RootSource {
                 RootField::of("lash_session_runs", "terminal_window_checkpoint_ref", None)
             }
             Self::ModelAnswer => RootField::of("lash_turn_phases", "answer_ref", None),
+            Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
+            Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
         }
     }
 
@@ -167,6 +180,8 @@ impl RootSource {
             Self::ReleasePin => ("graph_release_pins", "root_ref", None),
             Self::RunTerminalWindow => ("session_runs", "terminal_window_checkpoint_ref", None),
             Self::ModelAnswer => ("turn_phases", "answer_ref", None),
+            Self::ReadLease => ("root_leases", "root_ref", None),
+            Self::RetirementHold => ("retirement_holds", "root_ref", None),
         }
     }
 }

@@ -28,6 +28,9 @@ pub(crate) struct DurableHost {
     context: lash_core::ActorContext,
     probe: Arc<dyn lash_core::durable_port::DurableProbe>,
     nodes: usize,
+    /// The working state the host's turn row holds; none before its first
+    /// [`Self::commit_working`], which admits the turn.
+    working: std::sync::Mutex<Option<Option<lash_core_store::checkpoint_graph::NodeId>>>,
 }
 
 impl DurableHost {
@@ -74,6 +77,7 @@ impl DurableHost {
             context,
             probe,
             nodes: 1,
+            working: std::sync::Mutex::new(None),
         }
     }
 
@@ -88,20 +92,92 @@ impl DurableHost {
         lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context())
     }
 
-    /// Installs `graph`'s nodes, as the turn commit that captured it
-    /// would have: a law restores a session from a graph a deployment
-    /// hydrates from its store, and its next cell's end names the nodes
-    /// it holds without sending them again.
-    pub(crate) async fn install(
+    /// Commits `capture` as the working state of the host's turn, as the
+    /// turn phase commit that captured it would: its nodes, under the turn
+    /// row's working root. Answers where the session's state stands now,
+    /// which a later cell's context names.
+    pub(crate) async fn commit_working(
         &self,
-        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
-    ) {
-        let mut tx = self.context.begin().await.expect("open the install");
-        tx.stage(graph.nodes.values().cloned());
+        capture: &lash_core_store::execution_state::ExecutionGraphCapture,
+    ) -> Option<lash_core::plugin::SessionPages> {
+        use lash_core::durable_port::DomainWrite;
+        use lash_core::durable_port::domain::turns::TurnWrite;
+        let lash_core_store::execution_state::ExecutionGraphCapture::Replace { root, nodes } =
+            capture
+        else {
+            return self.session_pages();
+        };
+        let lash_core::ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } = self.admitted.scope().clone()
+        else {
+            panic!("a law's working state belongs to a turn");
+        };
+        let mut tx = self.context.begin().await.expect("open the working commit");
+        tx.stage(nodes.values().cloned());
+        let expected = {
+            let mut working = self
+                .working
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let expected = working.flatten();
+            if working.is_none() {
+                tx.write(DomainWrite::Turn(TurnWrite::Admit {
+                    session: session_id.clone(),
+                    run: turn_id.clone(),
+                    admission: lash_core_store::store::RunAdmissionRecord::Turn {
+                        took: lash_core_store::store::AdmittedTurnRows::Inputs {
+                            ids: lash_core_store::store::AdmittedInputIds::one(
+                                lash_core::InputId::from("rlm-cell-law"),
+                            ),
+                        },
+                        trace: None,
+                    },
+                    turn_deadline: None,
+                }));
+            }
+            *working = Some(Some(*root));
+            expected
+        };
+        tx.write(DomainWrite::Turn(TurnWrite::Working {
+            session: session_id,
+            run: turn_id,
+            expected,
+            working: Some(*root),
+        }));
         self.context
-            .commit(tx, CommitLabel::new("law.install"))
+            .commit(tx, CommitLabel::new("law.working"))
             .await
-            .expect("install the restored graph");
+            .expect("commit the working state");
+        self.session_pages()
+    }
+
+    /// Where the host's session's committed state stands: its turn's
+    /// working root, once one was committed.
+    pub(crate) fn session_pages(&self) -> Option<lash_core::plugin::SessionPages> {
+        let root = self
+            .working
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .flatten()?;
+        let lash_core::ExecutionScope::Turn {
+            session_id,
+            turn_id,
+        } = self.admitted.scope().clone()
+        else {
+            return None;
+        };
+        Some(lash_core::plugin::SessionPages {
+            store: self.context.pages().ok()?,
+            actor: self.actor.clone(),
+            epoch: self.context.epoch(),
+            owner: lash_core::durable_port::domain::graph::RootOwner::WorkingExecution {
+                session: session_id,
+                run: turn_id,
+            },
+            root,
+        })
     }
 
     /// The node serving the actor dies without releasing it, and another

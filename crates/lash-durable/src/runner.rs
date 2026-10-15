@@ -57,7 +57,7 @@
 //! piece of work.
 
 use crate::config::{LeaseConfig, LeaseSettings};
-use crate::durable_config::DurableConfig;
+use crate::durable_config::{DurableConfig, RetirementSettings};
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
@@ -91,6 +91,8 @@ pub struct RunnerConfig {
     pub max_active: usize,
     /// The most actors one claim takes.
     pub claim_batch: usize,
+    /// The node's page retirement and its backpressure.
+    pub retirement: RetirementSettings,
 }
 
 impl RunnerConfig {
@@ -113,6 +115,7 @@ impl RunnerConfig {
             lease: config.lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
+            retirement: settings.retirement,
         }
     }
 }
@@ -1026,6 +1029,24 @@ impl Runner {
         // ages the lease. Dropping the set on any return cancels it.
         let (ended_tx, ended) = watch::channel(None);
         let mut renewal: JoinSet<()> = JoinSet::new();
+        // Page retirement runs beside the renewal and ends with it.
+        let behind = match self.store.pages() {
+            Some(pages) => {
+                let behind = crate::retirement::Behind::unread();
+                renewal.spawn(crate::retirement::retire(
+                    pages,
+                    Arc::clone(&self.clock),
+                    self.config.retirement,
+                    behind.clone(),
+                ));
+                behind
+            }
+            None => crate::retirement::Behind::never(),
+        };
+        let mut caught_up = behind.watch();
+        // Whether the last claim was held back for retirement: the loop then
+        // claims as soon as retirement catches up.
+        let mut deferred = false;
         renewal.spawn(renew(
             Arc::clone(&self.store),
             Arc::clone(&self.clock),
@@ -1111,7 +1132,9 @@ impl Runner {
                     break Stopped::Drained;
                 }
             }
-            self.hints.offer_room(if self.drain.started() {
+            // A node behind on retirement takes no new actors.
+            let held_back = behind.get();
+            self.hints.offer_room(if self.drain.started() || held_back {
                 0
             } else {
                 self.config.max_active.saturating_sub(active.len())
@@ -1182,6 +1205,11 @@ impl Runner {
                     next_claim = self.clock.now();
                     claim_delay = settings.claim_backoff;
                 }
+                Ok(()) = caught_up.changed(), if deferred => {
+                    woke = Wake::Poll;
+                    next_claim = self.clock.now();
+                    claim_delay = settings.claim_backoff;
+                }
                 () = self.clock.sleep_until(next) => woke = Wake::Poll,
             }
             let now = self.clock.now();
@@ -1227,6 +1255,13 @@ impl Runner {
                 }
             }
             if now >= next_claim && !self.drain.started() {
+                // Behind as of now, not as of the turn's start: no new
+                // actors until retirement catches up.
+                deferred = *caught_up.borrow_and_update();
+                if deferred {
+                    next_claim = now + settings.claim_poll;
+                    continue;
+                }
                 next_claim = now + settings.claim_poll;
                 let claimed = if adopt {
                     match self

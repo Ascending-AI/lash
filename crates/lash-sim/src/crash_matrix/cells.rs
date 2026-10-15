@@ -188,7 +188,7 @@ fn core(
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .execution_budgets(lash::ExecutionBudgets::recommended())
     .delta_coalescing(lash::DeltaCoalescing::recommended())
-    .serve_test_llm_profile(model(), metadata()?)
+    .serve_test_llm_profile(model(Arc::downgrade(world)), metadata()?)
     .tools(
         lash::tool_provider_key!("tools"),
         ext_write(Arc::downgrade(world))?,
@@ -279,20 +279,26 @@ fn metadata() -> Result<lash_core::LlmProfileMetadata, String> {
         .map_err(|error| error.to_string())
 }
 
+/// The prefix of what the scripted model notes in the world for each call
+/// it answers after a session's cell: then the session, a space, and the
+/// names the call's prompt binds, comma-separated.
+pub const BOUND_AFTER_CELL: &str = "bound-after-cell:";
+
 /// The scripted model: before the transcript holds its own call it answers
-/// with the cell for the session its input names, after with [`FINAL`].
-fn model() -> ProviderHandle {
+/// with the cell for the session its input names, after with [`FINAL`],
+/// noting in `world` the names that call's prompt binds
+/// ([`BOUND_AFTER_CELL`]).
+fn model(world: Weak<World>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("lash-sim-cell")
         .requires_streaming(true)
-        .complete(move |request: LlmRequest| async move {
-            let answered = request
-                .messages
-                .iter()
-                .any(|message| message.role == LlmRole::Assistant);
-            let text = if answered {
-                FINAL.to_owned()
-            } else {
+        .complete(move |request: LlmRequest| {
+            let world = world.clone();
+            async move {
+                let answered = request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == LlmRole::Assistant);
                 let rendered = serde_json::to_string(&request.messages).unwrap_or_default();
                 let session = rendered
                     .split("go ")
@@ -300,12 +306,64 @@ fn model() -> ProviderHandle {
                     .and_then(|rest| rest.split('"').next())
                     .unwrap_or_default()
                     .to_owned();
-                cell(&session)
-            };
-            Ok(streamed(&request, &text))
+                let text = if answered {
+                    if let Some(world) = world.upgrade() {
+                        world.note(format!(
+                            "{BOUND_AFTER_CELL}{session} {}",
+                            bound_names(&request).join(",")
+                        ));
+                    }
+                    FINAL.to_owned()
+                } else {
+                    cell(&session)
+                };
+                Ok(streamed(&request, &text))
+            }
         })
         .build()
         .into_handle()
+}
+
+/// The names `request`'s last `BOUND VARIABLES` section binds, but the
+/// read-only `history`.
+fn bound_names(request: &LlmRequest) -> Vec<String> {
+    fn texts(value: &serde_json::Value, into: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, value) in map {
+                    match value {
+                        serde_json::Value::String(text) if key == "text" => {
+                            into.push(text.clone());
+                        }
+                        value => texts(value, into),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|item| texts(item, into)),
+            _ => {}
+        }
+    }
+    let mut all = Vec::new();
+    texts(
+        &serde_json::to_value(&request.messages).unwrap_or_default(),
+        &mut all,
+    );
+    let Some(section) = all.iter().rev().find_map(|text| {
+        text.split_once("=== BOUND VARIABLES ===")
+            .map(|(_, rest)| rest)
+    }) else {
+        return Vec::new();
+    };
+    section
+        .split("\n===")
+        .next()
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- `"))
+        .filter(|entry| !entry.contains("not bound:"))
+        .filter_map(|entry| entry.split_once('`').map(|(name, _)| name.to_owned()))
+        .filter(|name| name != "history")
+        .collect()
 }
 
 /// A text answer, streamed as one delta.

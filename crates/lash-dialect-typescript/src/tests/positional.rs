@@ -5,8 +5,8 @@ use lash_kernel_doc::{
     Action, Atom, Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Start,
-    Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request, Step,
+    Target,
 };
 use std::sync::Arc;
 
@@ -97,13 +97,16 @@ const BOUNDS: Bounds = Bounds {
     join_members: 100,
 };
 fn start(program: Program) -> KernelMachine {
-    KernelMachine::start(
+    super::pages::start(
         program,
         BOUNDS,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
     )
     .unwrap()
@@ -113,6 +116,7 @@ fn start(program: Program) -> KernelMachine {
 fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
     let lowered = super::lower("function f(a: number) { return a; } f(1); f(); f(1, 2);").unwrap();
     let mut machine = start(Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: machine::prepared().clone(),
     });
@@ -150,7 +154,7 @@ fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
 }
 
 #[test]
-fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
+fn a_paged_positional_stack_resumes_with_a_new_layout() {
     let mut lowered = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap();
     // A host may edit the kernel document. Insert the wait at the base case
     // so the synchronous positional entry itself parks with the whole stack.
@@ -188,22 +192,50 @@ fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
         },
     ];
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(lowered.document),
         library: machine::prepared().clone(),
     };
-    let mut machine = start(program.clone());
+    let source = super::pages::Source::default();
+    let mut machine = super::pages::with_source(
+        program.clone(),
+        BOUNDS,
+        CellStart {
+            owner: super::pages::OWNER,
+            target: Target::Main,
+            args: Vec::new(),
+            session: None,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+        Layout::default(),
+        &source,
+    )
+    .unwrap();
     let mut console = Console::default();
     let Step::Parked(park) = machine.run(&mut console, u64::MAX).unwrap() else {
         panic!("the deep call must park")
     };
-    let before = machine.export().unwrap();
-    assert_eq!(before.tasks[0].calls.len(), 62);
-    let bytes = serde_json::to_vec(&before).unwrap();
-    machine = KernelMachine::import_with_layout(program, BOUNDS, before, Layout(17)).unwrap();
-    assert_eq!(
-        serde_json::to_vec(&machine.export().unwrap()).unwrap(),
-        bytes
-    );
+    let sealed = machine.seal(super::pages::BUDGET).unwrap().unwrap();
+    let heap = lash_kernel_state::paged::PagedHeap::open_header(
+        sealed.root.heap,
+        Box::new(source.clone()),
+        lash_kernel_state::paged::EditEpoch(2),
+    )
+    .unwrap();
+    let tasks =
+        lash_kernel_state::paged::tree::Tree::<lash_kernel_state::paged::TaskRecord>::of_keyed(
+            &sealed.root.tasks,
+        );
+    let task = tasks
+        .get(
+            &lash_kernel_state::paged::directory::ordinal_key(0),
+            &heap.access,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(task.frames.len(), 62);
+    super::pages::reopen(&mut machine, &program, BOUNDS, &source, Layout(17));
     let [Request::Effect(effect)] = park.requests.as_slice() else {
         panic!("one base-case effect")
     };
@@ -218,4 +250,87 @@ fn a_positional_body_parked_at_sixty_recursive_calls_round_trips_exactly() {
         Step::Ended(End::Finished(_))
     ));
     assert_eq!(console.lines, [Datum::Text("0".into())]);
+}
+
+/// What a session cell's end saved, recorded through the dialect's own
+/// saving rules.
+struct Saving {
+    written: std::collections::BTreeMap<lash_kernel_doc::Site, lash_kernel_dialect::Written>,
+    saved: std::rc::Rc<
+        std::cell::RefCell<std::collections::BTreeMap<Name, lash_kernel_dialect::SavedFunction>>,
+    >,
+}
+impl lash_kernel_vm::CellSave for Saving {
+    fn save(
+        &mut self,
+        heap: &mut lash_kernel_state::paged::PagedHeap,
+        cell: lash_kernel_vm::SaveCell<'_>,
+    ) -> Result<lash_kernel_vm::SavedCell, lash_kernel_doc::heap::HeapFault> {
+        let (kept, refused) = lash_kernel_dialect::save(
+            heap,
+            lash_kernel_dialect::Left {
+                document: cell.document,
+                bindings: cell.bindings,
+                not_carried: cell.dropped,
+                controls: &Default::default(),
+                written: &self.written,
+                values: &crate::function_values(),
+                release: cell.release,
+            },
+            cell.held,
+        )?;
+        assert!(refused.is_empty(), "{refused:?}");
+        self.saved
+            .borrow_mut()
+            .extend(kept.into_iter().map(|(name, kept)| (name, kept.function)));
+        Ok(lash_kernel_vm::SavedCell::default())
+    }
+}
+
+/// FIG-6137 (main's PC-FUNCTION law, on the heap): mutually recursive
+/// functions whose direct calls enter private positional bodies are saved
+/// as one bundle. Each forwards to a private body that calls the other's,
+/// so each needs the other through the owners of the bodies it froze, and
+/// both bundles hold the same two members; a function neither uses stays
+/// out.
+#[test]
+fn mutually_recursive_positional_functions_save_as_one_bundle() {
+    let lowered = super::lower(
+        "function isEven(n: number): boolean { return n === 0 ? true : isOdd(n - 1); }\n\
+         function isOdd(n: number): boolean { return n === 0 ? false : isEven(n - 1); }\n\
+         const scale = (x: number) => x * 3;\n\
+         console.log(isEven(4), isOdd(4), scale(2));",
+    )
+    .unwrap();
+    let saved = std::rc::Rc::default();
+    let mut machine = start(Program {
+        release: super::pages::RELEASE,
+        document: Arc::new(lowered.document),
+        library: machine::prepared().clone(),
+    });
+    machine.set_cell_save(Box::new(Saving {
+        written: lowered.written,
+        saved: std::rc::Rc::clone(&saved),
+    }));
+    let mut console = Console::default();
+    assert!(matches!(
+        machine.run(&mut console, u64::MAX).unwrap(),
+        Step::Ended(End::Finished(_))
+    ));
+    assert_eq!(console.lines.len(), 1);
+    let saved = saved.borrow();
+    let (even, odd) = (Name::new("isEven"), Name::new("isOdd"));
+    assert!(saved[&even].needs().contains(&odd), "{:?}", saved[&even]);
+    assert!(saved[&odd].needs().contains(&even), "{:?}", saved[&odd]);
+    let members = |root: &Name| {
+        lash_kernel_dialect::Bundle::of(&saved, root)
+            .expect("a saved function")
+            .members()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(members(&even), [even.clone(), odd.clone()]);
+    assert_eq!(members(&odd), members(&even));
+    assert_eq!(members(&Name::new("scale")), [Name::new("scale")]);
 }

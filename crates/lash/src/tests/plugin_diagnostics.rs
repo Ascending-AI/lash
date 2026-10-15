@@ -662,6 +662,7 @@ async fn retained_expiry_check_attribution_survives_removal() {
             },
             state: Vec::new(),
             ended_at_ms: Some(0),
+            pages: None,
         };
         let record = fact.stage(&mut staging).unwrap();
         let ordinal = Ordinal(u64::try_from(index).unwrap());

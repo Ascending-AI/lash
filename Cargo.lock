@@ -2068,6 +2068,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-check",
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
 ]
 
@@ -2085,6 +2086,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "ruff_python_ast",
  "ruff_python_parser",
@@ -2111,6 +2113,7 @@ dependencies = [
  "lash-kernel-doc",
  "lash-kernel-edit",
  "lash-kernel-lib",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "ryu-js",
  "serde",
@@ -2153,6 +2156,7 @@ name = "lash-ext-regex-ecma"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-regress",
  "num-traits",
  "thiserror 2.0.18",
@@ -2370,6 +2374,7 @@ name = "lash-internal-durable"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "chrono",
  "futures-util",
  "lash-internal-core-ids",
  "lash-internal-core-store",
@@ -2403,6 +2408,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
+ "lash-kernel-doc",
  "lash-kernel-state",
  "lash-kernel-vm",
  "lash-runtime",
@@ -2572,6 +2578,7 @@ dependencies = [
  "lash-dialect-typescript",
  "lash-internal-core",
  "lash-internal-core-store",
+ "lash-internal-durable",
  "lash-internal-render",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
@@ -2790,6 +2797,7 @@ name = "lash-internal-vm-broker"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "blake3",
  "lash-internal-core-execution",
  "lash-internal-core-store",
  "lash-internal-durable",
@@ -2800,6 +2808,7 @@ dependencies = [
  "lash-kernel-state",
  "lash-kernel-vm",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2817,6 +2826,7 @@ dependencies = [
  "lash-internal-vm-protocol",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
  "quote",
@@ -2843,7 +2853,6 @@ dependencies = [
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "lash-internal-sansio",
  "rmp-serde",
  "schemars",
@@ -2868,6 +2877,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -2886,6 +2896,7 @@ dependencies = [
  "lash-internal-core-execution",
  "lash-internal-core-ids",
  "lash-internal-core-store",
+ "lash-internal-durable",
  "lash-internal-sansio",
  "lash-internal-trace",
  "lash-internal-vm-broker",
@@ -2944,6 +2955,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2973,7 +2985,6 @@ dependencies = [
  "lash-kernel-doc",
  "lash-kernel-edit",
  "lash-kernel-lib",
- "lash-kernel-migrate",
  "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
@@ -2986,6 +2997,7 @@ name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3010,6 +3022,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-check",
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "schemars",
  "serde",
@@ -3029,6 +3042,7 @@ name = "lash-kernel-lib"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "libm",
  "num-bigint",
@@ -3043,7 +3057,6 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-state",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -3101,6 +3114,7 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-library",
  "lash-internal-vm-runtime",

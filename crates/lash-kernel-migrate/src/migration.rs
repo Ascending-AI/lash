@@ -7,7 +7,6 @@ use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
     FunctionRegistry, KernelVersion, RegistryError, Site,
 };
-use lash_kernel_state::ParkedRun;
 use serde::Serialize;
 
 /// The migration a breaking kernel version ships from the version before
@@ -23,9 +22,6 @@ pub struct Migration {
     /// Rewrites a document written for `from`. `functions` holds the
     /// definitions the document's manifest lists.
     pub document: fn(&Document, &dyn FunctionCatalog) -> Result<Rewritten, DocumentRefusal>,
-    /// Carries a run of a document, parked under `from`, onto that
-    /// document rewritten.
-    pub parked: fn(&ParkedRun, &Document, &Rewritten) -> Result<ParkedRun, ParkedRefusal>,
 }
 
 /// A document rewritten for the next kernel version.

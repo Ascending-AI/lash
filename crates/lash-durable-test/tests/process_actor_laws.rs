@@ -217,6 +217,7 @@ impl ProcessEngine for LawEngine {
             EngineState {
                 format: self.state_format(),
                 bytes,
+                pages: None,
             },
             action,
         ))

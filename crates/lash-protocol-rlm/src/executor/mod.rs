@@ -19,6 +19,7 @@ mod cell_run;
 pub(crate) mod envelope;
 mod host;
 pub(crate) mod host_graph;
+mod pages;
 mod processes;
 mod reads;
 mod session;
@@ -40,8 +41,9 @@ use std::sync::{Arc, Mutex};
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
 use lash_kernel_doc::{Datum, Document, Name};
-use lash_kernel_vm::{Bindings, Bounds, End, Start, Target};
+use lash_kernel_vm::{Bounds, End, Target};
 use lash_sansio::sync::MutexExt;
+use lash_vm_broker::kernel::run::PagePlan;
 use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFailure};
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::service::{Request, Response};
@@ -217,9 +219,9 @@ struct LinkedCell {
     envelope: CellEnvelope,
     document: Document,
     boundary: HostBoundary,
-    /// The session's bindings and the host's read-only ones, as `main`
-    /// starts with them.
-    start: Bindings,
+    /// The host's read-only bindings, which `main` starts with over the
+    /// session's.
+    host: Vec<(Name, Datum)>,
     ledgers: CellHostLedgers,
     /// The host graph a resumed cell's root holds.
     graph: host::HostGraph,
@@ -257,7 +259,7 @@ fn host_failure(message: impl Into<String>) -> Refused {
 /// Lowers a fresh cell against what the session offers now, or takes a
 /// resumed cell as its first activation recorded it.
 async fn link_cell(
-    state: &CodeModeExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
@@ -277,12 +279,29 @@ async fn link_cell(
                 state.dialect()
             )));
         }
+        // An end an earlier activation recorded names the session as that
+        // activation left it, which a read-back end does not carry: the
+        // session adopts it, and reads its pages under a lease on the
+        // cell's ended root, which the turn names once the cell answers
+        // (FIG-6315).
+        if let Some(session) = &resumed.session {
+            state
+                .restore_execution_graph(
+                    session,
+                    lash_core_store::execution_state::ExecutionGraphPurpose::Working,
+                )
+                .map_err(|error| {
+                    host_failure(format!(
+                        "the session the cell's recorded end names does not restore: {error}"
+                    ))
+                })?;
+        }
         return Ok(LinkedCell {
             document: envelope.document().map_err(host_failure)?,
             boundary: envelope.boundary().map_err(host_failure)?,
             envelope,
             // The machine resumes from its parked state, not from a start.
-            start: Bindings::default(),
+            host: Vec::new(),
             ledgers: resumed.ledgers,
             graph: resumed.graph,
             open_sites: resumed.open_sites,
@@ -375,8 +394,11 @@ async fn link_cell(
     }
     let candidates = read_candidates(ctx, &boundary, &grants, read_tools);
 
-    let session = state.bindings();
-    let mut names = session.names();
+    state
+        .prepare_cell(ctx.session_pages())
+        .await
+        .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
+    let mut names = state.names();
     names.extend(projected.keys().map(|name| Name::new(name.as_str())));
     // A cell is written against the newest helper release every live node
     // holds (FIG-5799).
@@ -399,7 +421,7 @@ async fn link_cell(
             tool_roots,
             controls: boundary.controls(),
             bindings: names,
-            functions: session.functions(),
+            functions: state.lowering_functions(),
             helpers,
             reads: candidates.keys().cloned().collect(),
         })
@@ -472,31 +494,20 @@ async fn link_cell(
 
     // `main` starts with the session's bindings and, over them, the host's
     // read-only ones.
-    let mut start = session.start();
-    let mut next = start
-        .objects
-        .keys()
-        .next_back()
-        .map_or(0, |id| id.0.saturating_add(1));
-    let mut allocate = || {
-        let id = lash_kernel_doc::ObjectId(next);
-        next += 1;
-        id
-    };
-    for (name, value) in &projected {
-        let value = crate::cell_value::bind_json(
-            value,
-            document.manifest.numbers,
-            &mut allocate,
-            &mut start.objects,
-        );
-        start.variables.insert(Name::new(name.as_str()), value);
-    }
+    let host = projected
+        .iter()
+        .map(|(name, value)| {
+            (
+                Name::new(name.as_str()),
+                crate::cell_value::json_datum(value, document.manifest.numbers),
+            )
+        })
+        .collect();
     Ok(LinkedCell {
         envelope,
         document,
         boundary,
-        start,
+        host,
         ledgers: CellHostLedgers::default(),
         graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),
@@ -603,6 +614,7 @@ async fn run_cell(
         ));
     }
     state.begin_code_execution();
+    state.note_pages(ctx.session_pages());
     let workers = services.workers.begin_execution();
     let services = CellServices {
         workers,
@@ -714,13 +726,12 @@ async fn run_linked_cell(
         envelope,
         document,
         boundary,
-        start,
+        host: host_bindings,
         ledgers,
         graph,
         open_sites,
         resumed: runs_on,
     } = linked;
-    let projected = envelope.projected.clone();
     // The run names the dialect its cell's envelope recorded: a worker
     // whose embedding lacks it refuses the cell (FIG-5990).
     let dialect = envelope.dialect.clone();
@@ -867,6 +878,10 @@ async fn run_linked_cell(
         reads: cell_reads,
     });
     let bounds = cell_bounds(services);
+    let save = lash_vm_client::wire::SaveWire {
+        controls: host.boundary.controls(),
+        written: host.envelope.written.clone(),
+    };
     let machines = match lash_vm_client::RemoteMachines::new(
         services.workers.clone(),
         owner,
@@ -875,12 +890,14 @@ async fn run_linked_cell(
         run_host,
         &document,
         &dialect,
-        Start {
+        lash_vm_client::RunStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: start,
+            session: state.session(),
+            modes,
+            host: host_bindings,
+            save: Some(save),
         },
-        modes,
         bounds,
     ) {
         Ok(machines) => machines,
@@ -892,38 +909,92 @@ async fn run_linked_cell(
             );
         }
     };
+    let plan = match cell_pages(state, services).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    format!("the session's pages are not readable: {error}"),
+                ),
+            );
+        }
+    };
     let pool = services.workers.config();
-    let run = KernelBroker {
-        store: snapshots.as_ref(),
-        effects: &host,
-        identities: &identities,
-        ceilings: KernelCeilings {
-            requests_per_park: pool.run_bounds.requests_per_park,
-            join_members: pool.run_bounds.join_members,
-        },
-        slice: pool.tuning.slice,
-    }
-    .run(&machines, &ctx.cancellation())
+    let run = Box::pin(
+        KernelBroker {
+            store: snapshots.as_ref(),
+            effects: &host,
+            identities: &identities,
+            ceilings: KernelCeilings {
+                requests_per_park: pool.run_bounds.requests_per_park,
+                join_members: pool.run_bounds.join_members,
+            },
+            slice: pool.tuning.slice,
+            pages: &plan,
+        }
+        .run(&machines, &ctx.cancellation()),
+    )
     .await;
     // A read the limit refused is the turn's refusal as a call's is.
     if let Some(exceeded) = host.ledgers().tool_call_limit {
         ctx.record_tool_call_limit_refusal(exceeded);
     }
 
+    // A finished cell's carry is the session's next version, staged in the
+    // turn's spool under a descriptor of its own. The committed pages it
+    // names stay under its run's lease, which the session holds until a
+    // committed capture owns the carry.
+    let store = snapshots.context().pages().ok();
+    let staged = match &run {
+        Ok(KernelEnd::Ended {
+            end: End::Finished(finished),
+            pages,
+            ..
+        }) => match finished.carry {
+            Some(carry) => Some(
+                state
+                    .stage_cell(
+                        carry,
+                        finished.not_carried.clone(),
+                        pages
+                            .clone()
+                            .zip(store.clone())
+                            .map(|(pages, store)| pages::HeldRun::new(pages, store)),
+                    )
+                    .await
+                    .map_err(|error| error.to_string()),
+            ),
+            None => None,
+        },
+        _ => None,
+    };
+    let held = staged.is_some();
     // A run that parked owes its end over its root: held for the commit
-    // that consumes the cell's answer, or recorded once the session adopted
-    // what the cell left, so the end names that state.
+    // that consumes the cell's answer, or recorded with the session's
+    // descriptor as the cell left it.
     let owed = match &run {
         Ok(KernelEnd::Ended {
             end,
             owed: Some(ledger),
-        }) => Some((ledger.as_ref().clone(), end.clone())),
+            pages: Some(pages),
+        }) => Some((ledger.as_ref().clone(), end.clone(), Arc::clone(pages))),
+        _ => None,
+    };
+    // The last activation, which the cell's end reads and stages through;
+    // it ends once the end is answered and committed.
+    let activation = match &run {
+        Ok(KernelEnd::Ended {
+            pages: Some(pages), ..
+        }) => Some(Arc::clone(pages)),
         _ => None,
     };
     // An end an earlier activation recorded stands over the cell's root.
     let recorded = matches!(
         &run,
-        Ok(KernelEnd::Ended { end, owed: None }) if !matches!(end, End::Cancelled)
+        Ok(KernelEnd::Ended { end, owed: None, .. }) if !matches!(end, End::Cancelled)
     );
     let document_id = document_identity.clone();
     // The rest answers the cell from what the run left; the execution's
@@ -975,33 +1046,21 @@ async fn run_linked_cell(
                 if let Err(error) = document_identity {
                     return failed(lash_core::CellFailureKind::Host, error.to_string());
                 }
-                let mut left = finished.bindings;
-                // A process the cell bound or answered with leaves it as its
-                // definition.
-                host.entries.bind_definitions(&mut left);
-                let result = host
-                    .entries
-                    .leaving(&finished.result)
-                    .unwrap_or(finished.result);
-                // The host's read-only bindings are the host's: what the cell
-                // made of its copy is not the session's.
-                left.variables
-                    .retain(|name, _| !projected.contains(name.as_str()));
-                let bindings = state.settle_cell(session::CellLeft {
-                    document: &host.entries.document,
-                    written: &host.envelope.written,
-                    bindings: left,
-                    not_carried: finished.not_carried,
-                    closures: finished.closures,
-                    controls: host.boundary.controls(),
-                    function_values: host.envelope.function_values.as_ref(),
-                });
+                let bindings = match staged {
+                    Some(Ok(changes)) => changes.bindings,
+                    Some(Err(error)) => {
+                        return failed(
+                            lash_core::CellFailureKind::Host,
+                            format!("the cell's session state did not stage: {error}"),
+                        );
+                    }
+                    None => lash_core::BindingChanges::default(),
+                };
                 // A cell ends its turn only through a control call: the
                 // dialect ends `main` right after one settles, and the
                 // control is the settled call's, never the program's own
                 // value. `main` that ran to its end, or whose control call
                 // gave no control, answered nothing: the cell completed.
-                let _ = result;
                 let controlled = finished
                     .finish
                     .then(|| collected.settled_control(&host.boundary))
@@ -1039,8 +1098,7 @@ async fn run_linked_cell(
                 ),
             ),
             End::Error(error) => {
-                let observation =
-                    CellObservation::of_run_error(error, state.bindings().not_carried());
+                let observation = CellObservation::of_run_error(error, &state.not_carried());
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,
                     annotations.as_ref(),
@@ -1056,8 +1114,8 @@ async fn run_linked_cell(
     };
     let mut response = answer();
     let ended = match (owed, document_id) {
-        (Some((ledger, end)), Ok(document)) => {
-            end_cell(state, snapshots, &host, document, ledger, end)
+        (Some((ledger, end, pages)), Ok(document)) => {
+            end_cell(state, snapshots, &host, document, ledger, end, &pages)
                 .await
                 .map(Some)
         }
@@ -1081,6 +1139,12 @@ async fn run_linked_cell(
         Err(failure) => {
             response = broker_failure(state, &ctx, failure, runs_on, &host.ledgers());
         }
+    }
+    if let Some(pages) = activation
+        && !held
+        && let Some(store) = store
+    {
+        lash_vm_broker::kernel::end_activation(store.as_ref(), &pages).await;
     }
     if let Some(trace) = &host.trace
         && !response.suspended
@@ -1111,18 +1175,18 @@ async fn end_cell(
     document: lash_kernel_doc::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
+    pages: &lash_vm_broker::kernel::pages::SharedPages,
 ) -> Result<lash_core::EndedCell, KernelFailure> {
     if host.ctx.holds_cell_end()
         && let Some(held) = snapshots.held_end(&ledger).await?
     {
-        state.parked_nodes_stored(snapshots.stored_nodes());
         return Ok(lash_core::EndedCell {
             exec: snapshots.exec().clone(),
             root: held.root,
             held: true,
         });
     }
-    let root = record_end(state, snapshots, host, document, ledger, end).await?;
+    let root = record_end(state, snapshots, host, document, ledger, end, pages).await?;
     Ok(lash_core::EndedCell {
         exec: snapshots.exec().clone(),
         root,
@@ -1130,10 +1194,11 @@ async fn end_cell(
     })
 }
 
-/// Commits the end of a cell that parked over its root: the run's terminal,
-/// the session's working state as the cell left it, the host's state and
-/// envelope, in one CellEnd (FIG-5887 §6). The turn's consuming phase
-/// adopts the working state and retires the root this answers.
+/// Commits the end of a cell that parked over its root: the run's
+/// terminal, the session's descriptor as the cell left it, the host's
+/// state and envelope, in one CellEnd, publishing the pages the cell
+/// staged since its last park. The turn's consuming phase adopts the
+/// descriptor and retires the root this answers.
 async fn record_end(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -1141,38 +1206,53 @@ async fn record_end(
     document: lash_kernel_doc::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
+    pages: &lash_vm_broker::kernel::pages::SharedPages,
 ) -> Result<lash_core_store::checkpoint_graph::NodeId, KernelFailure> {
-    use lash_core_store::execution_state::{ExecutionGraphCapture, ExecutionGraphPurpose};
-    let refused =
-        |message: String| KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(message));
-    let ExecutionGraphCapture::Replace { root, nodes } = state
-        .capture_execution_graph(ExecutionGraphPurpose::Working)
-        .map_err(|error| refused(error.to_string()))?
-    else {
-        return Err(refused("the session holds no execution state".to_owned()));
-    };
-    let saved = snapshots
+    let session = state.end_descriptor().map_err(|error| {
+        KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(error.to_string()))
+    })?;
+    snapshots
         .commit_run_end(
             lash_vm_broker::kernel::EndSave {
                 document,
                 ledger,
                 end,
-                session: lash_vm_broker::kernel::SessionGraph { root, nodes },
+                session,
+                pages,
                 with: Vec::new(),
             },
             host,
         )
-        .await;
-    match saved {
-        Ok(saved) => {
-            state.acknowledge_execution_state_capture();
-            Ok(saved.root)
-        }
-        Err(refusal) => {
-            state.abort_execution_state_capture();
-            Err(KernelFailure::Checkpoint(refusal))
-        }
-    }
+        .await
+        .map(|saved| saved.root)
+        .map_err(KernelFailure::Checkpoint)
+}
+
+/// The pages a cell's run reads and stages: the turn's spool, the
+/// session's lease, and its carried roots, which the run names unread.
+async fn cell_pages(
+    state: &mut CodeModeExecutionState,
+    services: &CellServices,
+) -> Result<PagePlan, pages::PageAccessError> {
+    let spool = state.turn_spool()?;
+    let config = services.workers.config();
+    Ok(PagePlan {
+        spool: Arc::new(move || {
+            Ok(Box::new(spool.clone())
+                as Box<
+                    dyn lash_core_store::checkpoint_graph::stage::StageSpool,
+                >)
+        }),
+        fresh: state.lease().await?,
+        references: state.session_references(),
+        limits: lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
+        lease_ttl: pages::LEASE_TTL,
+        span: std::time::Duration::from_secs(3600),
+        cache: Some(services.workers.page_cache()),
+        hints: state
+            .actor()
+            .map(|actor| services.workers.page_hints().of(actor)),
+    })
 }
 
 /// How a broker failure answers the cell. Nothing about the guest: the
@@ -1217,11 +1297,7 @@ fn broker_failure(
             // cell's checkpoint.
             if runs_on
                 && let lash_vm_protocol::InfrastructureOutcome::RunRefused { refusal } = &outcome
-                && matches!(
-                    refusal,
-                    lash_vm_protocol::RunRefusal::GraphState { .. }
-                        | lash_vm_protocol::RunRefusal::Restore { .. }
-                )
+                && matches!(refusal, lash_vm_protocol::RunRefusal::Restore { .. })
             {
                 let mut refused = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::VmWorkerFailed,
@@ -1244,7 +1320,9 @@ fn broker_failure(
         }
         // The parked state is refused where the machine imports it: the
         // same account as a worker's refusal of it.
-        KernelFailure::Import(_) | KernelFailure::EmptyCheckpoint if runs_on => {
+        KernelFailure::Open(_) | KernelFailure::Sealed(_) | KernelFailure::EmptyCheckpoint
+            if runs_on =>
+        {
             ctx.record_nested_effect_error(
                 lash_core::RuntimeEffectControllerError::new(
                     lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
@@ -1477,10 +1555,11 @@ impl CodeModeCheckpointPerfFixture {
     ) -> Result<lash_core::plugin::ExecutionGraphCapture, lash_core::SessionError> {
         self.state
             .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
+            .await
     }
 
-    pub fn acknowledge_capture(&mut self) {
-        self.state.acknowledge_execution_state_capture();
+    pub async fn acknowledge_capture(&mut self) {
+        self.state.acknowledge_execution_state_capture().await;
     }
 
     /// Run the edit under the backend's scoped controller and this cell's

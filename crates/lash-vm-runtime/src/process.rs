@@ -16,6 +16,7 @@ mod advance;
 mod documents;
 mod helpers;
 mod migrate;
+mod pages;
 mod replay;
 mod run;
 mod state;
@@ -41,8 +42,8 @@ pub use helpers::{
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_run, migrate_saved_function, migration_refusal,
-    plan_migration, survey_kernel_processes,
+    UnmigratedKernelSession, migrate_saved_function, migration_refusal, plan_migration,
+    survey_kernel_processes,
 };
 pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
@@ -341,11 +342,20 @@ pub struct KernelRunPolicy {
     /// that made no progress ([`lash_core::CapacityVerdict`]). Such a run
     /// spends none of `attempts`.
     pub capacity_backoff: std::time::Duration,
+    /// How long a replay's reader lease on a retained run record lives
+    /// between renewals (FIG-6370): the longest a replay keeps the pages it
+    /// reads from retiring past its own end. Within
+    /// (0, [`Self::MAX_REPLAY_LEASE`]]; a replay refuses any other.
+    pub replay_lease: std::time::Duration,
 }
 
 impl KernelRunPolicy {
-    /// 120 seconds, three attempts, immediate retries, and a 50 ms capacity
-    /// backoff. A run recomputes only effect-free work from the last saved
+    /// The longest reader lease a replay takes.
+    pub const MAX_REPLAY_LEASE: std::time::Duration = std::time::Duration::from_secs(600);
+
+    /// 120 seconds, three attempts, immediate retries, a 50 ms capacity
+    /// backoff and a 60 second replay lease, the lease a run's own reads
+    /// take. A run recomputes only effect-free work from the last saved
     /// state. The backoff has no workload measurement behind it: with the
     /// standard activation-loop budget of 8, a pool that stays saturated
     /// parks the process after about 13 seconds of doubling backoff.
@@ -356,6 +366,7 @@ impl KernelRunPolicy {
             retry_initial_ms: 0,
             retry_max_ms: 0,
             capacity_backoff: std::time::Duration::from_millis(50),
+            replay_lease: std::time::Duration::from_secs(60),
         }
     }
 }

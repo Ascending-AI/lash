@@ -7,8 +7,7 @@ use std::sync::{Arc, OnceLock};
 use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, Start, Step, Target,
+    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
 
 struct Kernel {
@@ -83,6 +82,7 @@ fn drive_document(
     let kernel = kernel();
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
+        release: super::pages::RELEASE,
         document: Arc::new(document),
         library: kernel.prepared.clone(),
     };
@@ -94,13 +94,16 @@ fn drive_document(
         requests_per_park: 100,
         join_members: 100,
     };
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         program,
         bounds,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
     )
     .unwrap();
@@ -164,8 +167,9 @@ fn discarded_push_charges_only_the_append_body() {
         let text = lash_kernel_doc::print_document(&lowered.document);
         assert_eq!(text.matches("list.len(").count(), lengths, "{text}");
         assert!(!text.contains("num.to_float("), "{text}");
-        let mut machine = KernelMachine::start(
+        let mut machine = super::pages::start(
             Program {
+                release: super::pages::RELEASE,
                 document: Arc::new(lowered.document),
                 library: kernel().prepared.clone(),
             },
@@ -177,10 +181,13 @@ fn discarded_push_charges_only_the_append_body() {
                 requests_per_park: 100,
                 join_members: 100,
             },
-            Start {
+            CellStart {
                 target: Target::Main,
                 args: Vec::new(),
-                bindings: Bindings::default(),
+                session: None,
+                owner: super::pages::OWNER,
+                modes: Default::default(),
+                host: Vec::new(),
             },
         )
         .unwrap();
@@ -826,8 +833,9 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
     ));
     let document =
         lash_kernel_doc::parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{setup}"));
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         Program {
+            release: super::pages::RELEASE,
             document: Arc::new(document),
             library: kernel().prepared.clone(),
         },
@@ -839,10 +847,13 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
             requests_per_park: 100,
             join_members: 100,
         },
-        Start {
+        CellStart {
             target: Target::Main,
             args: vec![],
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
     )
     .unwrap();

@@ -180,6 +180,7 @@ pub struct RuntimeExecutionContext<'run> {
     nested_effect_error: Arc<std::sync::Mutex<Option<crate::RuntimeEffectControllerError>>>,
     /// How a cell this context runs hands its end to its turn.
     cell_end: CellEndHandoff,
+    session_pages: Option<crate::plugin::SessionPages>,
     /// The model response that asked for the cell this context runs, while
     /// its turn holds it for the cell's first save (FIG-6000).
     held_response: Option<HeldResponse>,
@@ -509,6 +510,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             cell_end: self.cell_end.clone(),
+            session_pages: self.session_pages.clone(),
             held_response: self.held_response.clone(),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             tool_requests: Arc::clone(&self.tool_requests),
@@ -833,6 +835,14 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub fn with_process_work(mut self, process_work: Option<crate::ProcessWorkWiring>) -> Self {
         self.process_work = process_work;
         self
+    }
+
+    /// Where this context's session's committed execution state stands on
+    /// the persistent heap (FIG-6193). A cell executor's hook, not host
+    /// surface.
+    #[doc(hidden)]
+    pub fn session_pages(&self) -> Option<&crate::plugin::SessionPages> {
+        self.session_pages.as_ref()
     }
 
     /// Whether the turn that runs this context's cell commits the cell's

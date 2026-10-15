@@ -352,10 +352,49 @@ await control.finish(await processes.await({ handle }));
 async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off() {
     use lash::workflow::document::{Datum, ErrorDatum, Handle, Site, Timestamp};
     use lash::workflow::view::RunObservation;
-    use lash_kernel_vm::{
-        Bounds, EffectModes, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step,
-        Target,
+    use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
+    use lash_kernel_state::paged::{
+        AllocationCensus as _, EditEpoch, PageAnswer, PageBody, PageSource, PagedHeap,
+        SemanticHeap as _, census_impl::Census,
     };
+    use lash_kernel_vm::{
+        Bounds, CellStart, EffectModes, Host, KernelMachine, Machine, PreparedLibrary, Program,
+        Step, Target,
+    };
+    /// The pages the unsplit run seals, held in memory.
+    #[derive(Clone, Default)]
+    struct Pages(Arc<std::sync::Mutex<std::collections::BTreeMap<PageId, PageAnswer>>>);
+    impl PageSource for Pages {
+        fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+            let held = self.0.lock_recover();
+            pages
+                .iter()
+                .map(|page| {
+                    held.get(&page.id)
+                        .cloned()
+                        .ok_or(HeapFault::Missing { page: page.id })
+                })
+                .collect()
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            let mut tokens = body.kind.0.to_be_bytes().to_vec();
+            tokens.extend_from_slice(&body.tokens);
+            let page = PageRef {
+                id: PageId(lash_kernel_doc::heap_values::key_digest(&tokens)),
+                grant: PageGrant::NONE,
+            };
+            self.0.lock_recover().insert(
+                page.id,
+                PageAnswer {
+                    page,
+                    kind: body.kind,
+                    tokens: body.tokens.into(),
+                    children: body.children,
+                },
+            );
+            Ok(page)
+        }
+    }
     struct Immediate;
     impl Host for Immediate {
         fn clock(&mut self) -> Timestamp {
@@ -404,25 +443,37 @@ async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off
     let kernel = document.document();
     let modes = EffectModes::reading(kernel.manifest.effects.keys().cloned());
     let embedding = lash::vm::built_worker_dialects(&lash::vm::WorkerTuning::default()).unwrap();
-    let mut unsplit = KernelMachine::start_reading(
+    let pages = Pages::default();
+    let bounds = Bounds {
+        charge: 1_000_000,
+        memory: 64 << 20,
+        call_depth: 64,
+        live_tasks: 16,
+        requests_per_park: 16,
+        join_members: 16,
+    };
+    let census = Census::restore(
+        PagedHeap::fresh(Box::new(pages.clone()), EditEpoch(1)).certificate(),
+        LogicalBytes(bounds.memory),
+    )
+    .unwrap();
+    let mut unsplit = KernelMachine::start(
         Program {
+            release: PageId([7; 32]),
             document: Arc::new(kernel.clone()),
             library: PreparedLibrary::new(Arc::clone(embedding.registry().unwrap())),
         },
-        Bounds {
-            charge: 1_000_000,
-            memory: 64 << 20,
-            call_depth: 64,
-            live_tasks: 16,
-            requests_per_park: 16,
-            join_members: 16,
-        },
-        Start {
+        bounds,
+        CellStart {
+            owner: PageId([9; 32]),
             target: Target::Main,
             args: vec![],
-            bindings: Default::default(),
+            session: None,
+            modes,
+            host: Vec::new(),
         },
-        modes,
+        Box::new(pages),
+        Box::new(census),
     )
     .unwrap();
     unsplit.set_observe(RunObservation::Counts);

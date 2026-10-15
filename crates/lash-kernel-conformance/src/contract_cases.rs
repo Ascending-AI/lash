@@ -14,8 +14,8 @@ use lash_kernel_doc::{
     validate_definition, validate_document,
 };
 use lash_kernel_vm::{
-    DeliverError, Delivered, End, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
-    Program, Request, Start, Step, WaitId,
+    CellStart, DeliverError, Delivered, End, KernelMachine, Layout, Machine, Outcome,
+    PreparedLibrary, Program, Request, Step, WaitId,
 };
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
@@ -507,10 +507,11 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     for native in [false, true] {
         for layout in [Layout(0), Layout(37)] {
             let program = Program {
+                release: crate::pages::RELEASE,
                 document: Arc::new(document.clone()),
                 library: PreparedLibrary::new(Arc::new(same_registry(BOTH, native))),
             };
-            let mut machine = KernelMachine::start_with_layout(
+            let mut machine = crate::pages::start_with_layout(
                 program,
                 crate::CaseBounds::default().into(),
                 start(),
@@ -527,14 +528,14 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
 
 fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
     let program = program(&shard.cases[0], registry);
-    let mut first = KernelMachine::start(
+    let mut first = crate::pages::start(
         program.clone(),
         crate::CaseBounds::default().into(),
         start(),
     )
     .unwrap();
     let mut second =
-        KernelMachine::start(program, crate::CaseBounds::default().into(), start()).unwrap();
+        crate::pages::start(program, crate::CaseBounds::default().into(), start()).unwrap();
     let mut host = ProbeHost;
     assert_eq!(first.run(&mut host, 1).unwrap(), Step::Slice);
     let second_end = second.run(&mut host, u64::MAX).unwrap();
@@ -546,13 +547,14 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
 
 fn program(case: &Case, registry: &FunctionRegistry) -> Program {
     Program {
+        release: crate::pages::RELEASE,
         document: Arc::new(doc(&case.document)),
         library: PreparedLibrary::new(Arc::new(registry.clone())),
     }
 }
 
 fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
-    let mut machine = KernelMachine::start(
+    let mut machine = crate::pages::start(
         program(&shard.cases[0], registry),
         crate::CaseBounds::default().into(),
         start(),
@@ -565,7 +567,9 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
     let Request::Effect(request) = &park.requests[0] else {
         panic!("effect request")
     };
-    let before = machine.export().unwrap();
+    let before = lash_kernel_doc::graph_tokens::encode_body(
+        &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root,
+    );
     assert!(matches!(
         machine.deliver(
             WaitId(u64::MAX),
@@ -573,7 +577,12 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         ),
         Err(DeliverError::UnknownWait { .. })
     ));
-    assert_eq!(machine.export().unwrap(), before);
+    assert_eq!(
+        lash_kernel_doc::graph_tokens::encode_body(
+            &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root
+        ),
+        before
+    );
     assert_eq!(
         machine
             .deliver(
@@ -583,7 +592,9 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
             .unwrap(),
         Delivered::Accepted
     );
-    let accepted = machine.export().unwrap();
+    let accepted = lash_kernel_doc::graph_tokens::encode_body(
+        &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root,
+    );
     assert!(matches!(
         machine.deliver(
             request.wait,
@@ -591,7 +602,12 @@ fn delivery_errors(shard: &Shard, registry: &FunctionRegistry) {
         ),
         Err(DeliverError::AlreadyDelivered { .. })
     ));
-    assert_eq!(machine.export().unwrap(), accepted);
+    assert_eq!(
+        lash_kernel_doc::graph_tokens::encode_body(
+            &machine.seal(crate::pages::BUDGET).unwrap().unwrap().root
+        ),
+        accepted
+    );
     assert!(matches!(
         machine.run(&mut host, u64::MAX).unwrap(),
         Step::Ended(End::Finished(_))
@@ -671,10 +687,13 @@ fn identity_definition() {
     }
 }
 
-fn start() -> Start {
-    Start {
+fn start() -> CellStart {
+    CellStart {
         target: lash_kernel_vm::Target::Main,
         args: Vec::new(),
-        bindings: Default::default(),
+        session: None,
+        owner: crate::pages::OWNER,
+        modes: Default::default(),
+        host: Vec::new(),
     }
 }

@@ -18,8 +18,10 @@
 //! `turn.commit` even with a host plugin's checkpoint callback (FIG-6162).
 //!
 //! Laws: the turn answered; the cell's program is entered fresh only by an
-//! activation that found no snapshot of it; the killed variant's operation
-//! settled `Interrupted` with its body entered at most once.
+//! activation that found no snapshot of it; unless its call was settled
+//! `Interrupted`, every model call after the cell binds what the cell
+//! bound; the killed variant's operation settled `Interrupted` with its
+//! body entered at most once.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -31,6 +33,7 @@ use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::SessionId;
 
 use super::{admit_turn, turn_end, turn_settled};
+use crate::crash_matrix::cells::BOUND_AFTER_CELL;
 use crate::crash_matrix::deployment::Workload;
 use crate::crash_matrix::services::{EXT_WRITE, TurnScript};
 use crate::crash_matrix::world::{SOAK, World};
@@ -128,6 +131,7 @@ impl Workload for CellCase {
                 ));
             }
         }
+        violations.extend(carried_laws(world, nodes, &session));
         if self.killed {
             violations.extend(killed_laws(world, nodes, &session).await);
         }
@@ -146,6 +150,37 @@ impl Workload for CellCase {
         // The kill's takeover restores the turn once more.
         if self.killed { 2 } else { 1 }
     }
+}
+
+/// The cell's binding reaches the turn's next prompt (FIG-6315): unless its
+/// call was settled `Interrupted`, which ends the cell with an error and
+/// binds nothing, every model call after the cell binds `written`, whether
+/// its owner ran the cell to its end or read back the end a dead owner
+/// recorded.
+fn carried_laws(world: &World, nodes: &SimNodes, session: &SessionId) -> Vec<String> {
+    let actor = lash_durable::ActorKey::session(session.as_str()).ok();
+    let interrupted = nodes.script().trace().iter().any(|write| {
+        write.point.label == CommitLabel::CELL_INJECT && write.committed() && write.actor == actor
+    });
+    if interrupted {
+        return Vec::new();
+    }
+    let prefix = format!("{BOUND_AFTER_CELL}{session} ");
+    let calls: Vec<String> = world
+        .notes()
+        .into_iter()
+        .filter_map(|note| note.strip_prefix(&prefix).map(str::to_owned))
+        .collect();
+    if calls.is_empty() {
+        return vec!["no model call followed the cell".to_owned()];
+    }
+    calls
+        .into_iter()
+        .filter(|bound| !bound.split(',').any(|name| name == "written"))
+        .map(|bound| {
+            format!("a model call after the cell bound [{bound}], not the cell's `written`")
+        })
+        .collect()
 }
 
 /// The killed variant: its operation settled `Interrupted` and its body ran

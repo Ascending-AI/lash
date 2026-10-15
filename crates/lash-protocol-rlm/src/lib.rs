@@ -75,13 +75,12 @@ pub use executor::{
     TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
     saved_function_pins,
 };
-/// The kernel's typed snapshot validation causes and fragment roots.
+/// The kernel's typed snapshot validation causes.
 pub mod snapshot {
     pub use lash_core_store::checkpoint_graph::{
         GraphRefusal, KernelRestoreRefusal, NodeId, RootSource, roots::RootField,
     };
-    pub use lash_kernel_dialect::BundleRefusal;
-    pub use lash_kernel_state::{LoadError, Root, SaveError};
+    pub use lash_kernel_doc::heap::HeapFault;
 }
 pub use call_feedback::{CallFeedbackPolicy, CallFeedbackPolicyError};
 pub use feedback::{

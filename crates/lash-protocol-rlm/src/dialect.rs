@@ -9,6 +9,7 @@ use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_sansio::{SchemaShape, ShapeRow};
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_runtime::ResolvedToolBinding;
 
 pub use python::PythonPrompts;
@@ -764,7 +765,9 @@ pub(crate) struct DialectSession {
 impl DialectSession {
     pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
         let state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
-            .carrying(services.kernel.clone());
+            .carrying(services.kernel.clone())
+            .staging(services.workers.spools().ok())
+            .caching(services.workers.page_cache());
         Self {
             dialect,
             state,
@@ -810,7 +813,6 @@ impl DialectSession {
 
     pub(crate) fn session_names(&self) -> BTreeSet<String> {
         self.state
-            .bindings()
             .names()
             .into_iter()
             .map(|name| name.to_string())
@@ -821,11 +823,11 @@ impl DialectSession {
         self.state.execution_state_dirty()
     }
 
-    pub(crate) fn capture_execution_graph(
+    pub(crate) async fn capture_execution_graph(
         &mut self,
         purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
     ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
-        self.state.capture_execution_graph(purpose)
+        self.state.capture_execution_graph(purpose).await
     }
 
     pub(crate) async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
@@ -838,8 +840,8 @@ impl DialectSession {
         self.state.hydrated_execution_graph().await
     }
 
-    pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.acknowledge_execution_state_capture();
+    pub(crate) async fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.acknowledge_execution_state_capture().await;
         Ok(())
     }
 
@@ -893,65 +895,42 @@ impl DialectSession {
         self.state.patch_globals(patch, protected_names).await
     }
 
-    /// Holds the saved functions a session is created with.
-    pub(crate) async fn seed_functions(
-        &mut self,
-        functions: &serde_json::Map<String, serde_json::Value>,
-        protected_names: &BTreeSet<String>,
-    ) -> Result<(), SessionError> {
-        self.state.seed_functions(functions, protected_names).await
-    }
-
     /// The bound-variable prompt and the globals it lists: the session's
     /// bindings, each a value a cell left, with the cell `provenance` names
     /// for it. A binding that was not carried (`K-SES-003`) is listed by
     /// name with why it is not bound, so the listing names every name an
     /// earlier cell wrote.
     pub(crate) async fn prepare_bound_variables_prompt(
-        &self,
+        &mut self,
         exclude: &BTreeSet<String>,
         params: lash_render::RenderParams,
         mut provenance: std::collections::BTreeMap<String, String>,
+        pages: Option<&lash_core::plugin::SessionPages>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         use crate::session_globals::{SessionGlobal, SessionGlobalKind};
-        let bindings = self.state.bindings();
-        let held_functions = bindings.held_functions();
-        let kinds = self
-            .state
-            .bound_variable_values(exclude)
+        let values = self.state.bound_variable_values(exclude, pages).await?;
+        let not_carried = self.state.not_carried();
+        let kinds = values
             .into_iter()
             .chain(
-                bindings
-                    .not_carried()
-                    .iter()
+                not_carried
+                    .into_iter()
                     .filter(|(name, _)| !exclude.contains(name.as_str()))
-                    .map(|(name, why)| {
-                        (
-                            name.to_string(),
-                            SessionGlobalKind::NotCarried {
-                                why: why.to_string(),
-                            },
-                        )
-                    }),
+                    .map(|(name, why)| (name.to_string(), SessionGlobalKind::NotCarried { why })),
             )
             // A saved function is listed with its signature and the cell
             // whose end froze what it reads.
             .chain(
-                held_functions
-                    .iter()
-                    .filter(|(name, _)| !exclude.contains(name.as_str()))
-                    .map(|(name, held)| {
-                        let signature = held
-                            .function
-                            .written
-                            .as_ref()
-                            .map(|written| written.signature.as_str())
-                            .unwrap_or("(...)");
+                self.state
+                    .held_functions()
+                    .into_iter()
+                    .filter(|(name, _, _)| !exclude.contains(name.as_str()))
+                    .map(|(name, signature, frozen_at)| {
                         (
-                            name.to_string(),
+                            name,
                             SessionGlobalKind::Function {
-                                signature: signature.to_owned(),
-                                frozen_at: held.cell,
+                                signature,
+                                frozen_at,
                             },
                         )
                     }),
@@ -1066,6 +1045,7 @@ mod tests {
                 &BTreeSet::new(),
                 lash_render::RenderParams::default(),
                 Default::default(),
+                None,
             )
             .await
             .expect("render the extension session's bindings")

@@ -288,13 +288,27 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
 
     let mut host = HostState::default();
     host.prints.push(PrintEvent(Datum::Int(1.into())));
+    // A session descriptor page: the end names it, and reads nothing of
+    // what it reaches.
+    let session = lash_vm_broker::kernel::pages::frame_page(&lash_kernel_state::paged::PageBody {
+        kind: lash_kernel_state::paged::PageKind::SESSION_ROOT,
+        tokens: lash_kernel_doc::graph_tokens::encode_body(&0_u64),
+        children: Vec::new(),
+    })
+    .unwrap();
+    let session_id = session.id;
+    staging.adopt(session).unwrap();
     let end = CellEnd {
-        terminal: staging
-            .encode_value(NodeKind::TERMINAL_WHOLE, &2_u64)
-            .unwrap(),
-        session: staging
-            .encode_value(NodeKind::SESSION_EXECUTION, &3_u64)
-            .unwrap(),
+        end: lash_vm_broker::kernel::EndRecord::Failed(
+            staging
+                .encode_value(
+                    NodeKind::FROZEN_VALUE,
+                    &lash_kernel_doc::FrozenDatum(Datum::Int(2.into())),
+                )
+                .unwrap()
+                .child_ref(),
+        ),
+        session: session_id,
         host: host.stage(&mut staging, &mut BTreeSet::new()).unwrap(),
         envelope: node,
     };
@@ -317,7 +331,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         host.prints.items()
     );
 
-    let wrong = envelope.stage(&mut staging, end.terminal).unwrap();
+    let wrong = envelope.stage(&mut staging, end.host).unwrap();
     let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 24));
     assert!(matches!(
         CellEnvelope::load(&mut decoder, wrong),

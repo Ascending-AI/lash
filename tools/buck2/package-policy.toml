@@ -461,7 +461,7 @@ shards = 8
 packages = ["lash-sim"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["cross_backend_store_differential"]
-compile_data = ["//crates/lash-core-store:package_files", "//crates/lash-core-execution:package_files"]
+compile_data = ["//crates/lash-core-store:package_files", "//crates/lash-core-execution:package_files", "//crates/lash-durable:package_files"]
 
 # The workbench unit test shells out to Node for its browser-projection case.
 # Its interpreter is a pinned Buck2 input, including on feature-lane variants.

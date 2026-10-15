@@ -150,6 +150,7 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
         },
         state: Vec::new(),
         ended_at_ms: Some(0),
+        pages: None,
     };
     let root = fact.stage(&mut staging).unwrap();
 
@@ -184,6 +185,7 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
         },
         state: Vec::new(),
         ended_at_ms: Some(0),
+        pages: None,
     };
     assert_eq!(
         forged.stage(&mut staging),

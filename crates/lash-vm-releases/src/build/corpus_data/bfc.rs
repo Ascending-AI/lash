@@ -21,6 +21,7 @@ pub(super) const DATA: &str = r####"{
 "fc289d5f8f738254045bfe99d3cef5249ba99527bac02eb18bdaad9faa9722ce":{"charge":352,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fc2acc00cd11b6a010596c7a693fb8df1b4c6551a94472c05447f54f682f6248":{"charge":24,"outcome":"ok {\"text\":\"Hello\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fc2b27bbf71b5ae84b7e153465a156018d644dd308b7f2a4d72cd6c62b3c05a3":[{"int":"-8398148081706144081"}],
+"fc2c834d72c9344892fc67d844b7b6210375d366acf5415a99d8cb5f14da2658":{"charge":5,"outcome":"memory","prepared_difference":null,"reservations":[[0,0]],"reserved":0,"spent":0},
 "fc2cacc53892e25925766fb87a5ea50b9d897b7cc9bb3a6cb7ce0f168fec1714":[{"float":"1.3164631212960522e78"},{"int":"650840755178985445"}],
 "fc32f19776e5fc86905d9a789db0c1b828e1365280bdffc50e71c371428c36a4":{"charge":3,"outcome":"ok {\"float\":\"-8.240402857534089e137\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fc33c043eb9011236fd727fbc1d6c1d7d3a1272ca42878fb93ac53a165699274":[{"list":["null",{"int":"-8306339861351375785"},{"bool":true},{"float":"-1.525236990129436e-113"},"null"]}],

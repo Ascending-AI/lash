@@ -124,9 +124,8 @@ impl Processes {
         };
         // The steps are read before the record: a record still retained
         // after them proves the steps read were retained too.
-        let steps =
-            lash_core::facade_support::read_process_steps(&self.core.effect_host(), process_id)
-                .await?;
+        let host = self.core.effect_host();
+        let steps = lash_core::facade_support::read_process_steps(&host, process_id).await?;
         let process = match self.make_observer().process(process_id).await {
             Ok(Some(process)) => process,
             Ok(None) | Err(lash_core::PluginError::ProcessUnknown { .. }) => return Ok(Vec::new()),
@@ -148,6 +147,7 @@ impl Processes {
             return Ok(Vec::new());
         };
         let request = lash_vm_runtime::ProcessReplayRequest {
+            pages: host.pages()?,
             process: process_id.clone(),
             settings: launch.settings.clone(),
             payload: payload.clone(),

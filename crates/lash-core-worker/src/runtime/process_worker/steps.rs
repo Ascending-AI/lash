@@ -732,6 +732,11 @@ impl DurableProcessWorker {
             projection_providers: Some(Arc::clone(backend.projection_providers())),
             kind,
             input,
+            pages: cx.pages().ok().map(|store| lash_core_execution::StepPages {
+                store,
+                actor: cx.actor().clone(),
+                epoch: cx.epoch(),
+            }),
         };
         steps.run(run, token).await.into()
     }

@@ -1,6 +1,12 @@
 //! JSON-lines machine adapter for the live helper fuzzer. No oracle runs here.
 #[path = "../shared/helper_differential/comparison.rs"]
 mod comparison;
+#[expect(
+    dead_code,
+    reason = "the adapter only needs the ordinary start fixture"
+)]
+#[path = "../src/tests/pages.rs"]
+mod pages;
 #[path = "../shared/helper_differential/runner.rs"]
 mod runner;
 use runner::{Case, Runner};

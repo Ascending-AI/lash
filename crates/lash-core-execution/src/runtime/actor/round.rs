@@ -1028,7 +1028,8 @@ pub(crate) async fn run_bounded(
 /// Record `admitted`'s outcome on `tx`, with the store-local effects that
 /// commit with it, at its run's next ordinal. Only a completion or a park
 /// carries effects: a park's declared start is what it waits on. Only a
-/// completion carries plugin state, which its `x_outcome` records.
+/// completion carries plugin state, which its `x_outcome` records, and
+/// heap `pages`, the CheckpointRoot its record names and owns (FIG-6193).
 ///
 /// # Errors
 ///
@@ -1038,7 +1039,11 @@ pub fn settle(
     admitted: &AdmittedExecution,
     output: SettledOutput,
     store_local: Vec<StoreLocalEffect>,
+    pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 ) -> Result<(), SettleRefusal> {
+    if pages.is_some() && !matches!(output, SettledOutput::Completed(_)) {
+        return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
+    }
     let mut state = Vec::new();
     if !store_local.is_empty() {
         if !matches!(
@@ -1061,7 +1066,7 @@ pub fn settle(
             }
         }
     }
-    record_outcome(tx, admitted, output, state);
+    record_outcome(tx, admitted, output, state, pages);
     Ok(())
 }
 
@@ -1082,7 +1087,7 @@ pub fn settle_interrupted(
         run: id.run,
         ordinal: id.ordinal,
     })?;
-    record_outcome(tx, &admitted, SettledOutput::Interrupted, Vec::new());
+    record_outcome(tx, &admitted, SettledOutput::Interrupted, Vec::new(), None);
     Ok(())
 }
 
@@ -1091,6 +1096,7 @@ fn record_outcome(
     admitted: &AdmittedExecution,
     output: SettledOutput,
     state: Vec<crate::plugin::StateResolution>,
+    pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 ) {
     let id = admitted.id();
     let body = OutcomeBody {
@@ -1098,6 +1104,7 @@ fn record_outcome(
         output,
         state,
         ended_at_ms: Some(u64::try_from(tx.opened_at().0).unwrap_or(0)),
+        pages,
     };
     // A park is no outcome: the call's one `x_outcome` follows it.
     let record = if matches!(body.output, SettledOutput::Waiting(_)) {

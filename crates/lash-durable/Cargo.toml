@@ -19,13 +19,14 @@ doctest = false
 [features]
 default = []
 # The fencing laws every DurableStore keeps, for the dialects' own tests.
-testing = ["dep:futures-util", "lash-sansio/testing"]
+testing = ["dep:chrono", "dep:futures-util", "lash-sansio/testing"]
 
 [lints]
 workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+chrono = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 lash-core-ids = { workspace = true }
 lash-core-store = { workspace = true }

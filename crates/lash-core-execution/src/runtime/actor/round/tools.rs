@@ -503,6 +503,7 @@ pub async fn settle_cancelled(
                 evidence: AvailableEvidence::default(),
             },
             Vec::new(),
+            None,
         )?;
     }
     Ok(open

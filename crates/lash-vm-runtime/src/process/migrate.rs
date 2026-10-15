@@ -4,32 +4,31 @@
 //! A breaking kernel version ships the migration from the version before
 //! it (`lash-kernel-migrate`). A node of the build that ships it decodes
 //! the engine state the previous build wrote, and the first time it holds a
-//! process parked in that format, with no node of the previous build left
-//! to read it, it carries the process forward: the document is rewritten
-//! and published under the process's own referrer, the parked run is
-//! carried onto it, every wait the state names is identified in the
-//! rewritten document, and the claimer commits the result as the engine
-//! state in this build's format, before any transition.
+//! process in that format, with no node of the previous build left to read
+//! it, it carries the process forward: the document is rewritten and
+//! published under the process's own referrer, every wait the state names
+//! is identified in the rewritten document, and the claimer commits the
+//! result as the engine state in this build's format, before any
+//! transition.
 //!
-//! The parked run is read here as data, in the parent, as
-//! `lash-kernel-state` lets any host read one: its KernelWhole restored to
-//! the kernel's parked structure with each wait's admission, carried, and
-//! captured as a whole state again. Nothing is compiled or run.
+//! A parked run is never carried: its heap pages are carried by no
+//! migrator this build ships (FIG-6193). A build that interprets the
+//! version it parked under and holds every function its document reaches
+//! resumes it in that version, to its end. Any other build refuses it,
+//! typed ([`ParkedRefusal::StateNotCarried`]), and parks it with its rows
+//! intact, to be resumed by a build that retains what it pins.
 //!
-//! [`plan_migration`] and [`migrate_run`] are that carrying without a
-//! store, which `lashctl` runs over a deployment before an upgrade to list
-//! what would be refused.
+//! [`plan_migration`] is that carrying without a store, which `lashctl`
+//! runs over a deployment before an upgrade to list what would be
+//! refused.
 
 use std::sync::Arc;
 
 use lash_core::{EngineState, EngineStateFormat, EngineStateRefusal, ProcessId};
-use lash_core_store::checkpoint_graph::DecodeLimits;
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
 use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Rewritten, migration_from};
-use lash_kernel_state::AdmittedWait;
-use lash_vm_broker::kernel::state::{OpenedRun, WholeState, capture_whole, open_whole};
 
-use super::state::{KernelEngineState, KernelProcessInput, Phase, SealedRun, Wait};
+use super::state::{KernelEngineState, KernelProcessInput, Phase};
 use super::{DocumentStoreError, KernelDocuments, KernelProcessEngine, advance};
 
 /// Why a kernel process is not carried to the next kernel version.
@@ -161,117 +160,6 @@ pub fn migrate_saved_function(
     }
 }
 
-/// The run `parked` under `base`, each wait's request in `admitted`,
-/// carried onto `plan`'s rewrite while keeping its exact pinned helper
-/// release. The retained manifest must supply every rewritten helper;
-/// otherwise the carry refuses, naming the release. Only an explicit
-/// successor pair can move the run onto another helper release (D2).
-///
-/// # Errors
-///
-/// The typed refusal of a run that is not carried.
-pub fn migrate_run(
-    parked: &WholeState,
-    admitted: &[AdmittedWait],
-    base: &Document,
-    plan: &PlannedMigration,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
-) -> Result<WholeState, KernelMigrationRefusal> {
-    let releases = lash_vm_broker::kernel::state::release_manifests().map_err(|failure| {
-        KernelMigrationRefusal::State {
-            message: failure.to_string(),
-        }
-    })?;
-    migrate_run_with_releases(parked, admitted, base, plan, limits, &releases)
-}
-
-pub(super) fn migrate_run_with_releases(
-    parked: &WholeState,
-    admitted: &[AdmittedWait],
-    base: &Document,
-    plan: &PlannedMigration,
-    limits: DecodeLimits,
-    releases: &lash_vm_broker::kernel::state::ReleaseGraph,
-) -> Result<WholeState, KernelMigrationRefusal> {
-    let state = |message: String| KernelMigrationRefusal::State { message };
-    let refused = |refusal| KernelMigrationRefusal::Parked {
-        document: plan.from,
-        refusal,
-    };
-    let Some(migration) = KernelVersion::of(parked.kernel).and_then(migration_from) else {
-        return Err(refused(ParkedRefusal::Version {
-            found: parked.kernel,
-            from: base.manifest.kernel,
-        }));
-    };
-    let opened = open_whole(
-        parked,
-        releases,
-        admitted,
-        base.manifest.functions.keys().copied().collect(),
-        limits,
-    )
-    .map_err(|failure| state(failure.to_string()))?;
-    let pinned = lash_core_store::checkpoint_graph::NodeId(opened.release.0).to_hex();
-    let manifest = releases.manifests.get(&opened.release).ok_or_else(|| {
-        refused(ParkedRefusal::StateNotCarried {
-            detail: format!("helper release manifest {pinned} is not retained by this build"),
-        })
-    })?;
-    // Redeclaring a function for the next kernel encoding is not permission
-    // to escape the pinned release. Its immutable catalog must already hold
-    // that encoding of the helper, rather than this build's replacement.
-    for (from, to) in &plan.rewritten.functions {
-        if releases.manifests.releases(from) && !manifest.holds(to) {
-            return Err(refused(ParkedRefusal::StateNotCarried {
-                detail: format!(
-                    "helper release {} ({pinned}) cannot carry helper {from} to kernel {}: \
-                     its manifest does not hold rewritten function {to}",
-                    manifest.release,
-                    plan.to.number(),
-                ),
-            }));
-        }
-    }
-    let carried = (migration.parked)(&opened.run, base, &plan.rewritten).map_err(refused)?;
-    capture_whole(
-        &OpenedRun {
-            run: carried,
-            release: opened.release,
-            binding: opened.binding,
-        },
-        u64::MAX,
-    )
-    .map_err(|failure| state(failure.to_string()))
-}
-
-/// The run `parked` under `base` holds, read as data.
-pub(crate) fn open_run(
-    parked: &WholeState,
-    admitted: &[AdmittedWait],
-    base: &Document,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
-) -> Result<OpenedRun, String> {
-    let releases = lash_vm_broker::kernel::state::release_manifests()
-        .map_err(|failure| failure.to_string())?;
-    // The decode reads the release's nodes beside the state's, and a shared
-    // value once per reference: the state's own size bounds neither.
-    open_whole(
-        parked,
-        &releases,
-        admitted,
-        base.manifest.functions.keys().copied().collect(),
-        limits,
-    )
-    .map_err(|failure| failure.to_string())
-}
-
-/// A sealed parked run as a whole state again.
-pub(crate) fn unsealed(parked: &SealedRun) -> Result<WholeState, String> {
-    WholeState::of_sealed(&parked.0, &DecodeLimits::within_total(parked.0.byte_len()))
-        .map_err(|refusal| refusal.to_string())
-}
-
 /// How the kernel process engine carries a process the previous build
 /// parked into this build's format.
 #[derive(Clone)]
@@ -332,18 +220,12 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
         if state.format == advance::state_format(engine.writes) {
             return Ok(None);
         }
-        let carried = carry(
-            &engine.documents,
-            &engine.functions,
-            engine.writes,
-            state,
-            engine.workers.config().graph_reads.execution(),
-        )
-        .await
-        .map_err(|error| match error {
-            CarryError::Refused(refusal) => fatal(&refusal),
-            CarryError::Store(error) => retried(error),
-        })?;
+        let carried = carry(&engine.documents, &engine.functions, engine.writes, state)
+            .await
+            .map_err(|error| match error {
+                CarryError::Refused(refusal) => fatal(&refusal),
+                CarryError::Store(error) => retried(error),
+            })?;
         // A run in flight settles in the format it started in; the process
         // is carried from its next park.
         let Some(Carried {
@@ -380,14 +262,13 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
 /// A stored state carried to the next kernel version, before its document
 /// is published.
 struct Carried {
-    /// The state, its waits identified in the rewritten document and its
-    /// run, when it stands at a park, carried onto it.
+    /// The state, its waits identified in the rewritten document.
     state: KernelEngineState,
     input: KernelProcessInput,
     /// The rewritten document.
     document: Document,
-    /// Whether the run stands at a park and was carried; a run in flight
-    /// is checked and left as written.
+    /// Whether the process stands at a park; one in flight is carried
+    /// from its next.
     at_park: bool,
 }
 
@@ -403,17 +284,18 @@ impl From<KernelMigrationRefusal> for CarryError {
 }
 
 /// `state` carried to the kernel version that replaced the one it is
-/// written in; `None` when it is written in `writes` already or its
-/// document is in the newest version.
+/// written in; `None` when it is written in `writes` already, its
+/// document is in the newest version, or it stands on a run this build
+/// resumes in place. A process that stands on a run this build does not
+/// resume is refused: no migrator carries the run's pages.
 async fn carry(
     documents: &KernelDocuments,
     functions: &FunctionRegistry,
     writes: KernelVersion,
     state: &EngineState,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<Carried>, CarryError> {
     let undecodable = |message: String| KernelMigrationRefusal::State { message };
-    let (mut state, written) =
+    let (state, written) =
         advance::decode(writes, state).map_err(|error| undecodable(error.to_string()))?;
     if written == writes {
         return Ok(None);
@@ -430,53 +312,25 @@ async fn carry(
     let Some(plan) = plan_migration(&base, functions)? else {
         return Ok(None);
     };
-    let identify = |identity: &mut lash_kernel_doc::EffectIdentity| {
-        plan.rewritten
-            .effect_identity(&base, identity)
-            .map(|carried| *identity = carried)
-            .map_err(|refusal| KernelMigrationRefusal::Parked {
-                document: plan.from,
-                refusal,
-            })
-    };
     let at_park = matches!(state.phase, Phase::Parked);
-    if let Some(parked) = state.parked.take() {
-        // A run in flight is checked, so that a survey names one this build
-        // will refuse once it parks, and kept as written.
-        let whole = unsealed(&parked).map_err(undecodable)?;
-        let admitted: Vec<AdmittedWait> = state
-            .admissions
-            .values()
-            .map(|admission| admission.0.clone())
-            .collect();
-        let carried = migrate_run(&whole, &admitted, &base, &plan, limits)?;
-        if at_park {
-            // No recorded output holds the migrated run.
-            state.parked_by = None;
+    // A run is never carried: no migrator carries its pages. It runs on in
+    // the version it parked under on a build that interprets that version
+    // and holds every function its document reaches; on any other it is
+    // refused. A run in flight is checked too, so that a survey names one
+    // this build will refuse once it parks.
+    if state.parked.is_some() {
+        if validate_document(&base, functions).is_ok() {
+            return Ok(None);
         }
-        // Nor the admissions, whose identities move with the document.
-        state.issued_by.clear();
-        state.parked = Some(if at_park {
-            SealedRun(carried.sealed(
-                parked.0.owner().clone(),
-                &plan.rewritten.identity().to_string(),
-            ))
-        } else {
-            parked
-        });
+        return Err(KernelMigrationRefusal::Parked {
+            document: plan.from,
+            refusal: super::helpers::parked_not_carried(),
+        }
+        .into());
     }
-    for wait in state.waits.values_mut() {
-        let (Wait::Step { identity, .. } | Wait::Timer { identity, .. }) = wait;
-        identify(identity)?;
-    }
-    for delivery in &mut state.settled {
-        identify(&mut delivery.identity)?;
-    }
-    for admission in state.admissions.values_mut() {
-        identify(&mut admission.0.identity)?;
-    }
+    // A state that stands on no run holds no wait: every wait is a park's.
     Ok(Some(Carried {
-        at_park: at_park && state.parked.is_some(),
+        at_park,
         state,
         input,
         document: plan.rewritten.document,
@@ -495,9 +349,8 @@ pub async fn migration_refusal(
     documents: &KernelDocuments,
     functions: &FunctionRegistry,
     state: &EngineState,
-    limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Result<Option<KernelMigrationRefusal>, DocumentStoreError> {
-    match carry(documents, functions, KernelVersion::NEWEST, state, limits).await {
+    match carry(documents, functions, KernelVersion::NEWEST, state).await {
         Ok(_) => Ok(None),
         Err(CarryError::Refused(refusal)) => Ok(Some(refusal)),
         Err(CarryError::Store(error)) => Err(error),
@@ -626,14 +479,7 @@ pub async fn survey_kernel_processes(
             if state.format != advance::state_format(KernelVersion::NEWEST) {
                 survey.unmigrated += 1;
             }
-            let Some(refusal) = migration_refusal(
-                &documents,
-                functions,
-                &state,
-                backend.config().settings().graph_reads.execution(),
-            )
-            .await?
-            else {
+            let Some(refusal) = migration_refusal(&documents, functions, &state).await? else {
                 continue;
             };
             if let KernelMigrationRefusal::Document {

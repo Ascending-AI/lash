@@ -39,6 +39,27 @@ pub const LASH_VM: Image = Image {
     wal: std::borrow::Cow::Borrowed(include_bytes!("../fixtures/formats/lashvm/db-wal.gz")),
 };
 
+/// [`LASH_VM`] as the last whole-state build recorded it, before the
+/// persistent heap replaced the parked shape (FIG-6193): the refusal
+/// witness. Its process's parked run is a KernelWhole root.
+pub const PRE_HEAP_LASH_VM: Image = Image {
+    name: std::borrow::Cow::Borrowed("pre-heap-lashvm"),
+    db: std::borrow::Cow::Borrowed(include_bytes!("../fixtures/formats/pre-heap-lashvm/db.gz")),
+    wal: std::borrow::Cow::Borrowed(include_bytes!(
+        "../fixtures/formats/pre-heap-lashvm/db-wal.gz"
+    )),
+};
+
+/// [`SESSION`] as the last whole-state build recorded it (FIG-6193): the
+/// refusal witness of a cell parked as a KernelWhole graph root.
+pub const PRE_HEAP_SESSION: Image = Image {
+    name: std::borrow::Cow::Borrowed("pre-heap-session"),
+    db: std::borrow::Cow::Borrowed(include_bytes!("../fixtures/formats/pre-heap-session/db.gz")),
+    wal: std::borrow::Cow::Borrowed(include_bytes!(
+        "../fixtures/formats/pre-heap-session/db-wal.gz"
+    )),
+};
+
 /// The original 1.0 images, whose format sets the baseline coverage law checks.
 pub const BASELINE: [&Image; 2] = [&SESSION, &LASH_VM];
 

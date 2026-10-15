@@ -40,6 +40,7 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 lash-helper-labels = { workspace = true }
+lash-kernel-state = { workspace = true }
 lash-core-store = { workspace = true }
 thiserror = { workspace = true }
 blake3 = { workspace = true }
@@ -60,5 +61,6 @@ lash-helper-labels = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
+lash-kernel-state = { workspace = true }
 lash-kernel-lib = { workspace = true }
 blake3 = { workspace = true }

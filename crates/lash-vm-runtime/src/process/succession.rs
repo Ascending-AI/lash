@@ -4,10 +4,11 @@
 //! The successor's payload names the same entry and arguments over another
 //! document. Each library function the process's document lists and the
 //! successor's does not is replaced by the successor's function of the same
-//! name; [`plan_carry`] rewrites the document over those replacements and
-//! carries the parked run onto it, and the rewrite must be the successor's
-//! document, or no correspondence carries the run. The waits the run holds
-//! move to the identities the rewrite gives their effects. Their admissions
+//! name; [`plan_carry`] rewrites the document over those replacements, and
+//! the rewrite must be the successor's document, or no correspondence
+//! carries the process. A parked run is refused, typed: no migrator carries
+//! its pages (FIG-6193). The waits the state holds move to the identities
+//! the rewrite gives their effects. Their admissions
 //! keep the requests they recorded, so a step already admitted keeps its
 //! call and the match its admission recorded, and nothing is re-matched. A
 //! successor of the same document carries the state unchanged: only the env
@@ -17,10 +18,9 @@ use std::collections::BTreeMap;
 
 use lash_core::{EngineState, ProcessId, SuccessionError, SuccessorCarry};
 use lash_kernel_doc::{FunctionId, FunctionName};
-use lash_kernel_state::AdmittedWait;
 
 use super::helpers::{HelperAdoptionRefusal, plan_carry};
-use super::state::{KernelProcessInput, Phase, SealedRun, Wait};
+use super::state::{KernelProcessInput, Phase};
 use super::{KernelProcessEngine, advance};
 
 /// How the kernel engine carries a process onto a successor pair.
@@ -101,23 +101,11 @@ impl lash_core::EngineSuccession for KernelSuccession {
         let next = read(successor.document).await?;
         let replacements =
             replacements(&base, &next, &engine.functions).map_err(|refusal| refused(&refusal))?;
-        let whole = state
-            .parked
-            .as_ref()
-            .map(super::migrate::unsealed)
-            .transpose()
-            .map_err(undecodable)?;
-        let admitted: Vec<AdmittedWait> = state
-            .admissions
-            .values()
-            .map(|admission| admission.0.clone())
-            .collect();
         let carried = plan_carry(
             &base,
-            whole.as_ref().map(|whole| (whole, admitted.as_slice())),
+            state.parked.is_some(),
             &engine.functions,
             &replacements,
-            engine.workers.config().graph_reads.execution(),
         )
         .map_err(|refusal| refused(&refusal))?;
         if carried.rewritten.identity() != successor.document {
@@ -126,39 +114,8 @@ impl lash_core::EngineSuccession for KernelSuccession {
                 successor: successor.document,
             }));
         }
-        let identify = |identity: &mut lash_kernel_doc::EffectIdentity| {
-            carried
-                .rewritten
-                .effect_identity(&base, identity)
-                .map(|moved| *identity = moved)
-                .map_err(|refusal| {
-                    refused(&HelperAdoptionRefusal::Parked {
-                        document: carried.from,
-                        refusal,
-                    })
-                })
-        };
-        for wait in state.waits.values_mut() {
-            let (Wait::Step { identity, .. } | Wait::Timer { identity, .. }) = wait;
-            identify(identity)?;
-        }
-        for delivery in &mut state.settled {
-            identify(&mut delivery.identity)?;
-        }
-        for admission in state.admissions.values_mut() {
-            identify(&mut admission.0.identity)?;
-        }
-        let owner = state.parked.as_ref().map(|parked| parked.0.owner().clone());
-        // No recorded output holds the rewritten run or its admissions.
-        state.parked_by = None;
-        state.issued_by.clear();
-        state.parked = match (carried.parked, owner) {
-            (Some(run), Some(owner)) => Some(SealedRun(
-                run.sealed(owner, &carried.rewritten.identity().to_string()),
-            )),
-            _ => None,
-        };
-        // The run now pins the build's own helper release.
+        // A state that stands on no run holds no wait: every wait is a
+        // park's, and a parked run was refused above.
         advance::encode(&state, engine.writes)
             .map(|state| SuccessorCarry::Carried {
                 state: Some(state),

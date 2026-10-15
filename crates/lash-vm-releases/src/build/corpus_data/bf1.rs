@@ -44,6 +44,7 @@ pub(super) const DATA: &str = r####"{
 "f14e3f91f036c192f976ce78f297f6365da826b1e777062a7e3c2948cd1dcb7f":{"charge":6,"outcome":"ok {\"float\":\"1.4936311325796349e-53\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f14e9f2df320316eab764b8fafb9eb9c0d34cd4362844596ee9750a8924bbf4d":[{"text":"𸢞򿈏󶰫󮀳򏤳󊘁𮔍񏾇𛾸񙳇񀨾붪𭙑񺞽𐾲󡜭񹱃󹆻󐡘󩙈𵽤󠓚󺑓󟟛󭫴󮹁򯗝񆅶񯈴𕫐񺱥🹽򉻁񛮼𥿋񵎴󍀓󨍳򕒵󧕜񵂶󌎗񈇐󏋓񮇶񦶵􇠮񤥞򵉌򯏨򒈏󣞋񾼤𽿺򄋅𙤀򩈲󱖖󀘽"},{"int":"1430737964381128561"}],
 "f14fe621a7850c3cadaacf38110a577f9e9e8bf39a92a3e03a776ed86903886d":[{"list":[{"bool":true},{"float":"7.100739446621768e112"}]}],
+"f15022b0b1a271d014ced913ae784395035605255936826cce8b0e483fb7373d":{"charge":5,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f153217a6c1e4c524e0deb45a20459bb0bd63ebcb907fb9193aba2ecab4dcd7d":[{"float":"-5.122539425665073e132"},{"float":"-3.69952700975214e245"}],
 "f15f2395f36d658c0ff8d39ec518a5e522eaeda05dfbe7dfe6d9def200be48b7":[{"record":0},{"text":"12.5"},{"int":"1"}],
 "f15f7bed78687267354c809f6b60fef8c3ecea1418a352738892b10f7678272c":[{"list":0},{"text":"𭇰󊙓󭟟򒾰𓟯𣙀񪨬𼙸矴󂨛򚂏􋀎򡋮蝋종񛉔􁐰􄈘󥢜󏬭򕦛򰷨񩯳񔨄󅶐􀼫򶇵㑶󆮞񙓉펠󩠇񺳷󺩮􏂺󶿛򶇄񆈇򷤃𽬱𮫇􀃒𠉓񡲗􃅮񝲌񟀵󐂕󏯔𮼣🐽𲚕򠎘񚶟􅤄񞲶󞋯󼳪𒷳񯽨𽢖䢧񇗶銝򾣸񂜩򋬧򘶑󃫊񿠿񄠏󥭟񪨩򙜽󍕓񹀹𜅙𖲛񊊂񼭇񱄑񾵳򆁩𤫩񷈼򷇘𣄻򆮙󥬎񍸸񋮄񟿳𓫌󺮹􎪮󫓻􈥒𫣀􆖱𹴺𫺀󀟽񎲲𙟫򪰄񸡜󐑌𜝄痊򃶡񌦚񺊉򫆌򔟯򗊠"}],

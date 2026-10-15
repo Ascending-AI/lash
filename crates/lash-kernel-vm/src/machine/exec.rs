@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorValue, Measure, ObjectId, TaskId, Value};
+use lash_kernel_doc::{EntityId, Measure, TaskId, Value};
 use lash_kernel_exec::LocalRef;
 
 use super::ops::Reg;
@@ -13,9 +13,12 @@ use super::{
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
-use crate::heap::{Key, Obj, Table, value_bytes};
-use crate::interface::{Bound, Host, Outcome};
+use crate::heap::value_bytes;
+use crate::interface::{Bound, Host};
 use crate::observe::Event;
+use lash_kernel_doc::NativeHeap;
+use lash_kernel_doc::heap::HeapFault;
+use lash_kernel_state::paged::{FrameRecord, HeapLifecycle, ObjectInit, SemanticHeap};
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
@@ -25,7 +28,7 @@ pub(super) struct Call<'a> {
     /// How many arguments there are.
     pub(super) count: usize,
     /// The cells of the variables a closure shares, in its code's order.
-    pub(super) captures: &'a [ObjectId],
+    pub(super) captures: &'a [EntityId],
     /// The library function the code is the body of.
     pub(super) library: Option<LibId>,
     /// The call sits inside an expression and runs to its end there.
@@ -47,7 +50,7 @@ impl<'a> Call<'a> {
         }
     }
 
-    pub(super) fn sharing(mut self, captures: &'a [ObjectId]) -> Self {
+    pub(super) fn sharing(mut self, captures: &'a [EntityId]) -> Self {
         self.captures = captures;
         self
     }
@@ -69,6 +72,24 @@ impl<'a> Call<'a> {
 }
 
 impl KernelMachine {
+    /// Literals remain admitted code data until the operation reads them.
+    /// Long immutable values enter canonical payload pages at that read.
+    pub(super) fn literal(&mut self, literal: &lash_kernel_doc::Literal) -> Eval<Value> {
+        use lash_kernel_doc::Literal;
+        Ok(match literal {
+            Literal::Null => Value::Null,
+            Literal::Absent => Value::Absent,
+            Literal::Bool(value) => Value::Bool(*value),
+            Literal::Float(value) => Value::Float(*value),
+            Literal::Int(value) => Value::Int(self.heap.int(value.clone())?),
+            Literal::Text(value) => Value::Text(self.heap.text(value)?),
+            Literal::Bytes(value) => Value::Bytes(self.heap.bytes(value.as_slice())?),
+            Literal::Function(name) => Value::Function(self.heap.text(name.as_str())?),
+        })
+    }
+}
+
+impl KernelMachine {
     /// Runs the next statement of the task's top frame, or leaves the
     /// block that has none left.
     pub(super) fn advance(
@@ -79,8 +100,10 @@ impl KernelMachine {
     ) -> Eval<Completion> {
         let frame = self
             .tasks
-            .get_mut(task.0 as usize)
-            .and_then(|task| task.frames.last_mut())
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("a running task is missing"))?
+            .frames
+            .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
         let code = frame.code;
@@ -146,7 +169,7 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         if let Some(Control::Block { block, .. }) = frame.control.pop() {
             for at in &exe.block(block).declares {
-                frame.slots[*at as usize] = SlotState::Empty;
+                frame.set_slot(*at, SlotState::Empty)?;
             }
         }
         Ok(())
@@ -209,6 +232,12 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
+            if let Completion::Return(value) | Completion::Throw(value) = &mut departure {
+                *value = self
+                    .heap
+                    .canonical_value(value.clone())
+                    .map_err(|error| self.heap_halt(error))?;
+            }
             match &departure {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it
@@ -253,7 +282,7 @@ impl KernelMachine {
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
                             Ok(_) => Completion::Normal,
-                            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+                            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
                             Err(Interrupt::Halt(halt)) => return Err(halt),
                         };
                     }
@@ -299,15 +328,15 @@ impl KernelMachine {
         exe: &Executable,
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
-        let Some(frame) = self.task(task)?.frames.pop() else {
+        let Some(frame) = self.task(task)?.frames.pop()? else {
             return Err(fault("a task with no frame returned"));
         };
-        self.refresh_charging(task, exe);
+        self.refresh_charging(task, exe)?;
         if let Some(call) = &frame.library {
             let evaluates = self.charging && exe.lib(call.lib).native;
             let units = self.in_formula(call.lib, evaluates, |machine| {
-                machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
-            });
+                machine.call_units_tree(exe, call.lib, &call.args, result.as_ref().ok())
+            })?;
             self.charge_call(exe, call.lib, units)?;
         }
         self.observe(Event::Pop { task });
@@ -332,7 +361,7 @@ impl KernelMachine {
                         self.take_edge_of(task, exe, stmt)?;
                         None
                     }
-                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
+                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(*value)),
                     Err(Interrupt::Halt(halt)) => return Err(halt),
                 }
             }
@@ -350,16 +379,16 @@ impl KernelMachine {
         lib: LibId,
         args: &[Value],
         result: Option<&Value>,
-    ) -> u64 {
+    ) -> Result<u64, Halt> {
         // Inside the body of a function with a native implementation
         // nothing is charged (`K-CHG-007`), so the formula, whose deep sizes
         // walk whole graphs, is not evaluated.
         if !self.charging {
-            return 0;
+            return Ok(0);
         }
         let function = exe.lib(lib);
         if !function.native {
-            return 0;
+            return Ok(0);
         }
         self.formula(&function.charge, args, result)
     }
@@ -377,38 +406,82 @@ impl KernelMachine {
 
     /// Keeps an ended frame's vectors for the next frame.
     fn recycle(&mut self, frame: Frame) {
-        let Frame {
-            mut slots,
-            mut control,
-            library,
-            ..
-        } = frame;
-        slots.clear();
+        let Frame { mut control, .. } = frame;
         control.clear();
-        let mut args = library.map(|call| call.args).unwrap_or_default();
-        args.clear();
-        self.storage.frames.push(FrameStorage {
-            slots,
-            control,
-            args,
-        });
+        self.storage.frames.push(FrameStorage { control });
     }
 
-    pub(super) fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> u64 {
-        plan.evaluate(|source, measure| {
+    fn call_units_tree(
+        &self,
+        exe: &Executable,
+        lib: LibId,
+        args: &super::Tree<Value>,
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        if !self.charging || !exe.lib(lib).native {
+            return Ok(0);
+        }
+        self.formula_source(
+            &exe.lib(lib).charge,
+            |index| {
+                args.get(
+                    &lash_kernel_state::paged::directory::ordinal_key(index as u64),
+                    &self.heap.access,
+                )
+            },
+            result,
+        )
+    }
+
+    pub(super) fn formula(
+        &self,
+        plan: &Plan,
+        args: &[Value],
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        self.formula_source(plan, |index| Ok(args.get(index).cloned()), result)
+    }
+
+    fn formula_source(
+        &self,
+        plan: &Plan,
+        mut argument: impl FnMut(usize) -> Result<Option<Value>, HeapFault>,
+        result: Option<&Value>,
+    ) -> Result<u64, Halt> {
+        let mut fault = None;
+        let units = plan.evaluate(|source, measure| {
+            // Formula arithmetic is pure; after the first failed measurement
+            // no subsequent measurement may read the heap.
+            if fault.is_some() {
+                return 0;
+            }
             let value = match source {
-                Source::Arg(index) => args.get(index),
-                Source::Result => result,
+                Source::Arg(index) => match argument(index) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        fault = Some(error);
+                        return 0;
+                    }
+                },
+                Source::Result => result.cloned(),
                 Source::Nothing => None,
             };
-            match (value, measure) {
-                (None, _) => 0,
+            let amount = match (value.as_ref(), measure) {
+                (None, _) => Ok(0),
                 (Some(value), Measure::Size) => size(&self.heap, value),
                 (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
                 (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
-                (Some(value), Measure::Magnitude) => magnitude(value),
+                (Some(value), Measure::Magnitude) => Ok(magnitude(value)),
+            };
+            match amount {
+                Ok(units) => units,
+                Err(error) => {
+                    fault = Some(error);
+                    0
+                }
             }
-        })
+        });
+        fault.map_or(Ok(units), |error| Err(Halt::Heap(error)))
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
@@ -421,11 +494,11 @@ impl KernelMachine {
         call: Call<'_>,
     ) -> Eval<()> {
         let Call {
+            library,
             code: code_id,
             args: base,
             count: given,
             captures,
-            library,
             inline,
             awaited_by,
         } = call;
@@ -446,39 +519,50 @@ impl KernelMachine {
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.reserve(super::FRAME_BYTES.saturating_add(code.slots.len() as u64 * 8))?;
-        let FrameStorage {
-            mut slots,
-            mut control,
-            mut args,
-        } = self.storage.frames.pop().unwrap_or_default();
-        slots.resize(code.slots.len(), SlotState::Empty);
+        self.reserve(super::FRAME_BYTES)?;
+        let FrameStorage { mut control, .. } = self.storage.frames.pop().unwrap_or_default();
         control.push(Control::Block {
             block: code.body,
             next: 0,
         });
         let mut frame = Frame {
             code: code_id,
-            slots,
+            record: FrameRecord::fresh(lash_kernel_state::paged::SiteRef::new(
+                &code.site.child(0),
+                &self.heap.access,
+            )?),
+            access: self.heap.access.clone(),
+            exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
-            library: library.map(|lib| {
-                // Only a native implementation's formula, charged when the
-                // call ends, reads them (`K-CHG-007`).
-                if exe.lib(lib).native {
-                    args.extend_from_slice(&self.regs[base..base + given]);
-                }
-                LibraryCall { lib, args }
-            }),
+            library: None,
             inline,
+            published: None,
         };
+        if let Some(lib) = library {
+            let mut args = super::Tree::new(true);
+            if exe.lib(lib).native {
+                for at in 0..given {
+                    let value = self
+                        .heap
+                        .canonical_value(self.regs[base + at].clone())
+                        .map_err(|error| self.heap_halt(error))?;
+                    args.write(
+                        lash_kernel_state::paged::directory::ordinal_key(at as u64),
+                        value,
+                        &self.heap.access,
+                    )?;
+                }
+            }
+            frame.library = Some(LibraryCall { lib, args });
+        }
         for (capture, cell) in code.captures.iter().zip(captures) {
-            frame.slots[capture.inner_at as usize] = SlotState::Cell(*cell);
+            frame.set_slot(capture.inner_at, SlotState::Cell(*cell))?;
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);
         }
-        self.task(task)?.frames.push(frame);
+        self.task(task)?.frames.push(frame)?;
         self.observe(Event::Push {
             task,
             code: code_id,
@@ -489,6 +573,35 @@ impl KernelMachine {
                 false => Value::Absent,
             };
             self.bind(task, param.at, param.shared, value)?;
+        }
+        if !code.free.is_empty() {
+            self.bind_captures(task, code)?;
+        }
+        Ok(())
+    }
+
+    /// Binds each free name of a saved function's code to a fresh instance
+    /// of the capture its session holds for it: every call its own family,
+    /// none sharing an identity with another call's (`K-SES-004`). A name
+    /// the session holds no capture of stays unbound.
+    fn bind_captures(&mut self, task: TaskId, code: &crate::compile::Code) -> Eval<()> {
+        let lash_kernel_doc::Unit::Function(function) = &code.site.unit else {
+            return Ok(());
+        };
+        let saved =
+            super::Tree::<lash_kernel_state::paged::FunctionRecord>::of_keyed(&self.functions)
+                .get(
+                    &lash_kernel_state::paged::metadata::metadata_key(function),
+                    &self.heap.access,
+                )?;
+        let Some(saved) = saved else {
+            return Ok(());
+        };
+        for (name, local) in &code.free {
+            if let Some(frozen) = saved.captures.get(name) {
+                let value = self.heap.instantiate(frozen)?;
+                self.bind(task, local.at, local.shared, value)?;
+            }
         }
         Ok(())
     }
@@ -502,13 +615,17 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
+        let value = self
+            .heap
+            .canonical_value(value)
+            .map_err(|error| self.heap_halt(error))?;
         let state = if shared {
-            SlotState::Cell(self.alloc(Obj::Variable(value))?)
+            SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {
             self.reserve(value_bytes(&value))?;
             SlotState::Value(value)
         };
-        self.frame(task)?.slots[at as usize] = state;
+        self.frame(task)?.set_slot(at, state)?;
         Ok(())
     }
 
@@ -523,8 +640,8 @@ impl KernelMachine {
                     at: local.at,
                 },
             ),
-            Var::Session(name) => match self.session.get(name) {
-                Some(value) => Ok(value.clone()),
+            Var::Session(name) => match self.session_get(name)? {
+                Some(value) => Ok(value),
                 None => unbound(name),
             },
             Var::Unbound(name) => unbound(name),
@@ -534,7 +651,7 @@ impl KernelMachine {
     /// Copies a value out of the run, charging its deep size
     /// (`K-EFF-002`, `K-CHG-002`).
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
-        self.charge(deep_size(&self.heap, value))?;
+        self.charge(deep_size(&self.heap, value)?)?;
         Ok(copy_out(&self.heap, value)?)
     }
 
@@ -548,39 +665,44 @@ impl KernelMachine {
     ) -> Eval<Value> {
         match incoming {
             Incoming::Value(value) => Ok(value),
-            Incoming::Raise(value) => Err(Interrupt::Raise(value)),
-            Incoming::Join(joined) => self.join_result(joined),
-            Incoming::Outcome(answered) => self.resume_outcome(task, exe, answered.outcome),
+            Incoming::Raise(value) => Err(Interrupt::raised(value)),
+            Incoming::Joined(joined) => self.join_result(joined),
+            Incoming::Outcome(wait) => self.resume_outcome(task, exe, wait),
         }
     }
 
-    fn resume_outcome(&mut self, task: TaskId, exe: &Executable, outcome: Outcome) -> Eval<Value> {
-        match outcome {
-            Outcome::Elapsed => Ok(Value::Null),
-            Outcome::Failed(error) => {
-                let datum = lash_kernel_doc::Datum::Error(Box::new(error));
-                Err(Interrupt::Raise(self.decode(
-                    exe,
-                    &datum,
-                    &lash_kernel_doc::Type::Any,
-                )?))
+    fn resume_outcome(
+        &mut self,
+        _task: TaskId,
+        _exe: &Executable,
+        wait: crate::interface::WaitId,
+    ) -> Eval<Value> {
+        let key = lash_kernel_state::paged::directory::ordinal_key(wait.0);
+        let pending = self
+            .waits
+            .get(&key, &self.heap.access)?
+            .ok_or_else(|| fault("a resuming outcome has no wait"))?;
+        let lash_kernel_state::paged::WaitPhase::Committed(outcome) = pending.phase else {
+            return Err(fault("a resuming outcome is not committed").into());
+        };
+        use lash_kernel_state::paged::CommittedOutcomeRecord;
+        let (value, failed) = match outcome {
+            CommittedOutcomeRecord::Elapsed => (Value::Null, false),
+            CommittedOutcomeRecord::Rejected(frozen) => (self.heap.instantiate(&frozen)?, true),
+            CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
+                let charge = self.heap.frozen_charge(&frozen)?;
+                let value = self.heap.instantiate(&frozen)?;
+                self.charge(charge)?;
+                (value, matches!(outcome, CommittedOutcomeRecord::Failed(_)))
             }
-            Outcome::Completed(datum) => {
-                let awaiting = self.frame(task)?.awaiting;
-                let ty = awaiting.and_then(|stmt| match &exe.stmt(stmt).form {
-                    Form::Action(action) => match &action.kind {
-                        crate::compile::ActionKind::Perform { effect, result, .. } => {
-                            Some((effect, result))
-                        }
-                        _ => None,
-                    },
-                    _ => None,
-                });
-                match ty {
-                    Some((effect, ty)) => self.decode_result(exe, &datum, ty, effect),
-                    None => Err(fault("an outcome arrived at no `perform`").into()),
-                }
-            }
+        };
+        // run cannot seal inside a statement; installation and consumption
+        // therefore publish together at the statement's safe point.
+        self.waits.remove(&key, &self.heap.access)?;
+        if failed {
+            Err(Interrupt::raised(value))
+        } else {
+            Ok(value)
         }
     }
 
@@ -590,11 +712,11 @@ impl KernelMachine {
     pub(super) fn join_result(&mut self, joined: TaskId) -> Eval<Value> {
         let joined = self.task(joined)?;
         match &joined.state {
-            TaskState::Ended(Ok(value)) => Ok(value.clone()),
-            TaskState::Ended(Err(value)) => {
+            TaskState::Ended(super::EndedTask::Returned(value)) => Ok(value.clone()),
+            TaskState::Ended(super::EndedTask::Raised(value)) => {
                 let value = value.clone();
                 joined.observed = true;
-                Err(Interrupt::Raise(value))
+                Err(Interrupt::raised(value))
             }
             _ => Err(fault("a join resumed before its task ended").into()),
         }
@@ -631,7 +753,7 @@ impl KernelMachine {
         what: &str,
     ) -> Eval<Value> {
         let decoder = lash_kernel_doc::Decoder {
-            max_depth: self.heap.value_depth,
+            max_depth: self.limits.value_depth(),
             policy: self.program.document.manifest.numbers,
             declared: &|name| exe.declared.contains_key(name),
         };
@@ -644,8 +766,10 @@ impl KernelMachine {
                 );
             }
         };
-        let value = self.materialise(&decoded)?;
-        self.charge(deep_size(&self.heap, &value))?;
+        let frozen = self.heap.freeze_datum(&decoded)?;
+        let charge = self.heap.frozen_charge(&frozen)?;
+        let value = self.heap.instantiate(&frozen)?;
+        self.charge(charge)?;
         Ok(value)
     }
 
@@ -668,80 +792,5 @@ impl KernelMachine {
             Ran::Done => Ok(id),
             _ => Err(fault("an action's statement did not complete").into()),
         }
-    }
-
-    /// Builds a decoded datum as a fresh graph (`K-EFF-003`).
-    pub(super) fn materialise(&mut self, datum: &Datum) -> Eval<Value> {
-        let invalid = || -> Halt { fault("a decoded datum holds an undecoded number") };
-        Ok(match datum {
-            Datum::Null => Value::Null,
-            Datum::Absent => Value::Absent,
-            Datum::Bool(flag) => Value::Bool(*flag),
-            Datum::Int(integer) => Value::Int(integer.clone()),
-            Datum::Float(float) => Value::Float(*float),
-            Datum::Number(_) => return Err(invalid().into()),
-            Datum::Text(text) => Value::text(text.as_str()),
-            Datum::Bytes(bytes) => Value::Bytes(bytes.clone()),
-            Datum::Timestamp(timestamp) => Value::Timestamp(timestamp.clone()),
-            Datum::Function(name) => Value::Function(name.clone()),
-            Datum::Handle(handle) => Value::Handle(Arc::new(handle.clone())),
-            Datum::Error(error) => Value::Error(Arc::new(ErrorValue {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: self.materialise(&error.data)?,
-            })),
-            Datum::Tuple(items) => {
-                let tuple = Value::Tuple(self.materialise_all(items)?.into());
-                self.pin_value(&tuple)?;
-                tuple
-            }
-            Datum::List(items) => {
-                let items = self.materialise_all(items)?;
-                Value::List(self.alloc(Obj::List(items))?)
-            }
-            Datum::Set(items) => {
-                let mut table = Table::default();
-                for member in self.materialise_all(items)? {
-                    table.insert(result_key(&member)?, member, Value::Null);
-                }
-                Value::Set(self.alloc(Obj::Set(table))?)
-            }
-            Datum::Map(entries) => {
-                let mut table = Table::default();
-                for (entry_key, value) in entries {
-                    let entry_key = self.materialise(entry_key)?;
-                    let value = self.materialise(value)?;
-                    table.insert(result_key(&entry_key)?, entry_key, value);
-                }
-                Value::Map(self.alloc(Obj::Map(table))?)
-            }
-            Datum::Record(fields) => {
-                let mut record: Vec<(String, Value)> = Vec::with_capacity(fields.len());
-                for (name, value) in fields {
-                    let value = self.materialise(value)?;
-                    match record.iter_mut().find(|(field, _)| field == name) {
-                        Some(field) => field.1 = value,
-                        None => record.push((name.clone(), value)),
-                    }
-                }
-                Value::Record(self.alloc(Obj::Record(record))?)
-            }
-        })
-    }
-
-    fn materialise_all(&mut self, items: &[Datum]) -> Eval<Vec<Value>> {
-        items.iter().map(|item| self.materialise(item)).collect()
-    }
-}
-
-/// The key a decoded member is; a result whose key is not a legal key
-/// does not fit (`K-EFF-007`).
-fn result_key(value: &Value) -> Eval<Key> {
-    match Key::of(value) {
-        Some(key) => Ok(key),
-        None => raise(
-            "effect_result",
-            "the result has a key that is not a legal key",
-        ),
     }
 }

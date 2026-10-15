@@ -105,6 +105,28 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
     }
 }
 
+/// A cell resumed on another owner after its first save, whose `Once`
+/// call that owner settles `Interrupted`, ends Answered (FIG-6315). The
+/// injected interruption ends the cell with an error and no carry, and
+/// its end, recorded over the cell's root with the session as the cell
+/// left it, publishes that session's pages out of the turn's spool. The
+/// turn's next prompt reads them under a lease on the cell's ended root,
+/// which stays the session's until the commit that consumes the cell's
+/// answer.
+#[tokio::test]
+async fn a_cell_resumed_after_its_first_save_and_settled_interrupted_ends_its_turn_answered() {
+    let report = Matrix::new()
+        .faults(&[Fault::CommitThenAbort])
+        .labels(&[CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT])
+        .run_test(|| Deployment::new(Case::Cell, 0, Dialect::SqliteMemory))
+        .await;
+    assert!(
+        !report.cells.is_empty(),
+        "the cell's first save was not cut"
+    );
+    report.assert_held();
+}
+
 /// A stale-epoch session command commits nothing (FIG-5230): the session
 /// actor writes each command's head commit on its fenced transaction under
 /// `session.command`, so a zombie owner whose write reaches the store only

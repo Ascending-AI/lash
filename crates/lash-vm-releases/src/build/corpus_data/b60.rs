@@ -10,6 +10,7 @@ pub(super) const DATA: &str = r####"{
 "600754bc80826ebf31161c0d3846dd291f00d8abc11df3d5b108b87944ed7478":[{"list":1},{"int":"2"},{"int":"-3"}],
 "6007b6d2997effd71539c4582edcecca0a83da4d090f5ff96ec0e338c54c6270":[{"list":[{"bool":true},{"float":"1.486038244896273e-180"},{"bool":true},{"text":"򋕵𸕟񀖕哞񵯷򗢀󷹱󣛍􀧠񫿳󳉌򜬨򓪾𦅋𔽉􆎗󶒐񞹙񭏅󪴢񞳸󐼡󯅿񭽝禣𰆐󿦓򏒠񻵉􆩳𻩧󱃓񊈲񹯶񝍁񬂧𛓦󲈏𫞋􇰤𗗜􎠷񵀧󉍇񓖡򔦊"},{"bool":false}]},{"list":[{"list":0},"null","null",{"bool":true},{"bool":false},{"text":"󫝃򩋭𿺈񵕵򻺟𜘢𭄮񠤌󡈞􆞺򄇵􇠶򺕆󾶌󂍗􎳑򈥈󔙚󬱖󧡎󡌾󀢘󟪉򲌼񆁺򔨺琮􁽆򂓸󉪱񿇄񕜧󘡉񼺏򾣒񞆃󨲀򤖙񀭒񼯄󕵓朩󧖧󋢌󞃽򘙼񀱰񘡨񏽸򩂆쀧񰁧񸖧񇵬𓚖󊝻􅫵󲌀򚍆򐦀𚾓𱈌𣄨򽝊򩉤󌉀􁯄򼃳򩶲𴘉"}]}],
 "6008774ed220e12f2fc6cc2534f99f52a3af4e4c09e7ae98dd15b89e7c38454e":{"charge":3,"outcome":"ok {\"float\":\"4.097599987026866e-303\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"60090c5fe3d9147306cf86f5684f2ec04fcebbcf5deaad819ddf595af2376bcc":{"charge":16419,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "600b43c086d07b9d6c36756d39c041ff4c80cb09aa5594eb6a42e25aae316dba":[{"int":"-3243689867119763795"}],
 "600bbb1cb1aa29b5d12c914e5858dde119c0c065a4d92c221b7513877bd08cce":[{"record":8},{"text":"𱗰򍷛􉺠񟮝򵌪􈔌򓬆򊋰󖾵󘠪󾖺󓻱򯳌娵迁򫪞񻩫󫟟򙝰񉁞󴛾򌇳򟂰󑵑򅴫󮭑򟣇𚣶򂐧𺶯򂌴􏙲򷌞󴩸􍳬򓉕򑽱򋌏𐮩󏟾򱖑𢿺󮔥𒶯𘘴󞨸􂯬𥪻󬋎򬓋􆦂𹿑񹪮򑈛"},{"text":"񡞾∑򄸕񨧉򶚚񒛗񃅚𜶸𰘣򸋯󑸪񻂖󻙷񕃛򾲺򞯣򮃴񞰵𯂭򔸌񔎐攗򗘝򯖱򳨚𚚷𸘺򘮶󷌡𽮇凰󦥓𨕁𨐋׃񢤈򯽚𲀤񺅤󔄦󐀤򫄤򔭆񑾈򣆷𻠔񜹤򛳸􄶁򷍚򐔼󠀶𲮶񛙡򰝍􁰃𴛻򬢶𔺧󲷺򆔡𦮫񡖼󭒗󷃾󟮟򞶨񢁳񏫳󹿆􏝹󣃗񺭶𚖠򲋫󖱮񬜶񻄸𢑚򵢒㺣򟈞񄹺򴉦񉵢𶃘򍀙򩏹󷂞󵧿񯒌󑱥򻌝򳴻񼶁󹉚󚿾𤼡񿿿󈏀򊳇🉞󓸺󈣆򖉗񜅓󒘑񦀝򂖝􊂖򏉗򖡳𙙣󇾏𮢰󭍡󛪇𵀲𚠒󉟂񡑭󡌅򰹣򱒿𶥖"}],
 "600c83cf82ef066ae5f3fef3c32eebc66d2ca1e1501bc3867dc22b3eba6b25d6":{"charge":70,"outcome":"ok {\"float\":\"-6.52899667352031e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

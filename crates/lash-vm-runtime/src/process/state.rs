@@ -2,21 +2,21 @@
 //! stands on.
 //!
 //! The machine parks; the engine commits (kernel spec §9 rule 4). The state
-//! holds the run as the machine exported it at its last park, as sealed
-//! checkpoint graph state (a KernelWhole), the admission of every wait the
-//! run holds (the state holds a wait as its identity alone), every wait
-//! that park left open with the step or timer that answers it, and the
+//! names the run as the machine sealed it at its last park, by its
+//! persistent-heap CheckpointRoot page (FIG-6193), the admission of every
+//! wait the run holds (the state holds a wait as its identity alone), every
+//! wait that park left open with the step or timer that answers it, and the
 //! outcomes that settled while a run was in flight. It is committed with
 //! the admission of the steps a park asked for, in one `process.advance`
-//! transaction.
+//! transaction, whose execution root owns the page from then on.
 
 use std::collections::BTreeMap;
 
 use lash_core::StepName;
+use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::{Datum, DocumentId, EffectIdentity, Name};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_client::wire::OutcomeWire;
-use lash_vm_protocol::{PayloadKind, SealedGraphState};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The engine step that runs the machine from its saved state to its next
@@ -95,29 +95,34 @@ impl KernelProcessDefinition {
     }
 }
 
-/// A parked run as the engine's JSON state carries it: its sealed graph
-/// state in the wire encoding, as base64 text.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SealedRun(pub(crate) SealedGraphState);
-
-impl Serialize for SealedRun {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let payload = lash_vm_client::wire::encode(PayloadKind::ParkedRun, &self.0)
-            .map_err(serde::ser::Error::custom)?;
-        serializer.serialize_str(&BASE64.encode(payload.0))
-    }
+/// A parked run as the engine's state names it: the CheckpointRoot page a
+/// `kernel_run` published with its outcome, and the kernel version its
+/// header states.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ParkedPage {
+    #[serde(with = "page_hex")]
+    pub(crate) root: NodeId,
+    pub(crate) kernel: u32,
 }
 
-impl<'de> Deserialize<'de> for SealedRun {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+/// A page's identity as JSON text: its lowercase hex.
+mod page_hex {
+    use super::{Deserialize as _, Deserializer, NodeId, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        page: &NodeId,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&page.to_hex())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<NodeId, D::Error> {
         let text = String::deserialize(deserializer)?;
-        let bytes = BASE64.decode(text).map_err(serde::de::Error::custom)?;
-        lash_vm_client::wire::decode(
-            PayloadKind::ParkedRun,
-            &lash_vm_protocol::EncodedPayload(bytes),
-        )
-        .map(Self)
-        .map_err(serde::de::Error::custom)
+        NodeId::from_hex(&text)
+            .ok_or_else(|| serde::de::Error::custom("a page identity is 64 lowercase hex"))
     }
 }
 
@@ -214,10 +219,10 @@ pub(crate) enum Phase {
 #[serde(deny_unknown_fields)]
 pub(crate) struct KernelEngineState {
     pub(crate) payload: serde_json::Value,
-    /// The run as the machine exported it at its last park; `None` before
+    /// The run as the machine sealed it at its last park; `None` before
     /// the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<SealedRun>,
+    pub(crate) parked: Option<ParkedPage>,
     /// The admission of every wait the parked run holds, by the machine's
     /// wait id, until a committed run has been handed its outcome.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -251,7 +256,7 @@ pub(crate) struct KernelEngineState {
 pub(crate) struct KernelRunInput {
     pub(crate) payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) parked: Option<SealedRun>,
+    pub(crate) parked: Option<ParkedPage>,
     /// The admission of each wait the parked run holds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) admissions: Vec<Admission>,
@@ -328,24 +333,10 @@ pub(crate) fn outcome_digest(outcome: &OutcomeWire) -> String {
 pub(crate) enum StartedFrom {
     /// The document's entry: the process's first segment.
     Entry,
-    /// The state `kernel_run.{run}` parked with, whose graph root is
-    /// `root` (hex): that output holds it, so it is not recorded twice.
+    /// The page `kernel_run.{run}` parked with, whose root is `root`
+    /// (hex): that output's record owns it while the journal retains it,
+    /// and a replay reads it under that record.
     Output { run: u64, root: String },
-    /// A state no recorded output holds, as a successor carry or a
-    /// migration rewrote it.
-    Whole(SealedRun),
-}
-
-impl StartedFrom {
-    /// The hex of `run`'s graph root, which [`Self::Output`] names.
-    pub(crate) fn root_of(run: &SealedRun) -> String {
-        run.0
-            .root()
-            .id
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
-    }
 }
 
 /// What a segment recorded for observation at `observe: counts`: its
@@ -411,10 +402,11 @@ impl Issued {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum KernelRunOutput {
-    /// The run parked: its exported state, the waits it asked for since
-    /// its last park and the waits it withdrew.
+    /// The run parked: the page it sealed, which the step's outcome
+    /// published and owns, the waits it asked for since its last park and
+    /// the waits it withdrew.
     Parked {
-        state: SealedRun,
+        state: ParkedPage,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

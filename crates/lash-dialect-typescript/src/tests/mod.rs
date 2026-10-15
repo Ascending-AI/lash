@@ -24,6 +24,7 @@ mod machine;
 mod numeric_helpers;
 mod operands;
 mod package;
+mod pages;
 mod positional;
 mod printer;
 mod printer_corpus;

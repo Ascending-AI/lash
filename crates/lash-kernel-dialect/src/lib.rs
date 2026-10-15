@@ -30,13 +30,15 @@ pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
     EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
 };
+/// The persistent heap saved functions are written to and read from.
+pub use lash_kernel_state::{WaitId, paged};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
 pub use saved::{
-    Bundle, BundleBody, BundleRefusal, CaptureRefusal, Constant, DOCUMENT_NODE_KIND,
-    FUNCTION_BUNDLE_NODE_KIND, Kept, Left, MemberBody, NotSaved, SavedFunction, Token, Unusable,
-    closure_of, function_reference, install, save, token_of,
+    Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
+    FUNCTION_BUNDLE_NODE_KIND, InstalledFunction, Kept, Left, MemberBody, NotSaved, SavedFunction,
+    Token, Unusable, closure_of, function_reference, install, save, token_of,
 };
 pub use source::{SourceError, define_functions};
 pub use written::{CallParam, CallShape, Written, closure_site, written_table};

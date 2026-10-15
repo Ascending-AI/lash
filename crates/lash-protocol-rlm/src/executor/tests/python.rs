@@ -75,6 +75,8 @@ async fn failures_keep_their_causes_and_name_the_work() {
     ).await;
     assert!(first.error().is_none(), "{:?}", first.error());
     assert_eq!(first.bindings.not_carried, ["render_invoice"]);
+    // The turn's phase commit adopts what the parked cell committed.
+    crate::testing::commit_working(&mut state, &host).await;
     let second = run_cell(
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
@@ -222,6 +224,8 @@ async fn committed_cells_report_binding_changes() {
             ..Default::default()
         }
     );
+    // The turn's phase commit adopts what the parked cell committed.
+    crate::testing::commit_working(&mut state, &host).await;
     let failed = run_cell(
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:2", tools.clone()),
@@ -366,27 +370,22 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     let mut source = state();
     let code = "rate = 3\nasync def scale(value: int = 14) -> int:\n    return value * rate";
     saved_cell(&mut source, &host, "exec-code:0", tools.clone(), code).await;
-    let held = source.bindings().held_functions();
+    let held = source.lowering_functions();
     let written = held[&lash_kernel_doc::Name::new("scale")]
-        .function
         .written
         .as_ref()
         .expect("Python metadata");
     assert_eq!(written.signature, "async (value: int = 14) -> int");
     assert!(written.call.as_ref().expect("call shape").is_async);
-    source
-        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-        .expect("snapshot");
-    source.acknowledge_execution_state_capture();
+    crate::testing::commit_working(&mut source, &host).await;
     let saved = source
         .hydrated_execution_graph()
         .await
         .expect("saved state");
-    host.install(&saved).await;
     drop(source);
     let mut restored = state();
     restored
-        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Final)
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
         .expect("cold restore");
     let called = saved_cell(
         &mut restored,
@@ -399,50 +398,9 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     assert_eq!(finish_of(&called), serde_json::json!([42, 21]));
 }
 
-/// FIG-5778: seeding is an explicit creation input, and the new session
-/// holds no data of the old session; a lambda keeps its keyword signature.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_new_session_created_with_a_saved_function_calls_it() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let mut source = state();
-    saved_cell(
-        &mut source,
-        &host,
-        "exec-code:0",
-        tools.clone(),
-        "greeting = 'hello'\ngreet = lambda name='lash': f'{greeting}, {name}'",
-    )
-    .await;
-    let functions = source.saved_functions();
-    assert_eq!(
-        functions["greet"]["written"]["call"]["params"][0]["name"], "name",
-        "{}",
-        functions["greet"]
-    );
-    drop(source);
-    let mut seeded = state();
-    seeded
-        .seed_functions(&functions, &std::collections::BTreeSet::new())
-        .await
-        .expect("seed functions");
-    assert_eq!(seeded.binding_names().count(), 0);
-    let called = saved_cell(
-        &mut seeded,
-        &host,
-        "exec-code:1",
-        tools,
-        "await control_finish([greet(), greet(name='world')])",
-    )
-    .await;
-    assert_eq!(
-        finish_of(&called),
-        serde_json::json!(["hello, lash", "hello, world"])
-    );
-}
-
-/// FIG-5778: installing a function validates its required effects in the
-/// calling environment before any code in the cell runs.
+/// FIG-5778: a saved function's required effects are checked in the
+/// calling environment before any code in the cell runs: restored into a
+/// session that does not offer a tool it calls, it is refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     let host = open_host().await;
@@ -450,20 +408,23 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
     let mut source = state();
     saved_cell(&mut source, &host, "exec-code:0", tools.clone(), "async def shout(text):\n    return await echo_say({'text': text})\nonce = await shout('a')").await;
     assert!(
-        source.saved_functions().contains_key("shout"),
+        source
+            .lowering_functions()
+            .contains_key(&lash_kernel_doc::Name::new("shout")),
         "{:?}",
-        source.bindings().not_carried()
+        source.not_carried()
     );
-    let mut seeded = state();
-    seeded
-        .seed_functions(
-            &source.saved_functions(),
-            &std::collections::BTreeSet::new(),
-        )
+    crate::testing::commit_working(&mut source, &host).await;
+    let saved = source
+        .hydrated_execution_graph()
         .await
-        .expect("seed");
+        .expect("saved state");
+    let mut restored = state();
+    restored
+        .restore_execution_graph(&saved, lash_core::plugin::ExecutionGraphPurpose::Working)
+        .expect("restore");
     let refused = run_cell(
-        &mut seeded,
+        &mut restored,
         cell_context(
             &host,
             SESSION,
@@ -531,13 +492,15 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
     );
     assert_eq!(
         state
-            .bindings()
             .not_carried()
             .get(&lash_kernel_doc::Name::new("later")),
-        Some(&lash_kernel_dialect::NotSaved::Capture {
-            name: lash_kernel_doc::Name::new("pending"),
-            why: lash_kernel_dialect::CaptureRefusal::Task,
-        })
+        Some(
+            &lash_kernel_dialect::NotSaved::Capture {
+                name: lash_kernel_doc::Name::new("pending"),
+                why: lash_kernel_dialect::CaptureRefusal::Task,
+            }
+            .to_string()
+        )
     );
     let refused = run_cell(
         &mut state,

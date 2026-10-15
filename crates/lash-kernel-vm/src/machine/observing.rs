@@ -15,6 +15,24 @@ use crate::observe::{
 use crate::{Observe, RanDelta, StatementPath};
 
 impl KernelMachine {
+    /// The occurrence counter each live task holds for the action at
+    /// `site`, summed: what an identity-bearing start there has advanced.
+    #[cfg(test)]
+    pub(crate) fn occurrences_at(
+        &mut self,
+        site: &lash_kernel_doc::Site,
+    ) -> Result<u64, lash_kernel_doc::heap::HeapFault> {
+        let key = lash_kernel_state::paged::metadata::metadata_key(site);
+        let access = self.heap.access.clone();
+        let mut total = 0;
+        for index in 0..self.tasks.len() {
+            if let Some(task) = self.tasks.get_mut(index)? {
+                total += task.record.occurrences.get(&key, &access)?.unwrap_or(0);
+            }
+        }
+        Ok(total)
+    }
+
     /// Selects observation for this machine. A resumed machine starts Off
     /// with zero counts; the caller chooses the new run segment's option.
     pub fn set_observe(&mut self, observe: Observe) {
@@ -61,13 +79,18 @@ impl KernelMachine {
     #[inline(never)]
     fn trace_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
         let site = &exe.block(block).site;
-        let tasks = &self.tasks;
         if let Some(path) = self.observer.as_deref_mut().and_then(|o| o.path.as_mut())
             && !matches!(site.unit, lash_kernel_doc::Unit::Library(_))
         {
+            let (tasks, access) = (&mut self.tasks, &self.heap.access);
             path.push(
                 task,
-                || tasks[task.0 as usize].identity.clone(),
+                || match tasks.get_mut(task.0 as usize)? {
+                    Some(running) => running.identity.resolve(access),
+                    None => Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                        "a path names no task".to_owned(),
+                    )),
+                },
                 site.clone(),
             );
         }
@@ -83,12 +106,15 @@ impl KernelMachine {
     /// Takes and resets the path recorded since the previous take. Its
     /// coordinates are the live block sites, independent of the compiled
     /// ordinals the counts use.
-    pub fn take_path(&mut self) -> StatementPath {
+    ///
+    /// # Errors
+    ///
+    /// The heap fault that kept a task's identity off the path.
+    pub fn take_path(&mut self) -> Result<StatementPath, lash_kernel_doc::heap::HeapFault> {
         self.observer
             .as_mut()
             .and_then(|o| o.path.as_mut())
-            .map(PathRecorder::take)
-            .unwrap_or_default()
+            .map_or_else(|| Ok(StatementPath::new()), PathRecorder::take)
     }
 
     /// Counts the run's work by the function that does it, from here on:
@@ -100,7 +126,7 @@ impl KernelMachine {
             self.exe.code_count(),
             self.exe.lib_count(),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         );
         self.observer_mut().work = Some(counting);
     }
@@ -113,7 +139,7 @@ impl KernelMachine {
             counting,
             &GuestSymbols::of(&self.exe),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         ))
     }
 
@@ -148,11 +174,10 @@ impl KernelMachine {
     fn observe_unlikely(&mut self, event: Event) {
         if let Some(observer) = self.observer.as_deref_mut() {
             if let Event::Statement { task, .. } = event
-                && let Some(path) = &mut observer.path
-                && let Some(Control::Block { block, next }) = self.tasks[task.0 as usize]
-                    .frames
-                    .last()
-                    .and_then(|frame| frame.control.last())
+                && observer.path.is_some()
+                && let Ok(Some(running)) = self.tasks.get_mut(task.0 as usize)
+                && let Ok(Some(frame)) = running.frames.last_mut()
+                && let Some(Control::Block { block, next }) = frame.control.last()
                 && !matches!(
                     self.exe.block(*block).site.unit,
                     lash_kernel_doc::Unit::Library(_)
@@ -161,10 +186,12 @@ impl KernelMachine {
                 // The path uses the live coordinate, independently of the
                 // compiled ordinal lookup used by the accumulator.
                 let site = self.exe.block(*block).site.child((*next - 1) as u32);
-                let tasks = &self.tasks;
-                path.push(task, || tasks[task.0 as usize].identity.clone(), site);
+                let (identity, access) = (running.identity, &self.heap.access);
+                if let Some(path) = &mut observer.path {
+                    path.push(task, || identity.resolve(access), site);
+                }
             }
-            observer.on(event, self.charged, self.heap.allocated());
+            observer.on(event, self.charged, self.heap.next_ordinal());
         }
     }
 
@@ -228,18 +255,26 @@ impl KernelMachine {
         let Some(observer) = self.observer.as_deref_mut() else {
             return;
         };
-        let frames = self
-            .tasks
-            .get(task.0 as usize)
-            .map_or(&[][..], |running| running.frames.as_slice());
+        let frames = self.tasks.cached_frames(task);
         if let Some(work) = &mut observer.work {
-            work.flush(self.charged, self.heap.allocated());
-            work.step(task.0 as usize, frames.iter().map(|frame| frame.code.0));
+            work.flush(self.charged, self.heap.next_ordinal());
+            work.step(
+                task.0 as usize,
+                frames.as_ref().map(|(len, known)| {
+                    (
+                        *len,
+                        known.iter().map(|(index, frame)| (*index, frame.code.0)),
+                    )
+                }),
+            );
         }
         if let Some(context) = &mut observer.context
             && context.task() != Some(task.0)
         {
-            context.republish(task.0, frames.iter().map(|frame| token(exe, frame)));
+            let known = frames
+                .as_ref()
+                .map_or(&[][..], |(_, known)| known.as_slice());
+            context.republish(task.0, known.iter().map(|(_, frame)| token(exe, frame)));
         }
     }
 }

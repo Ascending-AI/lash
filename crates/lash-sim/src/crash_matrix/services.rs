@@ -933,6 +933,7 @@ impl RoundTools for Catalog {
                     store_local: effects,
                     terminal: None,
                     capacity: None,
+                    candidate: None,
                 }
             })
         })

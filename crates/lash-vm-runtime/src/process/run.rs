@@ -1,12 +1,14 @@
 //! The `kernel_run` engine step: resume the saved run, hand it what
 //! settled, and run it until no task is ready.
 //!
-//! The step performs nothing. It answers the state the machine exported at
-//! its park with the waits it asked for there; the process activation
-//! commits both, with the admission of each wait's step, in one
-//! `process.advance` transaction. The step is `Repeatable`: a run that
-//! never committed is a recomputation of an effect-free stretch of guest
-//! code from the same saved state and the same outcomes.
+//! The step performs nothing. It answers the CheckpointRoot the machine
+//! sealed at its park with the waits it asked for there: the step's outcome
+//! publishes the root's pages and owns them (FIG-6193, P1), and the process
+//! activation commits the waits, with the admission of each wait's step,
+//! in one `process.advance` transaction whose root names the page. The
+//! step is `Repeatable`: a run that never committed is a recomputation of
+//! an effect-free stretch of guest code from the same saved state and the
+//! same outcomes, and its staging is dropped unpublished.
 
 use std::sync::Arc;
 
@@ -16,18 +18,19 @@ use lash_core::{
     SettledOutput,
 };
 use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Name, Timestamp};
-use lash_kernel_vm::{Bounds, End, Request, RunError, Start, Step, Target};
+use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{
-    DrivenMachine, KernelFailure, Machines, datum_from_json, datum_to_json,
+    DrivenMachine, KernelFailure, MachineStep, Machines, datum_from_json, datum_to_json,
 };
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use lash_vm_protocol::{PoolFault, ProtocolBreach};
 use tokio_util::sync::CancellationToken;
 
+use super::pages::{RunCandidate, StepActivation};
 use super::state::{
-    Admission, HostReads, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput,
-    RecordedAdmission, RecordedDelivery, RecordedStart, SealedRun, StartedFrom, outcome_digest,
+    Admission, HostReads, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput, ParkedPage,
+    RecordedAdmission, RecordedDelivery, RecordedStart, StartedFrom, outcome_digest,
 };
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
@@ -66,8 +69,17 @@ pub(crate) async fn run_kernel_step(
 ) -> EngineStepAnswer {
     let process = run.process.clone();
     match kernel_run(engine, run, stop).await {
-        Ok(output) => match serde_json::to_string(&output) {
-            Ok(text) => SettledOutput::Completed(material(&process, text)).into(),
+        Ok((output, candidate)) => match serde_json::to_string(&output) {
+            Ok(text) => {
+                let output = Box::new(SettledOutput::Completed(material(&process, text)));
+                match candidate {
+                    Some(candidate) => EngineStepAnswer::Paged {
+                        output,
+                        candidate: lash_core::StepCandidate(Arc::new(candidate)),
+                    },
+                    None => EngineStepAnswer::Settled(output),
+                }
+            }
             Err(error) => failed(&process, &RunFault(error.to_string())).into(),
         },
         Err(Unsettled::Fault(fault)) => failed(&process, &fault).into(),
@@ -203,20 +215,26 @@ impl RunHost for StepHost {
     }
 }
 
-fn ended(outcome: lash_core::ProcessOutcome) -> Result<KernelRunOutput, Unsettled> {
-    Ok(KernelRunOutput::Ended {
-        outcome: Box::new(outcome),
-        ran: Vec::new(),
-        reads: None,
-        start: None,
-    })
+/// What a run answers: its output, with the candidate its park sealed.
+type Answered = (KernelRunOutput, Option<RunCandidate>);
+
+fn ended(outcome: lash_core::ProcessOutcome) -> Result<Answered, Unsettled> {
+    Ok((
+        KernelRunOutput::Ended {
+            outcome: Box::new(outcome),
+            ran: Vec::new(),
+            reads: None,
+            start: None,
+        },
+        None,
+    ))
 }
 
 async fn kernel_run(
     engine: &KernelProcessEngine,
     run: EngineStepRun,
     stop: CancellationToken,
-) -> Result<KernelRunOutput, Unsettled> {
+) -> Result<Answered, Unsettled> {
     let input: KernelRunInput = serde_json::from_value(run.input)
         .map_err(|error| RunFault(format!("kernel_run input: {error}")))?;
     let process_input = match KernelProcessInput::from_payload(&input.payload) {
@@ -296,7 +314,8 @@ async fn kernel_run(
         }
     }
     let start = (settings.observe == lash_kernel_vm::Observe::Counts)
-        .then(|| recorded_start(process_input.document, &input));
+        .then(|| recorded_start(process_input.document, &input))
+        .flatten();
     let host = Arc::new(StepHost {
         trace: trace.clone(),
         now_ms: run.now.0,
@@ -308,7 +327,7 @@ async fn kernel_run(
         segment: input
             .parked
             .as_ref()
-            .map_or_else(|| "entry".to_owned(), StartedFrom::root_of),
+            .map_or_else(|| "entry".to_owned(), |parked| parked.root.to_hex()),
     });
     let machines = lash_vm_client::RemoteMachines::new(
         engine.workers.clone(),
@@ -318,34 +337,26 @@ async fn kernel_run(
         Arc::clone(&host) as Arc<dyn RunHost>,
         &document,
         &settings.dialect,
-        Start {
+        lash_vm_client::RunStart {
             target: Target::Entry(process_input.entry.clone()),
             args,
-            bindings: Default::default(),
+            session: None,
+            modes: lash_kernel_vm::EffectModes::recorded(),
+            host: Vec::new(),
+            save: None,
         },
-        lash_kernel_vm::EffectModes::recorded(),
         settings.bounds(),
     )
     .map_err(|error| RunFault(error.to_string()))?;
-    let driven = drive(
-        &machines,
-        &run.process,
-        &process_input.document.to_string(),
-        Resumed {
-            parked: input.parked,
-            admissions: &input.admissions,
-            deliver: input
-                .deliver
-                .into_iter()
-                .map(|delivery| (delivery.wait, delivery.outcome))
-                .collect(),
-        },
-        engine.workers.config().tuning.slice,
-        &stop,
-    )
-    .await;
+    let Some(step_pages) = run.pages.as_ref() else {
+        return Err(RunFault("the store holds no heap pages for the run".to_owned()).into());
+    };
+    let driven = drive(&machines, engine, step_pages, &run.process, input, &stop).await;
     let Driven {
-        step, state, ran, ..
+        step,
+        parked: state,
+        ran,
+        ..
     } = match driven {
         Ok(driven) => driven,
         Err(failure) => return worker_failure(failure),
@@ -353,21 +364,24 @@ async fn kernel_run(
     let reads = host.tape();
     let start = start.map(Box::new);
     match step {
-        Step::Ended(end) => {
+        MachineStep::Ended(end) => {
             let outcome = outcome_of_end(end);
             if let Some(trace) = &trace {
                 trace.finished(&outcome);
             }
-            Ok(KernelRunOutput::Ended {
-                outcome: Box::new(outcome),
-                ran,
-                reads,
-                start,
-            })
+            Ok((
+                KernelRunOutput::Ended {
+                    outcome: Box::new(outcome),
+                    ran,
+                    reads,
+                    start,
+                },
+                None,
+            ))
         }
-        Step::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
-        Step::Parked(park) => {
-            let Some(state) = state else {
+        MachineStep::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
+        MachineStep::Parked(park) => {
+            let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
             let withdrawn: Vec<u64> = park.withdrawn.iter().map(|wait| wait.0).collect();
@@ -387,28 +401,37 @@ async fn kernel_run(
                     trace.issued(issued);
                 }
             }
-            Ok(KernelRunOutput::Parked {
-                state,
-                issued,
-                withdrawn,
-                ran,
-                reads,
-                start,
-            })
+            Ok((
+                KernelRunOutput::Parked {
+                    state,
+                    issued,
+                    withdrawn,
+                    ran,
+                    reads,
+                    start,
+                },
+                Some(candidate),
+            ))
         }
     }
 }
 
 /// Where `input` starts, as a segment records it for a replay: everything
 /// a retained record holds by reference to it, and only the rest whole.
-fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput) -> RecordedStart {
+/// A parked page is recorded only by the output that holds it: one no
+/// recorded output holds has no record to be read back under, and the
+/// segment records no start.
+fn recorded_start(
+    document: lash_kernel_doc::DocumentId,
+    input: &KernelRunInput,
+) -> Option<RecordedStart> {
     let from = match (&input.parked, input.parked_by) {
         (None, _) => StartedFrom::Entry,
         (Some(parked), Some(run)) => StartedFrom::Output {
             run,
-            root: StartedFrom::root_of(parked),
+            root: parked.root.to_hex(),
         },
-        (Some(parked), None) => StartedFrom::Whole(parked.clone()),
+        (Some(_), None) => return None,
     };
     let admissions = input
         .admissions
@@ -433,89 +456,130 @@ fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput)
             None => RecordedDelivery::Whole(Box::new(delivery.clone())),
         })
         .collect();
-    RecordedStart {
+    Some(RecordedStart {
         document,
         from,
         admissions,
         deliver,
-    }
+    })
 }
 
-/// What a run segment resumes from: the state it parked with, the admission
-/// of each wait that state holds, and the outcomes it is handed, in order.
-pub(super) struct Resumed<'a> {
-    pub(super) parked: Option<SealedRun>,
-    pub(super) admissions: &'a [Admission],
-    pub(super) deliver: Vec<(u64, lash_vm_client::wire::OutcomeWire)>,
-}
-
-/// What driving a run segment reached: its step, its exported state at a
-/// park, and what it observed.
+/// What driving a run segment reached: its step, the root it sealed at a
+/// park with the candidate that publishes it, and what it observed.
 pub(super) struct Driven {
-    pub(super) step: Step,
-    pub(super) state: Option<SealedRun>,
+    pub(super) step: MachineStep,
+    pub(super) parked: Option<(ParkedPage, RunCandidate)>,
     pub(super) ran: lash_kernel_vm::RanDelta,
     pub(super) path: lash_vm_client::wire::OrdinalPath,
 }
 
-/// Starts or resumes the machine, hands it the settled outcomes and runs
-/// it until it parks or ends. A parked machine answers its exported state,
-/// bound to `process` and sealed under `document`.
-pub(super) async fn drive(
+/// Starts or resumes the machine over a page activation of the process's
+/// run, hands it the settled outcomes and runs it until it parks or ends.
+/// A parked machine answers the root it sealed, checked, with the
+/// candidate that publishes it.
+async fn drive(
     machines: &lash_vm_client::RemoteMachines,
+    engine: &KernelProcessEngine,
+    step: &lash_core::StepPages,
     process: &ProcessId,
-    document: &str,
-    input: Resumed<'_>,
+    input: KernelRunInput,
+    stop: &CancellationToken,
+) -> Result<Driven, KernelFailure> {
+    let binding = lash_vm_broker::kernel::graph::owner_binding_node(
+        &lash_durable::domain::ExecKey::Process(process.clone()),
+    )
+    .map_err(|refusal| KernelFailure::State(refusal.into()))?;
+    let config = engine.workers.config();
+    let spools = engine.workers.spools()?;
+    let mut activation = StepActivation::open(
+        std::sync::Arc::clone(&step.store),
+        process,
+        input
+            .parked
+            .map(|parked| (parked, super::pages::ParkedUnder::Process(step))),
+        input
+            .admissions
+            .iter()
+            .map(|admission| admission.0.clone())
+            .collect(),
+        binding,
+        machines.releases()?,
+        &spools,
+        lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
+    )
+    .await?;
+    let driven = run_machine(
+        machines,
+        &mut activation,
+        binding,
+        input
+            .deliver
+            .into_iter()
+            .map(|delivery| (delivery.wait, delivery.outcome))
+            .collect(),
+        config.tuning.slice,
+        stop,
+    )
+    .await;
+    activation.end_reads().await;
+    driven
+}
+
+/// Runs the machine of `activation`, resumed from its parked root or
+/// started fresh, hands it `deliver` and runs it until it parks or ends.
+/// A park answers the root it sealed, checked, with the candidate that
+/// publishes it; nothing publishes unless the caller does.
+pub(super) async fn run_machine(
+    machines: &lash_vm_client::RemoteMachines,
+    activation: &mut StepActivation,
+    binding: lash_core_store::checkpoint_graph::NodeId,
+    deliver: Vec<(u64, lash_vm_client::wire::OutcomeWire)>,
     slice: u64,
     stop: &CancellationToken,
 ) -> Result<Driven, KernelFailure> {
-    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
-        process: process.as_str().to_owned(),
+    let pages = std::sync::Arc::clone(&activation.pages);
+    let mut machine = match &activation.parked {
+        Some(parked) => machines.resume(parked, binding, pages).await?,
+        None => machines.start(binding, pages).await?,
     };
-    let mut machine = match input.parked {
-        Some(parked) => {
-            machines
-                .resume_sealed(
-                    lash_vm_protocol::ParkedGraph {
-                        state: parked.0,
-                        admissions: input
-                            .admissions
-                            .iter()
-                            .map(|admission| lash_vm_client::graph::admission(&admission.0))
-                            .collect(),
-                    },
-                    &binding,
-                )
-                .await?
-        }
-        None => machines.start(&binding).await?,
-    };
-    for (wait, outcome) in input.deliver {
+    for (wait, outcome) in deliver {
         machine
             .deliver(lash_kernel_vm::WaitId(wait), outcome.into())
             .await?;
     }
     loop {
         let step = machine.run(slice, false).await?;
-        let state = match &step {
+        let parked = match &step {
             // A stopped step is asked again from the same input.
-            Step::Slice if stop.is_cancelled() => None,
-            Step::Slice => continue,
-            Step::Parked(_) => Some(SealedRun(
-                machine
-                    .export(&binding)
-                    .await?
-                    .sealed(machines.owner().clone(), document),
-            )),
-            Step::Ended(_) => None,
+            MachineStep::Slice if stop.is_cancelled() => None,
+            MachineStep::Slice => continue,
+            MachineStep::Parked(_) => {
+                let sealed = lash_vm_broker::kernel::run::sealed(
+                    &mut machine,
+                    &activation.pages,
+                    binding,
+                    &machines.document(),
+                )
+                .await?;
+                let page = ParkedPage {
+                    root: sealed.root,
+                    kernel: sealed.header.kernel,
+                };
+                let candidate = activation.candidate(
+                    sealed.root,
+                    lash_core_store::checkpoint_graph::NodeId(sealed.header.release.0),
+                );
+                Some((page, candidate))
+            }
+            MachineStep::Ended(_) => None,
         };
         let (ran, path) = (machine.take_ran(), machine.take_path());
-        if !matches!(step, Step::Slice) {
+        if !matches!(step, MachineStep::Slice) {
             machine.release().await?;
         }
         return Ok(Driven {
             step,
-            state,
+            parked,
             ran,
             path,
         });
@@ -526,14 +590,14 @@ pub(super) async fn drive(
 /// when every attempt would meet it the same way, the host's capacity
 /// verdict, which records nothing and runs again uncounted, or a fault of
 /// this attempt, which is asked again within the step's attempts.
-fn worker_failure(failure_: KernelFailure) -> Result<KernelRunOutput, Unsettled> {
+fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
     if let KernelFailure::Worker { outcome } = &failure_
         && let Some(cause) = capacity_cause(outcome)
     {
         return Err(Unsettled::Capacity(cause, failure_.to_string()));
     }
     match &failure_ {
-        KernelFailure::Start(_) | KernelFailure::Import(_) | KernelFailure::Document(_) => {
+        KernelFailure::Start(_) | KernelFailure::Open(_) | KernelFailure::Document(_) => {
             ended(failure(
                 KernelProcessFailureCode::RunRefused,
                 failure_.to_string(),
@@ -583,6 +647,9 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
         | InfrastructureOutcome::ProtocolViolation { .. } => {
             Some(CapacityCause::RetryableInfrastructure)
         }
+        InfrastructureOutcome::PageRefused { .. } => outcome
+            .is_retryable()
+            .then_some(CapacityCause::RetryableInfrastructure),
         InfrastructureOutcome::RunRefused { .. }
         | InfrastructureOutcome::WorkerDeployment { .. } => None,
     }

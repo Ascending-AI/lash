@@ -44,27 +44,41 @@ pub type StatementPath = Vec<(lash_kernel_doc::TaskIdentity, Vec<lash_kernel_doc
 pub(crate) struct PathRecorder {
     last: Option<TaskId>,
     path: StatementPath,
+    /// The heap fault that kept a task's identity off the path: the path
+    /// is then not answered at all, never answered short.
+    fault: Option<lash_kernel_doc::heap::HeapFault>,
 }
 
 impl PathRecorder {
     pub(crate) fn push(
         &mut self,
         task: TaskId,
-        identity: impl FnOnce() -> lash_kernel_doc::TaskIdentity,
+        identity: impl FnOnce()
+            -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault>,
         site: lash_kernel_doc::Site,
     ) {
+        if self.fault.is_some() {
+            return;
+        }
         match self.path.last_mut() {
             Some((_, sites)) if self.last == Some(task) => sites.push(site),
-            _ => {
-                self.last = Some(task);
-                self.path.push((identity(), vec![site]));
-            }
+            _ => match identity() {
+                Ok(identity) => {
+                    self.last = Some(task);
+                    self.path.push((identity, vec![site]));
+                }
+                Err(fault) => self.fault = Some(fault),
+            },
         }
     }
 
-    pub(crate) fn take(&mut self) -> StatementPath {
+    pub(crate) fn take(&mut self) -> Result<StatementPath, lash_kernel_doc::heap::HeapFault> {
         self.last = None;
-        std::mem::take(&mut self.path)
+        let path = std::mem::take(&mut self.path);
+        match self.fault.take() {
+            Some(fault) => Err(fault),
+            None => Ok(path),
+        }
     }
 }
 
@@ -95,8 +109,6 @@ pub(crate) enum Event {
     },
     /// Its fast path answered.
     NativeFast,
-    /// It is called again after a collection.
-    NativeRetry,
     /// Its guard counted this much work.
     GuardWork(u64),
     /// It returned or raised, and was charged.
@@ -104,8 +116,6 @@ pub(crate) enum Event {
     /// A library function's formula is evaluated.
     FormulaEnter(LibId),
     FormulaExit,
-    CollectEnter,
-    CollectExit,
 }
 
 /// What one machine observes.
@@ -146,14 +156,13 @@ impl Observer {
                     work.native_enter(task.0 as usize, lib.0);
                 }
                 Event::NativeFast => work.native_fast(),
-                Event::NativeRetry => work.native_retry(),
                 Event::GuardWork(units) => work.guard_work(units),
                 Event::NativeExit => {
                     work.flush(charged, allocated);
                     work.native_exit();
                 }
                 Event::FormulaEnter(lib) => work.formula(lib.0),
-                Event::FormulaExit | Event::CollectEnter | Event::CollectExit => {}
+                Event::FormulaExit => {}
             }
         }
         if let Some(context) = &mut self.context {
@@ -165,12 +174,8 @@ impl Observer {
                 Event::Pop { task } => context.pop(task.0),
                 Event::NativeEnter { lib, .. } => context.enter(GuestPhase::Native(lib.0)),
                 Event::FormulaEnter(lib) => context.enter(GuestPhase::Formula(lib.0)),
-                Event::CollectEnter => context.enter(GuestPhase::Collect),
-                Event::NativeExit | Event::FormulaExit | Event::CollectExit => context.leave(),
-                Event::TaskEnded(_)
-                | Event::NativeFast
-                | Event::NativeRetry
-                | Event::GuardWork(_) => {}
+                Event::NativeExit | Event::FormulaExit => context.leave(),
+                Event::TaskEnded(_) | Event::NativeFast | Event::GuardWork(_) => {}
             }
         }
     }

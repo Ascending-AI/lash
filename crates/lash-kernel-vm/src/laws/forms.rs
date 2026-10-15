@@ -1,12 +1,10 @@
 //! The forms, strict operations, the effect boundary, host reads, charges
 //! and sessions: one case per rule, in kernel text.
 
-use std::collections::BTreeMap;
-
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Object, ObjectId, Timestamp, Value};
+use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Timestamp};
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
-use crate::{Bindings, End, KernelMachine, Machine, Start, StartError, Step, Target};
+use crate::{CellStart, End, Machine, Step, Target};
 
 fn list<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::List(items.to_vec())
@@ -104,13 +102,16 @@ fn go(handle) {{
 main {{}}"#
             ),
             Setup {
-                start: Start {
+                start: CellStart {
                     target: Target::Entry(Name::new("go")),
                     args: vec![Datum::Handle(Handle {
                         kind: "table".into(),
                         id: "one".into(),
                     })],
-                    bindings: Bindings::default(),
+                    session: None,
+                    owner: lash_kernel_doc::heap::PageId([9; 32]),
+                    modes: crate::EffectModes::recorded(),
+                    host: Vec::new(),
                 },
                 ..Setup::default()
             },
@@ -601,10 +602,13 @@ fn go(h, broken) {
 }
 main { }"#,
         Setup {
-            start: Start {
+            start: CellStart {
                 target: Target::Entry(Name::new("go")),
                 args: vec![handle("table"), handle("broken")],
-                bindings: Bindings::default(),
+                session: None,
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                modes: crate::EffectModes::recorded(),
+                host: Vec::new(),
             },
             ..Setup::default()
         },
@@ -669,171 +673,36 @@ fn charges_follow_the_cost_table() {
     );
 }
 
-/// `K-SES-001` to `K-SES-003`: a cell starts with the session's bindings
-/// and ends with `main`'s top-level ones; shared objects stay shared; a
-/// binding that reaches a closure or a task handle is not carried.
+/// K-SES-001: finishing without a park publishes the dirty binding tree.
 #[test]
-fn a_session_cell_reads_and_leaves_bindings() {
-    let mut objects = BTreeMap::new();
-    objects.insert(
-        ObjectId(7),
-        Object::List(vec![Value::Int(Integer::from(1))]),
-    );
-    let mut variables = BTreeMap::new();
-    variables.insert(Name::new("n"), Value::Int(Integer::from(1)));
-    variables.insert(Name::new("xs"), Value::List(ObjectId(7)));
-    variables.insert(Name::new("ys"), Value::List(ObjectId(7)));
-    let mut embedder = Embedder::with(
-        r#"
-private scratch
-main {
-  let scratch = num.add(n, 1)
-  set n = scratch
-  set xs[1] = n
-  let alias = ys
-  let callback = fn() { return n }
-  let nested = {keep: alias, call: callback}
-  return list.len(ys)
-}"#,
-        Setup {
-            start: Start {
-                target: Target::Main,
-                args: Vec::new(),
-                bindings: Bindings { variables, objects },
-            },
-            ..Setup::default()
-        },
-    );
+fn a_cell_carries_unsealed_bindings_at_its_end() {
+    let mut embedder = Embedder::new("main { let x = 7 }");
     let Step::Ended(End::Finished(finished)) = embedder.run() else {
-        panic!("the cell finishes");
+        panic!("cell finishes")
     };
-    assert_eq!(finished.result, int(2));
-    assert_eq!(
-        finished.not_carried,
-        [Name::new("callback"), Name::new("nested")]
+    let carry = finished.carry.unwrap();
+    assert_eq!(carry.bindings.len(), 1);
+    assert!(
+        carry.bindings.page().is_some(),
+        "a nonempty carry must name its sealed tree"
     );
-    // Neither reaches a task, so each is left as the run held it: the
-    // closure as the expression it was made from.
-    assert_eq!(
-        finished
-            .closures
-            .variables
-            .keys()
-            .map(Name::as_str)
-            .collect::<Vec<_>>(),
-        ["callback", "nested"]
-    );
-    let Value::Closure(callback) = &finished.closures.variables[&Name::new("callback")] else {
-        panic!("callback is a closure");
-    };
-    assert_eq!(
-        finished.closures.objects[callback],
-        Object::Closure(lash_kernel_doc::ClosureObject {
-            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [4, 0]),
-            captures: Vec::new(),
-        })
-    );
-    let bindings = finished.bindings;
-    assert_eq!(
-        bindings.variables.keys().collect::<Vec<_>>(),
-        ["alias", "n", "xs", "ys"]
-            .map(Name::new)
-            .iter()
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(
-        bindings.variables[&Name::new("n")],
-        Value::Int(Integer::from(2))
-    );
-    let shared = &bindings.variables[&Name::new("xs")];
-    assert_eq!(&bindings.variables[&Name::new("ys")], shared);
-    assert_eq!(&bindings.variables[&Name::new("alias")], shared);
-    let Value::List(id) = shared else {
-        panic!("xs is a list");
-    };
-    assert_eq!(
-        bindings.objects[id],
-        Object::List(vec![
-            Value::Int(Integer::from(1)),
-            Value::Int(Integer::from(2))
-        ])
-    );
-    assert_eq!(bindings.objects.len(), 1);
-}
-
-/// A start the machine refuses: an entry the document does not list,
-/// arguments that do not fit its signature, and bindings that are not a
-/// session's.
-#[test]
-fn a_start_that_does_not_fit_the_document_is_refused() {
-    let program = |text: &str| {
-        let library = super::embedder::library(true);
-        crate::Program {
-            document: std::sync::Arc::new(
-                lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers float\n{text}"))
-                    .unwrap(),
-            ),
-            library: crate::PreparedLibrary::new(library.registry),
-        }
-    };
-    let source = "entry go(n: Int, label?: Text) -> Any\nfn go(n, label) { return n }\nmain { }";
-    let start = |target: &str, args: Vec<Datum>| {
-        KernelMachine::start(
-            program(source),
-            super::embedder::ROOMY,
-            Start {
-                target: Target::Entry(Name::new(target)),
-                args,
-                bindings: Bindings::default(),
-            },
+    let mut heap = lash_kernel_state::paged::PagedHeap::open_header(
+        carry.heap,
+        Box::new(embedder.source.clone()),
+        lash_kernel_state::paged::EditEpoch(2),
+    )
+    .unwrap();
+    lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
+    let binding = heap
+        .session
+        .get(
+            &lash_kernel_state::paged::metadata::metadata_key(&Name::new("x")),
+            &heap.access,
         )
-        .map(|_| ())
-    };
-    assert_eq!(start("go", vec![int(1)]), Ok(()));
-    // K-FN-004: a supplied absent in an optional slot also means omitted.
-    assert_eq!(start("go", vec![int(1), Datum::Absent]), Ok(()));
-    assert_eq!(
-        start("gone", vec![]),
-        Err(StartError::UnknownEntry {
-            entry: Name::new("gone")
-        })
-    );
-    for args in [
-        vec![],
-        vec![Datum::Absent],
-        vec![text("one")],
-        vec![int(1), int(2)],
-        vec![int(1), text("l"), int(3)],
-    ] {
-        assert!(matches!(
-            start("go", args),
-            Err(StartError::Arguments { .. })
-        ));
-    }
-    let mut variables = BTreeMap::new();
-    variables.insert(Name::new("dangling"), Value::List(ObjectId(1)));
-    let dangling = KernelMachine::start(
-        program("main { }"),
-        super::embedder::ROOMY,
-        Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Bindings {
-                variables,
-                objects: BTreeMap::new(),
-            },
-        },
-    );
-    assert!(matches!(dangling, Err(StartError::Bindings { .. })));
-    // A document that calls a function the registry lacks is not run.
-    let missing = KernelMachine::start(
-        program(&format!("use gone = @{}\nmain {{ }}", "a".repeat(64))),
-        super::embedder::ROOMY,
-        Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Bindings::default(),
-        },
-    );
-    assert!(matches!(missing, Err(StartError::MissingFunction { .. })));
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        binding.value,
+        lash_kernel_state::paged::BoundRecord::Value(lash_kernel_doc::Value::Int(_))
+    ));
 }

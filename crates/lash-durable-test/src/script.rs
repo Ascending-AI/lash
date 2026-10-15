@@ -247,6 +247,11 @@ type CommitRefusal = Arc<
 /// its label and its domain writes.
 pub type CommitObserver = Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx) + Send + Sync>;
 
+/// What a law observes of every candidate publication before it enters
+/// the store: its label and the fresh pages its manifest supplies.
+pub type CandidateObserver =
+    Arc<dyn Fn(CommitLabel, &[lash_core_store::checkpoint_graph::EncodedNode]) + Send + Sync>;
+
 type ActorReceiptObserver =
     Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx, &lash_durable::ActorCommit) + Send + Sync>;
 type MailReceiptObserver = Arc<dyn Fn(CommitLabel, &lash_durable::MailCommit) + Send + Sync>;
@@ -259,6 +264,7 @@ pub(crate) struct Shared {
     state: Mutex<State>,
     recorded: tokio::sync::Notify,
     observer: Mutex<Option<CommitObserver>>,
+    candidate: Mutex<Option<CandidateObserver>>,
     refusal: Mutex<Option<CommitRefusal>>,
     pub(crate) actor_receipt: Mutex<Option<ActorReceiptObserver>>,
     pub(crate) mail_receipt: Mutex<Option<MailReceiptObserver>>,
@@ -302,6 +308,37 @@ impl Shared {
         if let Some(observer) = observer {
             observer(label, tx);
         }
+    }
+
+    /// Hand a candidate's fresh pages to the law observing them, if any,
+    /// reading its manifest once through; the store reads it again from
+    /// its start.
+    pub(crate) fn observe_candidate(
+        &self,
+        label: CommitLabel,
+        manifest: &mut dyn lash_core_store::checkpoint_graph::stage::CandidateManifest,
+    ) {
+        use lash_core_store::checkpoint_graph::stage::ManifestEntry;
+        let observer = self.candidate.lock_recover().clone();
+        let Some(observer) = observer else {
+            return;
+        };
+        let mut fresh = Vec::new();
+        let mut after = None;
+        while let Ok(entries) = manifest.entries(after, 256) {
+            let Some(last) = entries.last() else {
+                break;
+            };
+            after = Some(match last {
+                ManifestEntry::External(id) => *id,
+                ManifestEntry::Fresh(node) => node.id,
+            });
+            fresh.extend(entries.into_iter().filter_map(|entry| match entry {
+                ManifestEntry::Fresh(node) => Some(node),
+                ManifestEntry::External(_) => None,
+            }));
+        }
+        observer(label, &fresh);
     }
 
     /// Number one write, record it, and answer the fault an armed rule
@@ -444,6 +481,15 @@ impl Script {
     /// law counts of what each commit submits.
     pub fn observe_commits(&self, observer: CommitObserver) -> &Self {
         *self.shared.observer.lock_recover() = Some(observer);
+        self
+    }
+
+    /// Hand every candidate publication's label and fresh pages to
+    /// `observer` before its owner commit is observed and enters the
+    /// store, cut or not: the pages a commit publishes beside the nodes
+    /// its transaction stages.
+    pub fn observe_candidates(&self, observer: CandidateObserver) -> &Self {
+        *self.shared.candidate.lock_recover() = Some(observer);
         self
     }
 

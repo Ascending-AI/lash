@@ -4,7 +4,7 @@ use lash_kernel_doc::{Formula, NativeCall, NativeError, NativeHeap, Type, Value}
 use num_traits::ToPrimitive;
 
 use super::{
-    Function, arg, count_arg, definition, integer_arg, integer_value, raise, text_arg, text_buffer,
+    Function, arg, count_arg, definition, integer_value, materialized_text, raise, text_buffer,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -74,15 +74,12 @@ fn decimal_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
     };
     // Both texts and the four tuple members are reserved before allocation.
     super::reserve_list(call.heap, 4, kind.len() + digits.len() + 2)?;
-    Ok(Value::Tuple(
-        vec![
-            Value::text(kind),
-            Value::Bool(negative),
-            Value::text(digits),
-            Value::Int(i64::from(exponent).into()),
-        ]
-        .into(),
-    ))
+    Ok(Value::Tuple(call.heap.tuple(vec![
+        Value::text(kind),
+        Value::Bool(negative),
+        Value::text(digits),
+        Value::Int(i64::from(exponent).into()),
+    ])?))
 }
 
 /// A float's digits before the point, its sign and its point: what a
@@ -98,7 +95,11 @@ fn fixed(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let precision = count_arg(call.args, 1)?;
     let text = match arg(call.args, 0)? {
         Value::Int(i) => {
-            let whole = i.to_string();
+            let integer = match i {
+                lash_kernel_doc::heap::IntRef::Inline(i) => i.clone(),
+                _ => call.heap.materialize_int(i)?,
+            };
+            let whole = integer.to_string();
             if precision == 0 {
                 whole
             } else {
@@ -161,25 +162,30 @@ fn precise(
 }
 
 fn radix(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let radix = integer_arg(call.args, 1)?
-        .to_u32()
-        .filter(|r| (2..=36).contains(r))
-        .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
+    let integer = integer_value(call.args, 1)?;
+    let radix = match integer {
+        lash_kernel_doc::heap::IntRef::Inline(value) => value.to_u32(),
+        lash_kernel_doc::heap::IntRef::Paged { summary, .. }
+            if summary.negative || summary.bits > 6 =>
+        {
+            None
+        }
+        _ => call.heap.materialize_int(integer)?.to_u32(),
+    }
+    .filter(|r| (2..=36).contains(r))
+    .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
     let integer = integer_value(call.args, 0)?;
     crate::numbers::integer_text(call.heap, integer, radix)
 }
 
 fn pad(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let start = match text_arg(call.args, 3)? {
+    let start = match materialized_text(call.args, 3, call.heap)?.as_ref() {
         "start" => true,
         "end" => false,
         _ => return Err(raise("type_error", "padding side must be start or end")),
     };
-    super::text::padded(
-        call.heap,
-        text_arg(call.args, 0)?,
-        count_arg(call.args, 1)?,
-        text_arg(call.args, 2)?,
-        start,
-    )
+    let text = materialized_text(call.args, 0, call.heap)?;
+    let width = count_arg(call.args, 1)?;
+    let fill = materialized_text(call.args, 2, call.heap)?;
+    super::text::padded(call.heap, &text, width, &fill, start)
 }

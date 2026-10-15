@@ -256,6 +256,7 @@ pub(super) async fn run(
                         member,
                         round::SettledOutput::Completed(output),
                         Vec::new(),
+                        None,
                     )
                     .map_err(exec)?;
                 }
@@ -396,6 +397,7 @@ pub(super) fn record_refused(
             member,
             round::SettledOutput::Completed(output),
             Vec::new(),
+            None,
         )
         .map_err(exec)?;
     }

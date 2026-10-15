@@ -331,6 +331,13 @@ pub trait DurableStore: DurableReads {
     /// SQLite.
     async fn now(&self) -> Result<DurableInstant, DurableError>;
 
+    /// The store's persistent-heap page publication (S6), through which an
+    /// activation leases roots, reads pages and publishes candidates. A
+    /// wrapper answers its inner store's, or its own when it intercepts
+    /// publication; `None` for a store that holds no heap pages, which
+    /// refuses every kernel activation that parks.
+    fn pages(&self) -> Option<std::sync::Arc<dyn crate::domain::pages::PageStore>>;
+
     /// Register one boot of `spec.node` with a fresh lease.
     ///
     /// Earlier boots of the same node are reaped in the same transaction,

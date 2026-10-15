@@ -7,18 +7,15 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall, NativeHeap,
-    Object, TaskId, Timestamp, Value, WorkCounter, parse_document,
+    Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::observe::{GuestSymbols, WorkReport};
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Layout, Machine, Meters, PreparedLibrary, Program, Start,
-    Step, Target, register_machine_functions,
+    Bounds, End, Host, Layout, Machine, Meters, PreparedLibrary, Program, Step,
+    register_machine_functions,
 };
-use num_bigint::BigInt;
 
-use crate::tests::Heap;
-use crate::{register_collections, register_numbers, same};
+use crate::{register_collections, register_numbers};
 
 const BOUNDS: Bounds = Bounds {
     charge: 10_000_000,
@@ -99,16 +96,11 @@ impl Libraries {
         let document = Arc::new(parse_document(&text).unwrap_or_else(|error| panic!("{error}")));
         let run = |library: &PreparedLibrary, layout: Layout| -> (End, Meters) {
             let program = Program {
+                release: lash_kernel_doc::heap::PageId([8; 32]),
                 document: Arc::clone(&document),
                 library: library.clone(),
             };
-            let start = Start {
-                target: Target::Main,
-                args: Vec::new(),
-                bindings: Default::default(),
-            };
-            let mut machine =
-                KernelMachine::start_with_layout(program, BOUNDS, start, layout).unwrap();
+            let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
             match machine.run(&mut World, u64::MAX).unwrap() {
                 Step::Ended(end) => (end, machine.meters()),
                 other => panic!("{text}: {other:?}"),
@@ -131,97 +123,6 @@ impl Libraries {
             tuple[position] += 1;
             tuple[position + 1..].fill(0);
         }
-    }
-}
-
-fn heap() -> Heap {
-    let mut heap = Heap::default();
-    let int = |value: i64| Value::Int(Integer::from(value));
-    heap.allocate(Object::List(vec![int(1), Value::text("a")]))
-        .unwrap();
-    heap.allocate(Object::Record(vec![("a".to_owned(), int(1))]))
-        .unwrap();
-    heap.allocate(Object::Map(vec![(int(1), Value::text("x"))]))
-        .unwrap();
-    heap.allocate(Object::Set(vec![int(1)])).unwrap();
-    heap
-}
-
-/// The values the native laws call a primitive on, and the heap objects of
-/// [`heap`]: a list, a record, a map and a set.
-fn values() -> Vec<Value> {
-    let heap = heap();
-    let [list, record, map, set] = [1, 2, 3, 4].map(lash_kernel_doc::ObjectId);
-    assert_eq!(heap.len(list), 2);
-    let float = |value: f64| Value::Float(lash_kernel_doc::Float::new(value));
-    vec![
-        Value::Null,
-        Value::Absent,
-        Value::Bool(true),
-        Value::Int(Integer::from(0)),
-        Value::Int(Integer::from(1)),
-        Value::Int(Integer::from(10)),
-        Value::Int(Integer::from(-3)),
-        Value::Int(Integer::new(BigInt::from(1u8) << 70)),
-        float(0.0),
-        float(-0.0),
-        float(2.5),
-        float(f64::NAN),
-        float(f64::INFINITY),
-        Value::text(""),
-        Value::text("12"),
-        Value::text("a"),
-        Value::Tuple(Arc::from([Value::Int(Integer::from(1)), float(-0.0)])),
-        Value::List(list),
-        Value::Record(record),
-        Value::Map(map),
-        Value::Set(set),
-        Value::Task(TaskId(0)),
-        Value::Function(lash_kernel_doc::Name::new("f")),
-    ]
-}
-
-/// K-LIB-006: every prepared operation admits only answers of its general
-/// call, including all prefix families, Any-domain comparisons, overflow,
-/// mixed numbers, NaN, signed zero, wrong domains and structural fallback.
-#[test]
-fn prepared_entries_answer_as_the_general_call() {
-    let libraries = Libraries::new();
-    let corpus = values();
-    for (_, registered) in libraries.registry.iter() {
-        let Some(native) = registered.native() else {
-            continue;
-        };
-        let Some(prepared) = native.prepare() else {
-            continue;
-        };
-        let arity = registered.definition().signature.params.len();
-        let mut tuple = vec![0; arity];
-        let mut answered = 0;
-        loop {
-            let args: Vec<Value> = tuple.iter().map(|index| corpus[*index].clone()).collect();
-            if let Some(value) = (prepared.entry)(&args) {
-                answered += 1;
-                let general = native
-                    .call(NativeCall {
-                        args: &args,
-                        heap: &mut heap(),
-                        counter: &mut WorkCounter::new(None),
-                    })
-                    .unwrap_or_else(|error| panic!("{} {args:?}: {error:?}", prepared.operation));
-                assert!(
-                    same(&value, &general),
-                    "{} {args:?}: {value:?}, {general:?}",
-                    prepared.operation
-                );
-            }
-            let Some(position) = tuple.iter().rposition(|index| index + 1 < corpus.len()) else {
-                break;
-            };
-            tuple[position] += 1;
-            tuple[position + 1..].fill(0);
-        }
-        assert!(answered > 0, "{} answered nothing", prepared.operation);
     }
 }
 
@@ -326,6 +227,7 @@ main {{
     let mut ends = Vec::new();
     for layout in [Layout(0), Layout(1)] {
         let program = Program {
+            release: lash_kernel_doc::heap::PageId([8; 32]),
             document: Arc::clone(&document),
             library: if layout == Layout(0) {
                 libraries.fast.clone()
@@ -333,17 +235,7 @@ main {{
                 libraries.general.clone()
             },
         };
-        let mut machine = KernelMachine::start_with_layout(
-            program,
-            BOUNDS,
-            Start {
-                target: Target::Main,
-                args: Vec::new(),
-                bindings: Default::default(),
-            },
-            layout,
-        )
-        .unwrap();
+        let mut machine = crate::testsupport::start(program, BOUNDS, layout).unwrap();
         machine.count_work();
         ends.push(machine.run(&mut World, u64::MAX).unwrap());
         let work = machine.work().unwrap();

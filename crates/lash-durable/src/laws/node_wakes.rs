@@ -18,7 +18,7 @@ use crate::{
 
 mod harness;
 
-pub use harness::{Claims, CountingStore, LawNode, serve_node};
+pub use harness::{Claims, CountingStore, LawNode, serve_node, serve_node_on};
 use harness::{
     Evidence, WakeEvidence, actor, create, eventually, holding, listening, liveness, mail, node,
     observing, owner_of, quiet, under,

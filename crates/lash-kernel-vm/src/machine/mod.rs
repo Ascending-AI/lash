@@ -6,32 +6,39 @@
 //! stack and the variables: no value lives anywhere else while it waits.
 
 mod actions;
+mod checkpoint;
 mod exec;
+mod frames;
 mod observing;
 mod ops;
-mod parked;
+mod queue;
 mod session;
 mod steps;
 mod stream;
+mod tasks;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, DocumentId, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
-};
-use lash_kernel_state::{Baseline, ParkedRun, Saved};
+use lash_kernel_doc::{Datum, DocumentId, EntityId, Name, TaskId, Value};
 
 use crate::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
 use crate::data::{Raised, copy_out};
-use crate::heap::{Heap, refs, value_bytes};
+use crate::heap::value_bytes;
 use crate::interface::{
-    Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, ExportError, Host, ImportError,
-    Machine, MachineError, Meters, Outcome, Park, Program, Request, RunError, Start, StartError,
-    Step, WaitId,
+    Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, Host, Machine, MachineError,
+    Meters, Outcome, Park, Program, RunError, StartError, Step, WaitId,
 };
 use crate::observe::{Event, GuestPhase, Observer};
+use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId, TupleRef};
+use lash_kernel_state::paged::directory::ordinal_key;
+use lash_kernel_state::paged::tree::{Access, Tree};
+use lash_kernel_state::paged::{
+    BindingRecord, BoundRecord, EndedTask, FrameRecord, HeapLifecycle, HeapWriteError,
+    IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, PagedHeap,
+    SemanticHeap, TableCursor, TaskStateRecord as TaskState, WaitPhase, WaitRecord,
+};
+use session::{keyed, open_tree};
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
@@ -45,6 +52,8 @@ pub(crate) enum Halt {
     Fault(String),
     /// The host failed a read-bound `perform` (`K-EFF-012`).
     Host(crate::interface::HostFault),
+    Heap(HeapFault),
+    Memory,
 }
 
 impl Halt {
@@ -60,11 +69,14 @@ impl Halt {
 /// Why a statement did not complete.
 #[derive(Debug)]
 pub(crate) enum Interrupt {
-    Raise(Value),
+    Raise(Box<Value>),
     Halt(Halt),
 }
 
 impl Interrupt {
+    fn raised(value: Value) -> Self {
+        Self::Raise(Box::new(value))
+    }
     fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
         match self {
             Self::Halt(halt) => Self::Halt(halt.in_function(function)),
@@ -83,16 +95,59 @@ impl From<Halt> for Interrupt {
 
 impl From<Raised> for Interrupt {
     fn from(raised: Raised) -> Self {
-        Self::Raise(error(raised.kind, raised.message))
+        Self::raised(error(raised.kind, raised.message))
     }
 }
 
 pub(crate) fn error(kind: &str, message: impl Into<String>) -> Value {
-    Value::Error(Arc::new(ErrorValue::new(kind, message)))
+    Value::Error(Arc::new(ErrorRef::new(kind, &message.into())))
+}
+
+impl From<HeapFault> for Halt {
+    fn from(error: HeapFault) -> Self {
+        Self::Heap(error)
+    }
+}
+impl From<HeapFault> for Interrupt {
+    fn from(error: HeapFault) -> Self {
+        Self::Halt(error.into())
+    }
+}
+impl From<HeapWriteError> for Interrupt {
+    fn from(error: HeapWriteError) -> Self {
+        match error {
+            HeapWriteError::Raised { kind, message } => {
+                Self::raised(super::machine::error(kind, message))
+            }
+            HeapWriteError::Memory => Self::Halt(Halt::Memory),
+            HeapWriteError::Fault(error) => Self::Halt(Halt::Heap(error)),
+        }
+    }
+}
+impl From<lash_kernel_doc::NativeError> for Interrupt {
+    fn from(error: lash_kernel_doc::NativeError) -> Self {
+        use lash_kernel_doc::NativeError;
+        match error {
+            NativeError::Raised(error) => Self::raised(Value::Error(error)),
+            NativeError::Memory => Self::Halt(Halt::Memory),
+            NativeError::Heap(error) => Self::Halt(Halt::Heap(error)),
+            NativeError::Guard(error) => Self::Halt(Halt::Fault(format!(
+                "an immutable constructor returned a guard: {error}"
+            ))),
+        }
+    }
+}
+impl From<crate::data::CopyError> for Interrupt {
+    fn from(error: crate::data::CopyError) -> Self {
+        match error {
+            crate::data::CopyError::Raised(error) => error.into(),
+            crate::data::CopyError::Heap(error) => error.into(),
+        }
+    }
 }
 
 fn raise<T>(kind: &'static str, message: impl Into<String>) -> Eval<T> {
-    Err(Interrupt::Raise(error(kind, message)))
+    Err(Interrupt::raised(error(kind, message)))
 }
 
 fn fault(problem: &str) -> Halt {
@@ -129,16 +184,16 @@ enum SlotState {
     Empty,
     Value(Value),
     /// A variable a closure shares: the heap cell that holds it.
-    Cell(ObjectId),
+    Cell(EntityId),
 }
 
 /// A loop's position in what it iterates (`K-ITER-002`, `K-ITER-003`).
 #[derive(Clone, Debug)]
 enum Cursor {
-    List(ObjectId, usize),
-    Tuple(Arc<[Value]>, usize),
+    List(EntityId, usize),
+    Tuple(TupleRef, usize),
     /// A map or a set, and the sequence number of the entry last visited.
-    Table(ObjectId, Option<u64>),
+    Table(Value, Option<TableCursor>),
 }
 
 #[derive(Clone, Debug)]
@@ -170,18 +225,15 @@ enum Control {
     },
 }
 
-#[derive(Debug)]
 struct LibraryCall {
     lib: LibId,
-    args: Vec<Value>,
+    args: Tree<Value>,
 }
 
 /// The vectors of a frame that has ended, kept for the next frame.
 #[derive(Debug, Default)]
 struct FrameStorage {
-    slots: Vec<SlotState>,
     control: Vec<Control>,
-    args: Vec<Value>,
 }
 
 /// Storage the machine reuses from call to call, so that a call allocates
@@ -191,10 +243,11 @@ struct Storage {
     frames: Vec<FrameStorage>,
 }
 
-#[derive(Debug)]
 struct Frame {
     code: CodeId,
-    slots: Vec<SlotState>,
+    record: FrameRecord,
+    access: Access<'static>,
+    exe: Arc<Executable>,
     control: Vec<Control>,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
@@ -203,6 +256,57 @@ struct Frame {
     /// The frame was called from inside an expression and runs to its end
     /// there.
     inline: bool,
+    /// The record as last written to its row: what a flush compares to
+    /// instead of reading the row back (FIG-6318).
+    published: Option<FrameRecord>,
+}
+
+impl Frame {
+    fn slot(&self, at: u32) -> Result<SlotState, HeapFault> {
+        let code = self.exe.code(self.code);
+        let info = &code.slots[code.slots_by_at[at as usize] as usize];
+        let key = &info.key;
+        Ok(match self.record.bindings.get(key, &self.access)? {
+            None => SlotState::Empty,
+            Some(BindingRecord {
+                value: BoundRecord::Value(value),
+                ..
+            }) => SlotState::Value(value),
+            Some(BindingRecord {
+                value: BoundRecord::Shared(id),
+                ..
+            }) => SlotState::Cell(id),
+        })
+    }
+    fn set_slot(&mut self, at: u32, state: SlotState) -> Result<(), HeapFault> {
+        let code = self.exe.code(self.code);
+        let info = &code.slots[code.slots_by_at[at as usize] as usize];
+        let key = &info.key;
+        let value = match state {
+            SlotState::Empty => {
+                self.record.bindings.remove(key, &self.access)?;
+                return Ok(());
+            }
+            SlotState::Value(value) => BoundRecord::Value(value),
+            SlotState::Cell(id) => BoundRecord::Shared(id),
+        };
+        let (name, declared) = match self.record.bindings.get(key, &self.access)? {
+            Some(old) => (old.name, old.declared),
+            None => (
+                lash_kernel_state::paged::NameRef::new(&info.name, &self.access)?,
+                lash_kernel_state::paged::SiteRef::new(&info.declared, &self.access)?,
+            ),
+        };
+        self.record.bindings.write(
+            key.clone(),
+            BindingRecord {
+                name,
+                declared,
+                value,
+            },
+            &self.access,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,75 +316,11 @@ enum Wait {
     JoinMany(u64),
 }
 
-#[derive(Debug)]
-enum TaskState {
-    /// Running, or in the ready queue.
-    Ready,
-    Waiting(Wait),
-    Ended(Result<Value, Value>),
-}
-
-/// What a task's pending statement resumes with.
-#[derive(Debug)]
-enum Incoming {
-    Value(Value),
-    Raise(Value),
-    /// The outcome of the wait the task was in.
-    Outcome(Box<Answered>),
-    /// The result of this task, which has ended.
-    Join(TaskId),
-}
-
-/// One waiting join in a task's wake queue (`K-TASK-008`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Joiner {
-    Single(TaskId),
-    List(u64),
-}
-
-/// A wait whose outcome has been delivered and whose task has not yet run
-/// with it.
-#[derive(Debug)]
-struct Answered {
-    wait: WaitId,
-    request: Request,
-    outcome: Outcome,
-}
-
-#[derive(Debug)]
 struct Task {
-    identity: TaskIdentity,
-    frames: Vec<Frame>,
-    state: TaskState,
-    incoming: Option<Incoming>,
-    /// Every join waiting on this task, in join-start order.
-    joiners: Vec<Joiner>,
-    /// A `join` on the handle raised the task's error.
-    observed: bool,
-    /// The task is or was a member of a list `join` that has returned or
-    /// raised (`K-TASK-016`).
-    passed: bool,
-    /// The task ended in an error.
-    failed: bool,
-    /// How many times the task has entered each observed action.
-    occurrences: BTreeMap<StmtId, u64>,
-}
-
-#[derive(Debug)]
-struct ListJoin {
-    joiner: TaskId,
-    mode: JoinMode,
-    members: Vec<TaskId>,
-}
-
-#[derive(Debug)]
-struct PendingWait {
-    task: TaskId,
-    /// What the wait asked for. The embedder holds it too once it is
-    /// handed out; the machine keeps it so that a parked run says what
-    /// each task waits on.
-    request: Request,
-    handed_out: bool,
+    record: lash_kernel_state::paged::TaskRecord,
+    frames: frames::Frames,
+    /// The record as last written to its row (FIG-6318).
+    published: Option<lash_kernel_state::paged::TaskRecord>,
 }
 
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
@@ -292,34 +332,47 @@ pub struct KernelMachine {
     document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
-    heap: Heap,
-    tasks: Vec<Task>,
-    ready: VecDeque<TaskId>,
+    heap: PagedHeap,
+    limits: lash_kernel_doc::KernelDataLimits,
+    release: PageId,
+    owner: PageId,
+    tasks: tasks::Tasks,
+    ready: queue::Queue<TaskId>,
     current: Option<TaskId>,
-    joins: BTreeMap<u64, ListJoin>,
+    joins: Tree<ListJoin>,
     next_join: u64,
-    waits: BTreeMap<WaitId, PendingWait>,
+    waits: Tree<WaitRecord>,
     next_wait: u64,
     /// The effects and sleeps requested since the last park, in request
     /// order.
-    requests: Vec<WaitId>,
+    // Issued requests are retained in waits until reporting.
     /// The waits withdrawn since the last park, and every one ever.
-    withdrawn: Vec<WaitId>,
-    withdrawn_ever: BTreeSet<WaitId>,
+    withdrawn: queue::Queue<u64>,
+    withdrawn_ever: Tree<u64>,
     /// The mode each effect is performed in, bound at the start and saved
     /// with the run (`K-EFF-012`).
-    modes: crate::interface::EffectModes,
-    /// The session's bindings, when the run is a session cell.
-    session: BTreeMap<Name, Value>,
+    modes: Tree<lash_kernel_state::paged::NameRef>,
+    /// The session's saved functions ([`FunctionRecord`]s by declared
+    /// name), when the run is a session cell.
+    ///
+    /// [`FunctionRecord`]: lash_kernel_state::paged::FunctionRecord
+    functions: lash_kernel_state::paged::KeyedRoot,
+    /// The bindings the host projected into the cell, which its carry
+    /// leaves out.
+    host: Vec<Name>,
+    /// How the cell's end saves the functions its carry would drop; none
+    /// drops them.
+    save: Option<Box<dyn crate::interface::CellSave>>,
     session_cell: bool,
     /// What the statement being run holds outside any variable.
     pins: Pins,
-    fresh: Vec<ObjectId>,
+    fresh: Vec<EntityId>,
     charging: bool,
     charged: u64,
     /// The cost table of the kernel version the document states.
     costs: crate::costs::Costs,
     live_tasks: u32,
+    census_refinements: u64,
     inline_depth: u32,
     inline_result: Option<Result<Value, Value>>,
     /// The registers: the values of the expressions being evaluated and
@@ -338,6 +391,14 @@ pub struct KernelMachine {
     observer: Option<Box<Observer>>,
     /// Statement starts in this run segment, never captured in parked state.
     ran: Vec<u64>,
+}
+
+impl KernelMachine {
+    /// Saves the functions the cell's end would drop through `save`
+    /// (`K-SES-004`).
+    pub fn set_cell_save(&mut self, save: Box<dyn crate::interface::CellSave>) {
+        self.save = Some(save);
+    }
 }
 
 impl std::fmt::Debug for KernelMachine {
@@ -371,23 +432,8 @@ impl Pins {
 
     /// Holds `value`, of `bytes` bytes.
     fn hold(&mut self, value: &Value, bytes: u64) {
-        if matches!(
-            value,
-            Value::Null
-                | Value::Absent
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::Text(_)
-                | Value::Bytes(_)
-                | Value::Timestamp(_)
-                | Value::Function(_)
-                | Value::Handle(_)
-        ) {
-            self.bytes = self.bytes.saturating_add(bytes);
-        } else {
-            self.values.push(value.clone());
-        }
+        self.values.push(value.clone());
+        self.bytes = self.bytes.saturating_add(bytes);
     }
 
     fn clear(&mut self) {
@@ -396,98 +442,27 @@ impl Pins {
     }
 }
 
-#[derive(Default)]
-struct Roots {
-    seeds: Vec<Identity>,
-    bytes: u64,
-}
-
-impl Roots {
-    fn value(&mut self, value: &Value) {
-        self.bytes = self.bytes.saturating_add(value_bytes(value));
-        refs(value, &mut self.seeds);
+impl KernelMachine {
+    #[cfg(test)]
+    pub(crate) fn accounting(&self) -> lash_kernel_state::paged::AccountingCertificate {
+        self.heap.certificate()
     }
-
-    fn object(&mut self, object: ObjectId) {
-        self.seeds.push(Identity::Object(object));
+    #[cfg(test)]
+    pub(crate) fn wait_count(&self) -> u64 {
+        self.waits.len()
     }
-
-    fn task(&mut self, task: TaskId) {
-        self.seeds.push(Identity::Task(task));
+    fn heap_halt(&self, error: HeapWriteError) -> Halt {
+        match error {
+            HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
+            HeapWriteError::Fault(error) => Halt::Heap(error),
+            HeapWriteError::Raised { kind, message } => {
+                Halt::Fault(format!("an allocation returned {kind}: {message}"))
+            }
+        }
     }
 }
 
 impl KernelMachine {
-    /// Start under deployment recursive data admission, independent of run
-    /// spend, performing each effect in the mode `modes` binds: the binding
-    /// is saved with the run, and no resume changes it (`K-EFF-012`).
-    pub fn start_with_data_limits(
-        program: Program,
-        bounds: Bounds,
-        start: Start,
-        limits: lash_kernel_doc::KernelDataLimits,
-        modes: crate::interface::EffectModes,
-    ) -> Result<Self, StartError> {
-        let mut machine = session::start(program, bounds, start, Layout::default(), limits)?;
-        machine.bind_modes(modes)?;
-        Ok(machine)
-    }
-    /// Resume under the deployment's current recursive data admission policy.
-    pub fn import_with_data_limits(
-        program: Program,
-        bounds: Bounds,
-        parked: ParkedRun,
-        limits: lash_kernel_doc::KernelDataLimits,
-    ) -> Result<Self, ImportError> {
-        parked::import(program, bounds, parked, Layout::default(), limits)
-    }
-
-    /// Starts a run whose executable is laid out as `layout` says. A test
-    /// uses it to show that the layout changes nothing a run can observe;
-    /// [`Machine::start`] is layout 0.
-    pub fn start_with_layout(
-        program: Program,
-        bounds: Bounds,
-        start: Start,
-        layout: Layout,
-    ) -> Result<Self, StartError> {
-        session::start(
-            program,
-            bounds,
-            start,
-            layout,
-            lash_kernel_doc::KernelDataLimits::standard(),
-        )
-    }
-
-    /// Rebuilds a run from a parked state against an executable laid out
-    /// as `layout` says. A test uses it to show that nothing saved names a
-    /// position in an executable; [`Machine::import`] is layout 0.
-    pub fn import_with_layout(
-        program: Program,
-        bounds: Bounds,
-        parked: ParkedRun,
-        layout: Layout,
-    ) -> Result<Self, ImportError> {
-        parked::import(
-            program,
-            bounds,
-            parked,
-            layout,
-            lash_kernel_doc::KernelDataLimits::standard(),
-        )
-    }
-
-    /// Writes the run's state at this safe point as a header and one
-    /// fragment per root, rewriting only the fragments that changed since
-    /// `since`: the baseline of this machine's last save, or the one
-    /// `ParkedRun::load` returned for the state it was imported from.
-    ///
-    /// [`Machine::export`] gives the same state whole.
-    pub fn save(&mut self, since: &Baseline) -> Result<Saved, ExportError> {
-        parked::save(self, since)
-    }
-
     /// Has the run check, at the end of every statement's step, the step
     /// structure the executable states (the blocks the step leaves and the
     /// Boundary it ends at) against the one its frame shows, derived as
@@ -514,121 +489,96 @@ impl KernelMachine {
     /// Binds `modes` to a run that has executed nothing: each read names an
     /// effect the document's manifest declares.
     fn bind_modes(&mut self, modes: crate::interface::EffectModes) -> Result<(), StartError> {
-        if let Some(effect) = modes
-            .reads()
-            .iter()
-            .find(|effect| !self.program.document.manifest.effects.contains_key(*effect))
-        {
-            return Err(StartError::UndeclaredRead {
-                effect: effect.clone(),
-            });
+        for effect in modes.reads() {
+            if !self.program.document.manifest.effects.contains_key(effect) {
+                return Err(StartError::UndeclaredRead {
+                    effect: effect.clone(),
+                });
+            }
+            let name = Name::new(effect.as_str());
+            self.modes.write(
+                lash_kernel_state::paged::metadata::metadata_key(&name),
+                lash_kernel_state::paged::NameRef::new(&name, &self.heap.access)?,
+                &self.heap.access,
+            )?;
         }
-        self.modes = modes;
         Ok(())
     }
-
-    /// The mode each effect of the run is performed in.
-    #[must_use]
-    pub fn effect_modes(&self) -> &crate::interface::EffectModes {
-        &self.modes
+    fn effect_mode(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+    ) -> Result<crate::interface::EffectMode, HeapFault> {
+        let name = Name::new(effect.as_str());
+        Ok(
+            if self
+                .modes
+                .get(
+                    &lash_kernel_state::paged::metadata::metadata_key(&name),
+                    &self.heap.access,
+                )?
+                .is_some()
+            {
+                crate::interface::EffectMode::Read
+            } else {
+                crate::interface::EffectMode::Recorded
+            },
+        )
     }
 
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
+        self.reconcile_sweep()?;
         self.tasks
-            .get_mut(task.0 as usize)
+            .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("a handle names no task"))
     }
 
     fn frame(&mut self, task: TaskId) -> Result<&mut Frame, Halt> {
         self.task(task)?
             .frames
-            .last_mut()
+            .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))
     }
 
-    /// Frees every object the run cannot reach, and the result of every
-    /// ended task whose handle it cannot reach, and recounts its memory.
-    fn collect(&mut self) {
-        self.observe(Event::CollectEnter);
-        self.collect_unobserved();
-        self.observe(Event::CollectExit);
+    fn reconcile_sweep(&mut self) -> Result<(), Halt> {
+        let refinements = self.heap.certificate().refinements;
+        if refinements != self.census_refinements {
+            self.tasks.after_refinement(self.heap.tasks.clone())?;
+            self.census_refinements = refinements;
+        }
+        Ok(())
+    }
+    /// Publishes what the run holds as the census's persistent and
+    /// statement roots, with every frame's coordinates: what a seal, a
+    /// park or a carry needs.
+    fn publish_roots(&mut self) -> Result<(), Halt> {
+        self.publish(true)
     }
 
-    fn collect_unobserved(&mut self) {
-        let mut roots = Roots::default();
-        for task in &self.tasks {
-            match &task.incoming {
-                Some(Incoming::Value(value) | Incoming::Raise(value)) => roots.value(value),
-                Some(Incoming::Join(joined)) => roots.task(*joined),
-                _ => {}
-            }
-            if let TaskState::Waiting(Wait::Join(joined)) = task.state {
-                roots.task(joined);
-            }
-            for frame in &task.frames {
-                roots.bytes = roots.bytes.saturating_add(FRAME_BYTES);
-                for slot in &frame.slots {
-                    match slot {
-                        SlotState::Empty => {}
-                        SlotState::Value(value) => roots.value(value),
-                        SlotState::Cell(id) => roots.object(*id),
-                    }
-                }
-                if let Some(call) = &frame.library {
-                    call.args.iter().for_each(|arg| roots.value(arg));
-                }
-                for control in &frame.control {
-                    match control {
-                        Control::For {
-                            cursor: Cursor::List(id, _) | Cursor::Table(id, _),
-                            ..
-                        } => roots.object(*id),
-                        Control::For {
-                            cursor: Cursor::Tuple(items, _),
-                            ..
-                        } => items.iter().for_each(|item| roots.value(item)),
-                        Control::Try {
-                            phase:
-                                TryPhase::Finally(Completion::Return(value) | Completion::Throw(value)),
-                            ..
-                        } => roots.value(value),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        for join in self.joins.values() {
-            join.members.iter().for_each(|member| roots.task(*member));
-        }
-        self.session.values().for_each(|value| roots.value(value));
-        self.pins.values.iter().for_each(|value| roots.value(value));
-        roots.bytes = roots.bytes.saturating_add(self.pins.bytes);
-        if let Some(Ok(value) | Err(value)) = &self.inline_result {
-            roots.value(value);
-        }
-        self.fresh.iter().for_each(|id| roots.object(*id));
-        // An ended task's result lives as long as its handle can be
-        // reached.
-        let tasks = &self.tasks;
-        let mut reached = BTreeSet::new();
-        let mut results = 0u64;
-        let live = self.heap.collect(roots.seeds, &mut |task, seeds| {
-            let state = tasks.get(task.0 as usize).map(|task| &task.state);
-            if let Some(TaskState::Ended(Ok(value) | Err(value))) = state
-                && reached.insert(task)
-            {
-                results = results.saturating_add(value_bytes(value));
-                refs(value, seeds);
-            }
-        });
-        for (index, task) in self.tasks.iter_mut().enumerate() {
-            if matches!(task.state, TaskState::Ended(_)) && !reached.contains(&TaskId(index as u64))
-            {
-                task.state = TaskState::Ended(Ok(Value::Null));
-            }
-        }
-        let bytes = roots.bytes.saturating_add(results).saturating_add(live);
-        self.heap.settle(bytes, self.bounds.memory);
+    /// Publishes what the run holds, leaving frames' coordinates where they
+    /// were last published: the accounting and the trace before an
+    /// allocation, a reservation or a call read held values only, so a
+    /// frame that only moved is not written (FIG-6318).
+    fn publish_holdings(&mut self) -> Result<(), Halt> {
+        self.publish(false)
+    }
+
+    fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
+        self.reconcile_sweep()?;
+        let tasks = if coordinates {
+            self.tasks.roots()?
+        } else {
+            self.tasks.holdings()?
+        };
+        self.heap
+            .set_execution_roots(
+                tasks,
+                self.joins.clone(),
+                &self.regs,
+                &self.pins.values,
+                &self.fresh,
+            )
+            .map_err(|e| self.heap_halt(e))?;
+        self.reconcile_sweep()
     }
 
     /// Runs one statement of `task`, or resumes the one it waits in.
@@ -640,9 +590,9 @@ impl KernelMachine {
         }
         self.pins.clear();
         self.fresh.clear();
-        let outcome = match self.task(task)?.incoming.take() {
+        let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
-                self.refresh_charging(task, exe);
+                self.refresh_charging(task, exe)?;
                 self.resume(task, exe, incoming).and_then(|value| {
                     // The value is in no variable until the statement binds
                     // it.
@@ -658,12 +608,13 @@ impl KernelMachine {
         self.settle(task, host, exe, outcome)
     }
 
-    fn refresh_charging(&mut self, task: TaskId, exe: &Executable) {
+    fn refresh_charging(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
         self.charging = self
-            .tasks
-            .get(task.0 as usize)
-            .and_then(|task| task.frames.last())
+            .task(task)?
+            .frames
+            .last_mut()?
             .is_none_or(|frame| exe.code(frame.code).charged);
+        Ok(())
     }
 
     fn settle(
@@ -677,7 +628,7 @@ impl KernelMachine {
             // Most statements complete normally: nothing departs.
             Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
-            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
             Err(Interrupt::Halt(halt)) => return Err(halt),
         };
         self.complete(task, host, exe, completion)
@@ -686,30 +637,53 @@ impl KernelMachine {
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
     fn end_task(&mut self, task: TaskId, result: Result<Value, Value>) -> Result<(), Halt> {
+        let result = match result {
+            Ok(value) => Ok(self
+                .heap
+                .canonical_value(value)
+                .map_err(|error| self.heap_halt(error))?),
+            Err(value) => Err(self
+                .heap
+                .canonical_value(value)
+                .map_err(|error| self.heap_halt(error))?),
+        };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();
         ended.failed = result.is_err();
-        ended.state = TaskState::Ended(result.clone());
-        let joiners = std::mem::take(&mut ended.joiners);
+        ended.state = TaskState::Ended(match result.clone() {
+            Ok(value) => EndedTask::Returned(value),
+            Err(value) => EndedTask::Raised(value),
+        });
+        let joiners = std::mem::replace(&mut ended.joiners, Tree::new(true));
+        let access = self.heap.access.clone();
         self.live_tasks = self.live_tasks.saturating_sub(1);
         if self.current == Some(task) {
             self.current = None;
         }
         if task == TaskId::MAIN {
             self.end = Some(match result {
-                Ok(value) => self.conclude(None, Ending::Returned(value)),
-                Err(value) => End::Error(RunError::Uncaught(
-                    copy_out(&self.heap, &value).unwrap_or_else(Raised::into_datum),
-                )),
+                Ok(value) => self.conclude(None, Ending::Returned(value))?,
+                Err(value) => End::Error(RunError::Uncaught(match copy_out(&self.heap, &value) {
+                    Ok(value) => value,
+                    Err(crate::data::CopyError::Raised(error)) => error.into_datum(),
+                    Err(crate::data::CopyError::Heap(error)) => return Err(error.into()),
+                })),
             });
             return Ok(());
         }
-        for joiner in joiners {
+        for at in 0..joiners.len() {
+            let (_, joiner) = joiners
+                .rank_get(at, &access)?
+                .ok_or_else(|| fault("a joiner row is missing"))?;
             match joiner {
-                Joiner::Single(joiner) => self.wake(joiner, Incoming::Join(task))?,
+                Joiner::Single(joiner) => self.wake(joiner, Incoming::Joined(task))?,
                 Joiner::List(order) => {
-                    let Some(join) = self.joins.get(&order) else {
+                    let Some(join) = self.joins.get(
+                        &lash_kernel_state::paged::directory::ordinal_key(order),
+                        &access,
+                    )?
+                    else {
                         continue;
                     };
                     let (mode, members, joiner) = (join.mode, join.members.clone(), join.joiner);
@@ -733,93 +707,118 @@ impl KernelMachine {
     /// Makes a waiting task ready, at the back of the queue (`K-TASK-005`).
     fn wake(&mut self, task: TaskId, incoming: Incoming) -> Result<(), Halt> {
         let woken = self.task(task)?;
-        woken.state = TaskState::Ready;
-        woken.incoming = Some(incoming);
-        self.ready.push_back(task);
+        woken.wake(incoming);
+        self.ready.push_back(task)?;
         Ok(())
     }
 
     /// Examines the other tasks at the run's end and gives the end
     /// (`K-TASK-018`). `ender` is the task that ran `finish` or `fail`.
-    fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> End {
+    fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> Result<End, Halt> {
         let mut unfinished = Vec::new();
         let mut unobserved = Vec::new();
-        for (index, task) in self.tasks.iter().enumerate().skip(1) {
-            if ender == Some(TaskId(index as u64)) || task.passed {
-                continue;
-            }
-            match &task.state {
-                TaskState::Ended(_) if task.failed && !task.observed => {
-                    unobserved.push(task.identity.clone());
+        let access = self.heap.access.clone();
+        self.tasks.visit(&mut |id, task| {
+            if id != TaskId::MAIN && ender != Some(id) && !task.passed {
+                match task.state {
+                    TaskState::Ended(_) if task.failed && !task.observed => {
+                        unobserved.push(task.identity)
+                    }
+                    TaskState::Ended(_) => (),
+                    _ => unfinished.push(task.identity),
                 }
-                TaskState::Ended(_) => {}
-                _ => unfinished.push(task.identity.clone()),
             }
-        }
+            true
+        })?;
         if !unfinished.is_empty() || !unobserved.is_empty() {
-            return End::Error(RunError::TasksOutstanding {
+            let unfinished = unfinished
+                .into_iter()
+                .map(|id| id.resolve(&access))
+                .collect::<Result<Vec<_>, _>>()?;
+            let unobserved = unobserved
+                .into_iter()
+                .map(|id| id.resolve(&access))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(End::Error(RunError::TasksOutstanding {
                 unfinished,
                 unobserved,
-            });
+            }));
         }
-        match ending {
+        Ok(match ending {
             Ending::Returned(value) => match copy_out(&self.heap, &value) {
-                Ok(result) => End::Finished(self.finished(result, false)),
-                Err(raised) => End::Error(RunError::Uncaught(raised.into_datum())),
+                Ok(result) => End::Finished(Box::new(self.finished(result, false)?)),
+                Err(crate::data::CopyError::Raised(raised)) => {
+                    End::Error(RunError::Uncaught(raised.into_datum()))
+                }
+                Err(crate::data::CopyError::Heap(fault)) => return Err(fault.into()),
             },
-            Ending::Finished(result) => End::Finished(self.finished(result, true)),
+            Ending::Finished(result) => End::Finished(Box::new(self.finished(result, true)?)),
             Ending::Failed(reason) => End::Failed(reason),
-        }
+        })
     }
 
-    /// Hands the embedder what the tasks asked for, or ends a run nothing
-    /// can wake (`K-TASK-023`, `K-TASK-024`).
-    fn park(&mut self, host: &mut dyn Host) -> Step {
-        if self.waits.is_empty() {
-            let waiting = self
-                .tasks
-                .iter()
-                .filter(|task| !matches!(task.state, TaskState::Ended(_)))
-                .map(|task| task.identity.clone())
-                .collect();
-            return self.finish_with(End::Error(RunError::Deadlock { waiting }));
-        }
+    fn park(&mut self, host: &mut dyn Host) -> Result<Step, MachineError> {
         if host.cancel_requested() {
-            return self.finish_with(End::Cancelled);
+            return Ok(self.finish_with(End::Cancelled));
         }
-        let mut requests = Vec::with_capacity(self.requests.len());
-        for wait in std::mem::take(&mut self.requests) {
-            if let Some(pending) = self.waits.get_mut(&wait) {
-                pending.handed_out = true;
-                requests.push(pending.request.clone());
-            }
-        }
-        let outstanding = self
-            .tasks
-            .iter()
-            .skip(1)
-            .filter(|task| {
-                !task.passed
-                    && match &task.state {
-                        TaskState::Ended(_) => task.failed && !task.observed,
-                        _ => true,
+        if self.waits.is_empty() {
+            let mut waiting = Vec::new();
+            self.tasks
+                .visit(&mut |_, task| {
+                    if task.is_live() {
+                        waiting.push(task.identity);
                     }
-            })
-            .map(|task| task.identity.clone())
-            .collect();
-        let live = self
-            .tasks
-            .iter()
-            .skip(1)
-            .filter(|task| !matches!(task.state, TaskState::Ended(_)))
-            .map(|task| task.identity.clone())
-            .collect();
-        Step::Parked(Park {
+                    true
+                })
+                .map_err(MachineError::Heap)?;
+            let waiting = waiting
+                .into_iter()
+                .map(|id| id.resolve(&self.heap.access))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(MachineError::Heap)?;
+            return Ok(self.finish_with(End::Error(RunError::Deadlock { waiting })));
+        }
+        let mut requests = Vec::new();
+        // Each report changes Issued to Admitted. Sealing alone changes neither.
+        let access = self.heap.access.clone();
+        let mut key = None;
+        while let Some((next, mut wait)) = self
+            .waits
+            .after(key.as_deref(), &access)
+            .map_err(MachineError::Heap)?
+        {
+            if let WaitPhase::Issued { request } = wait.phase {
+                let raw: [u8; 8] = next
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| MachineError::Fault {
+                        problem: "wait key width".into(),
+                    })?;
+                let id = WaitId(u64::from_be_bytes(raw));
+                requests.push(
+                    self.report_request(id, wait.task, &request)
+                        .map_err(MachineError::Heap)?,
+                );
+                wait.phase = WaitPhase::Admitted;
+                self.waits
+                    .write(next.clone(), wait, &access)
+                    .map_err(MachineError::Heap)?;
+            }
+            key = Some(next);
+        }
+        let mut withdrawn = Vec::new();
+        while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
+            withdrawn.push(WaitId(wait));
+        }
+        let (tasks, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
+        let live = u64::from(self.live_tasks.saturating_sub(1));
+        Ok(Step::Parked(Park {
             requests,
-            withdrawn: std::mem::take(&mut self.withdrawn),
+            withdrawn,
             outstanding,
             live,
-        })
+            tasks,
+        }))
     }
 
     fn finish_with(&mut self, end: End) -> Step {
@@ -836,12 +835,12 @@ impl KernelMachine {
         loop {
             let task = match self.current {
                 Some(task) => task,
-                None => match self.ready.pop_front() {
+                None => match self.ready.pop_front().map_err(MachineError::Heap)? {
                     Some(task) => {
                         self.current = Some(task);
                         task
                     }
-                    None => return Ok(self.park(host)),
+                    None => return self.park(host),
                 },
             };
             match self.step(task, host, &exe) {
@@ -865,15 +864,34 @@ impl KernelMachine {
                     }
                     return Ok(self.finish_with(End::Error(RunError::Bound(exceeded))));
                 }
+                Err(Halt::Heap(error)) => return Err(MachineError::Heap(error)),
+                Err(Halt::Memory) => {
+                    return Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
+                        bound: Bound::Memory,
+                        limit: self.bounds.memory,
+                        function: None,
+                    }))));
+                }
                 Err(Halt::Finish(result)) => {
-                    let end = self.conclude(Some(task), Ending::Finished(result));
+                    let end = self
+                        .conclude(Some(task), Ending::Finished(result))
+                        .map_err(machine_error)?;
                     return Ok(self.finish_with(end));
                 }
                 Err(Halt::Fail(reason)) => {
-                    let end = self.conclude(Some(task), Ending::Failed(reason));
+                    let end = self
+                        .conclude(Some(task), Ending::Failed(reason))
+                        .map_err(machine_error)?;
                     return Ok(self.finish_with(end));
                 }
             }
+            self.publish_holdings().map_err(machine_error)?;
+            self.regs.clear();
+            self.pins.clear();
+            self.fresh.clear();
+            self.heap
+                .release_statement_roots()
+                .map_err(MachineError::Heap)?;
             if let Some(end) = self.end.take() {
                 return Ok(self.finish_with(end));
             }
@@ -888,90 +906,15 @@ impl KernelMachine {
     }
 }
 
-impl Machine for KernelMachine {
-    type Parked = ParkedRun;
-
-    fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
-        Self::start_with_layout(program, bounds, start, Layout::default())
-    }
-
-    fn start_reading(
-        program: Program,
-        bounds: Bounds,
-        start: Start,
-        modes: crate::interface::EffectModes,
-    ) -> Result<Self, StartError> {
-        let mut machine = Self::start_with_layout(program, bounds, start, Layout::default())?;
-        machine.bind_modes(modes)?;
-        Ok(machine)
-    }
-
-    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
-        if self.ended {
-            return Err(MachineError::Ended);
-        }
-        if self.observer.is_none() {
-            let step = self.run_slice(host, slice);
-            self.regs.clear();
-            return step;
-        }
-        self.observe_phase(GuestPhase::Interpret);
-        let step = self.run_slice(host, slice);
-        self.regs.clear();
-        self.observe_phase(match step {
-            Ok(Step::Parked(_)) => GuestPhase::Park,
-            _ => GuestPhase::Inactive,
-        });
-        step
-    }
-
-    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
-        if self.ended {
-            return Err(DeliverError::Ended);
-        }
-        let Some(pending) = self.waits.get(&wait) else {
-            return if self.withdrawn_ever.contains(&wait) {
-                Ok(Delivered::Dropped)
-            } else if wait.0 < self.next_wait {
-                Err(DeliverError::AlreadyDelivered { wait })
-            } else {
-                Err(DeliverError::UnknownWait { wait })
-            };
-        };
-        if !pending.handed_out {
-            return Err(DeliverError::UnknownWait { wait });
-        }
-        if matches!(pending.request, Request::Sleep(_)) != matches!(outcome, Outcome::Elapsed) {
-            return Err(DeliverError::WrongOutcome { wait });
-        }
-        let Some(PendingWait { task, request, .. }) = self.waits.remove(&wait) else {
-            return Err(DeliverError::UnknownWait { wait });
-        };
-        if let Some(woken) = self.tasks.get_mut(task.0 as usize) {
-            woken.state = TaskState::Ready;
-            woken.incoming = Some(Incoming::Outcome(Box::new(Answered {
-                wait,
-                request,
-                outcome,
-            })));
-            self.ready.push_back(task);
-        }
-        Ok(Delivered::Accepted)
-    }
-
-    fn export(&mut self) -> Result<Self::Parked, ExportError> {
-        parked::export(self)
-    }
-
-    fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError> {
-        Self::import_with_layout(program, bounds, parked, Layout::default())
-    }
-
-    fn meters(&self) -> Meters {
-        Meters {
-            charged: self.charged,
-            memory: self.heap.memory,
-            live_tasks: self.live_tasks,
-        }
+fn machine_error(halt: Halt) -> MachineError {
+    match halt {
+        Halt::Heap(error) => MachineError::Heap(error),
+        Halt::Host(error) => MachineError::Host(error),
+        other => MachineError::Fault {
+            problem: format!("{other:?}"),
+        },
     }
 }
+
+#[cfg(test)]
+mod park_laws;

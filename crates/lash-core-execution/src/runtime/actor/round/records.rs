@@ -64,6 +64,9 @@ pub(super) struct OutcomeBody {
     pub(super) output: SettledOutput,
     pub(super) state: Vec<lash_core_store::tool_run::StateResolution>,
     pub(super) ended_at_ms: Option<u64>,
+    /// The CheckpointRoot of the heap pages an engine step's completion
+    /// published with it, which the record owns (FIG-6193).
+    pub(super) pages: Option<NodeId>,
 }
 
 /// A `retry` record's body: the attempt started at `start` failed in a way
@@ -157,6 +160,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRef
             output: settled_fact(staging, &body.output)?,
             state: body.state.clone(),
             ended_at_ms: body.ended_at_ms,
+            pages: body.pages,
         },
         Record::Retry(body) => RoundFact::Retry {
             start: body.start,
@@ -223,17 +227,20 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             output: settled_output(&mut decoder, output)?,
             state: Vec::new(),
             ended_at_ms: None,
+            pages: None,
         }),
         RoundFact::Outcome {
             start,
             output,
             state,
             ended_at_ms,
+            pages,
         } => Record::Outcome(OutcomeBody {
             start,
             output: settled_output(&mut decoder, output)?,
             state,
             ended_at_ms,
+            pages,
         }),
         RoundFact::Retry {
             start,

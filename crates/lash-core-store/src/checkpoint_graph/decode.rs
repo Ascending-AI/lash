@@ -52,7 +52,8 @@ pub trait NodeSource {
 /// Every graph node `root` reaches in `source`, `root` included, each
 /// envelope checked against its digest within `limits`: a root's whole
 /// graph, as one map. An opaque blob a node names is not a graph node and
-/// is not included.
+/// is not included; a persistent-heap page is included, and nothing it
+/// reaches.
 ///
 /// # Errors
 ///
@@ -73,7 +74,12 @@ pub fn closure(
         if stored.encoding != BlobEncoding::Graph {
             continue;
         }
-        pending.extend(check_envelope(stored.bytes, id, limits)?.children.iter());
+        let envelope = check_envelope(stored.bytes, id, limits)?;
+        // A persistent-heap page is the closure's leaf: what it reaches is
+        // read through its heap, never as host graph (FIG-6193).
+        if !super::node::is_semantic(envelope.kind) {
+            pending.extend(envelope.children.iter());
+        }
         nodes.insert(
             id,
             EncodedNode {

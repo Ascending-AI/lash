@@ -18,9 +18,9 @@ use lash_kernel_conformance::smith::{Smith, compare};
 use lash_kernel_dialect::Environment;
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, DeliverError, Delivered, End, ExportError, Host, ImportError, KernelMachine,
-    Layout, Machine, MachineError, Meters, Outcome, PreparedLibrary, Program, Request, Start,
-    StartError, Step, Target, WaitId,
+    Bounds, CellStart, DeliverError, Delivered, End, Host, KernelMachine, Layout, Machine,
+    MachineError, Meters, Outcome, PreparedLibrary, Program, Request, StartError, Step, Target,
+    WaitId,
 };
 
 #[path = "../../shared/gate_six.rs"]
@@ -84,27 +84,31 @@ fn check_ranges(machine: &KernelMachine) {
 struct Verified(KernelMachine);
 
 impl Machine for Verified {
-    type Parked = <KernelMachine as Machine>::Parked;
-
-    fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
-        let mut machine = KernelMachine::start(program, bounds, start)?;
-        machine.verify_step_structure();
-        check_ranges(&machine);
-        Ok(Self(machine))
-    }
-
-    fn start_reading(
+    fn start(
         program: Program,
         bounds: Bounds,
-        start: Start,
-        modes: lash_kernel_vm::EffectModes,
+        start: CellStart,
+        source: Box<dyn lash_kernel_state::paged::PageSource>,
+        census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
     ) -> Result<Self, StartError> {
-        let mut machine = KernelMachine::start_reading(program, bounds, start, modes)?;
+        let mut machine = KernelMachine::start(program, bounds, start, source, census)?;
         machine.verify_step_structure();
         check_ranges(&machine);
         Ok(Self(machine))
     }
-
+    fn open(
+        program: Program,
+        bounds: Bounds,
+        root: &lash_kernel_state::paged::CheckpointRoot,
+        admissions: Vec<lash_kernel_state::AdmittedWait>,
+        source: Box<dyn lash_kernel_state::paged::PageSource>,
+        census: Box<dyn lash_kernel_state::paged::AllocationCensus>,
+    ) -> Result<Self, lash_kernel_vm::OpenError> {
+        let mut machine = KernelMachine::open(program, bounds, root, admissions, source, census)?;
+        machine.verify_step_structure();
+        check_ranges(&machine);
+        Ok(Self(machine))
+    }
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         let before = self.0.verified_steps();
         let step = self.0.run(host, slice);
@@ -117,17 +121,27 @@ impl Machine for Verified {
         self.0.deliver(wait, outcome)
     }
 
-    fn export(&mut self) -> Result<Self::Parked, ExportError> {
-        self.0.export()
+    fn seal(
+        &mut self,
+        budget: lash_kernel_state::paged::SealBudget,
+    ) -> Result<Option<lash_kernel_vm::paged::SealedRoot>, lash_kernel_vm::SealError> {
+        self.0.seal(budget)
     }
-
-    fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError> {
-        let mut machine = KernelMachine::import(program, bounds, parked)?;
-        machine.verify_step_structure();
-        check_ranges(&machine);
-        Ok(Self(machine))
+    fn task_identity(
+        &self,
+        identity: lash_kernel_state::paged::TaskIdentityRef,
+    ) -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
+        self.0.task_identity(identity)
     }
-
+    fn tasks(
+        &self,
+        root: lash_kernel_state::paged::KeyedRoot,
+        filter: lash_kernel_vm::TaskFilter,
+        after: Option<lash_kernel_doc::TaskId>,
+        limit: u32,
+    ) -> Result<lash_kernel_vm::TaskPage, lash_kernel_doc::heap::HeapFault> {
+        self.0.tasks(root, filter, after, limit)
+    }
     fn meters(&self) -> Meters {
         self.0.meters()
     }
@@ -136,13 +150,16 @@ impl Machine for Verified {
 /// Runs a gate program to its end with the step structure checked, giving
 /// the statement ends checked.
 fn verified_run(name: &str, program: Program) -> u64 {
-    let start = Start {
+    let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
+        host: Vec::new(),
     };
     let mut machine =
-        KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
+        super::pages::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
     machine.verify_step_structure();
     check_ranges(&machine);
     loop {
@@ -192,6 +209,7 @@ fn the_prepared_step_structure_is_the_one_the_frame_shows() {
         let lowered = crate::lower(&source, &environment)
             .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
         let program = Program {
+            release: super::pages::RELEASE,
             document: std::sync::Arc::new(lowered.document),
             library: super::machine::prepared().clone(),
         };

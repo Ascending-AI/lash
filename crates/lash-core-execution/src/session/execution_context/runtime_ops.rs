@@ -65,6 +65,11 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     /// turn (FIG-5999). The turn driver is the only caller.
     #[must_use]
     fn with_cell_end(self, handoff: super::CellEndHandoff) -> Self;
+    /// This context with `pages` as where its session's committed
+    /// execution state stands (FIG-6193). The turn driver is the only
+    /// caller.
+    #[must_use]
+    fn with_session_pages(self, pages: Option<crate::plugin::SessionPages>) -> Self;
     /// This context with `held` as the model response its cell's first
     /// save carries (FIG-6000). The turn driver is the only caller.
     #[must_use]
@@ -113,6 +118,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             cell_end: super::CellEndHandoff::default(),
+            session_pages: None,
             held_response: None,
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
@@ -181,6 +187,11 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
 
     fn with_cell_end(mut self, handoff: super::CellEndHandoff) -> Self {
         self.cell_end = handoff;
+        self
+    }
+
+    fn with_session_pages(mut self, pages: Option<crate::plugin::SessionPages>) -> Self {
+        self.session_pages = pages;
         self
     }
 

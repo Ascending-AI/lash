@@ -917,6 +917,7 @@
     "tool_catalog::tests::typescript_tool_prose_is_rendered_verbatim": 31
   },
   "//crates/lash-sim:crash_matrix__test": {
+    "a_cell_resumed_after_its_first_save_and_settled_interrupted_ends_its_turn_answered": 1690,
     "a_code_cell_cut_at_every_label_resumes_from_its_snapshot": 29451,
     "a_code_cell_killed_in_its_body_cut_at_every_label_settles_interrupted": 14055,
     "a_compaction_s_summary_cut_at_every_label_sends_its_admitted_body": 2403,

@@ -802,6 +802,18 @@ pub struct RecordedProcessStep {
     pub tool: String,
     /// Its final outcome, once it has one.
     pub outcome: Option<SettledOutput>,
+    /// The run fact that records that outcome: what owns the heap pages
+    /// the outcome published (FIG-6193), and what a reader leases them
+    /// under while the journal retains it.
+    pub outcome_fact: Option<StepFact>,
+}
+
+/// Where one run fact of a process's journal stands, and its record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepFact {
+    pub run: lash_durable::domain::RunSeq,
+    pub ordinal: lash_durable::domain::Ordinal,
+    pub record: lash_core_store::checkpoint_graph::NodeId,
 }
 
 /// The call id of the process step `step` admitted in `run`: a reader that
@@ -840,6 +852,7 @@ pub async fn read_process_steps(
             message: format!("the process's step records: {error}"),
         })
     })?;
+    let facts = &rows.rows;
     Ok(fold
         .rounds()
         .flat_map(|round| {
@@ -851,6 +864,19 @@ pub async fn read_process_steps(
                     run: round.run().0,
                     tool: member.draft().tool().as_str().to_owned(),
                     outcome: member.outcome().cloned(),
+                    outcome_fact: facts
+                        .iter()
+                        .rev()
+                        .find(|row| {
+                            row.run == round.run()
+                                && row.kind == lash_durable::domain::RunFactKind::XOutcome
+                                && row.call.as_ref() == Some(member.call())
+                        })
+                        .map(|row| StepFact {
+                            run: row.run,
+                            ordinal: row.ordinal,
+                            record: row.record,
+                        }),
                 })
         })
         .collect())
