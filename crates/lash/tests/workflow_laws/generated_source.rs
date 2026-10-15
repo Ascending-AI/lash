@@ -334,3 +334,53 @@ fn an_imported_typescript_view_needs_only_serialized_library_declarations() {
         serde_json::from_value(serialized).expect("view decodes");
     assert_eq!(view, decoded);
 }
+
+/// FIG-6340: entry publication and main admission retain the same typed
+/// output-signature difference rather than reducing it to an effect name.
+#[test]
+fn an_entry_signature_refusal_retains_the_same_output_difference_as_main() {
+    use lash::workflow::graph::{Environment, RefusalReason, SignatureSide};
+    let document = k::parse_document(
+        "kernel 1\nnumbers float\neffect notify() -> Record{message: Text}\nentry worker() -> Any\nfn worker() { let sent = perform notify() as Any return sent }\nmain { finish null }\n",
+    ).expect("document");
+    let functions = k::FunctionRegistry::default();
+    let mut environment = Environment::new(&functions);
+    environment.effects.insert(
+        k::EffectName::new("notify").expect("effect"),
+        k::Signature {
+            params: vec![],
+            result: k::Type::Any,
+        },
+    );
+    for entry in [
+        WorkflowDocumentEntry::Main,
+        WorkflowDocumentEntry::Entry {
+            function: k::Name::new("worker"),
+        },
+    ] {
+        let refusal = WorkflowDocument::admit(document.clone(), entry, &environment)
+            .expect_err("open output refuses the declared object");
+        let WorkflowAdmissionRefusal::Document(refusal) = refusal else {
+            panic!("signature refusal")
+        };
+        let reason = refusal
+            .errors
+            .iter()
+            .find(|error| error.reason.code() == "effect_signature")
+            .expect("signature mismatch");
+        let RefusalReason::EffectSignature { mismatch, .. } = &reason.reason else {
+            unreachable!()
+        };
+        assert_eq!(mismatch.side, SignatureSide::Output);
+        assert_eq!(mismatch.path, "/output");
+        assert_eq!(mismatch.provided, k::Type::Any);
+        assert!(matches!(&mismatch.expected, k::Type::Record(record) if record.rest.is_none()));
+        let message = reason.to_string();
+        assert!(
+            message.contains("/output")
+                && message.contains("closed object")
+                && message.contains("open/unconstrained"),
+            "{message}"
+        );
+    }
+}

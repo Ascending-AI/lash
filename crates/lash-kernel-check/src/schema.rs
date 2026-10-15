@@ -53,7 +53,7 @@ pub fn tool_signature(
 /// `expected` allows, and returns only what `expected` promises.
 #[must_use]
 pub fn signature_serves(provided: &Signature, expected: &Signature) -> bool {
-    crate::types::serves(provided, expected)
+    signature_mismatch(provided, expected).is_none()
 }
 
 #[derive(Clone, Copy)]
@@ -124,4 +124,14 @@ fn record_of(object: &serde_json::Map<String, serde_json::Value>, openness: Open
             Openness::Open => Some(Box::new(Type::Any)),
         },
     })
+}
+
+/// The first part of `provided` that cannot serve `expected`, found by the
+/// same relation as [`signature_serves`].
+#[must_use]
+pub fn signature_mismatch(
+    provided: &Signature,
+    expected: &Signature,
+) -> Option<crate::SignatureMismatch> {
+    crate::types::serves(provided, expected)
 }

@@ -95,22 +95,21 @@ pub fn derive_definition(
 pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admitted, Refusal> {
     let mut errors = Vec::new();
     for (effect, expected) in &document.manifest.effects {
-        match environment.effects.get(effect) {
-            None => errors.push(refused(
-                None,
-                RefusalReason::MissingEffect {
-                    effect: effect.clone(),
-                },
-            )),
-            Some(provided) if !serves(provided, expected) => errors.push(refused(
-                None,
-                RefusalReason::EffectSignature {
+        let reason = match environment.effects.get(effect) {
+            None => Some(RefusalReason::MissingEffect {
+                effect: effect.clone(),
+            }),
+            Some(provided) => {
+                serves(provided, expected).map(|mismatch| RefusalReason::EffectSignature {
                     effect: effect.clone(),
                     expected: expected.clone(),
                     provided: provided.clone(),
-                },
-            )),
-            Some(_) => {}
+                    mismatch: Box::new(mismatch),
+                })
+            }
+        };
+        if let Some(reason) = reason {
+            errors.push(refused(None, reason));
         }
     }
     let graph = check(document, environment.functions, &mut errors);

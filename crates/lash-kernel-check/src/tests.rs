@@ -629,6 +629,12 @@ main {{
             effect: effect("store"),
             expected: signature(&[("key", Type::Text)], Type::Int),
             provided,
+            mismatch: Box::new(crate::SignatureMismatch {
+                side: crate::SignatureSide::Input,
+                path: "/input/properties/key".into(),
+                expected: Type::Text,
+                provided: Type::Int,
+            }),
         },
     ];
     expected.extend(
@@ -650,6 +656,79 @@ main {{
             "missing_function",
             "missing_function"
         ],
+    );
+}
+
+/// FIG-6340: an open output offered for a closed output names the side
+/// and the differing projected types, rather than just the effect.
+#[test]
+fn an_effect_signature_refusal_names_the_output_openness_difference() {
+    let input = serde_json::json!({});
+    let closed = serde_json::json!({
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "additionalProperties": false
+    });
+    let mut open = closed.clone();
+    open.as_object_mut().unwrap().remove("additionalProperties");
+    let expected = crate::tool_signature(&input, true, &closed);
+    let provided = crate::tool_signature(&input, true, &open);
+    let mut document = document(
+        "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
+    );
+    document
+        .manifest
+        .effects
+        .insert(effect("chat.message_to_self"), expected);
+    let catalog = BTreeMap::new();
+    let mut environment = Environment::new(&catalog);
+    environment
+        .effects
+        .insert(effect("chat.message_to_self"), provided);
+    let refusal =
+        admit(&document, &environment).expect_err("an open output cannot serve the closed output");
+    let reason = refusal
+        .errors
+        .iter()
+        .find(|error| error.reason.code() == "effect_signature")
+        .expect("signature refusal");
+    let message = reason.to_string();
+    assert!(message.contains("output"), "{message}");
+    assert!(message.contains("/output"), "{message}");
+    assert!(
+        message.contains("declared fields") && message.contains("open/unconstrained"),
+        "{message}"
+    );
+    let RefusalReason::EffectSignature {
+        mismatch,
+        expected,
+        provided,
+        ..
+    } = &reason.reason
+    else {
+        unreachable!()
+    };
+    assert_eq!(mismatch.side, crate::SignatureSide::Output);
+    assert_eq!(mismatch.path, "/output");
+    assert_eq!(mismatch.expected, expected.result);
+    assert_eq!(mismatch.provided, provided.result);
+    // A native closed record retains its closedness in the signature.
+    let closed = Signature {
+        result: crate::type_of_schema(&closed),
+        ..expected.clone()
+    };
+    let mismatch = crate::signature_mismatch(provided, &closed).expect("closed vs unconstrained");
+    assert!(mismatch.to_string().contains("closed object"), "{mismatch}");
+    // When both projections retain record structure, the rest itself is
+    // the first incompatible part.
+    let mismatch = crate::signature_mismatch(expected, &closed).expect("open rest vs closed");
+    assert_eq!(mismatch.path, "/output/additionalProperties");
+    assert_eq!(mismatch.expected, closed.result);
+    assert_eq!(mismatch.provided, expected.result);
+    let message = mismatch.to_string();
+    assert!(
+        message.contains("closed object") && message.contains("open rest"),
+        "{message}"
     );
 }
 
@@ -980,6 +1059,12 @@ fn an_optional_result_field_does_not_serve_a_required_one() {
                 effect: effect("get"),
                 expected,
                 provided,
+                mismatch: Box::new(crate::SignatureMismatch {
+                    side: crate::SignatureSide::Output,
+                    path: "/output/properties/x".into(),
+                    expected: Type::Int,
+                    provided: Type::Union(vec![Type::Int, Type::Absent]),
+                }),
             },
         }]
     );
@@ -1085,5 +1170,37 @@ fn cached_library_refusals_keep_the_uncached_errors_and_view() {
     assert_eq!(
         crate::admit::LIBRARY_WORK.with(std::cell::Cell::get),
         (1, 1, 1)
+    );
+}
+
+/// FIG-6340: localisation follows the failing variance comparison, skipping
+/// harmless name and type differences, and escapes field names as pointers.
+#[test]
+fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
+    let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int\nmain { finish null }\n").manifest.effects[&effect("check")].clone();
+    let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text\nmain { finish null }\n").manifest.effects[&effect("check")].clone();
+    let mismatch = crate::signature_mismatch(&provided, &expected).expect("input mismatch first");
+    assert_eq!(
+        mismatch,
+        crate::SignatureMismatch {
+            side: crate::SignatureSide::Input,
+            path: "/input/properties/a~1b~0c/items".into(),
+            expected: Type::Int,
+            provided: Type::Text
+        }
+    );
+    let mut provided = provided;
+    provided.params = expected.params.clone();
+    provided.params[0].name = Name::new("renamed");
+    let mismatch =
+        crate::signature_mismatch(&provided, &expected).expect("only result is incompatible");
+    assert_eq!(
+        mismatch,
+        crate::SignatureMismatch {
+            side: crate::SignatureSide::Output,
+            path: "/output".into(),
+            expected: Type::Int,
+            provided: Type::Text
+        }
     );
 }

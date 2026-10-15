@@ -62,11 +62,14 @@ pub enum RefusalReason {
     MissingEffect { effect: EffectName },
     /// `K-ADM-002`: the environment's effect does not serve the signature
     /// the document expects.
-    #[error("effect `{effect}` is provided with a signature that does not serve the one expected")]
+    #[error(
+        "effect `{effect}` is provided with a signature that does not serve the one expected: {mismatch}"
+    )]
     EffectSignature {
         effect: EffectName,
         expected: Signature,
         provided: Signature,
+        mismatch: Box<SignatureMismatch>,
     },
     /// `K-ADM-003`: the environment holds no function of this identity.
     #[error("the environment holds no library function `{name}` ({function})")]
@@ -153,5 +156,55 @@ pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
     Refused {
         site: site.cloned(),
         reason,
+    }
+}
+
+/// The side of an effect signature that cannot serve its declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignatureSide {
+    Input,
+    Output,
+}
+
+impl fmt::Display for SignatureSide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Input => "input",
+            Self::Output => "output",
+        })
+    }
+}
+
+/// The first incompatible part found by the signature's serving relation.
+/// `path` uses JSON pointer escaping in the projected type structure:
+/// `/input`, `/output`, and their properties, items or additional properties.
+/// The types are the kernel's projections, not the original JSON schemas.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignatureMismatch {
+    pub side: SignatureSide,
+    pub path: String,
+    pub expected: Type,
+    pub provided: Type,
+}
+
+impl fmt::Display for SignatureMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} at {}: expected {}, provided {}",
+            self.side,
+            self.path,
+            describe_type(&self.expected),
+            describe_type(&self.provided)
+        )
+    }
+}
+
+fn describe_type(ty: &Type) -> String {
+    match ty {
+        Type::Any => "open/unconstrained (Any)".into(),
+        Type::Record(record) if record.rest.is_none() => format!("closed object {ty:?}"),
+        Type::Record(_) => format!("object with declared fields and open rest {ty:?}"),
+        other => format!("{other:?}"),
     }
 }

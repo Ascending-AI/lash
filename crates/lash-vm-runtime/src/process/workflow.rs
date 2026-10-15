@@ -530,14 +530,16 @@ fn admit_entry(
     for (effect, expected) in effects {
         let reason = match environment.effects.get(&effect) {
             None => Some(lash_kernel_check::RefusalReason::MissingEffect { effect }),
-            Some(provided) if !lash_kernel_check::signature_serves(provided, &expected) => {
-                Some(lash_kernel_check::RefusalReason::EffectSignature {
-                    effect,
-                    expected,
-                    provided: provided.clone(),
+            Some(provided) => {
+                lash_kernel_check::signature_mismatch(provided, &expected).map(|mismatch| {
+                    lash_kernel_check::RefusalReason::EffectSignature {
+                        effect,
+                        expected,
+                        provided: provided.clone(),
+                        mismatch: Box::new(mismatch),
+                    }
                 })
             }
-            Some(_) => None,
         };
         if let Some(reason) = reason {
             errors.push(lash_kernel_check::Refused { site: None, reason });

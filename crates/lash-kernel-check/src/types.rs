@@ -1,8 +1,8 @@
 //! Relations between types, as sets of kernel values.
 //!
 //! Both relations err toward silence: [`disjoint`] holds only when no value
-//! is of both types and [`subtype`] only when every value of the first is of
-//! the second, so a refusal built on either is never a false one.
+//! is of both types and subtyping succeeds only when every value of the
+//! first is of the second, so a refusal built on either is never a false one.
 
 use lash_kernel_doc::{MapType, Param, RecordType, Signature, Type};
 
@@ -126,63 +126,170 @@ fn records_disjoint(a: &RecordType, b: &RecordType) -> bool {
         )
 }
 
-/// Every value of `sub` is a value of `sup`.
-pub(crate) fn subtype(sub: &Type, sup: &Type) -> bool {
-    match (sub, sup) {
-        (_, Type::Any) => true,
-        (Type::Union(members), _) => members.iter().all(|member| subtype(member, sup)),
-        (_, Type::Union(members)) => members.iter().any(|member| subtype(sub, member)),
-        (Type::Int | Type::Float, Type::Number) | (Type::Enum(_), Type::Text) => true,
-        (Type::Enum(sub), Type::Enum(sup)) => sub.iter().all(|member| sup.contains(member)),
-        (Type::Tuple(sub), Type::Tuple(sup)) => {
-            sub.len() == sup.len() && sub.iter().zip(sup).all(|(sub, sup)| subtype(sub, sup))
-        }
-        (Type::List(sub), Type::List(sup))
-        | (Type::Set(sub), Type::Set(sup))
-        | (Type::Task(sub), Type::Task(sup)) => subtype(sub, sup),
-        (Type::Map(sub), Type::Map(sup)) => {
-            subtype(&sub.key, &sup.key) && subtype(&sub.value, &sup.value)
-        }
-        (Type::Record(sub), Type::Record(sup)) => record_subtype(sub, sup),
-        (Type::Function(sub), Type::Function(sup)) => serves(sub, sup),
-        (sub, sup) => sub == sup,
+/// A failed containment, oriented as the sub- and supertype being compared.
+struct TypeMismatch {
+    path: String,
+    sub: Type,
+    sup: Type,
+}
+
+fn differs(path: &str, sub: &Type, sup: &Type) -> TypeMismatch {
+    TypeMismatch {
+        path: path.into(),
+        sub: sub.clone(),
+        sup: sup.clone(),
     }
 }
 
-fn record_subtype(sub: &RecordType, sup: &RecordType) -> bool {
-    let named = sup.fields.iter().all(|field| {
-        match sub.fields.iter().find(|other| other.name == field.name) {
-            Some(other) => subtype(&other.ty, &field.ty) && (field.optional || !other.optional),
-            // `sub` may hold the field under its rest type, or not at all.
-            None => {
-                field.optional
-                    && sub
-                        .rest
-                        .as_deref()
-                        .is_none_or(|rest| subtype(rest, &field.ty))
-            }
-        }
-    });
-    let extra = sub
-        .fields
-        .iter()
-        .filter(|field| !sup.fields.iter().any(|other| other.name == field.name))
-        .map(|field| &field.ty)
-        .chain(sub.rest.as_deref())
-        .all(|ty| sup.rest.as_deref().is_some_and(|rest| subtype(ty, rest)));
-    named && extra
+fn property(path: &str, name: &str) -> String {
+    format!(
+        "{path}/properties/{}",
+        name.replace('~', "~0").replace('/', "~1")
+    )
 }
 
-/// A function of signature `provided` can stand wherever one of signature
-/// `expected` is called: it takes every argument list `expected` allows, and
-/// returns only what `expected` promises.
-pub(crate) fn serves(provided: &Signature, expected: &Signature) -> bool {
-    provided.params.len() >= expected.params.len()
-        && provided.required() <= expected.required()
-        && expected
-            .params
+fn subtype_at(sub: &Type, sup: &Type, path: &str) -> Option<TypeMismatch> {
+    match (sub, sup) {
+        (_, Type::Any) => None,
+        (Type::Union(members), _) => members
             .iter()
-            .zip(&provided.params)
-            .all(|(expected, provided)| subtype(&expected.ty, &provided.ty))
-        && subtype(&provided.result, &expected.result)
+            .find_map(|member| subtype_at(member, sup, path)),
+        (_, Type::Union(members)) => {
+            if members
+                .iter()
+                .any(|member| subtype_at(sub, member, path).is_none())
+            {
+                None
+            } else {
+                Some(differs(path, sub, sup))
+            }
+        }
+        (Type::Int | Type::Float, Type::Number) | (Type::Enum(_), Type::Text) => None,
+        (Type::Enum(subs), Type::Enum(sups)) if subs.iter().all(|member| sups.contains(member)) => {
+            None
+        }
+        (Type::Tuple(subs), Type::Tuple(sups)) if subs.len() == sups.len() => subs
+            .iter()
+            .zip(sups)
+            .enumerate()
+            .find_map(|(index, (sub, sup))| subtype_at(sub, sup, &format!("{path}/items/{index}"))),
+        (Type::List(sub), Type::List(sup))
+        | (Type::Set(sub), Type::Set(sup))
+        | (Type::Task(sub), Type::Task(sup)) => subtype_at(sub, sup, &format!("{path}/items")),
+        (Type::Map(sub), Type::Map(sup)) => subtype_at(&sub.key, &sup.key, &format!("{path}/keys"))
+            .or_else(|| subtype_at(&sub.value, &sup.value, &format!("{path}/values"))),
+        (Type::Record(sub), Type::Record(sup)) => record_subtype_at(sub, sup, path),
+        (Type::Function(sub), Type::Function(sup)) => {
+            serves_at(sub, sup, path).map(|mismatch| TypeMismatch {
+                path: mismatch.path,
+                sub: mismatch.provided,
+                sup: mismatch.expected,
+            })
+        }
+        (sub, sup) if sub == sup => None,
+        (sub, sup) => Some(differs(path, sub, sup)),
+    }
+}
+
+fn record_subtype_at(sub: &RecordType, sup: &RecordType, path: &str) -> Option<TypeMismatch> {
+    for field in &sup.fields {
+        let at = property(path, &field.name);
+        match sub.fields.iter().find(|other| other.name == field.name) {
+            Some(other) => {
+                if let Some(mismatch) = subtype_at(&other.ty, &field.ty, &at) {
+                    return Some(mismatch);
+                }
+                if !field.optional && other.optional {
+                    return Some(differs(
+                        &at,
+                        &Type::Union(vec![other.ty.clone(), Type::Absent]),
+                        &field.ty,
+                    ));
+                }
+            }
+            None if !field.optional => return Some(differs(&at, &Type::Absent, &field.ty)),
+            None => {
+                if let Some(rest) = &sub.rest
+                    && let Some(mismatch) = subtype_at(rest, &field.ty, &at)
+                {
+                    return Some(mismatch);
+                }
+            }
+        }
+    }
+    for field in &sub.fields {
+        if sup.fields.iter().any(|other| other.name == field.name) {
+            continue;
+        }
+        let at = property(path, &field.name);
+        match &sup.rest {
+            Some(rest) => {
+                if let Some(mismatch) = subtype_at(&field.ty, rest, &at) {
+                    return Some(mismatch);
+                }
+            }
+            None => return Some(differs(&at, &field.ty, &Type::Absent)),
+        }
+    }
+    match (&sub.rest, &sup.rest) {
+        (Some(sub), Some(sup)) => subtype_at(sub, sup, &format!("{path}/additionalProperties")),
+        (Some(_), None) => Some(differs(
+            &format!("{path}/additionalProperties"),
+            &Type::Record(sub.clone()),
+            &Type::Record(sup.clone()),
+        )),
+        _ => None,
+    }
+}
+
+/// The same contravariant-input, covariant-result comparison produces the
+/// diagnostic at its first failure; callers never diff the types afterward.
+pub(crate) fn serves(
+    provided: &Signature,
+    expected: &Signature,
+) -> Option<crate::SignatureMismatch> {
+    serves_at(provided, expected, "")
+}
+
+fn serves_at(
+    provided: &Signature,
+    expected: &Signature,
+    path: &str,
+) -> Option<crate::SignatureMismatch> {
+    use crate::{SignatureMismatch, SignatureSide};
+    let input = format!("{path}/input");
+    if provided.params.len() < expected.params.len() || provided.required() > expected.required() {
+        return Some(SignatureMismatch {
+            side: SignatureSide::Input,
+            path: input,
+            expected: Type::Function(Box::new(expected.clone())),
+            provided: Type::Function(Box::new(provided.clone())),
+        });
+    }
+    for (expected, provided) in expected.params.iter().zip(&provided.params) {
+        let at = if provided.name.as_str() == "input" && expected.name.as_str() == "input" {
+            input.clone()
+        } else {
+            property(&input, expected.name.as_str())
+        };
+        if let Some(mismatch) = subtype_at(&expected.ty, &provided.ty, &at) {
+            return Some(SignatureMismatch {
+                side: SignatureSide::Input,
+                path: mismatch.path,
+                expected: mismatch.sub,
+                provided: mismatch.sup,
+            });
+        }
+    }
+    subtype_at(
+        &provided.result,
+        &expected.result,
+        &format!("{path}/output"),
+    )
+    .map(|mismatch| SignatureMismatch {
+        side: SignatureSide::Output,
+        path: mismatch.path,
+        expected: mismatch.sup,
+        provided: mismatch.sub,
+    })
 }
