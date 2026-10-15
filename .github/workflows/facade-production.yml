@@ -1,0 +1,34 @@
+name: Production facade
+
+# Cargo owns this witness: workspace test resolution unifies development
+# features, and the Buck feature graph shares third-party feature unions.
+on:
+  schedule:
+    - cron: "43 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: facade-production-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  facade-production:
+    name: Compile every production facade feature
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+      - name: Restore production library artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          shared-key: facade-production
+          workspaces: ". -> .kiln/cargo-parity/target"
+      - name: Check production host graphs without testing
+        shell: bash
+        run: bash scripts/ci/facade-production.sh

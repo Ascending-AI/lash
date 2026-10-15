@@ -763,18 +763,25 @@ generation refuses a dependency that enables `testing`; compiling the resolved
 libraries catches production calls to testing-only APIs. Run the named target
 for a focused proof after changing those boundaries.
 
-Cargo build parity is implemented in `scripts/ci/cargo-parity.sh`, which is
-tracked without executable mode. This tree therefore advertises only the
-executable production facade witness below; it does not establish Cargo parity:
+The Cargo-owned production facade gate runs hourly on main in
+`.github/workflows/facade-production.yml`, outside the developer test partition.
+It checks the minimal graph, explicit defaults, each production feature alone,
+and all production features together. The matrix comes from the facade's
+`Cargo.toml`, excluding `testing` and the `synthetic-next` upgrade harness.
+Each request compiles only the library and its normal/build dependencies with
+`--locked`; a dependency tree that enables `testing` fails before compilation.
+This catches dependencies hidden by workspace development feature unification
+and by checking only the combined feature set. The scheduled job reuses Cargo
+artifacts across requests and hourly runs.
+
+Run the same named gate locally through the admission shim:
 
 ```sh
-# Cargo parity's script is not directly executable in this tree.
-# The production facade witness has an executable entrypoint:
-kiln gate lash <fork> -- scripts/ci/facade-production.sh
+kiln gate lash <fork> -- just facade-production
 ```
 
-The production witness checks the same two facade library graphs and refuses a
-`testing` feature in their normal/build dependency trees.
+Cargo build parity is implemented in `scripts/ci/cargo-parity.sh`, which also
+invokes this production gate.
 The parity script additionally runs real Cargo through the admission shim, with Buck routing disabled,
 using `check --workspace --all-targets --locked --offline` and the isolated
 development graphs of lash_vm and integrator-contract. Cargo manifests remain the single

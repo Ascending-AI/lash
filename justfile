@@ -32,6 +32,10 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
+# Production host library graphs, without development feature unification.
+facade-production:
+  bash "{{repo}}/scripts/ci/facade-production.sh"
+
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
 
