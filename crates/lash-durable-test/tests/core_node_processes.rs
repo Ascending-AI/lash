@@ -2172,3 +2172,128 @@ mod idle_obligations;
 
 #[path = "core_node_processes/capacity_verdicts.rs"]
 mod capacity_verdicts;
+
+/// Host outcome projections use readable JSON for both values and typed failures,
+/// through the same path for the durable record and its terminal event (FIG-6309).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_outcome_projections_are_readable_on_sqlite_memory() {
+    use lash::process::{
+        ProcessEventPageEvents, ProcessEventQueryMode, ProcessEventReadOutcome,
+        ProcessHistoryContinuation, ProcessReadView, ProjectedObservedProcess,
+        ProjectedProcessEvent, ProjectedProcessTerminal,
+    };
+    const KIND: &str = "projected-outcome";
+    fn advance(
+        _: &mut serde_json::Value,
+        event: lash_core::EngineEvent,
+    ) -> lash_core::EngineAction {
+        let lash_core::EngineEvent::Started { payload } = event else {
+            panic!("the engine completes at its start");
+        };
+        let output = if payload["fail"] == true {
+            let mut failure = lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::Execution,
+                "interrupted",
+                "Work interrupted",
+            )
+            .with_cause(lash_core::ToolFailureCause::Interrupted);
+            failure.raw = Some(lash_core::ToolValue::untrusted_json(
+                serde_json::json!({"attempt": 1}),
+            ));
+            lash_core::ToolCallOutput::failure(failure)
+        } else {
+            lash_core::ToolCallOutput::success(serde_json::json!({"answer": 42}))
+        };
+        lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(output))
+    }
+    let deployment = deploy(
+        Tier::SqliteMemory,
+        vec![Arc::new(ScriptEngine {
+            kind: KIND,
+            advance,
+            performs: no_tools,
+        })],
+        |builder| builder,
+    )
+    .await;
+    let fixtures = [
+        (
+            false,
+            serde_json::json!({"status": "completed", "value": {"answer": 42}}),
+        ),
+        (
+            true,
+            serde_json::json!({
+                "status": "failed", "failure": {
+                    "class": "execution", "code": "interrupted", "message": "Work interrupted",
+                    "source": "runtime", "cause": {"kind": "interrupted"}, "raw": {"attempt": 1}
+                }
+            }),
+        ),
+    ];
+    for (fail, expected) in fixtures {
+        let process = start(&deployment.core, KIND, serde_json::json!({"fail": fail})).await;
+        ended(&deployment.core, &process).await;
+        let snapshot = deployment
+            .core
+            .processes()
+            .observe(&process)
+            .snapshot()
+            .await
+            .unwrap();
+        let ProcessReadView::Retained(view) = snapshot.read_view else {
+            panic!("the finished process is retained");
+        };
+        let record = &view.process;
+        let terminal = record.lifecycle.terminal().unwrap();
+        let projected = terminal.projection();
+        assert_eq!(serde_json::to_value(&projected).unwrap(), expected);
+        let _: ProjectedProcessTerminal = serde_json::from_value(expected.clone()).unwrap();
+        let record_projection = record.projection();
+        let projected_record = serde_json::to_value(&record_projection).unwrap();
+        assert_eq!(projected_record["lifecycle"]["outcome"], expected);
+        assert!(!projected_record.to_string().contains("$lash_tool_value"));
+        let decoded: ProjectedObservedProcess =
+            serde_json::from_value(projected_record.clone()).unwrap();
+        assert_eq!(decoded, record_projection);
+        // All other observed facts survive the projection unchanged.
+        let mut internal_record = serde_json::to_value(record).unwrap();
+        internal_record["lifecycle"]["outcome"] = expected.clone();
+        assert_eq!(projected_record, internal_record);
+
+        let history = deployment
+            .core
+            .processes()
+            .events(
+                ProcessHistoryContinuation::start(process),
+                std::num::NonZeroUsize::new(64).unwrap(),
+                ProcessEventQueryMode::Full,
+            )
+            .await
+            .unwrap();
+        let ProcessEventReadOutcome::Retained(page) = history.outcome else {
+            panic!("the event history is retained");
+        };
+        let ProcessEventPageEvents::Full(events) = page.events else {
+            panic!("full event payloads were requested");
+        };
+        let event = events
+            .iter()
+            .find(|event| event.fact.terminal().is_some())
+            .unwrap();
+        let projected_event = event.projection();
+        assert_eq!(projected_event.payload["await_output"], expected);
+        assert_eq!(event.fact.payload_for_projection(), projected_event.payload);
+        let event_json = serde_json::to_value(&projected_event).unwrap();
+        assert!(!event_json.to_string().contains("$lash_tool_value"));
+        let decoded: ProjectedProcessEvent = serde_json::from_value(event_json).unwrap();
+        assert_eq!(decoded, projected_event);
+        // Internal serde still round trips its trust envelope for replay.
+        let internal_event = serde_json::to_value(event).unwrap();
+        assert!(internal_event.to_string().contains("$lash_tool_value"));
+        let decoded: lash::process::ObservedProcessEvent =
+            serde_json::from_value(internal_event).unwrap();
+        assert_eq!(&decoded, event);
+    }
+    deployment.core.shutdown().await.unwrap();
+}

@@ -308,7 +308,8 @@ impl ProcessLifecycleFact {
         }
     }
 
-    /// This fact's stored payload.
+    /// This fact's stored payload, including internal ToolValue trust envelopes.
+    /// Hosts store or display [`Self::payload_for_projection`] instead.
     #[expect(
         clippy::expect_used,
         reason = "every lifecycle payload is a crate-owned serializable struct"
@@ -721,7 +722,8 @@ fn settled_status(output: &crate::ToolCallOutput) -> TerminalProcessStatus {
 ///
 /// It is the part of [`ProcessAwaitOutput`] that is an outcome, so its status
 /// is a total function of it ([`Self::status`]) and is stored nowhere beside
-/// it. It serializes exactly as the [`ProcessAwaitOutput`] it is.
+/// it. It serializes exactly as the [`ProcessAwaitOutput`] it is. Hosts
+/// store or display [`Self::projection`]; direct serde is the internal record.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessTerminal {

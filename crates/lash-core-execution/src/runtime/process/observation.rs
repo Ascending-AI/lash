@@ -54,7 +54,8 @@ pub enum ObservedWorkItemState {
 /// A process as a host reads it: the facts of its durable row at
 /// `last_event_sequence`, and its actor's park. Every read of a process
 /// (one process, a roster, a change, an observation snapshot) answers this
-/// shape.
+/// shape. Hosts store or display [`Self::projection`]; direct serde is the
+/// internal record form and retains ToolValue trust envelopes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ObservedProcess {
     pub process_id: ProcessId,
@@ -139,7 +140,8 @@ pub enum ObservedProcessChangeKind {
 }
 
 /// One lifecycle fact of a process's log, as a host observes it. It travels
-/// as its kind's spelling and payload, exactly as the log stores it.
+/// as its kind's spelling and payload, exactly as the log stores it. Hosts
+/// store or display [`Self::projection`] to project any output values.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     into = "ObservedProcessEventRecord",

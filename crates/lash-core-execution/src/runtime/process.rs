@@ -25,6 +25,7 @@ mod model_filter_tests;
 pub(crate) mod observation;
 mod observer_intent;
 mod op_scope;
+mod projection;
 mod references;
 mod registry;
 mod registry_concerns;
@@ -123,6 +124,10 @@ pub use observer_intent::{
 };
 pub use op_scope::ProcessOpScope;
 pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
+pub use projection::{
+    ProjectedObservedProcess, ProjectedProcessEvent, ProjectedProcessLifecycleState,
+    ProjectedProcessTerminal,
+};
 pub use references::ProcessLiveReferenceView;
 mod roster;
 pub use roster::{

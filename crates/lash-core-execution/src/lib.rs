@@ -759,7 +759,10 @@ pub use runtime::{
     ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
     request_process_successor,
 };
-pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
+pub use runtime::{
+    ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal, ProjectedObservedProcess,
+    ProjectedProcessEvent, ProjectedProcessLifecycleState, ProjectedProcessTerminal,
+};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
 };

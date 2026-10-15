@@ -1089,6 +1089,8 @@ pub mod process {
     /// terminal one ends in.
     pub use lash_core::runtime::{
         ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal,
+        ProjectedObservedProcess, ProjectedProcessEvent, ProjectedProcessLifecycleState,
+        ProjectedProcessTerminal,
     };
     pub use lash_core::{
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,

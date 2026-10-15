@@ -728,7 +728,10 @@ pub use runtime::{
     ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
     ProcessSequence, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
-pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
+pub use runtime::{
+    ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal, ProjectedObservedProcess,
+    ProjectedProcessEvent, ProjectedProcessLifecycleState, ProjectedProcessTerminal,
+};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
 };

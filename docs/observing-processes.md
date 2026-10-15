@@ -60,6 +60,26 @@ process ended (an observer change, an external reference) moves
 `updated_at_ms` and leaves it alone. `status()`, `waits()` and `terminal()`
 read the state; nothing is stored beside it.
 
+For a host's stored or displayed JSON, use `ObservedProcess::projection()`
+(`ProjectedObservedProcess`) or `ProcessTerminal::projection()`
+(`ProjectedProcessTerminal`). Completed values, typed failures and cancellations
+all pass through `ToolCallOutput::value_for_projection()`. The outcome's
+`status` tag distinguishes `completed`, `failed`, `cancelled` and `abandoned`;
+values and failures carry ordinary JSON without lash's `$lash_tool_value`
+trust envelope. Abandonment keeps its typed evidence. Output controls and model
+views remain in the internal record.
+
+For event facts, use `ObservedProcessEvent::projection()`
+(`ProjectedProcessEvent`) or `event.fact.payload_for_projection()`. A terminal
+payload's `await_output` uses the same outcome projection as the observed row;
+the completion authority and other event facts are preserved.
+
+Direct serde of `ObservedProcess`, `ProcessTerminal` and `ObservedProcessEvent`,
+and `ProcessLifecycleFact::payload()`, are lash's internal record forms. They
+retain the trust envelope used by storage and replay. Projection is a separate,
+serde-serializable typed view; deserializing it does not restore an internal
+record or confer trust. Hosts define their own wire protocols.
+
 Lash formats nothing for display. A label for a process with none
 registered, a status line, a failure message and a key for a graph view are
 the host's to derive from these facts.
