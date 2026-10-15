@@ -6,7 +6,7 @@ fn send(outcome: lash::SendOutcome) {
         | lash::SendOutcome::Stalled { .. }
         | lash::SendOutcome::Refused { .. }
         | lash::SendOutcome::Withdrawn { .. }
-        | lash::SendOutcome::NotAccepted { .. } => {}
+        | lash::SendOutcome::Unknown { .. } => {}
     }
 }
 

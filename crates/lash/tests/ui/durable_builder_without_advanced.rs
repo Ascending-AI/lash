@@ -77,7 +77,7 @@ fn inspect_send(outcome: lash::SendOutcome) {
         } => {
             let _ = (run, refusal, gaps);
         }
-        lash::SendOutcome::Withdrawn { gaps, .. } | lash::SendOutcome::NotAccepted { gaps, .. } => {
+        lash::SendOutcome::Withdrawn { gaps, .. } | lash::SendOutcome::Unknown { gaps, .. } => {
             let _ = gaps;
         }
         _ => {}

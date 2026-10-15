@@ -24,7 +24,7 @@ pub(super) enum Resolution {
     Withdrawn,
     /// No record of the input exists: it was never accepted, or its
     /// withdrawal was reclaimed.
-    NotAccepted,
+    Unknown,
     /// The run's final physical turn committed with `outcome`.
     Settled { run: TurnId, outcome: TurnOutcome },
     OperationSettled {
@@ -92,7 +92,7 @@ async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution>
         .await
     {
         Err(lash_core::StoreError::ForkTargetUnavailable { .. }) => Resolution::Withdrawn,
-        Err(lash_core::StoreError::ForkTargetPending { .. }) => Resolution::NotAccepted,
+        Err(lash_core::StoreError::ForkTargetPending { .. }) => Resolution::Unknown,
         Ok(_) | Err(lash_core::StoreError::ForkTargetPruned { .. }) => {
             return Ok(Resolution::Undecided { run: None });
         }

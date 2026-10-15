@@ -431,7 +431,13 @@ fast path past queued work.
 `send` returns a handle with `events()` and `outcome()`. Cancellation withdraws
 queued input or requests durable cancellation of its running run. Dropping the
 handle stops observation, not execution. Outcomes distinguish answers, failure,
-cancellation, and a parked run.
+cancellation, and a parked run. An input id with no retained admission answers
+`SendOutcome::Unknown`: it is provisional, and hosts keep the input pending
+because a send can arrive later. A recorded `Refused` run retains its typed
+reason and is final, as are settled and withdrawn outcomes. A send refused
+before admission returns `Err` synchronously to its sender; it records no
+input and leaves the id reusable. The probe answers from input rows and run
+terminals, so refusals remain distinguishable from absence after a restart.
 
 Evidence: `crates/lash/src/send.rs:634`, `:644`, and
 `crates/lash-core/src/runtime/session_manager/session_init.rs:1`.

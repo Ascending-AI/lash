@@ -1464,7 +1464,6 @@
     "tests::send_handle::sqlite_memory::a_settled_run_no_execution_here_can_report_answers_at_once": 118,
     "tests::send_handle::sqlite_memory::a_withdrawn_send_answers_cancelled_without_output": 132,
     "tests::send_handle::sqlite_memory::all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes": 678,
-    "tests::send_handle::sqlite_memory::an_id_never_accepted_answers_not_accepted": 177,
     "tests::send_handle::sqlite_memory::an_input_answered_inside_another_run_resolves_answered_with_that_run": 179,
     "tests::send_handle::sqlite_memory::an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off": 2151,
     "tests::send_handle::sqlite_memory::an_unobserved_run_answers_with_a_reported_gap": 144,

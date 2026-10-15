@@ -10040,7 +10040,7 @@ laws = [
   "replay_gaps_reach_both_streams_and_sinks",
   "all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes",
   "a_host_reattaches_by_its_id_alone",
-  "an_id_never_accepted_answers_not_accepted",
+  "input_probe_distinguishes_unknown_refused_and_accepted",
   "an_unobserved_run_answers_with_a_reported_gap",
   "a_send_under_an_unserved_profile_key_is_refused_before_acceptance",
   "a_withdrawn_send_answers_cancelled_without_output",

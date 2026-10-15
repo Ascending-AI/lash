@@ -16,9 +16,98 @@ mod arrival;
 mod pins;
 mod replay_lag;
 
+/// FIG-6311: absence is provisional; a recorded refusal retains its reason.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn input_probe_distinguishes_unknown_refused_and_accepted() -> Result<()> {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::clone(&attempts);
+    let plugin = lash_core::plugin::StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial("probe-refusal"),
+        lash_core::facade_support::PluginSpec::new().with_after_turn(
+            lash_core::hook_key!("probe-refusal"),
+            Arc::new(move |_| {
+                let calls = Arc::clone(&calls);
+                Box::pin(async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return Err(lash_core::PluginError::Invoke("probe refusal".to_owned()));
+                    }
+                    Ok(Default::default())
+                })
+            }),
+        ),
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(
+        scripted_provider(Arc::new(Notify::new()), Arc::new(AtomicUsize::new(0))),
+        mock_llm_profile_spec(),
+    )
+    .plugin(Arc::new(plugin))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::fixture("probe-input-outcome"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let id = crate::TurnId::fixture("probe-before-send");
+    for outcome in [
+        session.attach_id(id.clone()).outcome().await?,
+        session.durable().attach_id(id.clone()).outcome().await?,
+    ] {
+        assert_eq!(
+            serde_json::to_value(&outcome)?["type"],
+            "unknown",
+            "an unseen id is not a final refusal: {outcome:?}"
+        );
+        assert!(outcome.run().is_none());
+        assert!(outcome.refusal().is_none());
+        assert!(outcome.output().is_none());
+    }
+    let sent = session
+        .send(TurnInput::text("refused by the callback"))
+        .id(id.clone())
+        .await?;
+    let refused = sent.outcome().await?;
+    let reason = refused.refusal().expect("typed recorded refusal");
+    assert!(reason.message.contains("probe refusal"), "{reason:?}");
+    let attached = session.durable().attach_id(id).outcome().await?;
+    assert!(matches!(attached, crate::SendOutcome::Refused { .. }));
+    assert_eq!(
+        serde_json::to_value(attached.refusal())?,
+        serde_json::to_value(Some(reason))?
+    );
+
+    // Pre-admission errors leave the id reusable: the probe remains provisional.
+    let valid_id = crate::TurnId::fixture("probe-valid-send");
+    let error = session
+        .send(TurnInput::text("valid input"))
+        .id(valid_id.clone())
+        .model("no-such-model")
+        .await
+        .map(|_| ())
+        .expect_err("unknown model refuses acceptance");
+    assert!(matches!(error, EmbedError::Runtime(ref error)
+        if error.code == lash_core::RuntimeErrorCode::LlmProfileUnknown));
+    let probe = session.attach_id(valid_id.clone());
+    assert!(probe.events().collect::<Vec<_>>().await.is_empty());
+    session
+        .send(TurnInput::text("valid input"))
+        .id(valid_id)
+        .await?
+        .outcome()
+        .await?;
+    // The same handle must re-read after its events observed absence.
+    assert_eq!(probe.outcome().await?.status(), crate::TurnStatus::Answered);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// FIG-6047: attaching to an absent or deleted session decides without waiting.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn absent_sessions_answer_not_accepted_promptly() -> Result<()> {
+async fn absent_sessions_answer_unknown_promptly() -> Result<()> {
     let fixture = fixture(1).await?;
     let id = SessionId::fixture("absent-input-outcome");
     let missing = fixture.core.session(id.clone()).durable().await?;
@@ -33,7 +122,7 @@ async fn absent_sessions_answer_not_accepted_promptly() -> Result<()> {
             .await
             .expect("absence decides promptly")
             .expect("absence is an outcome, not a read failure");
-            assert!(matches!(outcome, crate::SendOutcome::NotAccepted { .. }));
+            assert!(matches!(outcome, crate::SendOutcome::Unknown { .. }));
         }
     };
     answer(missing.clone()).await;
@@ -1225,46 +1314,6 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     Ok(())
 }
 
-/// An id lash never accepted answers `NotAccepted`, never `Withdrawn`: lash
-/// holds no record under it, so a send under the same id is accepted as new.
-/// A withdrawn input keeps its withdrawal on record and answers `Withdrawn`
-/// (FIG-5092).
-async fn an_id_never_accepted_answers_not_accepted() -> Result<()> {
-    let fixture = fixture(1).await?;
-    let session = fixture
-        .core
-        .session(crate::SessionId::parse("send-not-accepted").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
-    let never = crate::TurnId::parse("never-sent").expect("nonblank host identity");
-    let live = session.attach_id(never.clone()).outcome().await?;
-    let durable = session.durable().attach_id(never.clone()).outcome().await?;
-    for outcome in [&live, &durable] {
-        assert!(
-            matches!(outcome, crate::SendOutcome::NotAccepted { .. }),
-            "an id nothing was accepted under answers NotAccepted: {outcome:?}"
-        );
-        assert_eq!(outcome.status(), crate::TurnStatus::NotAccepted);
-        assert_eq!(outcome.run(), None);
-        assert!(outcome.output().is_none());
-    }
-    // A send under the id is accepted as new and runs.
-    let sent = session
-        .send(TurnInput::text("sent at last"))
-        .id(never.clone())
-        .await?
-        .outcome()
-        .await?;
-    assert_eq!(sent.status(), crate::TurnStatus::Answered, "{sent:?}");
-    assert_eq!(
-        session.attach_id(never).outcome().await?.status(),
-        crate::TurnStatus::Answered
-    );
-    Ok(())
-}
-
 /// A run this follower never observed live answers with a reported
 /// Unavailable gap, so its (empty) activity list is not taken for the run's
 /// history; a follower that watched it run reports none.
@@ -1491,7 +1540,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
             .await?;
         assert_eq!(
             outcome.status(),
-            crate::TurnStatus::NotAccepted,
+            crate::TurnStatus::Unknown,
             "`{never}` of a refused batch was never accepted"
         );
     }
@@ -1770,11 +1819,6 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
                 super::a_host_reattaches_by_its_id_alone().await
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn an_id_never_accepted_answers_not_accepted() -> Result<()> {
-                super::an_id_never_accepted_answers_not_accepted().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -500,9 +500,7 @@ pub(super) async fn follow(
             };
             let resolution = match resolution {
                 Ok(resolution) => resolution,
-                Err(error) if super::absent_input_session(subject, &error) => {
-                    Resolution::NotAccepted
-                }
+                Err(error) if super::absent_input_session(subject, &error) => Resolution::Unknown,
                 Err(error) => return Err(error),
             };
             match resolution {
@@ -560,11 +558,11 @@ pub(super) async fn follow(
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Err(EmbedError::Runtime(fault));
                 }
-                resolution @ (Resolution::Withdrawn | Resolution::NotAccepted) => {
+                resolution @ (Resolution::Withdrawn | Resolution::Unknown) => {
                     let gaps = observation.gaps;
                     return Ok(Followed::Answered(Box::new(match resolution {
                         Resolution::Withdrawn => SendOutcome::Withdrawn { gaps },
-                        _ => SendOutcome::NotAccepted { gaps },
+                        _ => SendOutcome::Unknown { gaps },
                     })));
                 }
                 Resolution::Undecided { run } => {

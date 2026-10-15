@@ -921,8 +921,12 @@ impl LashSession {
     /// into another run, and never commits anything.
     ///
     /// An id lash holds no record of answers
-    /// [`SendOutcome::NotAccepted`](crate::SendOutcome::NotAccepted), and a
-    /// withdrawn input answers
+    /// [`SendOutcome::Unknown`](crate::SendOutcome::Unknown): keep it pending,
+    /// since a send can arrive later. A run's recorded
+    /// [`Refused`](crate::SendOutcome::Refused) answer retains its typed reason
+    /// and is final, as are settled and withdrawn outcomes. A pre-admission
+    /// problem answers the sender synchronously as `Err`; it leaves no
+    /// admitted input and its id stays reusable. A withdrawn input answers
     /// [`Withdrawn`](crate::SendOutcome::Withdrawn). A host that lost a
     /// send's response does not attach to learn whether it was accepted: it
     /// sends the same id with the same content again, which accepts the input

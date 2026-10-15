@@ -338,7 +338,7 @@ impl SendBuilder {
     /// again. That send accepts the input exactly once, however many times it
     /// is repeated, and its handle answers the one run. Reading
     /// [`attach_id`](crate::LashSession::attach_id) instead answers only what
-    /// lash holds now: [`SendOutcome::NotAccepted`] when it holds nothing.
+    /// lash holds now: [`SendOutcome::Unknown`] when it holds nothing.
     ///
     /// Exactly-once acceptance does not imply exactly-once external actions:
     /// uncommitted work can repeat. See the
@@ -581,7 +581,10 @@ pub enum SendOutcome {
     Withdrawn {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
-    /// Lash holds no record of the input: its session is absent or deleted,
+    /// Lash holds no record of the input. This is provisional: the input
+    /// may arrive later, so a host must keep it pending and probe again or
+    /// re-send the same id and content. It is never a final refusal.
+    /// Its session is absent or deleted,
     /// it was never accepted, or it was withdrawn and
     /// [`vacuum`](lash_core::store::StoreMaintenance::vacuum)
     /// has since reclaimed the withdrawal. A send under the same id is
@@ -589,7 +592,7 @@ pub enum SendOutcome {
     /// response re-sends the same id with the same content rather than reading this answer
     /// ([`SendBuilder::id`]).
     #[non_exhaustive]
-    NotAccepted {
+    Unknown {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
 }
@@ -616,9 +619,9 @@ pub enum TurnStatus {
     /// its obligation. Not terminal: the input stays durable, and a host
     /// re-awaits it once re-armed.
     Stalled(StalledDelivery),
-    /// Lash holds no record of the input: see
-    /// [`SendOutcome::NotAccepted`].
-    NotAccepted,
+    /// No input is recorded yet. This is provisional, not a final refusal:
+    /// see [`SendOutcome::Unknown`].
+    Unknown,
 }
 
 /// An accepted input the engine was never handed: its ingress obligation
@@ -670,7 +673,7 @@ impl SendOutcome {
             Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
             Self::Refused { .. } => TurnStatus::Failed { cause: None },
             Self::Withdrawn { .. } => TurnStatus::Cancelled,
-            Self::NotAccepted { .. } => TurnStatus::NotAccepted,
+            Self::Unknown { .. } => TurnStatus::Unknown,
         }
     }
 
@@ -679,7 +682,7 @@ impl SendOutcome {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
             Self::Refused { run, .. } => run.as_ref(),
-            Self::Stalled { .. } | Self::Withdrawn { .. } | Self::NotAccepted { .. } => None,
+            Self::Stalled { .. } | Self::Withdrawn { .. } | Self::Unknown { .. } => None,
         }
     }
 
@@ -691,7 +694,7 @@ impl SendOutcome {
             | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
-            | Self::NotAccepted { .. } => None,
+            | Self::Unknown { .. } => None,
         }
     }
 
@@ -704,7 +707,7 @@ impl SendOutcome {
             | Self::Parked { .. }
             | Self::Stalled { .. }
             | Self::Withdrawn { .. }
-            | Self::NotAccepted { .. } => None,
+            | Self::Unknown { .. } => None,
         }
     }
 
@@ -716,7 +719,7 @@ impl SendOutcome {
             | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
-            | Self::NotAccepted { .. } => None,
+            | Self::Unknown { .. } => None,
         }
     }
 
@@ -730,7 +733,7 @@ impl SendOutcome {
             | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
-            | Self::NotAccepted { gaps } => gaps,
+            | Self::Unknown { gaps } => gaps,
         }
     }
 
@@ -742,7 +745,7 @@ impl SendOutcome {
             | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
-            | Self::NotAccepted { gaps } => gaps,
+            | Self::Unknown { gaps } => gaps,
         }
     }
 }
@@ -785,6 +788,11 @@ impl HandleShared {
     }
 
     fn remember(&self, outcome: &SendOutcome) {
+        // Absence is only this read's observation: a later send may still
+        // admit the input, including while this handle stays alive.
+        if matches!(outcome, SendOutcome::Unknown { .. }) {
+            return;
+        }
         let mut settled = self.settled.lock_recover();
         if settled.is_none() {
             *settled = Some(outcome.clone());
@@ -814,7 +822,7 @@ async fn settle(
         // An input has no retained acceptance once its session is gone.
         // Store failures and standing faults remain failed reads.
         Err(error) if absent_input_session(subject, &error) => {
-            SendOutcome::NotAccepted { gaps: Vec::new() }
+            SendOutcome::Unknown { gaps: Vec::new() }
         }
         Err(error) => return Err(error),
     };
@@ -934,7 +942,9 @@ impl SendHandle {
         )
     }
 
-    /// The input's run answer: resolves on a terminal **or** a park.
+    /// The input's run answer: resolves on a terminal, a park, or
+    /// [`Unknown`](SendOutcome::Unknown) when no input is recorded yet.
+    /// Unknown is provisional; observing it never caches a final answer.
     pub async fn outcome(self) -> Result<SendOutcome> {
         settle(
             &self.target,
@@ -1209,7 +1219,7 @@ pub(crate) fn attach(target: SendTarget, input_id: InputId) -> SendHandle {
 
 /// A handle on the input a send accepted under host id `id`: a keyed input's
 /// id is derived from its session and key, so no read finds it. An id lash
-/// holds no record of answers [`SendOutcome::NotAccepted`].
+/// holds no record of answers [`SendOutcome::Unknown`].
 pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
     let input_id =
         lash_core::PendingTurnInputDraft::keyed_input_id(&target.session_id(), id.as_str());
