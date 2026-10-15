@@ -429,7 +429,9 @@ Invariants:
   frames do not extend it.
 
 Errors: `PageRefusal` on the wire, `HeapFault` in the kernel. All of them
-are infrastructure.
+are infrastructure. A fault the worker meets itself crosses as
+`InfrastructureOutcome::HeapFault`, with `PageRefusal`'s retryability:
+missing, corrupt and malformed content is permanent.
 
 Laws:
 

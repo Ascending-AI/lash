@@ -18,6 +18,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::Detail;
+
 /// Names one page exchange within a lease, so its reply answers exactly
 /// it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -278,4 +280,64 @@ pub enum PageRefusal {
     Deadline,
     #[error("the store is unavailable")]
     StoreUnavailable,
+}
+
+impl PageRefusal {
+    /// Whether redriving the owning invocation can succeed: a page the
+    /// store lacks or holds corrupt is so on every attempt; a lease,
+    /// deadline, quota or transport refusal is the host's moment.
+    pub fn is_retryable(&self) -> bool {
+        !matches!(self, Self::Missing | Self::Corrupt)
+    }
+}
+
+/// A heap fault the worker met itself (FIG-6422), as it crosses to the
+/// parent: infrastructure, never a guest outcome. The wire mirrors the
+/// kernel's `lash_kernel_doc::heap::HeapFault`, which this crate cannot
+/// name: the worker carries each fault's `Display`, which names the page,
+/// as its `detail`.
+#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HeapFault {
+    #[error("{detail}")]
+    Missing { detail: Detail },
+    #[error("{detail}")]
+    Corrupt { detail: Detail },
+    #[error("{detail}")]
+    Unauthorized { detail: Detail },
+    #[error("the activation's root or stage lease is no longer valid")]
+    LeaseLost,
+    #[error("host resource {resource:?} is exhausted")]
+    Exhausted { resource: HostResource },
+    #[error("{detail}")]
+    Transport { detail: Detail },
+    #[error("{detail}")]
+    Malformed { detail: Detail },
+}
+
+/// The host resources a heap draws on beside guest memory, as they cross.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HostResource {
+    /// Quiescent census bitmap, work-list and root scratch budget.
+    TraceBudget,
+    CleanResidency,
+    DirtyResidency,
+    PinnedPages,
+    StagingBytes,
+    ReadBatch,
+    HostWork,
+}
+
+impl HeapFault {
+    /// Whether redriving the owning invocation can succeed: missing and
+    /// corrupt content is so on every attempt, and the heap's own stored
+    /// state is no different; a lease, grant, host resource or transport
+    /// fault is the host's moment.
+    pub fn is_retryable(&self) -> bool {
+        !matches!(
+            self,
+            Self::Missing { .. } | Self::Corrupt { .. } | Self::Malformed { .. }
+        )
+    }
 }

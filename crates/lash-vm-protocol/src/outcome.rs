@@ -355,9 +355,10 @@ pub enum RunRefusal {
     Resume { detail: Detail },
 }
 
-/// What a worker may say of its own failure: that the protocol was broken, or
-/// that it refuses the run. How it ended is the supervisor's evidence, and a
-/// limit travels as [`crate::WorkerMessage::LimitExceeded`].
+/// What a worker may say of its own failure: that the protocol was broken,
+/// that it refuses the run, or that its heap faulted. How it ended is the
+/// supervisor's evidence, and a limit travels as
+/// [`crate::WorkerMessage::LimitExceeded`].
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerRefusal {
@@ -365,6 +366,10 @@ pub enum WorkerRefusal {
     Breach(ProtocolBreach),
     #[error("{0}")]
     Run(RunRefusal),
+    /// A heap fault the worker met itself (FIG-6422), which crosses as
+    /// itself: the worker's own heap is its own to report.
+    #[error("{0}")]
+    Heap(crate::page::HeapFault),
 }
 
 /// Why this deployment cannot launch its configured worker executable.
@@ -402,6 +407,11 @@ pub enum InfrastructureOutcome {
     /// execution resumes from its last committed root.
     #[error("the run's page exchange is refused: {refusal}")]
     PageRefused { refusal: crate::page::PageRefusal },
+    /// A heap fault the worker met itself (FIG-6422): infrastructure,
+    /// never a guest outcome. The activation ends and its execution
+    /// resumes from its last committed root.
+    #[error("the run's heap faulted: {fault}")]
+    HeapFault { fault: crate::page::HeapFault },
 }
 
 impl InfrastructureOutcome {
@@ -412,13 +422,8 @@ impl InfrastructureOutcome {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
-            // A page the store lacks or holds corrupt is so on every
-            // attempt; a lease, deadline, quota or transport refusal is the
-            // host's moment.
-            Self::PageRefused { refusal } => !matches!(
-                refusal,
-                crate::page::PageRefusal::Missing | crate::page::PageRefusal::Corrupt
-            ),
+            Self::PageRefused { refusal } => refusal.is_retryable(),
+            Self::HeapFault { fault } => fault.is_retryable(),
             Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
             Self::WorkerCrashed { .. }
             | Self::WorkerUnresponsive { .. }
@@ -460,6 +465,13 @@ impl WorkerRefusal {
                 RunRefusal::Undecodable { detail, .. }
                 | RunRefusal::Start { detail }
                 | RunRefusal::Resume { detail },
+            )
+            | Self::Heap(
+                crate::page::HeapFault::Missing { detail }
+                | crate::page::HeapFault::Corrupt { detail }
+                | crate::page::HeapFault::Unauthorized { detail }
+                | crate::page::HeapFault::Transport { detail }
+                | crate::page::HeapFault::Malformed { detail },
             ) => Some(detail),
             Self::Breach(ProtocolBreach::Frame {
                 refusal: CodecRefusal::Malformed { reason },
@@ -478,6 +490,7 @@ impl WorkerRefusal {
         match self {
             Self::Breach(breach) => InfrastructureOutcome::ProtocolViolation { breach },
             Self::Run(refusal) => InfrastructureOutcome::RunRefused { refusal },
+            Self::Heap(fault) => InfrastructureOutcome::HeapFault { fault },
         }
     }
 
@@ -495,6 +508,9 @@ impl WorkerRefusal {
             }
             InfrastructureOutcome::RunRefused { refusal } => Some(crate::WorkerMessage::Refused {
                 refusal: Self::Run(refusal),
+            }),
+            InfrastructureOutcome::HeapFault { fault } => Some(crate::WorkerMessage::Refused {
+                refusal: Self::Heap(fault),
             }),
             // The page service's refusal is the parent's own evidence.
             InfrastructureOutcome::WorkerDeployment { .. }

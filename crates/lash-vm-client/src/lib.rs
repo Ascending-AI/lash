@@ -27,7 +27,7 @@ pub use lash_vm_protocol::{
     KernelRestoreRefusal, OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds, ProtocolBreach,
     ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal, SequenceFault,
     SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit, WorkerWork,
-    page::PageRefusal,
+    page::{HeapFault, HostResource, PageRefusal},
 };
 pub use machine::{RemoteMachine, RemoteMachines, RunHost, RunStart, kernel_reads};
 pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};

@@ -1016,12 +1016,32 @@ fn census(
         .map_err(machine_breach)
 }
 
-/// A heap fault as the worker reports it: a host outcome of the
-/// activation, never the guest's.
+/// A heap fault the worker met itself, as the protocol carries it: a host
+/// outcome of the activation, never the guest's (FIG-6422).
 fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
-    PoolError::breach(ProtocolBreach::Machine {
-        detail: Detail::new(fault),
-    })
+    use lash_kernel_doc::heap::{HeapFault as Kernel, HostResource as KernelResource};
+    let detail = || Detail::new(&fault);
+    let fault = match &fault {
+        Kernel::Missing { .. } => page::HeapFault::Missing { detail: detail() },
+        Kernel::Corrupt { .. } => page::HeapFault::Corrupt { detail: detail() },
+        Kernel::Unauthorized { .. } => page::HeapFault::Unauthorized { detail: detail() },
+        Kernel::LeaseLost => page::HeapFault::LeaseLost,
+        Kernel::Exhausted { resource } => page::HeapFault::Exhausted {
+            resource: match resource {
+                KernelResource::TraceBudget => page::HostResource::TraceBudget,
+                KernelResource::CleanResidency => page::HostResource::CleanResidency,
+                KernelResource::DirtyResidency => page::HostResource::DirtyResidency,
+                KernelResource::PinnedPages => page::HostResource::PinnedPages,
+                KernelResource::StagingBytes => page::HostResource::StagingBytes,
+                KernelResource::ReadBatch => page::HostResource::ReadBatch,
+                KernelResource::HostWork => page::HostResource::HostWork,
+            },
+        },
+        Kernel::Transport(_) => page::HeapFault::Transport { detail: detail() },
+        Kernel::Malformed(_) => page::HeapFault::Malformed { detail: detail() },
+        _ => page::HeapFault::Malformed { detail: detail() },
+    };
+    InfrastructureOutcome::HeapFault { fault }.into()
 }
 
 /// The kernel's refusal of a root as the protocol carries it.
@@ -1066,19 +1086,33 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
 mod tests {
     use super::*;
 
-    /// FIG-6148: activations of one process prepare identical content once
-    /// per worker, without changing charge.
-    #[test]
-    fn process_activations_decode_one_document_per_worker() {
+    /// A server on one end of a pipe and its parent's end, its Ready frame
+    /// read.
+    fn ready_server() -> (
+        lash_vm_client::PoolConfig,
+        FrameCodec,
+        &'static Embedding,
+        Server<'static>,
+        UnixStream,
+    ) {
         let config =
             lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let embedding =
-            crate::embedding::tests::typescript_only(&config.tuning).expect("embedding");
-        let mut server =
-            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
+        let embedding: &'static Embedding = Box::leak(Box::new(
+            crate::embedding::tests::typescript_only(&config.tuning).expect("embedding"),
+        ));
+        let server =
+            Server::new(pipe, codec.clone(), Bootstrap::from(&config), embedding).expect("server");
         read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
+        (config, codec, embedding, server, parent)
+    }
+
+    /// The `work` document and its `Start` the tests share.
+    fn work_start(
+        config: &lash_vm_client::PoolConfig,
+        embedding: &Embedding,
+    ) -> (lash_kernel_doc::Document, Start) {
         let add = embedding
             .library()
             .iter()
@@ -1117,6 +1151,15 @@ mod tests {
             observe_counts: false,
             observe_path: false,
         };
+        (document, start)
+    }
+
+    /// FIG-6148: activations of one process prepare identical content once
+    /// per worker, without changing charge.
+    #[test]
+    fn process_activations_decode_one_document_per_worker() {
+        let (config, _codec, embedding, mut server, _parent) = ready_server();
+        let (document, start) = work_start(&config, embedding);
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {
             fn clock(&mut self) -> lash_kernel_doc::Timestamp {
@@ -1274,5 +1317,75 @@ mod tests {
             InfrastructureOutcome::WorkerLimitExceeded { limit }
         );
         assert!(!outcome.is_retryable());
+    }
+
+    /// FIG-6422: a corrupt page is permanent wherever it is detected: the
+    /// worker's own heap fault crosses the pipe as itself and ends the run
+    /// as terminally as the parent's `PageRefusal::Corrupt`, never
+    /// redriven.
+    #[test]
+    fn a_corrupt_page_is_permanent_wherever_it_is_detected() {
+        let (config, codec, embedding, mut server, mut parent) = ready_server();
+        let (_document, mut start) = work_start(&config, embedding);
+        start.warm = vec![page::ReadPage {
+            page: page::PageEnvelope {
+                id: [9; 32],
+                envelope: vec![0xde, 0xad],
+            },
+            children: Vec::new(),
+        }];
+        let error = server
+            .start(start)
+            .err()
+            .expect("a corrupt warm page faults the start");
+        server.refuse(&error).expect("typed refusal frame");
+        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
+            .expect("next frame");
+        let WorkerMessage::Refused { refusal } =
+            codec.decode_worker(&bytes).expect("frame").message
+        else {
+            panic!("a heap fault crosses as a refusal")
+        };
+        let outcome = refusal.into_outcome();
+        assert_eq!(outcome, error.into_outcome());
+        let json = serde_json::to_value(&outcome).expect("json");
+        assert!(
+            json.pointer("/heap_fault/fault/corrupt").is_some(),
+            "{json}: the worker's own corrupt page crosses as its heap fault"
+        );
+        for outcome in [
+            outcome,
+            InfrastructureOutcome::PageRefused {
+                refusal: page::PageRefusal::Corrupt,
+            },
+        ] {
+            assert!(!outcome.is_retryable(), "{outcome:?} is permanent");
+            assert!(
+                !PoolError::from(outcome.clone()).is_host_verdict(),
+                "{outcome:?} is no host verdict"
+            );
+        }
+    }
+
+    /// FIG-6422: a host-resource exhaustion crosses as the heap's typed
+    /// fault, not a machine breach.
+    #[test]
+    fn a_trace_budget_exhaustion_crosses_as_its_typed_heap_fault() {
+        let (_config, codec, _embedding, mut server, mut parent) = ready_server();
+        let error = heap_fault(lash_kernel_doc::heap::HeapFault::Exhausted {
+            resource: lash_kernel_doc::heap::HostResource::TraceBudget,
+        });
+        server.refuse(&error).expect("typed refusal frame");
+        let bytes = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
+            .expect("next frame");
+        let WorkerMessage::Refused { refusal } =
+            codec.decode_worker(&bytes).expect("frame").message
+        else {
+            panic!("a heap fault crosses as a refusal")
+        };
+        assert_eq!(
+            serde_json::to_value(refusal.into_outcome()).expect("json"),
+            serde_json::json!({"heap_fault": {"fault": {"exhausted": {"resource": "trace_budget"}}}})
+        );
     }
 }
