@@ -587,3 +587,40 @@ fn an_issued_intent_projects_identical_data_without_allocating_entities() {
     assert_eq!(after.directory.len(), before.directory.len());
     assert_eq!(pages.borrow().seals, seals);
 }
+/// FIG-6318: a frozen family's pages come from the page port once per
+/// residency, however many of its objects a run reads and however often:
+/// a second pass over every member reads no page.
+#[test]
+fn a_frozen_familys_pages_are_read_once_per_residency() {
+    let (mut heap, pages) = fresh();
+    let children = (0..2_000)
+        .map(|n| {
+            heap.allocate_object(ObjectInit::List(vec![int(n)]))
+                .map(Value::List)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .expect("children");
+    let source = heap
+        .allocate_object(ObjectInit::List(children))
+        .expect("source");
+    let frozen = heap.freeze(&Value::List(source), true).expect("freeze");
+    let result = list(heap.instantiate(&frozen).expect("deliver"));
+    seal(&mut heap);
+    let pass = |heap: &PagedHeap| -> u64 {
+        let before = pages.borrow().reads;
+        for n in 0..2_000 {
+            let child = list(heap.list_get(result, n).expect("read").expect("member"));
+            assert!(matches!(
+                heap.list_get(child, 0).expect("read"),
+                Some(Value::Int(IntRef::Inline(i))) if i == (n as i64).into()
+            ));
+        }
+        pages.borrow().reads - before
+    };
+    let first = pass(&heap);
+    let second = pass(&heap);
+    assert_eq!(
+        second, 0,
+        "a second pass read {second} pages; the first {first}"
+    );
+}

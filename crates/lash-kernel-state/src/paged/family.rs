@@ -112,7 +112,7 @@ pub trait FamilyBase {
         &mut self,
         entity: EntityId,
         frozen: &FrozenRef,
-        pages: &mut dyn super::PageSource,
+        access: &super::tree::Access<'_>,
     ) -> Result<Option<super::directory::ObjectHead>, HeapFault>;
 }
 

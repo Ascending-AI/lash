@@ -27,7 +27,7 @@ pub struct PagedHeap {
     header_state: Option<(AccountingCertificate, DataOnlyCertificate)>,
     pub(super) accounting: AccountingCertificate,
     pub(super) population: DataOnlyCertificate,
-    family_base: RefCell<Option<Box<dyn FamilyBase>>>,
+    pub(super) family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     pub session: Tree<BindingRecord>,
     pub tasks: Tree<super::directory::execution::TaskRecord>,
@@ -269,7 +269,9 @@ impl PagedHeap {
         })
     }
     pub(super) fn head(&self, entity: EntityId) -> Result<Option<ObjectHead>, HeapFault> {
-        if entity.family != FamilyId::PRIMARY {
+        let family = if entity.family == FamilyId::PRIMARY {
+            None
+        } else {
             let Some(family) = self
                 .families
                 .get(&ordinal_key(entity.family.0), &self.access)?
@@ -285,35 +287,20 @@ impl PagedHeap {
             if !self.family_member(&family, entity.ordinal)? {
                 return Ok(None);
             }
-        }
+            Some(family)
+        };
         if let Some(head) = self.directory.get(&entity_key(entity), &self.access)? {
             return Ok(Some(head));
         }
-        if entity.family == FamilyId::PRIMARY {
-            return Ok(None);
-        }
-        let Some(family) = self
-            .families
-            .get(&ordinal_key(entity.family.0), &self.access)?
-        else {
+        let Some(family) = family else {
             return Ok(None);
         };
-        if entity.ordinal >= family.extent {
-            return Err(HeapFault::Corrupt {
-                page: family.base.root.id,
-                reason: "relative occurrence is outside its family extent".into(),
-            });
-        }
-        if !self.family_member(&family, entity.ordinal)? {
-            return Ok(None);
-        }
         let mut base = self.family_base.borrow_mut();
         let base = base
             .as_mut()
             .ok_or_else(|| HeapFault::Malformed("lazy family reader is not installed".into()))?;
-        let head = self
-            .access
-            .with_source(|pages| base.base_object(entity, &family.base, pages))?
+        let head = base
+            .base_object(entity, &family.base, &self.access)?
             .ok_or_else(|| {
                 HeapFault::Malformed("a live family entity has no frozen body".into())
             })?;

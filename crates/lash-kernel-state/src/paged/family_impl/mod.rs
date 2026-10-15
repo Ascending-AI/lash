@@ -196,36 +196,41 @@ fn context(value: &mut Value, family: Option<FamilyId>) -> Result<(), HeapFault>
     Ok(())
 }
 /// Resolves just the requested occurrence's index path, never its members.
+/// Its pages are read through the heap's residency, so each is decoded
+/// once while resident however often a run reads the family (FIG-6318).
 #[derive(Default)]
 pub struct FrozenBase {
-    header: Option<(FrozenRef, FrozenHeader)>,
+    /// The decoded headers of the families read, by root page; at most
+    /// [`FROZEN_HEADERS`].
+    headers: BTreeMap<PageId, (FrozenRef, FrozenHeader)>,
 }
+/// How many decoded family headers a reader holds before it starts over.
+const FROZEN_HEADERS: usize = 256;
 impl FamilyBase for FrozenBase {
     fn base_object(
         &mut self,
         entity: EntityId,
         frozen: &FrozenRef,
-        pages: &mut dyn PageSource,
+        access: &Access<'_>,
     ) -> Result<Option<ObjectHead>, HeapFault> {
         if !self
-            .header
-            .as_ref()
+            .headers
+            .get(&frozen.root.id)
             .is_some_and(|(held, _)| held.root == frozen.root && held.summary == frozen.summary)
         {
-            let answers = pages.read(&[frozen.root])?;
-            let [answer] = answers.as_slice() else {
-                return Err(invalid("frozen port returned wrong count"));
-            };
-            self.header = Some((*frozen, decode_header(answer, frozen)?));
+            let answer = access.read(frozen.root)?;
+            let header = decode_header(&answer, frozen)?;
+            if self.headers.len() >= FROZEN_HEADERS {
+                self.headers.clear();
+            }
+            self.headers.insert(frozen.root.id, (*frozen, header));
         }
         let header = &self
-            .header
-            .as_ref()
+            .headers
+            .get(&frozen.root.id)
             .ok_or_else(|| invalid("frozen header cache missing"))?
             .1;
-        let head = header
-            .objects
-            .get_from_source(&ordinal_key(entity.ordinal), pages)?;
+        let head = header.objects.get(&ordinal_key(entity.ordinal), access)?;
         Ok(head.map(|mut head| {
             head.family = entity.family;
             match &mut head.body {
@@ -525,9 +530,10 @@ impl HeapLifecycle for PagedHeap {
             Some(self.register_family(*frozen)?)
         };
         let mut value = header.value.0.clone();
-        self.set_family_base(Box::new(FrozenBase {
-            header: Some((*frozen, header)),
-        }));
+        // The installed reader keeps the families it decoded (FIG-6318).
+        if self.family_base.borrow().is_none() {
+            self.set_family_base(Box::new(FrozenBase::default()));
+        }
         context(&mut value, family)?;
         Ok(value)
     }
