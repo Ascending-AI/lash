@@ -217,10 +217,11 @@ pub enum DeclarationRefusal {
     UndeclaredOutput,
     #[error("an isolated call produced an inline outcome")]
     InlineOutcomeFromIsolated,
-    /// A Finish's value does not match the schema its tool declares
-    /// ([`FinishDeclaration`]). The call fails with no control: it makes no
-    /// completion candidate, is never repeated, and its control attempt
-    /// stays spent.
+    /// A Finish's value does not fit the schema its tool declares
+    /// ([`FinishDeclaration`]), by the same admission as a success's value
+    /// ([`OutputValueMismatch`](Self::OutputValueMismatch)). The call fails
+    /// with no control: it makes no completion candidate, is never
+    /// repeated, and its control attempt stays spent.
     #[error("the finish value does not match the tool's declared value schema: {mismatch}")]
     FinishValueMismatch {
         /// The schema the value was checked against: the admitted
@@ -229,9 +230,9 @@ pub enum DeclarationRefusal {
         mismatch: Box<crate::ValueMismatch>,
     },
     /// A success's value does not fit the output schema its tool's
-    /// contract states, by the rule a code cell decodes the value by
-    /// (`K-EFF-007`). The call fails: no caller, model or cell receives
-    /// the value.
+    /// contract states: it is not an instance of the schema, or does not
+    /// decode by the rule a code cell reads the value by (`K-EFF-007`). The
+    /// call fails: no caller, model or cell receives the value.
     #[error("its value does not fit the tool's output schema: {mismatch}")]
     OutputValueMismatch {
         /// The schema the value was checked against: the contract's the

@@ -1,8 +1,8 @@
 //! A tool's success settles against the output schema of the contract its
-//! call was prepared under (FIG-6295), by the rule a code cell decodes the
-//! value by: a value the schema does not admit fails the call, naming the
-//! tool and where the value does not fit, so the activity event, the host
-//! and the model all see the one failed outcome.
+//! call was prepared under (FIG-6295), admitted by the whole declared
+//! schema (FIG-6330): a value the schema does not admit fails the call,
+//! naming the tool and where the value does not fit, so the activity event,
+//! the host and the model all see the one failed outcome.
 
 use super::*;
 
@@ -140,7 +140,7 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
         panic!("the failure is the typed output mismatch: {failure:?}");
     };
     assert_eq!(mismatch.instance_path, "/diagnostics", "{mismatch:?}");
-    assert!(mismatch.message.contains("`took`"), "{mismatch:?}");
+    assert!(mismatch.message.contains("\"took\""), "{mismatch:?}");
     assert!(
         failure.message.contains("tool `search`"),
         "the failure names the tool: {failure:?}"

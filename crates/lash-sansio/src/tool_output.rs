@@ -205,13 +205,15 @@ impl ToolCallOutput {
     /// settles: the one check every route a call's answer takes passes
     /// through, inline, cached, deferred and after every result transform.
     /// A call that did not succeed stays the failure it is and carries no
-    /// turn control. A success's value is checked against the output schema
-    /// of the contract the call was admitted under, by the rule a code cell
-    /// decodes it by (`K-EFF-007`). A tool that declares a turn control has
-    /// no output: its success is null, whatever its body or a result
-    /// transform put beside the control. A Finish's value is checked against
-    /// the schema the declaration states, and the settled Finish keeps that
-    /// schema as the witness of the check.
+    /// turn control. A success's value is admitted by the output schema of
+    /// the contract the call was admitted under: it must be an instance of
+    /// the whole declared schema (maps, open objects, numeric bounds and
+    /// formats included), and decode by the schema's kernel result type, the
+    /// rule a code cell reads it by (`K-EFF-007`). A tool that declares a
+    /// turn control has no output: its success is null, whatever its body or
+    /// a result transform put beside the control. A Finish's value is
+    /// admitted the same way by the schema the declaration states, and the
+    /// settled Finish keeps that schema as the witness of the check.
     ///
     /// # Errors
     ///
@@ -241,7 +243,7 @@ impl ToolCallOutput {
             return Err(crate::DeclarationRefusal::UndeclaredControl { control });
         }
         if declaration.controls.is_empty() {
-            crate::result_fit::fit_result(output_schema, || self.value_for_projection()).map_err(
+            crate::result_fit::admit_value(output_schema, || self.value_for_projection()).map_err(
                 |mismatch| crate::DeclarationRefusal::OutputValueMismatch {
                     output_schema: Box::new(output_schema.clone()),
                     mismatch: Box::new(mismatch),
@@ -261,9 +263,7 @@ impl ToolCallOutput {
         }) = &mut self.control
             && let Some(declared) = declaration.controls.finish_declaration()
         {
-            declared
-                .value_schema
-                .validate(&value.to_json_value())
+            crate::result_fit::admit_value(&declared.value_schema, || value.to_json_value())
                 .map_err(|mismatch| crate::DeclarationRefusal::FinishValueMismatch {
                     value_schema: Box::new(declared.value_schema.clone()),
                     mismatch: Box::new(mismatch),
@@ -426,11 +426,15 @@ pub enum ToolCallOutcome {
 /// ([`ToolContract::output_schema`](crate::ToolContract::output_schema)), never
 /// model-facing presentation parts. Lash takes it from there:
 ///
-/// - Lash admits the value against the call's contract where program code
-///   receives it. A code cell that calls the tool decodes the answer by the
-///   result type that output schema gives, with every record open, so extra
-///   fields pass. A value that does not fit raises `effect_result` in the
-///   cell, after the call has already settled as a success.
+/// - Lash admits the value against the call's declared output schema when
+///   the call settles ([`ToolCallOutput::settled`]). The value must be an
+///   instance of the whole schema, as JSON Schema validates it, and decode by
+///   the result type the schema gives a code cell (`K-EFF-007`). A value that
+///   fails either check settles the call as a typed failure
+///   ([`DeclarationRefusal::OutputValueMismatch`](crate::DeclarationRefusal::OutputValueMismatch))
+///   naming the tool and the JSON pointer of the part that does not fit; no
+///   cell, model or caller receives it. The host need not check the value
+///   itself.
 /// - Lash presents the value to the model with
 ///   [`ModelToolReturn::from_output`]. A host that shows the call, as a card
 ///   or in a transcript, calls it too instead of deriving its own parts.
