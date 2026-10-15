@@ -14,6 +14,11 @@ description = "Credential-free VM worker entry and bounded resettable process po
 name = "lash_vm_worker"
 doctest = false
 
+# `src/lib.rs` pulls in `../lash-vm-releases/src/library.rs` with `#[path]`;
+# cargo-shear cannot see that file, the only user of `lash-kernel-lib` here.
+[package.metadata.cargo-shear]
+ignored = ["lash-kernel-lib"]
+
 [[bin]]
 name = "lash-vm-worker"
 path = "src/main.rs"

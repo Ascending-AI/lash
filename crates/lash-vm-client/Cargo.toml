@@ -39,9 +39,7 @@ lash-sansio = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-vm = { workspace = true }
-lash-kernel-state = { workspace = true }
 lash-core-store = { workspace = true }
-lash-vm-releases = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
 serde_json = { workspace = true }

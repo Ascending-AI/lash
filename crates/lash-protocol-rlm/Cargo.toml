@@ -67,9 +67,7 @@ lash-sqlite-store = { workspace = true, features = ["testing"] }
 # The worker a Python-dialect law runs its cell in: this crate's test binary
 # re-entered as the worker of a host that names Python alone.
 lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
-lash-dialect-python = { workspace = true }
 # The prompt walker lowers every example a prompt shows with the dialect's
 # own front end.
 lash-dialect-typescript = { workspace = true }
 insta = "1"
-tempfile = { workspace = true }

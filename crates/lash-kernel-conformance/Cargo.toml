@@ -14,6 +14,11 @@ publish = false
 [lib]
 doctest = false
 
+# `examples/native_corpus.rs` pulls in `../lash-vm-releases/src/build/corpus.rs`
+# with `#[path]`; cargo-shear cannot see that file, the only user of `blake3` here.
+[package.metadata.cargo-shear]
+ignored = ["blake3"]
+
 [features]
 # Runs the conformance case of the migration to kernel version 1's synthetic
 # successor.

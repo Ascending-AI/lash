@@ -18,12 +18,6 @@ categories = ["database", "asynchronous"]
 name = "lash_postgres_store"
 doctest = false
 
-# cargo-shear resolves `use` statements per crate directory and cannot see
-# inside macro expansions: `lash_conformance::queue_observation_tests!` in
-# tests/conformance.rs expands to `lash::LashCore` and friends.
-[package.metadata.cargo-shear]
-ignored = ["lash"]
-
 [lints]
 workspace = true
 
@@ -53,7 +47,6 @@ uuid = { workspace = true, features = ["v4"] }
 lash-durable-test = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
-lash-vm-runtime = { workspace = true, features = ["testing"] }
 lash = { workspace = true, features = ["postgres", "mcp"] }
 lash-conformance = { workspace = true, features = ["lash-vm"] }
 lash-core = { workspace = true, features = ["testing"] }

@@ -8,6 +8,11 @@ publish = false
 [lib]
 doctest = false
 
+# `swc_ecma_ast` has no source use: the edge only turns on `serde-impl`, which
+# `src/catalog/shape/source.rs` needs to serialize the parsed SWC module.
+[package.metadata.cargo-shear]
+ignored = ["swc_ecma_ast"]
+
 [lints]
 workspace = true
 

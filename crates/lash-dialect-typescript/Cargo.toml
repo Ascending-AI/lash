@@ -17,6 +17,12 @@ publish = false
 name = "lash_dialect_typescript"
 doctest = false
 
+# `tests/helper_differential.rs` and `examples/helper_differential.rs` pull in
+# `shared/helper_differential/runner.rs` with `#[path]`; cargo-shear cannot see
+# that file, the only user of `lash-vm-releases` here.
+[package.metadata.cargo-shear]
+ignored = ["lash-vm-releases"]
+
 [lints]
 workspace = true
 

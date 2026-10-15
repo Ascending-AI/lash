@@ -34,8 +34,6 @@ lash-sansio = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lash-vm-releases = { workspace = true }
 async-trait = { workspace = true }
-blake3 = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
@@ -44,11 +42,5 @@ tokio-util = { workspace = true }
 [dev-dependencies]
 # The laws' runs pin a dialect's release, so their build holds one.
 lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
-# The durable laws drive the broker over the durable store, cut by the
-# substrate harness at every commit.
 lash-core-execution = { workspace = true, features = ["testing"] }
-lash-durable-test = { workspace = true }
-lash-postgres-store = { workspace = true, features = ["testing"] }
-sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
-lash-sqlite-store = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

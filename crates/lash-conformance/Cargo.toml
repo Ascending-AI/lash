@@ -10,6 +10,11 @@ description = "Backend certification laws for Lash stores"
 name = "lash_conformance"
 doctest = false
 
+# `lash-core-worker` has no source use: the edge only turns on its `testing`
+# feature in the workspace feature graph (kept by FIG-5558).
+[package.metadata.cargo-shear]
+ignored = ["lash-core-worker"]
+
 [lints]
 workspace = true
 
@@ -35,7 +40,6 @@ proptest = "1"
 tokio-util.workspace = true
 chrono.workspace = true
 rmp-serde.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 # The store-contract self-tests replay their cases against a real store: a

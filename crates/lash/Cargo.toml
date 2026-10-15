@@ -165,8 +165,6 @@ synthetic-next = [
 ]
 
 [dev-dependencies]
-lash-kernel-conformance = { workspace = true }
-lash-kernel-vm = { workspace = true }
 chrono.workspace = true
 # The dev-dependencies' testing client is paired with a testing worker when
 # the `worker` feature links one (FIG-4409).
@@ -174,7 +172,6 @@ lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript"
 # The facade's laws run TypeScript and Python sessions and processes.
 lash-vm-runtime = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-conformance.workspace = true
-insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
@@ -185,8 +182,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
-rmp-serde = { workspace = true }
-serde_bytes = { workspace = true }
 trybuild = "1"
 tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }

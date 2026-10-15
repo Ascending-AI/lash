@@ -16,6 +16,11 @@ categories = ["api-bindings", "asynchronous"]
 name = "lash_provider_openai"
 doctest = false
 
+# The self dev-dependency below has no source use: it turns `testing` on for
+# every test build of this crate (FIG-1266).
+[package.metadata.cargo-shear]
+ignored = ["lash-provider-openai"]
+
 [features]
 # Enables public test support and the cross-provider response-normalization
 # conformance test. CI opts in explicitly; production builds keep it disabled.
