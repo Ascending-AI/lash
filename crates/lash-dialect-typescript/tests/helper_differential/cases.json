@@ -7944,5 +7944,100 @@
     "id": "typescript/fuzz-regression/helper-text-result-static",
     "dialect": "typescript",
     "source": "await observe(String.fromCharCode(97).length);"
+  },
+  {
+    "id": "python/iteration/dict-delete-add",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\n        d[k+'x']=1\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-add-delete",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        d[k+'x']=1\n        del d[k]\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-transient-add",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        d['new']=1\n        del d['new']\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-delete-only",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-last-delete",
+    "dialect": "python",
+    "source": "d={'a':1}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-break-after-replace",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\n        d[k+'x']=1\n        break\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-break-after-delete",
+    "dialect": "python",
+    "source": "d={'a':1}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\n        break\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-continue-after-replace",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        del d[k]\n        d[k+'x']=1\n        continue\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-unvisited-replacement",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        if k == 'a':\n            del d['b']\n            d['c']=3\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/dict-values-update",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k in d:\n        seen.append(k)\n        d[k]=3\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/set-delete-add",
+    "dialect": "python",
+    "source": "s={0}\nseen=[]\ntry:\n    for k in s:\n        seen.append(k)\n        if k == 0:\n            s.remove(k)\n            s.add(1)\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/set-add-delete",
+    "dialect": "python",
+    "source": "s={0}\nseen=[]\ntry:\n    for k in s:\n        seen.append(k)\n        if k == 0:\n            s.add(1)\n            s.remove(k)\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/set-transient-add",
+    "dialect": "python",
+    "source": "s={0}\nseen=[]\ntry:\n    for k in s:\n        seen.append(k)\n        s.add(1)\n        s.remove(1)\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/set-delete-only",
+    "dialect": "python",
+    "source": "s={0}\nseen=[]\ntry:\n    for k in s:\n        seen.append(k)\n        s.remove(k)\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/set-break-after-delete",
+    "dialect": "python",
+    "source": "s={0}\nseen=[]\ntry:\n    for k in s:\n        seen.append(k)\n        s.remove(k)\n        break\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/mutation-after-break",
+    "dialect": "python",
+    "source": "d={'a':1}\ns={0}\nfor k in d:\n    break\nd.clear()\nfor k in s:\n    break\ns.clear()\nawait observe([len(d),len(s)])\n"
+  },
+  {
+    "id": "python/iteration/dict-comprehension-replace",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\ndef replace(k):\n    del d[k]\n    d[k+'x']=1\n    return k\ntry:\n    r=[replace(k) for k in d]\nexcept RuntimeError as e:\n    await observe(str(e))\n"
+  },
+  {
+    "id": "python/iteration/dict-nested-budgets",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nr=[]\nfor k in d:\n    for j in d:\n        r.append(k+j)\nawait observe(r)\n"
+  },
+  {
+    "id": "python/iteration/dict-table-compaction",
+    "dialect": "python",
+    "source": "d={'0':1,'1':1,'2':1}\nfor k in d:\n    del d[k]\n    d[k+'x']=1\n"
   }
 ]

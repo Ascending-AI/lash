@@ -330,6 +330,39 @@ fn builtin_range_loop_uses_constant_space() {
     assert_eq!(console.lines, ["0", "0"]);
 }
 
+/// FIG-6406: replacing every visited key preserves size but must exhaust
+/// the dict iterator's entry budget instead of extending the loop forever.
+#[test]
+fn dict_same_size_key_replacement_raises_within_charge_bound() {
+    // CPython table compaction happens to exhaust the three-key case.
+    // The FIG-6406 ruling permits Lash's stricter detection there too.
+    for (initial, visited) in [
+        ("{'a': 1, 'b': 2}", vec!["a", "b"]),
+        ("{'0': 1, '1': 1, '2': 1}", vec!["0", "1", "2"]),
+    ] {
+        let source =
+            format!("d = {initial}\nfor k in d:\n    print(k)\n    del d[k]\n    d[k + 'x'] = 1\n");
+        let lowered = lower(&source).unwrap();
+        let program = Program {
+            document: Arc::new(lowered.document),
+            library: installed().prepared.clone(),
+        };
+        let bounds = Bounds {
+            charge: 20_000,
+            ..BOUNDS
+        };
+        let straight = execution_observation(program.clone(), bounds, false);
+        assert_eq!(
+            ending(straight.0.clone()),
+            "error RuntimeError: dictionary keys changed during iteration"
+        );
+        assert_eq!(straight.1, visited);
+        // K-MACH-007/008: the remaining budget, size and live map cursor must
+        // survive serialization at every safe point with identical charge.
+        assert_eq!(execution_observation(program, bounds, true), straight);
+    }
+}
+
 /// Runs `source` to its end as a cell of a session that holds `bindings`
 /// and can call the tools `effects`. At each park, `at_park` is given the
 /// lines printed since the park before, the park and the document's
@@ -618,7 +651,7 @@ except TypeError as e:
     print(e)
 ";
 
-fn arithmetic_observation(
+fn execution_observation(
     program: Program,
     bounds: Bounds,
     rebuild: bool,
@@ -632,26 +665,24 @@ fn arithmetic_observation(
             bindings: Bindings::default(),
         },
     )
-    .expect("the arithmetic document starts");
+    .expect("the document starts");
     let mut host = Console::default();
     let mut requests = Vec::new();
     loop {
         let step = machine
             .run(&mut host, if rebuild { 1 } else { u64::MAX })
-            .expect("the arithmetic document runs");
+            .expect("the document runs");
         if let Step::Ended(end) = step {
             return (end, host.lines, requests, machine.meters().charged);
         }
         if rebuild {
-            let state = machine
-                .export()
-                .expect("every arithmetic safe point exports");
+            let state = machine.export().expect("every safe point exports");
             // Use the serialized state, rather than keeping any prepared
             // execution coordinates from the previous machine.
             let bytes = serde_json::to_vec(&state).expect("state serializes");
             let state = serde_json::from_slice(&bytes).expect("state deserializes");
             machine = KernelMachine::import(program.clone(), bounds, state)
-                .expect("every arithmetic safe point imports");
+                .expect("every safe point imports");
         }
         if let Step::Parked(park) = step {
             for request in park.requests {
@@ -710,11 +741,11 @@ fn arithmetic_successors_and_held_previous_definitions_resume_exactly() {
             document: Arc::new(lowered.document),
             library: prepared.clone(),
         };
-        let straight = arithmetic_observation(program.clone(), BOUNDS, false);
+        let straight = execution_observation(program.clone(), BOUNDS, false);
         assert!(matches!(straight.0, End::Finished(_)), "{:?}", straight.0);
         assert_eq!(straight.2, ["echo:7"]);
         assert_eq!(
-            arithmetic_observation(
+            execution_observation(
                 program,
                 Bounds {
                     charge: straight.3,
@@ -936,12 +967,12 @@ print(s)
         document: Arc::new(lowered.document),
         library: installed().prepared.clone(),
     };
-    let straight = arithmetic_observation(program.clone(), BOUNDS, false);
+    let straight = execution_observation(program.clone(), BOUNDS, false);
     assert!(matches!(straight.0, End::Finished(_)));
     assert_eq!(straight.1, ["9223372036854775810"]);
     assert_eq!(straight.2, ["echo:9223372036854775808"]);
     assert_eq!(
-        arithmetic_observation(
+        execution_observation(
             program,
             Bounds {
                 charge: straight.3,

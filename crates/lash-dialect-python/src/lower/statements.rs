@@ -18,9 +18,14 @@ pub(super) enum Body<'a> {
     Value(&'a PyExpr),
 }
 
-/// What a `for` walks, and the dict or set it must find unchanged in size
-/// with that size.
-pub(super) type ForHeader = (Operand, Option<(Operand, Operand)>);
+/// What a `for` walks, with checkpointed Python iterator state.
+pub(super) type ForHeader = (Operand, Option<IterGuard>);
+
+pub(super) struct IterGuard {
+    watched: Operand,
+    size: Operand,
+    remaining: Name,
+}
 
 /// The built-in calls whose result is a fresh list, which no loop over it
 /// can find changed in size.
@@ -345,13 +350,13 @@ impl Lowerer<'_> {
     pub(super) fn loop_else(
         &mut self,
         flag: Option<Name>,
-        guard: Option<&(Operand, Operand)>,
+        guard: Option<&IterGuard>,
         orelse: &[PyStmt],
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let tail = |this: &mut Self| -> Lowering<()> {
-            if let Some((walked, size)) = guard {
-                this.invoke_do("py.iter_guard", &[walked.clone(), size.clone()])?;
+            if let Some(guard) = guard {
+                this.iter_guard(guard, false)?;
             }
             this.statements(orelse)
         };
@@ -383,9 +388,8 @@ impl Lowerer<'_> {
                     let receiver = self.pin(receiver);
                     let method = format!("py.method.{}", attribute.attr.id.as_str());
                     let walked = self.invoke(&method, std::slice::from_ref(&receiver), Ty::List)?;
-                    let size =
-                        self.invoke("py.iter_size", std::slice::from_ref(&receiver), Ty::Int)?;
-                    return Ok((walked, Some((receiver, size))));
+                    let guard = self.iter_state(receiver)?;
+                    return Ok((walked, Some(guard)));
                 }
                 PyExpr::Name(name)
                     if FRESH_ITERABLES.contains(&name.id.as_str())
@@ -406,8 +410,37 @@ impl Lowerer<'_> {
         }
         let value = self.expr(iter)?;
         let walked = self.invoke("py.iter", &[value], Ty::Unknown)?;
-        let size = self.invoke("py.iter_size", std::slice::from_ref(&walked), Ty::Int)?;
-        Ok((walked.clone(), Some((walked, size))))
+        let guard = self.iter_state(walked.clone())?;
+        Ok((walked, Some(guard)))
+    }
+
+    fn iter_state(&mut self, watched: Operand) -> Lowering<IterGuard> {
+        let size = self.invoke("py.iter_size", std::slice::from_ref(&watched), Ty::Int)?;
+        let remaining = self.temp();
+        self.emit(Stmt::Let {
+            name: remaining.clone(),
+            value: Rhs::Expr(size.expr.clone()),
+        });
+        Ok(IterGuard {
+            watched,
+            size,
+            remaining,
+        })
+    }
+
+    pub(super) fn iter_guard(&mut self, guard: &IterGuard, more: bool) -> Lowering<()> {
+        let next = self.invoke(
+            "py.iter_guard",
+            &[
+                guard.watched.clone(),
+                guard.size.clone(),
+                Operand::temp(guard.remaining.clone(), Ty::Int),
+                Operand::literal(Literal::Bool(more), Ty::Bool),
+            ],
+            Ty::Int,
+        )?;
+        self.store(Place::Variable(guard.remaining.clone()), next);
+        Ok(())
     }
 
     fn for_loop(
@@ -436,8 +469,8 @@ impl Lowerer<'_> {
             (breaks && (guard.is_some() || !for_loop.orelse.is_empty())).then(|| self.break_flag());
         let binding = self.temp();
         let body = self.block(|this| {
-            if let Some((watched, size)) = &guard {
-                this.invoke_do("py.iter_guard", &[watched.clone(), size.clone()])?;
+            if let Some(guard) = &guard {
+                this.iter_guard(guard, true)?;
             }
             this.assign(
                 &for_loop.target,

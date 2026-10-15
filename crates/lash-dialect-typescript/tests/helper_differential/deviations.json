@@ -943,5 +943,15 @@
       "type": "throw",
       "value": "TS_METHOD_UNSUPPORTED"
     }
+  },
+  {
+    "helper": null,
+    "case": "python/iteration/dict-table-compaction",
+    "rule": "FIG-6406; K-ITER-003",
+    "reason": "CPython table-compaction-dependent; lash raises",
+    "expected": {
+      "type": "throw",
+      "value": "RuntimeError"
+    }
   }
 ]

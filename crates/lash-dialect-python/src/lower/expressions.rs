@@ -597,8 +597,8 @@ impl Lowerer<'_> {
         };
         let binding = self.temp();
         let body = self.block(|this| {
-            if let Some((watched, size)) = &guard {
-                this.invoke_do("py.iter_guard", &[watched.clone(), size.clone()])?;
+            if let Some(guard) = &guard {
+                this.iter_guard(guard, true)?;
             }
             this.assign(
                 &generator.target,
@@ -616,8 +616,8 @@ impl Lowerer<'_> {
         self.emit_for(binding, walked.expr, body);
         // A dict or a set that changed size in the last pass is refused
         // too, as Python's next step of the iteration would.
-        if let Some((watched, size)) = &guard {
-            self.invoke_do("py.iter_guard", &[watched.clone(), size.clone()])?;
+        if let Some(guard) = &guard {
+            self.iter_guard(guard, false)?;
         }
         Ok(())
     }

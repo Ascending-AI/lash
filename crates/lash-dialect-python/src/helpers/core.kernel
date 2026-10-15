@@ -1250,24 +1250,31 @@ body {
   return -1
 }
 
-# Python refuses to go on iterating a dict or a set whose size changed.
-function py.iter_guard(value: Any, size: Int) -> Null
+# Size is checked even at exhaustion. Only a dict with an actual next
+# entry checks/decrements the remaining-entry budget; sets do not enforce it.
+function py.iter_guard(value: Any, size: Int, remaining: Int, more: Bool) -> Int
 kernel 1
 charge 4
 body {
   if lt(size, 0) {
-    return null
+    return remaining
   }
   if same(kind(value), "map") {
     if bool.not(eq(map.len(value), size)) {
       do invoke py.fail("RuntimeError", "dictionary changed size during iteration")
     }
-    return null
+    if more {
+      if eq(remaining, 0) {
+        do invoke py.fail("RuntimeError", "dictionary keys changed during iteration")
+      }
+      return sub(remaining, 1)
+    }
+    return remaining
   }
   if bool.not(eq(set.len(value), size)) {
     do invoke py.fail("RuntimeError", "Set changed size during iteration")
   }
-  return null
+  return remaining
 }
 
 function py.to_tuple(value: Any) -> Any

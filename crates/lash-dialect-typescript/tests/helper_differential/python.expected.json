@@ -3863,6 +3863,653 @@
           ]
         }
       ]
+    },
+    "python/iteration/dict-delete-add": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            107,
+            101,
+            121,
+            115,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-add-delete": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            107,
+            101,
+            121,
+            115,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-transient-add": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-delete-only": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            115,
+            105,
+            122,
+            101,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-last-delete": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            115,
+            105,
+            122,
+            101,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-break-after-replace": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-break-after-delete": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-continue-after-replace": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            107,
+            101,
+            121,
+            115,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-unvisited-replacement": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                99
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-values-update": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/set-delete-add": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/set-add-delete": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/set-transient-add": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/set-delete-only": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            83,
+            101,
+            116,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            115,
+            105,
+            122,
+            101,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/set-break-after-delete": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/mutation-after-break": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-comprehension-replace": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            107,
+            101,
+            121,
+            115,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-nested-budgets": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97,
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                97,
+                98
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98,
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98,
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-table-compaction": {
+      "type": "observations",
+      "value": []
     }
   }
 }

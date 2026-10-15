@@ -187,3 +187,11 @@ corpus images in place. Every source program and expected result is unchanged;
 all session image bytes, helper identities and kernel semantics are unchanged.
 The first registration retains the engine's explicit trace class, including
 when a different node without that engine cancels the process.
+
+FIG-6406 gives Python dict loops a remaining-entry budget beside their size
+snapshot. The changed unsealed Python helper release made only set
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s `pending-tool-python` image fail
+with a missing helper node. On the tree rebased onto `origin/main`, its existing
+session recorder refreshed exactly that image in place under the pre-cut rule.
+Its program, expected result and set metadata are unchanged; both baseline
+images and the other five corpus images retain their bytes.
