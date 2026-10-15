@@ -82,14 +82,18 @@ fn search_wide() -> lash::tools::ToolDefinition {
     )
 }
 
-/// Each search tool answers its own name as its hits.
+/// Each search tool answers its own name as its hits; only the wide tool
+/// declares timing in its result.
 struct Answer;
 
 #[lash::async_trait]
 impl lash::tools::StaticToolExecute for Answer {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
-        lash::tools::ToolOutcome::ok(serde_json::json!({ "hits": call.name(), "took_ms": 1 }))
-            .into()
+        let mut value = serde_json::json!({ "hits": call.name() });
+        if call.name() == "search_wide" {
+            value["took_ms"] = serde_json::json!(1);
+        }
+        lash::tools::ToolOutcome::ok(value).into()
     }
 }
 

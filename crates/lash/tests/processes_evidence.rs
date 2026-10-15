@@ -669,8 +669,8 @@ mod named_component_laws {
             format!("tool:{name}"),
             name,
             "Answers `a`.",
-            object.clone(),
             object,
+            serde_json::json!({ "type": "string" }),
         )
         .expect("the tool's schemas")
         .with_execution(std::time::Duration::from_secs(60))

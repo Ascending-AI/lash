@@ -243,13 +243,15 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     assert_eq!(failure.code, "tool_outcome_not_declared");
     assert!(failure.message.contains("tool `search`"), "{failure:?}");
     assert!(failure.message.contains("/diagnostics"), "{failure:?}");
-    assert!(failure.message.contains("`took`"), "{failure:?}");
-    assert!(matches!(
-        failure.cause.as_deref(),
-        Some(lash_core::ToolFailureCause::Declaration {
-            refusal: lash_core::DeclarationRefusal::OutputValueMismatch { .. }
-        })
-    ));
+    assert!(failure.message.contains("took"), "{failure:?}");
+    let Some(lash_core::ToolFailureCause::Declaration {
+        refusal: lash_core::DeclarationRefusal::OutputValueMismatch { mismatch, .. },
+    }) = failure.cause.as_deref()
+    else {
+        panic!("the committed failure carries the typed output mismatch: {failure:?}");
+    };
+    assert_eq!(mismatch.instance_path, "/diagnostics", "{mismatch:?}");
+    assert!(mismatch.message.contains("took"), "{mismatch:?}");
     reader.shutdown().await?;
     Ok(())
 }
