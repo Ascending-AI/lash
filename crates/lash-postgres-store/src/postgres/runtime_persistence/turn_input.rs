@@ -440,16 +440,20 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
     let mut admitted = Vec::with_capacity(batch.drafts().len());
     for draft in batch.drafts() {
         let submission_digest = support::turn_input_submission_digest(draft)?;
-        let by_source_key: Option<(String, String)> = match draft.source_key.as_deref() {
+        let (by_source_key, forsaken) = match draft.source_key.as_deref() {
             Some(source_key) => {
-                crate::observed_sql::query_as(sql.pending_inputs.select_id_by_source_key.sql())
+                let (input_id, digest, forsaken): (Option<String>, Option<String>, bool) =
+                    crate::observed_sql::query_as(
+                        sql.family_postgres.input_admission_by_source_key.sql(),
+                    )
                     .bind(session_id.as_str())
                     .bind(source_key)
-                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
                     .await
-                    .map_err(store_sqlx_error)?
+                    .map_err(store_sqlx_error)?;
+                (input_id.zip(digest), forsaken)
             }
-            None => None,
+            None => (None, false),
         };
         let by_input_id: Option<(String, String)> =
             match (&by_source_key, draft.input_id.as_deref()) {
@@ -462,17 +466,6 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                 .map_err(store_sqlx_error)?,
                 _ => None,
             };
-        let forsaken: bool = match (&by_source_key, draft.source_key.as_deref()) {
-            (None, Some(source_key)) => {
-                crate::observed_sql::query_scalar(sql.forsaken_inputs.select_exists.sql())
-                    .bind(session_id.as_str())
-                    .bind(source_key)
-                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(store_sqlx_error)?
-            }
-            _ => false,
-        };
         let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,

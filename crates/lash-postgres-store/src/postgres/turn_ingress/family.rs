@@ -4,6 +4,22 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only PostgreSQL
     /// issues.
     pub(crate) struct TurnIngressPostgresStatements @ "turn_ingress" {
+        /// The input and immutable digest session `?1` filed under source
+        /// key `?2`, or whether it forsook that key. Always returns one row,
+        /// with NULL input columns when no input holds the key.
+        ///
+        /// Admission holds the session's write authority through commit,
+        /// as forsake does: both absences hold until then. Reading the
+        /// tombstone beside replay costs no extra round trip (FIG-6345).
+        input_admission_by_source_key = "SELECT inputs.input_id, inputs.submission_digest,
+                inputs.input_id IS NULL AND EXISTS (
+                    SELECT 1 FROM forsaken_turn_inputs
+                    WHERE session_id = ?1 AND source_key = ?2
+                )
+             FROM (SELECT 1) AS request
+             LEFT JOIN pending_turn_inputs AS inputs
+               ON inputs.session_id = ?1 AND inputs.source_key = ?2";
+
         /// Lock run `?2`'s bound inputs in queue order before a park write,
         /// so withdrawal either follows the park or prevents it.
         run_bound_input_states = "SELECT pti.state FROM pending_turn_inputs pti

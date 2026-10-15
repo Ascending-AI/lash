@@ -176,7 +176,8 @@ fn within(operation: &str, trips: u64, budget: u64) {
 
 /// The most round trips the acceptance of one input pays (FIG-5936; 17
 /// before it): its guarded transaction and fleet check, the session's
-/// write authority taken once with the deletion check, the replay,
+/// write authority taken once with the deletion check, replay and the
+/// forsaken tombstone read together (FIG-6345),
 /// closing and referrer checks, the allocation, the insert, which returns
 /// the row, the session's wake and `COMMIT`.
 const ACCEPT_ROUND_TRIPS: u64 = 14;
