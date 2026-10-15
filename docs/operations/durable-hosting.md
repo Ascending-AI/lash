@@ -1181,6 +1181,24 @@ the committed-turn page, or keep each call's turn address (`TurnToolCallRef`)
 for later `read_tool_call`/`read_tool_calls` reads; a bare call id cannot be
 resolved without scanning.
 
+### Reading a call's settle verdict
+
+`DurableSession::read_tool_call(&TurnToolCallRef { turn_id, call_id })`
+returns Lash's committed verdict in `ToolCallRead::Settled { record }`.
+Inspect `record.output.outcome`: for `lash::tools::ToolCallOutcome::Failure`,
+the `ToolFailure` carries `code`, `message` and a typed `cause`. This is the
+settled result even when the host answered Success: a value its output schema
+rejects is recorded as a failure with code `tool_outcome_not_declared`, a
+message naming the tool and mismatch, and
+`ToolFailureCause::Declaration { refusal: DeclarationRefusal::OutputValueMismatch { .. } }`.
+The host's original answer does not establish the committed outcome.
+
+For a cell, take `call_id` from its `ExecutedCall` and `turn_id` from the
+enclosing transcript entry's provenance. `read_cell_tool_calls(turn_id,
+&cell.calls)` reads all of that cell's host call records in order. These
+reads use the retained call ledger and work through a cold durable handle;
+the failure details have one source in `ToolCallRecord.output`.
+
 A host projector can consume ordinary committed pages without decoding call
 bodies. Retain each call's complete address alongside its transcript placement,
 scoped to the session. The projection rows, addresses and next cursor must commit

@@ -5,7 +5,11 @@ use crate::{AttachmentRef, ToolCallId, ToolCallRecord};
 /// `operation` and `outcome` are what the cell ran and how it settled.
 /// `call_id` names the [`ToolCallRecord`] of the host tool call the dispatch
 /// resolved to: that record, keyed by the same id, carries the tool, its
-/// arguments and its output. `None` only for a dispatch lash handled itself,
+/// arguments and its settled output, including a failure's code, message and
+/// typed cause. Hosts read it through `DurableSession::read_tool_call`, pairing
+/// `call_id` with the enclosing transcript entry's turn provenance, or through
+/// `DurableSession::read_cell_tool_calls` for the whole cell.
+/// `None` only for a dispatch lash handled itself,
 /// with no host tool call.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

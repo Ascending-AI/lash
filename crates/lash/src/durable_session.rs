@@ -120,6 +120,17 @@ impl DurableSession {
     }
 
     /// Read a call from its named turn's ledger without materializing a runtime.
+    ///
+    /// A [`ToolCallRead::Settled`](crate::ToolCallRead::Settled) record's
+    /// `output.outcome` is lash's settle verdict. It can be a
+    /// [`ToolCallOutcome::Failure`](crate::tools::ToolCallOutcome::Failure)
+    /// even when the host answered Success, for example when the value does
+    /// not fit the call's output schema. Read that failure's `code`, `message`
+    /// and typed `cause` from this record.
+    ///
+    /// For a cell's [`ExecutedCall`](crate::persistence::ExecutedCall), pair
+    /// its `call_id` with the enclosing transcript entry's turn provenance,
+    /// or read the whole cell through [`Self::read_cell_tool_calls`].
     pub async fn read_tool_call(
         &self,
         call: &crate::TurnToolCallRef,

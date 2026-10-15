@@ -162,3 +162,94 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
     );
     Ok(())
 }
+
+/// FIG-6334: the committed call body is the host's settle verdict, including
+/// a refusal of the host's Success. A cold durable reader follows a cell's
+/// call id and reads the failure code, message and typed cause from that body.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Result<()> {
+    let responses = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("settle-verdict")
+        .complete(move |_| {
+            let response = responses.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let text = if response == 0 {
+                    typescript_block("await tools.search({});")
+                } else {
+                    "done".to_string()
+                };
+                Ok(text_response(&text))
+            }
+        })
+        .build()
+        .into_handle();
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(crate::tool_provider_key!("tools"), Arc::new(SearchTool))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session_id = SessionId::fixture("settle-verdict");
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let report = session
+        .send(TurnInput::text("search the index"))
+        .output()
+        .await?;
+    drop(session);
+    core.shutdown().await?;
+
+    let reader = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .build(crate::testing::runtime_lease_owner())?;
+    let durable = reader.session(session_id).durable().await?;
+    let transcript = durable.transcript().await?;
+    let (turn, cell) = transcript
+        .visible()
+        .find_map(|entry| match &entry.item {
+            crate::transcript::TranscriptItem::Cell(cell) => {
+                Some((entry.provenance.turn_id.as_ref().expect("cell turn"), cell))
+            }
+            _ => None,
+        })
+        .expect("the search cell is committed");
+    let [call] = cell.calls.as_slice() else {
+        panic!("one executed call: {:?}", cell.calls);
+    };
+    assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Err);
+    let call_id = call.call_id.as_ref().expect("host call id");
+    let crate::ToolCallRead::Settled { record } = durable
+        .read_tool_call(&crate::TurnToolCallRef {
+            turn_id: turn.clone(),
+            call_id: call_id.clone(),
+        })
+        .await?
+    else {
+        panic!("the committed call has a settled body");
+    };
+    assert_eq!(&record.call_id, call_id);
+    assert_eq!(record.tool, SEARCH);
+    assert_eq!(
+        report.result.tool_calls.as_slice(),
+        std::slice::from_ref(record.as_ref())
+    );
+    let lash_core::ToolCallOutcome::Failure(failure) = &record.output.outcome else {
+        panic!("lash refused the host's Success: {:?}", record.output);
+    };
+    assert_eq!(failure.code, "tool_outcome_not_declared");
+    assert!(failure.message.contains("tool `search`"), "{failure:?}");
+    assert!(failure.message.contains("/diagnostics"), "{failure:?}");
+    assert!(failure.message.contains("`took`"), "{failure:?}");
+    assert!(matches!(
+        failure.cause.as_deref(),
+        Some(lash_core::ToolFailureCause::Declaration {
+            refusal: lash_core::DeclarationRefusal::OutputValueMismatch { .. }
+        })
+    ));
+    reader.shutdown().await?;
+    Ok(())
+}
