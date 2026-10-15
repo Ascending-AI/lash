@@ -392,6 +392,22 @@ fn working_pages(
     })
 }
 
+/// Where a cell's recorded end leaves the session's version: the cell's
+/// ended root, whose end names the version's descriptor. None for a store
+/// that publishes no heap pages.
+fn ended_cell_pages(
+    cx: &ActorContext,
+    ended: &crate::EndedCell,
+) -> Option<crate::plugin::SessionPages> {
+    Some(crate::plugin::SessionPages {
+        store: cx.pages().ok()?,
+        actor: cx.actor().clone(),
+        epoch: cx.epoch(),
+        owner: lash_durable::domain::graph::RootOwner::Exec(ended.exec.clone()),
+        root: ended.root,
+    })
+}
+
 /// `exec`'s root, read whole under one protection: its row and every node
 /// it reaches. `None` when the cell has none.
 /// Capture references before the cell root and its run facts are retired.
@@ -1015,11 +1031,11 @@ impl TurnDrive for RuntimeDrive {
 
     async fn exec_cell(
         &mut self,
-        _cx: &ActorContext,
+        cx: &ActorContext,
         id: crate::EffectId,
         cell: CodeCell,
     ) -> Result<CellExit, TurnError> {
-        Box::pin(self.driver.handle_exec_code_effect(
+        let exit = Box::pin(self.driver.handle_exec_code_effect(
             &mut self.machine,
             id,
             cell.language,
@@ -1027,7 +1043,19 @@ impl TurnDrive for RuntimeDrive {
             &self.observer,
         ))
         .await
-        .map_err(cell_abort)
+        .map_err(cell_abort)?;
+        // A cell whose end is recorded over its root left the session's
+        // version under that root: the turn's next reads of it, its prompt
+        // renders among them, go under a lease on the root until the
+        // commit that consumes the cell's answer roots the version as the
+        // turn's working state (FIG-6315). An end held in memory leaves the
+        // version under its run's lease, which the executor holds.
+        if let Some((_, ended)) = &self.driver.answered_cell_end
+            && !ended.held
+        {
+            self.driver.session_pages = ended_cell_pages(cx, ended);
+        }
+        Ok(exit)
     }
 
     fn answered_cell_calls(&mut self) -> CellToolCalls {

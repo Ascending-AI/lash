@@ -279,6 +279,23 @@ async fn link_cell(
                 state.dialect()
             )));
         }
+        // An end an earlier activation recorded names the session as that
+        // activation left it, which a read-back end does not carry: the
+        // session adopts it, and reads its pages under a lease on the
+        // cell's ended root, which the turn names once the cell answers
+        // (FIG-6315).
+        if let Some(session) = &resumed.session {
+            state
+                .restore_execution_graph(
+                    session,
+                    lash_core_store::execution_state::ExecutionGraphPurpose::Working,
+                )
+                .map_err(|error| {
+                    host_failure(format!(
+                        "the session the cell's recorded end names does not restore: {error}"
+                    ))
+                })?;
+        }
         return Ok(LinkedCell {
             document: envelope.document().map_err(host_failure)?,
             boundary: envelope.boundary().map_err(host_failure)?,

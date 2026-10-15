@@ -44,7 +44,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) held_response: Option<crate::HeldResponse>,
     /// Where the session's committed execution state stands on the
     /// persistent heap: the head this turn started from, then the working
-    /// state its last committed cell left (FIG-6193).
+    /// state its last committed cell left (FIG-6193), or the root a cell's
+    /// recorded end left until a commit roots that state (FIG-6315).
     pub(super) session_pages: Option<crate::plugin::SessionPages>,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,

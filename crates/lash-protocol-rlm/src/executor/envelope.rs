@@ -170,6 +170,10 @@ pub(super) struct ResumedCell {
     pub graph: HostGraph,
     /// The effect identity each open call was performed at.
     pub open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>,
+    /// The session an ended root's end names, as the activation that
+    /// recorded the end left it: its descriptor page, which the session
+    /// adopts (FIG-6315). None for a parked root.
+    pub session: Option<lash_core_store::execution_state::HydratedExecutionGraph>,
 }
 
 /// The cell root `root` (an ExecRoot) in `source` holds: parked, its root's
@@ -188,15 +192,29 @@ pub(super) fn load_cell(
     let text = |error: GraphRefusal| error.to_string();
     let mut decoder = GraphDecoder::new(source, limits);
     let body: ExecRoot = decoder.decode(root, NodeKind::EXEC_ROOT).map_err(text)?;
-    let (host, envelope) = match body.status {
+    let (host, envelope, session) = match body.status {
         ExecStatus::Parked => (
             body.host.ok_or("a parked cell root names no host state")?,
             body.envelope
                 .ok_or("a parked cell root names no envelope")?,
+            None,
         ),
         ExecStatus::Ended => {
             let end = CellEnd::load(&mut decoder, body.state).map_err(text)?;
-            (end.host, end.envelope)
+            let descriptor = source
+                .fetch(&end.session)
+                .ok_or("an ended cell root omits its session's descriptor")?;
+            let session = lash_core_store::execution_state::HydratedExecutionGraph {
+                root: end.session,
+                nodes: BTreeMap::from([(
+                    end.session,
+                    lash_core_store::checkpoint_graph::EncodedNode {
+                        id: end.session,
+                        bytes: descriptor.bytes.into(),
+                    },
+                )]),
+            };
+            (end.host, end.envelope, Some(session))
         }
     };
     let (cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(text)?;
@@ -294,6 +312,7 @@ pub(super) fn load_cell(
         started_process_ids,
         graph,
         open_sites,
+        session,
     })
 }
 
