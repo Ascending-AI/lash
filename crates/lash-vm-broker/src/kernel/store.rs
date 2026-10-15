@@ -78,8 +78,11 @@ use super::run::KernelEffects;
 use super::state::{ReleaseGraph, WholeState};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
-use crate::members::{Decide, Driven};
-use crate::snapshot::{DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal, refused};
+use crate::members::{Decide, Driven, Undriven};
+use crate::snapshot::{
+    BrokerInvariant, DriveRefusal, DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal,
+    refused,
+};
 
 /// The error kind of an effect that reported a failure of its own; its
 /// `data` is what the effect reported.
@@ -1211,14 +1214,14 @@ impl DurableSnapshotStore {
     ///
     /// # Errors
     ///
-    /// [`QuietPointRefusal`]: ownership lost or another store failure, the
-    /// activation stopping, or a ledger that stands on nothing that can
-    /// settle.
+    /// [`DriveRefusal`]: ownership lost or another store failure, or the
+    /// activation stopping; or a [`BrokerInvariant`] that failed, a ledger
+    /// that stands on nothing that can settle among them.
     pub async fn drive_effects(
         &self,
         ledger: &EffectLedger,
         cancel: &CancellationToken,
-    ) -> Result<Driven<Vec<Settled>>, QuietPointRefusal> {
+    ) -> Result<Driven<Vec<Settled>>, DriveRefusal> {
         self.drive_effects_as(ledger, cancel, &|_, output| outcome_of(output), None)
             .await
     }
@@ -1236,7 +1239,7 @@ impl DurableSnapshotStore {
         cancel: &CancellationToken,
         outcome: OutcomeOf<'_>,
         quiet: Option<&tokio::sync::Notify>,
-    ) -> Result<Driven<Vec<Settled>>, QuietPointRefusal> {
+    ) -> Result<Driven<Vec<Settled>>, DriveRefusal> {
         let exec = &self.exec;
         let driven = self
             .members
@@ -1253,7 +1256,20 @@ impl DurableSnapshotStore {
                 }
             })
             .await
-            .map_err(refused)?;
+            .map_err(|undriven| match undriven {
+                Undriven::Round(error) => DriveRefusal::from(refused(error)),
+                Undriven::Unbound => BrokerInvariant::Unbound.into(),
+                Undriven::Unanswerable => BrokerInvariant::Unanswerable {
+                    calls: ledger
+                        .pending()
+                        .filter_map(|(_, entry)| match &entry.standing {
+                            Standing::Admitted(admitted) => Some(admitted.call.clone()),
+                            Standing::Sleeping { .. } | Standing::Refused(_) => None,
+                        })
+                        .collect(),
+                }
+                .into(),
+            })?;
         // A sleep that is over settles its timer row, so the owner's next
         // release is not due at a deadline already answered.
         if let Driven::Answered(settled) = &driven

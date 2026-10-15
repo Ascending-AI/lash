@@ -238,7 +238,20 @@ impl RoundView {
         &self.cursor
     }
 
-    /// The identity of `member`'s current attempt.
+    /// The identity `member`'s admission minted: the first start its
+    /// admission committed. Every attempt of it resolves to this one
+    /// ([`RunFold::recovery`]).
+    #[must_use]
+    pub fn admitted_id(&self, member: &RoundMember) -> AdmittedId {
+        AdmittedId {
+            owner: self.owner.clone(),
+            run: self.run,
+            ordinal: first_start(member.member),
+        }
+    }
+
+    /// The identity of `member`'s current attempt: the execution that runs
+    /// or settles it.
     #[must_use]
     pub fn id_of(&self, member: &RoundMember) -> AdmittedId {
         AdmittedId {
@@ -345,7 +358,7 @@ pub fn fold(
         for member in &view.members {
             folded
                 .recoveries
-                .push((view.id_of(member), member.recovery(current)));
+                .push((view.admitted_id(member), member.recovery(current)));
         }
         folded.rounds.insert(run, view);
     }
@@ -421,7 +434,9 @@ fn fold_run(
                 }
                 let slot = &mut members[index];
                 match slot {
-                    None if start.attempt == 1 => {
+                    // The admission commits each member's first start at
+                    // its place: the identity every attempt resolves to.
+                    None if start.attempt == 1 && row.ordinal == first_start(start.member) => {
                         *slot = Some(RoundMember {
                             draft: draft.clone(),
                             member: start.member,

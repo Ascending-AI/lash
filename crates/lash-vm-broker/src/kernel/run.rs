@@ -41,7 +41,7 @@ use super::store::{
 use crate::effects::{MemberDraft, ParentFault};
 use crate::identity::CodeCallIdentities;
 use crate::members::Driven;
-use crate::snapshot::{DurableSnapshotStore, QuietPointRefusal};
+use crate::snapshot::{BrokerInvariant, DriveRefusal, DurableSnapshotStore, QuietPointRefusal};
 use lash_core_execution::runtime::actor::round::SettledOutput;
 
 /// The parent's half of a kernel run: how each effect is admitted, how a
@@ -282,6 +282,10 @@ pub enum KernelFailure {
     Stalled,
     #[error(transparent)]
     Checkpoint(#[from] QuietPointRefusal),
+    /// The broker's own invariant failed, not the store: the run ends with
+    /// it, since every pass would meet it again.
+    #[error(transparent)]
+    Invariant(#[from] BrokerInvariant),
     #[error(transparent)]
     Parent(#[from] ParentFault),
     /// The worker that hosted the machine failed, refused the run or could
@@ -289,6 +293,15 @@ pub enum KernelFailure {
     /// stands.
     #[error("the run's worker failed: {outcome}")]
     Worker { outcome: InfrastructureOutcome },
+}
+
+impl From<DriveRefusal> for KernelFailure {
+    fn from(refusal: DriveRefusal) -> Self {
+        match refusal {
+            DriveRefusal::Refused(refusal) => Self::Checkpoint(refusal),
+            DriveRefusal::Invariant(invariant) => Self::Invariant(invariant),
+        }
+    }
 }
 
 /// One owner's broker for kernel runs.

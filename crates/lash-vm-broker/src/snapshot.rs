@@ -210,6 +210,49 @@ impl DurableSnapshotStore {
 #[error("the save was not committed: {0}")]
 pub struct QuietPointRefusal(pub String);
 
+/// A broker invariant that failed, not the store: the records are sound,
+/// so every pass meets it again. The run ends with it; it is never a store
+/// failure a retry might clear.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum BrokerInvariant {
+    /// The execution's host bound no member bodies before it drove them.
+    #[error("the execution's host runs no member bodies")]
+    Unbound,
+    /// The run waits on `calls`, and nothing can ever answer them: every
+    /// member of the execution is settled or waits on nothing.
+    #[error(
+        "the run awaits {}, which can never be answered: none of the execution's members is open",
+        named(calls)
+    )]
+    Unanswerable {
+        /// The admitted calls the run awaits.
+        calls: Vec<lash_sansio::ToolCallId>,
+    },
+}
+
+fn named(calls: &[lash_sansio::ToolCallId]) -> String {
+    if calls.is_empty() {
+        return "no call".to_owned();
+    }
+    calls
+        .iter()
+        .map(|call| format!("call `{}`", call.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Why driving a run's effects failed.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum DriveRefusal {
+    /// The store refused or failed a read or a commit, or the activation
+    /// stopped.
+    #[error(transparent)]
+    Refused(#[from] QuietPointRefusal),
+    /// The broker's own invariant failed.
+    #[error(transparent)]
+    Invariant(#[from] BrokerInvariant),
+}
+
 pub(crate) fn refused(error: impl std::fmt::Display) -> QuietPointRefusal {
     QuietPointRefusal(error.to_string())
 }

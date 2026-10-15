@@ -15,6 +15,7 @@ use super::CodeModeExecutionState;
 use crate::CellDialect;
 use crate::testing::{DurableHost, cell_context, cell_services, python_workers, run_cell};
 
+mod repeat;
 mod saved_functions;
 
 const SESSION: &str = "cell-laws";

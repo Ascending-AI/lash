@@ -75,13 +75,27 @@ pub(crate) struct Members {
     waits: PinnedWaits,
 }
 
-fn refused(message: impl Into<String>) -> RoundError {
-    RoundError::Durable(lash_durable::DurableError::Store(
-        lash_durable::StoreFailure {
-            kind: lash_durable::StoreFailureKind::Corrupt,
-            message: message.into(),
-        },
-    ))
+/// Why driving an owner's members failed.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Undriven {
+    /// Ownership lost or another store failure, records that do not fold,
+    /// or the activation stopping.
+    #[error(transparent)]
+    Round(#[from] RoundError),
+    /// The host bound no member bodies before it drove its members.
+    #[error("the execution's host runs no member bodies")]
+    Unbound,
+    /// Every member is settled or waits on nothing, and the host's decision
+    /// still waits: nothing can ever answer it. The records are sound; the
+    /// broker's own invariant failed.
+    #[error("the operation can never be answered: none of its members is open")]
+    Unanswerable,
+}
+
+impl From<DurableError> for Undriven {
+    fn from(error: DurableError) -> Self {
+        Self::Round(error.into())
+    }
 }
 
 impl Members {
@@ -114,35 +128,28 @@ impl Members {
         self.rows = None;
     }
 
-    fn lifecycle(&mut self) -> Result<&mut Lifecycle, RoundError> {
-        if self.lifecycle.is_none() {
-            let bodies = self
-                .bodies
-                .clone()
-                .ok_or_else(|| refused("the execution's host runs no member bodies"))?;
+    fn lifecycle(&mut self) -> Result<&mut Lifecycle, Undriven> {
+        let lifecycle = match self.lifecycle.take() {
+            Some(lifecycle) => lifecycle,
             // A turn's cell answers its calls under the turn's accepted
             // stop, as its round does: an answer that lands after an
             // `Immediate` cancel was accepted, before the owner saw it, is
             // the stop's, never a call the cell completed (FIG-6082).
-            self.lifecycle = Some(
-                Lifecycle::new(
-                    &self.cx,
-                    self.policies.clone(),
-                    bodies,
-                    CommitLabel::ROUND_OUTCOME,
-                )
-                .with_settlement_label(CommitLabel::CELL_INJECT)
-                .fenced_by(Arc::new(turn_control::immediate_in)),
-            );
-        }
-        self.lifecycle
-            .as_mut()
-            .ok_or_else(|| refused("the member lifecycle is gone"))
+            None => Lifecycle::new(
+                &self.cx,
+                self.policies.clone(),
+                self.bodies.clone().ok_or(Undriven::Unbound)?,
+                CommitLabel::ROUND_OUTCOME,
+            )
+            .with_settlement_label(CommitLabel::CELL_INJECT)
+            .fenced_by(Arc::new(turn_control::immediate_in)),
+        };
+        Ok(self.lifecycle.insert(lifecycle))
     }
 
     /// `members`, admitted by this activation's own quiet point, which
     /// committed: each one's body may run once.
-    pub(crate) fn admitted(&mut self, members: &[AdmittedExecution]) -> Result<(), RoundError> {
+    pub(crate) fn admitted(&mut self, members: &[AdmittedExecution]) -> Result<(), Undriven> {
         self.lifecycle()?.admitted(members);
         self.rows = None;
         Ok(())
@@ -206,8 +213,7 @@ impl Members {
     async fn act(
         &mut self,
         folded: &RunFold,
-    ) -> Result<Option<lash_core_execution::runtime::actor::round::lifecycle::Idle>, RoundError>
-    {
+    ) -> Result<Option<lash_core_execution::runtime::actor::round::lifecycle::Idle>, Undriven> {
         if self.export_traces(folded).await? {
             return Ok(None);
         }
@@ -233,15 +239,15 @@ impl Members {
     ///
     /// # Errors
     ///
-    /// [`RoundError`]: ownership lost or another store failure, records
-    /// that do not fold, the activation stopping, or a decision nothing
-    /// can answer.
+    /// [`Undriven`]: ownership lost or another store failure, records that
+    /// do not fold, the activation stopping, no member bodies bound, or a
+    /// decision nothing can answer.
     pub(crate) async fn drive_by<T>(
         &mut self,
         cancel: &CancellationToken,
         quiet: Option<&tokio::sync::Notify>,
         decide: &mut DecideFolded<'_, T>,
-    ) -> Result<Driven<T>, RoundError> {
+    ) -> Result<Driven<T>, Undriven> {
         let clock = Arc::clone(self.cx.clock());
         let idle_evict = self.cx.backend().config().settings().idle_evict;
         // Since when the operation has run nothing and waited only on rows.
@@ -263,9 +269,7 @@ impl Members {
                 Decide::Wait { until } => until,
             };
             if idle.quiet() && until.is_none() {
-                return Err(refused(
-                    "the operation can never be answered: none of its members is open",
-                ));
+                return Err(Undriven::Unanswerable);
             }
             // Only rows are left to wait on: stay hot for `idle_evict`,
             // then suspend until the earliest due.
@@ -312,7 +316,7 @@ impl Members {
     /// # Errors
     ///
     /// As [`drive_by`](Self::drive_by).
-    pub(crate) async fn close(&mut self) -> Result<(), RoundError> {
+    pub(crate) async fn close(&mut self) -> Result<(), Undriven> {
         // The bodies learn of the closing first: a stop their members meet
         // is the closing's own.
         if let Some(bodies) = &self.bodies {

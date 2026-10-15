@@ -1219,6 +1219,18 @@ fn broker_failure(
             );
             host(message)
         }
+        // The broker's own invariant failed over sound records: every pass
+        // meets it again, so the turn ends with it, typed, never retried.
+        KernelFailure::Invariant(_) => {
+            ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::BrokerInvariant,
+                message.clone(),
+            ));
+            if ctx.is_cancelled() {
+                state.rollback_code_execution();
+            }
+            host(message)
+        }
         // The parent's own store or host faulted: the attempt fails
         // retryably, and the cell resumes from its last checkpoint.
         KernelFailure::Checkpoint(_) | KernelFailure::Parent(_) => {

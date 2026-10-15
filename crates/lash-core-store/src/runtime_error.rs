@@ -655,6 +655,13 @@ runtime_error_codes! {
         /// of Node exiting on an unsettled top-level await (ADR 0099 §11 clause 5,
         /// ADR 0062). A host lifetime contract, not a catchable exception.
         AggregateAwaitUnsettled = "aggregate_await_unsettled" => Terminal,
+        // the records are sound and every pass meets the same broken invariant.
+        /// The VM broker's own invariant failed, not its store: a cell's wait
+        /// that nothing can ever answer, every member of its execution being
+        /// settled or waiting on nothing, or a host that runs no member
+        /// bodies. The run's records are sound, so a retry
+        /// meets the same failure; the run ends with it (FIG-6289).
+        BrokerInvariant = "broker_invariant" => Terminal,
         // the recorded tool-call limit refuses the same call again.
         /// A tool call would take its cell or process past the session's
         /// recorded `max_tool_calls` (ADR 0099 §9, FIG-4546). Refused whole,

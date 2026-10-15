@@ -35,4 +35,6 @@ pub use lash_core_execution::runtime::actor::waits::{PinnedKey, WaitRef, WaitSpe
 pub use lash_durable::DurableInstant;
 pub use lash_durable::domain::{CellId, ExecKey, SnapshotRev};
 pub use members::{Decide, Driven};
-pub use snapshot::{DurableSnapshotStore, OperationId, QuietPointRefusal};
+pub use snapshot::{
+    BrokerInvariant, DriveRefusal, DurableSnapshotStore, OperationId, QuietPointRefusal,
+};

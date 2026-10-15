@@ -567,28 +567,24 @@ pub struct RunFold {
 }
 
 impl RunFold {
-    /// The fold of `recoveries`, in admission order.
-    #[must_use]
-    pub fn new(recoveries: Vec<(AdmittedId, Recovery)>) -> Self {
-        Self {
-            recoveries,
-            rounds: std::collections::BTreeMap::new(),
-            reports: std::collections::BTreeMap::new(),
-        }
-    }
-
-    /// Each admitted execution and what it recovers to, in admission order.
+    /// Each admitted call and what it recovers to, in admission order, by
+    /// the identity its admission minted ([`RoundView::admitted_id`]).
     #[must_use]
     pub fn recoveries(&self) -> &[(AdmittedId, Recovery)] {
         &self.recoveries
     }
 
-    /// What `id` recovers to, if it was admitted.
+    /// What the call `id` names recovers to, if it was started. `id` is the
+    /// start of any of its attempts: the identity its admission minted and
+    /// the one of its current attempt name the same call, and resolve the
+    /// same way.
     #[must_use]
     pub fn recovery(&self, id: &AdmittedId) -> Option<&Recovery> {
+        let round = self.rounds.get(&id.run)?;
+        let admitted = round.admitted_id(self.admitted_member(id)?);
         self.recoveries
             .iter()
-            .find(|(admitted, _)| admitted == id)
+            .find(|(key, _)| *key == admitted)
             .map(|(_, recovery)| recovery)
     }
 
@@ -607,8 +603,12 @@ impl RunFold {
         round.admitted(id)
     }
 
+    /// The member one of whose attempts started at `id`.
     fn admitted_member(&self, id: &AdmittedId) -> Option<&RoundMember> {
-        self.rounds.get(&id.run)?.member_started_at(id.ordinal)
+        let round = self.rounds.get(&id.run)?;
+        (*round.owner() == id.owner)
+            .then(|| round.member_started_at(id.ordinal))
+            .flatten()
     }
 
     /// One admission's state: its members in declared order.

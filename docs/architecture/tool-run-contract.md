@@ -25,7 +25,11 @@ A call has one durable home: the admitted execution that runs it.
   A resume folds the round's run records: a started `Once` without an
   outcome is `Interrupted` and never starts again, and a started `Repeatable`
   reruns at its ordinal. A retryable failure is a known failure, and its
-  retry due is a row. A turn cancel ends unfinished members as `Cancelled`.
+  retry due is a row; an `invalid_request` failure is never retried, since
+  the same request fails the same way. Every attempt of a call resolves to
+  the identity its admission minted (its first `x_start`), so a reader that
+  holds that identity finds the outcome of whichever attempt settled the
+  call. A turn cancel ends unfinished members as `Cancelled`.
   The round's `present` record rides the turn's next commit
   (`round.present+model.start` or `turn.commit`) and answers the members
   in declared order. A member that parks records an `x_wait` before its

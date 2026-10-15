@@ -997,14 +997,17 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         // An outcome its declaration refused (a Finish
                         // value its schema does not admit among them) is
                         // the call's answer: no repeat can repair it
-                        // without running its body's work again.
+                        // without running its body's work again. Nor can
+                        // one repair an `invalid_request` failure: the
+                        // same request fails the same way.
                         _ => Ok(SingletonBodyOutcome::Failed {
                             output,
                             suggested_delay_ms: failure.suggested_delay_ms,
-                            repeatable: !matches!(
-                                failure.cause.as_deref(),
-                                Some(crate::ToolFailureCause::Declaration { .. })
-                            ),
+                            repeatable: failure.class != crate::ToolFailureClass::InvalidRequest
+                                && !matches!(
+                                    failure.cause.as_deref(),
+                                    Some(crate::ToolFailureCause::Declaration { .. })
+                                ),
                         }),
                     },
                     crate::ToolCallOutcome::Cancelled(_) => Ok(SingletonBodyOutcome::Cancelled {
