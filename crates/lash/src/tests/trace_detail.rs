@@ -2,13 +2,18 @@
 //! Extended model detail brings provider and stream event records; a kind
 //! that is off is never built; a kind the exporter skips is built and
 //! reaches every sink, and is not exported.
+//!
+//! Every turn consents to output-message content, so whether a stream
+//! event record is built turns on detail alone: stream block and part
+//! records carry output content and are captured only under that consent.
 
 use super::trace_enrichment::exporting;
 use super::*;
 
 use crate::support::TurnInput;
 use crate::tracing::{
-    TraceDetail, TraceDetailPolicy, TraceExportPolicy, TraceRecord, TraceSpanKind as K,
+    Capture, ContentCategory, ContentPolicy, TraceDetail, TraceDetailPolicy, TraceExportPolicy,
+    TraceRecord, TraceSpanKind as K,
 };
 use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, StreamBlockIdentity};
@@ -79,6 +84,9 @@ async fn turn_under(
         ))
         .serve_test_llm_profile(retried_model(), mock_llm_profile_spec())
         .trace_detail(detail)
+        .content_policy(
+            ContentPolicy::standard().with(ContentCategory::OutputMessages, Capture::Captured),
+        )
         .trace_sink(sink.clone()),
         Sampler::AlwaysOn,
         OtelOptions {
