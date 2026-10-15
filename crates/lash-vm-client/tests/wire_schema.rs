@@ -97,6 +97,7 @@ fn check_snapshot(testing: bool) {
         include_str!("../src/service.rs"),
         include_str!("../src/wire.rs"),
         include_str!("../../lash-kernel-dialect/src/imperative.rs"),
+        include_str!("../../lash-kernel-doc/src/source_map.rs"),
         include_str!("../../lash-kernel-dialect/src/diagnostic.rs"),
     ] {
         for declaration in declarations(source, testing) {

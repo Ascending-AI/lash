@@ -111,6 +111,15 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+filegroup(
+    name = "source_wire_declarations",
+    srcs = [
+        "src/source_map.rs",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(

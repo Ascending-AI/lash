@@ -96,6 +96,7 @@ lash_rust_integration_test(
     exec_properties = sized_exec_properties("lash-internal-vm-client", "wire_schema", "//crates/lash-vm-client:wire_schema__test"),
     extra_compile_data = [
         "//crates/lash-kernel-dialect:source_wire_declarations",
+        "//crates/lash-kernel-doc:source_wire_declarations",
     ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",

@@ -32,8 +32,10 @@ struct PrintOptions { source_map : bool , limits : GeneratedSourceLimits , }
 
 struct PrintedSource { source : String , format : SourceFormat , # [serde (default , skip_serializing_if = "Option::is_none")] source_map : Option < SourceMap > , }
 
-struct SourceMap { source : [u8 ; 32] , document : DocumentId , format : SourceFormat , sites : Vec < SourceSite > , }
+# [serde (deny_unknown_fields)] struct Span { start : usize , end : usize , }
 
-struct SourceSite { site : Site , ranges : Vec < crate :: Span > , implicit : Option < usize > , }
+# [serde (rename_all = "snake_case")] enum SourceLanguage { TypeScript , Python }
 
-struct Span { start : usize , end : usize , }
+# [serde (deny_unknown_fields)] struct SourceSite { site : Site , ranges : Vec < Span > , implicit : Option < usize > , }
+
+# [serde (deny_unknown_fields)] struct SourceMap { source : [u8 ; 32] , document : DocumentId , language : SourceLanguage , sites : Vec < SourceSite > , }
