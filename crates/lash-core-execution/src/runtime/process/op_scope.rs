@@ -120,6 +120,7 @@ impl<'scope> ProcessOpScope<'scope> {
                 content: lash_trace::TelemetryContent::Captured,
                 context,
                 position: None,
+                omissions: Default::default(),
                 event,
             }
         });

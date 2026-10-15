@@ -2,14 +2,16 @@
 #![cfg(feature = "otel-trace")]
 #![allow(dead_code)]
 
-use lash::tracing::{OtelOptions, OtelSpanEnricher, OtelTelemetry, contract_markdown, otel};
+use lash::tracing::{
+    OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView, contract_markdown, otel,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 struct Enricher;
-impl OtelSpanEnricher for Enricher {
-    fn attributes(&self, _: &lash::tracing::TraceRecord, out: &mut Vec<otel::KeyValue>) {
-        out.push(otel::KeyValue::new("host.attribute", true));
+impl SpanEnricher for Enricher {
+    fn enrich(&self, _: &SpanView<'_>, out: &mut SpanEnrichment) {
+        let _refused = out.set("host.attribute", true);
     }
 }
 
@@ -22,8 +24,8 @@ fn install<M: otel::metrics::MeterProvider>(
         tracer,
         meter,
         OtelOptions {
-            max_payload_bytes: 256,
-            enrich: Some(Arc::new(Enricher)),
+            enricher: Some(Arc::new(Enricher)),
+            ..OtelOptions::standard()
         },
     );
     let _: &lash::tracing::TelemetryMetrics = telemetry.metrics();
@@ -36,7 +38,7 @@ fn install<M: otel::metrics::MeterProvider>(
 /// the reference a host diffs its exported shape against. Regenerate it with:
 ///
 /// ```sh
-/// kiln test //crates/lash:otel_trace_evidence__test__fv_225e6839 \
+/// kiln test //crates/lash:otel_trace_evidence__test__fv_78b3f86b \
 ///     --test_arg=--ignored \
 ///     --test_arg=--exact \
 ///     --test_arg=instrumentation_contract_document_is_regenerated \

@@ -14,6 +14,17 @@ pub use lash_trace::telemetry::metrics::{
     DurableCommitCost, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
     TelemetryMetrics, ToolIntentMetrics,
 };
+/// Every tracing knob's sealed policy, its typed refusal, and the bounded
+/// writer and omission vocabulary every host contribution goes through.
+pub use lash_trace::{
+    AttrKey, ContentLimits, PolicyOperand, PolicyRelation, PolicyValue, PublicationHold,
+    RefinableKey, TraceDetail, TraceDetailPolicy, TraceExportPolicy, TraceLimits, TraceMetrics,
+    TraceOmission, TraceOmissionCounts, TraceOmissionDiagnostic, TraceOmissionLedger,
+    TraceOmissionReport, TraceOmissionSite, TraceOmissionSiteKind, TracePolicyError,
+    TracePolicyField, TracePolicySelection, TracePolicySnapshot, TraceSpanKindSet, TraceValue,
+    WriterRemaining, attribute_reserve,
+    policy::{FieldBounds, TraceDetailPolicyBuilder, TraceExportPolicyBuilder, TraceLimitsBuilder},
+};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
@@ -25,7 +36,7 @@ pub use lash_trace::{
     TraceSpanKind, TraceStateLimits, TraceTimestamp, TraceToolOwner, TraceTransitionKind,
     W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
-pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
+pub use lash_trace::{TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 
 pub use lash_core::{
     TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
@@ -46,12 +57,13 @@ pub use lash_trace::otel::registry::{
     contract_markdown, recommended_latency_histogram_boundaries,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{
+    LashTracerProvider, OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView,
+};
 pub use lash_trace::{
     CONTENT_POLICY_OMISSION, FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings,
     FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, TeeTraceSink,
-    TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceLimitsError, TraceSink,
-    TraceToolCallOutcome, TraceToolCallOutput,
+    TelemetryContent, TraceContext, TraceSink, TraceToolCallOutcome, TraceToolCallOutput,
 };
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a

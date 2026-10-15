@@ -597,7 +597,14 @@ pub async fn stage_process_start<'a>(
     registration: impl Into<ProcessStartRegistration>,
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
-    let registration = registration.into();
+    let registration = registration
+        .into()
+        .with_trace_nodes(stores.tracing.is_some_and(|tracing| {
+            tracing
+                .detail()
+                .get(lash_trace::TraceSpanKind::Workflow)
+                .is_extended()
+        }));
     let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
             "process_start_key_missing",

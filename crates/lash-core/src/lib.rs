@@ -84,9 +84,15 @@ pub mod panic_containment {
     pub(crate) use lash_core_ids::panic_containment::payload_message;
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
+pub use lash_core_execution::execution_limits;
 pub use lash_core_execution::plugin;
 pub(crate) use lash_core_execution::plugin_stack;
 pub(crate) use lash_core_execution::protocol_build;
+pub use lash_core_execution::{
+    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
+    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
+    EvidenceLimitsError, EvidenceLimitsField,
+};
 pub use lash_core_execution::{hook_key, tool_provider_key};
 #[cfg(feature = "perf-witness")]
 pub use lash_core_ids::perf_witness;
@@ -405,7 +411,7 @@ pub mod facade_support {
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::TraceBranchSelection;
-    pub use lash_trace::TraceLevel;
+    pub use lash_trace::TraceDetailPolicy;
     pub use lash_trace::TraceRecord;
     pub use lash_trace::TraceRuntimeScope;
     pub use lash_trace::TraceRuntimeSubject;
@@ -530,7 +536,9 @@ pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{
+    LashTracerProvider, OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView,
+};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,

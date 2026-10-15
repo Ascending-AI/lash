@@ -25,8 +25,14 @@
 //! between export and its record; other diagnostics are best effort and may be
 //! lost or repeated after a crash. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
 mod limits;
-pub use limits::{
-    MAX_PROCESS_EFFECT_OCCURRENCES, ObservationWorkLimits, TraceLimits, TraceLimitsError,
+pub use limits::ObservationWorkLimits;
+pub mod policy;
+pub use policy::{
+    AttrKey, ContentLimits, PolicyOperand, PolicyRelation, PolicyValue, PublicationHold,
+    TraceAttributeWriter, TraceDetail, TraceDetailPolicy, TraceExportPolicy, TraceLimits,
+    TraceMetrics, TraceOmission, TraceOmissionCounts, TraceOmissionDiagnostic, TraceOmissionLedger,
+    TraceOmissionReport, TraceOmissionSite, TraceOmissionSiteKind, TracePolicyError,
+    TracePolicyField, TracePolicySelection, TracePolicySnapshot, TraceValue, WriterRemaining,
 };
 
 use lash_sansio::{
@@ -78,17 +84,18 @@ use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
-pub use position::{SpanRole, TracePosition, TraceSpanKind};
+pub use position::{SpanRole, TracePosition, TraceSpanKind, TraceSpanKindSet};
 #[cfg(any(test, feature = "testing"))]
 pub use recording::RecordingTraceSink;
+pub use telemetry::metrics::registry::{RefinableKey, attribute_reserve};
 pub use telemetry::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec, SpanKey,
-    TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceAttemptId,
-    TraceAttemptLink, TraceCall, TraceCaller, TraceCarrier, TraceCause, TraceIdentity,
-    TraceLinkMode, TraceLinks, TraceParent, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,
-    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceStateLimits, TraceToolOwner,
-    TraceTransitionKind, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
+    TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceAttemptId, TraceAttemptLink, TraceCall,
+    TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceLinkMode, TraceLinks, TraceParent,
+    TraceRecordIdentity, TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer,
+    TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use time::TraceTimestamp;
 pub use workflow_overlay::{
@@ -243,7 +250,7 @@ pub use workflow_overlay::{
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
-pub const TRACE_SCHEMA_VERSION: u32 = 36;
+pub const TRACE_SCHEMA_VERSION: u32 = 37;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -273,29 +280,6 @@ pub fn ensure_trace_schema_version(actual: u32) -> Result<(), TraceSchemaVersion
             actual,
             expected: TRACE_SCHEMA_VERSION,
         })
-    }
-}
-
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceLevel {
-    #[default]
-    Standard,
-    Extended,
-}
-
-impl TraceLevel {
-    /// Standard detail preset: lifecycle records, with extended provider
-    /// payload records disabled. This is an export-volume choice, not a
-    /// workload-measured optimum.
-    pub const fn standard() -> Self {
-        Self::Standard
-    }
-
-    pub fn is_extended(self) -> bool {
-        matches!(self, Self::Extended)
     }
 }
 
@@ -455,6 +439,11 @@ pub struct TraceRecord {
     /// diagnostic and for a record of a scope nothing observed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<TracePosition>,
+    /// What lash did not keep of the contributions to this record, by
+    /// reason; its id and position are the omissions' address. Empty, and
+    /// omitted, when nothing was refused.
+    #[serde(default, skip_serializing_if = "TraceOmissionCounts::is_empty")]
+    pub omissions: TraceOmissionCounts,
     #[serde(flatten)]
     pub event: TraceEvent,
 }
@@ -481,6 +470,8 @@ impl schemars::JsonSchema for TraceRecord {
             context: TraceContext,
             #[serde(default, skip_serializing_if = "Option::is_none")]
             position: Option<TracePosition>,
+            #[serde(default, skip_serializing_if = "TraceOmissionCounts::is_empty")]
+            omissions: TraceOmissionCounts,
             #[serde(flatten)]
             event: TraceEvent,
         }
@@ -498,6 +489,8 @@ struct TraceRecordWire {
     context: TraceContext,
     #[serde(default)]
     position: Option<TracePosition>,
+    #[serde(default)]
+    omissions: TraceOmissionCounts,
     #[serde(flatten)]
     event: TraceEvent,
 }
@@ -528,6 +521,7 @@ impl<'de> Deserialize<'de> for TraceRecord {
             content: wire.content,
             context: wire.context,
             position: wire.position,
+            omissions: wire.omissions,
             event: wire.event,
         })
     }

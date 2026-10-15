@@ -29,7 +29,7 @@ impl TraceSink for Stderr {
 
 let sink = FlightRecorderSink::new(
     Stderr,
-    FlightRecorderSettings::default(),
+    FlightRecorderSettings::standard(),
     |snapshot| {
         // Hand this owned metadata snapshot to the host's bounded export queue.
         eprintln!("flight recorder: {snapshot:?}");
@@ -40,8 +40,12 @@ let sink = FlightRecorderSink::new(
 ```
 
 Settings default to **256 records**, a **five-second** slow threshold, snapshots
-on **failed operations**, and a **60-second** minimum interval. Capacity is a
-`NonZeroUsize`; hosts may tune every setting. A duration must strictly exceed the
+on **failed operations**, and a **60-second** minimum interval. The settings are
+sealed: `FlightRecorderSettings::new(capacity, slow_threshold, minimum_interval,
+snapshot_on_failure)` admits a capacity of 1..=16384 records, a slow threshold of
+1 ms..=24 h (or `None` for no slow trigger) and an interval of 0..=24 h, and
+refuses anything else with `TracePolicyError::Range` naming the
+`flight_recorder.*` field and the value. A duration must strictly exceed the
 slow threshold. A failure and a slow duration on the same record produce one
 snapshot. The first eligible trigger snapshots immediately.
 

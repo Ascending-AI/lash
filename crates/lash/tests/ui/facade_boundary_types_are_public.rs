@@ -391,12 +391,14 @@ fn telemetry_types_are_nameable(
 ) -> lash::LashCoreBuilder {
     use lash::tracing::{
         GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
-        OtelOptions, OtelSpanEnricher, TelemetryMetrics, contract_markdown, otel,
+        OtelOptions, SpanEnricher, TelemetryMetrics, TraceExportPolicy, TraceMetrics,
+        contract_markdown, otel,
     };
     let _: &OtelOptions = telemetry.options();
     let _: &TelemetryMetrics = telemetry.metrics();
-    let _: usize = telemetry.options().max_payload_bytes;
-    let _: Option<Arc<dyn OtelSpanEnricher>> = None;
+    let _: TraceExportPolicy = telemetry.options().export;
+    let _: TraceMetrics = telemetry.options().metrics;
+    let _: Option<Arc<dyn SpanEnricher>> = None;
     let _: Option<otel::trace::SpanContext> = None;
     let _: fn() -> String = contract_markdown;
     let _: &str = LASH_INSTRUMENTATION_NAME;

@@ -137,6 +137,12 @@ pub struct ProcessRecord {
     /// without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
+    /// Whether the process exports a span per workflow node occurrence,
+    /// retained from its first registration and never updated: every owner
+    /// that runs the process reads the same choice, so whether node spans
+    /// exist is fixed before any child span exists.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trace_nodes: bool,
     #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
@@ -402,6 +408,7 @@ impl ProcessRecord {
             identity: registration.identity,
             provenance: registration.provenance,
             trace: Some(trace),
+            trace_nodes: registration.trace_nodes,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             external_ref: None,

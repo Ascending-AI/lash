@@ -432,12 +432,22 @@ impl TurnServices for RuntimeTurnServices {
         // input's producer parents it, and the other inputs' producers fan
         // in as links (D1). A turn admitted while nothing observes the
         // runtime retains no cause and no span.
-        let (parent, links) = lash_trace::TraceCause::of_admitted(inputs);
+        let (parent, links) = lash_trace::TraceCause::of_admitted(inputs, tracing.limits().links());
         let (parent, links) = if tracing.is_observed() {
             (parent, links)
         } else {
             (None, lash_trace::TraceLinks::new())
         };
+        if links.omitted() > 0 {
+            let mut counts = lash_trace::TraceOmissionCounts::default();
+            counts.add_n(lash_trace::TraceOmission::Links, links.omitted());
+            tracing.omissions().record(
+                &lash_trace::TraceOmissionSite::Admission {
+                    scope: scope.clone(),
+                },
+                &counts,
+            );
+        }
         Some(lash_trace::DurableTraceScope::admit(
             scope,
             parent.as_ref(),

@@ -66,6 +66,7 @@ fn record(id: &str, timestamp_ms: i64, event: TraceEvent) -> TraceRecord {
             .for_session("session")
             .for_turn("turn"),
         position: None,
+        omissions: Default::default(),
         event,
     }
 }
@@ -102,11 +103,9 @@ fn failure() -> TraceEvent {
 
 #[test]
 fn slow_record_snapshots_bounded_preceding_records_in_order() {
-    let (sink, snapshots, _) = recorder(FlightRecorderSettings {
-        capacity: NonZeroUsize::new(3).unwrap(),
-        minimum_interval: Duration::ZERO,
-        ..FlightRecorderSettings::default()
-    });
+    let (sink, snapshots, _) = recorder(
+        FlightRecorderSettings::new(3, Some(Duration::from_secs(5)), Duration::ZERO, true).unwrap(),
+    );
     // The threshold is strict: an operation at five seconds is not slow.
     for id in ["evicted-1", "evicted-2", "preceding-1", "preceding-2"] {
         sink.append(&record(
@@ -155,10 +154,10 @@ fn slow_record_snapshots_bounded_preceding_records_in_order() {
 
 #[test]
 fn failed_operation_triggers_a_snapshot() {
-    let (sink, snapshots, _) = recorder(FlightRecorderSettings {
-        minimum_interval: Duration::ZERO,
-        ..FlightRecorderSettings::default()
-    });
+    let (sink, snapshots, _) = recorder(
+        FlightRecorderSettings::new(256, Some(Duration::from_secs(5)), Duration::ZERO, true)
+            .unwrap(),
+    );
     let failed_events = [
         failure(),
         tool(TraceToolCallOutcome::Failure(json!("PAYLOAD_SECRET")), 0),
@@ -194,11 +193,15 @@ fn failed_operation_triggers_a_snapshot() {
 
 #[test]
 fn minimum_interval_suppresses_triggers_without_losing_recent_context() {
-    let (sink, snapshots, _) = recorder(FlightRecorderSettings {
-        capacity: NonZeroUsize::new(2).unwrap(),
-        minimum_interval: Duration::from_secs(1),
-        ..FlightRecorderSettings::default()
-    });
+    let (sink, snapshots, _) = recorder(
+        FlightRecorderSettings::new(
+            2,
+            Some(Duration::from_secs(5)),
+            Duration::from_secs(1),
+            true,
+        )
+        .unwrap(),
+    );
     for (id, timestamp) in [("first", 1000), ("suppressed", 1999), ("older", 999)] {
         sink.append(&record(id, timestamp, failure())).unwrap();
     }

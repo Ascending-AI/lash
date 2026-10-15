@@ -202,6 +202,7 @@ fn fixture_record(event: TraceEvent, ms: i64) -> TraceRecord {
         content: crate::TelemetryContent::Captured,
         context: TraceContext::default().for_session("session-1"),
         position: None,
+        omissions: Default::default(),
         event,
     }
 }

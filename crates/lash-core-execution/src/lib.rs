@@ -51,6 +51,12 @@ pub use lash_core_store::runtime_error::{
 pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::surface_format;
 mod backend;
+pub mod execution_limits;
+pub use execution_limits::{
+    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
+    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
+    EvidenceLimitsError, EvidenceLimitsField,
+};
 pub mod formats;
 pub use backend::{
     Backend, BackendParts, DurableBuildError, RetirementCheck, StoreBindingId, StoreSet,
@@ -367,7 +373,6 @@ pub mod facade_support {
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::TraceBranchSelection;
-    pub use lash_trace::TraceLevel;
     pub use lash_trace::TraceRecord;
     pub use lash_trace::TraceRuntimeScope;
     pub use lash_trace::TraceRuntimeSubject;
@@ -593,7 +598,9 @@ pub use lash_sansio::{
 };
 
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{
+    LashTracerProvider, OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView,
+};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
     LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,

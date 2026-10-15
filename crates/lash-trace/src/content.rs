@@ -21,8 +21,8 @@ use lash_sansio::llm::types::StreamBlockEvent;
 /// receives (a tee, a host's own sink) and the adapter's
 /// projection of them.
 ///
-/// The policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still
-/// chooses which records exist, and byte bounds still cut what is captured.
+/// The policy is consent, not detail: [`TraceDetailPolicy`](crate::TraceDetailPolicy)
+/// still chooses which records exist, and byte bounds still cut what is captured.
 /// It governs telemetry only. Durable requests and results, session history,
 /// product observations and the app's own responses keep their contracts.
 ///

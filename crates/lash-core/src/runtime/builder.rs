@@ -98,8 +98,8 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_trace_level(mut self, level: lash_trace::TraceLevel) -> Self {
-        self.core.tracing = self.core.tracing.clone().with_level(level);
+    pub fn with_trace_detail(mut self, detail: lash_trace::TraceDetailPolicy) -> Self {
+        self.core.tracing = self.core.tracing.clone().with_detail(detail);
         self
     }
 

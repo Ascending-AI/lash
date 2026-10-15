@@ -16,32 +16,98 @@ use crate::{
     TraceTurnOutcome,
 };
 
-/// Host policy for retention and snapshot frequency, independent of content policy.
-#[derive(Clone, Debug)]
+/// Host policy for retention and snapshot frequency, independent of content
+/// policy.
+///
+/// Sealed: built through [`FlightRecorderSettings::new`], which refuses a
+/// value outside its range.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlightRecorderSettings {
-    /// Maximum retained records, including a snapshot's triggering record.
-    pub capacity: NonZeroUsize,
-    /// Snapshot when a reported operation duration strictly exceeds this value.
-    pub slow_threshold: Duration,
-    /// Minimum separation in record timestamps between accepted triggers.
-    /// Older timestamps are suppressed, even when this is zero.
-    pub minimum_interval: Duration,
-    /// Snapshot records whose typed outcome marks a failure.
-    pub snapshot_on_failure: bool,
+    capacity: NonZeroUsize,
+    slow_threshold: Option<Duration>,
+    minimum_interval: Duration,
+    snapshot_on_failure: bool,
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the literal default capacity, 256, is nonzero"
-)]
-impl Default for FlightRecorderSettings {
-    fn default() -> Self {
+impl FlightRecorderSettings {
+    /// 256 records, a 5 s slow threshold, a 60 s minimum interval, and
+    /// snapshots on failure.
+    #[expect(
+        clippy::expect_used,
+        reason = "the documented default capacity, 256, is nonzero"
+    )]
+    pub fn standard() -> Self {
+        use crate::TracePolicyField as F;
         Self {
-            capacity: NonZeroUsize::new(256).expect("the default capacity is nonzero"),
-            slow_threshold: Duration::from_secs(5),
-            minimum_interval: Duration::from_secs(60),
+            capacity: NonZeroUsize::new(F::RecorderCapacity.default_value() as usize)
+                .expect("the default capacity is nonzero"),
+            slow_threshold: Some(Duration::from_millis(
+                F::RecorderSlowThreshold.default_value(),
+            )),
+            minimum_interval: Duration::from_millis(F::RecorderMinimumInterval.default_value()),
             snapshot_on_failure: true,
         }
+    }
+
+    /// Settings that retain at most `capacity` records, including a
+    /// snapshot's triggering record (`flight_recorder.capacity`: 1..=16384);
+    /// snapshot when a reported duration strictly exceeds `slow_threshold`,
+    /// or never on duration when it is `None`
+    /// (`flight_recorder.slow_threshold_ms`: 1 ms..=24 h); accept triggers at
+    /// least `minimum_interval` apart in record time, older timestamps
+    /// suppressed even at zero (`flight_recorder.minimum_interval_ms`:
+    /// 0..=24 h); and snapshot records whose typed outcome is a failure when
+    /// `snapshot_on_failure` is set.
+    pub fn new(
+        capacity: u64,
+        slow_threshold: Option<Duration>,
+        minimum_interval: Duration,
+        snapshot_on_failure: bool,
+    ) -> Result<Self, crate::TracePolicyError> {
+        use crate::TracePolicyField as F;
+        let millis = |duration: Duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+        F::RecorderCapacity.check(capacity)?;
+        if let Some(threshold) = slow_threshold {
+            F::RecorderSlowThreshold.check(millis(threshold))?;
+        }
+        F::RecorderMinimumInterval.check(millis(minimum_interval))?;
+        let capacity = usize::try_from(capacity)
+            .ok()
+            .and_then(NonZeroUsize::new)
+            .ok_or(crate::TracePolicyError::Range {
+                field: F::RecorderCapacity,
+                value: capacity,
+                min: 1,
+                max: usize::MAX as u64,
+            })?;
+        Ok(Self {
+            capacity,
+            slow_threshold,
+            minimum_interval,
+            snapshot_on_failure,
+        })
+    }
+
+    pub fn capacity(&self) -> NonZeroUsize {
+        self.capacity
+    }
+
+    pub fn slow_threshold(&self) -> Option<Duration> {
+        self.slow_threshold
+    }
+
+    pub fn minimum_interval(&self) -> Duration {
+        self.minimum_interval
+    }
+
+    pub fn snapshot_on_failure(&self) -> bool {
+        self.snapshot_on_failure
+    }
+}
+
+impl Default for FlightRecorderSettings {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 
@@ -132,7 +198,8 @@ impl<S: TraceSink> FlightRecorderSink<S> {
             && metadata.outcome == Some(FlightRecorderOutcome::Failed);
         let slow = metadata
             .duration
-            .is_some_and(|duration| duration > self.settings.slow_threshold);
+            .zip(self.settings.slow_threshold)
+            .is_some_and(|(duration, threshold)| duration > threshold);
         let mut state = self.state.lock_recover();
         if state.records.len() == self.settings.capacity.get() {
             state.records.pop_front();

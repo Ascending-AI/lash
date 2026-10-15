@@ -48,8 +48,40 @@ impl LashCoreBuilder {
         if let Some(runtime) = self.trace_runtime.take() {
             core.tracing = runtime;
         }
+        let mut tracing = core.tracing.clone();
+        if let Some(limits) = self.trace_limits.take() {
+            tracing = tracing.with_limits(limits);
+        }
+        if let Some(detail) = self.trace_detail.take() {
+            tracing = tracing.with_detail(detail);
+        }
+        if let Some(content) = self.telemetry_content.take() {
+            tracing = tracing.with_content(content);
+        }
+        if let Some(limits) = self.content_limits.take() {
+            tracing = tracing.with_content_limits(limits);
+        }
+        if let Some(limits) = self.evidence_limits.take() {
+            tracing = tracing.with_evidence_limits(limits);
+        }
+        if let Some(limits) = self.diagnostic_limits.take() {
+            tracing = tracing.with_diagnostic_limits(limits);
+        }
+        if let Some(limits) = self.composition_cache_limits.take() {
+            tracing = tracing.with_composition_cache_limits(limits);
+        }
+        tracing.limits().check_against(&tracing.detail())?;
+        core.tracing = tracing;
+        #[cfg_attr(
+            not(feature = "otel-trace"),
+            expect(unused_mut, reason = "only the exporter adds to the policy")
+        )]
+        let mut trace_policy = core.tracing.policy();
         #[cfg(feature = "otel-trace")]
         if let Some(telemetry) = self.telemetry.take() {
+            let telemetry =
+                telemetry.bound(trace_policy.clone(), Arc::clone(core.tracing.omissions()));
+            trace_policy = telemetry.policy().clone();
             let metrics = telemetry.metrics().clone();
             let adapter = Arc::new(telemetry);
             core.tracing = core
@@ -64,15 +96,7 @@ impl LashCoreBuilder {
         core.providers.delivery_fetch_horizon = self.delivery_fetch_horizon;
         core.observation_work_limits = self.observation_work_limits;
         core.data_limits = self.data_limits;
-        if let Some(limits) = self.trace_limits.take() {
-            core.tracing = core.tracing.clone().with_limits(limits)?;
-        }
-        if let Some(level) = self.trace_level.take() {
-            core.tracing = core.tracing.clone().with_level(level);
-        }
-        if let Some(content) = self.telemetry_content.take() {
-            core.tracing = core.tracing.clone().with_content(content);
-        }
+        self.trace_policy = Some(trace_policy);
         if let Some(cuts) = self.output_cuts.take() {
             core.control.output_cuts = cuts;
         }

@@ -320,6 +320,7 @@ mod admission_identity_tests {
             content: lash_core::TelemetryContent::Captured,
             context: lash_core::TraceContext::default(),
             position: None,
+            omissions: Default::default(),
             event: lash_core::TraceEvent::Custom {
                 name: name.to_string(),
                 payload,

@@ -19,21 +19,21 @@ use lash_sansio::{ProcessId, RuntimeOwner, SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Most contexts one [`TraceLinks`] retains; later ones are counted, not kept.
-pub const TRACE_LINK_LIMIT: usize = 64;
 /// Most list members a W3C `tracestate` may hold.
 pub const TRACESTATE_MEMBER_LIMIT: usize = 32;
 /// Most characters the canonical `tracestate` may hold.
 pub const TRACESTATE_CHAR_LIMIT: usize = 512;
 
 const TRACEPARENT_LEN: usize = 55;
-const TRACESTATE_KEY_LIMIT: usize = 256;
-const TRACESTATE_TENANT_LIMIT: usize = 241;
-const TRACESTATE_SYSTEM_LIMIT: usize = 14;
-const TRACESTATE_VALUE_LIMIT: usize = 256;
 
-/// Host narrowing of W3C tracestate's protocol safety ceilings.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A host's narrowing of the W3C `tracestate` ceilings, for carriers it
+/// parses from its own transport ([`TraceCarrier::parse_w3c_with`]). The W3C
+/// maxima are the defaults and the hard ceilings: a host narrows them, never
+/// raises them.
+///
+/// Sealed: built through [`TraceStateLimits::new`], which refuses a value
+/// over its ceiling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceStateLimits {
     members: usize,
     chars: usize,
@@ -42,39 +42,81 @@ pub struct TraceStateLimits {
     system: usize,
     value: usize,
 }
+
 impl TraceStateLimits {
+    /// The W3C ceilings: 32 members, 512 characters, 256-byte keys, 241-byte
+    /// tenant and 14-byte system parts of a multi-tenant key, and 256-byte
+    /// values.
     pub const fn standard() -> Self {
+        use crate::TracePolicyField as F;
         Self {
-            members: TRACESTATE_MEMBER_LIMIT,
-            chars: TRACESTATE_CHAR_LIMIT,
-            key: TRACESTATE_KEY_LIMIT,
-            tenant: TRACESTATE_TENANT_LIMIT,
-            system: TRACESTATE_SYSTEM_LIMIT,
-            value: TRACESTATE_VALUE_LIMIT,
+            members: F::TracestateMembers.default_value() as usize,
+            chars: F::TracestateChars.default_value() as usize,
+            key: F::TracestateKeyBytes.default_value() as usize,
+            tenant: F::TracestateTenantBytes.default_value() as usize,
+            system: F::TracestateSystemBytes.default_value() as usize,
+            value: F::TracestateValueBytes.default_value() as usize,
         }
     }
+
+    /// Limits of at most `members` members and `chars` characters, `key`
+    /// bytes of a simple key, `tenant` and `system` bytes of a multi-tenant
+    /// key's parts and `value` bytes of a value. Each is refused over its
+    /// W3C ceiling (`tracestate_limits.*`).
     pub fn new(
-        members: usize,
-        chars: usize,
-        key: usize,
-        tenant: usize,
-        system: usize,
-        value: usize,
-    ) -> Option<Self> {
-        (members <= 32
-            && chars <= 512
-            && key <= 256
-            && tenant <= 241
-            && system <= 14
-            && value <= 256)
-            .then_some(Self {
-                members,
-                chars,
-                key,
-                tenant,
-                system,
-                value,
-            })
+        members: u64,
+        chars: u64,
+        key: u64,
+        tenant: u64,
+        system: u64,
+        value: u64,
+    ) -> Result<Self, crate::TracePolicyError> {
+        use crate::TracePolicyField as F;
+        let fields = [
+            (F::TracestateMembers, members),
+            (F::TracestateChars, chars),
+            (F::TracestateKeyBytes, key),
+            (F::TracestateTenantBytes, tenant),
+            (F::TracestateSystemBytes, system),
+            (F::TracestateValueBytes, value),
+        ];
+        for (field, value) in fields {
+            field.check(value)?;
+        }
+        let size = |value: u64| usize::try_from(value).unwrap_or(usize::MAX);
+        Ok(Self {
+            members: size(members),
+            chars: size(chars),
+            key: size(key),
+            tenant: size(tenant),
+            system: size(system),
+            value: size(value),
+        })
+    }
+
+    pub const fn members(&self) -> usize {
+        self.members
+    }
+    pub const fn chars(&self) -> usize {
+        self.chars
+    }
+    pub const fn key_bytes(&self) -> usize {
+        self.key
+    }
+    pub const fn tenant_bytes(&self) -> usize {
+        self.tenant
+    }
+    pub const fn system_bytes(&self) -> usize {
+        self.system
+    }
+    pub const fn value_bytes(&self) -> usize {
+        self.value
+    }
+}
+
+impl Default for TraceStateLimits {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 
@@ -157,6 +199,48 @@ impl W3cSpanId {
 impl std::fmt::Display for W3cSpanId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write_hex(f, &self.0)
+    }
+}
+
+/// Serialized as its 16 lowercase hex digits.
+impl Serialize for W3cSpanId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for W3cSpanId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let mut bytes = [0_u8; 8];
+        if text.len() != 16
+            || !text
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(serde::de::Error::custom(
+                InvalidTraceCarrier::TraceparentEncoding,
+            ));
+        }
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Self::from_bytes(bytes).map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for W3cSpanId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "W3cSpanId".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A nonzero W3C span id: 16 lowercase hex digits.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$",
+        })
     }
 }
 
@@ -323,9 +407,19 @@ impl TraceCarrier {
         traceparent: &str,
         tracestate: Option<&str>,
     ) -> Result<Self, InvalidTraceCarrier> {
+        Self::parse_w3c_with(traceparent, tracestate, &TraceStateLimits::standard())
+    }
+
+    /// [`parse_w3c`](Self::parse_w3c) under a host's narrower `tracestate`
+    /// admission: a `tracestate` over `limits` is refused with its reason.
+    pub fn parse_w3c_with(
+        traceparent: &str,
+        tracestate: Option<&str>,
+        limits: &TraceStateLimits,
+    ) -> Result<Self, InvalidTraceCarrier> {
         let (trace_id, span_id, flags) = parse_traceparent(traceparent)?;
         let tracestate = match tracestate {
-            Some(tracestate) => W3cTraceState::parse(tracestate)?,
+            Some(tracestate) => W3cTraceState::parse_with_limits(tracestate, *limits)?,
             None => W3cTraceState::default(),
         };
         Ok(Self::new(trace_id, span_id, flags, tracestate))
@@ -416,9 +510,10 @@ impl schemars::JsonSchema for TraceCarrier {
 
 /// The contexts an operation is causally linked to, in stable admission order.
 ///
-/// At most [`TRACE_LINK_LIMIT`] distinct spans are retained; the rest are
-/// counted in `omitted`. The limit bounds exported telemetry, never which
-/// business inputs are admitted.
+/// At most its limit of distinct spans are retained, the configured
+/// [`TraceLimits::links`](crate::TraceLimits::links); the rest are counted in
+/// `omitted`. The limit bounds exported telemetry, never which business
+/// inputs are admitted.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "TraceLinksWire", into = "TraceLinksWire")]
 pub struct TraceLinks {
@@ -439,17 +534,36 @@ impl Default for TraceLinks {
         Self {
             contexts: Vec::new(),
             omitted: 0,
-            limit: TRACE_LINK_LIMIT,
+            limit: TRACE_LINK_STANDARD,
         }
     }
 }
+
+/// The standard link limit, `trace_limits.links`' default.
+const TRACE_LINK_STANDARD: usize = crate::TracePolicyField::Links.default_value() as usize;
+/// The most links any stored set holds: `trace_limits.links`' maximum.
+const TRACE_LINK_CEILING: usize = match crate::TracePolicyField::Links.bounds() {
+    Some(bounds) => bounds.max as usize,
+    None => 0,
+};
+
 impl TraceLinks {
-    /// Configure a retained-link cut up to the stored 64-link safety ceiling.
-    pub fn with_limit(limit: usize) -> Option<Self> {
-        (limit <= TRACE_LINK_LIMIT).then(|| Self {
-            limit,
+    /// An empty set that keeps at most `limit` links, the configured
+    /// [`TraceLimits::links`](crate::TraceLimits::links).
+    pub fn with_limit(limit: u32) -> Self {
+        Self {
+            limit: usize::try_from(limit)
+                .map_or(TRACE_LINK_CEILING, |limit| limit.min(TRACE_LINK_CEILING)),
             ..Self::default()
-        })
+        }
+    }
+
+    /// The same links, keeping at most `limit` from now on: a set read back
+    /// from storage takes the limit of the owner that extends it.
+    #[must_use]
+    pub fn limited(mut self, limit: u32) -> Self {
+        self.limit = Self::with_limit(limit).limit;
+        self
     }
 
     pub fn new() -> Self {
@@ -504,7 +618,7 @@ impl FromIterator<TraceCarrier> for TraceLinks {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidTraceLinks {
-    #[error("{contexts} linked contexts, over the limit of {TRACE_LINK_LIMIT}")]
+    #[error("{contexts} linked contexts, over the ceiling of {TRACE_LINK_CEILING}")]
     TooMany { contexts: usize },
     #[error("linked context {index} repeats an earlier span")]
     Duplicate { index: usize },
@@ -528,7 +642,7 @@ impl TryFrom<TraceLinksWire> for TraceLinks {
     type Error = InvalidTraceLinks;
 
     fn try_from(wire: TraceLinksWire) -> Result<Self, Self::Error> {
-        if wire.contexts.len() > TRACE_LINK_LIMIT {
+        if wire.contexts.len() > TRACE_LINK_CEILING {
             return Err(InvalidTraceLinks::TooMany {
                 contexts: wire.contexts.len(),
             });
@@ -542,7 +656,7 @@ impl TryFrom<TraceLinksWire> for TraceLinks {
             }
         }
         Ok(Self {
-            limit: TRACE_LINK_LIMIT,
+            limit: TRACE_LINK_STANDARD,
             contexts: wire.contexts,
             omitted: wire.omitted,
         })
@@ -606,15 +720,16 @@ impl TraceCause {
 
     /// The parent and links of a scope that admits the work `members`
     /// caused, in admission order: the head member's parent, and every
-    /// other member's parent as a link (fan-in), at most
-    /// [`TRACE_LINK_LIMIT`] of them. A head with no cause admits the scope
-    /// unobserved.
+    /// other member's parent as a link (fan-in), at most `limit` of them,
+    /// the configured [`TraceLimits::links`](crate::TraceLimits::links). A
+    /// head with no cause admits the scope unobserved.
     pub fn of_admitted<'a>(
         members: impl IntoIterator<Item = &'a Self>,
+        limit: u32,
     ) -> (Option<TraceParent>, TraceLinks) {
         let mut members = members.into_iter();
         let parent = members.next().and_then(Self::as_parent);
-        let mut links = TraceLinks::new();
+        let mut links = TraceLinks::with_limit(limit);
         if let Some(head) = &parent {
             for member in members {
                 if let Self::Parent(context) = member
@@ -1241,6 +1356,7 @@ impl crate::TraceRecord {
             content: crate::TelemetryContent::Captured,
             context,
             position: None,
+            omissions: crate::TraceOmissionCounts::default(),
             event,
         })
     }
@@ -1368,17 +1484,17 @@ fn tracestate_key_part(part: &str, limit: usize, digit_start: bool) -> bool {
 fn valid_tracestate_key(key: &str) -> bool {
     match key.split_once('@') {
         Some((tenant, system)) => {
-            tracestate_key_part(tenant, TRACESTATE_TENANT_LIMIT, true)
-                && tracestate_key_part(system, TRACESTATE_SYSTEM_LIMIT, false)
+            tracestate_key_part(tenant, TraceStateLimits::standard().tenant, true)
+                && tracestate_key_part(system, TraceStateLimits::standard().system, false)
         }
-        None => tracestate_key_part(key, TRACESTATE_KEY_LIMIT, true),
+        None => tracestate_key_part(key, TraceStateLimits::standard().key, true),
     }
 }
 
 fn valid_tracestate_value(value: &str) -> bool {
     let bytes = value.as_bytes();
     !bytes.is_empty()
-        && bytes.len() <= TRACESTATE_VALUE_LIMIT
+        && bytes.len() <= TraceStateLimits::standard().value
         && bytes.last() != Some(&b' ')
         && bytes
             .iter()

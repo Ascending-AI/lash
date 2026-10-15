@@ -1886,7 +1886,7 @@
       ]
     },
     "TelemetryContent": {
-      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still\nchooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)\noutput. Lash does not inspect or classify them. A plugin must honour the\npolicy for content it includes in custom payloads; its factory reads the\ncurrent deployment policy through\n`lash::plugins::PluginSessionContext::telemetry_content()`. This operational\nprivacy setting follows the receiving host on reopen, rather than a\nsession's recorded execution config.\n\nA host has the final say over custom payloads at its exporter: install a\nwrapping [`TraceSink`](crate::TraceSink) through\n`LashCoreBuilder::trace_sink` that drops custom records or clones and\nredacts their payloads before forwarding them to the export sink. The\nwrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).",
+      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceDetailPolicy`](crate::TraceDetailPolicy)\nstill chooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)\noutput. Lash does not inspect or classify them. A plugin must honour the\npolicy for content it includes in custom payloads; its factory reads the\ncurrent deployment policy through\n`lash::plugins::PluginSessionContext::telemetry_content()`. This operational\nprivacy setting follows the receiving host on reopen, rather than a\nsession's recorded execution config.\n\nA host has the final say over custom payloads at its exporter: install a\nwrapping [`TraceSink`](crate::TraceSink) through\n`LashCoreBuilder::trace_sink` that drops custom records or clones and\nredacts their payloads before forwarding them to the export sink. The\nwrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).",
       "oneOf": [
         {
           "const": "omitted",
@@ -3361,6 +3361,128 @@
       ],
       "type": "string"
     },
+    "TraceOmissionCounts": {
+      "additionalProperties": false,
+      "description": "Omissions by reason: the non-zero reasons and their counts.",
+      "properties": {
+        "attributes": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "body_bytes": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "disallowed_key": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "enricher_failed": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "events": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "held_observations": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "hook_failed": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "immutable": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "key": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "late": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "links": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "name": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "non_finite": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "publication_hold": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reference_bytes": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "references": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reserved_key": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "selector_failed": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "span_bytes": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "spans": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "use_replace": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "value_too_large": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "value_truncated": {
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "TracePosition": {
       "additionalProperties": false,
       "description": "A record's position: the span it opens, closes, is, or is an event of,\nwith that span's parent, links and real start.\n\nThe span's flags are its trace's sampling decision. `parent` is `None`\nonly for a producer with no caller.",
@@ -3982,7 +4104,7 @@
       ]
     },
     "TraceSpanKind": {
-      "description": "The kind of span a record names.",
+      "description": "The kind of span a record names: one row of the span taxonomy.",
       "oneOf": [
         {
           "const": "producer",
@@ -4000,6 +4122,11 @@
           "type": "string"
         },
         {
+          "const": "model_attempt",
+          "description": "One real provider attempt of a model call.",
+          "type": "string"
+        },
+        {
           "const": "tool",
           "description": "One tool call.",
           "type": "string"
@@ -4011,12 +4138,32 @@
         },
         {
           "const": "process",
-          "description": "A process.",
+          "description": "A process that is not a user-facing workflow.",
+          "type": "string"
+        },
+        {
+          "const": "workflow",
+          "description": "A workflow process.",
+          "type": "string"
+        },
+        {
+          "const": "workflow_node",
+          "description": "One occurrence of a workflow node.",
           "type": "string"
         },
         {
           "const": "tool_intent",
           "description": "A host-submitted tool intent.",
+          "type": "string"
+        },
+        {
+          "const": "extension",
+          "description": "A span an extension opened.",
+          "type": "string"
+        },
+        {
+          "const": "point",
+          "description": "A zero-duration point an extension recorded.",
           "type": "string"
         }
       ]
@@ -4682,7 +4829,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/trace-record/v36",
+  "$id": "https://lash.dev/schemas/trace-record/v37",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "One durable trace record: the envelope fields plus the flattened\nevent, whose `type` tag names the variant.",
   "oneOf": [
@@ -5658,6 +5805,9 @@
     "id": {
       "type": "string"
     },
+    "omissions": {
+      "$ref": "#/$defs/TraceOmissionCounts"
+    },
     "position": {
       "anyOf": [
         {
@@ -5670,7 +5820,7 @@
     },
     "schema_version": {
       "enum": [
-        36
+        37
       ],
       "format": "uint32",
       "minimum": 0,
@@ -5689,6 +5839,6 @@
   ],
   "title": "TraceRecord",
   "type": "object",
-  "x-lash-schema-version": 36,
+  "x-lash-schema-version": 37,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }

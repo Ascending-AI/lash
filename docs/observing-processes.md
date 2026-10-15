@@ -126,11 +126,14 @@ call id as Lash's call identity. The occurrence's `replay_key` makes a
 repeated append idempotent; it is not a substitute for the typed call id.
 
 Hosts choose individual effect records per node with
-`TraceLimits::process_effect_occurrences`: the default is 64 and the hard
-maximum is 4096 (`MAX_PROCESS_EFFECT_OCCURRENCES`). Zero summarizes all
-occurrences. Configuration above the maximum returns a typed
-`TraceLimitsError::ProcessEffectOccurrencesExceeded`, through
-`EmbedError::TraceLimits` when building a core. The process pins its cut when
+`EvidenceLimits::builder().process_effect_occurrences(n)`, set through
+`LashCoreBuilder::evidence_limits`: the default is 64 and the hard maximum
+is 4096 (`EvidenceLimitsField::ProcessEffectOccurrences.bounds()`). Zero
+summarizes all occurrences. A value above the maximum is refused by
+`build()` with `EvidenceLimitsError::Range { field, value, min, max }`
+naming the field and the value. Effect evidence is execution evidence, not
+telemetry: it is bounded by `EvidenceLimits`, never by `TraceLimits`. The
+process pins its cut when
 it first advances; replay and redrive use that recorded cut even if the
 host changes its configuration. Effects beyond the cut still execute: only their individual
 evidence is omitted. `ProcessEffectOmissions` records the effective

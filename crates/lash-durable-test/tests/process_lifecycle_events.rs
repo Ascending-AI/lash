@@ -634,10 +634,12 @@ async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
     let world = Arc::new(World::default());
     let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
     let core = builder
-        .trace_limits(lash::tracing::TraceLimits {
-            process_effect_occurrences: 200,
-            ..Default::default()
-        })
+        .evidence_limits(
+            lash::EvidenceLimits::builder()
+                .process_effect_occurrences(200)
+                .build()
+                .expect("a valid evidence cut"),
+        )
         .build(owner("configured-200"))
         .expect("valid evidence cut");
     let process = start(&core).await;
@@ -688,10 +690,12 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
         let (backend, builder) = core_builder(&stores, advance, &world, None);
         let core = builder
             .serve_sessions(false)
-            .trace_limits(lash::tracing::TraceLimits {
-                process_effect_occurrences: 4096,
-                ..Default::default()
-            })
+            .evidence_limits(
+                lash::EvidenceLimits::builder()
+                    .process_effect_occurrences(4096)
+                    .build()
+                    .expect("a valid evidence cut"),
+            )
             .build(owner("constant-fact-work"))
             .unwrap();
         let (node_backend, inner) =
@@ -774,39 +778,6 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
     }
 }
 
-/// FIG-6249: configuration refuses unsupported cuts with their typed cause.
-#[tokio::test]
-async fn a_configured_5000_cut_is_refused_typed() {
-    use lash::tracing::{TraceLimits, TraceLimitsError};
-    let limits = TraceLimits {
-        process_effect_occurrences: 5000,
-        ..Default::default()
-    };
-    let refusal = TraceLimitsError::ProcessEffectOccurrencesExceeded {
-        actual: 5000,
-        maximum: 4096,
-    };
-    let runtime = lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock));
-    assert!(matches!(runtime.clone().with_limits(limits), Err(error) if error == refusal));
-    for cap in [0, 4096] {
-        assert!(
-            runtime
-                .clone()
-                .with_limits(TraceLimits {
-                    process_effect_occurrences: cap,
-                    ..limits
-                })
-                .is_ok()
-        );
-    }
-    let (stores, _keep) = stores(Tier::SqliteMemory).await;
-    let (_, builder) = core_builder(&stores, effects_advance, &Arc::new(World::default()), None);
-    assert!(
-        matches!(builder.trace_limits(limits).build(owner("invalid-cut")),
-        Err(lash::EmbedError::TraceLimits(error)) if error == refusal)
-    );
-}
-
 /// FIG-6249: redrive retains the run's first cut after the host changes it.
 async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     let _guard = EFFECT_LAW_GUARD.lock().await;
@@ -814,10 +785,12 @@ async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     let world = Arc::new(World::default());
     let (_, builder) = core_builder(&stores, effects_advance, &world, Some(20));
     let first = builder
-        .trace_limits(lash::tracing::TraceLimits {
-            process_effect_occurrences: 64,
-            ..Default::default()
-        })
+        .evidence_limits(
+            lash::EvidenceLimits::builder()
+                .process_effect_occurrences(64)
+                .build()
+                .expect("a valid evidence cut"),
+        )
         .build(owner("before-redrive"))
         .expect("first host");
     let process = start(&first).await;
@@ -839,10 +812,12 @@ async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     first.shutdown().await.expect("first host stops");
     let (backend, builder) = core_builder(&stores, effects_advance, &world, None);
     let second = builder
-        .trace_limits(lash::tracing::TraceLimits {
-            process_effect_occurrences: 16,
-            ..Default::default()
-        })
+        .evidence_limits(
+            lash::EvidenceLimits::builder()
+                .process_effect_occurrences(16)
+                .build()
+                .expect("a valid evidence cut"),
+        )
         .build(owner("after-redrive"))
         .expect("replacement host");
     assert!(

@@ -155,7 +155,7 @@ pub(super) fn ended(
         return;
     };
     tracing
-        .unreplayed(Some(consumed(scope, delivered)))
+        .unreplayed(Some(consumed(tracing, scope, delivered)))
         .transition(
             Some(&EmissionPermit::new_transition()),
             tracing.clock().timestamp_ms(),
@@ -237,10 +237,13 @@ pub(super) fn members_ended(
 /// turn's own parent never, and the overflow past the link limit is
 /// counted.
 fn consumed(
+    tracing: &TraceRuntime,
     scope: &DurableTraceScope,
     delivered: &[crate::AdmittedTurnInputs],
 ) -> DurableTraceScope {
     let mut scope = scope.clone();
+    let admitted = scope.links.omitted();
+    scope.links = std::mem::take(&mut scope.links).limited(tracing.limits().links());
     let parent = scope.cause.as_parent();
     for input in delivered.iter().flat_map(|admitted| &admitted.inputs) {
         if let lash_trace::TraceCause::Parent(producer) = &input.trace_cause
@@ -250,6 +253,17 @@ fn consumed(
         {
             scope.links.push(producer.clone());
         }
+    }
+    let omitted = scope.links.omitted().saturating_sub(admitted);
+    if omitted > 0 {
+        let mut counts = lash_trace::TraceOmissionCounts::default();
+        counts.add_n(lash_trace::TraceOmission::Links, omitted);
+        tracing.omissions().record(
+            &lash_trace::TraceOmissionSite::Admission {
+                scope: scope.scope.clone(),
+            },
+            &counts,
+        );
     }
     scope
 }

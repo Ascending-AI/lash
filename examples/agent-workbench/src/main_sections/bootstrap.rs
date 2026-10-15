@@ -408,7 +408,7 @@ pub(crate) async fn build_workbench_core(
     builder
         .trace_runtime(trace_runtime)
         .trace_sink(tracing.trace_sink)
-        .trace_level(TraceLevel::Extended)
+        .trace_detail(TraceDetailPolicy::extended_models())
         // A development host: its trace is the debugging record of what the
         // model was shown and said.
         .telemetry_content(lash::tracing::TelemetryContent::Captured)

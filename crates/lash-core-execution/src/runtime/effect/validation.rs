@@ -157,7 +157,7 @@ pub fn validate_replayed_effect_envelope(
     reconstructed: &CanonicalRuntimeEffectEnvelope,
     mismatch_code: crate::RuntimeErrorCode,
     trace: Option<&RuntimeEffectReplayTrace>,
-    limits: lash_trace::TraceLimits,
+    limits: crate::EvidenceLimits,
 ) -> Result<(), RuntimeEffectControllerError> {
     debug_assert!(
         mismatch_code.is_replay_mismatch(),
@@ -195,7 +195,7 @@ pub fn validate_replayed_effect_envelope(
         Some(&recorded_value),
         Some(&reconstructed_value),
         &mut differences,
-        limits.diff_value_json_bytes,
+        limits.diff_value_json_bytes(),
     );
     if differences.is_empty() {
         return Err(RuntimeEffectControllerError::new(
@@ -212,7 +212,7 @@ pub fn validate_replayed_effect_envelope(
         divergent_path_count: paths.len(),
         first_divergent_paths: paths
             .iter()
-            .take(limits.diff_summary_paths)
+            .take(limits.diff_summary_paths())
             .cloned()
             .collect(),
         effect_kind: reconstructed_value
@@ -403,7 +403,7 @@ mod tests {
                 &reconstructed,
                 crate::RuntimeErrorCode::EffectReplayDivergence,
                 None,
-                lash_trace::TraceLimits::standard(),
+                crate::EvidenceLimits::standard(),
             )
             .expect_err("a journal row this build did not write must not replay");
             assert_eq!(
@@ -421,7 +421,7 @@ mod tests {
             &canonical(reconstructed),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            lash_trace::TraceLimits::standard(),
+            crate::EvidenceLimits::standard(),
         )
         .expect_err("mismatch");
         error.summary.expect("summary").first_divergent_paths
@@ -479,7 +479,7 @@ mod tests {
             })),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            lash_trace::TraceLimits::standard(),
+            crate::EvidenceLimits::standard(),
         )
         .expect_err("mismatch");
         assert_eq!(
@@ -524,10 +524,10 @@ mod tests {
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
             crate::RuntimeErrorCode::EffectReplayDivergence,
             Some(&trace),
-            lash_trace::TraceLimits {
-                diff_value_json_bytes: 1,
-                ..Default::default()
-            },
+            crate::EvidenceLimits::builder()
+                .diff_value_json_bytes(1)
+                .build()
+                .expect("valid evidence limits"),
         )
         .expect_err("mismatch");
         assert_eq!(
@@ -563,7 +563,7 @@ mod tests {
             &reconstructed,
             crate::RuntimeErrorCode::EffectReplayDivergence,
             None,
-            lash_trace::TraceLimits::standard(),
+            crate::EvidenceLimits::standard(),
         )
         .expect_err("canonical invariant failure");
         assert_eq!(

@@ -88,7 +88,8 @@ impl EngineProcessRuntime {
         let state = Arc::new(crate::plugin::ComponentState::new(
             process_id.clone(),
             &composition,
-            ports.host.tracing.limits(),
+            ports.host.tracing.evidence_limits(),
+            ports.host.tracing.diagnostic_limits(),
             ports.host.data_limits,
         ));
         let policy = direct_policy(&env);

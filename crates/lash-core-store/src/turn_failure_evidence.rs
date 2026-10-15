@@ -4,9 +4,9 @@
 ///
 /// The marker is included inside this budget. Billing and refusal fields are
 /// typed separately and are never traded away to make room for output text.
+/// The standard `EvidenceLimits::failure_partial_output_bytes`.
 #[cfg(test)]
-const TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES: usize =
-    lash_trace::TraceLimits::standard().failure_partial_output_bytes;
+const TURN_FAILURE_PARTIAL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 
 /// Marker appended when failed-generation output exceeds its residency bound.
 pub(crate) const TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER: &str = "\n[truncated]";

@@ -82,14 +82,14 @@ impl EffectFoldBudget {
         Self {
             pages: limits.process_effect_fold_pages,
             page_size: limits.process_effect_fold_page_size,
-            occurrence_cap: lash_trace::TraceLimits::standard().process_effect_occurrences,
+            occurrence_cap: crate::EvidenceLimits::standard().process_effect_occurrences(),
         }
     }
 
     fn pages_for(self, recorded_cap: u64) -> usize {
         // Preserve the standard work per node when the host retains more
         // occurrences; a recorded terminal cut also survives host reconfiguration.
-        let base = lash_trace::TraceLimits::standard().process_effect_occurrences;
+        let base = crate::EvidenceLimits::standard().process_effect_occurrences();
         let scale = self
             .occurrence_cap
             .max(recorded_cap)

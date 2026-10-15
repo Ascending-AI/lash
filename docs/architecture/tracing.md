@@ -38,14 +38,13 @@ so every path shares the choice.
 | Content fields | empty (`""`, `null`, `[]`); offered tools keep their names | original text within the trace limits, never scrubbed |
 | Raw provider bodies and envelope diff values | absent, with the omission reason `content_policy` | present, or their size or parse reason |
 | A failed or cancelled tool outcome | its class, code, source and origin | the whole failure record |
-| Adapter span | `lash.content.omitted = true`, no `lash.payload.json` | `lash.payload.json`, cut at `OtelOptions::max_payload_bytes` |
+| Adapter span | `lash.content.omitted = true`, no `lash.payload.json` | `lash.payload.json`, cut at 4 KiB |
 
 Omitted request, response, instruction, tool and code payloads are not built:
 the runtime does not clone, render or serialize them. The setting is consent
-and nothing else. `TraceLevel` still
+and nothing else. `TraceDetailPolicy` still
 chooses which records exist, sampling stays with the host's provider, and
-`TraceLimits` and `OtelOptions::max_payload_bytes` still bound what is
-captured. The same records exist under either value.
+`ContentLimits` and `TraceLimits` still bound what is captured. The same records exist under either value.
 
 The setting governs telemetry only. Durable requests and results, session
 history, product observations (the process and language graph) and the
@@ -232,7 +231,7 @@ commit.
   record. The engine's close path has no `.await` between the commit's
   acknowledgement and that call. Publication still runs host code
   synchronously: every sink's `append`, the flight recorder's snapshot
-  callback, and under `OtelTelemetry` the host's `OtelSpanEnricher` and
+  callback, and under `OtelTelemetry` the host's `SpanEnricher` and
   the SDK's span processors. Host code has no wall-clock bound, so
   publication has none either.
 - **Sink acceptance** is per sink. Each `append` runs under its own panic
@@ -284,6 +283,68 @@ of that commit lose the cell's `execute_tool {language}` span, orphaning the
 calls the cell made, and nothing else; a cell that re-runs after any other
 cut publishes its span once. `process.terminal` (a process) and a tool intent's
 settlement follow the same rule, but this matrix does not cut them.
+
+## Tracing policies
+
+Every tracing knob is a sealed policy with a documented default and range.
+A value outside its range is refused at build with
+`TracePolicyError::Range { field, value, min, max }`; a value that breaks a
+documented relation with another with `TracePolicyError::Relation`, naming
+both operands and both values; a selection the model forbids with
+`TracePolicyError::Structural`. A core reports what is in effect through
+`LashCore::trace_policy()`.
+
+- **What lash builds.** `TraceDetailPolicy` (`LashCoreBuilder::trace_detail`)
+  sets one `TraceDetail` per `TraceSpanKind`. A kind that is `Off` is never
+  built: its records are not constructed, for any sink. Containers cannot be
+  off, and only model calls (provider and stream event records) and
+  workflows (node spans) have `Extended` detail. A workflow's choice is
+  retained on the process at registration (`trace_nodes`), so every owner
+  that runs it makes the same one.
+- **What the exporter exports.** `TraceExportPolicy`, on `OtelOptions`,
+  skips kinds from the OpenTelemetry export only: their records still reach
+  every sink. `TraceMetrics` chooses the runtime and GenAI metric families.
+- **The off rule.** No kind is off or skipped while a kind in its
+  `TraceSpanKind::children()` is on, so no exported span names a parent that
+  was not exported. `extension_spans = 0` turns extension and point spans
+  off, and so requires model calls and their attempts off.
+- **Bounds.** `TraceLimits` holds the seam's admission and buffering
+  bounds (held records, links, extension spans, attributes, events, bytes,
+  references, the publication hold). `ContentLimits` bounds captured
+  provider bodies. Execution evidence, diagnostics and composition memory
+  are not telemetry and have their own policies: `EvidenceLimits`,
+  `DiagnosticLimits`, `CompositionCacheLimits`. `TraceStateLimits` and
+  `FlightRecorderSettings` are sealed the same way.
+
+### The bounded writer and omissions
+
+Every host or plugin contribution to a span passes one writer. It charges
+one attribute and `key.len() + encoded_len(value)` bytes before it buffers,
+against the span's one budget: `attributes_per_span` less the registry's
+`attribute_reserve(kind)` for lash's own attributes, and
+`span_contribution_bytes`. Lash's attributes always fit, so an SDK whose
+`max_attributes_per_span` is at least a kind's reserve drops contributions
+first and never a lash attribute. A refusal is a typed `TraceOmission`
+(`Attributes`, `SpanBytes`, `ValueTooLarge`, `ReservedKey`, `UseReplace`,
+...): the writer returns it, the span carries `lash.trace.omitted` and
+`lash.trace.omitted.count`, and `LashCore::trace_omissions()` counts it by
+site kind and reason. A string over `attribute_value_bytes` is cut at a
+UTF-8 boundary; a JSON value over it is refused whole.
+
+### The enricher
+
+`OtelOptions::enricher` installs one `SpanEnricher`. Lash calls it once for
+every span it exports, before the SDK builds the span, with a `SpanView`
+holding the span's kind, stable ids (`TraceIds`, the same on every owner),
+position, record, lash's attributes and the policies in effect. A
+producer's enricher runs before the host sampler decides, so the sampler
+sees what it derived; the sampler's result attributes are written through
+the same writer and exported on the producer span only. Neither is ever
+persisted. `SpanEnrichment::set` adds host keys (never `lash.` keys or keys
+the registry declares), `rename` renames the span, and `replace` replaces
+a registered semantic default such as `gen_ai.provider.name`
+(`RefinableKey`); metric labels keep lash's values. A panicking enricher
+leaves the span with lash's attributes, counted as `EnricherFailed`.
 
 ## Integration status
 

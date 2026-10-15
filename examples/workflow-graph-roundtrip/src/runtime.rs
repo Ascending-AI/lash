@@ -689,7 +689,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
             bounds,
         )))
         .process_component(Arc::new(host_tools), HOST_TOOLS)
-        .trace_level(lash::tracing::TraceLevel::Extended)
+        .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -848,7 +848,7 @@ mod tests {
         }
         overlay.language_observation(&running).unwrap();
         let mut last_durable = None;
-        let retained = lash::tracing::TraceLimits::standard().process_effect_occurrences;
+        let retained = lash::EvidenceLimits::standard().process_effect_occurrences();
         for occurrence in 0..=retained {
             let call = lash::ToolCallId::fixture(&format!("call-{occurrence}"));
             overlay

@@ -1,4 +1,4 @@
-use super::{OtelOptions, registry::AttributeKey as A};
+use super::registry::AttributeKey as A;
 use crate::TraceRecord;
 use opentelemetry::KeyValue;
 use std::io::{self, Write};
@@ -40,12 +40,15 @@ impl Write for BoundedWriter {
     }
 }
 
+/// Bytes of one record's exported event payload.
+const MAX_PAYLOAD_BYTES: usize = 4096;
+
 /// The event payload follows the record's content marker, and an omitted
 /// one is never serialized.
-pub(super) fn attributes(record: &TraceRecord, options: &OtelOptions, out: &mut Vec<KeyValue>) {
+pub(super) fn attributes(record: &TraceRecord, out: &mut Vec<KeyValue>) {
     let mut truncated = 0_i64;
     if record.content.is_captured() {
-        let mut writer = BoundedWriter::new(options.max_payload_bytes);
+        let mut writer = BoundedWriter::new(MAX_PAYLOAD_BYTES);
         let _ = serde_json::to_writer(&mut writer, &record.event);
         truncated += i64::from(writer.truncated);
         out.push(A::Payload.value(writer.finish()));

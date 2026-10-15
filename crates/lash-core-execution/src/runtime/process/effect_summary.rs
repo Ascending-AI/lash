@@ -24,7 +24,6 @@ use super::events::ProcessEventAppendRequest;
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
-///     items(path = "crates/lash-trace/src/limits.rs", MAX_PROCESS_EFFECT_OCCURRENCES),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
@@ -73,9 +72,10 @@ pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
 
 /// How many effect occurrences of one node are recorded one by one, across
 /// every site of the node: the hard maximum of 4096.
-/// The host chooses an evidence cut through `TraceLimits` (default 64); the
-/// driver pins that cut in its first transition and omissions record it.
-pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = lash_trace::MAX_PROCESS_EFFECT_OCCURRENCES;
+/// The host chooses an evidence cut through
+/// [`EvidenceLimits`](crate::EvidenceLimits) (default 64); the driver pins
+/// that cut in its first transition and omissions record it.
+pub const MAX_PROCESS_EFFECT_OCCURRENCES: u64 = 4096;
 
 /// Terminal class of a recorded effect occurrence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

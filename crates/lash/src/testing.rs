@@ -300,6 +300,7 @@ impl LanguageObservationDispatcher {
             timestamp: lash_trace::TraceTimestamp::from_unix_ms(observation.observed_at_ms),
             context: lash_trace::TraceContext::default(),
             position: None,
+            omissions: Default::default(),
             event: lash_trace::TraceEvent::LanguageExecution {
                 language: observation.language,
                 event: observation.execution,

@@ -259,6 +259,7 @@ fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> cra
         content: crate::TelemetryContent::Captured,
         context,
         position: None,
+        omissions: Default::default(),
         event,
     }
 }

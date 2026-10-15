@@ -122,7 +122,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
 
     let failure = failure_from_process_turn(
         &turn,
-        lash_trace::TraceLimits::standard(),
+        lash_core_execution::DiagnosticLimits::standard(),
         lash_sansio::session_model::RuntimeOutputCuts::standard(),
     );
     assert_eq!(failure.code, "process_session_turn_provider_error");
@@ -148,7 +148,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
         turn,
         crate::ProcessStatus::Failed,
         &crate::SessionTurnOutcome::Turn,
-        lash_trace::TraceLimits::standard(),
+        lash_core_execution::DiagnosticLimits::standard(),
         lash_sansio::session_model::RuntimeOutputCuts {
             raw_error_max_chars: 3,
             ..lash_sansio::session_model::RuntimeOutputCuts::standard()
@@ -189,7 +189,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         turn,
         state,
         &crate::SessionTurnOutcome::Turn,
-        lash_trace::TraceLimits::standard(),
+        lash_core_execution::DiagnosticLimits::standard(),
         lash_sansio::session_model::RuntimeOutputCuts::standard(),
     );
     let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
@@ -326,7 +326,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         turn,
         crate::ProcessStatus::Cancelled,
         &crate::SessionTurnOutcome::FinalValue { schema: None },
-        lash_trace::TraceLimits::standard(),
+        lash_core_execution::DiagnosticLimits::standard(),
         lash_sansio::session_model::RuntimeOutputCuts::standard(),
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
@@ -386,7 +386,7 @@ fn project_turn(
         turn,
         state,
         result,
-        lash_trace::TraceLimits::standard(),
+        lash_core_execution::DiagnosticLimits::standard(),
         lash_sansio::session_model::RuntimeOutputCuts::standard(),
     )
 }

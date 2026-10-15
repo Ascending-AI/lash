@@ -63,7 +63,7 @@ it does not substitute for the judged browser row.
    session id off the page (or off the state document saved here) and pass it on every
    later read, or step 4's settlement poll reads "no messages" as "not settled yet", and
    then as a missing-turn defect.
-2. Workbench enables `TraceLevel::Extended` at bootstrap, so its trace carries
+2. Workbench sets `TraceDetailPolicy::extended_models()` at bootstrap, so its trace carries
    the outgoing provider request. **Gate it on what that record can actually
    show you.** Exact request JSON is retained only up to the trace limit
    `provider_request_body_json_bytes` (default 2048,

@@ -54,8 +54,8 @@ the first complete TypeScript cell, and never executes content after that bounda
 ## Phase 0 — Boot and baseline
 
 Boot a fresh Workbench on an available port other than 3056/3057. Extended tracing is
-always on for the Workbench — `TraceLevel::Extended` is set unconditionally at
-`examples/agent-workbench/src/main_sections/bootstrap.rs:410` — so there is no environment
+always on for the Workbench — `TraceDetailPolicy::extended_models()` is set unconditionally at
+`examples/agent-workbench/src/main_sections/bootstrap.rs:411` — so there is no environment
 variable or flag to enable, and there is nothing to record as "enabled". Do not invent a
 switch; that is the exact failure mode golden rule 1 warns about for stop sequences.
 Poll `/healthz`, open the browser, record the trace byte offset,

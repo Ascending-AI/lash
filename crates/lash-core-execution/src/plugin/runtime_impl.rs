@@ -489,7 +489,7 @@ impl PluginHost {
                 } else {
                     PluginStateRegistry::from_snapshot(snapshot)
                 };
-                registry.trace_limits = self.trace_runtime.limits();
+                registry.diagnostics = self.trace_runtime.diagnostic_limits();
                 registry.limits = self.data_limits.plugin_state;
                 registry
             })),

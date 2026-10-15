@@ -1520,10 +1520,15 @@ cap; the workbench's upload preset is 1 MiB.
 | H | Process replay events / age / bytes/process / processes / total bytes | 2048 / 120 s / 8 MiB / 4096 / 64 MiB | `InMemoryProcessReplayStoreConfig` via `LashCoreBuilder::process_replay_store` | Addressable counts/bytes/durations |
 | H | Observation expiry / publisher batch / process tail / dedup / effect-fold / bridge | 64 / 32 / 32 / 4096 per class / 64×256 / 256 | `LashCoreBuilder::observation_work_limits(ObservationWorkLimits)` | Addressable counts; page sizes obey store's paginated read contract |
 | H | Provisional language session ingress / bytes/class / process rounds | 256 / 4 MiB / 2 | `ObservationWorkLimits.language_{session_events,bytes,process_rounds}` | Addressable counts/bytes; overflow explicitly retires provisional continuity |
-| H | Trace held records / attempt stream / diff value / paths / failure output / provider body | 256 / 256 KiB / 2048 B / 8 / 64 KiB / 2048 B | `TraceLimits` through core tracing | Addressable counts/bytes |
-| H/S | Trace composition generations / sessions / process occurrences / error chars / state warning | 8 / 1024 / 8 / 4000 / 4 MiB | `TraceLimits` | Occurrences hard 8 preserves stored event representation; other cuts addressable |
-| H/S | W3C tracestate members / chars / key / tenant / system / value | 32 / 512 / 256 / 241 / 14 / 256 | `TraceStateLimits`, `W3cTraceState::parse_with_limits` | Each default is its W3C interoperability maximum |
-| H/S | Retained trace links | 64 | `TraceLinks::with_limit` | 64, bounded stored telemetry |
+| H | Trace held records / links / extension spans / events per span | 256 / 64 / 256 / 64 | `TraceLimits` via `LashCoreBuilder::trace_limits` | 4096 / 128 / 4096 / 256; each refused typed (`TracePolicyError::Range`) |
+| H | Trace attributes per span / value / key / name / span contributions | 128 / 4 KiB / 128 B / 1 KiB / 256 KiB | `TraceLimits` | 1024 / 64 KiB / 1 KiB / 16 KiB / 8 MiB; `attributes_per_span` at least every kind's `attribute_reserve`, contributions share what the reserve leaves (`TracePolicyError::Relation`) |
+| H | Trace extension bytes / tool-span annotations / references / reference bytes / publication hold | 1 MiB / 16 / 16 / 64 KiB / 256 records, 8 MiB | `TraceLimits` | 16 MiB / 64 / 64 / 1 MiB / 4096, 64 MiB; annotations and references at most the span's remaining slots |
+| H | Provider body captured under extended model detail | 2048 B | `ContentLimits` via `LashCoreBuilder::content_limits` | 8 MiB |
+| H | Attempt stream / diff value / diff paths / failure output / process effect occurrences | 256 KiB / 2048 B / 8 / 64 KiB / 64 | `EvidenceLimits` via `LashCoreBuilder::evidence_limits` | 16 MiB / 1 MiB / 4096 / 8 MiB / 4096 (the process pins its value); `EvidenceLimitsError::Range` |
+| H | Diagnostic error chars / plugin-state warning | 4000 / 4 MiB (or off) | `DiagnosticLimits` via `LashCoreBuilder::diagnostic_limits` | 1 MiB chars / 64 MiB |
+| H | Composition generations / sessions | 8 / 1024 | `CompositionCacheLimits` via `LashCoreBuilder::composition_cache_limits` | 4096 / 65536 |
+| H/S | W3C tracestate members / chars / key / tenant / system / value | 32 / 512 / 256 / 241 / 14 / 256 | `TraceStateLimits::new`, `TraceCarrier::parse_w3c_with` | Each default is its W3C maximum; above it is refused typed |
+| H | Flight recorder capacity / slow threshold / interval | 256 / 5 s / 60 s | `FlightRecorderSettings::new` | 16384 / 24 h / 24 h |
 | H | Workflow overlay history / mismatches | 256 / 64 | `WorkflowExecutionOverlayAccumulator::new`, `.with_mismatch_limit` | Addressable counts |
 | H | Catalogue preview modules / call names | 100 / 50 | `CataloguePreviewOptions` | Addressable counts |
 | H/S | Charge-safety retry count | Host-declared policy | `ChargeSafetyPolicy`, session/core config | 5 unsafe retries; bounded provider billing exposure |

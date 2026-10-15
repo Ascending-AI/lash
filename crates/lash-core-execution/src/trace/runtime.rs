@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use lash_trace::{
     DurableTraceScope, EmissionPermit, LashIdentity, ProducerKind, ProducerSpan, ProducerSpec,
     ProductObservationSink, SpanRole, TelemetryContent, TraceAttemptId, TraceAttemptLink,
-    TraceCall, TraceCarrier, TraceContext, TraceEvent, TraceIdentity, TraceIds, TraceLevel,
+    TraceCall, TraceCarrier, TraceContext, TraceDetailPolicy, TraceEvent, TraceIdentity, TraceIds,
     TraceLinkMode, TraceLinks, TracePosition, TraceRecord, TraceRecordIdentity, TraceScopeId,
     TraceScopeKind, TraceScopeOwner, TraceSink, TraceSpanKind, TraceTimestamp, TraceTransitionKind,
     telemetry::metrics::TelemetryMetrics,
@@ -40,9 +40,14 @@ struct TraceRuntimeParts {
     identity: Arc<dyn TraceIdentity>,
     clock: Arc<dyn crate::Clock>,
     emitter: TraceEmitter,
-    level: TraceLevel,
+    detail: TraceDetailPolicy,
     metrics: TelemetryMetrics,
     limits: lash_trace::TraceLimits,
+    content_limits: lash_trace::ContentLimits,
+    evidence: crate::EvidenceLimits,
+    diagnostics: crate::DiagnosticLimits,
+    composition: crate::CompositionCacheLimits,
+    omissions: Arc<lash_trace::TraceOmissionLedger>,
     compositions: Arc<super::composition::CompositionMemory>,
 }
 
@@ -54,9 +59,14 @@ impl TraceRuntime {
                 identity: Arc::new(LashIdentity),
                 clock,
                 emitter: TraceEmitter::default(),
-                level: TraceLevel::Standard,
+                detail: TraceDetailPolicy::standard(),
                 metrics: TelemetryMetrics::default(),
                 limits: lash_trace::TraceLimits::standard(),
+                content_limits: lash_trace::ContentLimits::standard(),
+                evidence: crate::EvidenceLimits::standard(),
+                diagnostics: crate::DiagnosticLimits::standard(),
+                composition: crate::CompositionCacheLimits::standard(),
+                omissions: Arc::default(),
                 compositions: Arc::default(),
             }),
         }
@@ -99,9 +109,34 @@ impl TraceRuntime {
         &self.parts.emitter
     }
 
-    /// Resolved working capacities and evidence cuts.
+    /// The tracing seam's admission and buffering bounds.
     pub fn limits(&self) -> lash_trace::TraceLimits {
         self.parts.limits
+    }
+
+    /// The bounds on the content a record carries.
+    pub fn content_limits(&self) -> lash_trace::ContentLimits {
+        self.parts.content_limits
+    }
+
+    /// The bounds on the execution evidence lash records.
+    pub fn evidence_limits(&self) -> crate::EvidenceLimits {
+        self.parts.evidence
+    }
+
+    /// How much of a diagnostic lash keeps, and when it warns.
+    pub fn diagnostic_limits(&self) -> crate::DiagnosticLimits {
+        self.parts.diagnostics
+    }
+
+    /// What lash builds for each span kind.
+    pub fn detail(&self) -> TraceDetailPolicy {
+        self.parts.detail
+    }
+
+    /// The core-wide omission counters every tracing path records into.
+    pub fn omissions(&self) -> &Arc<lash_trace::TraceOmissionLedger> {
+        &self.parts.omissions
     }
 
     /// The fingerprints of a request's `tools`, in its order, shared by
@@ -112,7 +147,7 @@ impl TraceRuntime {
     ) -> Arc<Vec<[u8; 32]>> {
         self.parts
             .compositions
-            .tool_fingerprints(tools, self.parts.limits.composition_fingerprint_generations)
+            .tool_fingerprints(tools, self.parts.composition.fingerprint_generations())
     }
 
     /// Whether `fingerprint`, `session`'s composition now, is one this
@@ -121,22 +156,54 @@ impl TraceRuntime {
     pub fn report_composition(&self, session: &crate::SessionId, fingerprint: [u8; 32]) -> bool {
         self.parts
             .compositions
-            .report(session, fingerprint, self.parts.limits.composition_sessions)
+            .report(session, fingerprint, self.parts.composition.sessions())
     }
 
-    /// Configure capacities and cuts without installing an observer.
-    /// Refuse unsupported cuts before accepting the host configuration.
-    pub fn with_limits(
-        mut self,
-        limits: lash_trace::TraceLimits,
-    ) -> Result<Self, lash_trace::TraceLimitsError> {
-        limits.validate()?;
+    /// Installs the tracing seam's bounds.
+    #[must_use]
+    pub fn with_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
         Arc::make_mut(&mut self.parts).limits = limits;
-        Ok(self)
+        self
     }
 
-    pub fn level(&self) -> TraceLevel {
-        self.parts.level
+    /// Installs the bounds on the content a record carries.
+    #[must_use]
+    pub fn with_content_limits(mut self, limits: lash_trace::ContentLimits) -> Self {
+        Arc::make_mut(&mut self.parts).content_limits = limits;
+        self
+    }
+
+    /// Installs the bounds on the execution evidence lash records.
+    #[must_use]
+    pub fn with_evidence_limits(mut self, limits: crate::EvidenceLimits) -> Self {
+        Arc::make_mut(&mut self.parts).evidence = limits;
+        self
+    }
+
+    /// Installs how much of a diagnostic lash keeps, and when it warns.
+    #[must_use]
+    pub fn with_diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
+        Arc::make_mut(&mut self.parts).diagnostics = limits;
+        self
+    }
+
+    /// Installs how much composition history the runtime remembers.
+    #[must_use]
+    pub fn with_composition_cache_limits(mut self, limits: crate::CompositionCacheLimits) -> Self {
+        Arc::make_mut(&mut self.parts).composition = limits;
+        self
+    }
+
+    /// The tracing policies in effect, as the core reports them: no
+    /// exporter's, which the exporter adds.
+    pub fn policy(&self) -> lash_trace::TracePolicySnapshot {
+        lash_trace::TracePolicySnapshot {
+            content: self.content(),
+            content_limits: self.parts.content_limits,
+            detail: self.parts.detail,
+            limits: self.parts.limits,
+            ..lash_trace::TracePolicySnapshot::standard()
+        }
     }
 
     /// The host's telemetry content policy: [`TelemetryContent::standard`]
@@ -195,10 +262,10 @@ impl TraceRuntime {
         self
     }
 
+    /// Installs what lash builds for each span kind.
     #[must_use]
-    pub fn with_level(mut self, level: TraceLevel) -> Self {
-        let parts = Arc::make_mut(&mut self.parts);
-        parts.level = level;
+    pub fn with_detail(mut self, detail: TraceDetailPolicy) -> Self {
+        Arc::make_mut(&mut self.parts).detail = detail;
         self
     }
 
@@ -348,6 +415,7 @@ impl TraceRuntime {
             scope: scope.map(Arc::new),
             leaf: None,
             right,
+            silenced: false,
         }
     }
 }
@@ -362,7 +430,7 @@ impl Default for TraceRuntime {
 impl std::fmt::Debug for TraceRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceRuntime")
-            .field("level", &self.parts.level)
+            .field("detail", &self.parts.detail)
             .field("content", &self.content())
             .field("observed", &self.is_observed())
             .finish_non_exhaustive()
@@ -689,17 +757,22 @@ impl JournalFrontier {
     /// Emits `observation` now when the shift is past its journal, and holds
     /// it otherwise.
     fn observe(&self, observation: HeldObservation) {
-        let capacity = self
-            .runtime()
-            .map_or_else(lash_trace::TraceLimits::standard, |runtime| {
-                runtime.limits()
-            })
-            .held_observations;
+        let runtime = self.runtime();
+        let capacity = runtime
+            .as_ref()
+            .map_or_else(lash_trace::TraceLimits::standard, TraceRuntime::limits)
+            .held_observations();
         {
             let mut state = self.state();
             if let FrontierState::Behind(held) = &mut *state {
-                if held.len() < capacity {
+                if held.len() < usize::try_from(capacity).unwrap_or(usize::MAX) {
                     held.push(observation);
+                } else if let Some(runtime) = runtime {
+                    drop(state);
+                    runtime.omissions().record_one(
+                        &lash_trace::TraceOmissionSite::Shift { scope: None },
+                        lash_trace::TraceOmission::HeldObservations,
+                    );
                 }
                 return;
             }
@@ -828,6 +901,9 @@ pub struct TraceStanding {
     scope: Option<Arc<DurableTraceScope>>,
     leaf: Option<Arc<LeafSpan>>,
     right: EmissionRight,
+    /// Inside a span of a kind the detail policy turns off: nothing here
+    /// is built, and nothing a child opens is either.
+    silenced: bool,
 }
 
 /// The span a standing's records name instead of its scope's: a model call,
@@ -856,8 +932,9 @@ impl TraceStanding {
         &self.runtime
     }
 
-    pub fn level(&self) -> TraceLevel {
-        self.runtime.parts.level
+    /// What lash builds for each span kind.
+    pub fn detail(&self) -> TraceDetailPolicy {
+        self.runtime.parts.detail
     }
 
     /// The host's telemetry content policy. A site that would clone, render
@@ -881,9 +958,10 @@ impl TraceStanding {
     }
 
     /// Whether a record made here now would reach an observer. Sites that
-    /// must prepare a record's parts ahead of the call test it first.
+    /// must prepare a record's parts ahead of the call test it first. Code
+    /// inside a span of a kind the detail policy turns off is unobserved.
     pub fn is_observed(&self) -> bool {
-        self.runtime.is_observed()
+        !self.silenced && self.runtime.is_observed()
     }
 
     /// Drop observations held by a replay-only drive. Reaching the end does
@@ -902,6 +980,7 @@ impl TraceStanding {
             scope: Some(Arc::new(scope)),
             leaf: None,
             right: self.right.clone(),
+            silenced: self.silenced,
         }
     }
 
@@ -913,6 +992,7 @@ impl TraceStanding {
             scope: self.scope.clone(),
             leaf: self.leaf.clone(),
             right: EmissionRight::Body(Arc::clone(live)),
+            silenced: self.silenced,
         }
     }
 
@@ -1002,6 +1082,16 @@ impl TraceStanding {
         kind: TraceSpanKind,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) -> OpenSpan {
+        if !self.runtime.parts.detail.builds(kind) {
+            // A kind the detail policy turns off builds nothing, and by the
+            // off rule nothing it could parent is built either.
+            return OpenSpan {
+                standing: Self {
+                    silenced: true,
+                    ..self.clone()
+                },
+            };
+        }
         let Some(parent) = self.container().cloned().filter(|_| self.is_observed()) else {
             // With no observed container the leaf has no span: its records
             // are this standing's, unpositioned.
@@ -1026,6 +1116,7 @@ impl TraceStanding {
                 started_at_ms: self.runtime.parts.clock.timestamp_ms(),
             })),
             right: self.right.clone(),
+            silenced: false,
         };
         standing.observe_as(SpanRole::Opens, None, record);
         OpenSpan { standing }
@@ -1054,6 +1145,7 @@ impl TraceStanding {
                 started_at_ms,
             })),
             right: self.right.clone(),
+            silenced: self.silenced || !self.runtime.parts.detail.builds(kind),
         })
     }
 
@@ -1063,7 +1155,7 @@ impl TraceStanding {
         at_ms: Option<u64>,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
-        if !self.runtime.is_observed() {
+        if !self.is_observed() {
             return;
         }
         // The clock is read only for a record that is made: a served prefix
@@ -1099,7 +1191,7 @@ impl TraceStanding {
         &self,
         record: impl FnOnce() -> (TraceContext, TraceEvent) + Send + 'static,
     ) {
-        if !self.runtime.is_observed() {
+        if !self.is_observed() {
             return;
         }
         match &self.right {
@@ -1149,7 +1241,13 @@ impl TraceStanding {
         sideband: lash_core_llm::core_internal::ProviderCompletionSideband,
         context: TraceContext,
     ) -> lash_core_llm::core_internal::ProviderCompletionSideband {
-        if !self.is_observed() {
+        if !self.is_observed()
+            || !self
+                .runtime
+                .parts
+                .detail
+                .builds(TraceSpanKind::ModelAttempt)
+        {
             return sideband;
         }
         let standing = self.clone();
@@ -1314,6 +1412,7 @@ mod diagnostic_tests {
             content: TelemetryContent::Captured,
             context: TraceContext::default(),
             position: None,
+            omissions: Default::default(),
             event: TraceEvent::TurnStarted {
                 metadata: Default::default(),
             },
@@ -1359,11 +1458,13 @@ mod diagnostic_tests {
         let after = Arc::new(AtomicUsize::new(0));
         let recorder = lash_trace::FlightRecorderSink::new(
             Counting(Arc::clone(&forwarded)),
-            lash_trace::FlightRecorderSettings {
-                slow_threshold: std::time::Duration::ZERO,
-                minimum_interval: std::time::Duration::ZERO,
-                ..lash_trace::FlightRecorderSettings::default()
-            },
+            lash_trace::FlightRecorderSettings::new(
+                256,
+                Some(std::time::Duration::from_millis(1)),
+                std::time::Duration::ZERO,
+                true,
+            )
+            .expect("valid recorder settings"),
             |_snapshot| panic!("the snapshot callback panics"),
         );
         let runtime = TraceRuntime::default()
@@ -1377,6 +1478,7 @@ mod diagnostic_tests {
             content: TelemetryContent::Captured,
             context: TraceContext::default(),
             position: None,
+            omissions: Default::default(),
             event: TraceEvent::ToolCallCompleted {
                 call_id: crate::ToolCallId::fixture("call"),
                 provider_call_id: None,

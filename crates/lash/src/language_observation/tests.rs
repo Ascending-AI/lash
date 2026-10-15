@@ -58,6 +58,7 @@ fn fixture_record(context: lash_trace::TraceContext, event: TraceEvent) -> Trace
         timestamp: lash_trace::TraceTimestamp::from_unix_ms(1_791_504_000_000),
         context,
         position: None,
+        omissions: Default::default(),
         event,
     }
 }

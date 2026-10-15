@@ -899,7 +899,13 @@ impl RuntimeTurnDriver<'_> {
         state: &mut LlmStreamState<'_>,
         payload: impl FnOnce() -> TraceRuntimeStreamPayload,
     ) {
-        if !self.trace.is_observed() || !self.trace.level().is_extended() {
+        if !self.trace.is_observed()
+            || !self
+                .trace
+                .detail()
+                .get(lash_trace::TraceSpanKind::Model)
+                .is_extended()
+        {
             return;
         }
         let event = TraceRuntimeStreamEvent {
@@ -924,7 +930,12 @@ impl RuntimeTurnDriver<'_> {
         llm_call_id: &str,
         debug: &LlmStreamDebugState,
     ) -> Option<LlmProviderTraceSender> {
-        if !call.level().is_extended() || !call.is_observed() {
+        if !call
+            .detail()
+            .get(lash_trace::TraceSpanKind::Model)
+            .is_extended()
+            || !call.is_observed()
+        {
             return None;
         }
 
@@ -950,7 +961,8 @@ impl RuntimeTurnDriver<'_> {
                 // Only a request body is bounded: a response event is one
                 // provider frame.
                 let oversized = matches!(direction, LlmProviderTraceDirection::Request { .. })
-                    && raw.len() > trace.runtime().limits().provider_request_body_json_bytes;
+                    && u64::try_from(raw.len()).unwrap_or(u64::MAX)
+                        > trace.runtime().content_limits().max_provider_body_bytes();
                 // An omitted request body is never parsed; a response event
                 // is parsed for its item identity whatever the policy.
                 let omitted_request = !trace.content().is_captured()

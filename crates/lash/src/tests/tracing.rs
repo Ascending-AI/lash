@@ -931,7 +931,7 @@ async fn standard_runtime_trace_records_stream_event_entries() -> Result<()> {
             }),
         }])
         .into_handle(),
-        |builder| builder.trace_level(lash_trace::TraceLevel::Extended),
+        |builder| builder.trace_detail(lash_trace::TraceDetailPolicy::extended_models()),
     )
     .await?;
     let session = traced.session("trace-stream-events").await?;
@@ -1043,11 +1043,8 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
         .into_handle();
     let traced = Traced::new(provider, |builder| {
         builder
-            .trace_level(lash_trace::TraceLevel::Extended)
-            .trace_limits(crate::tracing::TraceLimits {
-                provider_request_body_json_bytes: 32,
-                ..Default::default()
-            })
+            .trace_detail(lash_trace::TraceDetailPolicy::extended_models())
+            .content_limits(crate::tracing::ContentLimits::new(32).expect("valid content limits"))
     })
     .await?;
     let session = traced.session("trace-provider-stream").await?;
@@ -1154,7 +1151,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() -> Res
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(sender_absent(), mock_llm_profile_spec())
-    .trace_level(lash_trace::TraceLevel::Extended)
+    .trace_detail(lash_trace::TraceDetailPolicy::extended_models())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(crate::SessionId::parse("extended-without-sink").expect("nonblank host identity"))
@@ -1504,12 +1501,12 @@ async fn facade_plugin_state_warning_threshold_takes_effect() -> Result<()> {
     let traced = Traced::new(
         mock_provider(vec![text_call("done")]).into_handle(),
         |builder| {
-            builder
-                .plugin(Arc::new(plugin))
-                .trace_limits(crate::tracing::TraceLimits {
-                    plugin_state_warn_bytes: 1,
-                    ..Default::default()
-                })
+            builder.plugin(Arc::new(plugin)).diagnostic_limits(
+                crate::DiagnosticLimits::builder()
+                    .plugin_state_warn_bytes(Some(1))
+                    .build()
+                    .expect("valid diagnostic limits"),
+            )
         },
     )
     .await?;

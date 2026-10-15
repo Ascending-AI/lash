@@ -229,7 +229,7 @@ node's aggregate status, and the visual editor merges repeated live/durable
 updates by call ID. This improves continuous live inspection; it does not make
 the retained history complete after a gap or restart. The runtime's existing
 history cap and retention rules still apply. With the current runtime, this
-example inherits `TraceLimits::process_effect_occurrences`' default of 64
+example inherits `EvidenceLimits::process_effect_occurrences`' default of 64
 retained effects per node; hosts can configure up to 4096. Live call inspection
 continues independently of that retained summary.
 

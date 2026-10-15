@@ -384,8 +384,8 @@ impl<'a> AdmittedToolCall<'a> {
                 binding: Box::new(binding.clone()),
             }));
         }
-        let limits = self.handlers.trace_limits();
-        let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
+        let limits = self.handlers.evidence_limits();
+        let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes());
         let outcome = self
             .handlers
             .execute(SingletonAttempt {

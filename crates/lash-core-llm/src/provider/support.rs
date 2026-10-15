@@ -36,6 +36,7 @@ pub(super) fn fixture_record(
         content: lash_trace::TelemetryContent::Captured,
         context,
         position: None,
+        omissions: Default::default(),
         event,
     }
 }

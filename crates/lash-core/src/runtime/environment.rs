@@ -24,7 +24,7 @@
 use crate::SessionId;
 use std::sync::Arc;
 
-use lash_trace::{TraceLevel, TraceSink};
+use lash_trace::{TraceDetailPolicy, TraceSink};
 
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
@@ -177,8 +177,8 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn with_trace_level(mut self, level: TraceLevel) -> Self {
-        self.env.core.tracing = self.env.core.tracing.clone().with_level(level);
+    pub fn with_trace_detail(mut self, detail: TraceDetailPolicy) -> Self {
+        self.env.core.tracing = self.env.core.tracing.clone().with_detail(detail);
         self
     }
 

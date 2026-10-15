@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use lash::plugins::PluginDeclaration;
 use lash::prompt::{PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKey};
-use lash_core::facade_support::TraceLevel;
+use lash_core::facade_support::TraceDetailPolicy;
 use serde_json::json;
 
 use crate::provider::ScriptedLlmHttpTransport;
@@ -126,7 +126,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model.clone())
         .trace_sink(trace.clone())
-        .trace_level(TraceLevel::Extended)
+        .trace_detail(TraceDetailPolicy::extended_models())
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .plugin(Arc::new(SnapshotInstruction))
         .build(crate::sim_process_owner())

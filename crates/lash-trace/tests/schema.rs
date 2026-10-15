@@ -693,7 +693,7 @@ fn every_trace_event_serde_tag_round_trips_through_its_kind() {
 #[test]
 fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v36.schema.json"
+        "../../../schemas/host/trace-record/v37.schema.json"
     ))
     .expect("published trace schema");
     let context = TraceContext {
@@ -722,7 +722,7 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
 #[test]
 fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_variants() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v36.schema.json"
+        "../../../schemas/host/trace-record/v37.schema.json"
     ))
     .expect("published trace schema");
     let record = fixture_record(
@@ -753,7 +753,7 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
 #[test]
 fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/workflow-execution-overlay/v36.schema.json"
+        "../../../schemas/host/workflow-execution-overlay/v37.schema.json"
     ))
     .expect("published overlay schema");
     let mut records = language_execution_records();
@@ -821,6 +821,7 @@ fn fixture_record(
         content: lash_trace::TelemetryContent::Captured,
         context,
         position: None,
+        omissions: Default::default(),
         event,
     }
 }
@@ -1095,7 +1096,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
 #[test]
 fn omitted_content_policy_empties_every_content_field_and_keeps_identity() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v36.schema.json"
+        "../../../schemas/host/trace-record/v37.schema.json"
     ))
     .expect("published trace schema");
     for event in content_bearing_events() {

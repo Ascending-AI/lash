@@ -174,9 +174,11 @@ pub enum EmbedError {
     /// Invalid obligation retry or claim settings.
     #[error(transparent)]
     RelayPolicy(#[from] crate::RelayPolicyError),
-    /// The host selected an unsupported trace evidence cut.
+    /// A tracing policy value, or a combination of policies, the host
+    /// selected is refused: the error names the field, the value and the
+    /// bound, relation or selection it breaks.
     #[error(transparent)]
-    TraceLimits(#[from] crate::tracing::TraceLimitsError),
+    TracePolicy(#[from] crate::tracing::TracePolicyError),
     /// Invalid same-session admission wait TTL.
     #[error(transparent)]
     CommitAdmissionPolicy(#[from] crate::CommitAdmissionPolicyError),
@@ -534,7 +536,7 @@ impl EmbedError {
             | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
             | Self::RelayPolicy(_)
-            | Self::TraceLimits(_)
+            | Self::TracePolicy(_)
             | Self::CommitAdmissionPolicy(_)
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
@@ -636,7 +638,7 @@ impl EmbedError {
             | Self::DecodeProtocolTurnOptions(_)
             | Self::WorkCadence(_)
             | Self::RelayPolicy(_)
-            | Self::TraceLimits(_)
+            | Self::TracePolicy(_)
             | Self::CommitAdmissionPolicy(_)
             | Self::Session(_) => false,
         }

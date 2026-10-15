@@ -383,7 +383,7 @@ fn build_turn_core(
         crate::shutdown_marker::factory_from_env("toolbench").map_err(anyhow::Error::msg)?;
     let core = builder
         .trace_sink(Arc::new(telemetry.capture.clone()))
-        .trace_level(lash::tracing::TraceLevel::Extended)
+        .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .configure_plugins(|stack| {
             stack.push(telemetry.plugin());

@@ -441,26 +441,28 @@ impl SendBuilder {
         if let Some(error) = options_error {
             return Err(error.into());
         }
+        // The host id names the run; the shift executes the run's turns
+        // under it, so the input carries no turn id of its own.
+        let host_id = id.or_else(|| input.trace_turn_id.take());
+        input.trace_turn_id = None;
         // The producer opens once, here, on the first poll and before the
         // first await, under the caller's context: nothing later changes the
-        // edge. The input retains it as its cause.
+        // edge. The input retains it as its cause. Its ids are what is known
+        // before admission: the session, and the run a host named.
         let mut producer = target.open_producer(
             lash_core::ProducerKind::Send,
             &trace,
             lash_core::TraceIds {
                 session: Some(target.session_id()),
+                turn: host_id.clone(),
                 ..Default::default()
             },
         );
         let parent = producer.parent();
         let trace_cause = lash_core::TraceCause::from(parent.clone());
         let accepted = async {
-            // The host id names the run; the shift executes the run's turns
-            // under it, so the input carries no turn id of its own. An input
-            // sent without one gets a fresh id, so its row is keyed and its
-            // run named like any other.
-            let host_id = id.or_else(|| input.trace_turn_id.take());
-            input.trace_turn_id = None;
+            // An input sent without a host id gets a fresh id, so its row is
+            // keyed and its run named like any other.
             let id = host_id.unwrap_or_else(crate::turn::fresh_turn_id);
             let context = send_context(&target, &[id.as_str()]).await?;
             let cursor = target.current_cursor();

@@ -642,7 +642,7 @@ async fn retry_into_a_park(tier: Tier, records: &Arc<Records>) -> Option<(World,
     let world = World::new(tier, move |backend| {
         lash::LashCore::standard_builder(backend.clone())
             .trace_sink(sink)
-            .trace_level(lash::tracing::TraceLevel::Extended)
+            .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
             .telemetry_content(lash::tracing::TelemetryContent::Captured)
             .tools(
                 lash::tool_provider_key!("tools"),
@@ -853,7 +853,7 @@ mod sqlite_memory_traced {
         let world = super::World::new(super::Tier::SqliteMemory, move |backend| {
             lash::LashCore::standard_builder(backend.clone())
                 .trace_sink(sink)
-                .trace_level(lash::tracing::TraceLevel::Extended)
+                .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
                 .telemetry_content(lash::tracing::TelemetryContent::Captured)
                 .tools(
                     lash::tool_provider_key!("tools"),

@@ -68,6 +68,8 @@ pub struct LashCore {
     /// its installed registrations when it was built.
     pub(crate) serves: Arc<[String]>,
     transcript_decoders: crate::transcript::TranscriptDecoders,
+    /// The tracing policies in effect on this core, after validation.
+    pub(crate) trace_policy: Arc<crate::tracing::TracePolicySnapshot>,
     /// Weak metadata readers; inspection never keeps a materialization alive.
     pub(crate) diagnostic_hosts:
         Arc<std::sync::Mutex<Vec<crate::plugins::WeakMaterializedInventoryReader>>>,
@@ -76,6 +78,19 @@ pub struct LashCore {
 pub use lash_core::session_delete::SessionDeletion;
 
 impl LashCore {
+    /// The tracing policies in effect on this core, after validation: what
+    /// hooks and the enricher read, and what a host can log or assert on.
+    pub fn trace_policy(&self) -> &crate::tracing::TracePolicySnapshot {
+        &self.trace_policy
+    }
+
+    /// What tracing omitted on this core since it started, by site kind
+    /// and reason: contributions the bounded writer refused, held
+    /// observations past their bound, links past their limit.
+    pub fn trace_omissions(&self) -> crate::tracing::TraceOmissionReport {
+        self.env.core.tracing.omissions().report()
+    }
+
     /// Host-only plugin inspection. No diagnostic call runs plugin code.
     pub fn plugin_diagnostics(&self) -> crate::plugin_diagnostics::PluginDiagnostics {
         crate::plugin_diagnostics::PluginDiagnostics { core: self.clone() }
@@ -717,9 +732,15 @@ pub struct LashCoreBuilder {
     trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
-    trace_level: Option<lash_trace::TraceLevel>,
+    trace_detail: Option<crate::tracing::TraceDetailPolicy>,
     telemetry_content: Option<lash_trace::TelemetryContent>,
     trace_limits: Option<crate::tracing::TraceLimits>,
+    content_limits: Option<crate::tracing::ContentLimits>,
+    evidence_limits: Option<crate::EvidenceLimits>,
+    diagnostic_limits: Option<crate::DiagnosticLimits>,
+    composition_cache_limits: Option<crate::CompositionCacheLimits>,
+    /// The tracing policies the resolved runtime config carries.
+    trace_policy: Option<crate::tracing::TracePolicySnapshot>,
     observation_work_limits: crate::tracing::ObservationWorkLimits,
     data_limits: crate::RuntimeDataLimits,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
@@ -792,9 +813,14 @@ impl LashCoreBuilder {
             trace_sinks: Vec::new(),
             #[cfg(feature = "otel-trace")]
             telemetry: None,
-            trace_level: None,
+            trace_detail: None,
             telemetry_content: None,
             trace_limits: None,
+            content_limits: None,
+            evidence_limits: None,
+            diagnostic_limits: None,
+            composition_cache_limits: None,
+            trace_policy: None,
             observation_work_limits: Default::default(),
             data_limits: crate::RuntimeDataLimits::standard(),
             execution_budgets: None,
@@ -1021,8 +1047,14 @@ impl LashCoreBuilder {
         self
     }
 
-    pub fn trace_level(mut self, trace_level: lash_trace::TraceLevel) -> Self {
-        self.trace_level = Some(trace_level);
+    /// Select what lash builds for each span kind, for every sink and the
+    /// exporter. Defaults to
+    /// [`TraceDetailPolicy::standard`](crate::tracing::TraceDetailPolicy::standard).
+    /// Building refuses, with [`EmbedError::TracePolicy`], trace limits that
+    /// turn extension spans off (`extension_spans = 0`) while this policy
+    /// still builds model calls or their attempts.
+    pub fn trace_detail(mut self, detail: crate::tracing::TraceDetailPolicy) -> Self {
+        self.trace_detail = Some(detail);
         self
     }
 
@@ -1038,12 +1070,40 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure trace working capacities, evidence cuts and plugin-state warnings.
-    /// Defaults to [`crate::tracing::TraceLimits::standard`]. No sink is installed.
-    /// Building refuses process occurrence cuts above 4096 with
-    /// [`EmbedError::TraceLimits`].
+    /// Select the tracing seam's admission and buffering bounds. Defaults to
+    /// [`TraceLimits::standard`](crate::tracing::TraceLimits::standard). No
+    /// sink is installed.
     pub fn trace_limits(mut self, limits: crate::tracing::TraceLimits) -> Self {
         self.trace_limits = Some(limits);
+        self
+    }
+
+    /// Select the bounds on the content a record carries. Defaults to
+    /// [`ContentLimits::standard`](crate::tracing::ContentLimits::standard).
+    pub fn content_limits(mut self, limits: crate::tracing::ContentLimits) -> Self {
+        self.content_limits = Some(limits);
+        self
+    }
+
+    /// Select the bounds on the execution evidence lash records: tool
+    /// attempt streams, effect diffs, failed generations and process effect
+    /// occurrences. Defaults to [`EvidenceLimits::standard`](crate::EvidenceLimits::standard).
+    pub fn evidence_limits(mut self, limits: crate::EvidenceLimits) -> Self {
+        self.evidence_limits = Some(limits);
+        self
+    }
+
+    /// Select how much of a diagnostic lash keeps and when a plugin's state
+    /// size warns. Defaults to [`DiagnosticLimits::standard`](crate::DiagnosticLimits::standard).
+    pub fn diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
+        self.diagnostic_limits = Some(limits);
+        self
+    }
+
+    /// Select how much tool-composition history the runtime remembers.
+    /// Defaults to [`CompositionCacheLimits::standard`](crate::CompositionCacheLimits::standard).
+    pub fn composition_cache_limits(mut self, limits: crate::CompositionCacheLimits) -> Self {
+        self.composition_cache_limits = Some(limits);
         self
     }
 
@@ -1387,7 +1447,9 @@ impl LashCoreBuilder {
 
         let substrate_slot = Arc::new(CoreWorkSlot::new(substrate));
         let plugin_factories = Arc::new(plugin_factories);
+        let trace_policy = Arc::new(self.trace_policy.take().unwrap_or_default());
         let core = LashCore {
+            trace_policy,
             observer_pacing: Arc::new(self.observer_pacing),
             serves,
             transcript_decoders,

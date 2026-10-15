@@ -16,61 +16,78 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.process` | Internal | Transition |
 | `execute_tool` | Internal | Transition |
 
-| Attribute | Type |
+| Attribute | Type | Mutability | Set on |
+|---|---|---|---|
+| `lash.scope.kind` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.scope.boundary` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.producer.outcome` | String | Provenance | producer |
+| `lash.links.omitted` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.record.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.event.type` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `gen_ai.conversation.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.run.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.process.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.llm_call.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.send.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `http.response.status_code` | Integer | Provenance | metrics only |
+| `lash.session.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.turn.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.attempt.invocation_id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `gen_ai.operation.name` | String | Provenance | agent, model, tool, cell, workflow |
+| `gen_ai.request.model` | String | Provenance | model, process, tool_intent |
+| `gen_ai.response.model` | String | Provenance | model |
+| `gen_ai.tool.name` | String | Provenance | tool, cell, process, tool_intent |
+| `gen_ai.tool.call.id` | String | Provenance | tool, process, tool_intent |
+| `gen_ai.tool.type` | String | Provenance | cell |
+| `lash.cell.id` | String | Provenance | cell |
+| `lash.cell.language` | String | Provenance | cell |
+| `lash.cell.tool_calls` | Integer | Provenance | cell |
+| `gen_ai.usage.input_tokens` | Integer | Provenance | model, process, tool_intent |
+| `gen_ai.usage.output_tokens` | Integer | Provenance | model, process, tool_intent |
+| `gen_ai.usage.cache_read.input_tokens` | Integer | Provenance | model, process, tool_intent |
+| `gen_ai.usage.cache_write.input_tokens` | Integer | Provenance | model, process, tool_intent |
+| `lash.usage.reasoning_output_tokens` | Integer | Provenance | model, process, tool_intent |
+| `lash.model.attempt.ordinal` | Integer | Provenance | model_attempt |
+| `lash.model.attempts` | Integer | Provenance | model |
+| `lash.request.model_variant` | String | Provenance | metrics only |
+| `lash.response.text_chars` | Integer | Provenance | metrics only |
+| `lash.outcome` | String | Provenance | agent, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent |
+| `lash.cancel.origin` | String | Provenance | agent |
+| `lash.payload.json` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.payload.truncated` | Boolean | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.payload.truncated_fields` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.content.omitted` | Boolean | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.tool_intent.kind` | String | Provenance | process, tool_intent |
+| `lash.tool_intent.refusal_reason` | String | Provenance | process, tool_intent |
+| `lash.trace.omitted` | StringArray | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.trace.omitted.count` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.provider` | String | Provenance | metrics only |
+| `lash.provider.retry.kind` | String | Provenance | metrics only |
+| `lash.store.pool.acquire.outcome` | String | Provenance | metrics only |
+| `lash.durable.commit.label` | String | Provenance | metrics only |
+| `lash.runtime_commit.budget.outcome` | String | Provenance | metrics only |
+| `lash.parked_work.kind` | String | Provenance | metrics only |
+| `lash.parked_work.reason` | String | Provenance | metrics only |
+| `lash.obligation.kind` | String | Provenance | metrics only |
+| `lash.obligation.outcome` | String | Provenance | metrics only |
+| `lash.recovery_leader.name` | String | Provenance | metrics only |
+| `gen_ai.provider.name` | String | Refinable | model, process, tool_intent |
+| `error.type` | String | Refinable | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+
+| Span kind | Attribute reserve |
 |---|---|
-| `lash.scope.kind` | String |
-| `lash.scope.boundary` | Integer |
-| `lash.producer.outcome` | String |
-| `lash.links.omitted` | Integer |
-| `lash.record.id` | String |
-| `lash.event.type` | String |
-| `gen_ai.conversation.id` | String |
-| `lash.run.id` | String |
-| `lash.process.id` | String |
-| `lash.llm_call.id` | String |
-| `lash.send.id` | String |
-| `http.response.status_code` | Integer |
-| `lash.session.id` | String |
-| `lash.turn.id` | String |
-| `lash.attempt.invocation_id` | String |
-| `gen_ai.operation.name` | String |
-| `gen_ai.provider.name` | String |
-| `gen_ai.request.model` | String |
-| `gen_ai.response.model` | String |
-| `gen_ai.tool.name` | String |
-| `gen_ai.tool.call.id` | String |
-| `gen_ai.tool.type` | String |
-| `lash.cell.id` | String |
-| `lash.cell.language` | String |
-| `lash.cell.tool_calls` | Integer |
-| `gen_ai.usage.input_tokens` | Integer |
-| `gen_ai.usage.output_tokens` | Integer |
-| `gen_ai.usage.cache_read.input_tokens` | Integer |
-| `gen_ai.usage.cache_write.input_tokens` | Integer |
-| `lash.usage.reasoning_output_tokens` | Integer |
-| `lash.model.attempt.ordinal` | Integer |
-| `lash.model.attempts` | Integer |
-| `lash.request.model_variant` | String |
-| `lash.response.text_chars` | Integer |
-| `lash.outcome` | String |
-| `lash.cancel.origin` | String |
-| `error.type` | String |
-| `lash.payload.json` | String |
-| `lash.payload.truncated` | Boolean |
-| `lash.payload.truncated_fields` | Integer |
-| `lash.content.omitted` | Boolean |
-| `lash.tool_intent.kind` | String |
-| `lash.tool_intent.refusal_reason` | String |
-| `lash.provider` | String |
-| `lash.provider.retry.kind` | String |
-| `lash.store.pool.acquire.outcome` | String |
-| `lash.durable.commit.label` | String |
-| `lash.runtime_commit.budget.outcome` | String |
-| `lash.parked_work.kind` | String |
-| `lash.parked_work.reason` | String |
-| `lash.obligation.kind` | String |
-| `lash.obligation.outcome` | String |
-| `lash.recovery_leader.name` | String |
+| `producer` | 21 |
+| `agent` | 23 |
+| `model` | 30 |
+| `model_attempt` | 22 |
+| `tool` | 24 |
+| `cell` | 27 |
+| `process` | 32 |
+| `workflow` | 22 |
+| `workflow_node` | 21 |
+| `tool_intent` | 32 |
+| `extension` | 20 |
+| `point` | 20 |
 
 | Metric | Kind | Unit | Ownership |
 |---|---|---|---|

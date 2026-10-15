@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, ensure};
 use lash::tracing::{
-    TelemetryContent, TraceEvent, TraceLevel, TraceRecord, TraceSink, TraceSinkError,
+    TelemetryContent, TraceDetailPolicy, TraceEvent, TraceRecord, TraceSink, TraceSinkError,
 };
 use lash_sansio::sync::MutexExt;
 
@@ -169,7 +169,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     let fleet = Fleet::open(args, &meter, 1, Flavor::Chat, |builder, _| {
         let builder = builder
             .trace_sink(sink.clone())
-            .trace_level(TraceLevel::Extended)
+            .trace_detail(TraceDetailPolicy::extended_models())
             .telemetry_content(content);
         Ok(if otel {
             builder.telemetry(lash::tracing::OtelTelemetry::new(
@@ -212,6 +212,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                     content,
                     context: Default::default(),
                     position: None,
+                    omissions: Default::default(),
                     event: TraceEvent::Custom {
                         name: "observation_workload.custom".into(),
                         payload: payload.clone(),

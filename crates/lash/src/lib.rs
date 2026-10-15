@@ -261,6 +261,9 @@ pub use lash_core::runtime::durable::session::{
     ParkedTurnState, SessionParkReason, SessionPassFailure,
 };
 mod pacing;
+pub use lash_core::execution_limits::{
+    CompositionCacheLimitsBuilder, DiagnosticLimitsBuilder, EvidenceLimitsBuilder, LimitBounds,
+};
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
@@ -303,6 +306,13 @@ pub use lash_core::{
     facade_support::TurnExecutionMetrics, facade_support::TurnFinish,
     facade_support::TurnInputAcceptanceReceipt, facade_support::TurnOutcome,
     facade_support::TurnStop, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+};
+/// The bounds on execution evidence, diagnostics and composition memory:
+/// sealed policies whose refusals name the field, value and range.
+pub use lash_core::{
+    CompositionCacheLimits, CompositionCacheLimitsError, CompositionCacheLimitsField,
+    DiagnosticLimits, DiagnosticLimitsError, DiagnosticLimitsField, EvidenceLimits,
+    EvidenceLimitsError, EvidenceLimitsField,
 };
 /// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
 /// limit one executable stretch runs under, and the registration refusal of

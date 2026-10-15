@@ -69,7 +69,7 @@ use lash::provider::ProviderHandle;
 use lash::sync::MutexExt;
 use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
-    tracing::{TeeTraceSink, TraceContext, TraceEvent, TraceLevel, TraceRecord, TraceSink},
+    tracing::{TeeTraceSink, TraceContext, TraceDetailPolicy, TraceEvent, TraceRecord, TraceSink},
 };
 
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};

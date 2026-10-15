@@ -1392,7 +1392,7 @@ fn step_trace(
             Some(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
                 diagnostic: tracing
                     .trace_runtime()
-                    .limits()
+                    .diagnostic_limits()
                     .diagnostic_error(diagnostic),
             },
         };

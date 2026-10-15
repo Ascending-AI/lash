@@ -69465,6 +69465,7 @@
         "sha2",
         "strum",
         "thiserror",
+        "tracing",
         "uuid"
       ],
       "doc": "//crates/lash-trace:lash-trace__doc",

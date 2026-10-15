@@ -107,7 +107,7 @@ Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
 ### R4: durable per-effect summary
 
 Result incorporation records the host-selected first
-`TraceLimits::process_effect_occurrences` occurrences per effect node, counted
+`EvidenceLimits::process_effect_occurrences` occurrences per effect node, counted
 across the node's sites: default 64, hard maximum
 `MAX_PROCESS_EFFECT_OCCURRENCES = 4096`. Configuration above the maximum is
 refused typed. The first transition pins the chosen cut for replay and redrive. Each contains

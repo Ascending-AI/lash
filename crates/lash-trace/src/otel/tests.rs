@@ -646,8 +646,8 @@ fn emitted_domain_shape_matches_registry() {
 }
 
 struct EnrichmentSpy(Arc<AtomicUsize>);
-impl OtelSpanEnricher for EnrichmentSpy {
-    fn attributes(&self, _: &TraceRecord, _: &mut Vec<KeyValue>) {
+impl SpanEnricher for EnrichmentSpy {
+    fn enrich(&self, _: &SpanView<'_>, _: &mut SpanEnrichment) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -659,8 +659,8 @@ fn unsampled_records_and_bounded_payloads_do_not_serialize_past_their_limit() {
         &provider,
         &meter,
         OtelOptions {
-            max_payload_bytes: 32,
-            enrich: Some(Arc::new(EnrichmentSpy(count.clone()))),
+            enricher: Some(Arc::new(EnrichmentSpy(count.clone()))),
+            ..OtelOptions::standard()
         },
     );
     let mut unsampled = completed_under(&context(0), &scope_id());
@@ -686,38 +686,6 @@ fn unsampled_records_and_bounded_payloads_do_not_serialize_past_their_limit() {
     assert!(writer.truncated);
     assert!(writer.finish().len() <= 32);
     assert!(serializations.load(Ordering::Relaxed) < 10);
-}
-
-#[test]
-fn payload_limits_are_enforced() {
-    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
-    let adapter = OtelTelemetry::new(
-        &provider,
-        &meter,
-        OtelOptions {
-            max_payload_bytes: 13,
-            enrich: None,
-        },
-    );
-    let mut event = completed();
-    event.content = crate::TelemetryContent::Captured;
-    adapter.append(&event).unwrap();
-    let spans = exporter.get_finished_spans().unwrap();
-    let bytes: usize = spans[0]
-        .attributes
-        .iter()
-        .filter(|a| a.key.as_str() == A::Payload.definition().key)
-        .map(|a| match &a.value {
-            opentelemetry::Value::String(v) => v.as_str().len(),
-            _ => 0,
-        })
-        .sum();
-    assert!(bytes <= 13);
-    assert!(
-        spans[0]
-            .attributes
-            .contains(&A::PayloadTruncated.value(true))
-    );
 }
 
 /// V23: both telemetry projections read the same typed terminal subject.
@@ -1541,5 +1509,100 @@ fn latency_histograms_distinguish_thirty_seconds_from_five_seconds() {
     assert_eq!(
         point.bucket_counts().nth(point.bounds().count() - 1),
         Some(1)
+    );
+}
+
+/// What [`Refining`] saw its writer answer.
+#[derive(Debug, Default)]
+struct Refusals {
+    provider_set: Option<Result<(), crate::TraceOmission>>,
+    reserved_set: Option<Result<(), crate::TraceOmission>>,
+    host_set: Option<Result<(), crate::TraceOmission>>,
+}
+
+/// An enricher that replaces the provider name, tries to set it and a
+/// `lash.` key directly, and adds a host key the registry does not declare.
+struct Refining(Arc<Mutex<Refusals>>);
+impl SpanEnricher for Refining {
+    fn enrich(&self, _: &SpanView<'_>, out: &mut SpanEnrichment) {
+        let replaced = out.replace(crate::RefinableKey::GenAiProviderName, "openrouter");
+        assert_eq!(replaced, Ok(()));
+        let mut refusals = self.0.lock().unwrap();
+        refusals.provider_set = Some(out.set("gen_ai.provider.name", "anthropic"));
+        refusals.reserved_set = Some(out.set("lash.turn.id", "forged"));
+        refusals.host_set = Some(out.set("gen_ai.usage.cost", 0.25));
+    }
+}
+
+/// L10's replacement clause (FIG-6300): the enricher's `replace` wins over
+/// the semantic default lash set, once; `set` of a refinable key is refused
+/// `UseReplace` and of a `lash.` key `ReservedKey`, and neither changes the
+/// span; a host key the registry does not declare is kept unchecked.
+#[test]
+fn the_enrichers_replacement_wins_over_lashs_default_and_lash_keys_are_refused() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let refusals = Arc::new(Mutex::new(Refusals::default()));
+    let ledger = Arc::new(crate::TraceOmissionLedger::default());
+    let adapter = OtelTelemetry::new(
+        &provider,
+        &meter,
+        OtelOptions {
+            enricher: Some(Arc::new(Refining(refusals.clone()))),
+            ..OtelOptions::standard()
+        },
+    )
+    .bound(crate::TracePolicySnapshot::standard(), ledger.clone());
+    let mut completion = TraceDomainCompletion::new(
+        TraceDomainSubject::Process {},
+        4000,
+        TraceDomainStatus::Completed,
+    );
+    completion.provider = Some("openai".to_owned());
+    let mut record = closing(
+        TraceSpanKind::Process,
+        derived(&producer(), &scope_id()),
+        4000,
+        TraceEvent::DomainCompleted { completion },
+    );
+    record.context.turn_id = Some("lash-turn".into());
+    adapter.append(&record).unwrap();
+
+    let spans = exporter.get_finished_spans().unwrap();
+    let span = spans.last().unwrap();
+    let values = |key: &str| -> Vec<String> {
+        span.attributes
+            .iter()
+            .filter(|attribute| attribute.key.as_str() == key)
+            .map(|attribute| attribute.value.to_string())
+            .collect()
+    };
+    assert_eq!(values("gen_ai.provider.name"), ["openrouter"]);
+    assert_eq!(values("gen_ai.usage.cost"), ["0.25"]);
+    assert_eq!(values("lash.turn.id"), ["lash-turn"]);
+    let refusals = refusals.lock().unwrap();
+    assert_eq!(
+        refusals.provider_set,
+        Some(Err(crate::TraceOmission::UseReplace))
+    );
+    assert_eq!(
+        refusals.reserved_set,
+        Some(Err(crate::TraceOmission::ReservedKey))
+    );
+    assert_eq!(refusals.host_set, Some(Ok(())));
+    let report = ledger.report();
+    let site = crate::TraceOmissionSiteKind::Span;
+    assert_eq!(report.get(site, crate::TraceOmission::UseReplace), 1);
+    assert_eq!(report.get(site, crate::TraceOmission::ReservedKey), 1);
+    assert_eq!(report.total(), 2);
+    let omitted = span
+        .attributes
+        .iter()
+        .find(|attribute| attribute.key.as_str() == "lash.trace.omitted")
+        .map(|attribute| attribute.value.clone());
+    assert_eq!(
+        omitted,
+        Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+            vec!["reserved_key".into(), "use_replace".into()]
+        )))
     );
 }

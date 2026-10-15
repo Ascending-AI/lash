@@ -210,7 +210,7 @@ pub(crate) struct BenchmarkRuntime {
 pub(crate) struct RuntimePerfTraceConfig {
     pub(crate) trace_jsonl_path: Option<PathBuf>,
     pub(crate) lash_vm_execution_jsonl_path: Option<PathBuf>,
-    pub(crate) trace_level: lash::tracing::TraceLevel,
+    pub(crate) trace_detail: lash::tracing::TraceDetailPolicy,
 }
 
 impl BenchmarkRuntime {
@@ -1021,7 +1021,7 @@ pub(crate) async fn build_runtime(
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_sink(Arc::new(JsonlFileSink::new(path)));
                 }
-                builder = builder.trace_level(config.trace_level);
+                builder = builder.trace_detail(config.trace_detail);
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
@@ -1044,7 +1044,7 @@ pub(crate) async fn build_runtime(
                 if let Some(path) = config.trace_jsonl_path {
                     builder = builder.trace_sink(Arc::new(JsonlFileSink::new(path)));
                 }
-                builder = builder.trace_level(config.trace_level);
+                builder = builder.trace_detail(config.trace_detail);
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }

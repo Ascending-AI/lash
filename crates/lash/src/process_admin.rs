@@ -115,8 +115,8 @@ impl Processes {
                     .env
                     .core
                     .tracing
-                    .limits()
-                    .process_effect_occurrences,
+                    .evidence_limits()
+                    .process_effect_occurrences(),
             ),
         }
     }

@@ -516,7 +516,7 @@ async fn main() -> Result<()> {
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_sink(Arc::new(trace_file::JsonlFileSink::new(&trace_path)))
-        .trace_level(lash::tracing::TraceLevel::Extended)
+        .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("rlm-smoke"), lash::persistence::LeaseIncarnationId::new(args.session_id.clone())))
         .context("build RLM smoke core")?;

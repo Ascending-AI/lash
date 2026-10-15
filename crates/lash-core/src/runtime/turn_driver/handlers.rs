@@ -290,7 +290,10 @@ impl RuntimeTurnDriver<'_> {
                 && let Some(evidence) = crate::TurnFailureEvidence::from_llm_failure(
                     error,
                     record,
-                    self.trace.runtime().limits().failure_partial_output_bytes,
+                    self.trace
+                        .runtime()
+                        .evidence_limits()
+                        .failure_partial_output_bytes(),
                 )
             {
                 self.failure_evidence.push(evidence);

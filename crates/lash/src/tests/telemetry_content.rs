@@ -200,7 +200,7 @@ async fn tool_calling_turn(
                 Arc::clone(&recording) as Arc<dyn TraceSink>,
                 Arc::clone(&lines) as Arc<dyn TraceSink>,
             ])))
-            .trace_level(lash_trace::TraceLevel::Extended),
+            .trace_detail(lash_trace::TraceDetailPolicy::extended_models()),
     )
     .build(crate::testing::runtime_lease_owner())?;
     // output() waits for the durable settled outcome before trace shutdown.

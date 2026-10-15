@@ -179,7 +179,10 @@ fn links_keep_the_first_sixty_four_distinct_spans_in_admission_order() {
         links.push(carrier(span));
         links.push(carrier(span));
     }
-    assert_eq!(links.contexts().len(), TRACE_LINK_LIMIT);
+    assert_eq!(
+        links.contexts().len(),
+        crate::TraceLimits::standard().links() as usize
+    );
     assert_eq!(links.contexts()[0], carrier(1));
     assert_eq!(links.contexts()[63], carrier(64));
     // 65..=70 arrive twice each past the limit: none is retained to dedup against.
@@ -188,7 +191,13 @@ fn links_keep_the_first_sixty_four_distinct_spans_in_admission_order() {
     let stored = serde_json::to_value(&links).unwrap();
     assert_eq!(serde_json::from_value::<TraceLinks>(stored).unwrap(), links);
 
-    let over: Vec<_> = (1..=65_u64).map(carrier).collect();
+    // A scope retained under a configured limit up to the hard maximum
+    // decodes; past it, decoding refuses.
+    let ceiling = crate::TracePolicyField::Links.bounds().unwrap().max;
+    let at: Vec<_> = (1..=ceiling).map(carrier).collect();
+    let decoded = serde_json::from_value::<TraceLinks>(json!({ "contexts": at })).unwrap();
+    assert_eq!(u64::try_from(decoded.contexts().len()).unwrap(), ceiling);
+    let over: Vec<_> = (1..=ceiling + 1).map(carrier).collect();
     assert!(serde_json::from_value::<TraceLinks>(json!({ "contexts": over })).is_err());
     assert!(
         serde_json::from_value::<TraceLinks>(json!({ "contexts": [carrier(1), carrier(1)] }))
@@ -380,27 +389,30 @@ fn record_identity_is_stable_per_fact_and_distinct_per_attempt() {
 #[test]
 fn an_admitting_scope_parents_its_head_and_links_the_rest() {
     let caused = |span| TraceCause::Parent(carrier(span));
-    let (parent, links) = TraceCause::of_admitted([]);
+    let (parent, links) = TraceCause::of_admitted([], 64);
     assert_eq!(parent, None);
     assert!(links.is_empty());
-    let (parent, links) = TraceCause::of_admitted([&TraceCause::None, &caused(1)]);
+    let (parent, links) = TraceCause::of_admitted([&TraceCause::None, &caused(1)], 64);
     assert_eq!(parent, None, "a head with no cause is unobserved");
     assert!(links.is_empty());
-    let (parent, links) = TraceCause::of_admitted([&caused(1)]);
+    let (parent, links) = TraceCause::of_admitted([&caused(1)], 64);
     assert_eq!(
         parent.map(|parent| parent.carrier().clone()),
         Some(carrier(1))
     );
     assert!(links.is_empty());
 
-    let (parent, links) = TraceCause::of_admitted([
-        &caused(9),
-        &caused(1),
-        &TraceCause::None,
-        &caused(9),
-        &caused(2),
-        &caused(1),
-    ]);
+    let (parent, links) = TraceCause::of_admitted(
+        [
+            &caused(9),
+            &caused(1),
+            &TraceCause::None,
+            &caused(9),
+            &caused(2),
+            &caused(1),
+        ],
+        64,
+    );
     assert_eq!(
         parent.map(|parent| parent.carrier().clone()),
         Some(carrier(9))
@@ -424,7 +436,7 @@ fn host_trace_state_and_link_limits_are_honored() {
         W3cTraceState::parse_with_limits("a=1,b=2", limits),
         Err(InvalidTraceCarrier::TracestateMembers { limit: 1, .. })
     ));
-    let mut links = TraceLinks::with_limit(1).unwrap();
+    let mut links = TraceLinks::with_limit(1);
     links.push(carrier(1));
     links.push(carrier(2));
     assert_eq!(links.contexts().len(), 1);

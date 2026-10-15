@@ -75,11 +75,13 @@ impl Telemetry {
     pub fn runtime(&self) -> lash_core::runtime::TraceRuntime {
         let recorder = FlightRecorderSink::new(
             Counting(Arc::clone(&self.recorded)),
-            FlightRecorderSettings {
-                slow_threshold: std::time::Duration::ZERO,
-                minimum_interval: std::time::Duration::ZERO,
-                ..FlightRecorderSettings::default()
-            },
+            FlightRecorderSettings::new(
+                256,
+                Some(std::time::Duration::from_millis(1)),
+                std::time::Duration::ZERO,
+                true,
+            )
+            .unwrap(),
             |_snapshot| panic!("the snapshot callback panics"),
         );
         lash_core::runtime::TraceRuntime::new(Arc::new(lash_core::runtime::SystemClock))

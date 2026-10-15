@@ -284,8 +284,9 @@ pub trait SingletonToolHandlers: Send + Sync {
         None
     }
 
-    fn trace_limits(&self) -> lash_trace::TraceLimits {
-        lash_trace::TraceLimits::standard()
+    /// The bounds on the execution evidence the call records.
+    fn evidence_limits(&self) -> crate::EvidenceLimits {
+        crate::EvidenceLimits::standard()
     }
 
     /// The actual process implementations installed by this host.

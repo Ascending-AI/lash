@@ -328,10 +328,10 @@ pub(super) async fn run_once_trace_jsonl(
             let trace_config = RuntimePerfTraceConfig {
                 trace_jsonl_path: Some(trace_path.clone()),
                 lash_vm_execution_jsonl_path: lash_vm_trace_path.clone(),
-                trace_level: if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended) {
-                    lash::tracing::TraceLevel::Extended
+                trace_detail: if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended) {
+                    lash::tracing::TraceDetailPolicy::extended_models()
                 } else {
-                    lash::tracing::TraceLevel::Standard
+                    lash::tracing::TraceDetailPolicy::standard()
                 },
             };
             let runtime = build_runtime(scenario, Some(trace_config)).await?;

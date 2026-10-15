@@ -8,8 +8,10 @@
 //! and leaf ids from the host's fallback id generator, and asks the host's
 //! sampler at producers, the one decision every lash span of the trace
 //! follows.
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use lash_sansio::sync::MutexExt;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{
     Link, Span, SpanBuilder, SpanContext, SpanId, SpanKind, Status, TraceContextExt, TraceFlags,
@@ -20,14 +22,16 @@ use opentelemetry_sdk::trace::{IdGenerator, SamplingDecision, SdkTracer};
 
 use lash_sansio::llm::types::LlmUsage;
 
+use crate::policy::{Contributions, TraceAttributeWriter, TraceOmissionCounts};
 use crate::telemetry::{
     ProducerKind, ProducerSpec, TraceCarrier, TraceIdentity, TraceLinkMode, TraceScopeId,
     TraceScopeOwner, TraceToolOwner, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 use crate::{
-    TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TracePosition, TraceRecord,
-    TraceRetryAttemptDetail, TraceSink, TraceSinkError, TraceSpanKind, TraceToolAttemptOutcome,
-    TraceTurnOutcome,
+    SpanRole, TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TraceExportPolicy,
+    TraceMetrics, TraceOmissionLedger, TraceOmissionSite, TracePolicySnapshot, TracePosition,
+    TraceRecord, TraceRetryAttemptDetail, TraceSink, TraceSinkError, TraceSpanKind, TraceTimestamp,
+    TraceToolAttemptOutcome, TraceTurnOutcome,
 };
 
 /// Exact API namespace supported by this adapter.
@@ -35,41 +39,37 @@ pub use opentelemetry as api;
 /// Exact SDK namespace [`LashTracerProvider`] wraps.
 pub use opentelemetry_sdk as sdk;
 
+mod enrich;
 mod payload;
 mod provider;
 pub use crate::telemetry::metrics::registry;
 pub use crate::telemetry::metrics::{
     ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics, TelemetryMetrics, ToolIntentMetrics,
 };
+pub use enrich::{SpanEnricher, SpanEnrichment, SpanView};
 pub use provider::LashTracerProvider;
 use registry::{AttributeKey as A, DomainSpan};
 pub use registry::{GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT};
 
-/// Host naming and attribute customization over the typed domain record.
-pub trait OtelSpanEnricher: Send + Sync {
-    fn span_name(&self, _default: &'static str, _record: &TraceRecord) -> Option<String> {
-        None
-    }
-    fn attributes(&self, _record: &TraceRecord, _out: &mut Vec<KeyValue>) {}
-}
-
+/// The exporter's host choices.
 #[derive(Clone)]
 pub struct OtelOptions {
-    /// Bytes of one record's exported event payload. Whether a payload is
-    /// exported at all follows the host's
-    /// [`TelemetryContent`](crate::TelemetryContent) policy, read from
-    /// [`TraceRecord::content`].
-    pub max_payload_bytes: usize,
-    pub enrich: Option<Arc<dyn OtelSpanEnricher>>,
+    /// The host's enricher: none by default.
+    pub enricher: Option<Arc<dyn SpanEnricher>>,
+    /// Which kinds become spans: every kind lash builds by default.
+    pub export: TraceExportPolicy,
+    /// Which metric families are recorded: all by default.
+    pub metrics: TraceMetrics,
 }
 
 impl OtelOptions {
-    /// Standard preset: 4096 payload bytes per record and no enrichment.
-    /// Export remains opt-in through installing this adapter.
+    /// No enricher, every kind exported, every metric family recorded.
+    /// Export remains opt-in through installing the exporter.
     pub fn standard() -> Self {
         Self {
-            max_payload_bytes: 4096,
-            enrich: None,
+            enricher: None,
+            export: TraceExportPolicy::standard(),
+            metrics: TraceMetrics::All,
         }
     }
 }
@@ -79,6 +79,11 @@ impl Default for OtelOptions {
     }
 }
 
+/// A producer's contributions, made before its decision and exported on its
+/// span at settle: its enrichment, then the host sampler's result
+/// attributes. Held in memory only, from the producer's open to its settle.
+type ProducerContributions = (Contributions, TraceOmissionCounts);
+
 /// The runtime's OpenTelemetry exporter and identity. The host owns its
 /// provider's flush and shutdown.
 #[derive(Clone)]
@@ -87,6 +92,9 @@ pub struct OtelTelemetry {
     provider: LashTracerProvider,
     metrics: TelemetryMetrics,
     options: OtelOptions,
+    policy: Arc<TracePolicySnapshot>,
+    omissions: Arc<TraceOmissionLedger>,
+    producers: Arc<Mutex<HashMap<W3cSpanId, ProducerContributions>>>,
 }
 
 impl OtelTelemetry {
@@ -95,15 +103,27 @@ impl OtelTelemetry {
         meter_provider: &impl MeterProvider,
         options: OtelOptions,
     ) -> Self {
+        let metrics = if options.metrics.records_runtime() {
+            TelemetryMetrics::new(meter_provider.meter_with_scope(instrumentation_scope()))
+        } else {
+            TelemetryMetrics::default()
+        };
+        let policy = TracePolicySnapshot {
+            export: Some(options.export),
+            metrics: Some(options.metrics),
+            enricher: options.enricher.is_some(),
+            ..TracePolicySnapshot::standard()
+        };
         Self {
             tracer: tracer_provider
                 .provider()
                 .tracer_with_scope(instrumentation_scope()),
             provider: tracer_provider.clone(),
-            metrics: TelemetryMetrics::new(
-                meter_provider.meter_with_scope(instrumentation_scope()),
-            ),
+            metrics,
             options,
+            policy: Arc::new(policy),
+            omissions: Arc::default(),
+            producers: Arc::default(),
         }
     }
 
@@ -112,6 +132,39 @@ impl OtelTelemetry {
     }
     pub fn options(&self) -> &OtelOptions {
         &self.options
+    }
+
+    /// Binds the core's effective policies and its omission ledger: the
+    /// builder installing this exporter calls it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn bound(
+        mut self,
+        policy: TracePolicySnapshot,
+        omissions: Arc<TraceOmissionLedger>,
+    ) -> Self {
+        self.policy = Arc::new(TracePolicySnapshot {
+            export: Some(self.options.export),
+            metrics: Some(self.options.metrics),
+            enricher: self.options.enricher.is_some(),
+            ..policy
+        });
+        self.omissions = omissions;
+        self
+    }
+
+    /// The policies the exporter applies.
+    pub fn policy(&self) -> &TracePolicySnapshot {
+        &self.policy
+    }
+
+    /// Runs the enricher over a span that already holds `writer`'s
+    /// contributions, and counts what was refused at the span.
+    fn enriched(&self, view: &SpanView<'_>, writer: TraceAttributeWriter) -> TraceAttributeWriter {
+        match &self.options.enricher {
+            Some(enricher) => enrich::enrich(enricher.as_ref(), view, writer),
+            None => writer,
+        }
     }
 
     fn fallback(&self) -> &Arc<dyn IdGenerator> {
@@ -137,7 +190,15 @@ impl OtelTelemetry {
     /// Builds the SDK span `record` publishes: a sampled closing or whole
     /// record, at its position's preset id, under its parent, from its
     /// retained start to its end.
-    fn export(&self, record: &TraceRecord, position: &TracePosition) {
+    fn export(
+        &self,
+        record: &TraceRecord,
+        position: &TracePosition,
+        producer: Option<ProducerContributions>,
+    ) {
+        if !self.options.export.exports(position.kind) {
+            return;
+        }
         let Some(projection) = Projection::for_record(record, position) else {
             return;
         };
@@ -179,15 +240,38 @@ impl OtelTelemetry {
         attributes.push(A::EventType.value(record.event.kind().as_str()));
         correlation_attributes(position.scope.as_ref(), &record.context, &mut attributes);
         projection.attributes(record, &mut attributes);
+        payload::attributes(record, &mut attributes);
         let definition = projection.span.definition();
         let mut name = projection.name();
-        if let Some(enrich) = &self.options.enrich {
-            if let Some(custom) = enrich.span_name(definition.name, record) {
-                name = custom;
+        let (contributions, omissions) = match producer {
+            Some(contributed) => contributed,
+            None => {
+                let ids = record.context.ids();
+                let view = SpanView {
+                    kind: position.kind,
+                    default_name: &name,
+                    ids: &ids,
+                    position,
+                    record,
+                    attributes: &attributes,
+                    policy: &self.policy,
+                };
+                let writer = TraceAttributeWriter::new(position.kind, &self.policy.limits);
+                self.enriched(&view, writer).finish()
             }
-            enrich.attributes(record, &mut attributes);
+        };
+        if !omissions.is_empty() {
+            self.omissions.record(
+                &TraceOmissionSite::Span {
+                    kind: position.kind,
+                    span: position.span.span_id(),
+                },
+                &omissions,
+            );
         }
-        payload::attributes(record, &self.options, &mut attributes);
+        if let Some(custom) = enrich::assemble(&mut attributes, contributions, &omissions) {
+            name = custom.into_owned();
+        }
         let builder = SpanBuilder::from_name(name)
             .with_kind(definition.kind)
             .with_start_time(position.started_at.to_system_time())
@@ -213,11 +297,21 @@ impl OtelTelemetry {
 /// record, an opening record and an event build nothing.
 impl TraceSink for OtelTelemetry {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        if let Some(position) = &record.position
-            && position.publishes()
-            && position.is_sampled()
-        {
-            self.export(record, position);
+        let Some(position) = &record.position else {
+            return Ok(());
+        };
+        // A producer's contributions are taken at its one whole record,
+        // sampled or not, so none outlives its call.
+        let producer = (position.kind == TraceSpanKind::Producer
+            && position.role == SpanRole::Whole)
+            .then(|| {
+                self.producers
+                    .lock_recover()
+                    .remove(&position.span.span_id())
+            })
+            .flatten();
+        if position.publishes() && position.is_sampled() {
+            self.export(record, position, producer);
         }
         Ok(())
     }
@@ -248,15 +342,35 @@ impl TraceIdentity for OtelTelemetry {
             ),
             (None, _) => (Context::new(), self.trace_id(), Vec::new()),
         };
+        let (mut writer, name) = self.enrich_producer(spec, trace_id, span_id);
+        let enriched: Vec<KeyValue> = writer
+            .contributions()
+            .added
+            .iter()
+            .map(|(key, value)| {
+                KeyValue::new(key.as_str().to_owned(), enrich::otel_value(value.clone()))
+            })
+            .collect();
         let result = self.provider.sampler().should_sample(
             Some(&parent),
             TraceId::from_bytes(trace_id.to_bytes()),
-            producer(spec.kind).definition().name,
+            &name,
             &SpanKind::Producer,
-            &[],
+            &enriched,
             &links,
         );
         let sampled = result.decision == SamplingDecision::RecordAndSample;
+        // The sampler's result attributes stay with the producer, written
+        // after its enrichment against what the producer's budget has left.
+        for attribute in result.attributes {
+            let _refused = writer.set(
+                attribute.key.as_str().to_owned(),
+                enrich::trace_value(attribute.value),
+            );
+        }
+        self.producers
+            .lock_recover()
+            .insert(span_id, writer.finish());
         let caller_flags = match spec.link_mode {
             TraceLinkMode::Parent => caller.map_or(0, |caller| caller.flags().to_byte()),
             TraceLinkMode::Link => 0,
@@ -276,6 +390,89 @@ impl TraceIdentity for OtelTelemetry {
 
     fn leaf_span_id(&self) -> W3cSpanId {
         self.span_id()
+    }
+}
+
+impl OtelTelemetry {
+    /// Runs the enricher over the producer `spec` opens at `span_id` in
+    /// `trace_id`, before its decision: its position is complete, its flags
+    /// are the caller's. Returns its contributions and its name.
+    fn enrich_producer(
+        &self,
+        spec: &ProducerSpec,
+        trace_id: W3cTraceId,
+        span_id: W3cSpanId,
+    ) -> (TraceAttributeWriter, String) {
+        let caller = spec.caller.as_ref();
+        let (parent, links, flags, tracestate) = match (caller, spec.link_mode) {
+            (Some(caller), TraceLinkMode::Parent) => (
+                Some(caller.clone()),
+                crate::TraceLinks::new(),
+                caller.flags(),
+                caller.tracestate().clone(),
+            ),
+            (Some(caller), TraceLinkMode::Link) => (
+                None,
+                std::iter::once(caller.clone()).collect(),
+                W3cTraceFlags::default(),
+                W3cTraceState::default(),
+            ),
+            (None, _) => (
+                None,
+                crate::TraceLinks::new(),
+                W3cTraceFlags::default(),
+                W3cTraceState::default(),
+            ),
+        };
+        let now = TraceTimestamp::from_system_time(std::time::SystemTime::now())
+            .unwrap_or(TraceTimestamp::from_unix_ms(0));
+        let position = TracePosition {
+            span: TraceCarrier::new(trace_id, span_id, flags, tracestate),
+            parent,
+            links,
+            role: SpanRole::Whole,
+            kind: TraceSpanKind::Producer,
+            started_at: now,
+            ended_at: Some(now),
+            scope: None,
+            attempt: None,
+        };
+        let name = producer(spec.kind).definition().name;
+        let writer = TraceAttributeWriter::new(TraceSpanKind::Producer, &self.policy.limits);
+        let Some(enricher) = &self.options.enricher else {
+            return (writer, name.to_owned());
+        };
+        let record = TraceRecord {
+            schema_version: crate::TRACE_SCHEMA_VERSION,
+            id: format!("producer:{span_id}"),
+            timestamp: now,
+            content: crate::TelemetryContent::Omitted,
+            context: TraceContext::of_ids(spec.ids.clone()),
+            position: Some(position.clone()),
+            omissions: TraceOmissionCounts::default(),
+            event: TraceEvent::ProducerSettled {
+                producer: spec.kind,
+                outcome: crate::ProducerOutcome::Selected,
+            },
+        };
+        let mut attributes = Vec::new();
+        correlation_attributes(None, &record.context, &mut attributes);
+        let view = SpanView {
+            kind: TraceSpanKind::Producer,
+            default_name: name,
+            ids: &spec.ids,
+            position: &position,
+            record: &record,
+            attributes: &attributes,
+            policy: &self.policy,
+        };
+        let writer = enrich::enrich(enricher.as_ref(), &view, writer);
+        let renamed = writer
+            .contributions()
+            .name
+            .as_deref()
+            .map(ToOwned::to_owned);
+        (writer, renamed.unwrap_or_else(|| name.to_owned()))
     }
 }
 
@@ -503,7 +700,7 @@ impl<'a> Projection<'a> {
                     out.push(A::RequestModel.value(model.clone()));
                 }
                 if let Some(provider) = &completion.provider {
-                    out.push(A::ProviderName.value(provider.clone()));
+                    out.push(A::GenAiProviderName.value(provider.clone()));
                 }
                 if let TraceDomainSubject::ToolIntent { kind } = completion.subject {
                     out.push(A::ToolIntentKind.value(kind.as_str()));

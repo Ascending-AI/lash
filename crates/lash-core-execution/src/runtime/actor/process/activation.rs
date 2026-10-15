@@ -86,7 +86,7 @@ pub struct ProcessActivation {
     /// What a process's terminal and a park are reported through; a node
     /// given none reports neither.
     pub(super) tracing: Option<crate::trace::TraceRuntime>,
-    trace_limits: lash_trace::TraceLimits,
+    evidence: crate::EvidenceLimits,
     pub(super) backend: Backend,
     pub(super) steps: Arc<dyn ProcessSteps>,
     probe: Arc<dyn DurableProbe>,
@@ -109,7 +109,7 @@ impl ProcessActivation {
         Self {
             backend,
             tracing: None,
-            trace_limits: lash_trace::TraceLimits::standard(),
+            evidence: crate::EvidenceLimits::standard(),
             steps,
             probe,
             session_turns: None,
@@ -123,7 +123,7 @@ impl ProcessActivation {
     /// retained, and a committed park counts in `lash.parked_work.parks`.
     #[must_use]
     pub fn with_tracing(mut self, tracing: crate::trace::TraceRuntime) -> Self {
-        self.trace_limits = tracing.limits();
+        self.evidence = tracing.evidence_limits();
         self.tracing = Some(tracing);
         self
     }
@@ -767,7 +767,7 @@ impl ProcessActivation {
             }
         };
         if matches!(event, EngineEvent::Started { .. }) {
-            driver.effect_occurrence_cap = self.trace_limits.process_effect_occurrences;
+            driver.effect_occurrence_cap = self.evidence.process_effect_occurrences();
             driver.cancel_grace_ms =
                 u64::try_from(engine.cancel_grace().as_millis()).unwrap_or(u64::MAX);
         }

@@ -714,6 +714,13 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// start's effect identity never cover it.
     #[serde(default, skip_serializing_if = "lash_trace::TraceScopeOffer::is_empty")]
     pub trace: lash_trace::TraceScopeOffer,
+    /// Whether the process exports a span per workflow node occurrence: the
+    /// registering node's `TraceDetailPolicy` selects `Extended` for
+    /// `Workflow`. Start staging sets it; the inserting registration retains
+    /// it as the record's [`trace_nodes`](ProcessRecord::trace_nodes). It is
+    /// no part of the start, like [`Self::trace`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trace_nodes: bool,
     /// The claim requirements the process's actor is created with: one
     /// `component:<id>@fmt<format>` for every component its environment
     /// names (FIG-6034 §6.2). Start staging derives them from the held
@@ -739,6 +746,7 @@ impl<I> Clone for ProcessRegistration<I> {
             provenance: self.provenance.clone(),
             consumer_hold: self.consumer_hold.clone(),
             trace: self.trace.clone(),
+            trace_nodes: self.trace_nodes,
             requires: self.requires.clone(),
         }
     }
@@ -861,6 +869,7 @@ impl<I> ProcessRegistration<I> {
             provenance,
             consumer_hold: None,
             trace: lash_trace::TraceScopeOffer::default(),
+            trace_nodes: false,
             requires: Vec::new(),
         }
     }
@@ -907,8 +916,16 @@ impl<I> ProcessRegistration<I> {
             provenance: self.provenance,
             consumer_hold: self.consumer_hold,
             trace: self.trace,
+            trace_nodes: self.trace_nodes,
             requires: self.requires,
         }
+    }
+
+    /// Sets whether the process exports workflow node spans
+    /// ([`Self::trace_nodes`]).
+    pub fn with_trace_nodes(mut self, trace_nodes: bool) -> Self {
+        self.trace_nodes = trace_nodes;
+        self
     }
 
     /// Sets what the start offers the process's trace scope

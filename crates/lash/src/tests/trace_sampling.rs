@@ -7,8 +7,9 @@
 //! without sampling them (`RecordOnly`) and rewrites the tracestate of every
 //! send it samples. It serves no session: a second owner, whose sampler is
 //! `AlwaysOff`, runs every turn. Both share one recording sink.
-//! (The sampler's result attributes are the tracing lane T6's; the MCP
-//! `_meta` clause is the MCP propagation lane's, §3.10.)
+//! The sampler's result attributes (FIG-6300) are exported on the producer
+//! span only, and no store row holds them. (The MCP `_meta` clause is the
+//! MCP propagation lane's, §3.10.)
 
 use super::tracing::text_call;
 use super::*;
@@ -27,6 +28,8 @@ use opentelemetry_sdk::trace::{
 const KEEP: u8 = 0x51;
 const DROP: u8 = 0x52;
 const RECORD: u8 = 0x53;
+/// The sampler's result attribute: a token no lash row may hold.
+const SAMPLER_TOKEN: &str = "sampler-kept-3d9a";
 
 fn caller(caller: u8) -> lash_core::TraceCarrier {
     lash_core::TraceCarrier::parse_w3c(&format!("00-{caller:032x}-{caller:016x}-01"), None)
@@ -60,7 +63,7 @@ impl ShouldSample for HostSampler {
             } else {
                 SamplingDecision::RecordAndSample
             },
-            attributes: Vec::new(),
+            attributes: vec![KeyValue::new("host.sampler", SAMPLER_TOKEN)],
             trace_state: TraceState::from_key_value([("vendor", "x")]).expect("a tracestate"),
         }
     }
@@ -87,16 +90,19 @@ fn exporting(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Result<()> {
-    let backend = sqlite_memory_store_backend().await;
+    let directory = tempfile::tempdir().expect("SQLite test directory");
+    let database = directory.path().join("lash.db");
     let sink = Arc::new(crate::testing::RecordingTraceSink::new());
     let ((first_spans, _first), first) = exporting(
-        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-            .serve_test_llm_profile(
-                mock_provider(Vec::new()).into_handle(),
-                mock_llm_profile_spec(),
-            )
-            .serve_sessions(false)
-            .trace_sink(sink.clone()),
+        explicit_ephemeral_facets(LashCore::standard_builder(
+            super::trace_enrichment::file_backend(&database).await,
+        ))
+        .serve_test_llm_profile(
+            mock_provider(Vec::new()).into_handle(),
+            mock_llm_profile_spec(),
+        )
+        .serve_sessions(false)
+        .trace_sink(sink.clone()),
         HostSampler,
     );
     let first = first.build(crate::testing::runtime_lease_owner())?;
@@ -110,17 +116,19 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
             .await?;
     }
     let ((second_spans, _second), second) = exporting(
-        explicit_ephemeral_facets(LashCore::standard_builder(backend))
-            .serve_test_llm_profile(
-                mock_provider(vec![
-                    text_call("done"),
-                    text_call("done"),
-                    text_call("done"),
-                ])
-                .into_handle(),
-                mock_llm_profile_spec(),
-            )
-            .trace_sink(sink.clone()),
+        explicit_ephemeral_facets(LashCore::standard_builder(
+            super::trace_enrichment::file_backend(&database).await,
+        ))
+        .serve_test_llm_profile(
+            mock_provider(vec![
+                text_call("done"),
+                text_call("done"),
+                text_call("done"),
+            ])
+            .into_handle(),
+            mock_llm_profile_spec(),
+        )
+        .trace_sink(sink.clone()),
         Sampler::AlwaysOff,
     );
     let second = second.build(crate::testing::runtime_lease_owner())?;
@@ -222,7 +230,20 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
             "an unsampled trace's records are unsampled"
         );
     }
+    for span in &exported {
+        let carried = span
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key.as_str() == "host.sampler");
+        assert_eq!(
+            carried,
+            span.name == "lash.send",
+            "{} carries the sampler's attribute only as the producer",
+            span.name
+        );
+    }
     first.shutdown().await?;
     second.shutdown().await?;
+    super::trace_enrichment::assert_not_stored(directory.path(), SAMPLER_TOKEN);
     Ok(())
 }

@@ -38,10 +38,7 @@ async fn facade_held_observation_capacity_limits_the_live_suffix() {
         crate::tests::sqlite_memory_store_backend().await,
     ))
     .trace_sink(sink.clone())
-    .trace_limits(TraceLimits {
-        held_observations: 1,
-        ..TraceLimits::standard()
-    });
+    .trace_limits(TraceLimits::builder().held_observations(1).build().unwrap());
     let config = builder
         .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
         .unwrap();
@@ -73,19 +70,26 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
     let mut builder = crate::tests::explicit_ephemeral_facets(LashCore::builder(
         crate::tests::sqlite_memory_store_backend().await,
     ))
-    .trace_limits(TraceLimits {
-        attempt_stream_bytes: 1,
-        failure_partial_output_bytes: 1,
-        diff_value_json_bytes: 1,
-        diff_summary_paths: 1,
-        diagnostic_error_chars: 2,
-        ..TraceLimits::standard()
-    });
+    .evidence_limits(
+        crate::EvidenceLimits::builder()
+            .attempt_stream_bytes(1)
+            .failure_partial_output_bytes(1)
+            .diff_value_json_bytes(1)
+            .diff_summary_paths(1)
+            .build()
+            .unwrap(),
+    )
+    .diagnostic_limits(
+        crate::DiagnosticLimits::builder()
+            .diagnostic_error_chars(2)
+            .build()
+            .unwrap(),
+    );
     let config = builder
         .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
         .unwrap();
-    let limits = config.tracing.limits();
-    let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
+    let limits = config.tracing.evidence_limits();
+    let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes());
     recorder.observe(ShiftObservation {
         key: ReplayKey::new("capacity"),
         ordinal: 0,
@@ -101,11 +105,14 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
     assert!(captured.events.is_empty());
     assert_eq!(captured.truncated.unwrap().dropped_events, 1);
     let output =
-        crate::TurnFailurePartialOutput::bounded("€".into(), limits.failure_partial_output_bytes);
+        crate::TurnFailurePartialOutput::bounded("€".into(), limits.failure_partial_output_bytes());
     assert!(output.is_truncated());
     assert!(output.text().len() <= 1);
     assert_eq!(
-        limits.diagnostic_error("€abcd€"),
+        config
+            .tracing
+            .diagnostic_limits()
+            .diagnostic_error("€abcd€"),
         "€\n\n... (4 chars omitted) ...\n\n€"
     );
     let recorded = envelope(serde_json::json!({"a": "one", "b": "two"}))

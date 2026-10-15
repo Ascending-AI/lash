@@ -1013,13 +1013,14 @@ fn session_budget(
             lash_core_store::tool_run::StateCommandRefusal::SessionTooLarge { bytes, limit },
         );
     }
-    let warn = registry.trace_limits.plugin_state_warn_bytes;
-    if bytes > warn {
+    if let Some(warn) = registry.diagnostics.plugin_state_warn_bytes()
+        && u64::try_from(bytes).unwrap_or(u64::MAX) > warn.get()
+    {
         tracing::debug!(
             event = "plugin_state.session_budget_warn",
             plugin_id = %plugin,
             bytes,
-            warn,
+            warn = warn.get(),
             limit = limit,
             "a plugin-state publication takes the session past its warn tier"
         );

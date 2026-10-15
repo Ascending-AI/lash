@@ -19,84 +19,183 @@ pub enum Ownership {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttributeType {
     String,
+    StringArray,
     Integer,
     Boolean,
+}
+
+/// Who may change an attribute lash sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttributeMutability {
+    /// A fact lash derived: ids, times, outcomes, measurements and every
+    /// `lash.*` key. Nothing replaces it.
+    Provenance,
+    /// Lash's best default for a fact the host may know better, which the
+    /// host's enricher can replace through [`RefinableKey`].
+    Refinable,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeDefinition {
     pub key: &'static str,
     pub value_type: AttributeType,
+    pub mutability: AttributeMutability,
+    /// The span kinds lash sets the attribute on. Empty for a metric label.
+    pub on: TraceSpanKindSet,
 }
 
+use crate::{TraceSpanKind as K, TraceSpanKindSet};
+
+/// Every kind lash exports a span of.
+const EVERY: TraceSpanKindSet = TraceSpanKindSet::ALL;
+/// No span: a metric label.
+const NONE: TraceSpanKindSet = TraceSpanKindSet::EMPTY;
+/// The kinds a domain completion record closes, which carry its model,
+/// provider, tool and usage.
+const DOMAIN: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Process, K::ToolIntent]);
+const MODEL_OR_DOMAIN: TraceSpanKindSet =
+    TraceSpanKindSet::of(&[K::Model, K::Process, K::ToolIntent]);
+
 macro_rules! attributes {
-    ($($id:ident => ($key:literal, $ty:ident)),+ $(,)?) => {
+    (
+        provenance: { $($id:ident => ($key:literal, $ty:ident, $on:expr)),+ $(,)? }
+        refinable: { $($rid:ident => ($rkey:literal, $rty:ident, $ron:expr)),+ $(,)? }
+    ) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum AttributeKey { $($id),+ }
+        pub enum AttributeKey { $($id,)+ $($rid),+ }
         impl AttributeKey {
             pub const fn definition(self) -> AttributeDefinition { match self {
-                $(Self::$id => AttributeDefinition { key: $key, value_type: AttributeType::$ty }),+
+                $(Self::$id => AttributeDefinition {
+                    key: $key,
+                    value_type: AttributeType::$ty,
+                    mutability: AttributeMutability::Provenance,
+                    on: $on,
+                },)+
+                $(Self::$rid => AttributeDefinition {
+                    key: $rkey,
+                    value_type: AttributeType::$rty,
+                    mutability: AttributeMutability::Refinable,
+                    on: $ron,
+                }),+
             }}
             #[cfg(feature = "otel")]
             pub fn value(self, value: impl Into<Value>) -> KeyValue { KeyValue::new(self.definition().key, value) }
         }
-        pub const ATTRIBUTES: &[AttributeDefinition] = &[$(AttributeDefinition { key: $key, value_type: AttributeType::$ty }),+];
+        /// Every registry attribute, in table order.
+        pub const ATTRIBUTE_KEYS: &[AttributeKey] = &[$(AttributeKey::$id,)+ $(AttributeKey::$rid),+];
+        pub const ATTRIBUTES: &[AttributeDefinition] = &[
+            $(AttributeKey::$id.definition(),)+
+            $(AttributeKey::$rid.definition()),+
+        ];
+
+        /// A semantic default lash sets that the host's enricher can
+        /// replace: the registry's refinable attributes.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
+        pub enum RefinableKey { $($rid),+ }
+        impl RefinableKey {
+            /// The registry attribute the key replaces.
+            pub(crate) const fn attribute(self) -> AttributeKey {
+                match self { $(Self::$rid => AttributeKey::$rid),+ }
+            }
+            pub const fn key(self) -> &'static str {
+                self.attribute().definition().key
+            }
+        }
     }
 }
 attributes! {
-    ScopeKind => ("lash.scope.kind", String),
-    ScopeBoundary => ("lash.scope.boundary", Integer),
-    ProducerOutcome => ("lash.producer.outcome", String),
-    LinksOmitted => ("lash.links.omitted", Integer),
-    RecordId => ("lash.record.id", String),
-    EventType => ("lash.event.type", String),
-    ConversationId => ("gen_ai.conversation.id", String),
-    RunId => ("lash.run.id", String),
-    ProcessId => ("lash.process.id", String),
-    LlmCallId => ("lash.llm_call.id", String),
-    SendId => ("lash.send.id", String),
-    HttpResponseStatusCode => ("http.response.status_code", Integer),
-    SessionId => ("lash.session.id", String),
-    TurnId => ("lash.turn.id", String),
-    AttemptInvocationId => ("lash.attempt.invocation_id", String),
-    OperationName => ("gen_ai.operation.name", String),
-    ProviderName => ("gen_ai.provider.name", String),
-    RequestModel => ("gen_ai.request.model", String),
-    ResponseModel => ("gen_ai.response.model", String),
-    ToolName => ("gen_ai.tool.name", String),
-    ToolCallId => ("gen_ai.tool.call.id", String),
-    ToolType => ("gen_ai.tool.type", String),
-    CellId => ("lash.cell.id", String),
-    CellLanguage => ("lash.cell.language", String),
-    CellToolCalls => ("lash.cell.tool_calls", Integer),
-    InputTokens => ("gen_ai.usage.input_tokens", Integer),
-    OutputTokens => ("gen_ai.usage.output_tokens", Integer),
-    CacheReadTokens => ("gen_ai.usage.cache_read.input_tokens", Integer),
-    CacheWriteTokens => ("gen_ai.usage.cache_write.input_tokens", Integer),
-    ReasoningTokens => ("lash.usage.reasoning_output_tokens", Integer),
-    ModelAttemptOrdinal => ("lash.model.attempt.ordinal", Integer),
-    ModelAttempts => ("lash.model.attempts", Integer),
-    ModelVariant => ("lash.request.model_variant", String),
-    ResponseTextChars => ("lash.response.text_chars", Integer),
-    Outcome => ("lash.outcome", String),
-    CancelOrigin => ("lash.cancel.origin", String),
-    ErrorType => ("error.type", String),
-    Payload => ("lash.payload.json", String),
-    PayloadTruncated => ("lash.payload.truncated", Boolean),
-    PayloadsTruncated => ("lash.payload.truncated_fields", Integer),
-    ContentOmitted => ("lash.content.omitted", Boolean),
-    ToolIntentKind => ("lash.tool_intent.kind", String),
-    ToolIntentRefusal => ("lash.tool_intent.refusal_reason", String),
-    Provider => ("lash.provider", String),
-    ProviderRetryKind => ("lash.provider.retry.kind", String),
-    PoolAcquireOutcome => ("lash.store.pool.acquire.outcome", String),
-    CommitLabel => ("lash.durable.commit.label", String),
-    CommitBudgetOutcome => ("lash.runtime_commit.budget.outcome", String),
-    ParkKind => ("lash.parked_work.kind", String),
-    ParkReason => ("lash.parked_work.reason", String),
-    ObligationKind => ("lash.obligation.kind", String),
-    ObligationOutcome => ("lash.obligation.outcome", String),
-    RecoveryLease => ("lash.recovery_leader.name", String),
+    provenance: {
+        ScopeKind => ("lash.scope.kind", String, EVERY),
+        ScopeBoundary => ("lash.scope.boundary", Integer, EVERY),
+        ProducerOutcome => ("lash.producer.outcome", String, TraceSpanKindSet::of(&[K::Producer])),
+        LinksOmitted => ("lash.links.omitted", Integer, EVERY),
+        RecordId => ("lash.record.id", String, EVERY),
+        EventType => ("lash.event.type", String, EVERY),
+        ConversationId => ("gen_ai.conversation.id", String, EVERY),
+        RunId => ("lash.run.id", String, EVERY),
+        ProcessId => ("lash.process.id", String, EVERY),
+        LlmCallId => ("lash.llm_call.id", String, EVERY),
+        SendId => ("lash.send.id", String, EVERY),
+        HttpResponseStatusCode => ("http.response.status_code", Integer, NONE),
+        SessionId => ("lash.session.id", String, EVERY),
+        TurnId => ("lash.turn.id", String, EVERY),
+        AttemptInvocationId => ("lash.attempt.invocation_id", String, EVERY),
+        OperationName => ("gen_ai.operation.name", String,
+            TraceSpanKindSet::of(&[K::Agent, K::Model, K::Tool, K::Cell, K::Workflow])),
+        RequestModel => ("gen_ai.request.model", String, MODEL_OR_DOMAIN),
+        ResponseModel => ("gen_ai.response.model", String, TraceSpanKindSet::of(&[K::Model])),
+        ToolName => ("gen_ai.tool.name", String,
+            TraceSpanKindSet::of(&[K::Tool, K::Cell, K::Process, K::ToolIntent])),
+        ToolCallId => ("gen_ai.tool.call.id", String,
+            TraceSpanKindSet::of(&[K::Tool, K::Process, K::ToolIntent])),
+        ToolType => ("gen_ai.tool.type", String, TraceSpanKindSet::of(&[K::Cell])),
+        CellId => ("lash.cell.id", String, TraceSpanKindSet::of(&[K::Cell])),
+        CellLanguage => ("lash.cell.language", String, TraceSpanKindSet::of(&[K::Cell])),
+        CellToolCalls => ("lash.cell.tool_calls", Integer, TraceSpanKindSet::of(&[K::Cell])),
+        InputTokens => ("gen_ai.usage.input_tokens", Integer, MODEL_OR_DOMAIN),
+        OutputTokens => ("gen_ai.usage.output_tokens", Integer, MODEL_OR_DOMAIN),
+        CacheReadTokens => ("gen_ai.usage.cache_read.input_tokens", Integer, MODEL_OR_DOMAIN),
+        CacheWriteTokens => ("gen_ai.usage.cache_write.input_tokens", Integer, MODEL_OR_DOMAIN),
+        ReasoningTokens => ("lash.usage.reasoning_output_tokens", Integer, MODEL_OR_DOMAIN),
+        ModelAttemptOrdinal => ("lash.model.attempt.ordinal", Integer,
+            TraceSpanKindSet::of(&[K::ModelAttempt])),
+        ModelAttempts => ("lash.model.attempts", Integer, TraceSpanKindSet::of(&[K::Model])),
+        ModelVariant => ("lash.request.model_variant", String, NONE),
+        ResponseTextChars => ("lash.response.text_chars", Integer, NONE),
+        Outcome => ("lash.outcome", String, TraceSpanKindSet::of(&[
+            K::Agent, K::ModelAttempt, K::Tool, K::Cell, K::Process, K::Workflow,
+            K::WorkflowNode, K::ToolIntent,
+        ])),
+        CancelOrigin => ("lash.cancel.origin", String, TraceSpanKindSet::of(&[K::Agent])),
+        Payload => ("lash.payload.json", String, EVERY),
+        PayloadTruncated => ("lash.payload.truncated", Boolean, EVERY),
+        PayloadsTruncated => ("lash.payload.truncated_fields", Integer, EVERY),
+        ContentOmitted => ("lash.content.omitted", Boolean, EVERY),
+        ToolIntentKind => ("lash.tool_intent.kind", String, DOMAIN),
+        ToolIntentRefusal => ("lash.tool_intent.refusal_reason", String, DOMAIN),
+        TraceOmitted => ("lash.trace.omitted", StringArray, EVERY),
+        TraceOmittedCount => ("lash.trace.omitted.count", Integer, EVERY),
+        Provider => ("lash.provider", String, NONE),
+        ProviderRetryKind => ("lash.provider.retry.kind", String, NONE),
+        PoolAcquireOutcome => ("lash.store.pool.acquire.outcome", String, NONE),
+        CommitLabel => ("lash.durable.commit.label", String, NONE),
+        CommitBudgetOutcome => ("lash.runtime_commit.budget.outcome", String, NONE),
+        ParkKind => ("lash.parked_work.kind", String, NONE),
+        ParkReason => ("lash.parked_work.reason", String, NONE),
+        ObligationKind => ("lash.obligation.kind", String, NONE),
+        ObligationOutcome => ("lash.obligation.outcome", String, NONE),
+        RecoveryLease => ("lash.recovery_leader.name", String, NONE),
+    }
+    refinable: {
+        GenAiProviderName => ("gen_ai.provider.name", String, MODEL_OR_DOMAIN),
+        ErrorType => ("error.type", String, EVERY),
+    }
+}
+
+impl AttributeKey {
+    /// The registry attribute named `key`, if lash declares one.
+    pub fn of_key(key: &str) -> Option<Self> {
+        ATTRIBUTE_KEYS
+            .iter()
+            .copied()
+            .find(|attribute| attribute.definition().key == key)
+    }
+}
+
+/// The number of registered attributes lash may set on a span of `kind`:
+/// the reserve every host or plugin contribution to that span is admitted
+/// after. Generated from the registry's `on` column, never hand-counted.
+pub const fn attribute_reserve(kind: crate::TraceSpanKind) -> u32 {
+    let mut count = 0_u32;
+    let mut index = 0;
+    while index < ATTRIBUTES.len() {
+        if ATTRIBUTES[index].on.contains(kind) {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
 }
 
 #[cfg(feature = "otel")]
@@ -189,9 +288,26 @@ pub fn contract_markdown() -> String {
             span.name, span.kind, span.ownership
         );
     }
-    out.push_str("\n| Attribute | Type |\n|---|---|\n");
+    out.push_str("\n| Attribute | Type | Mutability | Set on |\n|---|---|---|---|\n");
     for attr in ATTRIBUTES {
-        let _ = writeln!(out, "| `{}` | {:?} |", attr.key, attr.value_type);
+        let on = attr
+            .on
+            .iter()
+            .map(crate::TraceSpanKind::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "| `{}` | {:?} | {:?} | {} |",
+            attr.key,
+            attr.value_type,
+            attr.mutability,
+            if on.is_empty() { "metrics only" } else { &on }
+        );
+    }
+    out.push_str("\n| Span kind | Attribute reserve |\n|---|---|\n");
+    for kind in crate::TraceSpanKind::ALL {
+        let _ = writeln!(out, "| `{kind}` | {} |", attribute_reserve(kind));
     }
     out.push_str("\n| Metric | Kind | Unit | Ownership |\n|---|---|---|---|\n");
     for metric in METRICS {

@@ -410,7 +410,7 @@ async fn run_once_inner(
                     trace_jsonl_path: matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
                         .then(|| root.join("trace.jsonl")),
                     lash_vm_execution_jsonl_path: Some(root.join("lash-vm-execution.jsonl")),
-                    trace_level: lash::tracing::TraceLevel::Extended,
+                    trace_detail: lash::tracing::TraceDetailPolicy::extended_models(),
                 });
             let runtime = if let Some(root) = sqlite_root.as_ref() {
                 build_runtime_with_sqlite_store(scenario, root.clone()).await?

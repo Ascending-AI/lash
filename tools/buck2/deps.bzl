@@ -897,6 +897,7 @@ PACKAGE_DEPS = {
             "sha2": "//third-party/rust:p0328",
             "strum": "//third-party/rust:p0356",
             "thiserror": "//third-party/rust:p0375",
+            "tracing": "//third-party/rust:p0398",
             "uuid": "//third-party/rust:p0423"
         }
     },
