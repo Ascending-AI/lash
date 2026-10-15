@@ -10,7 +10,7 @@ use super::{Control, Frame, KernelMachine};
 use crate::compile::{Executable, LibId};
 use crate::observe::{
     Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT, Observer,
-    WorkReport,
+    StatementAt, WorkReport,
 };
 
 impl KernelMachine {
@@ -51,6 +51,69 @@ impl KernelMachine {
     /// What the tokens of this run's counts and context name.
     pub fn guest_symbols(&self) -> GuestSymbols {
         GuestSymbols::of(&self.exe)
+    }
+
+    /// Spike (FIG-6364): counts every statement start from here on.
+    pub fn count_statements(&mut self) {
+        self.observer_mut().counts = Some(Vec::new());
+    }
+
+    /// Spike (FIG-6364): records every statement start, in order, with
+    /// its task, from here on.
+    pub fn trace_statements(&mut self) {
+        self.observer_mut().trace = Some(Vec::new());
+    }
+
+    /// Spike (FIG-6364): the document statements counted since
+    /// [`Self::count_statements`], by coordinate. Library statements are
+    /// dropped.
+    pub fn statement_counts(&self) -> std::collections::BTreeMap<StatementAt, u64> {
+        let (statements, _) = self.exe.document_statements();
+        let mut out = std::collections::BTreeMap::new();
+        if let Some(counts) = self.observer.as_ref().and_then(|o| o.counts.as_ref()) {
+            for (id, count) in counts.iter().enumerate() {
+                if *count == 0 {
+                    continue;
+                }
+                if let Some((block, index)) = statements.get(&(id as u32)) {
+                    *out.entry(StatementAt {
+                        block: block.clone(),
+                        index: *index,
+                    })
+                    .or_default() += count;
+                }
+            }
+        }
+        out
+    }
+
+    /// Spike (FIG-6364): the document statement starts recorded since
+    /// [`Self::trace_statements`], in order, each with its task, and how
+    /// many library statement starts were dropped.
+    pub fn statement_trace(&self) -> (Vec<(u32, StatementAt)>, u64) {
+        let (statements, _) = self.exe.document_statements();
+        let mut out = Vec::new();
+        let mut library = 0;
+        if let Some(trace) = self.observer.as_ref().and_then(|o| o.trace.as_ref()) {
+            for (task, id) in trace {
+                match statements.get(id) {
+                    Some((block, index)) => out.push((
+                        *task,
+                        StatementAt {
+                            block: block.clone(),
+                            index: *index,
+                        },
+                    )),
+                    None => library += 1,
+                }
+            }
+        }
+        (out, library)
+    }
+
+    /// Spike (FIG-6364): every document block's site and length.
+    pub fn document_blocks(&self) -> std::collections::BTreeMap<lash_kernel_doc::Site, u32> {
+        self.exe.document_statements().1
     }
 
     fn observer_mut(&mut self) -> &mut Observer {

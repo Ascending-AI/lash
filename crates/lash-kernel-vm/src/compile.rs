@@ -400,6 +400,21 @@ fn entry<'t, T>(library: &'t [T], own: &'t [T], index: u32) -> Option<&'t T> {
 }
 
 impl Executable {
+    /// Spike (FIG-6364): each document statement's coordinate by id, the
+    /// site of its block and its index there, and each document block's
+    /// site with its length. Library statements have none.
+    pub(crate) fn document_statements(&self) -> (BTreeMap<u32, (Site, u32)>, BTreeMap<Site, u32>) {
+        let mut statements = BTreeMap::new();
+        let mut blocks = BTreeMap::new();
+        for block in &self.own.tables.blocks {
+            blocks.insert(block.site.clone(), block.stmts.len() as u32);
+            for (index, id) in block.stmts.iter().enumerate() {
+                statements.insert(id.0, (block.site.clone(), index as u32));
+            }
+        }
+        (statements, blocks)
+    }
+
     pub(crate) fn get_code(&self, id: CodeId) -> Option<&Code> {
         entry(&self.library.0.tables.codes, &self.own.tables.codes, id.0)
     }

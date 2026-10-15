@@ -90,6 +90,9 @@ mod gate_six;
 #[path = "../shared/gate_six_registry.rs"]
 mod gate_six_registry;
 
+#[path = "../shared/replay_spike.rs"]
+mod replay_spike;
+
 use gate_six::{answer, effects, programs};
 use gate_six_registry::registry;
 
@@ -280,6 +283,10 @@ enum Observe {
     Nothing,
     Work,
     Context,
+    /// Spike (FIG-6364): statement-start counts.
+    Counts,
+    /// Spike (FIG-6364): a statement-start trace.
+    Trace,
 }
 
 /// Starts a run with what `observe` asks for on.
@@ -293,6 +300,8 @@ fn start_observed(
         Observe::Nothing => {}
         Observe::Work => machine.count_work(),
         Observe::Context => machine.publish_context(Arc::clone(context)),
+        Observe::Counts => machine.count_statements(),
+        Observe::Trace => machine.trace_statements(),
     }
     machine
 }
@@ -314,6 +323,30 @@ fn main() -> Result<(), String> {
             println!("{name}");
         }
         return Ok(());
+    }
+    if args.peek().is_some_and(|arg| arg == "replay") {
+        args.next();
+        let dir = PathBuf::from(args.next().ok_or("an output directory")?);
+        std::fs::create_dir_all(&dir).map_err(|error| format!("{dir:?}: {error}"))?;
+        let registry = registry();
+        let mut registry = (*registry).clone();
+        let mut names = NamedLibrary::from_registry(&registry).expect("unique library names");
+        for definition in lash_dialect_python::define_helpers(&mut names)
+            .unwrap_or_else(|error| panic!("{error}"))
+        {
+            registry
+                .register(definition, None)
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+        let registry = Arc::new(registry);
+        let prepared = PreparedLibrary::new(Arc::clone(&registry));
+        let library = NamedLibrary::from_registry(&registry).expect("unique library names");
+        let cells = programs()
+            .into_iter()
+            .map(|(name, source)| (name.to_string(), source))
+            .collect();
+        let workloads = replay_spike::workloads(&registry, &prepared, &library, cells, &effects())?;
+        return replay_spike::run(&dir, &workloads);
     }
     let mode = match args.peek().map(String::as_str) {
         Some(mode @ ("work" | "guest")) => {
@@ -342,6 +375,8 @@ fn main() -> Result<(), String> {
     let observe = match std::env::var("KERNEL_PERF_OBSERVE").as_deref() {
         Ok("work") => Observe::Work,
         Ok("context") => Observe::Context,
+        Ok("counts") => Observe::Counts,
+        Ok("trace") => Observe::Trace,
         Ok("") | Err(_) => Observe::Nothing,
         Ok(other) => {
             return Err(format!(

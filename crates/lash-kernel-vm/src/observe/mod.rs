@@ -27,6 +27,14 @@ use lash_kernel_doc::TaskId;
 
 use crate::compile::{CodeId, LibId, StmtId};
 
+/// Spike (FIG-6364): a document statement by its coordinate: the site of
+/// its block and its index there. Layout-independent.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StatementAt {
+    pub block: lash_kernel_doc::Site,
+    pub index: u32,
+}
+
 /// Something a run did that an observer sees.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Event {
@@ -71,6 +79,10 @@ pub(crate) enum Event {
 pub(crate) struct Observer {
     pub(crate) work: Option<Counting>,
     pub(crate) context: Option<Publisher>,
+    /// Spike (FIG-6364): every statement start, counted by statement id.
+    pub(crate) counts: Option<Vec<u64>>,
+    /// Spike (FIG-6364): every statement start, in order, with its task.
+    pub(crate) trace: Option<Vec<(u32, u32)>>,
 }
 
 impl Observer {
@@ -78,11 +90,25 @@ impl Observer {
         Self {
             work: None,
             context: None,
+            counts: None,
+            trace: None,
         }
     }
 
     #[inline(never)]
     pub(crate) fn on(&mut self, event: Event, charged: u64, allocated: u64) {
+        if let Event::Statement { task, stmt, .. } = event {
+            if let Some(counts) = &mut self.counts {
+                let at = stmt.0 as usize;
+                if counts.len() <= at {
+                    counts.resize(at + 1, 0);
+                }
+                counts[at] += 1;
+            }
+            if let Some(trace) = &mut self.trace {
+                trace.push((task.0 as u32, stmt.0));
+            }
+        }
         if let Some(work) = &mut self.work {
             match event {
                 Event::Statement { code, charging, .. } => work.statement(code.0, charging),

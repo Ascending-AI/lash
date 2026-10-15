@@ -43,6 +43,8 @@ mod laws;
 
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
+/// Spike (FIG-6364): what a replay harness outside the crate needs.
+pub use lash_kernel_state::{AdmittedRequest, KernelWhole};
 pub use machine::KernelMachine;
 pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
 
