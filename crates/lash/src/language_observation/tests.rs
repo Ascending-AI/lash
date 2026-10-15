@@ -1,4 +1,14 @@
 //! FIG-5548: the feed owns terminal authority; the host owns the pure fold.
+
+// Clippy's `allow-expect-in-tests` recognizes a bare `#[cfg(test)]` module;
+// this one is gated `#[cfg(all(test, feature = "codemode"))]` and so is not
+// recognized, even though every item in it is test code.
+#![expect(
+    clippy::expect_used,
+    reason = "test module gated on `cfg(all(test, feature = \"codemode\"))`, which clippy's \
+              in-test exemption does not recognize"
+)]
+
 use super::*;
 use futures_util::StreamExt as _;
 use lash_core::SessionRevision;

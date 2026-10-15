@@ -1342,6 +1342,7 @@ PACKAGE_DEPS = {
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
+            "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",

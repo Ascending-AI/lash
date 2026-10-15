@@ -145,6 +145,7 @@ testing = [
     "tokio/rt-multi-thread",
     "tokio/time",
     "lash-protocol-rlm?/testing",
+    "lash-provider-openai?/testing",
     "lash-vm-worker?/testing",
 ]
 # Exposes the host-installed OpenTelemetry adapter (`lash::tracing::OtelTelemetry`).
@@ -177,6 +178,7 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }
+lash-provider-openai = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }

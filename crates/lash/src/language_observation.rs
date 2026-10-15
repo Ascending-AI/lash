@@ -316,5 +316,5 @@ impl Drop for LanguageObservationPublisher {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "codemode"))]
 mod tests;
