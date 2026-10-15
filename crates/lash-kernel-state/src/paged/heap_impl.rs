@@ -74,6 +74,12 @@ pub fn heap_accounting(
     Ok(header_root(page, answer)?.accounting)
 }
 
+/// The most census entities a carry traces to collect the cell's garbage
+/// (FIG-6321): a small session sheds what its cell left dead before it
+/// rides into every later cell's pages; a larger one collects under
+/// pressure only (ADR 0145 §5).
+pub(super) const CARRY_COLLECTION_ENTITIES: u64 = 4096;
+
 impl PagedHeap {
     /// Opens the one heap-header page; directory and payloads stay lazy.
     pub fn open_header(
@@ -300,6 +306,34 @@ impl PagedHeap {
             Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
             Err(error) => Err(census_fault(error).into()),
         }
+    }
+    /// Whether a carry collects: when the census holds some entity, and at
+    /// most [`CARRY_COLLECTION_ENTITIES`], so the trace is bounded by a
+    /// constant and a carry stays O(1) however much the session holds.
+    pub(super) fn collects_at_carry(&self) -> bool {
+        self.census.as_ref().is_some_and(|census| {
+            (1..=CARRY_COLLECTION_ENTITIES).contains(&census.certificate().entities)
+        })
+    }
+    /// One exact refinement outside pressure: traces from the persistent
+    /// roots and the installed statement roots, sweeps what it did not
+    /// reach and makes U exact. Nothing is pending, so no verdict follows;
+    /// a heap with no census has nothing to refine.
+    pub(super) fn collect(&mut self) -> Result<(), HeapFault> {
+        let Some(mut census) = self.census.take() else {
+            return Ok(());
+        };
+        let result = match self.refine_installed(census.as_mut(), &[]) {
+            Ok(()) | Err(HeapWriteError::Memory) => Ok(()),
+            Err(HeapWriteError::Fault(fault)) => Err(fault),
+            Err(other) => Err(HeapFault::Malformed(format!("collection failed: {other}"))),
+        };
+        if self.accounting != census.certificate() {
+            self.accounting = census.certificate();
+            self.header = None;
+        }
+        self.census = Some(census);
+        result
     }
     pub(super) fn admit(&mut self, bytes: u64, extra: &[Value]) -> Result<(), HeapWriteError> {
         let census = self

@@ -234,6 +234,9 @@ impl std::fmt::Debug for SiteRef {
 }
 impl SiteRef {
     pub fn new(site: &Site, access: &Access<'_>) -> Result<Self, HeapFault> {
+        if let Some(value) = access.metadata_site(site) {
+            return Ok(value);
+        }
         let unit = match &site.unit {
             Unit::Main => UnitRef::Main,
             Unit::Function(name) => UnitRef::Function(NameRef::new(name, access)?),
@@ -245,14 +248,23 @@ impl SiteRef {
         }
         path.seal_nested(access, &mut budget())?;
         let cached = OnceLock::new();
-        if encode_body(site).len() <= super::tree::INLINE_TREE_BYTES {
+        let small = encode_body(site).len() <= super::tree::INLINE_TREE_BYTES;
+        if small {
             let _ = cached.set(Arc::new(site.clone()));
         }
-        Ok(Self {
+        let value = Self {
             unit,
             path,
             cached: Arc::new(cached),
-        })
+        };
+        let resident = match &value.unit {
+            UnitRef::Function(name) => matches!(name.text.body, Payload::Resident(_)),
+            UnitRef::Main | UnitRef::Library(_) => true,
+        };
+        if small && resident && value.path.is_self_contained() {
+            access.retain_metadata_site(site, &value);
+        }
+        Ok(value)
     }
     pub fn resolve(&self, access: &Access<'_>) -> Result<Arc<Site>, HeapFault> {
         if let Some(site) = self.cached.get() {

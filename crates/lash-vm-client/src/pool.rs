@@ -11,7 +11,7 @@ use crate::measurements::{
     ExecutionClass, ExecutionReceipt, Measurements, PoolMeasurements, SharedMeasurements,
 };
 use crate::{PoolConfig, PoolError};
-use lash_vm_protocol::page::{PageCapability, PageExchangeId, PageReply, PageRequest};
+use lash_vm_protocol::page::{PageCapability, PageExchangeId, PageReply, PageRequest, SealBatch};
 use lash_vm_protocol::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -347,22 +347,30 @@ pub enum RunStep {
         id: PageExchangeId,
         request: PageRequest,
     },
-    /// No task is ready. On the persistent heap, `candidate` is the stage
-    /// capability of the root the park sealed.
+    /// No task is ready. On the persistent heap, `candidate` is the root
+    /// the park sealed, and `seal` the pages that crossed with the park:
+    /// the caller admits them and hands their grants to
+    /// [`Checkout::grant`].
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
-        candidate: Option<PageCapability>,
+        seal: Option<SealBatch>,
+        candidate: Option<[u8; 32]>,
     },
     /// The slice is spent and a task is still ready.
     Slice { meters: RunMeters },
-    /// The run is over.
+    /// The run is over, with the pages that crossed with its end.
     Ended {
         end: EncodedPayload,
         meters: RunMeters,
+        seal: Option<SealBatch>,
     },
-    /// The candidate a seal made: the stage capability of its root.
-    Sealed { candidate: PageCapability },
+    /// The candidate a seal made: its root, with the pages that crossed
+    /// with it.
+    Sealed {
+        seal: Option<SealBatch>,
+        candidate: [u8; 32],
+    },
 }
 
 /// Owns one transport lease. Dropping without release kills and reaps the
@@ -389,6 +397,12 @@ pub struct Checkout {
     deliveries: Vec<Delivery>,
     /// The host read or page exchange the worker waits on.
     pending: Option<Pending>,
+    /// The phase a worker waiting on a page exchange answers from: it
+    /// asked while computing and computes on.
+    paged: Option<WorkerPhase>,
+    /// The stage capabilities issued for the last seal batch that crossed
+    /// with the run, until they cross back with its next slice.
+    grants: Vec<PageCapability>,
     /// The rest of a slice or seal whose start and deliveries outgrew one
     /// frame and cross an exchange at a time.
     split: Option<Split>,
@@ -576,12 +590,14 @@ impl Checkout {
                         deliveries: &deliveries,
                         slice,
                         cancel,
+                        sealed: &self.grants,
                     },
                 })
                 .ok()
                 .filter(|bytes| worker.codec.check_frame(bytes).is_ok())
         });
         if let Some(bytes) = together {
+            self.grants.clear();
             let message = self.exchange_encoded(&bytes, timeout)?;
             return self.step(message);
         }
@@ -642,15 +658,19 @@ impl Checkout {
         }
         let then = self.split.take().map(|split| split.then);
         let message = match then {
-            Some(SplitThen::Run { slice, cancel }) => self.exchange(
-                ParentMessage::Run {
-                    start: None,
-                    deliveries: Vec::new(),
-                    slice,
-                    cancel,
-                },
-                timeout,
-            )?,
+            Some(SplitThen::Run { slice, cancel }) => {
+                let sealed = std::mem::take(&mut self.grants);
+                self.exchange(
+                    ParentMessage::Run {
+                        start: None,
+                        deliveries: Vec::new(),
+                        slice,
+                        cancel,
+                        sealed,
+                    },
+                    timeout,
+                )?
+            }
             Some(SplitThen::Seal) | None => self.exchange(ParentMessage::Seal, timeout)?,
         };
         self.step(message)
@@ -710,17 +730,26 @@ impl Checkout {
             WorkerMessage::Parked {
                 park,
                 meters,
+                seal,
                 candidate,
             } => RunStep::Parked {
                 park,
                 meters,
+                seal,
                 candidate,
             },
-            WorkerMessage::Sealed { candidate } => RunStep::Sealed { candidate },
+            WorkerMessage::Sealed { seal, candidate } => RunStep::Sealed { seal, candidate },
             WorkerMessage::Slice { meters } => RunStep::Slice { meters },
-            WorkerMessage::Ended { end, meters } => RunStep::Ended { end, meters },
+            WorkerMessage::Ended { end, meters, seal } => RunStep::Ended { end, meters, seal },
             message => return Err(self.unexpected(Exchange::Run, &message)),
         })
+    }
+
+    /// Holds `sealed`, the stage capabilities the page service issued for
+    /// the seal batch that crossed with the last step, until they cross
+    /// with the run's next slice (FIG-6288).
+    pub fn grant(&mut self, sealed: Vec<PageCapability>) {
+        self.grants = sealed;
     }
 
     /// Hands the machine one committed outcome, with the run's next slice:
@@ -950,8 +979,14 @@ impl Checkout {
     /// The worker's answer to the request just sent, its progress and
     /// prints taken on the way.
     fn answer(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
-        let mut deadline = Instant::now() + timeout;
-        let mut phase = None;
+        // A worker answered a page exchange computes on, under a fresh
+        // compute deadline: none ran while the parent served its pages.
+        let mut phase = self.paged.take();
+        let mut deadline = Instant::now()
+            + match phase {
+                Some(WorkerPhase::Computing) => self.pool.config.deadlines.compute,
+                _ => timeout,
+            };
         #[cfg(feature = "testing")]
         let mut phase_started = Instant::now();
         loop {
@@ -1071,9 +1106,15 @@ impl Checkout {
                     return Ok(WorkerMessage::HostRead { id, kind, request });
                 }
                 WorkerMessage::Pages { id, request } => {
-                    // The codec held the request to its batch bound; the
-                    // page service owns the activation's deadline.
+                    // A page exchange is asked mid-computation and adds no
+                    // phase of its own. The codec held the request to its
+                    // batch bound; the page service owns the activation's
+                    // deadline.
+                    if phase != Some(WorkerPhase::Computing) {
+                        return Err(PoolError::breach(SequenceFault::InvalidPhase));
+                    }
                     self.pending = Some(Pending::Pages(id));
+                    self.paged = phase;
                     return Ok(WorkerMessage::Pages { id, request });
                 }
                 // Do not consult exit status after a fully decoded step.
@@ -1276,6 +1317,8 @@ pub mod runtime_ops {
                         started: false,
                         unsent_start: None,
                         deliveries: Vec::new(),
+                        paged: None,
+                        grants: Vec::new(),
                         pending: None,
                         split: None,
                         // Nothing has crossed: the worker stands where its

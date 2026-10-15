@@ -23,7 +23,7 @@ use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph};
 use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
 };
-use lash_vm_protocol::page::{PageAuthority, PageCapability, PageReply};
+use lash_vm_protocol::page::{PageReply, SealBatch};
 use lash_vm_protocol::{
     CheckpointStart, EncodedPayload, FrameEpoch, HostReadKind, InfrastructureOutcome, OwnerEpoch,
     PayloadKind, RunBounds, StartFrom, VmOwner,
@@ -31,7 +31,8 @@ use lash_vm_protocol::{
 
 use crate::service::{CallHeld, Service};
 use crate::wire::{
-    self, CarryWire, EffectRead, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire,
+    self, CarryWire, EffectRead, EndWire, OutcomeWire, PageLink, ParkWire, ProjectionRead,
+    StartWire,
 };
 use crate::{Checkout, ExecutionClass, PoolError, RunStep, WorkerPoolRuntimeOps as _};
 
@@ -209,7 +210,16 @@ impl RemoteMachines {
         from: StartFrom,
         binding: NodeId,
         pages: SharedPages,
+        roots: &[NodeId],
     ) -> Result<RemoteMachine, KernelFailure> {
+        // Prefetch changes latency only: pages it cannot carry are left to
+        // the worker's own reads, which meet any fault where it is typed.
+        let warm = pages
+            .lock()
+            .await
+            .warm(roots, lash_vm_broker::kernel::pages::WARM_BYTES)
+            .await
+            .unwrap_or_default();
         let start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
@@ -231,6 +241,7 @@ impl RemoteMachines {
                 .map(|save| wire::encode(PayloadKind::Start, save))
                 .transpose()
                 .map_err(worker)?,
+            warm,
         };
         let reservation = start_reservation(
             &start,
@@ -313,10 +324,11 @@ impl Machines for RemoteMachines {
     ) -> Result<RemoteMachine, KernelFailure> {
         let session = {
             let service = pages.lock().await;
-            self.start
-                .session
-                .as_ref()
-                .map(|session| CarryWire::of(session, |page| service.issue(NodeId(page.id.0))))
+            self.start.session.as_ref().map(|session| {
+                CarryWire::of(session, |page| {
+                    PageLink::Granted(service.issue(NodeId(page.id.0)))
+                })
+            })
         };
         let start = wire::encode(
             PayloadKind::Start,
@@ -329,7 +341,21 @@ impl Machines for RemoteMachines {
             ),
         )
         .map_err(worker)?;
-        self.checkout(StartFrom::Fresh(start), binding, pages).await
+        // A session cell reads its carried roots first.
+        let roots: Vec<NodeId> = self
+            .start
+            .session
+            .as_ref()
+            .map(|session| {
+                std::iter::once(session.heap)
+                    .chain(session.bindings.page())
+                    .chain(session.functions.page())
+                    .map(|page| NodeId(page.id.0))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.checkout(StartFrom::Fresh(start), binding, pages, &roots)
+            .await
     }
 
     /// Opens the run's committed checkpoint root: the worker reads its
@@ -350,7 +376,7 @@ impl Machines for RemoteMachines {
                 .map(lash_vm_broker::kernel::state::admission)
                 .collect(),
         });
-        self.checkout(from, binding, pages).await
+        self.checkout(from, binding, pages, &[parked.root]).await
     }
 }
 
@@ -381,43 +407,67 @@ pub struct RemoteMachine {
 enum Stop {
     Parked {
         park: EncodedPayload,
-        candidate: Option<PageCapability>,
+        candidate: Option<NodeId>,
     },
     Slice,
-    Ended(EncodedPayload),
-    Sealed(PageCapability),
+    Ended {
+        end: EncodedPayload,
+        /// The pages that crossed with the end, admitted.
+        carried: Vec<NodeId>,
+    },
+    Sealed(NodeId),
 }
 
 impl RemoteMachine {
-    /// The staged page a candidate's capability names, when it is this
-    /// activation's and staged.
-    async fn staged(
-        pages: &SharedPages,
-        candidate: &PageCapability,
-    ) -> Result<NodeId, KernelFailure> {
-        if !matches!(candidate.authority, PageAuthority::Stage(_)) {
-            return Err(worker(PoolError::from(
-                InfrastructureOutcome::PageRefused {
-                    refusal: lash_vm_protocol::page::PageRefusal::Unauthorized,
-                },
-            )));
+    /// The candidate root a worker named, when this activation staged it.
+    async fn staged(pages: &SharedPages, candidate: [u8; 32]) -> Result<NodeId, KernelFailure> {
+        pages
+            .lock()
+            .await
+            .staged(NodeId(candidate))
+            .map_err(refused)
+    }
+
+    /// Admits the seal batch that crossed with a step, as a seal exchange
+    /// of the same pages is admitted, and holds its grants for the run's
+    /// next slice. The admitted pages, in batch order.
+    async fn admit(&mut self, seal: Option<SealBatch>) -> Result<Vec<NodeId>, KernelFailure> {
+        let Some(batch) = seal else {
+            return Ok(Vec::new());
+        };
+        let carried: Vec<NodeId> = batch.pages.iter().map(|page| NodeId(page.id)).collect();
+        let admitted = self.pages.lock().await.admit(batch);
+        match admitted {
+            Ok(grants) => {
+                if let Some(checkout) = self.checkout.as_mut() {
+                    checkout.grant(grants);
+                }
+                Ok(carried)
+            }
+            Err(refusal) => {
+                // The activation ends here, as infrastructure, as a refused
+                // seal exchange ends it.
+                self.checkout = None;
+                Err(refused(refusal))
+            }
         }
-        pages.lock().await.verify(candidate).map_err(|refusal| {
-            worker(PoolError::from(InfrastructureOutcome::PageRefused {
-                refusal,
-            }))
-        })
     }
 
     /// The run's end: a finished cell's carry names only pages this
-    /// activation may read.
-    async fn end(pages: &SharedPages, end: EndWire) -> Result<End, KernelFailure> {
+    /// activation may read, or pages that crossed with the end.
+    async fn end(
+        pages: &SharedPages,
+        end: EndWire,
+        carried: &[NodeId],
+    ) -> Result<End, KernelFailure> {
         let pages = pages.lock().await;
-        end.into_end(|capability| {
-            pages
-                .verify(capability)
-                .map(|_| PageGrant::NONE)
-                .map_err(|refusal| PoolError::from(InfrastructureOutcome::PageRefused { refusal }))
+        end.into_end(|link| {
+            match link {
+                PageLink::Granted(capability) => pages.verify(capability).map(|_| PageGrant::NONE),
+                PageLink::Carried(page) if carried.contains(&NodeId(*page)) => Ok(PageGrant::NONE),
+                PageLink::Carried(_) => Err(lash_vm_protocol::page::PageRefusal::Unauthorized),
+            }
+            .map_err(|refusal| PoolError::from(InfrastructureOutcome::PageRefused { refusal }))
         })
         .map_err(worker)
     }
@@ -450,11 +500,27 @@ impl RemoteMachine {
                         .await?;
                 }
                 RunStep::Parked {
-                    park, candidate, ..
-                } => return Ok(Stop::Parked { park, candidate }),
+                    park,
+                    seal,
+                    candidate,
+                    ..
+                } => {
+                    self.admit(seal).await?;
+                    let candidate = match candidate {
+                        Some(root) => Some(Self::staged(&self.pages, root).await?),
+                        None => None,
+                    };
+                    return Ok(Stop::Parked { park, candidate });
+                }
                 RunStep::Slice { .. } => return Ok(Stop::Slice),
-                RunStep::Ended { end, .. } => return Ok(Stop::Ended(end)),
-                RunStep::Sealed { candidate } => return Ok(Stop::Sealed(candidate)),
+                RunStep::Ended { end, seal, .. } => {
+                    let carried = self.admit(seal).await?;
+                    return Ok(Stop::Ended { end, carried });
+                }
+                RunStep::Sealed { seal, candidate } => {
+                    self.admit(seal).await?;
+                    return Ok(Stop::Sealed(Self::staged(&self.pages, candidate).await?));
+                }
             }
         }
     }
@@ -538,8 +604,8 @@ impl DrivenMachine for RemoteMachine {
             .await?;
         match self.drive(step).await? {
             Stop::Parked { park, candidate } => {
-                if let Some(candidate) = candidate {
-                    self.candidate = Some(Self::staged(&self.pages, &candidate).await?);
+                if candidate.is_some() {
+                    self.candidate = candidate;
                 }
                 let park: ParkWire = wire::decode(PayloadKind::Park, &park).map_err(worker)?;
                 Ok(MachineStep::Parked(
@@ -547,9 +613,11 @@ impl DrivenMachine for RemoteMachine {
                 ))
             }
             Stop::Slice => Ok(MachineStep::Slice),
-            Stop::Ended(end) => {
+            Stop::Ended { end, carried } => {
                 let end: EndWire = wire::decode(PayloadKind::End, &end).map_err(worker)?;
-                Ok(MachineStep::Ended(Self::end(&self.pages, end).await?))
+                Ok(MachineStep::Ended(
+                    Self::end(&self.pages, end, &carried).await?,
+                ))
             }
             Stop::Sealed(_) => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Sealed)),
         }
@@ -571,14 +639,13 @@ impl DrivenMachine for RemoteMachine {
         }
         let step = self.with(Checkout::seal).await?;
         match self.drive(step).await? {
-            Stop::Sealed(candidate) => {
-                let root = Self::staged(&self.pages, &candidate).await?;
+            Stop::Sealed(root) => {
                 self.candidate = Some(root);
                 Ok(root)
             }
             Stop::Parked { .. } => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Parked)),
             Stop::Slice => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Slice)),
-            Stop::Ended(_) => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Ended)),
+            Stop::Ended { .. } => Err(unexpected(lash_vm_protocol::WorkerFrameKind::Ended)),
         }
     }
 
@@ -600,6 +667,12 @@ fn unexpected(found: lash_vm_protocol::WorkerFrameKind) -> KernelFailure {
             found,
         },
     ))
+}
+
+fn refused(refusal: lash_vm_protocol::page::PageRefusal) -> KernelFailure {
+    worker(PoolError::from(InfrastructureOutcome::PageRefused {
+        refusal,
+    }))
 }
 
 fn worker(error: PoolError) -> KernelFailure {
@@ -675,6 +748,7 @@ mod reservation_tests {
             },
             binding: [7; 32],
             save: None,
+            warm: Vec::new(),
         };
         let actual = codec
             .encode_parent(&ParentFrame {

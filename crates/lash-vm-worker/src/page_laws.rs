@@ -35,7 +35,7 @@ use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, LeasedReads, PageExchange, PageLimits, SpoolRoot,
 };
 use lash_vm_client::ipc::{FrameSource, read_frame, write_frame};
-use lash_vm_protocol::page::{PageAuthority, PageCapability};
+use lash_vm_protocol::page::{PageAuthority, PageCapability, PageEnvelope};
 use lash_vm_protocol::*;
 
 use crate::host::{PageTraffic, Wire, WirePageSource, grant_of};
@@ -705,4 +705,20 @@ fn sealed_pages_cross_in_one_batch() {
     assert_eq!(exchanges, 1, "{CHAIN} sealed pages crossed in one exchange");
     assert_eq!(traffic.pages_sealed, CHAIN as u64);
     assert_eq!(pages.usage().pages, CHAIN as u64);
+}
+
+/// A page crosses the wire named by the store's content address of its
+/// envelope: the parent admits a carried seal batch, and the worker checks a
+/// read reply, under the id the page is committed as, so each side derives
+/// the name from the bytes alone (FIG-6321).
+#[test]
+fn a_page_crosses_named_by_its_store_content_address() {
+    let store = Store::default();
+    committed_list(&store, 200);
+    let pages = store.pages.lock().expect("pages");
+    assert!(pages.len() > 3, "the fixture commits a tree of pages");
+    for (id, bytes) in pages.iter() {
+        assert_eq!(PageEnvelope::digest(bytes), id.0);
+        assert_eq!(PageEnvelope::new(bytes.to_vec()).id, id.0);
+    }
 }

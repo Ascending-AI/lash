@@ -23,7 +23,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::page::{PageCapability, PageExchangeId, PageReply, PageRequest};
+use crate::page::{PageCapability, PageExchangeId, PageReply, PageRequest, ReadPage, SealBatch};
 use crate::state::VmOwner;
 
 /// The lease one checkout of a worker runs under. The parent mints it and
@@ -291,6 +291,11 @@ pub struct Start {
     /// in the kernel embedding's encoding; none for a run that saves none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save: Option<EncodedPayload>,
+    /// Pages the run reads first, as a read of them answers: its carried
+    /// session's or checkpoint root's pages and what lies nearest under
+    /// them, so a fresh activation does not fault each in on its own
+    /// exchange (FIG-6321). The worker checks each as a read reply.
+    pub warm: Vec<ReadPage>,
 }
 
 /// One committed outcome, for the wait the machine named.
@@ -353,11 +358,17 @@ pub enum ParentMessage {
     /// and ends cancelled; the durable winner is still the parent's to
     /// decide (ADR 0039). One exchange does what a start, its deliveries
     /// and a slice need, under one compute deadline (FIG-5921).
+    ///
+    /// `sealed` is the stage capability the parent issued for each page of
+    /// the last seal batch that crossed with a `Parked`, `Sealed` or
+    /// `Ended` frame, in batch order: the worker holds those pages under
+    /// these grants before the slice reads or references them (FIG-6288).
     Run {
         start: Option<Box<Start>>,
         deliveries: Vec<Delivery>,
         slice: u64,
         cancel: bool,
+        sealed: Vec<PageCapability>,
     },
     /// One committed outcome, for the wait the machine named: a delivery
     /// that does not fit one frame with the slice it precedes.
@@ -433,13 +444,16 @@ pub enum WorkerMessage {
     },
     /// No task is ready: the effects and sleeps requested since the last
     /// park, and the waits withdrawn since. A park that requests something
-    /// is sealed: `candidate` is a stage capability for its
-    /// `CheckpointRoot` page in the activation's staging, which the parent
-    /// publishes with the park's admissions.
+    /// is sealed: `candidate` names its `CheckpointRoot` page in the
+    /// activation's staging, which the parent publishes with the park's
+    /// admissions. `seal` carries the pages sealed since the last batch
+    /// crossed, the root among them, so a park adds no page exchange
+    /// (FIG-6288); the parent admits them before it handles the park.
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
-        candidate: Option<PageCapability>,
+        seal: Option<SealBatch>,
+        candidate: Option<[u8; 32]>,
     },
     /// The slice is spent and a task is still ready.
     Slice {
@@ -447,17 +461,22 @@ pub enum WorkerMessage {
     },
     /// The run is over. A fully received `Ended` wins over a later EOF or
     /// exit.
+    /// `seal` carries the pages sealed since the last batch crossed: a
+    /// finished cell's carry crosses with its end.
     Ended {
         end: EncodedPayload,
         meters: RunMeters,
+        seal: Option<SealBatch>,
     },
     /// The outcome was taken, or dropped when its wait had been
     /// withdrawn.
     Delivered,
-    /// The candidate a [`ParentMessage::Seal`] asked for: a stage
-    /// capability for its `CheckpointRoot` page.
+    /// The candidate a [`ParentMessage::Seal`] asked for: its
+    /// `CheckpointRoot` page in the activation's staging, with the pages
+    /// sealed since the last batch crossed.
     Sealed {
-        candidate: PageCapability,
+        seal: Option<SealBatch>,
+        candidate: [u8; 32],
     },
     Cancelled,
     ResetDone {
@@ -520,6 +539,7 @@ pub enum BorrowedParentMessage<'a> {
         deliveries: &'a [Delivery],
         slice: u64,
         cancel: bool,
+        sealed: &'a [PageCapability],
     },
 }
 

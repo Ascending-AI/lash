@@ -60,8 +60,21 @@ fn site_ref(
 }
 
 impl Frame {
+    /// Brings the record up to the frame: its coordinates and its held
+    /// values.
     pub(super) fn sync(&mut self) -> Result<(), HeapFault> {
-        if let Some(Control::Block { block, next }) = self.control.last() {
+        self.sync_to(true)
+    }
+
+    /// Brings the record's held values up to the frame, leaving its
+    /// coordinates (statement, loop positions, cleanups) where they were:
+    /// what pressure accounting and a trace read (FIG-6318).
+    pub(super) fn sync_holdings(&mut self) -> Result<(), HeapFault> {
+        self.sync_to(false)
+    }
+
+    fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
+        if coordinates && let Some(Control::Block { block, next }) = self.control.last() {
             let index = if self.awaiting.is_some() {
                 next.checked_sub(1)
                     .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
@@ -101,24 +114,26 @@ impl Frame {
                             (value.clone(), at.map(|at| at.0).unwrap_or(u64::MAX))
                         }
                     };
-                    let saved_site = site_ref(
-                        self.record
-                            .loops
-                            .get(&ordinal_key(loops), &self.access)?
-                            .map(|record| record.site),
-                        site,
-                        &self.access,
-                    )?;
-                    write(
-                        &mut self.record.loops,
-                        loops,
-                        LoopRecord {
-                            site: saved_site,
-                            started: *started,
-                            position: Some(position),
-                        },
-                        &self.access,
-                    )?;
+                    if coordinates {
+                        let saved_site = site_ref(
+                            self.record
+                                .loops
+                                .get(&ordinal_key(loops), &self.access)?
+                                .map(|record| record.site),
+                            site,
+                            &self.access,
+                        )?;
+                        write(
+                            &mut self.record.loops,
+                            loops,
+                            LoopRecord {
+                                site: saved_site,
+                                started: *started,
+                                position: Some(position),
+                            },
+                            &self.access,
+                        )?;
+                    }
                     write(
                         &mut self.record.iterated,
                         iterated,
@@ -132,24 +147,26 @@ impl Frame {
                     let Form::While { site, .. } = &self.exe.stmt(*stmt).form else {
                         return Err(malformed("a while cursor stands at another form"));
                     };
-                    let saved_site = site_ref(
-                        self.record
-                            .loops
-                            .get(&ordinal_key(loops), &self.access)?
-                            .map(|record| record.site),
-                        site,
-                        &self.access,
-                    )?;
-                    write(
-                        &mut self.record.loops,
-                        loops,
-                        LoopRecord {
-                            site: saved_site,
-                            started: *started,
-                            position: None,
-                        },
-                        &self.access,
-                    )?;
+                    if coordinates {
+                        let saved_site = site_ref(
+                            self.record
+                                .loops
+                                .get(&ordinal_key(loops), &self.access)?
+                                .map(|record| record.site),
+                            site,
+                            &self.access,
+                        )?;
+                        write(
+                            &mut self.record.loops,
+                            loops,
+                            LoopRecord {
+                                site: saved_site,
+                                started: *started,
+                                position: None,
+                            },
+                            &self.access,
+                        )?;
+                    }
                     loops += 1;
                 }
                 Control::Try {
@@ -178,31 +195,35 @@ impl Frame {
                             }
                         }
                     };
-                    let saved_site = site_ref(
-                        self.record
-                            .finally
-                            .get(&ordinal_key(finally), &self.access)?
-                            .map(|record| record.site),
-                        site,
-                        &self.access,
-                    )?;
-                    write(
-                        &mut self.record.finally,
-                        finally,
-                        FinallyRecord {
-                            site: saved_site,
-                            entered,
-                        },
-                        &self.access,
-                    )?;
+                    if coordinates {
+                        let saved_site = site_ref(
+                            self.record
+                                .finally
+                                .get(&ordinal_key(finally), &self.access)?
+                                .map(|record| record.site),
+                            site,
+                            &self.access,
+                        )?;
+                        write(
+                            &mut self.record.finally,
+                            finally,
+                            FinallyRecord {
+                                site: saved_site,
+                                entered,
+                            },
+                            &self.access,
+                        )?;
+                    }
                     finally += 1;
                 }
                 _ => {}
             }
         }
-        truncate(&mut self.record.loops, loops, &self.access)?;
+        if coordinates {
+            truncate(&mut self.record.loops, loops, &self.access)?;
+            truncate(&mut self.record.finally, finally, &self.access)?;
+        }
         truncate(&mut self.record.iterated, iterated, &self.access)?;
-        truncate(&mut self.record.finally, finally, &self.access)?;
         truncate(&mut self.record.departing, departing, &self.access)?;
         if let Some(call) = &self.library {
             if self.exe.lib(call.lib).native {
@@ -277,6 +298,7 @@ impl Frames {
         let index = self.rows.len();
         self.rows
             .write(ordinal_key(index), frame.record.clone(), &self.access)?;
+        frame.published = Some(frame.record.clone());
         self.cache.insert(index, frame);
         self.continues = false;
         Ok(())
@@ -300,7 +322,34 @@ impl Frames {
     pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
         for (index, frame) in &mut self.cache {
             frame.sync()?;
-            write(&mut self.rows, *index, frame.record.clone(), &self.access)?;
+            if !frame
+                .published
+                .as_ref()
+                .is_some_and(|old| old.same_version(&frame.record))
+            {
+                self.rows
+                    .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
+                frame.published = Some(frame.record.clone());
+            }
+        }
+        Ok(())
+    }
+    /// Publishes what the cached frames hold, not where they stand: a
+    /// frame whose held values did not change since its row was written
+    /// is not written again (FIG-6318). The cache stays the authority for
+    /// coordinates until [`Self::flush`].
+    pub(super) fn flush_holdings(&mut self) -> Result<(), HeapFault> {
+        for (index, frame) in &mut self.cache {
+            frame.sync_holdings()?;
+            if !frame
+                .published
+                .as_ref()
+                .is_some_and(|old| old.same_holdings(&frame.record))
+            {
+                self.rows
+                    .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
+                frame.published = Some(frame.record.clone());
+            }
         }
         Ok(())
     }
@@ -497,6 +546,7 @@ fn restore(
     };
     Ok(Frame {
         code: code_id,
+        published: Some(record.clone()),
         record,
         access,
         exe,

@@ -161,6 +161,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         bounds: bounds(),
         binding: BINDING,
         save: None,
+        warm: Vec::new(),
     }
 }
 
@@ -180,6 +181,7 @@ fn resumed(
         bounds: bounds(),
         binding: BINDING,
         save: None,
+        warm: Vec::new(),
     }
 }
 
@@ -215,6 +217,9 @@ struct Parent {
     _spools: tempfile::TempDir,
     /// The page exchanges the parent answered.
     replies: u64,
+    /// The stage capability the parent issued for each page a hand-over
+    /// frame's seal batch carried.
+    grants: std::collections::HashMap<[u8; 32], PageCapability>,
 }
 
 impl Parent {
@@ -252,6 +257,7 @@ impl Parent {
             spool,
             _spools: directory,
             replies: 0,
+            grants: std::collections::HashMap::new(),
         }
     }
 
@@ -267,7 +273,36 @@ impl Parent {
             self.replies += 1;
             step = worker.page_reply(id, reply)?;
         }
+        // The batch a hand-over frame carried: admitted, and its grants
+        // handed to the run's next slice.
+        if let RunStep::Parked {
+            seal: Some(batch), ..
+        }
+        | RunStep::Ended {
+            seal: Some(batch), ..
+        }
+        | RunStep::Sealed {
+            seal: Some(batch), ..
+        } = &step
+        {
+            let sealed = self
+                .pages
+                .admit(batch.clone())
+                .expect("the parent admits the batch");
+            self.grants.extend(
+                sealed
+                    .iter()
+                    .map(|capability| (capability.page, *capability)),
+            );
+            worker.grant(sealed);
+        }
         Ok(step)
+    }
+
+    /// The stage capability the parent issued for the page `id` a run
+    /// sealed.
+    fn granted(&self, id: [u8; 32]) -> PageCapability {
+        *self.grants.get(&id).expect("the parent granted the page")
     }
 
     /// One slice of `worker`'s run.
@@ -340,8 +375,8 @@ fn requested(step: RunStep) -> (u64, Datum) {
 }
 
 /// The one effect the park requests, as the parent's admission freezes it,
-/// and the stage capability of the checkpoint root the park sealed.
-fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload, PageCapability) {
+/// and the checkpoint root the park sealed.
+fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload, [u8; 32]) {
     let RunStep::Parked {
         park, candidate, ..
     } = step
@@ -429,6 +464,7 @@ fn killed_at_a_park_and_resumed(
     first.deliver(wait, completed(argument)).expect("deliver");
     let (wait, argument, admission, root) =
         admitted(parent.run(&mut first, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     asked.push(argument.clone());
     // Killed at the park: the worker is discarded, not reset.
     drop(first);
@@ -509,6 +545,7 @@ main {{
         )
         .expect("start");
     let (wait, _, admission, root) = admitted(parent.run(&mut first, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     drop(first);
 
     let mut second = checkout(&pool);
@@ -622,6 +659,7 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
         .expect("start");
     let (_, _, admission, root) =
         admitted(parent.run(&mut worker, SLICE, false).expect("a Python run"));
+    let root = parent.granted(root);
     worker.release().expect("release at the park");
     drop(pool);
 
@@ -726,6 +764,7 @@ fn a_parked_run_is_refused_under_another_document() {
         )
         .expect("start");
     let (_, _, admission, root) = admitted(parent.run(&mut worker, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     worker.release().expect("release at the park");
 
     let mut next = checkout(&pool);

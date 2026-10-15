@@ -12,6 +12,14 @@ impl<T: Cell> Tree<T> {
         }
     }
 
+    /// The tree is empty or one inline leaf that references no page: a
+    /// value that holds nothing a retirement could take away.
+    pub fn is_self_contained(&self) -> bool {
+        self.root.as_ref().is_none_or(
+            |root| matches!(&root.link, Link::Inline { children, .. } if children.is_empty()),
+        )
+    }
+
     pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         let Some(root) = &mut self.root else {
             return Ok(());

@@ -593,6 +593,21 @@ pub mod execution {
             Ok(())
         }
     }
+    impl FrameRecord {
+        /// Whether `other` holds what this record holds: the same values
+        /// and arguments, whatever coordinates either stands at. What the
+        /// census accounts and traces of a frame is only this.
+        pub fn same_holdings(&self, other: &Self) -> bool {
+            self.bindings.same_version(&other.bindings)
+                && self.iterated.same_version(&other.iterated)
+                && self.departing.same_version(&other.departing)
+                && match (&self.arguments, &other.arguments) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_version(b),
+                    _ => false,
+                }
+        }
+    }
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
             self.statement.same_version(&other.statement)
@@ -1054,6 +1069,13 @@ impl PagedHeap {
                 .into_iter()
                 .chain(registers.iter().chain(pinned).map(value_cost)),
         )?;
+        // Republishing the installed trees changes only the statement
+        // roots: their task edges are those already counted (FIG-6318).
+        if tasks.same_version(&self.tasks) && joins.same_version(&self.joins) {
+            return self.replace_holding(before, after, 0, 0, |heap| {
+                heap.install_transient(registers, pinned, fresh);
+            });
+        }
         let old_tasks = checked_sum(
             [
                 self.tasks.read_task_edges(&self.access)?,

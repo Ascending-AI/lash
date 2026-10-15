@@ -256,6 +256,9 @@ struct Frame {
     /// The frame was called from inside an expression and runs to its end
     /// there.
     inline: bool,
+    /// The record as last written to its row: what a flush compares to
+    /// instead of reading the row back (FIG-6318).
+    published: Option<FrameRecord>,
 }
 
 impl Frame {
@@ -316,6 +319,8 @@ enum Wait {
 struct Task {
     record: lash_kernel_state::paged::TaskRecord,
     frames: frames::Frames,
+    /// The record as last written to its row (FIG-6318).
+    published: Option<lash_kernel_state::paged::TaskRecord>,
 }
 
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
@@ -540,9 +545,28 @@ impl KernelMachine {
         }
         Ok(())
     }
+    /// Publishes what the run holds as the census's persistent and
+    /// statement roots, with every frame's coordinates: what a seal, a
+    /// park or a carry needs.
     fn publish_roots(&mut self) -> Result<(), Halt> {
+        self.publish(true)
+    }
+
+    /// Publishes what the run holds, leaving frames' coordinates where they
+    /// were last published: the accounting and the trace before an
+    /// allocation, a reservation or a call read held values only, so a
+    /// frame that only moved is not written (FIG-6318).
+    fn publish_holdings(&mut self) -> Result<(), Halt> {
+        self.publish(false)
+    }
+
+    fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
         self.reconcile_sweep()?;
-        let tasks = self.tasks.roots()?;
+        let tasks = if coordinates {
+            self.tasks.roots()?
+        } else {
+            self.tasks.holdings()?
+        };
         self.heap
             .set_execution_roots(
                 tasks,
@@ -859,14 +883,13 @@ impl KernelMachine {
                     return Ok(self.finish_with(end));
                 }
             }
-            self.publish_roots().map_err(machine_error)?;
+            self.publish_holdings().map_err(machine_error)?;
             self.regs.clear();
             self.pins.clear();
             self.fresh.clear();
             self.heap
                 .release_statement_roots()
                 .map_err(MachineError::Heap)?;
-            self.tasks.evict().map_err(MachineError::Heap)?;
             if let Some(end) = self.end.take() {
                 return Ok(self.finish_with(end));
             }

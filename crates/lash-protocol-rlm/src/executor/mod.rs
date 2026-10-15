@@ -1196,6 +1196,10 @@ async fn cell_pages(
         limits: lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
         lease_ttl: pages::LEASE_TTL,
         span: std::time::Duration::from_secs(3600),
+        cache: Some(services.workers.page_cache()),
+        hints: state
+            .actor()
+            .map(|actor| services.workers.page_hints().of(actor)),
     })
 }
 

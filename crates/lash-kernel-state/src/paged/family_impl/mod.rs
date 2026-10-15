@@ -623,6 +623,12 @@ impl HeapLifecycle for PagedHeap {
                     other => invalid(format!("session root transfer failed: {other}")),
                 })?;
         }
+        // A small carried session holds what it reaches: the cell's garbage
+        // is swept here, once per cell, so no dead entity, family or task
+        // row rides into every later cell's pages. The trace is bounded.
+        if self.collects_at_carry() {
+            self.collect()?;
+        }
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
         Ok(SessionRoot {

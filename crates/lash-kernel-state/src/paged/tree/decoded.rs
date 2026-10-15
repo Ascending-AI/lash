@@ -1,8 +1,9 @@
 //! Decoded cells retain bounded normal-form caches across repeated reads.
-use super::super::NameRef;
+use super::super::{NameRef, SiteRef};
 use super::*;
-use lash_kernel_doc::Name;
+use lash_kernel_doc::{Name, Site};
 use std::any::{Any, TypeId};
+use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Location {
@@ -20,6 +21,7 @@ pub(super) struct DecodedResidency {
     nodes: BTreeMap<CacheKey, Decoded>,
     pub(super) bytes: usize,
     names: BTreeMap<(usize, usize), (Name, NameRef)>,
+    sites: BTreeMap<Site, SiteRef>,
     projected_names: BTreeMap<(PageId, u64, u64, u64), Name>,
 }
 impl Access<'_> {
@@ -28,23 +30,27 @@ impl Access<'_> {
         page: PageRef,
         family: Option<FamilyId>,
         sequence: bool,
-    ) -> Option<(Node<T>, Summary)> {
+    ) -> Option<(Rc<Node<T>>, Summary)> {
         let cache = self.decoded.borrow();
         let entry =
             cache
                 .nodes
                 .get(&(Location::Page(page.id), TypeId::of::<T>(), family, sequence))?;
-        Some((entry.node.downcast_ref::<Node<T>>()?.clone(), entry.summary))
+        Some((
+            Rc::clone(entry.node.downcast_ref::<Rc<Node<T>>>()?),
+            entry.summary,
+        ))
     }
     pub(super) fn retain_decoded<T: Cell>(
         &self,
         page: PageRef,
         family: Option<FamilyId>,
         sequence: bool,
-        node: &Node<T>,
+        node: &Rc<Node<T>>,
         summary: Summary,
+        encoded: usize,
     ) {
-        let weight = node_weight(node);
+        let weight = decoded_weight(node, encoded);
         if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
             self.clear();
         }
@@ -53,7 +59,7 @@ impl Access<'_> {
         cache.nodes.insert(
             (Location::Page(page.id), TypeId::of::<T>(), family, sequence),
             Decoded {
-                node: Box::new(node.clone()),
+                node: Box::new(Rc::clone(node)),
                 summary,
                 _inline: None,
             },
@@ -65,7 +71,7 @@ impl Access<'_> {
         tokens: &Arc<[u8]>,
         children: &[PageRef],
         sequence: bool,
-    ) -> Result<Node<T>, HeapFault> {
+    ) -> Result<Rc<Node<T>>, HeapFault> {
         let key = (
             Location::Inline(tokens.as_ptr() as usize),
             TypeId::of::<T>(),
@@ -78,11 +84,11 @@ impl Access<'_> {
                     "inline tree aggregate mismatch".into(),
                 ));
             }
-            if let Some(node) = entry.node.downcast_ref::<Node<T>>() {
-                return Ok(node.clone());
+            if let Some(node) = entry.node.downcast_ref::<Rc<Node<T>>>() {
+                return Ok(Rc::clone(node));
             }
         }
-        let node = Tree::inline_node(branch, tokens, children, true)?;
+        let node = Rc::new(Tree::inline_node(branch, tokens, children, true)?);
         let weight = node_weight(&node) + tokens.len();
         if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
             self.clear();
@@ -92,7 +98,7 @@ impl Access<'_> {
         cache.nodes.insert(
             key,
             Decoded {
-                node: Box::new(node.clone()),
+                node: Box::new(Rc::clone(&node)),
                 summary: branch.summary,
                 _inline: Some(tokens.clone()),
             },
@@ -124,6 +130,23 @@ impl Access<'_> {
             (name.as_str().as_ptr() as usize, name.as_str().len()),
             (name.clone(), value.clone()),
         );
+    }
+    pub(crate) fn metadata_site(&self, site: &Site) -> Option<SiteRef> {
+        self.decoded.borrow().sites.get(site).cloned()
+    }
+    /// Retains a self-contained site reference, so a frame or binding that
+    /// names a site again does not build its path tree again (FIG-6318).
+    pub(crate) fn retain_metadata_site(&self, site: &Site, value: &SiteRef) {
+        let weight = encode_body(site).len() * 2
+            + encode_body(value).len() * 16
+            + std::mem::size_of::<SiteRef>()
+            + 512;
+        if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
+            self.clear();
+        }
+        let mut cache = self.decoded.borrow_mut();
+        cache.bytes += weight;
+        cache.sites.insert(site.clone(), value.clone());
     }
     pub(crate) fn projected_name(
         &self,
@@ -174,22 +197,80 @@ impl Access<'_> {
 /// Conservative physical allowance for cell allocations and their bounded
 /// runtime caches. Nested trees retain links; their pages account separately.
 pub(super) fn node_weight<T: Cell>(node: &Node<T>) -> usize {
+    match node {
+        Node::Leaf(rows) => leaf_weight(rows, row_sums(rows)),
+        Node::Index(rows) => {
+            std::mem::size_of::<Node<T>>()
+                + 128
+                + rows.capacity() * std::mem::size_of::<Branch<T>>()
+                + rows.iter().map(|r| r.first.0.capacity()).sum::<usize>()
+        }
+        Node::Staged(..) => std::mem::size_of::<Node<T>>() + 128,
+    }
+}
+/// A leaf's allowance from its rows' sums, so one changed row updates it
+/// without encoding the others.
+pub(super) fn leaf_weight<T: Cell>(rows: &Vec<(Key, T)>, sums: RowSums) -> usize {
     std::mem::size_of::<Node<T>>()
         + 128
-        + match node {
-            Node::Leaf(rows) => {
-                rows.capacity() * std::mem::size_of::<(Key, T)>()
-                    + rows
-                        .iter()
-                        .map(|(k, v)| k.0.capacity() + encode_body(v).len() * 16 + 512)
-                        .sum::<usize>()
-            }
-            Node::Index(rows) => {
-                rows.capacity() * std::mem::size_of::<Branch<T>>()
-                    + rows.iter().map(|r| r.first.0.capacity()).sum::<usize>()
-            }
-            Node::Staged(..) => 0,
+        + rows.capacity() * std::mem::size_of::<(Key, T)>()
+        + sums.weight
+}
+/// One leaf row's share of its leaf's allowance and of its encoded body.
+#[derive(Clone, Copy)]
+pub(super) struct RowSize {
+    weight: usize,
+    encoded: usize,
+}
+impl RowSize {
+    pub(super) fn of(key: &Key, encoded: usize) -> Self {
+        Self {
+            weight: key.0.capacity() + encoded * 16 + 512,
+            encoded: key.len() + encoded + 8,
         }
+    }
+}
+/// The sums of a leaf's row sizes.
+#[derive(Clone, Copy, Default)]
+pub(super) struct RowSums {
+    weight: usize,
+    pub(super) encoded: usize,
+}
+impl RowSums {
+    pub(super) fn add(mut self, row: RowSize) -> Self {
+        self.weight += row.weight;
+        self.encoded += row.encoded;
+        self
+    }
+    pub(super) fn without(self, row: RowSize) -> Option<Self> {
+        Some(Self {
+            weight: self.weight.checked_sub(row.weight)?,
+            encoded: self.encoded.checked_sub(row.encoded)?,
+        })
+    }
+}
+pub(super) fn row_sums<T: Cell>(rows: &[(Key, T)]) -> RowSums {
+    rows.iter().fold(RowSums::default(), |sums, (k, v)| {
+        sums.add(RowSize::of(k, encode_body(v).len()))
+    })
+}
+/// [`node_weight`] of a node decoded from `encoded` token bytes, which
+/// bound its rows' encodings: a read retains it without encoding each row
+/// again (FIG-6321).
+fn decoded_weight<T: Cell>(node: &Node<T>, encoded: usize) -> usize {
+    match node {
+        Node::Leaf(rows) => {
+            std::mem::size_of::<Node<T>>()
+                + 128
+                + rows.capacity() * std::mem::size_of::<(Key, T)>()
+                + rows
+                    .iter()
+                    .map(|(k, _)| k.0.capacity() + 512)
+                    .sum::<usize>()
+                + encoded * 16
+        }
+        Node::Index(_) | Node::Staged(..) => node_weight(node),
+    }
 }
 pub(super) fn validate_summary<T: Cell>(
     branch: &Branch<T>,

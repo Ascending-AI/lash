@@ -25,7 +25,7 @@ use lash_vm_client::{
 };
 use lash_vm_protocol::page::{
     PageAuthority, PageCapability, PageEnvelope, PageExchangeId, PageRefusal, PageReply,
-    PageRequest,
+    PageRequest, ReadPage,
 };
 use lash_vm_protocol::*;
 use std::cell::RefCell;
@@ -160,8 +160,9 @@ impl Wire {
         )?;
         Ok(answer)
     }
-    /// One page exchange, as a host read is one: a frame out, a frame back,
-    /// under the run's fence.
+    /// One page exchange: a frame out, a frame back, under the run's fence.
+    /// It is asked mid-computation and computes on once answered, so it
+    /// adds no progress phase of its own.
     pub(crate) fn pages(&self, request: PageRequest) -> Result<PageReply, PoolError> {
         let mut pipe = self
             .pipe
@@ -176,16 +177,6 @@ impl Wire {
             fences.next_page += 1;
             id
         };
-        for phase in [WorkerPhase::Serializing, WorkerPhase::Responding] {
-            self.send(
-                &mut pipe,
-                WorkerMessage::Progress {
-                    phase,
-                    cpu_nanos: cpu_nanos()?,
-                    work: None,
-                },
-            )?;
-        }
         self.send(&mut pipe, WorkerMessage::Pages { id, request })?;
         let bytes = self
             .inbound
@@ -211,14 +202,6 @@ impl Wire {
         if answered != id {
             return Err(PoolError::breach(SequenceFault::WrongPageExchange));
         }
-        self.send(
-            &mut pipe,
-            WorkerMessage::Progress {
-                phase: WorkerPhase::Computing,
-                cpu_nanos: cpu_nanos()?,
-                work: None,
-            },
-        )?;
         Ok(reply)
     }
     pub fn refuse(&self, error: &PoolError) {
@@ -330,6 +313,18 @@ pub(crate) fn grant_of(capability: &PageCapability) -> PageGrant {
     PageGrant(grant)
 }
 
+/// The grant a start's carried session holds `link` under: the parent
+/// names each of its pages by a capability.
+pub(crate) fn link_grant(link: &lash_vm_client::wire::PageLink) -> Result<PageGrant, PoolError> {
+    match link {
+        lash_vm_client::wire::PageLink::Granted(capability) => Ok(grant_of(capability)),
+        lash_vm_client::wire::PageLink::Carried(_) => Err(PoolError::payload(
+            PayloadKind::Start,
+            "a start's carried session names a page by no capability",
+        )),
+    }
+}
+
 /// The capability a page link's grant carries back to the parent.
 pub(crate) fn capability_of(page: &PageRef) -> PageCapability {
     let word = |range: std::ops::Range<usize>| {
@@ -408,6 +403,14 @@ impl Resident {
         Some(answer)
     }
 
+    /// The grant `page` is held under, when it is held under one.
+    fn grant(&self, page: &PageId) -> Option<PageGrant> {
+        self.pages
+            .get(page)
+            .map(|(answer, _, _)| answer.page.grant)
+            .filter(|grant| *grant != PageGrant::NONE)
+    }
+
     fn insert(&mut self, answer: PageAnswer, size: u64) {
         if size > self.budget || self.pages.contains_key(&answer.page.id) {
             return;
@@ -456,10 +459,12 @@ const SEAL_BATCH_CHILDREN: usize = 512;
 /// decodes it.
 ///
 /// Seals cross in batches. A sealed page waits in the port, readable from
-/// it, and crosses with the pages sealed after it in one exchange, children
-/// first, when the batch fills or the worker hands a page to the parent
-/// ([`PagePort::flush`]). Until then the heap holds it under no grant; the
-/// port answers for it with the grant the parent issued once it crossed.
+/// it, and crosses with the pages sealed after it, children first: in one
+/// exchange when the batch fills ([`PagePort::flush`]), and otherwise with
+/// the frame that hands the run to the parent ([`PagePort::take_batch`]),
+/// whose grants come back with the run's next slice ([`PagePort::grant`]).
+/// Until then the heap holds it under no grant; the port answers for it
+/// with the grant the parent issued once it crossed.
 pub(crate) struct WirePageSource {
     port: Rc<RefCell<Port>>,
 }
@@ -473,14 +478,17 @@ struct Port {
     exchanger: PageExchanger,
     resident: Resident,
     traffic: PageTraffic,
-    batch: SealBatch,
+    batch: Pending,
+    /// The batch that crossed with the last frame that handed the run to
+    /// the parent, until its grants come back.
+    carried: Pending,
     /// The grant the parent issued for each page this port sealed.
     granted: HashMap<PageId, PageGrant>,
 }
 
-/// Sealed pages that have not crossed yet, in seal order.
+/// Sealed pages that have not been granted yet, in seal order.
 #[derive(Default)]
-struct SealBatch {
+struct Pending {
     pages: Vec<(PageEnvelope, PageAnswer)>,
     index: HashMap<PageId, usize>,
     bytes: u64,
@@ -510,7 +518,8 @@ impl WirePageSource {
                     order: BTreeMap::new(),
                 },
                 traffic: PageTraffic::default(),
-                batch: SealBatch::default(),
+                batch: Pending::default(),
+                carried: Pending::default(),
                 granted: HashMap::new(),
             })),
         }
@@ -537,30 +546,97 @@ impl PagePort {
         self.0.borrow_mut().flush()
     }
 
-    /// `page` as the parent's capability: the batch it waits in crosses
-    /// first.
+    /// The pages sealed since the last batch crossed, to cross with the
+    /// frame that hands the run to the parent (FIG-6288). They stay
+    /// readable here until [`Self::grant`] takes their grants.
+    pub(crate) fn take_batch(&self) -> Option<CarriedSeal> {
+        self.0.borrow_mut().take_batch()
+    }
+
+    /// Takes the grants the parent issued for the batch that crossed last,
+    /// in its order.
     ///
     /// # Errors
     ///
-    /// The parent's refusal of that batch.
-    pub(crate) fn capability(&self, page: PageRef) -> Result<PageCapability, HeapFault> {
-        let mut port = self.0.borrow_mut();
-        if port.batch.index.contains_key(&page.id) {
-            port.flush()?;
-        }
-        Ok(capability_of(&port.resolved(page)))
+    /// A breach when they are not that batch's.
+    pub(crate) fn grant(&self, sealed: Vec<PageCapability>) -> Result<(), HeapFault> {
+        self.0.borrow_mut().grant(sealed)
     }
 
-    /// `page` as the parent's capability, once every batch crossed.
-    pub(crate) fn crossed(&self, page: PageRef) -> PageCapability {
-        capability_of(&self.0.borrow().resolved(page))
+    /// Holds `pages`, which the run's start carried as a read of them would
+    /// have answered them (FIG-6321), each checked as a read reply is.
+    ///
+    /// # Errors
+    ///
+    /// [`HeapFault::Corrupt`] for a page that is not its envelope or whose
+    /// capabilities are not its children's.
+    pub(crate) fn warm(&self, pages: &[ReadPage]) -> Result<(), HeapFault> {
+        let port = &mut *self.0.borrow_mut();
+        // They come parents first: each is held under the capability its
+        // parent's answer carried for it, a root under none until the heap
+        // reads it under its own.
+        let mut grants: HashMap<PageId, PageGrant> = HashMap::new();
+        for got in pages {
+            let id = PageId(got.page.id);
+            let page = PageRef {
+                id,
+                grant: grants.get(&id).copied().unwrap_or(PageGrant::NONE),
+            };
+            port.accept(page, got)?;
+            grants.extend(
+                got.children
+                    .iter()
+                    .map(|capability| (PageId(capability.page), grant_of(capability))),
+            );
+        }
+        Ok(())
+    }
+
+    /// How a carried session names `page`: under the grant the parent
+    /// issued, or as a page of the batch that crosses with it.
+    pub(crate) fn link(&self, page: PageRef) -> lash_vm_client::wire::PageLink {
+        let port = self.0.borrow();
+        let resolved = port.resolved(page);
+        if resolved.grant == PageGrant::NONE && port.carried.index.contains_key(&page.id) {
+            lash_vm_client::wire::PageLink::Carried(page.id.0)
+        } else {
+            lash_vm_client::wire::PageLink::Granted(capability_of(&resolved))
+        }
     }
 }
+
+/// A seal batch as it crosses with a frame.
+pub(crate) type CarriedSeal = lash_vm_protocol::page::SealBatch;
 
 impl Port {
     fn exchange(&mut self, request: PageRequest) -> Result<PageReply, HeapFault> {
         self.traffic.exchanges += 1;
         (self.exchanger)(request)
+    }
+
+    /// `got` as the answer for `wanted`, re-hashed and re-framed here, its
+    /// children under the capabilities that came with it; held resident.
+    fn accept(&mut self, wanted: PageRef, got: &ReadPage) -> Result<PageAnswer, HeapFault> {
+        let mut children = got.children.iter();
+        let mut mismatch = false;
+        let answer = answer_page(wanted, &got.page.envelope, |child| {
+            Ok(match children.next() {
+                Some(capability) if capability.page == child.0 => grant_of(capability),
+                _ => {
+                    mismatch = true;
+                    PageGrant::NONE
+                }
+            })
+        })?;
+        if mismatch || children.next().is_some() {
+            return Err(HeapFault::Corrupt {
+                page: wanted.id,
+                reason: "its capabilities are not its envelope's children".to_owned(),
+            });
+        }
+        self.resident
+            .insert(answer.clone(), got.page.envelope.len() as u64);
+        Ok(answer)
     }
 
     /// `page` under the grant the parent issued for it, when this port
@@ -579,21 +655,25 @@ impl Port {
         }
     }
 
+    /// A page sealed here that the parent has not granted yet.
     fn unsent(&self, page: &PageRef) -> Option<PageAnswer> {
-        let at = *self.batch.index.get(&page.id)?;
-        let mut answer = self.batch.pages[at].1.clone();
+        let pending = [&self.batch, &self.carried]
+            .into_iter()
+            .find(|pending| pending.index.contains_key(&page.id))?;
+        let mut answer = pending.pages[pending.index[&page.id]].1.clone();
         answer.page = *page;
         Some(answer)
     }
 
-    fn flush(&mut self) -> Result<(), HeapFault> {
-        if self.batch.pages.is_empty() {
-            return Ok(());
-        }
-        let batch = std::mem::take(&mut self.batch);
-        // A child crosses with its capability unless it is sealed in this
-        // batch or is a host node the heap holds no grant for (a checkpoint
-        // root's release and owner binding): the parent decides those.
+    fn ungranted(&self, page: &PageId) -> bool {
+        self.batch.index.contains_key(page) || self.carried.index.contains_key(page)
+    }
+
+    /// `batch` as it crosses: its pages, and the capability of each child
+    /// that is neither sealed in it nor a host node the heap holds no grant
+    /// for (a checkpoint root's release and owner binding, or a page an
+    /// earlier batch carried that is staged): the parent decides those.
+    fn request(&self, batch: &Pending) -> CarriedSeal {
         let mut children = BTreeMap::new();
         for (_, own) in &batch.pages {
             for child in &own.children {
@@ -603,10 +683,74 @@ impl Port {
                 }
             }
         }
-        let reply = self.exchange(PageRequest::Seal {
+        CarriedSeal {
             pages: batch.pages.iter().map(|(page, _)| page.clone()).collect(),
             children: children.into_values().collect(),
-        })?;
+        }
+    }
+
+    fn take_batch(&mut self) -> Option<CarriedSeal> {
+        if self.batch.pages.is_empty() {
+            return None;
+        }
+        let batch = std::mem::take(&mut self.batch);
+        let request = self.request(&batch);
+        // A batch carried before is granted with the run's next slice; a
+        // second one in the same hand-over waits behind it in order.
+        for (page, own) in batch.pages {
+            self.carried
+                .index
+                .insert(own.page.id, self.carried.pages.len());
+            self.carried.pages.push((page, own));
+        }
+        Some(request)
+    }
+
+    fn grant(&mut self, sealed: Vec<PageCapability>) -> Result<(), HeapFault> {
+        if sealed.is_empty() && self.carried.pages.is_empty() {
+            return Ok(());
+        }
+        let carried = std::mem::take(&mut self.carried);
+        if sealed.len() != carried.pages.len()
+            || sealed
+                .iter()
+                .zip(&carried.pages)
+                .any(|(capability, (page, _))| capability.page != page.id)
+        {
+            return Err(breach("a run's grants are not its carried batch's"));
+        }
+        self.admitted(&sealed, carried.pages);
+        Ok(())
+    }
+
+    /// Holds each of `pages` under the grant the parent issued for it.
+    fn admitted(&mut self, sealed: &[PageCapability], pages: Vec<(PageEnvelope, PageAnswer)>) {
+        let count = sealed.len() as u64;
+        self.traffic.pages_sealed += count;
+        crate::perf_witness::pages_sealed(count);
+        for (capability, (page, own)) in sealed.iter().zip(pages) {
+            let grant = grant_of(capability);
+            self.granted.insert(own.page.id, grant);
+            self.resident.insert(
+                PageAnswer {
+                    page: PageRef {
+                        id: own.page.id,
+                        grant,
+                    },
+                    ..own
+                },
+                page.envelope.len() as u64,
+            );
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), HeapFault> {
+        if self.batch.pages.is_empty() {
+            return Ok(());
+        }
+        let batch = std::mem::take(&mut self.batch);
+        let request = self.request(&batch);
+        let reply = self.exchange(request.into_request())?;
         let sealed = match reply {
             PageReply::Sealed { pages }
                 if pages.len() == batch.pages.len()
@@ -635,23 +779,7 @@ impl Port {
             }
             _ => return Err(breach("a seal was not answered with its pages")),
         };
-        let count = sealed.len() as u64;
-        self.traffic.pages_sealed += count;
-        crate::perf_witness::pages_sealed(count);
-        for (capability, (page, own)) in sealed.iter().zip(batch.pages) {
-            let grant = grant_of(capability);
-            self.granted.insert(own.page.id, grant);
-            self.resident.insert(
-                PageAnswer {
-                    page: PageRef {
-                        id: own.page.id,
-                        grant,
-                    },
-                    ..own
-                },
-                page.envelope.len() as u64,
-            );
-        }
+        self.admitted(&sealed, batch.pages);
         Ok(())
     }
 }
@@ -669,7 +797,7 @@ impl PageSource for WirePageSource {
         for page in pages {
             if !missing.iter().any(|wanted| wanted.id == page.id)
                 && !port.resident.pages.contains_key(&page.id)
-                && !port.batch.index.contains_key(&page.id)
+                && !port.ungranted(&page.id)
             {
                 missing.push(port.resolved(*page));
             }
@@ -697,26 +825,7 @@ impl PageSource for WirePageSource {
                         reason: "the parent answered another page".to_owned(),
                     });
                 }
-                let mut children = got.children.iter();
-                let mut mismatch = false;
-                let answer = answer_page(*wanted, &got.page.envelope, |child| {
-                    Ok(match children.next() {
-                        Some(capability) if capability.page == child.0 => grant_of(capability),
-                        _ => {
-                            mismatch = true;
-                            PageGrant::NONE
-                        }
-                    })
-                })?;
-                if mismatch || children.next().is_some() {
-                    return Err(HeapFault::Corrupt {
-                        page: wanted.id,
-                        reason: "its capabilities are not its envelope's children".to_owned(),
-                    });
-                }
-                port.resident
-                    .insert(answer.clone(), got.page.envelope.len() as u64);
-                fresh.insert(wanted.id, answer);
+                fresh.insert(wanted.id, port.accept(*wanted, got)?);
             }
             missing.drain(..read.len());
         }
@@ -741,7 +850,7 @@ impl PageSource for WirePageSource {
         let node = frame_page(&page)?;
         let id = PageId(node.id.0);
         let port = &mut *self.port.borrow_mut();
-        if port.batch.index.contains_key(&id) {
+        if port.ungranted(&id) {
             return Ok(PageRef {
                 id,
                 grant: PageGrant::NONE,
@@ -749,6 +858,11 @@ impl PageSource for WirePageSource {
         }
         if let Some(grant) = port.granted.get(&id) {
             return Ok(PageRef { id, grant: *grant });
+        }
+        // A page the run read is committed or staged already, under the
+        // grant it was read with: the parent need not see it again.
+        if let Some(grant) = port.resident.grant(&id) {
+            return Ok(PageRef { id, grant });
         }
         let grants: HashMap<PageId, PageGrant> = page
             .children

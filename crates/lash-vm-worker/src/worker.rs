@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::PoolError;
 use crate::embedding::Embedding;
-use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of};
+use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
 use lash_kernel_doc::heap::{LogicalBytes, PageId, PageRef};
 use lash_kernel_doc::{Datum, Document};
@@ -22,7 +22,6 @@ use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Progr
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
 use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, StartWire};
-use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::*;
 
 /// The one run a worker hosts between resets.
@@ -34,7 +33,7 @@ struct Hosted {
     ended: bool,
     /// The root the run's last park sealed, until a delivery or a slice
     /// moves the run on: a `Seal` there answers with it.
-    sealed: Option<PageCapability>,
+    sealed: Option<[u8; 32]>,
     /// The run's page port: what the run hands the parent crosses first.
     port: PagePort,
 }
@@ -301,6 +300,7 @@ impl<'embedding> Server<'embedding> {
                     deliveries,
                     slice,
                     cancel,
+                    sealed,
                 } => {
                     if let Some(start) = &start {
                         self.admit_start(start)?;
@@ -309,6 +309,9 @@ impl<'embedding> Server<'embedding> {
                     if let Some(start) = start {
                         self.hosted = Some(self.start(*start)?);
                     }
+                    // The grants for the batch that crossed with the last
+                    // hand-over, before anything reads or references it.
+                    self.running()?.port.grant(sealed).map_err(heap_fault)?;
                     for delivery in deliveries {
                         self.deliver(delivery)?;
                     }
@@ -332,7 +335,13 @@ impl<'embedding> Server<'embedding> {
                         Err(PoolError::Infrastructure(
                             InfrastructureOutcome::WorkerLimitExceeded { limit },
                         )) => WorkerMessage::LimitExceeded { limit },
-                        result => WorkerMessage::Sealed { candidate: result? },
+                        result => {
+                            let candidate = result?;
+                            WorkerMessage::Sealed {
+                                seal: self.running()?.port.take_batch(),
+                                candidate,
+                            }
+                        }
                     };
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(message)?;
@@ -406,9 +415,9 @@ impl<'embedding> Server<'embedding> {
         Ok(())
     }
     /// Seals the run as it stands at this safe point: its changed pages and
-    /// a checkpoint root, each crossing to the parent's staging. Returns the
-    /// root's stage capability.
-    fn seal(&mut self) -> Result<PageCapability, PoolError> {
+    /// a checkpoint root, which cross to the parent's staging with the
+    /// frame that hands the run over. Returns the root's page.
+    fn seal(&mut self) -> Result<[u8; 32], PoolError> {
         let hosted = self.running()?;
         if let Some(sealed) = hosted.sealed {
             return Ok(sealed);
@@ -428,7 +437,7 @@ impl<'embedding> Server<'embedding> {
                 break sealed;
             }
         };
-        let candidate = hosted.port.capability(root.page).map_err(heap_fault)?;
+        let candidate = root.page.id.0;
         hosted.sealed = Some(candidate);
         Ok(candidate)
     }
@@ -509,6 +518,7 @@ impl<'embedding> Server<'embedding> {
         let owner = PageId(start.binding);
         let mut source = WirePageSource::new(self.wire()?, self.bootstrap.tuning.pages.clean_bytes);
         let port = source.port();
+        port.warm(&start.warm).map_err(heap_fault)?;
         let manifests = &self
             .embedding
             .release_manifests()
@@ -553,7 +563,7 @@ impl<'embedding> Server<'embedding> {
                 let session = from
                     .session
                     .as_ref()
-                    .map(|carry| carry.session(|capability| Ok(grant_of(capability))))
+                    .map(|carry| carry.session(link_grant))
                     .transpose()
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
                 let census = census(
@@ -746,15 +756,16 @@ impl<'embedding> Server<'embedding> {
             live_tasks: meters.live_tasks,
         };
         // A park that requests something is saved as it stands, so it is
-        // sealed now, where the parent would ask for it next.
+        // sealed now, where the parent would ask for it next. What it
+        // sealed crosses with the park, and a finished cell's carry with
+        // the run's end.
         let candidate = match &step {
             Step::Parked(park) if requests_something(park) => Some(self.seal()?),
-            // A finished cell's carry crosses with the run's end.
-            Step::Ended(_) => {
-                port.flush().map_err(heap_fault)?;
-                None
-            }
             _ => None,
+        };
+        let seal = match &step {
+            Step::Parked(_) | Step::Ended(_) => port.take_batch(),
+            Step::Slice => None,
         };
         self.progress(WorkerPhase::Serializing)?;
         let Some(chunks) = self.printed_chunks(&host.printed, memory)? else {
@@ -769,17 +780,20 @@ impl<'embedding> Server<'embedding> {
             Step::Parked(park) => WorkerMessage::Parked {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
+                seal,
                 candidate,
             },
             Step::Slice => WorkerMessage::Slice { meters },
             Step::Ended(end) => {
-                // A finished cell's carry crossed to the parent's staging
-                // as the run ended: each of its pages crosses back as the
-                // capability its seal or read granted.
-                let end = EndWire::of(end, |page| port.crossed(page));
+                // A finished cell's carry crosses to the parent's staging
+                // with the run's end: each of its pages is named by the
+                // capability its seal or read granted, or as a page of the
+                // batch that crosses with it.
+                let end = EndWire::of(end, |page| port.link(page));
                 WorkerMessage::Ended {
                     end: self.encode(PayloadKind::End, &end)?,
                     meters,
+                    seal,
                 }
             }
         };
@@ -1056,6 +1070,7 @@ mod tests {
             bounds: config.run_bounds,
             binding: [3; 32],
             save: None,
+            warm: Vec::new(),
         };
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {

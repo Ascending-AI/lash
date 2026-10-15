@@ -134,6 +134,25 @@ page's child that was committed and reused keeps the root lease's authority;
 a staged child keeps the stage lease's. Capabilities are never persisted: a
 stored link is a bare page id, and every activation derives fresh ones.
 
+A seal batch also rides on the hand-over frame that needs it: `Parked`,
+`Sealed` and `Ended` carry the pages sealed since the last batch crossed,
+so a park adds no page exchange (FIG-6288). The parent admits the batch
+before it handles the frame and names the candidate by its digest; the
+stage capability of each admitted page comes back on the next `Run`
+(`sealed`), so the worker holds those pages under grants before its next
+slice reads them. A page is named on the wire by the store's content
+address of its envelope, so each side derives the name from the bytes.
+
+A start carries `warm`: the pages its carried session or checkpoint root
+names, and beneath them those the session's last activation read, warmed
+or sealed, within 8 KiB, each checked as a read reply. Prefetch changes
+latency only: a page it cannot carry is left to the worker's own read,
+which meets any fault where it is typed. A process keeps the committed
+pages it fetched in one cache bounded by bytes (64 MiB, least recently used
+first), keyed by content address and shared by every reader in the
+process; what a read may ask for is still decided by its capability or
+lease (FIG-6321).
+
 Validation is inductive and on demand:
 
 - The worker re-hashes and re-frames every answered envelope before the
@@ -160,7 +179,8 @@ Laws: `crates/lash-vm-worker/src/page_laws.rs`
 `a_one_worker_pool_serves_pages_without_another_worker`,
 `a_forged_foreign_or_stale_capability_reads_nothing`,
 `a_missing_or_corrupt_page_is_infrastructure_never_absence`,
-`sealed_pages_cross_in_one_batch`).
+`sealed_pages_cross_in_one_batch`,
+`a_page_crosses_named_by_its_store_content_address`).
 
 ### 4. Infrastructure failures are never guest outcomes
 
@@ -207,6 +227,19 @@ again. Only a refused refinement is `Bound::Memory`.
 
 So whether an allocation passes depends on what the run can reach, not on
 residency, eviction or when the census last refined (`K-BND-003`).
+
+One collection runs outside pressure, and it is bounded by a constant: a
+cell's carry refines once when the census holds at most 4096 entities
+(`CARRY_COLLECTION_ENTITIES`), so a small session sheds the cell's garbage
+before its pages are sealed, and no dead entity, family or task row rides
+into every later cell's pages. A larger session is left to pressure. A park
+still never collects (FIG-6321).
+
+The machine publishes what its frames hold, not where they stand, at every
+statement end and before an allocation, a reservation or a call: the
+census's root cost counts held values only, so a frame that only moved is
+not written. Its coordinates are written where a reader needs them: at a
+park, a seal, a carry, a pushed frame and the frames view (FIG-6318).
 
 Laws: `lash-kernel-vm`'s `laws::census`
 (`an_unreachable_cycle_never_fails_an_allocation`,

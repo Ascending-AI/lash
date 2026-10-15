@@ -508,7 +508,6 @@ impl KernelMachine {
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.publish_roots()?;
         self.reserve(super::FRAME_BYTES)?;
         let FrameStorage { mut control, .. } = self.storage.frames.pop().unwrap_or_default();
         control.push(Control::Block {
@@ -527,6 +526,7 @@ impl KernelMachine {
             awaiting: None,
             library: None,
             inline,
+            published: None,
         };
         if let Some(lib) = library {
             let mut args = super::Tree::new(true);

@@ -29,6 +29,7 @@ impl Task {
                 frames: Tree::new(true),
             },
             frames: Frames::new(access, exe),
+            published: None,
         }
     }
     pub(super) fn take_incoming(&mut self) -> Option<IncomingRecord> {
@@ -119,20 +120,30 @@ impl Tasks {
                 Arc::clone(&self.exe),
                 continues,
             );
-            self.cache.insert(index, Task { record, frames });
+            self.cache.insert(
+                index,
+                Task {
+                    published: Some(record.clone()),
+                    record,
+                    frames,
+                },
+            );
         }
         Ok(self.cache.get_mut(&index))
     }
-    pub(super) fn push(&mut self, task: Task) -> Result<(), HeapFault> {
+    pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
         self.make_room()?;
         let index = self.rows.len();
         self.rows
             .write(ordinal_key(index), task.record.clone(), &self.access)?;
+        task.published = Some(task.record.clone());
         self.cache.insert(index, task);
         Ok(())
     }
     pub(super) fn after_refinement(&mut self, rows: Tree<TaskRecord>) -> Result<(), HeapFault> {
         for (index, task) in &mut self.cache {
+            // The refined rows replace those last written.
+            task.published = None;
             if matches!(task.record.state, TaskStateRecord::Ended(_))
                 && let Some(record) = rows.get(&ordinal_key(*index), &self.access)?
                 && !record.result_retained
@@ -144,18 +155,22 @@ impl Tasks {
         self.rows = rows;
         Ok(())
     }
+    /// The task rows with what every cached task's frames hold, where
+    /// they stand left as last published: what pressure accounting and a
+    /// trace read (FIG-6318).
+    pub(super) fn holdings(&mut self) -> Result<Tree<TaskRecord>, HeapFault> {
+        for (index, task) in &mut self.cache {
+            task.frames.flush_holdings()?;
+            task.record.frames = task.frames.rows.clone();
+            put(&mut self.rows, *index, task, &self.access)?;
+        }
+        Ok(self.rows.clone())
+    }
     pub(super) fn roots(&mut self) -> Result<Tree<TaskRecord>, HeapFault> {
         for (index, task) in &mut self.cache {
             task.frames.flush()?;
             task.record.frames = task.frames.rows.clone();
-            let key = ordinal_key(*index);
-            if !self
-                .rows
-                .get(&key, &self.access)?
-                .is_some_and(|old| old.same_version(&task.record))
-            {
-                self.rows.write(key, task.record.clone(), &self.access)?;
-            }
+            put(&mut self.rows, *index, task, &self.access)?;
         }
         Ok(self.rows.clone())
     }
@@ -191,8 +206,6 @@ impl Tasks {
         })?;
         malformed.map_or(Ok(()), Err)
     }
-    /// At a complete statement the canonical records are authoritative.
-    /// Retire derived frames so the cache cannot grow with task history.
     /// How many frames `id` has and those the cache holds, by index: the
     /// top one, and those an inline call pins. `None` when the task is not
     /// cached.
@@ -200,10 +213,6 @@ impl Tasks {
         self.cache
             .get(&id.0)
             .map(|task| (task.frames.len(), task.frames.cached()))
-    }
-    pub(super) fn evict(&mut self) -> Result<(), HeapFault> {
-        self.roots()?;
-        Ok(())
     }
     fn make_room(&mut self) -> Result<(), HeapFault> {
         if self.cache.len() < 64 {
@@ -224,14 +233,25 @@ impl Tasks {
             .ok_or_else(|| HeapFault::Malformed("selected cached task is absent".into()))?;
         task.frames.flush()?;
         task.record.frames = task.frames.rows.clone();
-        let key = ordinal_key(index);
-        if !self
-            .rows
-            .get(&key, &self.access)?
-            .is_some_and(|old| old.same_version(&task.record))
-        {
-            self.rows.write(key, task.record, &self.access)?;
-        }
-        Ok(())
+        put(&mut self.rows, index, &mut task, &self.access)
     }
+}
+
+/// Writes `task`'s record to its row unless the row already holds that
+/// version, as its last write left it (FIG-6318).
+fn put(
+    rows: &mut Tree<TaskRecord>,
+    index: u64,
+    task: &mut Task,
+    access: &Access<'static>,
+) -> Result<(), HeapFault> {
+    if !task
+        .published
+        .as_ref()
+        .is_some_and(|old| old.same_version(&task.record))
+    {
+        rows.write(ordinal_key(index), task.record.clone(), access)?;
+        task.published = Some(task.record.clone());
+    }
+    Ok(())
 }

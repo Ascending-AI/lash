@@ -25,7 +25,7 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_client::RunStart;
 
-use crate::host::{WirePageSource, grant_of};
+use crate::host::{WirePageSource, grant_of, link_grant};
 
 /// The pages an in-process heap keeps read.
 const CLEAN_BYTES: u64 = 64 << 20;
@@ -392,13 +392,9 @@ where
             Some(session) => {
                 let service = pages.lock().await;
                 let carry = lash_vm_client::wire::CarryWire::of(session, |page| {
-                    service.issue(NodeId(page.id.0))
+                    lash_vm_client::wire::PageLink::Granted(service.issue(NodeId(page.id.0)))
                 });
-                Some(
-                    carry
-                        .session(|capability| Ok(grant_of(capability)))
-                        .map_err(fault)?,
-                )
+                Some(carry.session(link_grant).map_err(fault)?)
             }
             None => None,
         };

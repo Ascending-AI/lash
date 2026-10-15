@@ -24,6 +24,7 @@
 //! [`LocalPages`] is the same port for an embedder with no parent: the
 //! kernel's [`PageSource`] over committed pages it holds itself and a spool.
 
+pub mod cache;
 pub mod capability;
 pub mod local;
 pub mod shared;
@@ -49,6 +50,7 @@ use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind};
 use lash_vm_protocol::page::{
     PageAuthority, PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest, ReadPage,
+    SealBatch,
 };
 
 pub use capability::CapabilityKey;
@@ -93,6 +95,10 @@ pub trait PageExchange: Send {
     async fn serve(&mut self, request: PageRequest) -> PageReply;
 }
 
+/// The most envelope bytes of pages a run's start carries warm
+/// ([`ActivationPages::warm`]).
+pub const WARM_BYTES: u64 = 8 * 1024;
+
 /// How much one exchange may carry each way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageLimits {
@@ -128,9 +134,9 @@ impl PageLimits {
 const REPLY_HEADROOM: u64 = 512 * 1024;
 
 /// The MessagePack values one page of a reply is estimated to hold: its
-/// envelope's and each child capability's.
+/// envelope's and each child capability's, which crosses as one value.
 fn page_nodes(children: usize) -> u64 {
-    8 + 16 * children as u64
+    8 + 2 * children as u64
 }
 
 /// What a page service did, for measurement and the layer's laws.
@@ -189,6 +195,11 @@ pub struct ActivationPages<R: ?Sized> {
     /// Whether the activation's lease is one its broker took, which ends
     /// with the activation; the host's own lease outlives it.
     owned: bool,
+    /// The process's committed pages: a read the cache answers asks the
+    /// store for nothing.
+    cache: Option<cache::PageCache>,
+    /// What the session's activations read, warmed and sealed.
+    hints: Option<cache::PageHints>,
     stats: PageStats,
 }
 
@@ -224,8 +235,26 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             settled: false,
             references: BTreeSet::new(),
             owned: false,
+            cache: None,
+            hints: None,
             stats: PageStats::default(),
         }
+    }
+
+    /// Answers committed reads from `cache` first, and keeps there what the
+    /// store answers.
+    #[must_use]
+    pub fn caching(mut self, cache: cache::PageCache) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    /// Notes in `hints` what the activation reads, warms and seals, and
+    /// warms what they name.
+    #[must_use]
+    pub fn hinted(mut self, hints: cache::PageHints) -> Self {
+        self.hints = Some(hints);
+        self
     }
 
     /// Lets sealed pages name `references`, host nodes the publishing
@@ -267,6 +296,45 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// [`PageRefusal::Unauthorized`].
     pub fn verify(&self, capability: &PageCapability) -> Result<NodeId, PageRefusal> {
         self.authorize(capability)
+    }
+
+    /// Admits a seal batch that crossed with a worker's park, seal or end
+    /// (FIG-6288) exactly as a seal exchange of the same pages: the same
+    /// digest, authority, bound and quota checks, the first refusal ending
+    /// the activation. The stage capability of each page, in batch order.
+    ///
+    /// # Errors
+    ///
+    /// The refusal a seal exchange of the batch would get.
+    pub fn admit(&mut self, batch: SealBatch) -> Result<Vec<PageCapability>, PageRefusal> {
+        if let Some(refusal) = &self.refused {
+            return Err(refusal.clone());
+        }
+        let reply = self
+            .check_deadline()
+            .and_then(|()| self.seal(batch.pages, &batch.children));
+        match reply {
+            Ok(PageReply::Sealed { pages }) => Ok(pages),
+            Ok(_) => Err(PageRefusal::Corrupt),
+            Err(refusal) => {
+                self.refused = Some(refusal.clone());
+                Err(refusal)
+            }
+        }
+    }
+
+    /// `page`, when this activation staged it and its spool still holds
+    /// it: a candidate root a worker named.
+    ///
+    /// # Errors
+    ///
+    /// [`PageRefusal::Missing`].
+    pub fn staged(&self, page: NodeId) -> Result<NodeId, PageRefusal> {
+        if self.spool.contains(&page) {
+            Ok(page)
+        } else {
+            Err(PageRefusal::Missing)
+        }
     }
 
     #[must_use]
@@ -365,9 +433,36 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         }
     }
 
+    /// Reads `pages`: from the process's cache, and the rest from the store
+    /// under the lease, renewing it first when a third of its ttl has
+    /// passed.
+    async fn store_read(&mut self, pages: &[NodeId]) -> Result<Vec<StoredPage>, PageRefusal> {
+        let Some(cache) = self.cache.clone() else {
+            return self.fetch(pages).await;
+        };
+        let mut read = Vec::with_capacity(pages.len());
+        let mut missing = Vec::new();
+        for id in pages {
+            match cache.get(id) {
+                Some(bytes) => read.push(StoredPage { id: *id, bytes }),
+                None => missing.push(*id),
+            }
+        }
+        if !missing.is_empty() {
+            let fetched = self.fetch(&missing).await?;
+            cache.keep(
+                fetched
+                    .iter()
+                    .map(|page| (page.id, Arc::clone(&page.bytes))),
+            );
+            read.extend(fetched);
+        }
+        Ok(read)
+    }
+
     /// Reads `pages` from the store under the lease, renewing it first when
     /// a third of its ttl has passed.
-    async fn store_read(&mut self, pages: &[NodeId]) -> Result<Vec<StoredPage>, PageRefusal> {
+    async fn fetch(&mut self, pages: &[NodeId]) -> Result<Vec<StoredPage>, PageRefusal> {
         let deadline = tokio::time::Instant::from_std(self.deadline);
         let Some(lease) = self.lease.clone() else {
             return Err(PageRefusal::Unauthorized);
@@ -424,13 +519,12 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                 bytes.insert(page.id, page.bytes);
             }
         }
-        let limits = DecodeLimits::within_total(u64::MAX);
         let (mut reply_bytes, mut reply_nodes) = (0_u64, 0_u64);
         let mut pages = Vec::with_capacity(wanted.len());
         for (id, _) in wanted {
             let page = bytes.get(&id).ok_or(PageRefusal::Missing)?;
-            let envelope = check_envelope(page, id, &limits).map_err(|_| PageRefusal::Corrupt)?;
-            let nodes = page_nodes(envelope.children.len());
+            let read = self.answer(id, page)?;
+            let nodes = page_nodes(read.children.len());
             // A reply answers a prefix that fits one frame; at least one
             // page always fits, since a page is at most 64 KiB.
             if !pages.is_empty()
@@ -441,24 +535,109 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             }
             reply_bytes += page.len() as u64;
             reply_nodes += nodes;
-            pages.push(ReadPage {
-                page: PageEnvelope {
-                    id: id.0,
-                    envelope: page.to_vec(),
-                },
-                // A child's authority is its provenance: a staged child
-                // reads and seals under the spool's, a committed child (a
-                // committed page's, or one a staged page reuses) under the
-                // root lease that protects it.
-                children: envelope
-                    .children
-                    .iter()
-                    .map(|child| self.key.issue(child, self.provenance(&child), self.epoch))
-                    .collect(),
-            });
+            pages.push(read);
+        }
+        if let Some(hints) = &self.hints {
+            hints.extend(pages.iter().map(|read| NodeId(read.page.id)));
         }
         self.stats.pages_read += pages.len() as u64;
         Ok(PageReply::Read { pages })
+    }
+
+    /// `page`, read as `id`, as it crosses: its envelope checked, with a
+    /// capability for each child it declares. A child's authority is its
+    /// provenance: a staged child reads and seals under the spool's, a
+    /// committed child (a committed page's, or one a staged page reuses)
+    /// under the root lease that protects it.
+    fn answer(&self, id: NodeId, page: &[u8]) -> Result<ReadPage, PageRefusal> {
+        let envelope = check_envelope(page, id, &DecodeLimits::within_total(u64::MAX))
+            .map_err(|_| PageRefusal::Corrupt)?;
+        Ok(ReadPage {
+            page: PageEnvelope {
+                id: id.0,
+                envelope: page.to_vec(),
+            },
+            children: envelope
+                .children
+                .iter()
+                .map(|child| self.key.issue(child, self.provenance(&child), self.epoch))
+                .collect(),
+        })
+    }
+
+    /// The pages a fresh activation reads first, as a read of them answers:
+    /// `roots`, and under them, breadth first, the pages the session's last
+    /// activation read, warmed or sealed ([`cache::PageHints`]), within
+    /// `budget` envelope bytes. They cross with the run's start, so its
+    /// first statements fault none of them in one exchange at a time
+    /// (FIG-6321). Only what the roots reach is warmed; what does not fit,
+    /// or was not touched last time, the worker reads on demand.
+    ///
+    /// # Errors
+    ///
+    /// As a read of the pages.
+    pub async fn warm(
+        &mut self,
+        roots: &[NodeId],
+        budget: u64,
+    ) -> Result<Vec<ReadPage>, PageRefusal> {
+        let hinted = self
+            .hints
+            .as_ref()
+            .map(cache::PageHints::take)
+            .unwrap_or_default();
+        let mut seen: BTreeSet<NodeId> = roots.iter().copied().collect();
+        let mut level: Vec<NodeId> = roots.to_vec();
+        let mut left = budget;
+        let mut warm = Vec::new();
+        while !level.is_empty() && left > 0 && warm.len() < self.limits.batch_pages {
+            let mut bytes: BTreeMap<NodeId, Arc<[u8]>> = BTreeMap::new();
+            let mut committed = Vec::new();
+            for id in &level {
+                match self.spool.read(id) {
+                    Ok(page) => {
+                        bytes.insert(*id, page);
+                    }
+                    Err(StageFault::Missing(_)) => committed.push(*id),
+                    Err(fault) => return Err(stage_refusal(fault)),
+                }
+            }
+            if !committed.is_empty() {
+                for page in self.store_read(&committed).await? {
+                    bytes.insert(page.id, page.bytes);
+                }
+            }
+            let mut next = Vec::new();
+            for id in level {
+                let page = bytes.get(&id).ok_or(PageRefusal::Missing)?;
+                let size = page.len() as u64;
+                if size > left || warm.len() == self.limits.batch_pages {
+                    continue;
+                }
+                let envelope = check_envelope(page, id, &DecodeLimits::within_total(u64::MAX))
+                    .map_err(|_| PageRefusal::Corrupt)?;
+                // A host node under a root (a release, an owner binding) is
+                // never a heap read.
+                if !SEMANTIC_KINDS.contains(&envelope.kind.0) {
+                    continue;
+                }
+                let read = self.answer(id, page)?;
+                left -= size;
+                next.extend(
+                    envelope
+                        .children
+                        .iter()
+                        .filter(|child| hinted.contains(child) && seen.insert(*child)),
+                );
+                warm.push(read);
+            }
+            level = next;
+        }
+        if let Some(hints) = &self.hints {
+            hints.extend(warm.iter().map(|read| NodeId(read.page.id)));
+        }
+        self.stats.pages_read += warm.len() as u64;
+        Ok(warm)
     }
 
     fn seal(
@@ -496,6 +675,9 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                 )
                 .map_err(stage_refusal)?;
             sealed.push(self.key.issue(id, self.stage_authority(), self.epoch));
+        }
+        if let Some(hints) = &self.hints {
+            hints.extend(sealed.iter().map(|capability| NodeId(capability.page)));
         }
         self.stats.pages_sealed += sealed.len() as u64;
         Ok(PageReply::Sealed { pages: sealed })

@@ -394,10 +394,7 @@ fn page_exchanges_respect_batch_bounds() {
         epoch: 1,
         mac: [7; 32],
     };
-    let envelope = |index: usize, bytes: usize| PageEnvelope {
-        id: [index as u8; 32],
-        envelope: vec![0; bytes],
-    };
+    let envelope = |index: usize, bytes: usize| PageEnvelope::new(vec![index as u8; bytes]);
     let worker = |request: PageRequest| WorkerFrame {
         header: fence().next_header(),
         message: WorkerMessage::Pages {

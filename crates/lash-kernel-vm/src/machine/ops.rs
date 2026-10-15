@@ -131,7 +131,7 @@ impl KernelMachine {
     /// when the heap is due and ending the run when what is live does not
     /// leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        self.publish_roots()?;
+        self.publish_holdings()?;
         let transient = TransientRoots {
             registers: &self.regs,
             pinned: &self.pins.values,
@@ -145,7 +145,7 @@ impl KernelMachine {
     }
 
     pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
-        self.publish_roots()?;
+        self.publish_holdings()?;
         let id = self
             .heap
             .allocate_object(object)
@@ -468,7 +468,7 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
             LibRun::Native(native) => {
-                self.publish_roots()?;
+                self.publish_holdings()?;
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])

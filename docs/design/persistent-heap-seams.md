@@ -1180,3 +1180,43 @@ changed directory path and heap header. Full paths:
 `paged::laws::heap::{a_point_write_in_a_huge_list_seals_one_leaf_path,
 a_tiny_update_among_many_objects_seals_one_directory_path,
 a_text_length_read_touches_no_payload_page}`.
+
+### S3/S4/S7 amendment: cost no more than the pre-heap baseline (FIG-6321)
+
+S3, the page exchange:
+
+- `Parked`, `Sealed` and `Ended` carry `seal: Option<SealBatch>`, the pages
+  sealed since the last batch crossed; `Parked`/`Sealed` name the candidate
+  by its digest. The parent admits the batch before it handles the frame
+  and returns each admitted page's stage capability on the next
+  `Run { sealed }`. A park therefore adds no `Pages` exchange (FIG-6288).
+- `PageEnvelope` crosses as its envelope bytes alone; its id is derived as
+  the store's content address (`lash-blob/v2`). `PageCapability` crosses as
+  81 bytes. Law: `page_laws::a_page_crosses_named_by_its_store_content_address`.
+- `Start.warm` carries, as read replies, the pages the start's carried
+  session or checkpoint root names and those beneath them that the
+  session's last activation read, warmed or sealed (`PageHints`, at most 256
+  ids a session, 1024 sessions a process), within `WARM_BYTES` (8 KiB). A
+  warm the parent cannot build is dropped, never a failure.
+- One process-wide `PageCache` (`PAGE_CACHE_BYTES`, 64 MiB, least recently
+  used first, by content address) answers committed reads for the
+  executor's session reads and every activation's page service. It
+  amends S3's "never a set of visited pages": the set is bounded by bytes,
+  not by history, and grants nothing.
+
+S4, the frames: the machine publishes holdings (bindings, iterated values,
+departing values, native arguments) at a statement's end and before an
+allocation, a reservation or a call, writing a frame's row only when what
+it holds changed since the row it last wrote. Coordinates (statement, loop
+positions, cleanups) are written at a park, seal, carry, pushed frame and
+frames view. A tree read borrows a working node in place; a copy-on-write
+copy keeps its residency weight; a self-contained site reference is
+memoized per heap. The census sees the same root cost at every reservation
+as before, because a frame's cost counts holdings only (FIG-6318).
+
+S7, collection: a cell's carry refines once when the census holds 1 to 4096
+entities (`CARRY_COLLECTION_ENTITIES`); a park never collects.
+
+Replay measurement: `lash-perf replay` settles page retirement between
+rounds, outside each round's window, as it settles artifact cleanup; the
+node's background sweep is left idle for the run.

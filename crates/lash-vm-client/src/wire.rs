@@ -88,22 +88,43 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
     Ok(value)
 }
 
+/// How a carried session names one of its pages: under a capability the
+/// receiver verifies, or as a page of the seal batch the same frame
+/// carries, which the parent admits into this activation's staging before
+/// it reads the session (FIG-6288).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageLink {
+    Granted(PageCapability),
+    Carried([u8; 32]),
+}
+
+impl PageLink {
+    /// The page this names.
+    #[must_use]
+    pub fn page(&self) -> [u8; 32] {
+        match self {
+            Self::Granted(capability) => capability.page,
+            Self::Carried(page) => *page,
+        }
+    }
+}
+
 /// A carried session as it crosses (S8): its [`SessionRoot`] in the
-/// kernel's token encoding, and a capability for each page it names, in
-/// its order (heap, bindings, functions). The receiver authorizes every
-/// page by its capability; a root naming a page with none is refused.
+/// kernel's token encoding, and a link for each page it names, in its
+/// order (heap, bindings, functions). The receiver authorizes every page
+/// by its link; a root naming a page with none is refused.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CarryWire {
     #[serde(with = "serde_bytes")]
     pub root: Vec<u8>,
-    pub pages: Vec<PageCapability>,
+    pub pages: Vec<PageLink>,
 }
 
 impl CarryWire {
-    /// `session`, each of its pages carried by the capability `issue`
-    /// gives it.
-    pub fn of(session: &SessionRoot, mut issue: impl FnMut(PageRef) -> PageCapability) -> Self {
+    /// `session`, each of its pages carried by the link `issue` gives it.
+    pub fn of(session: &SessionRoot, mut issue: impl FnMut(PageRef) -> PageLink) -> Self {
         Self {
             root: encode_body(session),
             pages: session_pages(session).into_iter().map(&mut issue).collect(),
@@ -111,15 +132,15 @@ impl CarryWire {
     }
 
     /// The session this carries, each page granted what `grant` makes of
-    /// its capability.
+    /// its link.
     ///
     /// # Errors
     ///
-    /// A payload breach for a root that does not decode, or capabilities
-    /// that are not its pages'.
+    /// A payload breach for a root that does not decode, or links that
+    /// are not its pages'.
     pub fn session(
         &self,
-        mut grant: impl FnMut(&PageCapability) -> Result<PageGrant, PoolError>,
+        mut grant: impl FnMut(&PageLink) -> Result<PageGrant, PoolError>,
     ) -> Result<SessionRoot, PoolError> {
         let breach = |problem: &str| PoolError::payload(PayloadKind::Start, problem);
         let mut session: SessionRoot = decode_body(&self.root)
@@ -129,17 +150,15 @@ impl CarryWire {
             || named
                 .iter()
                 .zip(&self.pages)
-                .any(|(page, capability)| page.id.0 != capability.page)
+                .any(|(page, link)| page.id.0 != link.page())
         {
-            return Err(breach(
-                "a carried session's capabilities are not its pages'",
-            ));
+            return Err(breach("a carried session's links are not its pages'"));
         }
         let mut grants = self.pages.iter();
         let mut next = || -> Result<PageGrant, PoolError> {
             grants
                 .next()
-                .ok_or_else(|| breach("a carried session's capabilities run out"))
+                .ok_or_else(|| breach("a carried session's links run out"))
                 .and_then(&mut grant)
         };
         session.heap.grant = next()?;
@@ -418,7 +437,7 @@ pub enum BoundWire {
 }
 
 /// How a run ended ([`End`]). A finished cell's carry crosses as the
-/// session root it sealed, with a capability for each page.
+/// session root it sealed, with a link for each page.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum EndWire {
@@ -446,9 +465,9 @@ pub enum EndWire {
 }
 
 impl EndWire {
-    /// `end`, its carry's pages carried by the capability `issue` gives
+    /// `end`, its carry's pages carried by the link `issue` gives
     /// each.
-    pub fn of(end: End, issue: impl FnMut(PageRef) -> PageCapability) -> Self {
+    pub fn of(end: End, issue: impl FnMut(PageRef) -> PageLink) -> Self {
         match end {
             End::Finished(finished) => {
                 let Finished {
@@ -492,14 +511,14 @@ impl EndWire {
     }
 
     /// The end this carries, its carry's pages granted what `grant` makes
-    /// of each capability.
+    /// of each link.
     ///
     /// # Errors
     ///
     /// As [`CarryWire::session`].
     pub fn into_end(
         self,
-        grant: impl FnMut(&PageCapability) -> Result<PageGrant, PoolError>,
+        grant: impl FnMut(&PageLink) -> Result<PageGrant, PoolError>,
     ) -> Result<End, PoolError> {
         Ok(match self {
             Self::Finished {

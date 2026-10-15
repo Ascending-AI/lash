@@ -139,6 +139,17 @@ impl Parent {
         }
     }
 
+    /// The grants for a seal batch a hand-over frame carried, which the
+    /// run's next slice takes.
+    fn admit(
+        &mut self,
+        seal: Option<lash_vm_protocol::page::SealBatch>,
+    ) -> Vec<lash_vm_protocol::page::PageCapability> {
+        let pages = self.pages.as_mut().expect("a lease's page service");
+        seal.map(|batch| pages.admit(batch).expect("the parent admits the batch"))
+            .unwrap_or_default()
+    }
+
     fn send(&mut self, message: ParentMessage) -> WorkerMessage {
         let bytes = self
             .codec
@@ -247,21 +258,28 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
         bounds,
         binding: BINDING,
         save: None,
+        warm: Vec::new(),
     };
     let mut start = Some(Box::new(start));
     let mut deliveries = Vec::new();
+    let mut sealed = Vec::new();
     loop {
         let step = parent.exchange(ParentMessage::Run {
             start: start.take(),
             deliveries: std::mem::take(&mut deliveries),
             slice: 1_000_000,
             cancel: false,
+            sealed: std::mem::take(&mut sealed),
         });
         match step {
             WorkerMessage::Parked {
-                park, candidate, ..
+                park,
+                candidate,
+                seal,
+                ..
             } => {
                 assert!(candidate.is_some(), "the park carries its sealed root");
+                sealed = parent.admit(seal);
                 let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
                 let park = MachinePark::try_from(park).expect("canonical park");
                 for request in park.requests {

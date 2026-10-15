@@ -215,6 +215,11 @@ pub struct Service {
     /// run starts on it: the lowering and the run share one lease, with no
     /// reset between them (FIG-5921). Only an execution's service has one.
     retained: Option<Arc<Mutex<Option<crate::Checkout>>>>,
+    /// The committed pages this process read, shared by every session's
+    /// reads and every activation's page service (FIG-6321).
+    pages: lash_vm_broker::kernel::pages::cache::PageCache,
+    /// What each session's last activation touched (FIG-6321).
+    hints: lash_vm_broker::kernel::pages::cache::HintBook,
 }
 impl Service {
     /// Select the helper executable explicitly, using the code mode/process bounds.
@@ -234,7 +239,19 @@ impl Service {
             spools: Arc::default(),
             budget: None,
             retained: None,
+            pages: lash_vm_broker::kernel::pages::cache::PageCache::default(),
+            hints: lash_vm_broker::kernel::pages::cache::HintBook::default(),
         }
+    }
+
+    /// What each session's last activation read, warmed and sealed.
+    pub fn page_hints(&self) -> lash_vm_broker::kernel::pages::cache::HintBook {
+        self.hints.clone()
+    }
+
+    /// The committed pages this process read.
+    pub fn page_cache(&self) -> lash_vm_broker::kernel::pages::cache::PageCache {
+        self.pages.clone()
     }
     #[cfg(feature = "testing")]
     pub fn with_worker_receipts(mut self) -> Self {

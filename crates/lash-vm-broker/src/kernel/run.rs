@@ -246,6 +246,12 @@ pub struct PagePlan {
     pub lease_ttl: Duration,
     /// How long all of one activation's page exchanges may take.
     pub span: Duration,
+    /// The committed pages the process read, which an activation's reads
+    /// answer from before the store (FIG-6321).
+    pub cache: Option<super::pages::cache::PageCache>,
+    /// What the session's last activation touched, which the next one's
+    /// start carries warm (FIG-6321).
+    pub hints: Option<super::pages::cache::PageHints>,
 }
 
 impl PagePlan {
@@ -264,6 +270,8 @@ impl PagePlan {
             limits,
             lease_ttl: Duration::from_secs(60),
             span: Duration::from_secs(3600),
+            cache: None,
+            hints: None,
         }
     }
 }
@@ -724,6 +732,14 @@ impl KernelBroker<'_> {
             self.pages.limits,
         )
         .with_references(references);
+        let pages = match &self.pages.cache {
+            Some(cache) => pages.caching(cache.clone()),
+            None => pages,
+        };
+        let pages = match &self.pages.hints {
+            Some(hints) => pages.hinted(hints.clone()),
+            None => pages,
+        };
         let pages = if owned { pages.owning() } else { pages };
         Ok(PageActivation {
             pages: Arc::new(tokio::sync::Mutex::new(pages)),

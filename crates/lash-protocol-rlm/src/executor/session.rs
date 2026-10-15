@@ -183,6 +183,15 @@ impl CodeModeExecutionState {
         self
     }
 
+    /// Reads the session's committed pages through `cache`, the process's.
+    pub(crate) fn caching(
+        mut self,
+        cache: lash_vm_broker::kernel::pages::cache::PageCache,
+    ) -> Self {
+        self.pages.caching(cache);
+        self
+    }
+
     /// The dialect the session recorded at its creation.
     pub(crate) fn dialect(&self) -> &str {
         &self.dialect
@@ -222,6 +231,11 @@ impl CodeModeExecutionState {
     /// none when the store holds none of them.
     pub(super) async fn lease(&mut self) -> Result<Option<RootLease>, PageAccessError> {
         self.pages.lease().await
+    }
+
+    /// The actor whose committed state the session's pages are.
+    pub(super) fn actor(&self) -> Option<&lash_durable::ActorKey> {
+        self.pages.actor()
     }
 
     /// The carried session a cell starts from.

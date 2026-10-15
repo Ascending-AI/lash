@@ -325,7 +325,7 @@ impl<T: Cell> Tree<T> {
         if root.tasks_known {
             return Ok(root.summary.tasks);
         }
-        match Self::load(root, access, self.sequence)? {
+        match &*Self::load_node(root, access, self.sequence)?.node() {
             Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.task_edges())),
             Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.tasks)),
             Node::Staged(..) => unreachable!("loaded staged node"),
@@ -347,8 +347,7 @@ impl<T: Cell> Tree<T> {
         if root.members_known {
             return Ok(root.summary.members);
         }
-        let node = Self::load(root, access, self.sequence)?;
-        match node {
+        match &*Self::load_node(root, access, self.sequence)?.node() {
             Node::Leaf(rows) => checked_sum(rows.iter().map(|(_, c)| c.live_members())),
             Node::Index(rows) => checked_sum(rows.iter().map(|r| r.summary.members)),
             Node::Staged(..) => unreachable!("loaded staged node"),
@@ -365,7 +364,34 @@ impl<T: Cell> Tree<T> {
             .as_ref()
             .is_none_or(|r| !matches!(r.link, Link::Dirty(_)))
     }
+    /// The node `branch` names, owned: a copy of the decoded node a read
+    /// shares.
     fn load(branch: &Branch<T>, access: &Access<'_>, sequence: bool) -> Result<Node<T>, HeapFault> {
+        Self::load_shared(branch, access, sequence).map(Rc::unwrap_or_clone)
+    }
+
+    /// The node `branch` names for a read: a working node borrowed in
+    /// place, never copied row by row (FIG-6318).
+    fn load_node(
+        branch: &Branch<T>,
+        access: &Access<'_>,
+        sequence: bool,
+    ) -> Result<Loaded<T>, HeapFault> {
+        match &branch.link {
+            Link::Dirty(n) if !matches!(&*n.borrow(), Node::Staged(..)) => {
+                Ok(Loaded::Dirty(Rc::clone(n)))
+            }
+            _ => Self::load_shared(branch, access, sequence).map(Loaded::Shared),
+        }
+    }
+
+    /// The node `branch` names, as the access's decoded nodes hold it: a
+    /// read takes it without copying its rows (FIG-6321).
+    fn load_shared(
+        branch: &Branch<T>,
+        access: &Access<'_>,
+        sequence: bool,
+    ) -> Result<Rc<Node<T>>, HeapFault> {
         match &branch.link {
             Link::Dirty(n) => {
                 let node = n.borrow().clone();
@@ -374,9 +400,9 @@ impl<T: Cell> Tree<T> {
                     staged.link = Link::Sealed(page);
                     staged.encoded_bytes = Some(bytes);
                     staged.is_leaf = Some(leaf);
-                    Self::load(&staged, access, sequence)
+                    Self::load_shared(&staged, access, sequence)
                 } else {
-                    Ok(node)
+                    Ok(Rc::new(node))
                 }
             }
             Link::Inline { tokens, children } => {
@@ -418,7 +444,7 @@ impl<T: Cell> Tree<T> {
                         if count > KEYED_LEAF_ROWS {
                             return Err(corrupt(*p, "too many leaf rows"));
                         }
-                        let mut rows = Vec::new();
+                        let mut rows = Vec::with_capacity(count as usize);
                         for _ in 0..count {
                             input.expect_struct(2).map_err(|e| corrupt(*p, e))?;
                             let key = Key::decode(&mut input).map_err(|e| corrupt(*p, e))?;
@@ -507,6 +533,7 @@ impl<T: Cell> Tree<T> {
                 if len != branch.summary.len || cost != branch.summary.cost {
                     return Err(corrupt(*p, "tree aggregate mismatch"));
                 }
+                let node = Rc::new(node);
                 access.retain_decoded(
                     *p,
                     branch.family,
@@ -518,6 +545,7 @@ impl<T: Cell> Tree<T> {
                         tasks,
                         members,
                     },
+                    answer.tokens.len(),
                 );
                 Ok(node)
             }
@@ -528,7 +556,7 @@ impl<T: Cell> Tree<T> {
             return Ok(None);
         };
         loop {
-            match Self::load(&branch, access, self.sequence)? {
+            match &*Self::load_node(&branch, access, self.sequence)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
                     return Ok(rows
@@ -557,7 +585,7 @@ impl<T: Cell> Tree<T> {
             return Ok(None);
         };
         loop {
-            match Self::load(&branch, access, self.sequence)? {
+            match &*Self::load_node(&branch, access, self.sequence)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
                     return Ok(rows
@@ -573,9 +601,11 @@ impl<T: Cell> Tree<T> {
                         }
                         rank -= row.summary.len;
                     }
-                    branch = chosen.ok_or_else(|| {
-                        HeapFault::Malformed("tree rank summary is inconsistent".into())
-                    })?;
+                    branch = chosen
+                        .ok_or_else(|| {
+                            HeapFault::Malformed("tree rank summary is inconsistent".into())
+                        })?
+                        .clone();
                 }
             }
         }
@@ -591,12 +621,12 @@ impl<T: Cell> Tree<T> {
             access: &Access<'_>,
             sequence: bool,
         ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-            match Tree::load(branch, access, sequence)? {
+            match &*Tree::load_node(branch, access, sequence)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => Ok(rows
-                    .into_iter()
+                    .iter()
                     .find(|(k, _)| key.is_none_or(|a| k.as_slice() > a))
-                    .map(|(k, v)| (k.0, v))),
+                    .map(|(k, v)| (k.0.clone(), v.clone()))),
                 Node::Index(rows) => {
                     let start = key.map_or(0, |k| {
                         rows.partition_point(|r| r.first.as_slice() <= k)
@@ -622,7 +652,7 @@ impl<T: Cell> Tree<T> {
             access: &Access<'_>,
             seq: bool,
         ) -> Result<u64, HeapFault> {
-            match Tree::load(branch, access, seq)? {
+            match &*Tree::load_node(branch, access, seq)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => Ok(rows.partition_point(|(k, _)| k.as_slice() <= key) as u64),
                 Node::Index(rows) => {
@@ -651,14 +681,21 @@ impl<T: Cell> Tree<T> {
             match &mut *node {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
-                    match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
-                        Ok(i) => rows[i].1 = value,
-                        Err(i) => rows.insert(i, (key, value)),
-                    }
-                    let bytes = rows
-                        .iter()
-                        .map(|(k, v)| k.len() + encode_body(v).len() + 8)
-                        .sum::<usize>();
+                    let encoded = encode_body(&value).len();
+                    let (at, before) = match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
+                        Ok(i) => {
+                            let before =
+                                decoded::RowSize::of(&rows[i].0, encode_body(&rows[i].1).len());
+                            rows[i].1 = value;
+                            (i, Some(before))
+                        }
+                        Err(i) => {
+                            rows.insert(i, (key, value));
+                            (i, None)
+                        }
+                    };
+                    let after = decoded::RowSize::of(&rows[at].0, encoded);
+                    let bytes = access.track_row(&page, rows, seq, before, after);
                     if rows.len() > KEYED_LEAF_ROWS as usize || bytes > PAGE_TARGET_BYTES as usize {
                         if rows.len() == 1 {
                             return Err(HeapFault::Malformed("unbounded tree cell".into()));
@@ -668,6 +705,8 @@ impl<T: Cell> Tree<T> {
                         access.track(&page, &node, seq);
                         return Ok(Some(dirty(Node::Leaf(right), access, seq)?));
                     }
+                    refresh(branch, &node)?;
+                    return Ok(None);
                 }
                 Node::Index(rows) => {
                     let i = rows.partition_point(|r| r.first <= key).saturating_sub(1);
@@ -759,17 +798,17 @@ impl<T: Cell> Tree<T> {
             seq: bool,
             visitor: &mut dyn FnMut(&[u8], &T) -> bool,
         ) -> Result<bool, HeapFault> {
-            match Tree::load(branch, access, seq)? {
+            match &*Tree::load_shared(branch, access, seq)? {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
-                    for (k, v) in &rows {
+                    for (k, v) in rows {
                         if !visitor(k.as_slice(), v) {
                             return Ok(false);
                         }
                     }
                 }
                 Node::Index(rows) => {
-                    for row in &rows {
+                    for row in rows {
                         if !walk(row, access, seq, visitor)? {
                             return Ok(false);
                         }
@@ -811,6 +850,7 @@ impl<T: Cell> Tree<T> {
             let (kind, tokens) = match &mut *node {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
+                    access.forget_rows(page);
                     for (_, cell) in rows.iter_mut() {
                         if !cell.prepare(access, work)? {
                             return Ok(false);
@@ -867,6 +907,33 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(true), |r| walk(r, access, work, self.sequence))
     }
 }
+/// A node a read holds: a working node it borrows, or a decoded one it
+/// shares.
+enum Loaded<T: Cell> {
+    Dirty(Rc<RefCell<Node<T>>>),
+    Shared(Rc<Node<T>>),
+}
+enum NodeGuard<'a, T: Cell> {
+    Dirty(std::cell::Ref<'a, Node<T>>),
+    Shared(&'a Node<T>),
+}
+impl<T: Cell> Loaded<T> {
+    fn node(&self) -> NodeGuard<'_, T> {
+        match self {
+            Self::Dirty(node) => NodeGuard::Dirty(node.borrow()),
+            Self::Shared(node) => NodeGuard::Shared(node),
+        }
+    }
+}
+impl<T: Cell> std::ops::Deref for NodeGuard<'_, T> {
+    type Target = Node<T>;
+    fn deref(&self) -> &Node<T> {
+        match self {
+            Self::Dirty(node) => node,
+            Self::Shared(node) => node,
+        }
+    }
+}
 fn make_dirty<T: Cell>(
     branch: &mut Branch<T>,
     access: &Access<'_>,
@@ -885,11 +952,13 @@ fn make_dirty<T: Cell>(
         && Rc::strong_count(page) > 1
     {
         let private = page.borrow().clone();
-        *page = Rc::new(RefCell::new(private));
+        let private = Rc::new(RefCell::new(private));
+        access.track_copy(page, &private, seq);
+        *page = private;
     }
     match &branch.link {
         Link::Dirty(page) => {
-            access.track(page, &page.borrow(), seq);
+            access.ensure_tracked(page, seq);
             Ok(Rc::clone(page))
         }
         Link::Sealed(_) | Link::Inline { .. } => {

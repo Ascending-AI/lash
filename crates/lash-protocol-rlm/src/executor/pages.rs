@@ -11,24 +11,23 @@
 //! and the executor has not read faults the read: the executor fetches
 //! every page the read missed, under the lease, and runs it again.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core::plugin::SessionPages;
 use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::node::parse_envelope;
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_durable::domain::pages::{RootLease, RootLeaseRequest};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind, PageSource};
 use lash_vm_broker::kernel::next_stage_lease;
+use lash_vm_broker::kernel::pages::cache::PageCache;
 use lash_vm_broker::kernel::pages::{SharedSpool, SpoolRoot, answer_page, frame_page};
 
 /// How long the session's lease lives between renewals.
 pub(crate) const LEASE_TTL: Duration = Duration::from_secs(60);
-
-/// The most committed pages the executor keeps read, by count.
-const CACHED_PAGES: usize = 4096;
 
 /// The parent's access to a session's pages: the store it reads them from,
 /// the lease it reads under, the turn's spool and the pages it read.
@@ -45,7 +44,9 @@ pub(crate) struct SessionPageAccess {
     /// stay protected by its run's lease until a capture of the session is
     /// committed, and are read under it while the session holds no root.
     runs: VecDeque<HeldRun>,
-    cache: Arc<Mutex<PageCache>>,
+    /// The committed pages the process read, shared with its activations'
+    /// page services (FIG-6321).
+    cache: PageCache,
     /// Lease writes the executor made: acquisitions and renewals.
     lease_writes: u64,
 }
@@ -77,7 +78,7 @@ impl std::fmt::Debug for SessionPageAccess {
             .field("handle", &self.handle)
             .field("leased", &self.lease.is_some())
             .field("spool", &self.spool.is_some())
-            .field("cached", &lock(&self.cache).pages.len())
+            .field("cached", &self.cache.usage().0)
             .finish()
     }
 }
@@ -196,7 +197,17 @@ impl SessionPageAccess {
     /// Keeps `pages`, the bytes of committed pages the host already holds
     /// (a restored descriptor), as read.
     pub(crate) fn preload(&mut self, pages: impl IntoIterator<Item = (NodeId, Arc<[u8]>)>) {
-        lock(&self.cache).keep(pages);
+        self.cache.keep(pages);
+    }
+
+    /// The actor whose committed state the session's pages are.
+    pub(crate) fn actor(&self) -> Option<&lash_durable::ActorKey> {
+        self.handle.as_ref().map(|handle| &handle.actor)
+    }
+
+    /// Reads committed pages through `cache`, the process's.
+    pub(crate) fn caching(&mut self, cache: PageCache) {
+        self.cache = cache;
     }
 
     /// Runs `read` over the session's pages until it reads no page it
@@ -211,7 +222,7 @@ impl SessionPageAccess {
             let missing = Arc::new(Mutex::new(Vec::new()));
             let result = read(Box::new(ParentPages {
                 spool: self.spool.clone(),
-                cache: Arc::clone(&self.cache),
+                cache: self.cache.clone(),
                 missing: Arc::clone(&missing),
             }));
             let missing = std::mem::take(&mut *lock(&missing));
@@ -224,9 +235,33 @@ impl SessionPageAccess {
         }
     }
 
+    /// Fetches `missing` and, with it, the rest of every payload it
+    /// reaches: the host reads a text or bytes value whole, so a payload
+    /// index's pages come in with it rather than one read pass each.
     async fn fetch(&mut self, mut missing: Vec<NodeId>) -> Result<(), PageAccessError> {
-        missing.sort();
-        missing.dedup();
+        while !missing.is_empty() {
+            missing.sort();
+            missing.dedup();
+            let batch = missing.split_off(missing.len().saturating_sub(FETCH_BATCH));
+            let pages = self.fetch_batch(&batch).await?;
+            for (id, bytes) in &pages {
+                missing.extend(payload_children(*id, bytes).into_iter().filter(|child| {
+                    !self.cache.contains(child)
+                        && !self
+                            .spool
+                            .as_ref()
+                            .is_some_and(|spool| spool.contains(child))
+                }));
+            }
+            self.cache.keep(pages);
+        }
+        Ok(())
+    }
+
+    async fn fetch_batch(
+        &mut self,
+        missing: &[NodeId],
+    ) -> Result<Vec<(NodeId, Arc<[u8]>)>, PageAccessError> {
         if self.handle.is_none()
             && let Some(run) = self.runs.back()
         {
@@ -234,39 +269,35 @@ impl SessionPageAccess {
                 .pages
                 .lock()
                 .await
-                .read_committed(&missing)
+                .read_committed(missing)
                 .await
                 .map_err(PageAccessError::Run)?;
-            lock(&self.cache).keep(pages.into_iter().map(|page| (page.id, page.bytes)));
-            return Ok(());
+            return Ok(pages
+                .into_iter()
+                .map(|page| (page.id, page.bytes))
+                .collect());
         }
         let lease = self.lease().await?.ok_or(PageAccessError::NoStore)?;
         let store = Arc::clone(&self.handle.as_ref().ok_or(PageAccessError::NoStore)?.store);
-        let pages = store.read_pages(&lease, &missing).await?;
-        lock(&self.cache).keep(pages.into_iter().map(|page| (page.id, page.bytes)));
-        Ok(())
+        let pages = store.read_pages(&lease, missing).await?;
+        Ok(pages
+            .into_iter()
+            .map(|page| (page.id, page.bytes))
+            .collect())
     }
 }
 
-/// The committed pages the executor read, the oldest dropped first.
-#[derive(Default)]
-struct PageCache {
-    pages: BTreeMap<NodeId, Arc<[u8]>>,
-    order: VecDeque<NodeId>,
-}
+/// The most pages one store read asks for.
+const FETCH_BATCH: usize = 512;
 
-impl PageCache {
-    fn keep(&mut self, pages: impl IntoIterator<Item = (NodeId, Arc<[u8]>)>) {
-        for (id, bytes) in pages {
-            if self.pages.insert(id, bytes).is_none() {
-                self.order.push_back(id);
-            }
+/// The children of `bytes` when it frames a payload index; a page that
+/// does not frame is left for the read that answers it to refuse.
+fn payload_children(id: NodeId, bytes: &[u8]) -> Vec<NodeId> {
+    match parse_envelope(bytes, Some(id)) {
+        Ok(envelope) if envelope.kind.0 == PageKind::PAYLOAD_INDEX.0 => {
+            envelope.children.iter().collect()
         }
-        while self.order.len() > CACHED_PAGES {
-            if let Some(evicted) = self.order.pop_front() {
-                self.pages.remove(&evicted);
-            }
-        }
+        _ => Vec::new(),
     }
 }
 
@@ -280,7 +311,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// from the store; any other page is recorded as missing.
 struct ParentPages {
     spool: Option<SharedSpool>,
-    cache: Arc<Mutex<PageCache>>,
+    cache: PageCache,
     missing: Arc<Mutex<Vec<NodeId>>>,
 }
 
@@ -294,8 +325,8 @@ impl PageSource for ParentPages {
                 Some(spool) if spool.contains(&id) => spool
                     .read(&id)
                     .map_err(|_| HeapFault::Missing { page: page.id })?,
-                _ => match lock(&self.cache).pages.get(&id) {
-                    Some(bytes) => Arc::clone(bytes),
+                _ => match self.cache.get(&id) {
+                    Some(bytes) => bytes,
                     None => {
                         missing.push(id);
                         continue;
