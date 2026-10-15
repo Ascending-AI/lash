@@ -150,7 +150,11 @@ impl SendBatchBuilder {
             input.trace_turn_id = None;
             submissions.push((input, Some(id.to_string())));
         }
-        let context = target.context().await?;
+        let ids = submissions
+            .iter()
+            .filter_map(|(_, id)| id.as_deref())
+            .collect::<Vec<_>>();
+        let context = super::send_context(&target, &ids).await?;
         let cursor = target.current_cursor();
         let enqueued = context
             .parts

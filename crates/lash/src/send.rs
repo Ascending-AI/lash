@@ -104,6 +104,16 @@ impl SendTarget {
         }
     }
 
+    /// The session's store whether or not lash has created the session: a
+    /// forsake writes through it, and a send or probe of a session not yet
+    /// created reads the id's tombstone from it. It reads nothing.
+    fn uncreated_store(&self) -> Result<lash_core::store::SessionStore> {
+        match self {
+            Self::Live(session) => session.durable().uncreated_store(),
+            Self::Durable(durable) => durable.uncreated_store(),
+        }
+    }
+
     /// The core's telemetry adapter, which captures the caller's context
     /// and opens a send's producer span.
     pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
@@ -320,7 +330,8 @@ impl SendBuilder {
     /// lash holds now: [`SendOutcome::Unknown`] when it holds nothing.
     ///
     /// An id the host [forsook](crate::LashSession::forsake) is refused
-    /// before acceptance, whatever the content.
+    /// before acceptance, whatever the content, including when the host
+    /// forsook it before lash created the session.
     ///
     /// Exactly-once acceptance does not imply exactly-once external actions:
     /// uncommitted work can repeat. See the
@@ -437,7 +448,6 @@ impl SendBuilder {
             .as_deref()
             .map(<dyn lash_core::TraceHostOperation>::parent);
         let trace_cause = lash_core::TraceCause::from(parent.clone());
-        let context = target.context().await?;
         // The host id names the run; the shift executes the run's turns under
         // it, so the input carries no turn id of its own. An input sent
         // without one gets a fresh id, so its row is keyed and its run named
@@ -445,6 +455,7 @@ impl SendBuilder {
         let host_id = id.or_else(|| input.trace_turn_id.take());
         input.trace_turn_id = None;
         let id = host_id.unwrap_or_else(crate::turn::fresh_turn_id);
+        let context = send_context(&target, &[id.as_str()]).await?;
         let cursor = target.current_cursor();
         // A retained submission is answered by the store's digest verdict,
         // including a changed-content conflict. Only a new key consults the
@@ -573,10 +584,11 @@ pub enum SendOutcome {
     /// ([`SendBuilder::id`]).
     ///
     /// A host that must end the wait without a timer forsakes the id
-    /// ([`LashSession::forsake`](crate::LashSession::forsake)): that answers
-    /// the input's outcome if a send of it was accepted after all, and
-    /// otherwise [`Forsaken`](Self::Forsaken), after which no send of the id
-    /// is ever accepted.
+    /// ([`LashSession::forsake`](crate::LashSession::forsake)), even before
+    /// lash has created the session: that answers the input if a send of it
+    /// was accepted after all, and otherwise records the id's tombstone,
+    /// after which no send of the id is ever accepted and this probe answers
+    /// [`Forsaken`](Self::Forsaken).
     #[non_exhaustive]
     Unknown {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
@@ -827,11 +839,22 @@ async fn settle(
     }
     let outcome = match follow_subject(target, subject, cursor, &mut tap).await {
         Ok(outcome) => outcome,
-        // An input has no retained acceptance once its session is gone.
-        // Store failures and standing faults remain failed reads.
-        Err(error) if absent_input_session(subject, &error) => {
-            SendOutcome::Unknown { gaps: Vec::new() }
-        }
+        // An input has no retained acceptance once its session is gone, and
+        // none before lash creates it, though a forsake may already have
+        // closed its id. Store failures and standing faults remain failed
+        // reads.
+        Err(error) if absent_input_session(subject, &error) => match (subject, &error) {
+            (Subject::Input(receipt), EmbedError::UnknownSession { .. })
+                if target
+                    .uncreated_store()?
+                    .input_status(&receipt.input_id)
+                    .await?
+                    .forsaken =>
+            {
+                SendOutcome::Forsaken { gaps: Vec::new() }
+            }
+            _ => SendOutcome::Unknown { gaps: Vec::new() },
+        },
         Err(error) => return Err(error),
     };
     shared.remember(&outcome);
@@ -1235,24 +1258,58 @@ pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
     handle
 }
 
-/// Forsake host id `id` in `target`'s session, then follow it: a handle on
-/// the input accepted under `id` when lash holds one, and otherwise on the
-/// id's tombstone, which answers [`SendOutcome::Forsaken`].
-pub(crate) async fn forsake(target: SendTarget, id: TurnId) -> Result<SendHandle> {
-    let context = target.context().await?;
-    if context
-        .parts
-        .store
-        .load_session_head_meta()
-        .await?
-        .is_none()
-    {
-        return Err(EmbedError::UnknownSession {
-            session_id: context.parts.session_id.clone(),
-        });
+/// What a forsake of a host id found: the id's tombstone, or the input a
+/// send accepted under it first.
+#[non_exhaustive]
+pub enum Forsaking {
+    /// The id's tombstone is recorded, now or by an earlier forsake, whether
+    /// or not lash has created the session yet: no send of the id is ever
+    /// accepted, and a probe of it answers [`SendOutcome::Forsaken`].
+    Forsaken,
+    /// A send of the id was accepted before the forsake: nothing was
+    /// written, and the handle follows that input, as
+    /// [`LashSession::attach_id`](crate::LashSession::attach_id) does.
+    Accepted(Box<SendHandle>),
+}
+
+/// Forsake host id `id` in `target`'s session, created or not: the store
+/// decides under the session's write authority, which every admission of
+/// the id takes too, whether an input holds the id or its tombstone is
+/// written.
+pub(crate) async fn forsake(target: SendTarget, id: TurnId) -> Result<Forsaking> {
+    let store = target.uncreated_store()?;
+    match store.forsake_turn_input(id.as_str()).await? {
+        lash_core::store::TurnInputForsaking::Held { .. } => {
+            Ok(Forsaking::Accepted(Box::new(attach_id(target, id))))
+        }
+        lash_core::store::TurnInputForsaking::Forsaken { .. } => Ok(Forsaking::Forsaken),
     }
-    context.parts.store.forsake_turn_input(id.as_str()).await?;
-    Ok(attach_id(target, id))
+}
+
+/// The context a send of host ids `ids` accepts through. A session lash has
+/// not created refuses the send as unknown, unless the host forsook one of
+/// `ids` before the session existed: that send is refused as forsaken, as an
+/// admission would refuse it. Either way nothing is created.
+async fn send_context(target: &SendTarget, ids: &[&str]) -> Result<SendContext> {
+    let session_id = match target.context().await {
+        Err(EmbedError::UnknownSession { session_id }) => session_id,
+        context => return context,
+    };
+    let store = target.uncreated_store()?;
+    for id in ids {
+        let input_id = lash_core::PendingTurnInputDraft::keyed_input_id(&session_id, id);
+        if store.input_status(&input_id).await?.forsaken {
+            return Err(EmbedError::Runtime(
+                lash_core::StoreError::TurnInputForsaken {
+                    session_id,
+                    source_key: (*id).to_owned(),
+                    input_id,
+                }
+                .runtime_error(),
+            ));
+        }
+    }
+    Err(EmbedError::UnknownSession { session_id })
 }
 
 /// A handle on `run`; its cursor is the observation's current position.

@@ -448,7 +448,12 @@ key's tombstone (`forsaken_turn_inputs`), idempotently: from then on an
 admission under the key is refused with `TurnInputForsaken` and stores
 nothing, and the probe answers the final `SendOutcome::Forsaken`. A forsake and
 a send of one id are serialized by that authority, so exactly one of them
-wins. A tombstone lives as long as the settled input's idempotency record it
+wins. The authority is keyed by the session id, so a host may forsake an id
+before lash has created the session (FIG-6355): the tombstone is recorded
+under that id, a send of the id to the uncreated session is refused
+`TurnInputForsaken` instead of `UnknownSession`, and creating the session
+does not reopen it. The forsake's answer (`Forsaking`) says whether it
+recorded the tombstone or found the accepted input. A tombstone lives as long as the settled input's idempotency record it
 stands in for: it is deleted with its session, and no vacuum reclaims it.
 
 Evidence: `crates/lash/src/send.rs:634`, `:644`, and

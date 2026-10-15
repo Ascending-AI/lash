@@ -891,6 +891,10 @@ pub trait TurnInputStore: Send + Sync {
     /// concurrent admission under the key is serialized against the forsake
     /// by that authority, so exactly one of them wins.
     ///
+    /// `session_id` need not be created yet: the authority is keyed by the
+    /// session id, not by a row its creation writes, so a tombstone written
+    /// before the session exists refuses every admission after its creation.
+    ///
     /// A tombstone lives as long as the settled input's idempotency record
     /// it stands in for: until the session is deleted. No vacuum reclaims
     /// it. A reserved key is refused as an admission refuses it, and a

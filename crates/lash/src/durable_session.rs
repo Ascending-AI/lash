@@ -39,6 +39,12 @@
 //! Nothing is stored and no `SessionShifts` is woken in either case. Create the session
 //! first — `core.session(id).create(creation)` — then send.
 //!
+//! [`forsake`](DurableSession::forsake) is the one queue operation that does
+//! not need the session: it may close a host id before the session exists,
+//! and a send of that id to the uncreated session is then refused
+//! [`TurnInputForsaken`](lash_core::RuntimeErrorCode::TurnInputForsaken)
+//! instead of [`EmbedError::UnknownSession`].
+//!
 //! A catalog that cannot resolve a session by id at all is a different answer
 //! from a session that is not there: it surfaces as
 //! [`EmbedError::Store`] preserving the typed catalog error, never as
@@ -377,6 +383,24 @@ impl DurableSession {
         crate::session::resolve_existing_session(&self.catalog, &self.session_id).await
     }
 
+    /// This session's store whether or not lash has created the session: the
+    /// bound store, or a view of the catalog's store under this id, which
+    /// reads nothing. Only an id's forsake, and the tombstone reads of a send
+    /// or probe that found no session, go through it: a forsake may close an
+    /// id before its session exists.
+    pub(crate) fn uncreated_store(&self) -> Result<lash_core::store::SessionStore> {
+        match &self.acquisition {
+            DurableAcquisition::Bound(store) => Ok(store.as_ref().clone()),
+            DurableAcquisition::Catalog => {
+                let runtime: Arc<dyn lash_core::store::RuntimeStore> = self.catalog.clone();
+                Ok(lash_core::store::SessionStore::new(
+                    runtime,
+                    self.session_id.clone(),
+                )?)
+            }
+        }
+    }
+
     /// Used only by the settled reads, whose job is to report absence.
     async fn store_if_present(&self) -> Result<Option<&lash_core::store::SessionStore>> {
         match self.store().await {
@@ -428,7 +452,19 @@ impl DurableSession {
 
     /// Close host id `id` for good: see
     /// [`LashSession::forsake`](crate::LashSession::forsake).
-    pub async fn forsake(&self, id: lash_core::TurnId) -> Result<crate::SendHandle> {
+    ///
+    /// Unlike the other queue operations, a forsake does not need the
+    /// session to exist: a host may close an id whose send was lost before
+    /// lash created the session. The tombstone is recorded under this
+    /// session's id and answers
+    /// [`Forsaking::Forsaken`](crate::Forsaking::Forsaken). A send of the id
+    /// to the session before it is created is refused
+    /// [`TurnInputForsaken`](lash_core::RuntimeErrorCode::TurnInputForsaken)
+    /// rather than [`EmbedError::UnknownSession`], and so is one after
+    /// [`create`](crate::SessionBuilder::create): creating the session
+    /// does not reopen the id. A deleted session refuses the forsake with
+    /// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
+    pub async fn forsake(&self, id: lash_core::TurnId) -> Result<crate::Forsaking> {
         crate::send::forsake(crate::send::SendTarget::Durable(self.clone()), id).await
     }
 

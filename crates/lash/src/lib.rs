@@ -236,7 +236,7 @@ pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, RetiredConfigObserverRefusal, SendError};
 pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
 pub use crate::send::{
-    BatchInput, CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RunHandle,
+    BatchInput, CancelBuilder, CancelReceipt, CancelTarget, Forsaking, ParkedTurn, RunHandle,
     SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, StalledDelivery, TurnEvents,
     TurnStatus,
 };

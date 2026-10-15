@@ -942,19 +942,20 @@ impl LashSession {
     /// is provisional; this is how a host ends it without a timer).
     ///
     /// One durable write, idempotent, decided in one store transaction
-    /// under the session's write authority, which every send takes too:
+    /// under the session's write authority, which every send takes too. The
+    /// answer says which happened:
     ///
-    /// * when lash holds an input accepted under `id`, nothing is written
-    ///   and the handle follows that input, exactly as
-    ///   [`attach_id`](Self::attach_id) does: its outcome is the send's;
-    /// * otherwise the id's tombstone is written, or found from an earlier
-    ///   forsake, and the handle answers
-    ///   [`SendOutcome::Forsaken`](crate::SendOutcome::Forsaken). From then
+    /// * [`Forsaking::Accepted`](crate::Forsaking::Accepted): lash holds an
+    ///   input accepted under `id`. Nothing is written, and the handle
+    ///   follows that input, exactly as [`attach_id`](Self::attach_id) does:
+    ///   its outcome is the send's.
+    /// * [`Forsaking::Forsaken`](crate::Forsaking::Forsaken): the id's
+    ///   tombstone is written, or found from an earlier forsake. From then
     ///   on a send under `id` is refused before acceptance with
     ///   [`RuntimeErrorCode::TurnInputForsaken`](lash_core::RuntimeErrorCode::TurnInputForsaken)
     ///   ([`RuntimeError::forsaken_input`](lash_core::RuntimeError::forsaken_input)
     ///   names the input), and [`attach_id`](Self::attach_id) answers
-    ///   `Forsaken`.
+    ///   [`SendOutcome::Forsaken`](crate::SendOutcome::Forsaken).
     ///
     /// A forsake racing a send of the same id: exactly one of them wins.
     /// Either the send is accepted and the forsake answers its input, or the
@@ -963,7 +964,7 @@ impl LashSession {
     /// The tombstone lives as long as the idempotency record of a settled
     /// input it stands in for: until the session is deleted. No
     /// [`vacuum`](lash_core::store::StoreMaintenance::vacuum) reclaims it.
-    pub async fn forsake(&self, id: TurnId) -> Result<crate::SendHandle> {
+    pub async fn forsake(&self, id: TurnId) -> Result<crate::Forsaking> {
         crate::send::forsake(crate::send::SendTarget::Live(self.clone()), id).await
     }
 
