@@ -7,12 +7,14 @@
 //! a committed page is read and reused by every later read of the turn.
 //!
 //! The host's own reads (the bindings a prompt lists, the names a cell is
-//! lowered against) run synchronously over the heap. A page the store holds
-//! and the executor has not read faults the read: the executor fetches
-//! every page the read missed, under the lease, and runs it again.
+//! lowered against) run synchronously over the heap, on a blocking thread.
+//! A page the store holds and the executor has not read is a demand: the
+//! read waits where it stands while the executor fetches the page under
+//! the lease, so a read needs only the pages it reads, never a cache that
+//! holds them all at once (FIG-6419).
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lash_core::plugin::SessionPages;
@@ -25,6 +27,7 @@ use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind, PageSource};
 use lash_vm_broker::kernel::next_stage_lease;
 use lash_vm_broker::kernel::pages::cache::PageCache;
 use lash_vm_broker::kernel::pages::{SharedSpool, SpoolRoot, answer_page, frame_page};
+use tokio::sync::{mpsc, oneshot};
 
 /// How long the session's lease lives between renewals.
 pub(crate) const LEASE_TTL: Duration = Duration::from_secs(60);
@@ -49,6 +52,8 @@ pub(crate) struct SessionPageAccess {
     cache: PageCache,
     /// Lease writes the executor made: acquisitions and renewals.
     lease_writes: u64,
+    /// Pages the executor asked the store, or a held run, for.
+    fetches: u64,
 }
 
 /// An ended run's activation the session holds, with the store its lease
@@ -113,6 +118,12 @@ impl SessionPageAccess {
     #[cfg(test)]
     pub(crate) fn lease_writes(&self) -> u64 {
         self.lease_writes
+    }
+
+    /// Pages fetched so far: each page each store read asked for.
+    #[cfg(test)]
+    pub(crate) fn fetches(&self) -> u64 {
+        self.fetches
     }
 
     /// The turn's spool, opened in `spools` on first use.
@@ -212,58 +223,90 @@ impl SessionPageAccess {
         self.cache = cache;
     }
 
-    /// Runs `read` over the session's pages until it reads no page it
-    /// does not hold: each pass fetches, under the lease, every committed
-    /// page the last one missed. A page the read seals is staged in the
-    /// turn's spool.
-    pub(crate) async fn read<T>(
+    /// Runs `read` over the session's pages on a blocking thread, to its
+    /// end. A committed page it reads that the cache does not hold is
+    /// fetched, under the lease, while the read waits where it stands:
+    /// it keeps its place and what it built, so however few pages the
+    /// cache holds, it fetches each page it needs once. A page the read
+    /// seals is staged in the turn's spool.
+    pub(crate) async fn read<T: Send + 'static>(
         &mut self,
-        mut read: impl FnMut(Box<dyn PageSource>) -> Result<T, HeapFault>,
+        read: impl FnOnce(Box<dyn PageSource>) -> Result<T, HeapFault> + Send + 'static,
     ) -> Result<T, PageAccessError> {
-        loop {
-            let missing = Arc::new(Mutex::new(Vec::new()));
-            let result = read(Box::new(ParentPages {
-                spool: self.spool.clone(),
-                cache: self.cache.clone(),
-                missing: Arc::clone(&missing),
-            }));
-            let missing = std::mem::take(&mut *lock(&missing));
-            match result {
-                Err(HeapFault::Missing { .. }) if !missing.is_empty() => {
-                    self.fetch(missing).await?;
+        let (demands, mut asked) = mpsc::channel(1);
+        let source = ParentPages {
+            spool: self.spool.clone(),
+            cache: self.cache.clone(),
+            demands,
+            fetched: Fetched::new(),
+        };
+        let reading = tokio::task::spawn_blocking(move || read(Box::new(source)));
+        let mut refused: Option<PageAccessError> = None;
+        while let Some(Demand { pages, answer }) = asked.recv().await {
+            if refused.is_none() {
+                match self.fetch(pages).await {
+                    Ok(fetched) => {
+                        let _ = answer.send(Ok(fetched));
+                        continue;
+                    }
+                    Err(error) => refused = Some(error),
                 }
-                other => return other.map_err(PageAccessError::Heap),
             }
+            let reason = refused.as_ref().map(ToString::to_string);
+            let _ = answer.send(Err(HeapFault::Transport(reason.unwrap_or_default())));
+        }
+        let read = match reading.await {
+            Ok(read) => read,
+            Err(ended) if ended.is_panic() => std::panic::resume_unwind(ended.into_panic()),
+            Err(ended) => Err(HeapFault::Transport(ended.to_string())),
+        };
+        match refused {
+            Some(refusal) => Err(refusal),
+            None => read.map_err(PageAccessError::Heap),
         }
     }
 
     /// Fetches `missing` and, with it, the rest of every payload it
     /// reaches: the host reads a text or bytes value whole, so a payload
-    /// index's pages come in with it rather than one read pass each.
-    async fn fetch(&mut self, mut missing: Vec<NodeId>) -> Result<(), PageAccessError> {
+    /// index's pages come in with it rather than one demand each. Answers
+    /// every page it fetched, and each such page the cache already held,
+    /// keeping what it fetched in the cache.
+    async fn fetch(&mut self, mut missing: Vec<NodeId>) -> Result<Fetched, PageAccessError> {
+        let mut fetched = Fetched::new();
         while !missing.is_empty() {
             missing.sort();
             missing.dedup();
             let batch = missing.split_off(missing.len().saturating_sub(FETCH_BATCH));
             let pages = self.fetch_batch(&batch).await?;
+            self.cache.keep(pages.iter().cloned());
+            fetched.extend(pages.iter().cloned());
             for (id, bytes) in &pages {
-                missing.extend(payload_children(*id, bytes).into_iter().filter(|child| {
-                    !self.cache.contains(child)
-                        && !self
+                for child in payload_children(*id, bytes) {
+                    if fetched.contains_key(&child)
+                        || self
                             .spool
                             .as_ref()
-                            .is_some_and(|spool| spool.contains(child))
-                }));
+                            .is_some_and(|spool| spool.contains(&child))
+                    {
+                        continue;
+                    }
+                    match self.cache.get(&child) {
+                        Some(bytes) => {
+                            fetched.insert(child, bytes);
+                        }
+                        None => missing.push(child),
+                    }
+                }
             }
-            self.cache.keep(pages);
         }
-        Ok(())
+        Ok(fetched)
     }
 
     async fn fetch_batch(
         &mut self,
         missing: &[NodeId],
     ) -> Result<Vec<(NodeId, Arc<[u8]>)>, PageAccessError> {
+        self.fetches += missing.len() as u64;
         if self.handle.is_none()
             && let Some(run) = self.runs.back()
         {
@@ -303,49 +346,97 @@ fn payload_children(id: NodeId, bytes: &[u8]) -> Vec<NodeId> {
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// The bytes of committed pages a demand answered, by page.
+type Fetched = HashMap<NodeId, Arc<[u8]>>;
+
+/// Committed pages a host read waits on, with where to answer them: every
+/// page fetched for them, and the rest of each payload they reach.
+struct Demand {
+    pages: Vec<NodeId>,
+    answer: oneshot::Sender<Result<Fetched, HeapFault>>,
 }
 
-/// One pass of a host read: the turn's spool, then what the executor read
-/// from the store; any other page is recorded as missing.
+/// A host read's pages: the turn's spool, then what was fetched for the
+/// read and not read yet, then the cache; any other page the read waits
+/// on while the executor fetches it.
 struct ParentPages {
     spool: Option<SharedSpool>,
     cache: PageCache,
-    missing: Arc<Mutex<Vec<NodeId>>>,
+    demands: mpsc::Sender<Demand>,
+    /// Pages a demand answered that the read has not read yet: the rest
+    /// of a payload it reads.
+    fetched: Fetched,
+}
+
+/// The fault of a read whose executor no longer waits on it.
+fn abandoned() -> HeapFault {
+    HeapFault::Transport("the session's read was abandoned".to_owned())
+}
+
+impl ParentPages {
+    /// The bytes of `id` if the read holds them without a fetch.
+    fn held(&mut self, id: &NodeId) -> Result<Option<Arc<[u8]>>, HeapFault> {
+        match &self.spool {
+            Some(spool) if spool.contains(id) => spool
+                .read(id)
+                .map(Some)
+                .map_err(|_| HeapFault::Missing { page: PageId(id.0) }),
+            _ => Ok(self.fetched.remove(id).or_else(|| self.cache.get(id))),
+        }
+    }
+
+    /// Fetches `pages`, waiting while the executor does.
+    fn demand(&mut self, pages: Vec<NodeId>) -> Result<(), HeapFault> {
+        let (answer, answered) = oneshot::channel();
+        self.demands
+            .blocking_send(Demand { pages, answer })
+            .map_err(|_| abandoned())?;
+        let fetched = answered.blocking_recv().map_err(|_| abandoned())??;
+        self.fetched.extend(fetched);
+        Ok(())
+    }
 }
 
 impl PageSource for ParentPages {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
-        let mut answers = Vec::with_capacity(pages.len());
-        let mut missing = lock(&self.missing);
+        let mut held = Vec::with_capacity(pages.len());
+        let mut missing = Vec::new();
         for page in pages {
             let id = NodeId(page.id.0);
-            let bytes = match &self.spool {
-                Some(spool) if spool.contains(&id) => spool
-                    .read(&id)
-                    .map_err(|_| HeapFault::Missing { page: page.id })?,
-                _ => match self.cache.get(&id) {
+            let bytes = self.held(&id)?;
+            if bytes.is_none() {
+                missing.push(id);
+            }
+            held.push(bytes);
+        }
+        if !missing.is_empty() {
+            self.demand(missing.clone())?;
+        }
+        let answers = pages
+            .iter()
+            .zip(held)
+            .map(|(page, bytes)| {
+                let bytes = match bytes {
                     Some(bytes) => bytes,
-                    None => {
-                        missing.push(id);
-                        continue;
-                    }
-                },
-            };
-            answers.push(answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))?);
+                    None => self
+                        .fetched
+                        .get(&NodeId(page.id.0))
+                        .cloned()
+                        .ok_or(HeapFault::Missing { page: page.id })?,
+                };
+                answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))
+            })
+            .collect();
+        for id in &missing {
+            self.fetched.remove(id);
         }
-        if let Some(first) = missing.first() {
-            return Err(HeapFault::Missing {
-                page: PageId(first.0),
-            });
-        }
-        Ok(answers)
+        answers
     }
 
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        if self.demands.is_closed() {
+            return Err(abandoned());
+        }
         let node = frame_page(&page)?;
         let id = PageId(node.id.0);
         let Some(spool) = &mut self.spool else {

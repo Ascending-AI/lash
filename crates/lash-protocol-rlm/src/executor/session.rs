@@ -209,6 +209,12 @@ impl CodeModeExecutionState {
         self.pages.lease_writes()
     }
 
+    /// Pages the session's reads fetched from the store.
+    #[cfg(test)]
+    pub(crate) fn page_fetches(&self) -> u64 {
+        self.pages.fetches()
+    }
+
     /// The turn's spool, opened on first use.
     pub(super) fn turn_spool(&mut self) -> Result<SharedSpool, PageAccessError> {
         let spools = match &self.spools {
@@ -299,7 +305,7 @@ impl CodeModeExecutionState {
         let session = self.current.session;
         let (sealed, bound) = self
             .pages
-            .read(|source| {
+            .read(move |source| {
                 let mut editor = SessionEditor::open(session.as_ref(), source)?;
                 let mut bound = Vec::new();
                 for (name, value) in &defaults {
@@ -388,7 +394,7 @@ impl CodeModeExecutionState {
         };
         let metas = self
             .pages
-            .read(|source| SessionEditor::open(Some(&session), source)?.functions())
+            .read(move |source| SessionEditor::open(Some(&session), source)?.functions())
             .await?;
         let mut functions = BTreeMap::new();
         for (name, meta) in metas {
@@ -502,7 +508,7 @@ impl CodeModeExecutionState {
         };
         let (bindings, functions) = self
             .pages
-            .read(|source| {
+            .read(move |source| {
                 let editor = SessionEditor::open(Some(&carry), source)?;
                 Ok((
                     editor.changed(&old_bindings, &carry.bindings)?,
@@ -886,7 +892,7 @@ impl CodeModeExecutionState {
         {
             let read = self
                 .pages
-                .read(|source| {
+                .read(move |source| {
                     let mut editor = SessionEditor::open(Some(&session), source)?;
                     let mut read = Vec::with_capacity(unread.len());
                     for name in &unread {

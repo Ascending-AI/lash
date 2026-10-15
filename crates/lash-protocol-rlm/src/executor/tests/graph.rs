@@ -1,8 +1,9 @@
 //! The laws of a session's paged state (FIG-6193): saved functions run
 //! with what they froze after a later rebinding and a cold restore, a
 //! working state is adopted whole and a rolled-back cell never promotes
-//! what it captured, and states restored from one descriptor share its
-//! pages but not their heaps.
+//! what it captured, states restored from one descriptor share its pages
+//! but not their heaps, and a host read of more pages than the page cache
+//! holds completes.
 
 use std::sync::Arc;
 
@@ -265,5 +266,87 @@ async fn a_turns_cells_share_one_lease_and_commit_only_the_pages_they_changed() 
     assert!(
         changed * 8 < whole,
         "the turn commits the pages its cells changed: {changed} of the session's {whole}"
+    );
+}
+
+/// `len` letters whose pages never repeat one another, so content
+/// addressing shares none of them.
+fn distinct_text(seed: u64, len: usize) -> String {
+    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            char::from(b'a' + u8::try_from(state % 26).expect("a letter"))
+        })
+        .collect()
+}
+
+/// What a session restored cold from `source`'s committed state lists of
+/// its bindings, reading through `cache`, with the pages it fetched; none
+/// when the listing does not finish within a minute.
+async fn listed(
+    host: &DurableHost,
+    source: &CodeModeExecutionState,
+    cache: lash_vm_broker::kernel::pages::cache::PageCache,
+) -> (
+    Option<Vec<(String, crate::session_globals::SessionGlobalKind)>>,
+    u64,
+) {
+    let mut cold = restored(host, source).await.caching(cache);
+    let listing = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        cold.bound_variable_values(
+            &std::collections::BTreeSet::new(),
+            host.session_pages().as_ref(),
+        ),
+    )
+    .await
+    .ok()
+    .map(|listing| listing.expect("the bindings read"));
+    (listing, cold.page_fetches())
+}
+
+/// FIG-6419: a host projection that reads more pages than the page cache
+/// holds completes. Listing bindings that hold twelve times a 1 MiB cache
+/// in distinct text reads each page it needs from the store once, as many
+/// as a cache that never evicts, and lists exactly what that cache lists.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_projection_larger_than_the_page_cache_fetches_each_page_once() {
+    use lash_vm_broker::kernel::pages::cache::PageCache;
+    const CACHE: u64 = 1 << 20;
+    let host = open_host().await;
+    let mut state = typescript_state();
+    let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
+    for index in 0..48 {
+        patch.set_default.insert(
+            format!("b{index}"),
+            serde_json::json!(distinct_text(index, 256 << 10)),
+        );
+    }
+    state
+        .patch_globals(&patch, &std::collections::BTreeSet::new())
+        .await
+        .expect("bind the session's values");
+    commit_working(&mut state, &host).await;
+
+    let unbounded = PageCache::new(u64::MAX);
+    let (expected, distinct) = listed(&host, &state, unbounded.clone()).await;
+    let expected = expected.expect("a cache that never evicts lists the session");
+    assert!(
+        unbounded.usage().1 > 10 * CACHE,
+        "the projection reads ten caches' worth of pages: {:?}",
+        unbounded.usage()
+    );
+    let (listing, fetches) = listed(&host, &state, PageCache::new(CACHE)).await;
+    assert!(
+        fetches <= distinct + 2,
+        "each page is fetched once: {fetches} fetches of {distinct} distinct pages"
+    );
+    assert_eq!(
+        listing.expect("a 1 MiB cache lists the session"),
+        expected,
+        "the listing is the unbounded cache's"
     );
 }
