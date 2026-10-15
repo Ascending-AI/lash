@@ -7,6 +7,14 @@ pub(super) const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for PayloadGatedEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

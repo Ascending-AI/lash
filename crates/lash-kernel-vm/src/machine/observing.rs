@@ -10,9 +10,9 @@ use super::{Control, Frame, KernelMachine};
 use crate::compile::{BlockId, Executable, LibId};
 use crate::observe::{
     Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT, Observer,
-    WorkReport,
+    PathRecorder, WorkReport,
 };
-use crate::{Observe, RanDelta};
+use crate::{Observe, RanDelta, StatementPath};
 
 impl KernelMachine {
     /// Selects observation for this machine. A resumed machine starts Off
@@ -46,36 +46,48 @@ impl KernelMachine {
     }
 
     #[inline(always)]
-    pub(super) fn observe_empty_block(&mut self, block: BlockId, exe: &Executable) {
+    pub(super) fn observe_empty_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
         if !self.ran.is_empty()
             && let Some(ordinal) = exe.block_ordinal(block)
         {
             self.ran[ordinal as usize] += 1;
         }
-        #[cfg(any(test, feature = "perf-witness"))]
-        if let Some(observer) = self.observer.as_deref_mut()
-            && let Some(trace) = &mut observer.trace
-            && !matches!(
-                exe.block(block).site.unit,
-                lash_kernel_doc::Unit::Library(_)
-            )
-        {
-            trace.push(exe.block(block).site.clone());
+        if self.observer.is_some() {
+            self.trace_block(task, block, exe);
         }
     }
 
-    /// Diagnostic statement/empty-block trace for the count differential.
-    #[cfg(any(test, feature = "perf-witness"))]
-    pub(crate) fn trace_statements(&mut self) {
-        self.observer_mut().trace = Some(Vec::new());
+    #[cold]
+    #[inline(never)]
+    fn trace_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
+        let site = &exe.block(block).site;
+        let tasks = &self.tasks;
+        if let Some(path) = self.observer.as_deref_mut().and_then(|o| o.path.as_mut())
+            && !matches!(site.unit, lash_kernel_doc::Unit::Library(_))
+        {
+            path.push(
+                task,
+                || tasks[task.0 as usize].identity.clone(),
+                site.clone(),
+            );
+        }
     }
 
-    #[cfg(any(test, feature = "perf-witness"))]
-    pub(crate) fn take_statement_trace(&mut self) -> Vec<lash_kernel_doc::Site> {
+    /// Records every document statement start and empty-block entry from
+    /// here on, in order, by task: the path a replay answers. Recording
+    /// changes no result, charge, park or export, and it is never captured.
+    pub fn trace_path(&mut self) {
+        self.observer_mut().path = Some(PathRecorder::default());
+    }
+
+    /// Takes and resets the path recorded since the previous take. Its
+    /// coordinates are the live block sites, independent of the compiled
+    /// ordinals the counts use.
+    pub fn take_path(&mut self) -> StatementPath {
         self.observer
             .as_mut()
-            .and_then(|o| o.trace.as_mut())
-            .map(std::mem::take)
+            .and_then(|o| o.path.as_mut())
+            .map(PathRecorder::take)
             .unwrap_or_default()
     }
 
@@ -135,9 +147,8 @@ impl KernelMachine {
     #[inline(never)]
     fn observe_unlikely(&mut self, event: Event) {
         if let Some(observer) = self.observer.as_deref_mut() {
-            #[cfg(any(test, feature = "perf-witness"))]
             if let Event::Statement { task, .. } = event
-                && let Some(trace) = &mut observer.trace
+                && let Some(path) = &mut observer.path
                 && let Some(Control::Block { block, next }) = self.tasks[task.0 as usize]
                     .frames
                     .last()
@@ -147,9 +158,11 @@ impl KernelMachine {
                     lash_kernel_doc::Unit::Library(_)
                 )
             {
-                // The trace uses the live coordinate, independently of the
+                // The path uses the live coordinate, independently of the
                 // compiled ordinal lookup used by the accumulator.
-                trace.push(self.exe.block(*block).site.child((*next - 1) as u32));
+                let site = self.exe.block(*block).site.child((*next - 1) as u32);
+                let tasks = &self.tasks;
+                path.push(task, || tasks[task.0 as usize].identity.clone(), site);
             }
             observer.on(event, self.charged, self.heap.allocated());
         }

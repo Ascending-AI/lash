@@ -168,6 +168,7 @@ process_event_kinds! {
     Resumed => "process.resumed",
     EffectOutcome => "process.effect_outcome",
     EffectOmissions => "process.effect_omissions",
+    Ran => "process.ran",
     CancelRequested => "process.cancel_requested",
     ObserverAdded => "process.observer_added",
     ObserverRemoved => "process.observer_removed",
@@ -216,6 +217,7 @@ impl ProcessEventKind {
         match self {
             Self::EffectOutcome => Some(super::effect_summary::effect_outcome_payload_schema()),
             Self::EffectOmissions => Some(super::effect_summary::effect_omissions_payload_schema()),
+            Self::Ran => Some(super::ran::ran_payload_schema()),
             _ => None,
         }
     }
@@ -243,6 +245,8 @@ pub enum ProcessLifecycleFact {
     EffectOutcome(ProcessEffectOccurrence),
     /// The effect occurrences past the per-node cap, counted.
     EffectOmissions(ProcessEffectOmissions),
+    /// One committed run segment's statement starts (FIG-6370).
+    Ran(super::ProcessRan),
     /// The process's cancel was requested.
     CancelRequested(CancelRequest),
     /// A session began observing the process.
@@ -281,6 +285,7 @@ impl ProcessLifecycleFact {
             Self::Resumed { .. } => ProcessEventKind::Resumed,
             Self::EffectOutcome(_) => ProcessEventKind::EffectOutcome,
             Self::EffectOmissions(_) => ProcessEventKind::EffectOmissions,
+            Self::Ran(_) => ProcessEventKind::Ran,
             Self::CancelRequested(_) => ProcessEventKind::CancelRequested,
             Self::ObserverAdded { .. } => ProcessEventKind::ObserverAdded,
             Self::ObserverRemoved { .. } => ProcessEventKind::ObserverRemoved,
@@ -319,6 +324,7 @@ impl ProcessLifecycleFact {
             Self::EffectOmissions(omissions) => {
                 serde_json::to_value(omissions).expect("effect omissions serialize")
             }
+            Self::Ran(ran) => serde_json::to_value(ran).expect("a process.ran record serializes"),
             Self::CancelRequested(request) => {
                 serde_json::to_value(request).expect("a cancel request serializes")
             }
@@ -411,6 +417,10 @@ impl ProcessLifecycleFact {
                 ProcessEffectOmissions::decode(payload, fleet_format)
                     .map_err(|error| refused(&error))?,
             ),
+            ProcessEventKind::Ran => Self::Ran(
+                super::ProcessRan::decode(payload, fleet_format)
+                    .map_err(|error| refused(&error))?,
+            ),
             ProcessEventKind::CancelRequested => {
                 Self::CancelRequested(serde_json::from_value(payload).map_err(invalid)?)
             }
@@ -470,7 +480,7 @@ impl ProcessLifecycleFact {
     /// writer appended.
     fn replay_identity(&self) -> serde_json::Value {
         let mut identity = self.payload();
-        if let (Self::EffectOutcome(_) | Self::EffectOmissions(_), Some(fields)) =
+        if let (Self::EffectOutcome(_) | Self::EffectOmissions(_) | Self::Ran(_), Some(fields)) =
             (self, identity.as_object_mut())
         {
             fields.remove("vocabulary_version");
@@ -1321,6 +1331,12 @@ impl ProcessEventAppendRequest {
         replay_key: impl Into<String>,
     ) -> Self {
         Self::new(ProcessLifecycleFact::EffectOmissions(omissions)).with_replay_key(replay_key)
+    }
+
+    /// The runtime append of one run segment's counts, keyed by
+    /// `replay_key`: one key per segment (FIG-6370).
+    pub fn ran(ran: super::ProcessRan, replay_key: impl Into<String>) -> Self {
+        Self::new(ProcessLifecycleFact::Ran(ran)).with_replay_key(replay_key)
     }
 }
 

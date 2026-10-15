@@ -130,6 +130,14 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 
 #[async_trait::async_trait]
 impl ProcessEngine for WriteEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core_execution::EngineStepKind,
+        _output: &lash_core_execution::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

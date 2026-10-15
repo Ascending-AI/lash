@@ -81,10 +81,36 @@ pub enum ProcessWorkflowLiveCoverage {
     },
 }
 
+/// Whether a process's runs count the statements they run: the level its
+/// start recorded (FIG-6370). `off` is unobserved, never zero.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessWorkflowObservation {
+    #[default]
+    Off,
+    Counts,
+}
+
+/// How many times one document statement started, or one empty block was
+/// entered, by its document site ordinal. `committed` sums the process's
+/// `process.ran` events; `provisional` is what live frames reported since
+/// the latest of them, which the next commit replaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProcessWorkflowRan {
+    pub ordinal: u32,
+    pub committed: u64,
+    pub provisional: u64,
+}
+
 /// The workflow part of a process observation. Durable coverage is the
 /// enclosing snapshot's `effects.coverage`; live entries are provisional and
 /// can be lost at a replay gap. `current_sites` retains the last entered site
 /// of each task through pure computation and is empty once the process ends.
+///
+/// At `observation: counts`, `ran` holds each ordinal that ran, and an
+/// ordinal absent from it ran zero times. At `off` there is no `ran`: the
+/// process is unobserved. Ordinals refer to the document the process runs
+/// now: a successor carry restarts them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowOverlay {
     pub process_id: ProcessId,
@@ -94,6 +120,9 @@ pub struct ProcessWorkflowOverlay {
     pub current_sites: Vec<EffectIdentity>,
     pub live_coverage: ProcessWorkflowLiveCoverage,
     pub sites: Vec<ProcessWorkflowSite>,
+    pub observation: ProcessWorkflowObservation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ran: Vec<ProcessWorkflowRan>,
 }
 
 /// An observation from another execution cannot enter a process projection.
@@ -123,6 +152,9 @@ pub struct ProcessWorkflowOverlayAccumulator {
     through: u64,
     ended: bool,
     live_coverage: ProcessWorkflowLiveCoverage,
+    observation: ProcessWorkflowObservation,
+    /// Committed and provisional counts by ordinal.
+    ran: BTreeMap<u32, (u64, u64)>,
 }
 
 impl ProcessWorkflowOverlayAccumulator {
@@ -139,6 +171,36 @@ impl ProcessWorkflowOverlayAccumulator {
             through: 0,
             ended: false,
             live_coverage: ProcessWorkflowLiveCoverage::NotObserved,
+            observation: ProcessWorkflowObservation::Off,
+            ran: BTreeMap::new(),
+        }
+    }
+
+    /// This fold of a process whose start recorded `observation`. A
+    /// committed `process.ran` or a live count also says the process
+    /// counts: only a counted run writes one.
+    #[must_use]
+    pub fn observing(mut self, observation: ProcessWorkflowObservation) -> Self {
+        self.observation = observation;
+        self
+    }
+
+    fn counted(&mut self, delta: &[(u32, u64)], committed: bool) {
+        self.observation = ProcessWorkflowObservation::Counts;
+        if committed {
+            // A commit makes the run's counts exact: what live frames
+            // reported before it is in it.
+            for (_, provisional) in self.ran.values_mut() {
+                *provisional = 0;
+            }
+        }
+        for &(ordinal, count) in delta {
+            let held = self.ran.entry(ordinal).or_default();
+            if committed {
+                held.0 = held.0.saturating_add(count);
+            } else {
+                held.1 = held.1.saturating_add(count);
+            }
         }
     }
 
@@ -266,6 +328,9 @@ impl ProcessWorkflowOverlayAccumulator {
                 };
                 self.site(&outcome.at, now, state, true, Some(event.sequence));
             }
+            ProcessLifecycleFact::Ran(ran) => self.counted(&ran.ran, true),
+            // Ordinals from here on refer to the successor's document.
+            ProcessLifecycleFact::Succeeded(_) => self.ran.clear(),
             ProcessLifecycleFact::Terminal { .. } => self.finish(),
             _ => {}
         }
@@ -283,6 +348,11 @@ impl ProcessWorkflowOverlayAccumulator {
     pub fn finish(&mut self) {
         self.ended = true;
         self.current.clear();
+        // Every run committed before the terminal: nothing is provisional.
+        for (_, provisional) in self.ran.values_mut() {
+            *provisional = 0;
+        }
+        self.ran.retain(|_, (committed, _)| *committed > 0);
         for site in self.sites.values_mut() {
             if matches!(
                 site.value.state,
@@ -352,6 +422,11 @@ impl ProcessWorkflowOverlayAccumulator {
                 }
                 self.live_document(document)?;
                 self.live_coverage = ProcessWorkflowLiveCoverage::RetainedWindow;
+                if let TraceLanguageExecutionPayload::Ran { ran } = &execution.payload
+                    && !self.ended
+                {
+                    self.counted(ran, false);
+                }
                 if let TraceLanguageExecutionPayload::Node { at, fact } = &execution.payload {
                     let state = match fact {
                         TraceNodeFact::Started { .. } => {
@@ -401,6 +476,19 @@ impl ProcessWorkflowOverlayAccumulator {
             live_coverage: self.live_coverage,
             current_sites: self.current.values().cloned().collect(),
             sites: self.sites.values().map(|site| site.value.clone()).collect(),
+            observation: self.observation,
+            ran: match self.observation {
+                ProcessWorkflowObservation::Off => Vec::new(),
+                ProcessWorkflowObservation::Counts => self
+                    .ran
+                    .iter()
+                    .map(|(&ordinal, &(committed, provisional))| ProcessWorkflowRan {
+                        ordinal,
+                        committed,
+                        provisional,
+                    })
+                    .collect(),
+            },
         }
     }
 }
@@ -559,6 +647,92 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<ProcessWorkflowSite>(wire).expect("site round trip"),
             *site
+        );
+    }
+
+    /// FIG-6370: live counts are provisional until their segment's
+    /// `process.ran` commits, which replaces them; a carry restarts the sum;
+    /// a process not observed at `counts` reports none, never zero.
+    #[test]
+    fn committed_counts_replace_provisional_ones_and_restart_at_a_carry() {
+        let process = ProcessId::fixture("counted-workflow");
+        let document = WorkflowDocumentRef {
+            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
+            entry: WorkflowDocumentEntry::Main,
+        };
+        let live = |ran: Vec<(u32, u64)>| {
+            ProcessObservationEventPayload::LanguageExecution(LanguageExecutionObservation {
+                language: None,
+                observed_at_ms: 100,
+                execution: TraceLanguageExecution {
+                    event_key: "ran".into(),
+                    identity: TraceLanguageExecutionIdentity {
+                        scope: TraceRuntimeScope::none(),
+                        subject: TraceRuntimeSubject::Process {
+                            process_id: process.clone(),
+                        },
+                        document: document.clone(),
+                        entry_name: "main".into(),
+                        engine_execution_id: None,
+                        generation: None,
+                    },
+                    payload: TraceLanguageExecutionPayload::Ran { ran },
+                },
+            })
+        };
+        let committed = |sequence, fact| ObservedProcessEvent {
+            sequence,
+            occurred_at_ms: 1,
+            fact,
+        };
+        let ran = |ran: Vec<(u32, u64)>| {
+            ProcessLifecycleFact::Ran(crate::ProcessRan::new(ran, crate::FleetFormat::current()))
+        };
+        let counts = |overlay: &ProcessWorkflowOverlayAccumulator| {
+            overlay
+                .snapshot()
+                .ran
+                .iter()
+                .map(|ran| (ran.ordinal, ran.committed, ran.provisional))
+                .collect::<Vec<_>>()
+        };
+
+        let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone())
+            .observing(ProcessWorkflowObservation::Counts);
+        overlay
+            .observe(&document, &live(vec![(3, 2)]))
+            .expect("live counts");
+        assert_eq!(counts(&overlay), [(3, 0, 2)]);
+        overlay.committed(&committed(5, ran(vec![(3, 2), (4, 1)])));
+        assert_eq!(counts(&overlay), [(3, 2, 0), (4, 1, 0)]);
+        overlay
+            .observe(&document, &live(vec![(4, 5)]))
+            .expect("live counts");
+        assert_eq!(counts(&overlay), [(3, 2, 0), (4, 1, 5)]);
+        overlay.committed(&committed(
+            6,
+            ProcessLifecycleFact::Succeeded(crate::ProcessSuccessorRequest {
+                payload: serde_json::Value::Null,
+                env: crate::ProcessEnvRef::new("successor"),
+                definition_id: None,
+            }),
+        ));
+        assert_eq!(counts(&overlay), []);
+        overlay.committed(&committed(7, ran(vec![(1, 1)])));
+        assert_eq!(counts(&overlay), [(1, 1, 0)]);
+        assert_eq!(
+            overlay.snapshot().observation,
+            ProcessWorkflowObservation::Counts
+        );
+
+        let unobserved = ProcessWorkflowOverlayAccumulator::new(process).snapshot();
+        assert_eq!(unobserved.observation, ProcessWorkflowObservation::Off);
+        assert!(unobserved.ran.is_empty());
+        let wire = serde_json::to_value(&unobserved).expect("overlay wire shape");
+        assert_eq!(wire["observation"], "off");
+        assert!(
+            wire.get("ran").is_none(),
+            "an unobserved overlay counts nothing: {wire}"
         );
     }
 

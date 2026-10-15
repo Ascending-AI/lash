@@ -1,6 +1,6 @@
 //! Emits the checked-in JSON Schema documents for the runtime-owned durable
-//! process-event payloads: `process.effect_outcome` and
-//! `process.effect_omissions`.
+//! process-event payloads: `process.effect_outcome`,
+//! `process.effect_omissions` and `process.ran`.
 //!
 //! Each document is the payload schema the runtime registers and validates
 //! appends against, stamped with [`PROCESS_EVENT_VOCABULARY_VERSION`]. There is
@@ -8,13 +8,13 @@
 
 use lash_core_execution::runtime::process::{
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, ProcessEventKind,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE, ProcessEventKind,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 const VERSION_CONSTANT: &str = "PROCESS_EVENT_VOCABULARY_VERSION";
-const SHAPES: [(&str, &str, &str); 2] = [
+const SHAPES: [(&str, &str, &str); 3] = [
     (
         "process-effect-outcome",
         PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
@@ -25,6 +25,7 @@ const SHAPES: [(&str, &str, &str); 2] = [
         PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
         "ProcessEffectOmissions",
     ),
+    ("process-ran", PROCESS_RAN_EVENT_TYPE, "ProcessRan"),
 ];
 
 #[derive(Serialize)]

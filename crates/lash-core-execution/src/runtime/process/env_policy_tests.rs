@@ -247,6 +247,14 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
 struct SearchEngine;
 #[async_trait::async_trait]
 impl crate::ProcessEngine for SearchEngine {
+    fn settled_ran(
+        &self,
+        _kind: &crate::EngineStepKind,
+        _output: &crate::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

@@ -43,6 +43,14 @@ fn module_of(payload: &serde_json::Value) -> Result<String, crate::PluginError> 
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for ModuleDefinitionEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

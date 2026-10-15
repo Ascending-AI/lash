@@ -9,6 +9,7 @@ pub mod engine_state;
 mod env_hold;
 pub mod env_policy;
 mod link_check;
+mod ran;
 pub(crate) use env_hold::hold_launch;
 pub use env_hold::{HoldEnvError, ProcessEnvPorts, ProcessEnvSelection, hold_process_env};
 pub use env_policy::{
@@ -129,6 +130,7 @@ pub use projection::{
     ProjectedObservedProcess, ProjectedProcessEvent, ProjectedProcessLifecycleState,
     ProjectedProcessTerminal,
 };
+pub use ran::{PROCESS_RAN_EVENT_TYPE, ProcessRan};
 pub use references::ProcessLiveReferenceView;
 mod roster;
 pub use roster::{

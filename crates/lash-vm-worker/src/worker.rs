@@ -46,6 +46,9 @@ struct Hosted {
     staged: Option<Result<SealedGraphState, PoolError>>,
     /// Whether the parent observes the document sites the run enters.
     observe_sites: bool,
+    /// The document's site ordinals, when the parent records the run's
+    /// statement path.
+    path: Option<std::collections::BTreeMap<lash_kernel_doc::Site, u32>>,
 }
 
 pub(crate) struct Server<'embedding> {
@@ -486,6 +489,7 @@ impl<'embedding> Server<'embedding> {
         };
         let (program, identity) = self.program(&start.document)?;
         let kernel = program.document.manifest.kernel;
+        let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             charge: start.bounds.charge,
             memory: start.bounds.memory,
@@ -568,6 +572,9 @@ impl<'embedding> Server<'embedding> {
         } else {
             lash_kernel_vm::Observe::Off
         });
+        if path.is_some() {
+            machine.trace_path();
+        }
         Ok(Hosted {
             machine,
             document: identity,
@@ -578,6 +585,7 @@ impl<'embedding> Server<'embedding> {
             export: start.export,
             staged: None,
             observe_sites: start.observe_sites,
+            path,
         })
     }
     /// The content key is verified bytes rather than a claimed identity.
@@ -654,6 +662,7 @@ impl<'embedding> Server<'embedding> {
             cancel,
             printed: Vec::new(),
             ran: Vec::new(),
+            path: Vec::new(),
             sites: hosted
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
@@ -665,6 +674,24 @@ impl<'embedding> Server<'embedding> {
             .map_err(machine_breach)?;
         if hosted.observe_sites || !matches!(step, Step::Slice) {
             host.ran.extend(hosted.machine.take_ran());
+        }
+        if let Some(ordinals) = &hosted.path {
+            host.path = hosted
+                .machine
+                .take_path()
+                .into_iter()
+                .map(|(task, sites)| {
+                    let starts = sites
+                        .iter()
+                        .map(|site| {
+                            ordinals.get(site).copied().ok_or_else(|| {
+                                machine_breach(format!("the path names no document site {site}"))
+                            })
+                        })
+                        .collect::<Result<Vec<u32>, PoolError>>()?;
+                    Ok((task, starts))
+                })
+                .collect::<Result<_, PoolError>>()?;
         }
         let meters = hosted.machine.meters();
         let memory = hosted.memory;
@@ -1040,6 +1067,7 @@ mod tests {
             export: None,
             observe_sites: false,
             observe_counts: false,
+            observe_path: false,
         };
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {

@@ -177,6 +177,9 @@ pub(crate) struct WireHost {
     /// observes them.
     pub sites: Option<EnteredSites>,
     pub ran: lash_kernel_vm::RanDelta,
+    /// The statement path since the run's previous frame, as document
+    /// ordinals, when the parent records it.
+    pub path: wire::OrdinalPath,
 }
 
 /// Each task's last entered document site since the run's previous frame.
@@ -216,10 +219,11 @@ impl WireHost {
             .map(EnteredSites::take)
             .unwrap_or_default();
         let ran = std::mem::take(&mut self.ran);
-        if entered.is_empty() && ran.is_empty() {
+        let path = std::mem::take(&mut self.path);
+        if entered.is_empty() && ran.is_empty() && path.is_empty() {
             return Ok(None);
         }
-        wire::encode(PayloadKind::Sites, &wire::Sites { entered, ran }).map(Some)
+        wire::encode(PayloadKind::Sites, &wire::Sites { entered, ran, path }).map(Some)
     }
 
     #[expect(

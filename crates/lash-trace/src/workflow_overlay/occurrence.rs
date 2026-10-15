@@ -219,6 +219,8 @@ pub(super) enum Transition {
 
 /// Where an observation belongs: the identity it is folded under.
 pub(super) enum Placement {
+    /// A fact this overlay keeps no history of: a live count delta.
+    Unplaced,
     Execution(WorkflowOverlayExecutionTransition),
     Occurrence {
         site: WorkflowTaskSite,
@@ -241,6 +243,7 @@ impl Placement {
                 Payload::ExecutionFinished { .. } => {
                     return Self::Execution(WorkflowOverlayExecutionTransition::Finished);
                 }
+                Payload::Ran { .. } => return Self::Unplaced,
                 Payload::Node { at, fact } => (
                     at,
                     match fact {

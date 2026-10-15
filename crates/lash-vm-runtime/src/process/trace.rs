@@ -143,11 +143,25 @@ impl ProcessTrace {
         }
     }
 
+    /// One live delta of the segment that started at `segment`, its
+    /// `frame`th: a recomputed segment reports the same facts.
+    pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::RanDelta) {
+        self.emit_keyed(
+            Some(format!("ran:{segment}:{frame}")),
+            TraceLanguageExecutionPayload::Ran { ran: delta.clone() },
+        );
+    }
+
     fn emit(&self, payload: TraceLanguageExecutionPayload) {
+        self.emit_keyed(None, payload);
+    }
+
+    fn emit_keyed(&self, key: Option<String>, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
+            Payload::Ran { .. } => (key.unwrap_or_default(), None),
             Payload::Node { at, fact } => {
                 // The whole identity names an occurrence: every task counts
                 // a site's occurrences from 0.

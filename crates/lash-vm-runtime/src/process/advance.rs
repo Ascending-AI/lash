@@ -20,8 +20,8 @@ use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
 use super::state::{
-    Delivery, Issued, KERNEL_RUN_STEP, KernelEngineState, KernelRunInput, KernelRunOutput, Phase,
-    Wait, refused,
+    Delivery, DeliverySource, Issued, KERNEL_RUN_STEP, KernelEngineState, KernelRunInput,
+    KernelRunOutput, Phase, Wait, refused,
 };
 use super::{KernelProcessFailureCode, failure};
 
@@ -102,6 +102,8 @@ pub(crate) fn advance(
             waits: Default::default(),
             settled: Vec::new(),
             phase: Phase::Ended,
+            parked_by: None,
+            issued_by: Default::default(),
         };
         let action = run(&mut state, Vec::new())?;
         return Ok((encode(&state, writes)?, action));
@@ -144,6 +146,7 @@ fn transition(
                         wait,
                         identity,
                         outcome: OutcomeWire::Elapsed,
+                        source: Some(DeliverySource::Elapsed),
                     });
                 }
             }
@@ -187,6 +190,7 @@ fn step_settled(
             wait,
             identity,
             outcome: outcome.into(),
+            source: Some(DeliverySource::Step { step: step.clone() }),
         });
     }
     resume(state, Vec::new())
@@ -196,7 +200,7 @@ fn step_settled(
 /// `None` while the record is not final. A tool's success is its value; a
 /// failure it reported is an error the guest may catch, carrying the
 /// failure as its data.
-fn effect_outcome(output: &SettledOutput) -> Option<lash_kernel_vm::Outcome> {
+pub(super) fn effect_outcome(output: &SettledOutput) -> Option<lash_kernel_vm::Outcome> {
     use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, datum_from_json, outcome_of};
     let generic = outcome_of(output)?;
     let payload = match output {
@@ -298,7 +302,7 @@ fn run_settled(
         }
     };
     match output {
-        KernelRunOutput::Ended { outcome } => {
+        KernelRunOutput::Ended { outcome, .. } => {
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }
@@ -306,8 +310,12 @@ fn run_settled(
             state: parked,
             issued,
             withdrawn,
+            ..
         } => {
             state.parked = Some(parked);
+            // Runs are sequential: the one settling is the last asked for.
+            let settling = state.runs.saturating_sub(1);
+            state.parked_by = Some(settling);
             state.phase = Phase::Parked;
             for wait in withdrawn {
                 state.waits.remove(&wait);
@@ -316,6 +324,7 @@ fn run_settled(
             for issued in issued {
                 let wait = issued.wait();
                 state.admissions.insert(wait, issued.admission().clone());
+                state.issued_by.insert(wait, settling);
                 match issued {
                     Issued::Effect {
                         wait,
@@ -350,6 +359,7 @@ fn run_settled(
                         wait,
                         identity: admission.identity().clone(),
                         outcome: refused(&kind, message),
+                        source: Some(DeliverySource::Refused { run: settling }),
                     }),
                     Issued::Sleep {
                         wait,
@@ -370,6 +380,7 @@ fn run_settled(
                 .chain(state.settled.iter().map(|delivery| delivery.wait))
                 .collect();
             state.admissions.retain(|wait, _| held.contains(wait));
+            state.issued_by.retain(|wait, _| held.contains(wait));
             if !state.settled.is_empty() {
                 return run(state, steps);
             }
@@ -432,8 +443,14 @@ fn run(
     let input = KernelRunInput {
         payload: state.payload.clone(),
         parked: state.parked.clone(),
+        admitted_by: state
+            .admissions
+            .keys()
+            .map(|wait| state.issued_by.get(wait).map(|run| (*wait, *run)))
+            .collect(),
         admissions: state.admissions.values().cloned().collect(),
         deliver: std::mem::take(&mut state.settled),
+        parked_by: state.parked_by,
     };
     state.phase = Phase::Running { step: step.clone() };
     steps.push(StepRequest::Engine {

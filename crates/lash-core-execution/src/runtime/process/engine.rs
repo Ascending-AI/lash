@@ -142,6 +142,18 @@ pub trait ProcessEngine: Send + Sync {
         payload: &serde_json::Value,
     ) -> Result<Option<EngineSettings>, crate::PluginError>;
 
+    /// The document statement starts and empty-block entries a settled
+    /// engine step of `kind` counted, by document site ordinal, as its
+    /// committed `output` records them (FIG-6370): pure, like `advance`.
+    /// Lash appends them as one `process.ran` in the transaction that hands
+    /// the step to `advance`. An engine whose steps count nothing, and a
+    /// step that counted nothing, answer none.
+    fn settled_ran(
+        &self,
+        kind: &super::engine_state::EngineStepKind,
+        output: &crate::runtime::actor::round::SettledOutput,
+    ) -> Vec<(u32, u64)>;
+
     /// The next state and action for `event` over `state`: synchronous and
     /// effect-free. The same state and event always give the same answer.
     fn advance(
@@ -336,6 +348,17 @@ pub trait ProcessDocumentProvider: Send + Sync {
         &self,
         request: ProcessDocument,
     ) -> Result<ProcessDocument, crate::PluginError>;
+
+    /// Replays recorded run segments of one process from what its journal
+    /// retains, on demand. It is a read: nothing runs that the process
+    /// performs, and nothing is recorded. `request` and the answer are the
+    /// provider's own types.
+    async fn replay(&self, request: ProcessDocument)
+    -> Result<ProcessDocument, crate::PluginError>;
+
+    /// Whether a process recorded with `settings` counts the statements its
+    /// run segments start: what its workflow overlay reports it observed.
+    fn counts_statements(&self, settings: Option<&EngineSettings>) -> bool;
 }
 
 /// A process identity the engine registry produced.

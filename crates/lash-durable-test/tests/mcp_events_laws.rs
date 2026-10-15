@@ -837,6 +837,14 @@ struct LawWorkflow;
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for LawWorkflow {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     fn kind(&self) -> &'static str {
         WORKFLOW_ENGINE
     }

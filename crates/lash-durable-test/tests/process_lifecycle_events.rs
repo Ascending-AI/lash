@@ -189,6 +189,14 @@ fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for ScriptEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

@@ -84,6 +84,14 @@ fn settings_that_break_a_rule_are_refused() {
 struct MismatchedEngine;
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for MismatchedEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

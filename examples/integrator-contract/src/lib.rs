@@ -252,6 +252,14 @@ impl ProtocolDriverPlugin for Integrator {
 
 #[lash::async_trait]
 impl ProcessEngine for Integrator {
+    fn settled_ran(
+        &self,
+        _kind: &lash::plugins::EngineStepKind,
+        _output: &lash::plugins::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &lash::messages::JsonValue,

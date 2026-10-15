@@ -431,6 +431,29 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         }))
     }
 
+    async fn replay(
+        &self,
+        request: lash_core::ProcessDocument,
+    ) -> Result<lash_core::ProcessDocument, lash_core::PluginError> {
+        let request = request
+            .downcast::<super::ProcessReplayRequest>()
+            .map_err(|_| {
+                lash_core::PluginError::Invoke(
+                    "the kernel engine replays a `ProcessReplayRequest`".to_owned(),
+                )
+            })?;
+        let answers = self
+            .engine
+            .replay(&request)
+            .await
+            .map_err(|fault| lash_core::PluginError::Invoke(fault.to_string()))?;
+        Ok(lash_core::ProcessDocument::new(answers))
+    }
+
+    fn counts_statements(&self, settings: Option<&lash_core::EngineSettings>) -> bool {
+        super::KernelRecordedSettings::observed(settings) == lash_kernel_vm::Observe::Counts
+    }
+
     async fn admit(
         &self,
         claim: &lash_core::ReferrerClaim,

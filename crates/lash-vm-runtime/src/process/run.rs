@@ -26,7 +26,8 @@ use lash_vm_protocol::{PoolFault, ProtocolBreach};
 use tokio_util::sync::CancellationToken;
 
 use super::state::{
-    Admission, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput, SealedRun,
+    Admission, HostReads, Issued, KernelProcessInput, KernelRunInput, KernelRunOutput,
+    RecordedAdmission, RecordedDelivery, RecordedStart, SealedRun, StartedFrom, outcome_digest,
 };
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
@@ -104,16 +105,52 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 
 /// The process's host: the activation's clock reading, the engine's random
 /// source and the backend's projection providers. What the body prints is
-/// not kept.
+/// not kept. At `observe: counts` it records what its reads answered: the
+/// segment's tape (FIG-6370).
 struct StepHost {
     trace: Option<super::trace::ProcessTrace>,
     now_ms: i64,
     random: Arc<dyn Fn() -> u64 + Send + Sync>,
     providers: ProjectionCatalog,
+    observe: lash_kernel_vm::Observe,
+    reads: std::sync::Mutex<HostReads>,
+    /// The live deltas this segment reported, which name their trace facts.
+    deltas: std::sync::atomic::AtomicU64,
+    /// What names this segment's live facts: its start.
+    segment: String,
+}
+
+impl StepHost {
+    fn taped(&self) -> std::sync::MutexGuard<'_, HostReads> {
+        self.reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The segment's tape, at `observe: counts`.
+    fn tape(&self) -> Option<HostReads> {
+        (self.observe == lash_kernel_vm::Observe::Counts)
+            .then(|| std::mem::take(&mut *self.taped()))
+    }
 }
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
+    fn observe(&self) -> lash_kernel_vm::Observe {
+        self.observe
+    }
+
+    /// A live delta is provisional: the segment's commit makes its total
+    /// exact, as `process.ran`.
+    fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+        if let Some(trace) = &self.trace {
+            let frame = self
+                .deltas
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            trace.ran(&self.segment, frame, delta);
+        }
+    }
+
     fn observes_sites(&self) -> bool {
         self.trace.is_some()
     }
@@ -125,13 +162,20 @@ impl RunHost for StepHost {
     }
 
     async fn clock(&self) -> Result<Timestamp, ParentFault> {
+        if self.observe == lash_kernel_vm::Observe::Counts {
+            self.taped().now_ms = Some(self.now_ms);
+        }
         Ok(Timestamp {
             nanoseconds: Integer::from(self.now_ms.saturating_mul(1_000_000)),
         })
     }
 
     async fn random(&self) -> Result<u64, ParentFault> {
-        Ok((self.random)())
+        let bits = (self.random)();
+        if self.observe == lash_kernel_vm::Observe::Counts {
+            self.taped().random.push(bits);
+        }
+        Ok(bits)
     }
 
     async fn read(
@@ -162,6 +206,9 @@ impl RunHost for StepHost {
 fn ended(outcome: lash_core::ProcessOutcome) -> Result<KernelRunOutput, Unsettled> {
     Ok(KernelRunOutput::Ended {
         outcome: Box::new(outcome),
+        ran: Vec::new(),
+        reads: None,
+        start: None,
     })
 }
 
@@ -247,17 +294,27 @@ async fn kernel_run(
             trace.delivered(delivery);
         }
     }
+    let start = (settings.observe == lash_kernel_vm::Observe::Counts)
+        .then(|| recorded_start(process_input.document, &input));
+    let host = Arc::new(StepHost {
+        trace: trace.clone(),
+        now_ms: run.now.0,
+        random: Arc::clone(&engine.random),
+        providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
+        observe: settings.observe,
+        reads: std::sync::Mutex::default(),
+        deltas: std::sync::atomic::AtomicU64::new(0),
+        segment: input
+            .parked
+            .as_ref()
+            .map_or_else(|| "entry".to_owned(), StartedFrom::root_of),
+    });
     let machines = lash_vm_client::RemoteMachines::new(
         engine.workers.clone(),
         VmOwner::new(format!("process:{}", run.process)),
         OwnerEpoch(0),
         FrameEpoch(0),
-        Arc::new(StepHost {
-            trace: trace.clone(),
-            now_ms: run.now.0,
-            random: Arc::clone(&engine.random),
-            providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
-        }),
+        Arc::clone(&host) as Arc<dyn RunHost>,
         &document,
         &settings.dialect,
         Start {
@@ -273,22 +330,39 @@ async fn kernel_run(
         &machines,
         &run.process,
         &process_input.document.to_string(),
-        input,
+        Resumed {
+            parked: input.parked,
+            admissions: &input.admissions,
+            deliver: input
+                .deliver
+                .into_iter()
+                .map(|delivery| (delivery.wait, delivery.outcome))
+                .collect(),
+        },
         engine.workers.config().tuning.slice,
         &stop,
     )
     .await;
-    let (step, state) = match driven {
+    let Driven {
+        step, state, ran, ..
+    } = match driven {
         Ok(driven) => driven,
         Err(failure) => return worker_failure(failure),
     };
+    let reads = host.tape();
+    let start = start.map(Box::new);
     match step {
         Step::Ended(end) => {
             let outcome = outcome_of_end(end);
             if let Some(trace) = &trace {
                 trace.finished(&outcome);
             }
-            ended(outcome)
+            Ok(KernelRunOutput::Ended {
+                outcome: Box::new(outcome),
+                ran,
+                reads,
+                start,
+            })
         }
         Step::Slice => Err(RunFault("the run was stopped mid-slice".to_owned()).into()),
         Step::Parked(park) => {
@@ -316,22 +390,84 @@ async fn kernel_run(
                 state,
                 issued,
                 withdrawn,
+                ran,
+                reads,
+                start,
             })
         }
     }
 }
 
+/// Where `input` starts, as a segment records it for a replay: everything
+/// a retained record holds by reference to it, and only the rest whole.
+fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput) -> RecordedStart {
+    let from = match (&input.parked, input.parked_by) {
+        (None, _) => StartedFrom::Entry,
+        (Some(parked), Some(run)) => StartedFrom::Output {
+            run,
+            root: StartedFrom::root_of(parked),
+        },
+        (Some(parked), None) => StartedFrom::Whole(parked.clone()),
+    };
+    let admissions = input
+        .admissions
+        .iter()
+        .enumerate()
+        .map(
+            |(index, admission)| match input.admitted_by.get(index).copied().flatten() {
+                Some((wait, run)) => RecordedAdmission::Issued { wait, run },
+                None => RecordedAdmission::Whole(Box::new(admission.clone())),
+            },
+        )
+        .collect();
+    let deliver = input
+        .deliver
+        .iter()
+        .map(|delivery| match &delivery.source {
+            Some(source) => RecordedDelivery::Of {
+                wait: delivery.wait,
+                source: source.clone(),
+                digest: outcome_digest(&delivery.outcome),
+            },
+            None => RecordedDelivery::Whole(Box::new(delivery.clone())),
+        })
+        .collect();
+    RecordedStart {
+        document,
+        from,
+        admissions,
+        deliver,
+    }
+}
+
+/// What a run segment resumes from: the state it parked with, the admission
+/// of each wait that state holds, and the outcomes it is handed, in order.
+pub(super) struct Resumed<'a> {
+    pub(super) parked: Option<SealedRun>,
+    pub(super) admissions: &'a [Admission],
+    pub(super) deliver: Vec<(u64, lash_vm_client::wire::OutcomeWire)>,
+}
+
+/// What driving a run segment reached: its step, its exported state at a
+/// park, and what it observed.
+pub(super) struct Driven {
+    pub(super) step: Step,
+    pub(super) state: Option<SealedRun>,
+    pub(super) ran: lash_kernel_vm::RanDelta,
+    pub(super) path: lash_vm_client::wire::OrdinalPath,
+}
+
 /// Starts or resumes the machine, hands it the settled outcomes and runs
 /// it until it parks or ends. A parked machine answers its exported state,
 /// bound to `process` and sealed under `document`.
-async fn drive(
+pub(super) async fn drive(
     machines: &lash_vm_client::RemoteMachines,
     process: &ProcessId,
     document: &str,
-    input: KernelRunInput,
+    input: Resumed<'_>,
     slice: u64,
     stop: &CancellationToken,
-) -> Result<(Step, Option<SealedRun>), KernelFailure> {
+) -> Result<Driven, KernelFailure> {
     let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Process {
         process: process.as_str().to_owned(),
     };
@@ -353,30 +489,35 @@ async fn drive(
         }
         None => machines.start(&binding).await?,
     };
-    for delivery in input.deliver {
+    for (wait, outcome) in input.deliver {
         machine
-            .deliver(
-                lash_kernel_vm::WaitId(delivery.wait),
-                delivery.outcome.into(),
-            )
+            .deliver(lash_kernel_vm::WaitId(wait), outcome.into())
             .await?;
     }
     loop {
-        match machine.run(slice, false).await? {
+        let step = machine.run(slice, false).await?;
+        let state = match &step {
             // A stopped step is asked again from the same input.
-            Step::Slice if stop.is_cancelled() => return Ok((Step::Slice, None)),
-            Step::Slice => {}
-            Step::Parked(park) => {
-                let state = machine.export(&binding).await?;
-                machine.release().await?;
-                let sealed = SealedRun(state.sealed(machines.owner().clone(), document));
-                return Ok((Step::Parked(park), Some(sealed)));
-            }
-            Step::Ended(end) => {
-                machine.release().await?;
-                return Ok((Step::Ended(end), None));
-            }
+            Step::Slice if stop.is_cancelled() => None,
+            Step::Slice => continue,
+            Step::Parked(_) => Some(SealedRun(
+                machine
+                    .export(&binding)
+                    .await?
+                    .sealed(machines.owner().clone(), document),
+            )),
+            Step::Ended(_) => None,
+        };
+        let (ran, path) = (machine.take_ran(), machine.take_path());
+        if !matches!(step, Step::Slice) {
+            machine.release().await?;
         }
+        return Ok(Driven {
+            step,
+            state,
+            ran,
+            path,
+        });
     }
 }
 
@@ -448,7 +589,10 @@ fn capacity_cause(outcome: &InfrastructureOutcome) -> Option<CapacityCause> {
 
 /// The entry's arguments in parameter order, from the start's arguments by
 /// name. An omitted optional parameter is absent (`K-FN-004`).
-fn entry_args(document: &Document, input: &KernelProcessInput) -> Result<Vec<Datum>, String> {
+pub(super) fn entry_args(
+    document: &Document,
+    input: &KernelProcessInput,
+) -> Result<Vec<Datum>, String> {
     let signature = document.entries.get(&input.entry).ok_or_else(|| {
         format!(
             "document `{}` has no entry `{}`",
@@ -482,6 +626,31 @@ fn entry_args(document: &Document, input: &KernelProcessInput) -> Result<Vec<Dat
         .collect()
 }
 
+/// The wait a request names and its admission.
+pub(super) fn admission_of(request: &Request) -> (u64, Admission) {
+    match request {
+        Request::Sleep(sleep) => (
+            sleep.wait.0,
+            Admission(lash_kernel_state::AdmittedWait {
+                identity: sleep.identity.clone(),
+                request: lash_kernel_state::AdmittedRequest::Sleep {
+                    duration: sleep.duration.into(),
+                },
+            }),
+        ),
+        Request::Effect(request) => (
+            request.wait.0,
+            Admission(lash_kernel_state::AdmittedWait {
+                identity: request.identity.clone(),
+                request: lash_kernel_state::AdmittedRequest::Effect {
+                    effect: request.effect.clone(),
+                    args: request.args.clone(),
+                },
+            }),
+        ),
+    }
+}
+
 /// Resolves one wait the machine asked for against the host boundary.
 fn issue(
     boundary: &HostBoundary,
@@ -490,30 +659,18 @@ fn issue(
     now_ms: i64,
     request: Request,
 ) -> Issued {
+    let (wait, admission) = admission_of(&request);
     let request = match request {
         Request::Sleep(sleep) => {
             let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
             return Issued::Sleep {
-                wait: sleep.wait.0,
-                admission: Admission(lash_kernel_state::AdmittedWait {
-                    identity: sleep.identity,
-                    request: lash_kernel_state::AdmittedRequest::Sleep {
-                        duration: sleep.duration.into(),
-                    },
-                }),
+                wait,
+                admission,
                 until_ms: now_ms.saturating_add(millis),
             };
         }
         Request::Effect(request) => request,
     };
-    let wait = request.wait.0;
-    let admission = Admission(lash_kernel_state::AdmittedWait {
-        identity: request.identity.clone(),
-        request: lash_kernel_state::AdmittedRequest::Effect {
-            effect: request.effect.clone(),
-            args: request.args.clone(),
-        },
-    });
     if boundary.effect(&request.effect).is_none() {
         return Issued::Refused {
             wait,
@@ -603,7 +760,7 @@ pub fn with_definitions(
 }
 
 /// How a run's end becomes the output its awaiter reads.
-fn outcome_of_end(end: End) -> lash_core::ProcessOutcome {
+pub(super) fn outcome_of_end(end: End) -> lash_core::ProcessOutcome {
     let json = |value: &Datum| {
         datum_to_json(value)
             .ok()

@@ -90,7 +90,15 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
 pub struct Sites {
     pub entered: Vec<EffectIdentity>,
     pub ran: lash_kernel_vm::RanDelta,
+    /// The statement path since the previous frame, when the start asked
+    /// for it: each task's consecutive starts, as document ordinals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: OrdinalPath,
 }
+
+/// A statement path ([`lash_kernel_vm::StatementPath`]) whose sites are
+/// [`lash_kernel_doc::Document::site_ordinals`] ordinals.
+pub type OrdinalPath = Vec<(lash_kernel_doc::TaskIdentity, Vec<u32>)>;
 
 /// How a new run starts ([`Start`]), and the effects it performs as reads
 /// ([`EffectModes`]).

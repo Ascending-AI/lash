@@ -94,6 +94,78 @@ impl Processes {
         .await?)
     }
 
+    /// Replay recorded run segments of a process observed at `counts`, on
+    /// demand: each chosen segment re-runs from the start its journal
+    /// records, its host reads answered from its recorded tape, and answers
+    /// the statement path it verified, or why it has none
+    /// ([`Unreplayable`](crate::workflow::Unreplayable)). It is a read: a
+    /// replay performs nothing and records nothing, and a park ends it.
+    /// An unknown process, or one of an engine that replays nothing,
+    /// answers no segment; a pruned process answers each segment it was
+    /// asked for `Pruned`.
+    #[cfg(feature = "codemode")]
+    pub async fn replay(
+        &self,
+        process_id: &ProcessId,
+        segments: crate::workflow::ReplaySegments,
+    ) -> Result<Vec<crate::workflow::SegmentReplay>> {
+        use crate::workflow::{ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable};
+        let pruned = |segments: &ReplaySegments| match segments {
+            ReplaySegments::All => Vec::new(),
+            ReplaySegments::Only(segments) => segments
+                .iter()
+                .map(|segment| SegmentReplay {
+                    segment: *segment,
+                    answer: SegmentAnswer::Unreplayable {
+                        reason: Unreplayable::Pruned,
+                    },
+                })
+                .collect(),
+        };
+        // The steps are read before the record: a record still retained
+        // after them proves the steps read were retained too.
+        let steps =
+            lash_core::facade_support::read_process_steps(&self.core.effect_host(), process_id)
+                .await?;
+        let process = match self.make_observer().process(process_id).await {
+            Ok(Some(process)) => process,
+            Ok(None) | Err(lash_core::PluginError::ProcessUnknown { .. }) => return Ok(Vec::new()),
+            Err(lash_core::PluginError::ProcessNoLongerRetained { .. }) => {
+                return Ok(pruned(&segments));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let lash_core::ProcessInput::Engine {
+            kind,
+            payload,
+            launch,
+            ..
+        } = &process.input
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(provider) = self.core.host_process_engines.document_provider(kind) else {
+            return Ok(Vec::new());
+        };
+        let request = lash_vm_runtime::ProcessReplayRequest {
+            process: process_id.clone(),
+            settings: launch.settings.clone(),
+            payload: payload.clone(),
+            steps,
+            segments,
+        };
+        provider
+            .replay(lash_core::ProcessDocument::new(request))
+            .await?
+            .downcast::<Vec<SegmentReplay>>()
+            .map_err(|_| {
+                lash_core::PluginError::Invoke(format!(
+                    "the `{kind}` engine answered a replay with another type"
+                ))
+                .into()
+            })
+    }
+
     /// One process, observed: its durable snapshot and the recovering feed
     /// that continues it from the core's process replay store.
     pub fn observe(&self, process_id: &ProcessId) -> crate::process_feed::ObservableProcess {

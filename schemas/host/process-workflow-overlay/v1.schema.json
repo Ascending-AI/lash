@@ -125,6 +125,40 @@
         }
       ]
     },
+    "ProcessWorkflowObservation": {
+      "description": "Whether a process's runs count the statements they run: the level its\nstart recorded (FIG-6370). `off` is unobserved, never zero.",
+      "enum": [
+        "off",
+        "counts"
+      ],
+      "type": "string"
+    },
+    "ProcessWorkflowRan": {
+      "description": "How many times one document statement started, or one empty block was\nentered, by its document site ordinal. `committed` sums the process's\n`process.ran` events; `provisional` is what live frames reported since\nthe latest of them, which the next commit replaces.",
+      "properties": {
+        "committed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provisional": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "committed",
+        "provisional"
+      ],
+      "type": "object"
+    },
     "ProcessWorkflowSite": {
       "description": "One task's latest visit to a document site. The VM's zero-based occurrence\nindex counts entries, including sleeps and calls, independently of effects.",
       "properties": {
@@ -419,7 +453,7 @@
   },
   "$id": "https://lash.dev/schemas/process-workflow-overlay/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The workflow part of a process observation. Durable coverage is the\nenclosing snapshot's `effects.coverage`; live entries are provisional and\ncan be lost at a replay gap. `current_sites` retains the last entered site\nof each task through pure computation and is empty once the process ends.",
+  "description": "The workflow part of a process observation. Durable coverage is the\nenclosing snapshot's `effects.coverage`; live entries are provisional and\ncan be lost at a replay gap. `current_sites` retains the last entered site\nof each task through pure computation and is empty once the process ends.\n\nAt `observation: counts`, `ran` holds each ordinal that ran, and an\nordinal absent from it ran zero times. At `off` there is no `ran`: the\nprocess is unobserved. Ordinals refer to the document the process runs\nnow: a successor carry restarts them.",
   "properties": {
     "current_sites": {
       "items": {
@@ -441,8 +475,17 @@
     "live_coverage": {
       "$ref": "#/$defs/ProcessWorkflowLiveCoverage"
     },
+    "observation": {
+      "$ref": "#/$defs/ProcessWorkflowObservation"
+    },
     "process_id": {
       "type": "string"
+    },
+    "ran": {
+      "items": {
+        "$ref": "#/$defs/ProcessWorkflowRan"
+      },
+      "type": "array"
     },
     "sites": {
       "items": {
@@ -455,7 +498,8 @@
     "process_id",
     "current_sites",
     "live_coverage",
-    "sites"
+    "sites",
+    "observation"
   ],
   "title": "ProcessWorkflowOverlay",
   "type": "object",

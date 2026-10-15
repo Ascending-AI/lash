@@ -118,6 +118,10 @@ pub enum TraceLanguageExecutionPayload {
         at: lash_sansio::EffectIdentity,
         fact: TraceNodeFact,
     },
+    /// Document statement starts and empty-block entries since the
+    /// execution's previous report, by document site ordinal: a live,
+    /// provisional delta of what an observed run counts (FIG-6370).
+    Ran { ran: Vec<(u32, u64)> },
 }
 
 impl TraceLanguageExecutionPayload {
@@ -125,7 +129,7 @@ impl TraceLanguageExecutionPayload {
     /// execution.
     pub fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
         match self {
-            Self::ExecutionStarted | Self::ExecutionFinished { .. } => None,
+            Self::ExecutionStarted | Self::ExecutionFinished { .. } | Self::Ran { .. } => None,
             Self::Node { at, .. } => Some(at),
         }
     }
@@ -134,7 +138,7 @@ impl TraceLanguageExecutionPayload {
     /// about the whole execution.
     pub fn node_fact(&self) -> Option<&TraceNodeFact> {
         match self {
-            Self::ExecutionStarted | Self::ExecutionFinished { .. } => None,
+            Self::ExecutionStarted | Self::ExecutionFinished { .. } | Self::Ran { .. } => None,
             Self::Node { fact, .. } => Some(fact),
         }
     }

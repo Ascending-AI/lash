@@ -328,7 +328,8 @@ impl ProcessFeedSource {
         let document = self.document(&process).await?;
         let mut workflow = match &document {
             lash_core::ProcessDocumentIdentity::Available(_) => Some(
-                lash_core::ProcessWorkflowOverlayAccumulator::new(self.process_id.clone()),
+                lash_core::ProcessWorkflowOverlayAccumulator::new(self.process_id.clone())
+                    .observing(self.observation(&process)),
             ),
             _ => None,
         };
@@ -365,6 +366,23 @@ impl ProcessFeedSource {
                 },
                 None,
             )),
+        }
+    }
+
+    /// Whether `process` counts its statements, as its engine's document
+    /// provider reads its recorded settings: `off` for any other process.
+    fn observation(
+        &self,
+        process: &lash_core::facade_support::ObservedProcess,
+    ) -> lash_core::ProcessWorkflowObservation {
+        let lash_core::ProcessInput::Engine { kind, launch, .. } = &process.input else {
+            return lash_core::ProcessWorkflowObservation::Off;
+        };
+        match self.engines.document_provider(kind) {
+            Some(provider) if provider.counts_statements(launch.settings.as_ref()) => {
+                lash_core::ProcessWorkflowObservation::Counts
+            }
+            _ => lash_core::ProcessWorkflowObservation::Off,
         }
     }
 

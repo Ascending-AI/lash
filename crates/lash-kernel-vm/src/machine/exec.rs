@@ -128,7 +128,7 @@ impl KernelMachine {
                     None => {
                         if *next == 0 {
                             let block = *block;
-                            self.observe_empty_block(block, exe);
+                            self.observe_empty_block(task, block, exe);
                         }
                         self.pop_control(task, exe)?;
                         self.block_ended(task, host, exe)

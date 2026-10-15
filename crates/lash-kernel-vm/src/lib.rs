@@ -44,7 +44,7 @@ mod laws;
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
-pub use observe::{Observe, RanDelta};
+pub use observe::{Observe, RanDelta, StatementPath};
 pub use whole::{TerminalError, WholeExportError, WholeImportError, terminal_end, terminal_whole};
 
 pub use interface::{

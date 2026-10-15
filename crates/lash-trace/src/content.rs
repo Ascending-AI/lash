@@ -257,7 +257,8 @@ impl TraceEvent {
                     | TraceNodeFact::BranchSelected { .. }
                     | TraceNodeFact::ChildStarted { .. } => {}
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted => {}
+                TraceLanguageExecutionPayload::ExecutionStarted
+                | TraceLanguageExecutionPayload::Ran { .. } => {}
             },
             // Typed identities, counts, hashes, statuses and classes only: a
             // model attempt is its sealed record, whose error is a class, a

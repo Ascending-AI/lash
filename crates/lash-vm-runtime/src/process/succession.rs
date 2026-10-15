@@ -149,6 +149,9 @@ impl lash_core::EngineSuccession for KernelSuccession {
             identify(&mut admission.0.identity)?;
         }
         let owner = state.parked.as_ref().map(|parked| parked.0.owner().clone());
+        // No recorded output holds the rewritten run or its admissions.
+        state.parked_by = None;
+        state.issued_by.clear();
         state.parked = match (carried.parked, owner) {
             (Some(run), Some(owner)) => Some(SealedRun(
                 run.sealed(owner, &carried.rewritten.identity().to_string()),

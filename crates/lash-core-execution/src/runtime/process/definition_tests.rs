@@ -53,6 +53,14 @@ fn authoritative_signature() -> ProcessSignature {
 
 #[async_trait::async_trait]
 impl ProcessEngine for SignedEngine {
+    fn settled_ran(
+        &self,
+        _kind: &crate::EngineStepKind,
+        _output: &crate::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::events::ProcessEventAppendRequest;
 
 /// Version of the runtime-owned durable process-event vocabulary: the
-/// `process.effect_*` kinds, their strict payloads, the per-node occurrence
+/// `process.effect_*` and `process.ran` kinds, their strict payloads, the per-node occurrence
 /// cap and the failure-code mappings a recorded outcome carries. Changing any
 /// of them changes what a redrive re-derives for an already-written record, so
 /// the 1.0 baseline is updated in place before the version freeze ends.
@@ -24,6 +24,7 @@ use super::events::ProcessEventAppendRequest;
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
+///     items(path = "crates/lash-core-execution/src/runtime/process/ran.rs", ProcessRan),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
@@ -369,7 +370,7 @@ impl ProcessEffectOmissions {
     }
 }
 
-fn require_vocabulary_version(
+pub(super) fn require_vocabulary_version(
     payload: &serde_json::Value,
     window: lash_core_store::store::ReadWindow,
 ) -> Result<u32, ProcessEffectReportError> {
@@ -393,7 +394,7 @@ fn require_vocabulary_version(
     Ok(version)
 }
 
-fn admit_vocabulary_version(
+pub(super) fn admit_vocabulary_version(
     version: u32,
     fleet_format: crate::FleetFormat,
 ) -> Result<(), ProcessEffectReportError> {
@@ -515,6 +516,10 @@ pub enum ProcessEffectReportError {
     UnsupportedOccurrenceCap { expected: u64, actual: u64 },
     #[error("effect omission record names no omitted occurrence")]
     EmptyOmissions,
+    #[error(
+        "a process.ran record names no ordinal, an ordinal twice or out of order, or a zero count"
+    )]
+    InvalidRan,
 }
 
 /// The `vocabulary_version` an appended payload may carry: the version each
@@ -522,7 +527,7 @@ pub enum ProcessEffectReportError {
 /// §2.1). A build writing under one epoch writes one version; a compatibility
 /// release writes `F_prev`'s version until finalize and `F_self`'s after, so
 /// its validator admits both.
-fn vocabulary_version_schema() -> serde_json::Value {
+pub(super) fn vocabulary_version_schema() -> serde_json::Value {
     let writable = crate::FleetFormat::writable();
     let mut versions = (writable.min()..=writable.max())
         .map(|fleet| {

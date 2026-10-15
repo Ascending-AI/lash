@@ -5,9 +5,9 @@ mod process_lifecycle;
 mod process_replay;
 mod process_workflow;
 pub use process_workflow::{
-    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
-    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
-    ProcessWorkflowWaitKind,
+    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowObservation,
+    ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator, ProcessWorkflowRan,
+    ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
 };
 pub(crate) mod replay;
 

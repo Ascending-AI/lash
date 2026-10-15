@@ -32,6 +32,14 @@ pub struct ReceiverEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for ReceiverEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash::plugins::EngineStepKind,
+        _output: &lash::plugins::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
@@ -164,6 +172,14 @@ pub struct SourceEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SourceEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash::plugins::EngineStepKind,
+        _output: &lash::plugins::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
@@ -305,6 +321,14 @@ pub struct SleeperEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SleeperEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash::plugins::EngineStepKind,
+        _output: &lash::plugins::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

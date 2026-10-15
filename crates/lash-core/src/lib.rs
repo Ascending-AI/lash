@@ -148,7 +148,9 @@ pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
     pub use lash_core_execution::facade_support::observe_process_records;
-    pub use lash_core_execution::runtime::process::steps::read_process_tool_call;
+    pub use lash_core_execution::runtime::process::steps::{
+        RecordedProcessStep, process_step_call, read_process_steps, read_process_tool_call,
+    };
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
@@ -644,8 +646,8 @@ pub use runtime::{
     LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
     MAX_PROCESS_EFFECT_OCCURRENCES, MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner,
     NonTerminalProcessPage, OwnerRunOptions, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan,
-    PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_RAN_EVENT_TYPE,
+    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
@@ -672,8 +674,8 @@ pub use runtime::{
     ProcessLiveReferenceView, ProcessModel, ProcessObserverBy, ProcessObserverRegistry,
     ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
     ProcessOutcomeObserver, ProcessParkReason, ProcessParkState, ProcessProvenance,
-    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
-    ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry,
+    ProcessPruneReport, ProcessQuery, ProcessRan, ProcessRecord, ProcessRegistrar,
+    ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry,
     ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
     ProcessRosterCursor, ProcessRosterPage, ProcessRosterRecords, ProcessRosterTokenError,
     ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
@@ -730,9 +732,10 @@ pub use runtime::{
     ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
     ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
     ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
-    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
-    ProcessWorkflowWaitKind, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
+    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage,
+    ProcessWorkflowObservation, ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator,
+    ProcessWorkflowRan, ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
+    RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
 pub use runtime::{
     ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal, ProjectedObservedProcess,

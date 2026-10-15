@@ -595,6 +595,14 @@ impl SubscriptionEngine {
 
 #[async_trait::async_trait]
 impl ProcessEngine for SubscriptionEngine {
+    fn settled_ran(
+        &self,
+        _kind: &lash_core::EngineStepKind,
+        _output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     fn kind(&self) -> &'static str {
         MCP_EVENTS_ENGINE
     }

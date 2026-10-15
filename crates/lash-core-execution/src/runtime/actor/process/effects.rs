@@ -96,6 +96,27 @@ fn effect_class(
     })
 }
 
+/// Record the statement starts the engine step `step` counted on `tx`, the
+/// transaction that hands its settled output to the engine: once, under the
+/// step, so a recomputed pass appends nothing new (FIG-6370).
+pub(super) fn record_ran(
+    tx: &mut ActorTx,
+    process: &ProcessId,
+    step: &crate::StepName,
+    ran: Vec<(u32, u64)>,
+    fleet: crate::FleetFormat,
+) {
+    if ran.is_empty() {
+        return;
+    }
+    let ran = crate::runtime::process::ProcessRan::new(ran, fleet);
+    append_event(
+        tx,
+        process,
+        ran.append_request(format!("process:{process}:ran:{}", step.0)),
+    );
+}
+
 /// Append `request` to `process`'s event log on `tx`, exactly once under
 /// its replay key: it commits with the transaction, or not at all.
 pub(super) fn append_event(

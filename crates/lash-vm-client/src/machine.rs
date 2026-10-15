@@ -51,6 +51,12 @@ pub trait RunHost: Send + Sync {
     /// Exact provisional counts since the worker's previous frame.
     fn ran(&self, _delta: &lash_kernel_vm::RanDelta) {}
 
+    /// Whether the run records its statement path, for a replay: the run
+    /// frames carry it and [`RemoteMachine::take_path`] answers it.
+    fn traces_path(&self) -> bool {
+        false
+    }
+
     /// Whether the run reports the document sites it enters. The worker
     /// carries them on the run frames it already sends, so observing them
     /// adds no exchange.
@@ -234,6 +240,7 @@ impl RemoteMachines {
             ))),
             observe_sites: self.host.observes_sites(),
             observe_counts: self.host.observe() == lash_kernel_vm::Observe::Counts,
+            observe_path: self.host.traces_path(),
         };
         let reservation = start_reservation(
             &start,
@@ -287,6 +294,7 @@ impl RemoteMachines {
             owner: self.owner.clone(),
             document: self.document.to_string(),
             ran: Default::default(),
+            path: Vec::new(),
         })
     }
 }
@@ -364,12 +372,19 @@ pub struct RemoteMachine {
     owner: VmOwner,
     document: String,
     ran: std::collections::BTreeMap<u32, u64>,
+    path: wire::OrdinalPath,
 }
 
 impl RemoteMachine {
     /// Takes and resets the total received in this run segment's frames.
     pub fn take_ran(&mut self) -> lash_kernel_vm::RanDelta {
         std::mem::take(&mut self.ran).into_iter().collect()
+    }
+
+    /// Takes and resets the statement path received in this run segment's
+    /// frames, in order, when the host traces it.
+    pub fn take_path(&mut self) -> wire::OrdinalPath {
+        std::mem::take(&mut self.path)
     }
 
     /// The run's end, as the worker sealed it: refused unless it is this
@@ -455,6 +470,12 @@ impl RemoteMachine {
             }
             if !sites.ran.is_empty() {
                 self.host.ran(&sites.ran);
+            }
+            for (task, starts) in sites.path {
+                match self.path.last_mut() {
+                    Some((last, held)) if *last == task => held.extend(starts),
+                    _ => self.path.push((task, starts)),
+                }
             }
         }
         Ok(())
@@ -622,6 +643,7 @@ mod reservation_tests {
             export: Some(EncodedPayload(vec![0; 16 * 1024])),
             observe_sites: true,
             observe_counts: false,
+            observe_path: false,
         };
         let actual = codec
             .encode_parent(&ParentFrame {

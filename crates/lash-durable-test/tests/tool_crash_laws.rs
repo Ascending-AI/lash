@@ -93,7 +93,10 @@ use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmResponse;
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{ToolCall, ToolOutcome};
-use lash_core_execution::StoreSet;
+use lash_core_execution::{
+    EngineAction, EngineEvent, EngineState, EngineStepKind, ProcessInfraError, SettledOutput,
+    StoreSet,
+};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -1657,9 +1660,7 @@ fn find_text(value: &serde_json::Value, key: &str) -> Option<String> {
 }
 
 /// A step's tool output, as its payload carries it.
-fn step_answer(
-    outcome: &lash_core_execution::runtime::actor::round::SettledOutput,
-) -> serde_json::Value {
+fn step_answer(outcome: &SettledOutput) -> serde_json::Value {
     outcome
         .payload()
         .and_then(|payload| serde_json::from_str(payload).ok())
@@ -1690,6 +1691,10 @@ fn engine_failure(error: impl std::fmt::Display) -> lash_core_execution::Process
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessEngine for StateEngine {
+    fn settled_ran(&self, _kind: &EngineStepKind, _output: &SettledOutput) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,
@@ -1760,16 +1765,9 @@ impl lash_core_execution::ProcessEngine for StateEngine {
 
     fn advance(
         &self,
-        state: lash_core_execution::EngineState,
-        event: lash_core_execution::EngineEvent,
-    ) -> Result<
-        (
-            lash_core_execution::EngineState,
-            lash_core_execution::EngineAction,
-        ),
-        lash_core_execution::ProcessInfraError,
-    > {
-        use lash_core_execution::{EngineAction, EngineEvent};
+        state: EngineState,
+        event: EngineEvent,
+    ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
         let mut settled: BTreeMap<String, serde_json::Value> = if state.bytes.is_empty() {
             BTreeMap::new()
         } else {
@@ -1814,7 +1812,7 @@ impl lash_core_execution::ProcessEngine for StateEngine {
             }
             _ => EngineAction::Idle,
         };
-        let state = lash_core_execution::EngineState {
+        let state = EngineState {
             format: self.state_format(),
             bytes: serde_json::to_vec(&settled).map_err(engine_failure)?,
         };

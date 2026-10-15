@@ -486,6 +486,40 @@
             "fact"
           ],
           "type": "object"
+        },
+        {
+          "description": "Document statement starts and empty-block entries since the\nexecution's previous report, by document site ordinal: a live,\nprovisional delta of what an observed run counts (FIG-6370).",
+          "properties": {
+            "kind": {
+              "const": "ran",
+              "type": "string"
+            },
+            "ran": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "ran"
+          ],
+          "type": "object"
         }
       ]
     },

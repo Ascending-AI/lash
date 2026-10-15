@@ -40,6 +40,40 @@ pub enum Observe {
 /// and committed run segments. Counts use u64 throughout.
 pub type RanDelta = Vec<(u32, u64)>;
 
+/// Document statement starts and empty-block entries in the order they
+/// happened: each entry is one task's consecutive starts, by the block
+/// sites they started at. Library code is never on it.
+pub type StatementPath = Vec<(lash_kernel_doc::TaskIdentity, Vec<lash_kernel_doc::Site>)>;
+
+/// What [`crate::KernelMachine::trace_path`] records until it is taken.
+#[derive(Default)]
+pub(crate) struct PathRecorder {
+    last: Option<TaskId>,
+    path: StatementPath,
+}
+
+impl PathRecorder {
+    pub(crate) fn push(
+        &mut self,
+        task: TaskId,
+        identity: impl FnOnce() -> lash_kernel_doc::TaskIdentity,
+        site: lash_kernel_doc::Site,
+    ) {
+        match self.path.last_mut() {
+            Some((_, sites)) if self.last == Some(task) => sites.push(site),
+            _ => {
+                self.last = Some(task);
+                self.path.push((identity(), vec![site]));
+            }
+        }
+    }
+
+    pub(crate) fn take(&mut self) -> StatementPath {
+        self.last = None;
+        std::mem::take(&mut self.path)
+    }
+}
+
 /// Something a run did that an observer sees.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Event {
@@ -82,8 +116,7 @@ pub(crate) enum Event {
 
 /// What one machine observes.
 pub(crate) struct Observer {
-    #[cfg(any(test, feature = "perf-witness"))]
-    pub(crate) trace: Option<Vec<lash_kernel_doc::Site>>,
+    pub(crate) path: Option<PathRecorder>,
     pub(crate) work: Option<Counting>,
     pub(crate) context: Option<Publisher>,
 }
@@ -91,8 +124,7 @@ pub(crate) struct Observer {
 impl Observer {
     pub(crate) fn new() -> Self {
         Self {
-            #[cfg(any(test, feature = "perf-witness"))]
-            trace: None,
+            path: None,
             work: None,
             context: None,
         }

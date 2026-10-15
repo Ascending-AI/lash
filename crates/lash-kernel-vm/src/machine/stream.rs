@@ -161,7 +161,7 @@ impl KernelMachine {
                     };
                     // An empty block would end as soon as it began.
                     if running.exe.block(block).stmts.is_empty() {
-                        self.observe_empty_block(block, running.exe);
+                        self.observe_empty_block(task, block, running.exe);
                         return Ok(Ran::Done);
                     }
                     self.push_block(task, block)?;

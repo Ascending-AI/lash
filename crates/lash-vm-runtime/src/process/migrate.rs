@@ -450,6 +450,12 @@ async fn carry(
             .map(|admission| admission.0.clone())
             .collect();
         let carried = migrate_run(&whole, &admitted, &base, &plan, limits)?;
+        if at_park {
+            // No recorded output holds the migrated run.
+            state.parked_by = None;
+        }
+        // Nor the admissions, whose identities move with the document.
+        state.issued_by.clear();
         state.parked = Some(if at_park {
             SealedRun(carried.sealed(
                 parked.0.owner().clone(),

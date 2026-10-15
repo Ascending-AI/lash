@@ -80,6 +80,10 @@ impl ProcessEventAppendRequest {
                     .admit(fleet_format)
                     .map_err(|error| PluginError::Session(error.to_string()))?;
             }
+            ProcessLifecycleFact::Ran(ran) => {
+                ran.admit(fleet_format)
+                    .map_err(|error| PluginError::Session(error.to_string()))?;
+            }
             ProcessLifecycleFact::Terminal { outcome, .. } => {
                 *outcome = outcome.clone().with_cancel_origin(
                     record
@@ -348,7 +352,8 @@ pub fn apply_process_event_projection(
         | ProcessLifecycleFact::ObserverAdded { .. }
         | ProcessLifecycleFact::ObserverRemoved { .. }
         | ProcessLifecycleFact::EffectOutcome(_)
-        | ProcessLifecycleFact::EffectOmissions(_) => {}
+        | ProcessLifecycleFact::EffectOmissions(_)
+        | ProcessLifecycleFact::Ran(_) => {}
     }
 
     if let Some(outcome) = ends {

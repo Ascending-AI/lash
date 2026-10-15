@@ -1173,6 +1173,14 @@ impl LawEngine {
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for LawEngine {
+    fn settled_ran(
+        &self,
+        _kind: &crate::EngineStepKind,
+        _output: &crate::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        Vec::new()
+    }
+
     async fn performed_effects(
         &self,
         _payload: &serde_json::Value,

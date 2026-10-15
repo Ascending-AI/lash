@@ -151,6 +151,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         export: Some(binding()),
         observe_sites: false,
         observe_counts: false,
+        observe_path: false,
     }
 }
 
@@ -267,6 +268,7 @@ fn killed_at_a_park_and_resumed(
                 export: Some(binding()),
                 observe_sites: false,
                 observe_counts: false,
+                observe_path: false,
             },
             identity,
             ExecutionClass::Cell,
@@ -352,6 +354,7 @@ main {{
                 export: Some(binding()),
                 observe_sites: false,
                 observe_counts: false,
+                observe_path: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -430,6 +433,7 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
         export: Some(binding()),
         observe_sites: false,
         observe_counts: false,
+        observe_path: false,
     };
     let mut refused = checkout(&pool);
     refused
@@ -544,6 +548,7 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
         export: Some(binding()),
         observe_sites: false,
         observe_counts: false,
+        observe_path: false,
     };
     let new_run = || python(fresh(&document, Target::Main, Vec::new()).from);
 
@@ -666,6 +671,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
                 export: Some(binding()),
                 observe_sites: false,
                 observe_counts: false,
+                observe_path: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -730,6 +736,7 @@ fn a_parked_run_is_refused_under_another_document() {
                 export: Some(binding()),
                 observe_sites: false,
                 observe_counts: false,
+                observe_path: false,
             },
             &other,
             ExecutionClass::Cell,

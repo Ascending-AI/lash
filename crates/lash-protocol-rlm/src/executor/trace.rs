@@ -141,6 +141,8 @@ impl CellTrace {
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
+            // Cells report no counts yet.
+            Payload::Ran { .. } => ("ran".to_owned(), None),
             Payload::Node { at, fact } => {
                 // The whole identity names an occurrence: every task counts
                 // a site's occurrences from 0.

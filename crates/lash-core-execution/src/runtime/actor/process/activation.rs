@@ -58,7 +58,7 @@ use lash_durable::{
 use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, StoredWaitId};
-use super::effects::{record_effect, record_omitted_effects};
+use super::effects::{record_effect, record_omitted_effects, record_ran};
 use super::session_turn::SessionTurns;
 use super::step_admission::{Consumed, Handoff};
 use super::succession::{Current, Succession};
@@ -711,6 +711,7 @@ impl ProcessActivation {
         let event = match self
             .next_event(
                 &mut tx,
+                engine.as_ref(),
                 process,
                 reads,
                 row.state_rev,
@@ -1112,6 +1113,7 @@ impl ProcessActivation {
     async fn next_event(
         &self,
         tx: &mut ActorTx,
+        engine: &dyn ProcessEngine,
         process: &ProcessId,
         reads: &dyn DurableReads,
         state_rev: u64,
@@ -1197,6 +1199,18 @@ impl ProcessActivation {
             }
             let outcome = self.steps.engine_output(process, &step.request, outcome);
             record_effect(tx, process, driver, &step, &outcome, self.fleet());
+            if let StepRequest::Engine {
+                step: name, kind, ..
+            } = &step.request
+            {
+                record_ran(
+                    tx,
+                    process,
+                    name,
+                    engine.settled_ran(kind, &outcome),
+                    self.fleet(),
+                );
+            }
             return Ok(Next::Event(EngineEvent::StepSettled {
                 call_id: match &step.request {
                     StepRequest::Tool { .. } => Some(step.call.clone()),

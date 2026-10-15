@@ -131,6 +131,7 @@ impl WorkflowExecutionOverlayAccumulator {
                 fact: event.fact.clone(),
             };
             match Placement::of(&observation) {
+                Placement::Unplaced => {}
                 Placement::Execution(transition) => {
                     accumulator
                         .execution_history
@@ -315,6 +316,7 @@ impl WorkflowExecutionOverlayAccumulator {
 
     fn append(&mut self, observation: Observation) {
         match Placement::of(&observation) {
+            Placement::Unplaced => {}
             Placement::Execution(transition) => {
                 if let Some(document) = &self.document
                     && let WorkflowOverlayFact::Language {

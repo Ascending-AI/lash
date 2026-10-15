@@ -791,3 +791,67 @@ pub async fn read_process_tool_call(
     }
     Ok(None)
 }
+
+/// One step of a process as its run journal retains it (FIG-6370).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecordedProcessStep {
+    pub call: crate::ToolCallId,
+    /// The admission the step belongs to: the run its call id names.
+    pub run: u64,
+    /// The admitted tool: an engine step's is `{engine}/{kind}`.
+    pub tool: String,
+    /// Its final outcome, once it has one.
+    pub outcome: Option<SettledOutput>,
+}
+
+/// The call id of the process step `step` admitted in `run`: a reader that
+/// knows a step's name finds its record by it.
+#[must_use]
+pub fn process_step_call(
+    process_id: &ProcessId,
+    step: &super::StepName,
+    run: u64,
+) -> crate::ToolCallId {
+    lash_sansio::ToolCallAdmission::process("", process_id.clone())
+        .call_id(&[lash_sansio::ToolCallPosition::ProcessStep { step: &step.0, run }])
+}
+
+/// Read every step a process's run journal retains, in admission order,
+/// without driving its owner. A pruned process retains none.
+///
+/// # Errors
+/// Failed durable reads or corrupt committed records.
+pub async fn read_process_steps(
+    host: &ActorContext,
+    process_id: &ProcessId,
+) -> Result<Vec<RecordedProcessStep>, lash_durable::DurableError> {
+    use crate::runtime::actor::round::{self, PolicyView};
+    use lash_durable::domain::OwnerKey;
+    use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
+
+    let reads = host.durable_reads()?;
+    let rows = reads
+        .run_facts(&OwnerKey::Process(process_id.clone()))
+        .await?;
+    let waits = round::PinnedWaits::read(reads, &rows).await?;
+    let fold = round::fold(&rows, &PolicyView::new([]), &waits).map_err(|error| {
+        DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Corrupt,
+            message: format!("the process's step records: {error}"),
+        })
+    })?;
+    Ok(fold
+        .rounds()
+        .flat_map(|round| {
+            round
+                .members()
+                .iter()
+                .map(move |member| RecordedProcessStep {
+                    call: member.call().clone(),
+                    run: round.run().0,
+                    tool: member.draft().tool().as_str().to_owned(),
+                    outcome: member.outcome().cloned(),
+                })
+        })
+        .collect())
+}

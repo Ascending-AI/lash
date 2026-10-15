@@ -397,7 +397,7 @@ fn counted_run(
     let mut total = std::collections::BTreeMap::<u32, u64>::new();
     let enable = |machine: &mut crate::KernelMachine| {
         machine.set_observe(crate::Observe::Counts);
-        machine.trace_statements();
+        machine.trace_path();
     };
     enable(&mut embedder.machine);
     let mut hops = 0_u64;
@@ -405,7 +405,12 @@ fn counted_run(
         let step = embedder.run();
         let delta = ran_map(embedder.machine.take_ran());
         let mut histogram = std::collections::BTreeMap::new();
-        for site in embedder.machine.take_statement_trace() {
+        for site in embedder
+            .machine
+            .take_path()
+            .into_iter()
+            .flat_map(|(_, sites)| sites)
+        {
             *histogram.entry(ordinals[&site]).or_default() += 1;
         }
         assert_eq!(

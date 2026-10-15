@@ -161,6 +161,22 @@ pub(crate) struct Delivery {
     /// observed as.
     pub(crate) identity: EffectIdentity,
     pub(crate) outcome: OutcomeWire,
+    /// Which retained record the outcome is read from: what a replay reads
+    /// it back from instead of a copy (FIG-6370).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<DeliverySource>,
+}
+
+/// The retained record an outcome the machine is handed is read from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum DeliverySource {
+    /// The settled output of the effect step `step`, in the run journal.
+    Step { step: StepName },
+    /// A sleep's timer: the outcome is always `Elapsed`.
+    Elapsed,
+    /// A `perform` the boundary refused, as `kernel_run.{run}` issued it.
+    Refused { run: u64 },
 }
 
 /// What answers one open wait of the saved run.
@@ -218,6 +234,15 @@ pub(crate) struct KernelEngineState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) settled: Vec<Delivery>,
     pub(crate) phase: Phase,
+    /// Which `kernel_run` answered `parked` with its output, when one did:
+    /// `None` before the first park and once a carry rewrote the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) parked_by: Option<u64>,
+    /// Which `kernel_run` issued each wait in `admissions`, while its
+    /// admission is the one that output holds: a carry that rewrote the
+    /// admissions forgets them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) issued_by: BTreeMap<u64, u64>,
 }
 
 /// The input of one `kernel_run`: everything the step recomputes from.
@@ -232,6 +257,107 @@ pub(crate) struct KernelRunInput {
     pub(crate) admissions: Vec<Admission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) deliver: Vec<Delivery>,
+    /// Which `kernel_run` answered `parked` with its output, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) parked_by: Option<u64>,
+    /// For each of `admissions`, in order: its wait and the `kernel_run`
+    /// whose output holds it as issued, when one does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) admitted_by: Vec<Option<(u64, u64)>>,
+}
+
+/// What the host's reads answered one run segment, recorded at
+/// `observe: counts` (FIG-6370): the clock instant it read, at most one
+/// since the segment's clock is constant, and each random draw in order. A
+/// replay answers the same reads from it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HostReads {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) now_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) random: Vec<u64>,
+}
+
+/// Where one run segment started, recorded at `observe: counts` beside its
+/// end (FIG-6370). The step's input is not journaled, so this is what a
+/// replay re-runs the segment from: the document, the state it resumed,
+/// and the admissions and outcomes it was handed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordedStart {
+    pub(crate) document: DocumentId,
+    pub(crate) from: StartedFrom,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) admissions: Vec<RecordedAdmission>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) deliver: Vec<RecordedDelivery>,
+}
+
+/// One admission a recorded segment was handed: by reference to the output
+/// that issued it, or whole when a carry rewrote it and no record holds it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum RecordedAdmission {
+    Issued { wait: u64, run: u64 },
+    Whole(Box<Admission>),
+}
+
+/// One outcome a recorded segment was handed: by reference to the record it
+/// is read from, with the digest of the outcome as the machine got it, or
+/// whole when no record names its source.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum RecordedDelivery {
+    Of {
+        wait: u64,
+        source: DeliverySource,
+        digest: String,
+    },
+    Whole(Box<Delivery>),
+}
+
+/// The digest a [`RecordedDelivery::Of`] binds its outcome by.
+pub(crate) fn outcome_digest(outcome: &OutcomeWire) -> String {
+    lash_core::stable_hash::sha256_hex(&serde_json::to_vec(outcome).unwrap_or_default())
+}
+
+/// The state a recorded segment resumed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum StartedFrom {
+    /// The document's entry: the process's first segment.
+    Entry,
+    /// The state `kernel_run.{run}` parked with, whose graph root is
+    /// `root` (hex): that output holds it, so it is not recorded twice.
+    Output { run: u64, root: String },
+    /// A state no recorded output holds, as a successor carry or a
+    /// migration rewrote it.
+    Whole(SealedRun),
+}
+
+impl StartedFrom {
+    /// The hex of `run`'s graph root, which [`Self::Output`] names.
+    pub(crate) fn root_of(run: &SealedRun) -> String {
+        run.0
+            .root()
+            .id
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
+/// What a segment recorded for observation at `observe: counts`: its
+/// statement-start delta, its host reads and its start. Every part is empty
+/// at `off`, and in an output recorded before they existed.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Observed<'a> {
+    /// The segment's statement starts and empty-block entries, by document
+    /// site ordinal.
+    pub(crate) ran: &'a lash_kernel_vm::RanDelta,
+    pub(crate) reads: Option<&'a HostReads>,
+    pub(crate) start: Option<&'a RecordedStart>,
 }
 
 /// One wait the machine asked for at a park, as the step resolved it
@@ -293,12 +419,50 @@ pub(crate) enum KernelRunOutput {
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         withdrawn: Vec<u64>,
+        /// The segment's statement starts and empty-block entries, by
+        /// document site ordinal, at `observe: counts` (FIG-6370).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ran: lash_kernel_vm::RanDelta,
+        /// The segment's host reads, at `observe: counts`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reads: Option<HostReads>,
+        /// Where the segment started, at `observe: counts`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Box<RecordedStart>>,
     },
     /// The run ended.
     Ended {
         #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         outcome: Box<lash_core::ProcessOutcome>,
+        /// The segment's statement starts and empty-block entries, by
+        /// document site ordinal, at `observe: counts` (FIG-6370).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ran: lash_kernel_vm::RanDelta,
+        /// The segment's host reads, at `observe: counts`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reads: Option<HostReads>,
+        /// Where the segment started, at `observe: counts`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Box<RecordedStart>>,
     },
+}
+
+impl KernelRunOutput {
+    /// What the segment recorded for observation.
+    pub(crate) fn observed(&self) -> Observed<'_> {
+        match self {
+            Self::Parked {
+                ran, reads, start, ..
+            }
+            | Self::Ended {
+                ran, reads, start, ..
+            } => Observed {
+                ran,
+                reads: reads.as_ref(),
+                start: start.as_deref(),
+            },
+        }
+    }
 }
 
 /// A refused effect's error, as the machine is handed it.

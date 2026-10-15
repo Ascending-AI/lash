@@ -292,6 +292,10 @@ pub struct Start {
     /// with Slice and HostRead only when observe_sites is true; parks and
     /// ends always carry the remaining counts.
     pub observe_counts: bool,
+    /// Records the run's statement path for a replay: each Slice, Parked
+    /// and Ended frame carries the document statement starts and
+    /// empty-block entries since the previous one, by task, in order.
+    pub observe_path: bool,
 }
 
 /// One committed outcome, for the wait the machine named.

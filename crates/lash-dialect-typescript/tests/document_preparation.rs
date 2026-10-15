@@ -141,13 +141,13 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
             )
             .unwrap();
             machine.set_observe(Observe::Counts);
-            lash_kernel_vm::perf_witness::trace_statements(&mut machine);
+            machine.trace_path();
             let mut total = BTreeMap::<u32, u64>::new();
             loop {
                 let step = machine.run(&mut Console, slice).unwrap();
                 let delta: BTreeMap<_, _> = machine.take_ran().into_iter().collect();
                 let mut trace = BTreeMap::<u32, u64>::new();
-                for site in lash_kernel_vm::perf_witness::take_statement_trace(&mut machine) {
+                for site in machine.take_path().into_iter().flat_map(|(_, sites)| sites) {
                     *trace.entry(ordinals[&site]).or_default() += 1;
                 }
                 assert_eq!(delta, trace, "{name}, slice {slice}");

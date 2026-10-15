@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 74,
-  "cargo_target_count": 321,
+  "cargo_target_count": 322,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_829a56e2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d4e0f7b6__metadata[check]",
@@ -64178,7 +64178,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 402,
+  "generated_label_count": 403,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -64291,6 +64291,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -64962,6 +64963,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -65548,7 +65550,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1423,
+  "metadata_target_count": 1424,
   "packages": [
     {
       "declared_features": [
@@ -66739,6 +66741,17 @@
           "clippy_label": "//crates/lash-durable-test:process_lifecycle_events__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:process_lifecycle_events__test",
+          "tags": [
+            "hermetic-postgres"
+          ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:process_ran_laws__test",
+          "cargo": "process_ran_laws",
+          "check_label": "//crates/lash-durable-test:process_ran_laws__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-durable-test:process_ran_laws__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:process_ran_laws__test",
           "tags": [
             "hermetic-postgres"
           ]
@@ -72146,6 +72159,7 @@
       "//crates/lash-durable-test:plugin_state_storage_laws__test",
       "//crates/lash-durable-test:pressure_frame_crash_proof__test",
       "//crates/lash-durable-test:process_lifecycle_events__test",
+      "//crates/lash-durable-test:process_ran_laws__test",
       "//crates/lash-durable-test:process_tool_call_crash_laws__test",
       "//crates/lash-durable-test:process_tool_calls__test",
       "//crates/lash-durable-test:recorded_behaviour_laws__test",
@@ -72293,6 +72307,7 @@
     "//crates/lash-durable-test:process_actor_laws__test": 300,
     "//crates/lash-durable-test:process_crash_proof__test": 300,
     "//crates/lash-durable-test:process_lifecycle_events__test": 300,
+    "//crates/lash-durable-test:process_ran_laws__test": 300,
     "//crates/lash-durable-test:process_step_crash_proof__test": 300,
     "//crates/lash-durable-test:process_tool_call_crash_laws__test": 900,
     "//crates/lash-durable-test:process_tool_calls__test": 300,
@@ -72965,6 +72980,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -73382,6 +73398,7 @@
     "//crates/lash-durable-test:process_actor_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:process_crash_proof__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:process_lifecycle_events__test__rust_test__metadata[check]",
+    "//crates/lash-durable-test:process_ran_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:process_step_crash_proof__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test__rust_test__metadata[check]",
     "//crates/lash-durable-test:process_tool_calls__test__rust_test__metadata[check]",
@@ -73818,6 +73835,7 @@
     "//crates/lash-durable-test:process_actor_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_lifecycle_events__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:process_ran_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_step_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:process_tool_calls__test__clippy[clippy.txt]",
@@ -74139,6 +74157,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -74461,6 +74480,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -74839,6 +74859,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -75021,6 +75042,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -75223,6 +75245,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -75653,6 +75676,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",
@@ -75858,6 +75882,7 @@
     "//crates/lash-durable-test:process_actor_laws__test",
     "//crates/lash-durable-test:process_crash_proof__test",
     "//crates/lash-durable-test:process_lifecycle_events__test",
+    "//crates/lash-durable-test:process_ran_laws__test",
     "//crates/lash-durable-test:process_step_crash_proof__test",
     "//crates/lash-durable-test:process_tool_call_crash_laws__test",
     "//crates/lash-durable-test:process_tool_calls__test",

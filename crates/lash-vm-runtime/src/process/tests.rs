@@ -153,6 +153,9 @@ fn every_engine_state_holding_a_run_is_read_against_its_seal() {
         completed(
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome),
+                ran: Vec::new(),
+                reads: None,
+                start: None,
             })
             .expect("a run output serializes"),
         ),
@@ -220,6 +223,9 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<u64>) -> SettledOutput {
             state: sealed(),
             issued,
             withdrawn,
+            ran: Vec::new(),
+            reads: None,
+            start: None,
         })
         .expect("a run output serializes"),
     )
@@ -389,6 +395,9 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         completed(
             serde_json::to_string(&KernelRunOutput::Ended {
                 outcome: Box::new(outcome.clone()),
+                ran: Vec::new(),
+                reads: None,
+                start: None,
             })
             .expect("a run output serializes"),
         ),

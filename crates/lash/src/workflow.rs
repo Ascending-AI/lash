@@ -246,6 +246,7 @@ pub use lash_trace::{
 /// and an execution's start name it.
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
 pub use lash_vm_runtime::{
+    ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay, TaskPath, Unreplayable,
     WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment,
 };
 
@@ -358,7 +359,7 @@ pub(crate) async fn read(
 /// process feed's live entries. The trace overlay above serves session cells,
 /// which have no process log. Process observation snapshots include this fold.
 pub use lash_core::{
-    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
-    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
-    ProcessWorkflowWaitKind,
+    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowObservation,
+    ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator, ProcessWorkflowRan,
+    ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
 };

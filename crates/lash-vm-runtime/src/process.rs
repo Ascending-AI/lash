@@ -16,6 +16,7 @@ mod advance;
 mod documents;
 mod helpers;
 mod migrate;
+mod replay;
 mod run;
 mod state;
 mod succession;
@@ -42,6 +43,10 @@ pub use migrate::{
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
     UnmigratedKernelSession, migrate_run, migrate_saved_function, migration_refusal,
     plan_migration, survey_kernel_processes,
+};
+pub use replay::{
+    ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
+    TaskPath, Unreplayable,
 };
 pub use run::with_definitions;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
@@ -125,8 +130,9 @@ pub(crate) fn failure(
 
 /// The kernel engine's settings, which a start states and its row records
 /// (FIG-6034 D4): the dialect its documents are written in, which a worker
-/// must install to run it, and the bounds every run of it is held to. Every
-/// run reads both back from the record (FIG-5990).
+/// must install to run it, the bounds every run of it is held to, and what
+/// its runs record of the statements they run. Every run reads them back
+/// from the record (FIG-5990), and a successor carry keeps them.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelRecordedSettings {
@@ -137,10 +143,22 @@ pub struct KernelRecordedSettings {
     pub live_tasks: u32,
     pub requests_per_park: u32,
     pub join_members: u32,
+    /// `counts` commits each run segment's statement starts as a
+    /// `process.ran` event, with the host reads and start that replay the
+    /// segment (FIG-6370). The host chooses it per start; it is `off`
+    /// unless the start states otherwise, and lash has no default of its
+    /// own for it.
+    #[serde(
+        default,
+        with = "observe_level",
+        skip_serializing_if = "observe_level::is_off"
+    )]
+    pub observe: lash_kernel_vm::Observe,
 }
 
 impl KernelRecordedSettings {
-    /// The settings of a process written in `dialect` and held to `bounds`.
+    /// The settings of a process written in `dialect` and held to `bounds`,
+    /// observed `off`.
     #[must_use]
     pub fn new(dialect: &str, bounds: lash_kernel_vm::Bounds) -> Self {
         Self {
@@ -151,6 +169,61 @@ impl KernelRecordedSettings {
             live_tasks: bounds.live_tasks,
             requests_per_park: bounds.requests_per_park,
             join_members: bounds.join_members,
+            observe: lash_kernel_vm::Observe::Off,
+        }
+    }
+
+    /// These settings observed at `observe`.
+    #[must_use]
+    pub fn observing(mut self, observe: lash_kernel_vm::Observe) -> Self {
+        self.observe = observe;
+        self
+    }
+
+    /// The level a process recorded with `settings` is observed at: `off`
+    /// when it recorded none, or settings that do not decode.
+    #[must_use]
+    pub fn observed(settings: Option<&lash_core::EngineSettings>) -> lash_kernel_vm::Observe {
+        settings
+            .and_then(|settings| serde_json::from_value::<Self>(settings.value().clone()).ok())
+            .map_or(lash_kernel_vm::Observe::Off, |settings| settings.observe)
+    }
+}
+
+/// The recorded spelling of an observation level: `"off"` or `"counts"`.
+mod observe_level {
+    use lash_kernel_vm::Observe;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes a reference"
+    )]
+    pub(super) fn is_off(observe: &Observe) -> bool {
+        *observe == Observe::Off
+    }
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's serialize_with passes a reference"
+    )]
+    pub(super) fn serialize<S: Serializer>(
+        observe: &Observe,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(match observe {
+            Observe::Off => "off",
+            Observe::Counts => "counts",
+        })
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Observe, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "off" => Ok(Observe::Off),
+            "counts" => Ok(Observe::Counts),
+            other => Err(serde::de::Error::unknown_variant(other, &["off", "counts"])),
         }
     }
 }
@@ -483,6 +556,22 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         serde_json::to_value(KernelRecordedSettings::new(&self.dialect, self.bounds))
             .map(|value| Some(lash_core::EngineSettings::new(value)))
             .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
+    }
+
+    /// A `kernel_run`'s counts, which it records at `observe: counts`.
+    fn settled_ran(
+        &self,
+        kind: &lash_core::EngineStepKind,
+        output: &lash_core::SettledOutput,
+    ) -> Vec<(u32, u64)> {
+        match output {
+            lash_core::SettledOutput::Completed(material) if kind.0 == KERNEL_RUN_STEP => {
+                serde_json::from_str::<state::KernelRunOutput>(material.payload())
+                    .map(|output| output.observed().ran.clone())
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
+        }
     }
 
     fn advance(

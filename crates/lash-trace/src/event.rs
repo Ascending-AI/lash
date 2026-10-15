@@ -324,7 +324,8 @@ impl TraceEvent {
                     | TraceLanguageExecutionStatus::Completed
                     | TraceLanguageExecutionStatus::Cancelled => false,
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted => false,
+                TraceLanguageExecutionPayload::ExecutionStarted
+                | TraceLanguageExecutionPayload::Ran { .. } => false,
             },
             Self::TurnStarted { .. }
             | Self::ExecCodeDiscarded { .. }
