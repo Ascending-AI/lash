@@ -1225,11 +1225,21 @@ fn rows(answered: &served::Answered) -> Vec<(u64, String, bool)> {
         .unwrap_or_default()
 }
 
-/// A result is its call's failure: a refusal the transcript carries as a
-/// failure outcome, or no JSON answer at all.
-fn failed(answered: &served::Answered) -> bool {
-    let value = answered.value();
-    value.is_null() || value.pointer("/outcome/status") == Some(&serde_json::json!("failure"))
+/// Protocol admission refusals present the projected failure object
+/// (FIG-6353); the call ledger retains the typed outcome (ADR 0071).
+fn assert_runtime_refusal(
+    answered: &served::Answered,
+    class: lash_sansio::ToolFailureClass,
+    code: &str,
+) {
+    let failure: lash_sansio::ToolFailure = serde_json::from_value(answered.value())
+        .unwrap_or_else(|error| {
+            panic!("a runtime refusal projects its failure: {error}: {answered:?}")
+        });
+    assert_eq!(failure.class, class);
+    assert_eq!(failure.code, code);
+    assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
+    assert!(!failure.message.is_empty(), "a refusal explains its cause");
 }
 
 /// Every call the transcript holds is one the model issued, and every
@@ -1277,6 +1287,8 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
             sugar("wover", members("echo", &over)),
             sugar("wempty", serde_json::json!([])),
             sugar("wmalformed", serde_json::json!("echo")),
+            sugar("wbadmember", serde_json::json!([null])),
+            sugar("wbadtool", serde_json::json!([{ "tool": "" }])),
             sugar(
                 "wmixed",
                 serde_json::json!([
@@ -1358,13 +1370,13 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
             .all(|(index, (row, tool, ok))| *row == index as u64 && tool == "echo" && *ok),
         "{context}: every full row answers in member order: {wfull_rows:?}"
     );
-    for refused in ["wover", "wempty", "wmalformed"] {
+    for refused in ["wover", "wempty", "wmalformed", "wbadmember", "wbadtool"] {
         let wrapper = answered_under(&view, refused);
         assert_eq!(wrapper.len(), 1, "{context}: `{refused}` answers once");
-        assert!(
-            failed(&wrapper[0]),
-            "{context}: `{refused}` is refused whole: {:?}",
-            wrapper[0]
+        assert_runtime_refusal(
+            &wrapper[0],
+            lash_sansio::ToolFailureClass::InvalidRequest,
+            "invalid_batch",
         );
     }
     let mixed = answered_under(&view, "wmixed");
@@ -1433,8 +1445,14 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     );
     let wrapper = answered_under(&view, "w");
     assert_eq!(wrapper.len(), 1);
+    // With no sugar, ordinary tool dispatch refuses the unavailable tool
+    // and presents its failure through ModelToolReturn::from_output.
+    assert_eq!(
+        wrapper[0].content,
+        "[Tool execution failed]\nTool is unavailable in this session",
+    );
     assert!(
-        failed(&wrapper[0]) && rows(&wrapper[0]).is_empty(),
+        rows(&wrapper[0]).is_empty(),
         "{context}: a disabled `batch` is an ordinary unknown tool: {:?}",
         wrapper[0]
     );
