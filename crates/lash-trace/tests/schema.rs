@@ -2,14 +2,15 @@ use lash_sansio::llm::types::{
     LlmProviderTraceDirection, LlmUsage, StreamBlockEvent, StreamBlockIdentity, StreamBlockKind,
 };
 use lash_trace::{
-    TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceEventKind, TraceExecToolCall,
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
-    TraceProviderEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
-    TraceProviderReplayKind, TraceProviderRouteIdentity, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeStreamPayload, TraceRuntimeSubject, TraceToolCallOutcome,
-    TraceToolCallOutput, TraceToolCallStatus, TraceTurnCompletionReason, TraceTurnOutcome,
+    TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry,
+    TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
+    TraceEventKind, TraceExecToolCall, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceLlmRequest, TraceLlmResponse, TraceProviderEvent, TraceProviderReplayDropEvent,
+    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRouteIdentity,
+    TraceRecord, TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
+    TraceRuntimeSubject, TraceToolCallOutcome, TraceToolCallOutput, TraceToolCallStatus,
+    TraceTurnCompletionReason, TraceTurnOutcome,
 };
 use serde_json::json;
 
@@ -101,7 +102,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 36"
+        format!("unsupported trace schema version 3; expected {TRACE_SCHEMA_VERSION}")
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -109,7 +110,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 36"
+        format!("unsupported trace schema version 3; expected {TRACE_SCHEMA_VERSION}")
     );
 }
 
