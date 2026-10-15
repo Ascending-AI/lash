@@ -49,6 +49,18 @@ pub const MCP_EVENTS_ENGINE: &str = "mcp-events-subscription";
 /// The one key a parked subscription waits on, re-pinned per park.
 pub const MCP_EVENTS_RESUME_KEY: &str = "mcp.events.resume";
 
+/// The format of a subscription process's committed state: the
+/// [`Subscription`] encoding `EngineState.bytes` holds, and the fetch and
+/// dispatch step payloads journaled beside it. The bytes carry no stamp of
+/// their own: the process's format set carries this version as its engine
+/// surface, so only a node whose engine decodes it claims the process
+/// (ADR 0106 §1).
+///
+/// version_guard(
+///     roots(Subscription, FetchInput, FetchOutcome, DispatchInput, DispatchOutcome),
+/// )
+/// version_surface = "drain"
+/// format_outside_manifest = "engine-owned process state: the process's format set admits it as its engine surface (ADR 0106 §1); the engine manifest rows of ADR 0104 §2 are not wired"
 const STATE_VERSION: u32 = 1;
 pub(crate) const FETCH: &str = "fetch";
 pub(crate) const DISPATCH: &str = "dispatch";
