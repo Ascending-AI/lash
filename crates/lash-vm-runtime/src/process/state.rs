@@ -319,7 +319,7 @@ pub(crate) enum RecordedDelivery {
 
 /// The digest a [`RecordedDelivery::Of`] binds its outcome by.
 pub(crate) fn outcome_digest(outcome: &OutcomeWire) -> String {
-    lash_core::stable_hash::sha256_hex(&serde_json::to_vec(outcome).unwrap_or_default())
+    lash_core_ids::stable_hash::sha256_hex(&serde_json::to_vec(outcome).unwrap_or_default())
 }
 
 /// The state a recorded segment resumed.
