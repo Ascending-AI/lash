@@ -1,6 +1,21 @@
 //! Read-only durable ports and their configured graph hydration.
 use super::*;
 
+impl SqliteDurableStore {
+    /// A single statement owns its SQLite snapshot. Compound reads keep
+    /// using `read` so their rows and graph bodies share one transaction.
+    async fn query<T, F>(&self, body: F) -> Result<T, DurableError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Connection) -> rusqlite::Result<Result<T, DurableError>> + Send + 'static,
+    {
+        self.conn
+            .call(move |conn| body(conn))
+            .await
+            .map_err(store_failure)?
+    }
+}
+
 #[async_trait::async_trait]
 impl DurableReads for SqliteDurableStore {
     async fn turn(
@@ -17,7 +32,7 @@ impl DurableReads for SqliteDurableStore {
         run: &lash_sansio::TurnId,
     ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
         let (session, run) = (session.clone(), run.clone());
-        self.read(move |tx| turns::turn_end(tx, &session, &run))
+        self.query(move |tx| turns::turn_end(tx, &session, &run))
             .await
     }
 
@@ -90,7 +105,7 @@ impl DurableReads for SqliteDurableStore {
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         let exec = exec.clone();
-        self.read(move |tx| snapshots::read(tx, &exec)).await
+        self.query(move |tx| snapshots::read(tx, &exec)).await
     }
 
     async fn cell_roots(
@@ -99,7 +114,7 @@ impl DurableReads for SqliteDurableStore {
         run: &lash_sansio::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
-        self.read(move |tx| snapshots::under(tx, &prefix)).await
+        self.query(move |tx| snapshots::under(tx, &prefix)).await
     }
 
     async fn cell_roots_within(
@@ -109,7 +124,7 @@ impl DurableReads for SqliteDurableStore {
         max_rows: usize,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         let prefix = ExecKey::turn_cells(session, run);
-        self.read(move |tx| snapshots::under_limited(tx, &prefix, Some(max_rows)))
+        self.query(move |tx| snapshots::under_limited(tx, &prefix, Some(max_rows)))
             .await
     }
 
@@ -170,7 +185,8 @@ impl DurableReads for SqliteDurableStore {
         session: &lash_sansio::SessionId,
     ) -> Result<Option<SessionCloseRow>, DurableError> {
         let session = session.clone();
-        self.read(move |tx| session_close::read(tx, &session)).await
+        self.query(move |tx| session_close::read(tx, &session))
+            .await
     }
 
     async fn ending_scopes(
@@ -178,7 +194,7 @@ impl DurableReads for SqliteDurableStore {
         session: &lash_sansio::SessionId,
     ) -> Result<Vec<ScopeKey>, DurableError> {
         let session = session.clone();
-        self.read(move |tx| session_close::ending_scopes(tx, &session))
+        self.query(move |tx| session_close::ending_scopes(tx, &session))
             .await
     }
 

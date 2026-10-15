@@ -178,8 +178,8 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             }
         }
     }
-    // The parked class, named: the replay refusals, which a redrive of the
-    // same build refuses again with zero dispatch.
+    // The parked class, named: replay and deployment refusals, including
+    // retired plugins. The same build refuses a redrive with zero dispatch.
     let parked = RuntimeErrorCode::ALL_FIRST_PARTY
         .iter()
         .filter(|code| code.turn_failure_cause() == TurnFailureCause::Parked)
@@ -196,11 +196,12 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
             RuntimeErrorCode::ExecutionBindingUnreadable,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::VmWorkerUnavailable,
+            RuntimeErrorCode::PluginRetired,
         ]
         .iter()
         .map(RuntimeErrorCode::as_str)
         .collect::<std::collections::BTreeSet<_>>(),
-        "replay, binding readability and worker deployment refusals park"
+        "replay, binding readability, worker deployment and plugin retirement refusals park"
     );
     // A foreign code carries the class its minting host chose on the error.
     for (cause, terminal) in [

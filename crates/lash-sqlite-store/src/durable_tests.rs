@@ -45,6 +45,48 @@ async fn a_process_row_read_uses_only_its_select() {
     assert_eq!(receipt.statements, 1, "the SELECT owns its snapshot");
 }
 
+/// DURABLE-METADATA-READ-WORK: a single SELECT already owns an atomic
+/// SQLite snapshot; reading metadata opens no redundant transaction.
+#[tokio::test]
+async fn single_statement_durable_reads_use_their_implicit_snapshots() {
+    use lash_durable::DurableReads as _;
+    use lash_durable::domain::ExecKey;
+
+    let set = SqliteStoreSet::memory().await.unwrap();
+    let store = set.durable_store();
+    let session = lash_sansio::SessionId::fixture("metadata-read-work");
+    let run = lash_sansio::TurnId::fixture("metadata-read-run");
+    let exec = ExecKey::Cell(
+        session.clone(),
+        run.clone(),
+        lash_durable::domain::CellId::new("metadata"),
+    );
+    let ((), receipt) =
+        lash_core_execution::facade_support::sql::collect("durable.metadata", "sqlite", async {
+            assert!(store.turn_end(&session, &run).await.unwrap().is_none());
+            assert!(store.exec_root(&exec).await.unwrap().is_none());
+            assert!(store.cell_roots(&session, &run).await.unwrap().is_empty());
+            assert!(
+                store
+                    .cell_roots_within(&session, &run, 1)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(store.session_close(&session).await.unwrap().is_none());
+            assert!(store.ending_scopes(&session).await.unwrap().is_empty());
+        })
+        .await;
+    eprintln!(
+        "DURABLE_METADATA_SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    assert_eq!(
+        receipt.statements, 6,
+        "each metadata SELECT owns its snapshot"
+    );
+}
+
 /// A fresh store set on a clock the law moves, and the directory a file set
 /// lives in.
 async fn world(file: bool) -> (Option<tempfile::TempDir>, SqliteStoreSet, Arc<TestClock>) {
