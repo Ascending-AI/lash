@@ -15,9 +15,18 @@ pub(super) struct ModelSpanState {
 pub struct OpenSpan {
     pub(super) standing: TraceStanding,
     pub(super) model: Option<ModelSpanState>,
+    pub(crate) request: Option<lash_trace::TraceLlmRequest>,
 }
 
 impl OpenSpan {
+    pub(crate) fn select_record(&mut self, ids: &TraceIds) {
+        let kind = self
+            .standing
+            .leaf
+            .as_ref()
+            .map_or(TraceSpanKind::Model, |leaf| leaf.kind);
+        self.standing = self.standing.selected(kind, ids);
+    }
     pub fn standing(&self) -> &TraceStanding {
         &self.standing
     }
@@ -57,7 +66,11 @@ impl OpenSpan {
         let identity = standing.runtime.parts.identity.clone();
         let clock = standing.runtime.clock().clone();
         sideband.with_attempt_observer(
-            Arc::new(move |attempt, observation| {
+            Arc::new(move |attempt, observation, response_metadata| {
+                let standing = standing.selected(TraceSpanKind::ModelAttempt, &context.ids());
+                if !standing.is_observed() {
+                    return;
+                }
                 if let Some(span) = &attempt.span {
                     attempts
                         .lock_recover()
@@ -67,6 +80,11 @@ impl OpenSpan {
                     (
                         context.clone(),
                         TraceEvent::LlmAttemptCompleted {
+                            response_metadata: standing
+                                .content()
+                                .capture(lash_trace::ContentCategory::ResponseMetadata, || {
+                                    response_metadata.clone()
+                                }),
                             attempt: attempt.attempt,
                             observation,
                         },

@@ -78,7 +78,7 @@ completions, and do not trigger slow-operation snapshots.
 
 The ring never copies event payloads, arbitrary context metadata, diagnostic
 messages, tool arguments/results, prompts, responses, or provider bodies. This
-holds even under `TelemetryContent::Captured`. Identity strings must be identities
+holds even under `ContentPolicy::captured()`. Identity strings must be identities
 rather than host-encoded content. Incoming records are forwarded unchanged to the
 inner sink, whose existing content policy still applies.
 

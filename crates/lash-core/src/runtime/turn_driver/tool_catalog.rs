@@ -138,17 +138,21 @@ impl RuntimeTurnDriver<'_> {
             let fingerprint =
                 crate::trace::trace_composition_key(request, tool_fingerprints.as_slice());
             if runtime.report_composition(&self.session_id, fingerprint) {
-                let snapshot = crate::trace::trace_composition_snapshot(
-                    request,
-                    fingerprint,
-                    self.trace.content(),
-                );
-                self.emit_trace(machine.protocol_iteration(), || {
-                    lash_trace::TraceEvent::CompositionChanged {
-                        fingerprint: snapshot.fingerprint,
-                        rendered_system_prompt: snapshot.rendered_system_prompt,
-                        tool_schemas: snapshot.tool_schemas,
-                    }
+                let context = self.trace_context(machine.protocol_iteration());
+                let trace = self
+                    .trace
+                    .selected(lash_trace::TraceSpanKind::Agent, &context.ids());
+                let snapshot =
+                    crate::trace::trace_composition_snapshot(request, fingerprint, trace.content());
+                trace.observe(|| {
+                    (
+                        context,
+                        lash_trace::TraceEvent::CompositionChanged {
+                            fingerprint: snapshot.fingerprint,
+                            rendered_system_prompt: snapshot.rendered_system_prompt,
+                            tool_schemas: snapshot.tool_schemas,
+                        },
+                    )
                 });
             }
         }

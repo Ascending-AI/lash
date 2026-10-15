@@ -296,7 +296,7 @@ impl LanguageObservationDispatcher {
         let record = lash_trace::TraceRecord {
             schema_version: lash_trace::TRACE_SCHEMA_VERSION,
             id: observation.execution.event_key.clone(),
-            content: lash_trace::TelemetryContent::Captured,
+            content: lash_trace::ContentPolicy::captured().into(),
             timestamp: lash_trace::TraceTimestamp::from_unix_ms(observation.observed_at_ms),
             context: lash_trace::TraceContext::default(),
             position: None,

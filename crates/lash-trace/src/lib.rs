@@ -62,7 +62,11 @@ pub mod telemetry;
 mod time;
 mod workflow_overlay;
 
-pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
+pub use content::{
+    Capture, CaptureSelector, ContentCategory, ContentField, ContentHook, ContentMarks,
+    ContentPath, ContentPolicy, ContentValue, ContentView, RecordContent, SelectorView,
+    TraceNarrowing,
+};
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
     TraceAttemptObservation, TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject,
@@ -433,8 +437,8 @@ pub struct TraceRecord {
     pub id: String,
     pub timestamp: TraceTimestamp,
     /// Whether this record carries content or had it omitted under the
-    /// host's [`TelemetryContent`] policy: how to read an empty content field.
-    pub content: TelemetryContent,
+    /// host's [`ContentPolicy`] policy: how to read an empty content field.
+    pub content: ContentMarks,
     pub context: TraceContext,
     /// The record's place in the trace. `None` only for an unscoped
     /// diagnostic and for a record of a scope nothing observed.
@@ -467,7 +471,7 @@ impl schemars::JsonSchema for TraceRecord {
             schema_version: u32,
             id: String,
             timestamp: TraceTimestamp,
-            content: TelemetryContent,
+            content: ContentMarks,
             context: TraceContext,
             #[serde(default, skip_serializing_if = "Option::is_none")]
             position: Option<TracePosition>,
@@ -486,7 +490,7 @@ struct TraceRecordWire {
     schema_version: u32,
     id: String,
     timestamp: TraceTimestamp,
-    content: TelemetryContent,
+    content: ContentMarks,
     context: TraceContext,
     #[serde(default)]
     position: Option<TracePosition>,
@@ -667,9 +671,12 @@ pub struct TracePromptComponent {
     pub chars: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLlmRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_instructions: Option<String>,
+    pub composition_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_variant: Option<String>,
     pub messages: Vec<TraceLlmMessage>,
@@ -701,7 +708,7 @@ pub struct TraceLlmMessage {
     pub blocks: Vec<TraceContentBlock>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceAttachment {
     pub id: String,
     pub media_type: String,
@@ -748,7 +755,7 @@ pub struct TraceLlmResponse {
 pub enum TraceProviderBodyOmission {
     SizeLimit,
     InvalidJson,
-    /// The host's [`TelemetryContent`] policy withheld it.
+    /// The host's [`ContentPolicy`] policy withheld it.
     ContentPolicy,
 }
 
@@ -1290,3 +1297,18 @@ pub fn json_hash(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Cross-crate engine support, outside the facade's host contract.
+#[doc(hidden)]
+pub mod core_internal {
+    /// Starts a record at its core ceiling or its leaf parent's narrowing.
+    pub fn content_narrowing(
+        policy: &crate::TracePolicySnapshot,
+        parent: Option<&crate::TraceNarrowing>,
+    ) -> crate::TraceNarrowing {
+        parent.map_or_else(
+            || crate::TraceNarrowing::new(policy),
+            crate::TraceNarrowing::inherited,
+        )
+    }
+}

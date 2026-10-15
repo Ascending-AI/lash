@@ -1353,7 +1353,7 @@ impl crate::TraceRecord {
             schema_version: crate::TRACE_SCHEMA_VERSION,
             id: identity.record_id()?,
             timestamp,
-            content: crate::TelemetryContent::Captured,
+            content: crate::ContentPolicy::captured().into(),
             context,
             position: None,
             omissions: crate::TraceOmissionCounts::default(),
@@ -1369,16 +1369,18 @@ impl crate::TraceRecord {
     }
 
     /// This record under the host's content policy: as built when content is
-    /// captured, and with every content field emptied
-    /// ([`TraceEvent::omit_content`](crate::TraceEvent::omit_content)) and
-    /// the record marked when it is omitted. Every record the runtime hands a
+    /// captured, and with fields emptied and marked for omitted categories.
+    /// Uses the same exhaustive visitor and bounds as the runtime. Every record the runtime hands a
     /// sink or the adapter passes through here.
     #[must_use]
-    pub fn governed(mut self, content: crate::TelemetryContent) -> Self {
-        if !content.is_captured() {
-            self.event.omit_content();
-            self.content = crate::TelemetryContent::Omitted;
-        }
+    pub fn governed(mut self, content: crate::ContentPolicy) -> Self {
+        self.apply_content(
+            &crate::TracePolicySnapshot {
+                content,
+                ..Default::default()
+            },
+            None,
+        );
         self
     }
 }

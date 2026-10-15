@@ -162,6 +162,8 @@ macro_rules! numeric_fields {
             Detail(TraceSpanKind),
             /// The `TraceExportPolicy` selection of a kind.
             Export(TraceSpanKind),
+            /// A capture selector skipping an optional leaf.
+            Selector(TraceSpanKind),
             $($id),+
         }
 
@@ -173,14 +175,14 @@ macro_rules! numeric_fields {
             /// for a per-kind selection.
             pub const fn bounds(self) -> Option<FieldBounds> {
                 match self {
-                    Self::Detail(_) | Self::Export(_) => None,
+                    Self::Detail(_) | Self::Export(_) | Self::Selector(_) => None,
                     $(Self::$id => Some(FieldBounds { default: $default, min: $min, max: $max })),+
                 }
             }
 
             fn numeric_name(self) -> &'static str {
                 match self {
-                    Self::Detail(_) | Self::Export(_) => "",
+                    Self::Detail(_) | Self::Export(_) | Self::Selector(_) => "",
                     $(Self::$id => $name),+
                 }
             }
@@ -190,6 +192,8 @@ macro_rules! numeric_fields {
 
 numeric_fields! {
     // ContentLimits
+    MaxPartBytes => ("content_limits.max_part_bytes", 16 * KIB, KIB, MIB),
+    MaxAttributeBytes => ("content_limits.max_attribute_bytes", 128 * KIB, KIB, 8 * MIB),
     MaxProviderBodyBytes => ("content_limits.max_provider_body_bytes", 2048, 0, 8 * MIB),
     // TraceLimits, in table order
     HeldObservations => ("trace_limits.held_observations", 256, 0, 4096),
@@ -252,6 +256,7 @@ impl std::fmt::Display for TracePolicyField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Detail(kind) => write!(f, "trace_detail.{kind}"),
+            Self::Selector(kind) => write!(f, "capture_selector.{kind}"),
             Self::Export(kind) => write!(f, "trace_export.{kind}"),
             field => f.write_str(field.numeric_name()),
         }

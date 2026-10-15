@@ -458,6 +458,90 @@
         }
       ]
     },
+    "ContentCategory": {
+      "description": "Every content field belongs to one of these categories. Reasoning also\nrequires consent to its message's direction.",
+      "enum": [
+        "system_instructions",
+        "input_messages",
+        "output_messages",
+        "reasoning",
+        "tool_definitions",
+        "output_schema",
+        "tool_arguments",
+        "tool_results",
+        "code",
+        "code_output",
+        "provider_payloads",
+        "response_metadata",
+        "diagnostics_text",
+        "extension"
+      ],
+      "type": "string"
+    },
+    "ContentMarks": {
+      "description": "How a reader distinguishes omitted, empty, cut and oversized content.",
+      "properties": {
+        "captured": {
+          "items": {
+            "$ref": "#/$defs/ContentCategory"
+          },
+          "type": "array"
+        },
+        "dropped_messages": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hook_failed": {
+          "type": "boolean"
+        },
+        "omitted": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "oversize": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "references": {
+          "description": "References committed by a normally returning content hook.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/TraceValue"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "captured",
+        "omitted",
+        "truncated",
+        "oversize",
+        "dropped_messages",
+        "hook_failed",
+        "references"
+      ],
+      "type": "object"
+    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -1945,21 +2029,6 @@
         }
       ]
     },
-    "TelemetryContent": {
-      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceDetailPolicy`](crate::TraceDetailPolicy)\nstill chooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)\noutput. Lash does not inspect or classify them. A plugin must honour the\npolicy for content it includes in custom payloads; its factory reads the\ncurrent deployment policy through\n`lash::plugins::PluginSessionContext::telemetry_content()`. This operational\nprivacy setting follows the receiving host on reopen, rather than a\nsession's recorded execution config.\n\nA host has the final say over custom payloads at its exporter: install a\nwrapping [`TraceSink`](crate::TraceSink) through\n`LashCoreBuilder::trace_sink` that drops custom records or clones and\nredacts their payloads before forwarding them to the export sink. The\nwrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).",
-      "oneOf": [
-        {
-          "const": "omitted",
-          "description": "Records keep identities, statuses, counts, hashes and durations.\nContent fields are empty, and [`TraceRecord::content`] says so.\n\n[`TraceRecord::content`]: crate::TraceRecord::content",
-          "type": "string"
-        },
-        {
-          "const": "captured",
-          "description": "Records carry the original text within the documented bounds. Nothing\nis scrubbed.",
-          "type": "string"
-        }
-      ]
-    },
     "TextProjectionMetadata": {
       "properties": {
         "limit_chars": {
@@ -3123,6 +3192,9 @@
     },
     "TraceLlmRequest": {
       "properties": {
+        "composition_fingerprint": {
+          "type": "string"
+        },
         "messages": {
           "items": {
             "$ref": "#/$defs/TraceLlmMessage"
@@ -3142,6 +3214,12 @@
         "stream": {
           "type": "boolean"
         },
+        "system_instructions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tool_choice": {
           "type": "string"
         },
@@ -3154,6 +3232,7 @@
       },
       "required": [
         "model",
+        "composition_fingerprint",
         "messages",
         "tool_choice",
         "stream"
@@ -3863,7 +3942,7 @@
         },
         {
           "const": "content_policy",
-          "description": "The host's [`TelemetryContent`] policy withheld it.",
+          "description": "The host's [`ContentPolicy`] policy withheld it.",
           "type": "string"
         }
       ]
@@ -4876,6 +4955,110 @@
         }
       ]
     },
+    "TraceValue": {
+      "description": "A contributed value. `Json` is the declared JSON exception of the\ntracing seam.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "str",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "int",
+              "type": "string"
+            },
+            "value": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "float",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "bool",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "str_array",
+              "type": "string"
+            },
+            "value": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "json",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Unit": {
       "description": "The code a node belongs to.",
       "oneOf": [
@@ -5383,8 +5566,16 @@
           ]
         },
         "provider_usage": true,
+        "request": {
+          "$ref": "#/$defs/TraceLlmRequest"
+        },
         "response": {
           "$ref": "#/$defs/TraceLlmResponse"
+        },
+        "response_metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
         },
         "stream_summary": true,
         "type": {
@@ -5404,6 +5595,7 @@
       },
       "required": [
         "type",
+        "request",
         "response"
       ],
       "type": "object"
@@ -5432,6 +5624,9 @@
             }
           ]
         },
+        "request": {
+          "$ref": "#/$defs/TraceLlmRequest"
+        },
         "stream_summary": true,
         "type": {
           "const": "llm_call_failed",
@@ -5440,6 +5635,7 @@
       },
       "required": [
         "type",
+        "request",
         "error"
       ],
       "type": "object"
@@ -5452,6 +5648,11 @@
         },
         "observation": {
           "$ref": "#/$defs/TraceAttemptObservation"
+        },
+        "response_metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
         },
         "type": {
           "const": "llm_attempt_completed",
@@ -5667,6 +5868,9 @@
     {
       "description": "A code cell answered, and the commit that consumed its answer closes\nits span. `started_at_ms` is the cell's first start, which a\nsuspension or a re-run keeps; `duration_ms` runs from it.",
       "properties": {
+        "code": {
+          "type": "string"
+        },
         "duration_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -5723,6 +5927,7 @@
       },
       "required": [
         "type",
+        "code",
         "language",
         "started_at_ms",
         "duration_ms",
@@ -5737,6 +5942,9 @@
     {
       "description": "A code cell answered with a failure, and the commit that consumed its\nanswer closes its span, from its first start.",
       "properties": {
+        "code": {
+          "type": "string"
+        },
         "duration_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -5765,6 +5973,7 @@
       },
       "required": [
         "type",
+        "code",
         "language",
         "started_at_ms",
         "duration_ms",
@@ -5776,6 +5985,9 @@
     {
       "description": "A code cell its turn's terminal stopped before it answered: that\nterminal's owner closes its span, from its first start. A discard is\nnot a failure.",
       "properties": {
+        "code": {
+          "type": "string"
+        },
         "duration_ms": {
           "format": "uint64",
           "minimum": 0,
@@ -5796,6 +6008,7 @@
       },
       "required": [
         "type",
+        "code",
         "language",
         "started_at_ms",
         "duration_ms"
@@ -6097,7 +6310,7 @@
   ],
   "properties": {
     "content": {
-      "$ref": "#/$defs/TelemetryContent"
+      "$ref": "#/$defs/ContentMarks"
     },
     "context": {
       "$ref": "#/$defs/TraceContext"

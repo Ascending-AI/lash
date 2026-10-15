@@ -86,21 +86,25 @@ impl RuntimeExecutionContext<'_> {
             .clone()
             .for_call(start.call_id.clone());
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
-        let content = tracing.runtime.content();
-        self.coordination_standing(tracing)
+        let standing = self
+            .coordination_standing(tracing)
             .under(scope.clone())
-            .open_scope(|| {
-                (
-                    context.clone(),
-                    lash_trace::TraceEvent::ToolCallStarted {
-                        call_id: start.call_id.clone(),
-                        provider_call_id: start.provider_call_id.map(str::to_owned),
-                        name: start.tool.to_owned(),
-                        args: content.capture(|| start.args.clone()),
-                        issuing_node_id: issuing_node,
-                    },
-                )
-            });
+            .selected(lash_trace::TraceSpanKind::Tool, &context.ids());
+        let content = standing.content();
+        standing.open_scope(|| {
+            (
+                context.clone(),
+                lash_trace::TraceEvent::ToolCallStarted {
+                    call_id: start.call_id.clone(),
+                    provider_call_id: start.provider_call_id.map(str::to_owned),
+                    name: start.tool.to_owned(),
+                    args: content.capture(lash_trace::ContentCategory::ToolArguments, || {
+                        start.args.clone()
+                    }),
+                    issuing_node_id: issuing_node,
+                },
+            )
+        });
         self.tool_requests
             .lock_recover()
             .insert(start.call_id.clone(), TracedToolCall { scope, context });
@@ -144,23 +148,27 @@ impl RuntimeExecutionContext<'_> {
         let ended_at_ms = ended_at_ms.unwrap_or_else(|| self.dispatch.clock.timestamp_ms());
         let duration_ms = ended_at_ms.saturating_sub(scope.started_at_ms);
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
-        let content = tracing.runtime.content();
-        self.coordination_standing(tracing)
+        let standing = self
+            .coordination_standing(tracing)
             .under(scope)
-            .close_scope(ended_at_ms, || {
-                (
-                    context,
-                    lash_trace::TraceEvent::ToolCallCompleted {
-                        call_id: record.call_id.clone(),
-                        provider_call_id: record.provider_call_id.clone(),
-                        name: record.tool.clone(),
-                        args: content.capture(|| record.args.clone()),
-                        output: crate::trace::trace_tool_call_output(&record.output, content),
-                        duration_ms,
-                        issuing_node_id: issuing_node,
-                        attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
-                    },
-                )
-            });
+            .selected(lash_trace::TraceSpanKind::Tool, &context.ids());
+        let content = standing.content();
+        standing.close_scope(ended_at_ms, || {
+            (
+                context,
+                lash_trace::TraceEvent::ToolCallCompleted {
+                    call_id: record.call_id.clone(),
+                    provider_call_id: record.provider_call_id.clone(),
+                    name: record.tool.clone(),
+                    args: content.capture(lash_trace::ContentCategory::ToolArguments, || {
+                        record.args.clone()
+                    }),
+                    output: crate::trace::trace_tool_call_output(&record.output, content),
+                    duration_ms,
+                    issuing_node_id: issuing_node,
+                    attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+                },
+            )
+        });
     }
 }

@@ -1,287 +1,357 @@
-//! The host's one telemetry content policy, and the omission it applies.
-
+//! Consent, host redaction and terminating bounds shared by every trace consumer.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
-    TraceEffectEnvelopeDiffValue, TraceEvent, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionPayload, TraceNodeFact, TraceProgramStepOutcome,
-    TraceProviderBodyOmission, TraceRetryAttempt, TraceRetryAttemptDetail,
-    TraceRuntimeStreamPayload, TraceToolAttemptOutcome, TraceToolCallOutcome, TraceToolSpec,
+    AttrKey, TraceAttributeWriter, TraceEvent, TraceEventKind, TraceIds, TraceOmission,
+    TracePolicySnapshot, TracePosition, TraceSpanKind, TraceValue,
 };
-use lash_sansio::llm::types::StreamBlockEvent;
 
-/// Whether built-in telemetry carries content.
-///
-/// Content is what a session says, as opposed to what it did: prompts and
-/// model responses, rendered instructions and tool contracts, tool arguments
-/// and results, executed code and its output, raw provider payloads, and
-/// diagnostic or provider text. One host choice governs all of it on every
-/// built-in telemetry path: the records every [`TraceSink`](crate::TraceSink)
-/// receives (a tee, a host's own sink) and the adapter's
-/// projection of them.
-///
-/// The policy is consent, not detail: [`TraceDetailPolicy`](crate::TraceDetailPolicy)
-/// still chooses which records exist, and byte bounds still cut what is captured.
-/// It governs telemetry only. Durable requests and results, session history,
-/// product observations and the app's own responses keep their contracts.
-///
-/// Opaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)
-/// output. Lash does not inspect or classify them. A plugin must honour the
-/// policy for content it includes in custom payloads; its factory reads the
-/// current deployment policy through
-/// `lash::plugins::PluginSessionContext::telemetry_content()`. This operational
-/// privacy setting follows the receiving host on reopen, rather than a
-/// session's recorded execution config.
-///
-/// A host has the final say over custom payloads at its exporter: install a
-/// wrapping [`TraceSink`](crate::TraceSink) through
-/// `LashCoreBuilder::trace_sink` that drops custom records or clones and
-/// redacts their payloads before forwarding them to the export sink. The
-/// wrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).
+mod selector;
+mod semconv;
+mod truncate;
+mod visit;
+pub use selector::{CaptureSelector, SelectorView, TraceNarrowing};
+pub(crate) use semconv::attributes;
+use semconv::{semconv_input, semconv_tools};
+
+/// Whether the host consents to building a category of telemetry content.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum TelemetryContent {
-    /// Records keep identities, statuses, counts, hashes and durations.
-    /// Content fields are empty, and [`TraceRecord::content`] says so.
-    ///
-    /// [`TraceRecord::content`]: crate::TraceRecord::content
+pub enum Capture {
     #[default]
     Omitted,
-    /// Records carry the original text within the documented bounds. Nothing
-    /// is scrubbed.
     Captured,
 }
 
-impl TelemetryContent {
-    /// Standard preset: omitted. A host opts in to content capture.
-    pub const fn standard() -> Self {
-        Self::Omitted
-    }
-
-    pub const fn is_captured(self) -> bool {
-        matches!(self, Self::Captured)
-    }
-
-    /// Builds a content value under consent, and its empty value otherwise:
-    /// an omitted payload is never cloned, rendered or serialized.
-    pub fn capture<T: Default>(self, build: impl FnOnce() -> T) -> T {
-        match self {
-            Self::Captured => build(),
-            Self::Omitted => T::default(),
-        }
-    }
+/// Every content field belongs to one of these categories. Reasoning also
+/// requires consent to its message's direction.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentCategory {
+    SystemInstructions,
+    InputMessages,
+    OutputMessages,
+    Reasoning,
+    ToolDefinitions,
+    OutputSchema,
+    ToolArguments,
+    ToolResults,
+    Code,
+    CodeOutput,
+    ProviderPayloads,
+    ResponseMetadata,
+    DiagnosticsText,
+    Extension,
 }
-
-/// The omission reason written beside a payload that has its own reason
-/// field: the host's content policy withheld it.
-pub const CONTENT_POLICY_OMISSION: &str = "content_policy";
-
-impl TraceToolSpec {
-    fn omit_content(&mut self) {
-        self.description.clear();
-        self.input_schema = Value::Null;
-        self.output_schema = Value::Null;
-    }
-}
-
-impl TraceEffectEnvelopeDiffValue {
-    fn omit_content(&mut self) {
-        match self {
-            Self::Missing => {}
-            Self::Present {
-                value_json,
-                value_json_omitted_reason,
-                ..
-            } => {
-                if value_json.take().is_some() {
-                    *value_json_omitted_reason = Some(CONTENT_POLICY_OMISSION.to_owned());
-                }
-            }
-        }
-    }
-}
-
-/// A failed or cancelled tool outcome is the runtime's failure or
-/// cancellation record: its typed classification stays, and its message,
-/// cause detail and raw tool value go.
-fn omit_outcome_text(payload: &mut Value) {
-    const CLASSIFICATION: [&str; 6] = [
-        "class",
-        "code",
-        "source",
-        "suggested_delay_ms",
-        "origin",
-        "forced",
+impl ContentCategory {
+    pub const ALL: [Self; 14] = [
+        Self::SystemInstructions,
+        Self::InputMessages,
+        Self::OutputMessages,
+        Self::Reasoning,
+        Self::ToolDefinitions,
+        Self::OutputSchema,
+        Self::ToolArguments,
+        Self::ToolResults,
+        Self::Code,
+        Self::CodeOutput,
+        Self::ProviderPayloads,
+        Self::ResponseMetadata,
+        Self::DiagnosticsText,
+        Self::Extension,
     ];
-    match payload {
-        Value::Object(fields) => fields.retain(|name, _| CLASSIFICATION.contains(&name.as_str())),
-        other => *other = Value::Null,
-    }
 }
 
-fn omit_attempt_content(attempts: &mut Option<Vec<TraceRetryAttempt>>) {
-    for attempt in attempts.iter_mut().flatten() {
-        match &mut attempt.detail {
-            TraceRetryAttemptDetail::Tool { outcome } => match outcome {
-                TraceToolAttemptOutcome::Completed => {}
-                TraceToolAttemptOutcome::Failed { message, .. }
-                | TraceToolAttemptOutcome::Cancelled { message, .. } => message.clear(),
-            },
+/// The node's ceiling: all categories omitted by default. A selector can only narrow it.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct ContentPolicy {
+    categories: [Capture; 14],
+}
+impl ContentPolicy {
+    pub const fn standard() -> Self {
+        Self::omitted()
+    }
+    pub const fn omitted() -> Self {
+        Self {
+            categories: [Capture::Omitted; 14],
+        }
+    }
+    pub const fn captured() -> Self {
+        Self {
+            categories: [Capture::Captured; 14],
+        }
+    }
+    pub const fn with(mut self, category: ContentCategory, capture: Capture) -> Self {
+        self.categories[category as usize] = capture;
+        self
+    }
+    pub const fn get(&self, category: ContentCategory) -> Capture {
+        self.categories[category as usize]
+    }
+    pub const fn captures(&self, category: ContentCategory) -> bool {
+        matches!(self.get(category), Capture::Captured)
+    }
+    /// Does not evaluate `build` without consent.
+    pub fn capture<T: Default>(&self, category: ContentCategory, build: impl FnOnce() -> T) -> T {
+        if self.captures(category) {
+            build()
+        } else {
+            T::default()
         }
     }
 }
 
-impl TraceEvent {
-    /// Empties every content field of this event, leaving its identities,
-    /// statuses, counts, hashes and durations.
-    ///
-    /// Every variant is named, so a new one cannot be added without deciding
-    /// what in it is content.
-    pub fn omit_content(&mut self) {
-        match self {
-            Self::AttachmentDegraded { label, .. } => *label = None,
-            Self::CompositionChanged {
-                rendered_system_prompt,
-                tool_schemas,
-                ..
-            } => {
-                rendered_system_prompt.clear();
-                tool_schemas.iter_mut().for_each(TraceToolSpec::omit_content);
-            }
-            Self::LlmCallStarted { request } => {
-                request.messages.clear();
-                request
-                    .tools
-                    .iter_mut()
-                    .for_each(TraceToolSpec::omit_content);
-                request.output_spec = None;
-            }
-            Self::LlmCallCompleted { response, .. } => {
-                response.text.clear();
-                response.parts = None;
-            }
-            Self::ProviderEvent { event } => {
-                if event.raw_json.take().is_some() {
-                    event.raw_json_omitted_reason = Some(TraceProviderBodyOmission::ContentPolicy);
-                }
-            }
-            Self::EffectEnvelopeDiff { event } => {
-                for entry in &mut event.divergent_paths {
-                    entry.recorded.omit_content();
-                    entry.reconstructed.omit_content();
-                }
-            }
-            Self::RuntimeStreamEvent { event } => match &mut event.payload {
-                TraceRuntimeStreamPayload::Block { event, raw_text } => {
-                    *raw_text = None;
-                    match event {
-                        StreamBlockEvent::Started { .. } => {}
-                        StreamBlockEvent::Delta { text, .. }
-                        | StreamBlockEvent::Completed { text, .. } => text.clear(),
-                    }
-                }
-                TraceRuntimeStreamPayload::TextPart { text, .. }
-                | TraceRuntimeStreamPayload::ReasoningPart { text, .. } => text.clear(),
-                TraceRuntimeStreamPayload::ToolCallPart { input_json, .. } => {
-                    *input_json = Value::Null;
-                }
-                TraceRuntimeStreamPayload::Usage { .. } => {}
-            },
-            Self::ToolCallStarted { args, .. } => *args = Value::Null,
-            Self::ToolCallCompleted {
-                args,
-                output,
-                attempts,
-                ..
-            } => {
-                *args = Value::Null;
-                match &mut output.outcome {
-                    TraceToolCallOutcome::Success(payload) => *payload = Value::Null,
-                    TraceToolCallOutcome::Failure(payload)
-                    | TraceToolCallOutcome::Cancelled(payload) => omit_outcome_text(payload),
-                    TraceToolCallOutcome::Discarded => {}
-                }
-                output.control = None;
-                omit_attempt_content(attempts);
-            }
-            Self::ExecCodeStarted { code, .. } => code.clear(),
-            Self::ExecCodeCompleted {
-                output,
-                error,
-                terminal_finish,
-                ..
-            } => {
-                output.clear();
-                if let Some(failure) = error {
-                    failure.message.clear();
-                    for feedback in &mut failure.feedback {
-                        feedback.repairs.clear();
-                    }
-                    if let Some(admission) = failure.schema_admission.as_deref_mut() {
-                        match admission {
-                            lash_sansio::SchemaAdmissionError::Compilation { message, .. } => {
-                                message.clear();
-                            }
-                            lash_sansio::SchemaAdmissionError::NonLocalReference { reference, .. } => {
-                                reference.clear();
-                            }
-                            lash_sansio::SchemaAdmissionError::InvalidKind { .. } => {}
-                        }
-                    }
-                }
-                *terminal_finish = None;
-            }
-            Self::ExecCodeFailed { error, .. } => error.clear(),
-            Self::StoreErrorObserved { message, .. } => message.clear(),
-            Self::ProgramStep { outcome, .. } => match outcome {
-                TraceProgramStepOutcome::Ok => {}
-                TraceProgramStepOutcome::Failure { diagnostic } => diagnostic.clear(),
-            },
-            // A protocol step projects a session history record.
-            Self::ProtocolStep { payload, .. } => *payload = Value::Null,
-            Self::LanguageExecution { event, .. } => match &mut event.payload {
-                TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => *error = None,
-                TraceLanguageExecutionPayload::Node { fact, .. } => match fact {
-                    TraceNodeFact::Failed { failure, .. } => match failure {
-                        TraceLanguageExecutionFailure::Effect { message, .. }
-                        | TraceLanguageExecutionFailure::Runtime { message, .. } => message.clear(),
-                    },
-                    TraceNodeFact::Started { .. }
-                    | TraceNodeFact::Waiting { .. }
-                    | TraceNodeFact::Resumed { .. }
-                    | TraceNodeFact::Cancelled
-                    | TraceNodeFact::Completed { .. }
-                    | TraceNodeFact::BranchSelected { .. }
-                    | TraceNodeFact::ChildStarted { .. } => {}
-                },
-                TraceLanguageExecutionPayload::ExecutionStarted { .. }
-                | TraceLanguageExecutionPayload::Ran { .. } => {}
-            },
-            // Typed identities, counts, hashes, statuses and classes only: a
-            // model attempt is its sealed record, whose error is a class, a
-            // code and a status.
-            Self::TurnStarted { .. }
-            | Self::PromptBuilt { .. }
-            | Self::PromptCompositionFailed { .. }
-            | Self::CompactionNeeded { .. }
-            | Self::CompactionStarted { .. }
-            | Self::CompactionCompleted { .. }
-            | Self::PromptViewAttachmentsPruned { .. }
-            | Self::LlmCallFailed { .. }
-            | Self::LlmAttemptCompleted { .. }
-            | Self::DomainCompleted { .. }
-            | Self::ProviderReplayDropped { .. }
-            | Self::StepBodyStarted { .. }
-            | Self::ToolCheckConflict { .. }
-            | Self::ObservationProjection { .. }
-            | Self::ExecCodeDiscarded { .. }
-            | Self::TurnCompleted { .. }
-            | Self::ProducerSettled { .. }
-            // The producer's own structured evidence (`TelemetryContent`).
-            | Self::Custom { .. } => {}
+/// A stable address of a content field within its record.
+pub type ContentPath = String;
+/// How a reader distinguishes omitted, empty, cut and oversized content.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ContentMarks {
+    pub captured: Vec<ContentCategory>,
+    pub omitted: Vec<ContentPath>,
+    pub truncated: Vec<ContentPath>,
+    pub oversize: Vec<ContentPath>,
+    pub dropped_messages: u64,
+    pub hook_failed: bool,
+    /// References committed by a normally returning content hook.
+    pub references: Vec<(String, TraceValue)>,
+}
+impl From<ContentPolicy> for ContentMarks {
+    fn from(policy: ContentPolicy) -> Self {
+        Self {
+            captured: ContentCategory::ALL
+                .into_iter()
+                .filter(|c| policy.captures(*c))
+                .collect(),
+            ..Self::default()
         }
     }
 }
+
+/// A mutable field, visited in record order. Structured values are whole JSON;
+/// replacing one with an invalid typed value omits it rather than leaking the original.
+pub struct ContentField<'a> {
+    category: ContentCategory,
+    path: ContentPath,
+    value: FieldValue<'a>,
+    omitted: bool,
+}
+impl ContentField<'_> {
+    pub fn category(&self) -> ContentCategory {
+        self.category
+    }
+    pub fn path(&self) -> &ContentPath {
+        &self.path
+    }
+    pub fn value(&mut self) -> ContentValue<'_> {
+        match &mut self.value {
+            FieldValue::Text(v) => ContentValue::Text(v),
+            FieldValue::Json(v) => ContentValue::Json(v.value()),
+        }
+    }
+    pub fn omit(&mut self) {
+        self.omitted = true;
+        match &mut self.value {
+            FieldValue::Text(v) => v.clear(),
+            FieldValue::Json(v) => v.omit(),
+        }
+    }
+}
+enum FieldValue<'a> {
+    Text(&'a mut String),
+    Json(&'a mut dyn JsonField),
+}
+trait JsonField {
+    fn value(&mut self) -> &mut serde_json::Value;
+    fn omit(&mut self);
+}
+/// JSON is the facade's declared JSON contract exception.
+pub enum ContentValue<'a> {
+    Text(&'a mut String),
+    Json(&'a mut serde_json::Value),
+}
+
+/// One synchronous host hook. It must not block, do I/O or re-enter the engine.
+pub trait ContentHook: Send + Sync + 'static {
+    fn on_content(&self, view: &ContentView<'_>, content: &mut RecordContent<'_>);
+}
+pub struct ContentView<'a> {
+    pub kind: TraceSpanKind,
+    pub position: Option<&'a TracePosition>,
+    pub ids: &'a TraceIds,
+    pub event_kind: TraceEventKind,
+    pub policy: &'a TracePolicySnapshot,
+}
+/// A transaction over a record's captured fields and bounded references.
+pub struct RecordContent<'a> {
+    event: &'a mut TraceEvent,
+    marks: &'a mut ContentMarks,
+    policy: ContentPolicy,
+    writer: TraceAttributeWriter,
+    references: u32,
+    reference_bytes: u64,
+    limits: crate::TraceLimits,
+}
+impl RecordContent<'_> {
+    pub fn for_each(&mut self, mut f: impl FnMut(&mut ContentField<'_>)) {
+        let policy = self.policy;
+        let marks = &mut self.marks;
+        self.event.visit_content(&mut |field| {
+            if policy.captures(field.category()) {
+                f(field);
+                if field.omitted {
+                    marks.omitted.push(field.path.clone());
+                }
+            }
+        });
+    }
+    pub fn omit(&mut self, category: ContentCategory) {
+        self.policy = self.policy.with(category, Capture::Omitted);
+        self.marks.captured.retain(|c| *c != category);
+        self.event.apply_policy(&self.policy, self.marks);
+    }
+    pub fn reference(&mut self, key: AttrKey, value: TraceValue) -> Result<(), TraceOmission> {
+        let bytes = key.as_str().len() as u64 + value.encoded_len();
+        let result = if self.references >= self.limits.references() {
+            Err(TraceOmission::References)
+        } else if bytes
+            > self
+                .limits
+                .reference_bytes()
+                .saturating_sub(self.reference_bytes)
+        {
+            Err(TraceOmission::ReferenceBytes)
+        } else {
+            return self.write_reference(key, value, bytes);
+        };
+        if let Err(reason) = result {
+            self.writer.omit(reason);
+        }
+        result
+    }
+    fn write_reference(
+        &mut self,
+        key: AttrKey,
+        value: TraceValue,
+        bytes: u64,
+    ) -> Result<(), TraceOmission> {
+        let result = self.writer.set(key, value);
+        if result.is_ok() || result == Err(TraceOmission::ValueTruncated) {
+            self.references += 1;
+            self.reference_bytes += bytes;
+        }
+        result
+    }
+    pub fn system_instructions(&mut self) -> Option<&mut String> {
+        if !self.policy.captures(ContentCategory::SystemInstructions) {
+            return None;
+        }
+        self.event.request_mut()?.system_instructions.as_mut()
+    }
+    pub fn messages(&mut self) -> Option<&mut Vec<crate::TraceLlmMessage>> {
+        if !self.policy.captures(ContentCategory::InputMessages) {
+            return None;
+        }
+        Some(&mut self.event.request_mut()?.messages)
+    }
+    pub fn output_parts(&mut self) -> Option<&mut Vec<lash_sansio::llm::types::LlmOutputPart>> {
+        if !self.policy.captures(ContentCategory::OutputMessages) {
+            return None;
+        }
+        match self.event {
+            TraceEvent::LlmCallCompleted { response, .. } => response.parts.as_mut(),
+            _ => None,
+        }
+    }
+}
+
+impl crate::TraceRecord {
+    /// Applies consent before any consumer and bounds captured values. The host
+    /// hook is transactional: a panic clears its mutations and references. The
+    /// caller enforces the runtime's panic loudness after receiving the payload.
+    pub fn apply_content(
+        &mut self,
+        policy: &TracePolicySnapshot,
+        hook: Option<&dyn ContentHook>,
+    ) -> Option<Box<dyn std::any::Any + Send>> {
+        self.content = ContentMarks::default();
+        self.event.apply_policy(&policy.content, &mut self.content);
+        self.event.visit_content(&mut |field| {
+            if policy.content.captures(field.category())
+                && !self.content.captured.contains(&field.category())
+            {
+                self.content.captured.push(field.category());
+            }
+        });
+        let mut panic = None;
+        if !self.content.captured.is_empty()
+            && let Some(hook) = hook
+        {
+            let ids = self.context.ids();
+            let view = ContentView {
+                kind: self
+                    .position
+                    .as_ref()
+                    .map_or(TraceSpanKind::Point, |p| p.kind),
+                position: self.position.as_ref(),
+                ids: &ids,
+                event_kind: self.event.kind(),
+                policy,
+            };
+            let mut content = RecordContent {
+                event: &mut self.event,
+                marks: &mut self.content,
+                policy: policy.content,
+                writer: TraceAttributeWriter::new(view.kind, &policy.limits),
+                references: 0,
+                reference_bytes: 0,
+                limits: policy.limits,
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                hook.on_content(&view, &mut content)
+            }));
+            let (contributions, omissions) = content.writer.finish();
+            self.omissions.merge(&omissions);
+            match result {
+                Ok(()) => {
+                    self.content.references = contributions
+                        .added
+                        .into_iter()
+                        .map(|(key, value)| (key.as_str().to_owned(), value))
+                        .collect();
+                    self.event.apply_policy(&policy.content, &mut self.content);
+                }
+                Err(payload) => {
+                    self.event
+                        .apply_policy(&ContentPolicy::omitted(), &mut self.content);
+                    self.content.captured.clear();
+                    self.content.references.clear();
+                    self.content.hook_failed = true;
+                    self.omissions.add(TraceOmission::HookFailed);
+                    panic = Some(payload);
+                }
+            }
+        }
+        self.event
+            .truncate_content(policy.content_limits, &mut self.content);
+        panic
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod laws;

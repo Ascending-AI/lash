@@ -33,7 +33,7 @@ pub(super) fn fixture_record(
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
         timestamp: lash_trace::TraceTimestamp::from_unix_ms(0),
-        content: lash_trace::TelemetryContent::Captured,
+        content: lash_trace::ContentPolicy::captured().into(),
         context,
         position: None,
         omissions: Default::default(),

@@ -411,7 +411,7 @@ pub(crate) async fn build_workbench_core(
         .trace_detail(TraceDetailPolicy::extended_models())
         // A development host: its trace is the debugging record of what the
         // model was shown and said.
-        .telemetry_content(lash::tracing::TelemetryContent::Captured)
+        .content_policy(lash::tracing::ContentPolicy::captured())
         .llm_profiles(Arc::new(WorkbenchLlmProfiles { provider }))
         .build(owner)
         .context("build Lash core")

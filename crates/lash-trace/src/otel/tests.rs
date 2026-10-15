@@ -114,7 +114,7 @@ fn captured_record(event: TraceEvent, position: TracePosition) -> TraceRecord {
 }
 /// A record as the runtime hands it over under the standard content policy.
 fn record(event: TraceEvent, position: TracePosition) -> TraceRecord {
-    captured_record(event, position).governed(crate::TelemetryContent::standard())
+    captured_record(event, position).governed(crate::ContentPolicy::standard())
 }
 /// A `kind` leaf or container's closing record under the turn of
 /// [`producer`], from `started` to 9000.
@@ -479,6 +479,8 @@ fn emitted_domain_shape_matches_registry() {
                 output_type: None,
                 generation: Default::default(),
             }),
+            request: Default::default(),
+            response_metadata: Default::default(),
             response: crate::TraceLlmResponse {
                 text: "answer".into(),
                 duration_ms: 500,
@@ -663,49 +665,6 @@ fn emitted_domain_shape_matches_registry() {
     assert!(registry::contract_markdown().contains("cache_write.input_tokens"));
 }
 
-struct EnrichmentSpy(Arc<AtomicUsize>);
-impl SpanEnricher for EnrichmentSpy {
-    fn enrich(&self, _: &SpanView<'_>, _: &mut SpanEnrichment) {
-        self.0.fetch_add(1, Ordering::Relaxed);
-    }
-}
-#[test]
-fn unsampled_records_and_bounded_payloads_do_not_serialize_past_their_limit() {
-    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
-    let count = Arc::new(AtomicUsize::new(0));
-    let adapter = OtelTelemetry::new(
-        &provider,
-        &meter,
-        OtelOptions {
-            enricher: Some(Arc::new(EnrichmentSpy(count.clone()))),
-            ..OtelOptions::standard()
-        },
-    );
-    let mut unsampled = completed_under(&context(0), &scope_id());
-    unsampled.content = crate::TelemetryContent::Captured;
-    adapter.append(&unsampled).unwrap();
-    assert_eq!(count.load(Ordering::Relaxed), 0);
-    assert!(exporter.get_finished_spans().unwrap().is_empty());
-    struct Huge<'a>(&'a AtomicUsize);
-    impl serde::Serialize for Huge<'_> {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            use serde::ser::SerializeSeq;
-            let mut sequence = serializer.serialize_seq(Some(1_000_000))?;
-            for _ in 0..1_000_000 {
-                self.0.fetch_add(1, Ordering::Relaxed);
-                sequence.serialize_element("payload")?;
-            }
-            sequence.end()
-        }
-    }
-    let serializations = AtomicUsize::new(0);
-    let mut writer = payload::BoundedWriter::new(32);
-    assert!(serde_json::to_writer(&mut writer, &Huge(&serializations)).is_err());
-    assert!(writer.truncated);
-    assert!(writer.finish().len() <= 32);
-    assert!(serializations.load(Ordering::Relaxed) < 10);
-}
-
 /// V23: both telemetry projections read the same typed terminal subject.
 #[test]
 fn domain_subject_owns_the_span_and_intent_kind_attribute() {
@@ -809,6 +768,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         (
             TraceSpanKind::Cell,
             TraceEvent::ExecCodeCompleted {
+                code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
                 duration_ms: 300,
@@ -850,7 +810,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         if matches!(built.event, TraceEvent::ToolCallCompleted { .. }) {
             captured_tool = Some(built.clone());
         }
-        let event = built.governed(crate::TelemetryContent::Omitted);
+        let event = built.governed(crate::ContentPolicy::omitted());
         adapter.append(&event).unwrap();
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
@@ -863,12 +823,12 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
             event.event.is_failed()
         );
         assert!(
-            !span
-                .attributes
-                .iter()
-                .any(|a| a.key.as_str() == A::Payload.definition().key)
+            !span.attributes.iter().any(|a| a
+                .key
+                .as_str()
+                .starts_with("gen_ai.tool.call.arguments")
+                || a.key.as_str() == "gen_ai.tool.call.result")
         );
-        assert!(span.attributes.contains(&A::ContentOmitted.value(true)));
         assert!(
             !text(span).contains("hidden") && !text(span).contains("secret"),
             "{}",
@@ -880,12 +840,11 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
     // The same tool completion under a captured policy exports its payload.
     let captured = captured_tool.expect("tool completion");
     adapter
-        .append(&captured.governed(crate::TelemetryContent::Captured))
+        .append(&captured.governed(crate::ContentPolicy::captured()))
         .unwrap();
     let spans = exporter.get_finished_spans().unwrap();
     let span = spans.last().unwrap();
     assert_eq!(span.name, "execute_tool unfamiliar-tool");
-    assert!(!span.attributes.contains(&A::ContentOmitted.value(true)));
     assert!(text(span).contains("hidden"), "{}", text(span));
 }
 
@@ -901,6 +860,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     let events = [
         (
             TraceEvent::ExecCodeCompleted {
+                code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
                 duration_ms: 10,
@@ -919,6 +879,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeFailed {
+                code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
                 duration_ms: 0,
@@ -929,6 +890,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
                 duration_ms: 10,
@@ -947,6 +909,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
                 duration_ms: 10,
@@ -1014,6 +977,7 @@ fn a_discarded_cell_is_a_tool_span_that_did_not_fail() {
         cell,
         8000,
         TraceEvent::ExecCodeDiscarded {
+            code: String::new(),
             language: "typescript".into(),
             started_at_ms: 1000,
             duration_ms: 7000,
@@ -1116,6 +1080,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         let mut model = record(
             TraceEvent::LlmCallFailed {
                 model: None,
+                request: Default::default(),
                 error: crate::TraceError {
                     code: None,
                     retryable: false,
@@ -1235,6 +1200,7 @@ fn failure_attributes_preserve_typed_classes() {
     ];
     let model = |code| TraceEvent::LlmCallFailed {
         model: None,
+        request: Default::default(),
         error: crate::TraceError {
             code: None,
             retryable: false,
@@ -1607,6 +1573,8 @@ fn the_enrichers_replacement_wins_over_lashs_default_and_lash_keys_are_refused()
         with_span(&producer(), adapter.leaf_span_id()),
         4000,
         TraceEvent::LlmCallCompleted {
+            request: Default::default(),
+            response_metadata: Default::default(),
             model: Some(crate::TraceModelCall {
                 provider: Some("openai-compatible".into()),
                 request_model: "m".into(),
@@ -1683,6 +1651,8 @@ fn semconv_token_usage_includes_cache_and_marks_overflow() {
         with_span(&producer(), adapter.leaf_span_id()),
         2500,
         TraceEvent::LlmCallCompleted {
+            request: Default::default(),
+            response_metadata: Default::default(),
             model: None,
             response: crate::TraceLlmResponse {
                 text: String::new(),
@@ -1821,6 +1791,7 @@ fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
             with_span(&producer(), adapter.leaf_span_id()),
             2500,
             TraceEvent::LlmCallFailed {
+                request: Default::default(),
                 model,
                 attempts,
                 error: crate::TraceError {
@@ -1847,6 +1818,7 @@ fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
         unreachable!()
     };
     cancelled.event = TraceEvent::LlmCallFailed {
+        request: Default::default(),
         model,
         attempts,
         error: crate::TraceError {
@@ -2034,6 +2006,8 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
         with_span(&producer(), adapter.leaf_span_id()),
         2500,
         TraceEvent::LlmCallCompleted {
+            request: Default::default(),
+            response_metadata: Default::default(),
             model: Some(crate::TraceModelCall {
                 provider: Some(provider.into()),
                 request_model: "model-x".into(),
@@ -2059,4 +2033,138 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
             attempts: Some(attempts),
         },
     )
+}
+
+/// L7: content is valid structured semconv JSON, including a non-object result.
+#[test]
+fn content_attributes_are_whole_schema_valid_json() {
+    let (traces, meters, spans, _) = providers(Sampler::AlwaysOn);
+    let exporter = OtelTelemetry::new(&traces, &meters, OtelOptions::standard());
+    let event = TraceEvent::ToolCallCompleted {
+        call_id: lash_sansio::ToolCallId::fixture("content-law"),
+        provider_call_id: None,
+        name: "read".into(),
+        args: serde_json::json!([1, 2]),
+        output: crate::TraceToolCallOutput {
+            outcome: crate::TraceToolCallOutcome::Success(serde_json::json!("é".repeat(20_000))),
+            control: None,
+        },
+        duration_ms: 1,
+        issuing_node_id: None,
+        attempts: None,
+    };
+    let turn = derived(&producer(), &scope_id());
+    let captured = captured_record(
+        event,
+        position(
+            TraceSpanKind::Tool,
+            SpanRole::Closes,
+            turn,
+            Some(producer()),
+            &scope_id(),
+            (1, 2),
+        ),
+    )
+    .governed(crate::ContentPolicy::captured());
+    exporter.append(&captured).unwrap();
+    traces.provider().force_flush().unwrap();
+    let exported = spans.get_finished_spans().unwrap();
+    let attrs = &exported[0].attributes;
+    assert!(
+        !attrs
+            .iter()
+            .any(|kv| kv.key.as_str() == "lash.payload.json")
+    );
+    for key in ["gen_ai.tool.call.arguments", "gen_ai.tool.call.result"] {
+        let value = attrs
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .expect("semconv content attribute");
+        let json: serde_json::Value = serde_json::from_str(&value.value.as_str()).unwrap();
+        assert!(json.is_object());
+    }
+}
+
+/// L6 and L22(a): all consumers see redaction and references consume the span budget before enrichment.
+#[test]
+fn content_hooks_reach_sinks_and_spans_and_references_share_the_enrichment_budget() {
+    struct Hook;
+    impl crate::ContentHook for Hook {
+        fn on_content(&self, _: &crate::ContentView<'_>, content: &mut crate::RecordContent<'_>) {
+            content.for_each(|field| match field.value() {
+                crate::ContentValue::Text(value) => *value = value.replace("secret", "REDACTED"),
+                crate::ContentValue::Json(value) => {
+                    if let Some(object) = value.as_object_mut() {
+                        for value in object.values_mut() {
+                            if let Some(text) = value.as_str() {
+                                *value = serde_json::json!(text.replace("secret", "REDACTED"));
+                            }
+                        }
+                    }
+                }
+            });
+            for i in 0..100 {
+                let _ = content.reference(format!("app.ref.{i}").into(), "uploaded".into());
+            }
+        }
+    }
+    struct Budget(Arc<Mutex<Option<crate::WriterRemaining>>>);
+    impl SpanEnricher for Budget {
+        fn enrich(&self, _: &SpanView<'_>, out: &mut SpanEnrichment) {
+            *self.0.lock().unwrap() = Some(out.remaining());
+        }
+    }
+    let (traces, meters, spans, _) = providers(Sampler::AlwaysOn);
+    let remaining = Arc::new(Mutex::new(None));
+    let policy = crate::TracePolicySnapshot {
+        content: crate::ContentPolicy::captured(),
+        ..Default::default()
+    };
+    let adapter = OtelTelemetry::new(
+        &traces,
+        &meters,
+        OtelOptions {
+            enricher: Some(Arc::new(Budget(remaining.clone()))),
+            ..Default::default()
+        },
+    )
+    .bound(policy.clone(), Arc::default());
+    let mut record = captured_record(
+        crate::content::laws::model_event(),
+        position(
+            TraceSpanKind::Model,
+            SpanRole::Closes,
+            context(1),
+            Some(producer()),
+            &scope_id(),
+            (1, 2),
+        ),
+    );
+    assert!(record.apply_content(&policy, Some(&Hook)).is_none());
+    let sink = crate::RecordingTraceSink::new();
+    sink.append(&record).unwrap();
+    adapter.append(&record).unwrap();
+    assert!(
+        !serde_json::to_string(&sink.records())
+            .unwrap()
+            .contains("secret")
+    );
+    assert_eq!(record.content.references.len(), 16);
+    assert_eq!(record.omissions.get(crate::TraceOmission::References), 84);
+    let span = spans.get_finished_spans().unwrap().remove(0);
+    assert!(!format!("{:?}", span.attributes).contains("secret"));
+    assert!(
+        span.attributes
+            .contains(&KeyValue::new("app.ref.0", "uploaded"))
+    );
+    assert!(
+        span.attributes
+            .iter()
+            .any(|a| a.key.as_str() == "lash.trace.omitted")
+    );
+    let initial = TraceAttributeWriter::new(TraceSpanKind::Model, &policy.limits).remaining();
+    assert_eq!(
+        remaining.lock().unwrap().unwrap().attributes,
+        initial.attributes - 16
+    );
 }

@@ -915,7 +915,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
                 .trace_sink(trace.clone())
-                .telemetry_content(lash_trace::TelemetryContent::Captured)
+                .content_policy(lash_trace::ContentPolicy::captured())
                 .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session(

@@ -81,24 +81,34 @@ Wake hints and diagnostics are not durable reliable event feeds. The
 process facts from node execution traces and shows how a host keeps a path
 for replay.
 
-One host telemetry content policy (`TelemetryContent`, default omitted) governs
-prompts, responses, instructions, tool arguments and results, and diagnostic or
-provider text on every built-in telemetry path: passive record sinks and the
-OpenTelemetry adapter alike. Consent, detail level, sampling and byte bounds are
-separate controls. With content omitted, records retain identities, outcomes,
-counts and an omission marker, and the content is never built. With explicit
-content capture, retain original provider text within documented bounds.
-Correctness-required durable requests/results and app responses keep their
-existing contracts. A new content-bearing trace field is emptied in
-`TraceEvent::omit_content`, and a site that would clone or serialize content
-builds it through `TelemetryContent::capture`. See
-[durable tracing](../architecture/tracing.md#telemetry-content).
+One host `ContentPolicy` governs every trace consumer, including the OTel
+exporter. Its fourteen categories are omitted by default. Opt in with
+`ContentPolicy::with(ContentCategory::InputMessages, Capture::Captured)` or
+`ContentPolicy::captured()`. Reasoning requires both its direction's consent
+and `Reasoning`; nested tool parts follow their message's direction.
 
-Custom trace payloads are plugin-authored output; Lash does not inspect or
-classify them. Plugins must honour the current host policy, available through
-`PluginSessionContext::telemetry_content()`. Hosts retain the final export
-decision by wrapping their `TraceSink` to drop or redact custom records before
-forwarding, as shown in the [host filtering example](../architecture/tracing.md#plugin-custom-payloads-and-host-filtering).
+Builders use `policy.capture(category, || build())`, so omitted content is
+never cloned, rendered or serialized. `LashCoreBuilder::capture_selector`
+installs a synchronous host callback keyed by `TraceIds` that can narrow this
+ceiling before builders run, including skipping optional leaf kinds. Skip
+children first; a skipped parent cannot leave a child enabled. A selector
+panic omits content and counts `SelectorFailed`.
 
-Tests pin a named rule or a demonstrated bug, not vocabulary snapshots or coverage
-counts.
+One `ContentHook`, installed with `content_hook`, sees every captured field
+through `RecordContent::for_each` before any sink. It can redact, omit a
+category, or enqueue an upload and add a bounded reference. It must not block,
+do I/O or re-enter the engine. A panic clears all captured fields and discards
+all references from that call, with `ContentMarks::hook_failed` set. References
+share the span's contribution budget with annotations and enrichment.
+
+`ContentLimits` bounds prose parts, whole serialized fields and attributes,
+and provider request bodies. Truncation preserves JSON structure; old messages
+are dropped whole, and a still oversized field is omitted whole. Schemas,
+provider bodies and response metadata are atomic. Sinks read typed fields and
+`ContentMarks`; spans carry the corresponding structured GenAI semconv JSON
+attributes. There is no event payload blob.
+
+Plugin factories read the deployment ceiling through
+`PluginSessionContext::content_policy()`. Telemetry consent is host policy on
+reopen and is never persisted as session execution configuration. See the
+[tracing contract](../architecture/tracing.md).

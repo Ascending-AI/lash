@@ -127,7 +127,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .serve_test_llm_profile(provider, model.clone())
         .trace_sink(trace.clone())
         .trace_detail(TraceDetailPolicy::extended_models())
-        .telemetry_content(lash::tracing::TelemetryContent::Captured)
+        .content_policy(lash::tracing::ContentPolicy::captured())
         .plugin(Arc::new(SnapshotInstruction))
         .build(crate::sim_process_owner())
         .expect("runtime core");

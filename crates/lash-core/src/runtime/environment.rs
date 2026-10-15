@@ -182,7 +182,7 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn with_telemetry_content(mut self, content: lash_trace::TelemetryContent) -> Self {
+    pub fn with_content_policy(mut self, content: lash_trace::ContentPolicy) -> Self {
         self.env.core.tracing = self.env.core.tracing.clone().with_content(content);
         self
     }

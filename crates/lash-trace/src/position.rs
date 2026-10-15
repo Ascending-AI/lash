@@ -181,6 +181,10 @@ impl TraceSpanKindSet {
         Self(bits)
     }
 
+    pub const fn with(self, kind: TraceSpanKind) -> Self {
+        Self(self.0 | (1 << kind.index()))
+    }
+
     pub const fn contains(self, kind: TraceSpanKind) -> bool {
         self.0 & (1 << kind.index()) != 0
     }

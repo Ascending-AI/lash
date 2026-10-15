@@ -214,6 +214,8 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::CompactionCompleted { summary_nodes: 1 },
         TraceEvent::LlmCallStarted {
             request: TraceLlmRequest {
+                system_instructions: None,
+                composition_fingerprint: Default::default(),
                 model: "m".to_string(),
                 model_variant: Default::default(),
                 messages: Vec::new(),
@@ -225,6 +227,8 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmCallCompleted {
             model: None,
+            request: Default::default(),
+            response_metadata: Default::default(),
             response: TraceLlmResponse {
                 text: "hello".to_string(),
                 duration_ms: 12,
@@ -240,6 +244,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmCallFailed {
             model: None,
+            request: Default::default(),
             error: TraceError {
                 retryable: true,
                 terminal_reason: lash_trace::TraceLlmTerminalReason::Unknown,
@@ -250,6 +255,7 @@ fn event_samples() -> Vec<TraceEvent> {
             attempts: None,
         },
         TraceEvent::LlmAttemptCompleted {
+            response_metadata: Default::default(),
             attempt: lash_sansio::llm::types::AttemptRecord {
                 ordinal: 1,
                 outcome: lash_sansio::llm::types::AttemptOutcome::Completed,
@@ -411,6 +417,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         exec_code_completed_event(),
         TraceEvent::ExecCodeFailed {
+            code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
             duration_ms: 0,
@@ -418,6 +425,7 @@ fn event_samples() -> Vec<TraceEvent> {
             error: "boom".to_string(),
         },
         TraceEvent::ExecCodeDiscarded {
+            code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
             duration_ms: 9,
@@ -498,6 +506,7 @@ fn trace_event_vocabulary_names_no_seam_implementation() {
 #[test]
 fn exec_code_failed_carries_a_closed_reason_code() {
     let event = TraceEvent::ExecCodeFailed {
+        code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
         duration_ms: 0,
@@ -540,6 +549,7 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
 fn exec_code_completed_event() -> TraceEvent {
     TraceEvent::ExecCodeCompleted {
+        code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
         duration_ms: 12,
@@ -838,7 +848,7 @@ fn fixture_record(
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
         timestamp: lash_trace::TraceTimestamp::from_unix_ms(0),
-        content: lash_trace::TelemetryContent::Captured,
+        content: lash_trace::ContentPolicy::captured().into(),
         context,
         position: None,
         omissions: Default::default(),
@@ -896,6 +906,8 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmCallStarted {
             request: TraceLlmRequest {
+                system_instructions: None,
+                composition_fingerprint: Default::default(),
                 model: "m".to_string(),
                 model_variant: None,
                 messages: vec![lash_trace::TraceLlmMessage {
@@ -913,6 +925,8 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmCallCompleted {
             model: None,
+            request: Default::default(),
+            response_metadata: Default::default(),
             response: TraceLlmResponse {
                 text: CONTENT.to_string(),
                 duration_ms: 12,
@@ -1046,6 +1060,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             code_chars: 14,
         },
         TraceEvent::ExecCodeCompleted {
+            code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
             duration_ms: 12,
@@ -1071,6 +1086,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             }],
         },
         TraceEvent::ExecCodeFailed {
+            code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
             duration_ms: 0,
@@ -1109,96 +1125,45 @@ fn content_bearing_events() -> Vec<TraceEvent> {
     ]
 }
 
-/// FIG-5530: the host's content policy governs the whole record vocabulary.
-/// A record under an omitted policy says so, carries no content in any event
-/// kind and keeps the event's identities, counts and outcomes; the same
-/// record under a captured policy is the event as built. Both are records the
-/// published schema accepts.
+/// L6: every content-bearing variant is reached by the one hook traversal.
 #[test]
-fn omitted_content_policy_empties_every_content_field_and_keeps_identity() {
-    let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v37.schema.json"
-    ))
-    .expect("published trace schema");
+fn content_hook_reaches_every_content_bearing_variant() {
+    struct Redact;
+    impl lash_trace::ContentHook for Redact {
+        fn on_content(
+            &self,
+            _: &lash_trace::ContentView<'_>,
+            content: &mut lash_trace::RecordContent<'_>,
+        ) {
+            fn clear(value: &mut serde_json::Value) {
+                match value {
+                    serde_json::Value::String(text) => *text = text.replace(CONTENT, "[redacted]"),
+                    serde_json::Value::Array(values) => values.iter_mut().for_each(clear),
+                    serde_json::Value::Object(fields) => fields.values_mut().for_each(clear),
+                    _ => {}
+                }
+            }
+            content.for_each(|field| match field.value() {
+                lash_trace::ContentValue::Text(text) => *text = text.replace(CONTENT, "[redacted]"),
+                lash_trace::ContentValue::Json(value) => clear(value),
+            });
+        }
+    }
+    let policy = lash_trace::TracePolicySnapshot {
+        content: lash_trace::ContentPolicy::captured(),
+        ..Default::default()
+    };
     for event in content_bearing_events() {
         let kind = event.kind();
-        let built = fixture_record(TraceContext::default().for_session("s1"), event);
+        let mut record = fixture_record(TraceContext::default(), event);
+        assert!(record.apply_content(&policy, Some(&Redact)).is_none());
         assert!(
-            serde_json::to_string(&built).unwrap().contains(CONTENT),
-            "{kind}: the sample carries content"
-        );
-
-        let captured = built
-            .clone()
-            .governed(lash_trace::TelemetryContent::Captured);
-        assert_eq!(captured, built, "{kind}: a captured record is as built");
-
-        let omitted = built
-            .clone()
-            .governed(lash_trace::TelemetryContent::Omitted);
-        let value = serde_json::to_value(&omitted).expect("encode record");
-        assert!(
-            !value.to_string().contains(CONTENT),
-            "{kind}: content survived an omitted policy: {value}"
-        );
-        assert_eq!(value["content"], "omitted", "{kind}");
-        assert_eq!(value["type"], kind.as_str());
-        assert_eq!(value["id"], "fixture-record");
-        assert_eq!(value["context"]["session_id"], "s1");
-        assert_schema_accepts(&validator, &value, kind.as_str());
-        assert_eq!(
-            serde_json::from_value::<TraceRecord>(value).expect("decode an omitted record"),
-            omitted,
-            "{kind}: an omitted record round-trips"
+            !serde_json::to_string(&record).unwrap().contains(CONTENT),
+            "{kind}: the hook missed content"
         );
     }
-
-    let completed = fixture_record(
-        TraceContext::default(),
-        content_bearing_events()
-            .into_iter()
-            .find(|event| event.kind() == TraceEventKind::ToolCallCompleted)
-            .expect("tool completion sample"),
-    )
-    .governed(lash_trace::TelemetryContent::Omitted);
-    let value = serde_json::to_value(&completed).unwrap();
-    assert_eq!(
-        value["call_id"],
-        lash_sansio::ToolCallId::fixture("call-1").to_string()
-    );
-    assert_eq!(value["provider_call_id"], "provider-call");
-    assert_eq!(value["name"], "search");
-    assert_eq!(value["duration_ms"], 3);
-    assert_eq!(value["output"]["outcome"]["status"], "failure");
-    assert_eq!(
-        value["output"]["outcome"]["payload"],
-        json!({ "class": "permission_denied", "code": "tool_failed", "source": "tool" }),
-        "a failed outcome keeps its typed classification"
-    );
-    assert_eq!(
-        value["attempts"][0]["detail"]["outcome"]["code"],
-        "tool_failed"
-    );
-
-    let request = fixture_record(
-        TraceContext::default(),
-        content_bearing_events()
-            .into_iter()
-            .find(|event| event.kind() == TraceEventKind::ProviderEvent)
-            .expect("provider request sample"),
-    )
-    .governed(lash_trace::TelemetryContent::Omitted);
-    let value = serde_json::to_value(&request).unwrap();
-    assert_eq!(value["event"]["raw_len"], 13);
-    assert_eq!(value["event"]["raw_sha256"], "abcd");
-    assert_eq!(
-        value["event"]["direction"]["endpoint"], "chat/completions",
-        "{value}"
-    );
-    assert_eq!(value["event"]["raw_json_omitted_reason"], "content_policy");
 }
 
-/// A process execution cannot silently lose its start through a missing entry reference.
 #[test]
 fn execution_identity_requires_its_process_document() {
     let wire = serde_json::to_value(lash_vm_identity()).expect("identity wire");
@@ -1262,15 +1227,15 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
         let record = fixture_record(TraceContext::default().for_session("s1"), event);
         let captured = record
             .clone()
-            .governed(lash_trace::TelemetryContent::Captured);
-        assert_eq!(captured, record);
+            .governed(lash_trace::ContentPolicy::captured());
+        assert_eq!(captured.event, record.event);
         let captured = serde_json::to_value(captured).expect("captured record");
         assert!(captured.to_string().contains(COMPILATION));
         if kind == "non_local_reference" {
             assert!(captured.to_string().contains(REFERENCE));
         }
 
-        let omitted = serde_json::to_value(record.governed(lash_trace::TelemetryContent::Omitted))
+        let omitted = serde_json::to_value(record.governed(lash_trace::ContentPolicy::omitted()))
             .expect("omitted record");
         assert!(!omitted.to_string().contains(COMPILATION), "{omitted}");
         assert!(!omitted.to_string().contains(REFERENCE), "{omitted}");

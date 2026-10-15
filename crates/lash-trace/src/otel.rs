@@ -39,9 +39,9 @@ pub use opentelemetry as api;
 /// Exact SDK namespace [`LashTracerProvider`] wraps.
 pub use opentelemetry_sdk as sdk;
 
+mod content_attributes;
 mod enrich;
 mod model;
-mod payload;
 mod provider;
 pub use crate::telemetry::metrics::registry;
 pub use crate::telemetry::metrics::{
@@ -255,11 +255,11 @@ impl OtelTelemetry {
         correlation_attributes(position.scope.as_ref(), &record.context, &mut attributes);
         projection.attributes(record, &mut attributes);
         if position.kind != TraceSpanKind::ModelAttempt {
-            payload::attributes(record, &mut attributes);
+            content_attributes::attributes(record, &mut attributes);
         }
         let definition = projection.span.definition();
         let mut name = projection.name();
-        let (contributions, omissions) = match producer {
+        let (contributions, mut omissions) = match producer {
             Some(contributed) => contributed,
             None => {
                 let ids = record.context.ids();
@@ -272,7 +272,12 @@ impl OtelTelemetry {
                     attributes: &attributes,
                     policy: &self.policy,
                 };
-                let writer = TraceAttributeWriter::new(position.kind, &self.policy.limits);
+                let mut writer = TraceAttributeWriter::new(position.kind, &self.policy.limits);
+                if position.kind != TraceSpanKind::ModelAttempt {
+                    for (key, value) in &record.content.references {
+                        let _ = writer.set(key.clone(), value.clone());
+                    }
+                }
                 self.enriched(&view, writer).finish()
             }
         };
@@ -285,6 +290,7 @@ impl OtelTelemetry {
                 &omissions,
             );
         }
+        omissions.merge(&record.omissions);
         if let Some(custom) = enrich::assemble(&mut attributes, contributions, &omissions) {
             name = custom.into_owned();
         }
@@ -463,7 +469,7 @@ impl OtelTelemetry {
             schema_version: crate::TRACE_SCHEMA_VERSION,
             id: format!("producer:{span_id}"),
             timestamp: now,
-            content: crate::TelemetryContent::Omitted,
+            content: crate::ContentPolicy::omitted().into(),
             context: TraceContext::of_ids(spec.ids.clone()),
             position: Some(position.clone()),
             omissions: TraceOmissionCounts::default(),

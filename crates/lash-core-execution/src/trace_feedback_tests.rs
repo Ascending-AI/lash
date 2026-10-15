@@ -29,7 +29,7 @@ fn runtime_feedback_is_not_part_of_initial_composition_identity() {
     ));
     assert_eq!(trace_composition_key(&request, &[]), before);
     assert_eq!(
-        trace_composition_snapshot(&request, before, lash_trace::TelemetryContent::Captured)
+        trace_composition_snapshot(&request, before, lash_trace::ContentPolicy::captured())
             .rendered_system_prompt,
         "I"
     );

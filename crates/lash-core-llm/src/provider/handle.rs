@@ -493,15 +493,21 @@ impl ProviderHandle {
                     )
                 };
                 if !invalidated {
-                    sideband.seal_attempt(failure_attempt_record(
-                        attempt_ordinal,
-                        failure,
-                        true,
-                        failure_protocol_position(failure),
-                        Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                            limit: lash_sansio::LimitCause::ExecutionTotal,
-                        })),
-                    ));
+                    sideband.seal_attempt(
+                        failure_attempt_record(
+                            attempt_ordinal,
+                            failure,
+                            true,
+                            failure_protocol_position(failure),
+                            Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                                limit: lash_sansio::LimitCause::ExecutionTotal,
+                            })),
+                        ),
+                        failure
+                            .partial_response
+                            .as_deref()
+                            .map(|r| &r.response_metadata),
+                    );
                     return Err(ProviderCompletionError {
                         error: model_total_error(limit, Some(failure)),
                         call_record: Box::new(sideband.call_record(call_id)),
@@ -529,17 +535,20 @@ impl ProviderHandle {
                         .provider_usage
                         .as_ref()
                         .map(|_| response.usage.clone());
-                    sideband.seal_attempt(AttemptRecord {
-                        ordinal: attempt_ordinal,
-                        outcome,
-                        protocol_position: success_protocol_position(&response, outcome),
-                        retry_budget_consumed: true,
-                        retry_decision: None,
-                        error: None,
-                        evidence: response.execution_evidence.clone(),
-                        generation_disposition: response.generation_disposition,
-                        usage: usage.clone(),
-                    });
+                    sideband.seal_attempt(
+                        AttemptRecord {
+                            ordinal: attempt_ordinal,
+                            outcome,
+                            protocol_position: success_protocol_position(&response, outcome),
+                            retry_budget_consumed: true,
+                            retry_decision: None,
+                            error: None,
+                            evidence: response.execution_evidence.clone(),
+                            generation_disposition: response.generation_disposition,
+                            usage: usage.clone(),
+                        },
+                        Some(&response.response_metadata),
+                    );
                     return Ok(ProviderCompletion {
                         response,
                         call_record: sideband.call_record(call_id),
@@ -646,13 +655,19 @@ impl ProviderHandle {
                     };
                     let delay = decision.delay();
                     let unsafe_retry = charge_safety_decision.is_some();
-                    sideband.seal_attempt(failure_attempt_record(
-                        attempt_ordinal,
-                        recorded_failure,
-                        consumed,
-                        protocol_position,
-                        Some(decision),
-                    ));
+                    sideband.seal_attempt(
+                        failure_attempt_record(
+                            attempt_ordinal,
+                            recorded_failure,
+                            consumed,
+                            protocol_position,
+                            Some(decision),
+                        ),
+                        recorded_failure
+                            .partial_response
+                            .as_deref()
+                            .map(|r| &r.response_metadata),
+                    );
                     match verdict {
                         RetryVerdict::Declined(cause) => {
                             let error = match cause {
@@ -812,15 +827,18 @@ fn model_total_exceeded(
 ) -> ProviderCompletionError {
     let error = model_total_error(limit, None);
     if let Some(position) = cut_at {
-        sideband.seal_attempt(failure_attempt_record(
-            ordinal,
-            &error,
-            true,
-            position,
-            Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                limit: lash_sansio::LimitCause::ExecutionTotal,
-            })),
-        ));
+        sideband.seal_attempt(
+            failure_attempt_record(
+                ordinal,
+                &error,
+                true,
+                position,
+                Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                    limit: lash_sansio::LimitCause::ExecutionTotal,
+                })),
+            ),
+            None,
+        );
     }
     ProviderCompletionError {
         error,

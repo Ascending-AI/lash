@@ -121,6 +121,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "llm call failed",
             TraceEvent::LlmCallFailed {
                 model: None,
+                request: Default::default(),
                 error: TraceError {
                     retryable: false,
                     terminal_reason: crate::TraceLlmTerminalReason::Unknown,
@@ -259,7 +260,7 @@ fn fixture_record(context: crate::TraceContext, event: crate::TraceEvent) -> cra
         schema_version: crate::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
         timestamp: crate::TraceTimestamp::from_unix_ms(0),
-        content: crate::TelemetryContent::Captured,
+        content: crate::ContentPolicy::captured().into(),
         context,
         position: None,
         omissions: Default::default(),

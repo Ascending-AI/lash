@@ -204,7 +204,7 @@ fn fixture_record(event: TraceEvent, ms: i64) -> TraceRecord {
         schema_version: TRACE_SCHEMA_VERSION,
         id: format!("record-{ms}"),
         timestamp: crate::TraceTimestamp::from_unix_ms(u64::try_from(ms).unwrap()),
-        content: crate::TelemetryContent::Captured,
+        content: crate::ContentPolicy::captured().into(),
         context: TraceContext::default().for_session("session-1"),
         position: None,
         omissions: Default::default(),

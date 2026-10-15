@@ -520,17 +520,21 @@ impl RuntimeTurnDriver<'_> {
                 self.cell_start = None;
                 if self.trace.is_observed() {
                     let started_at_ms = self.host.core.tracing.clock().timestamp_ms();
+                    let context = self.trace_context(iteration);
+                    let standing = self
+                        .trace
+                        .selected(lash_trace::TraceSpanKind::Agent, &context.ids());
+                    let content = standing.content();
                     let event = lash_trace::TraceEvent::ExecCodeFailed {
+                        code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms,
                         duration_ms: 0,
                         reason: crate::ExecCodeFailureReason::Session,
-                        error: message.clone(),
+                        error: content
+                            .capture(lash_trace::ContentCategory::CodeOutput, || message.clone()),
                     };
-                    let context = self.trace_context(iteration);
-                    self.emit_cell_trace(held.as_ref(), self.trace.clone(), false, move || {
-                        (context, event)
-                    });
+                    self.emit_cell_trace(held.as_ref(), standing, false, move || (context, event));
                 }
                 self.turn_observations.observe(
                     cell_tx,
@@ -586,19 +590,17 @@ impl RuntimeTurnDriver<'_> {
             },
         };
         if self.trace.is_observed() {
-            let content = self.trace.content();
+            let standing = cell_trace
+                .standing(&self.trace)
+                .selected(lash_trace::TraceSpanKind::Cell, &cell_trace.context.ids());
+            let content = standing.content();
             let event = lash_trace::TraceEvent::ExecCodeStarted {
                 language: language.clone(),
-                code: content.capture(|| code.clone()),
+                code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                 code_chars: code.chars().count(),
             };
             let context = cell_trace.context.clone();
-            self.emit_cell_trace(
-                held.as_ref(),
-                cell_trace.standing(&self.trace),
-                true,
-                move || (context, event),
-            );
+            self.emit_cell_trace(held.as_ref(), standing, true, move || (context, event));
         }
         // The cell's own observation lane: every CodeBlock* event this driver
         // publishes for the cell sequences under the cell's replay key.
@@ -758,70 +760,101 @@ impl RuntimeTurnDriver<'_> {
         if self.trace.is_observed() {
             let ended_at_ms = self.host.core.tracing.clock().timestamp_ms();
             let duration_ms = ended_at_ms.saturating_sub(first_started_at_ms);
-            let event = match &result {
-                Ok(output) => {
-                    let observations_text = join_prints(&output.prints);
-                    let observation_projections = output
-                        .prints
-                        .iter()
-                        .map(|observation| observation.projection.clone())
-                        .collect::<Vec<_>>();
-                    if !observation_projections.is_empty() {
-                        let projections = observation_projections.clone();
-                        let context = cell_trace.context.clone();
-                        self.emit_cell_trace(
-                            held.as_ref(),
-                            cell_trace.standing(&self.trace),
-                            false,
-                            move || {
-                                (
-                                    context,
-                                    lash_trace::TraceEvent::ObservationProjection { projections },
-                                )
-                            },
-                        );
+            let committed = self
+                .host
+                .core
+                .tracing
+                .unreplayed(self.trace.scope().cloned());
+            let standing = cell_trace
+                .standing(&committed)
+                .selected(lash_trace::TraceSpanKind::Cell, &cell_trace.context.ids());
+            let content = standing.content();
+            if standing.is_observed() {
+                let event = match &result {
+                    Ok(output) => {
+                        let observations_text = content
+                            .capture(lash_trace::ContentCategory::CodeOutput, || {
+                                join_prints(&output.prints)
+                            });
+                        let observation_projections = output
+                            .prints
+                            .iter()
+                            .map(|observation| observation.projection.clone())
+                            .collect::<Vec<_>>();
+                        if !observation_projections.is_empty() {
+                            let projections = observation_projections.clone();
+                            let context = cell_trace.context.clone();
+                            self.emit_cell_trace(
+                                held.as_ref(),
+                                cell_trace.standing(&self.trace),
+                                false,
+                                move || {
+                                    (
+                                        context,
+                                        lash_trace::TraceEvent::ObservationProjection {
+                                            projections,
+                                        },
+                                    )
+                                },
+                            );
+                        }
+                        lash_trace::TraceEvent::ExecCodeCompleted {
+                            code: content
+                                .capture(lash_trace::ContentCategory::Code, || code.clone()),
+                            language: language.clone(),
+                            started_at_ms: first_started_at_ms,
+                            duration_ms,
+                            output: observations_text,
+                            output_chars: output
+                                .prints
+                                .iter()
+                                .map(|p| p.text.chars().count())
+                                .sum::<usize>()
+                                + output.prints.len().saturating_sub(1),
+                            observation_count: output.prints.len(),
+                            observation_projections,
+                            error: output
+                                .error()
+                                .map(|failure| crate::trace::trace_cell_failure(failure, content)),
+                            terminal_finish: content
+                                .capture(lash_trace::ContentCategory::CodeOutput, || {
+                                    output.finish_value().cloned()
+                                }),
+                            tool_calls: output
+                                .tool_calls
+                                .iter()
+                                .map(|record| lash_trace::TraceExecToolCall {
+                                    call_id: record.call_id.clone(),
+                                    name: record.tool.clone(),
+                                    status: match record.output.status() {
+                                        lash_sansio::ToolCallStatus::Success => {
+                                            lash_trace::TraceToolCallStatus::Success
+                                        }
+                                        lash_sansio::ToolCallStatus::Failure => {
+                                            lash_trace::TraceToolCallStatus::Failure
+                                        }
+                                        lash_sansio::ToolCallStatus::Cancelled => {
+                                            lash_trace::TraceToolCallStatus::Cancelled
+                                        }
+                                    },
+                                })
+                                .collect(),
+                        }
                     }
-                    let content = self.trace.content();
-                    lash_trace::TraceEvent::ExecCodeCompleted {
+                    Err(error) => lash_trace::TraceEvent::ExecCodeFailed {
+                        code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms: first_started_at_ms,
                         duration_ms,
-                        output: content.capture(|| observations_text.clone()),
-                        output_chars: observations_text.chars().count(),
-                        observation_count: output.prints.len(),
-                        observation_projections,
-                        error: output.error().cloned(),
-                        terminal_finish: content.capture(|| output.finish_value().cloned()),
-                        tool_calls: output
-                            .tool_calls
-                            .iter()
-                            .map(|record| lash_trace::TraceExecToolCall {
-                                call_id: record.call_id.clone(),
-                                name: record.tool.clone(),
-                                status: match record.output.status() {
-                                    lash_sansio::ToolCallStatus::Success => {
-                                        lash_trace::TraceToolCallStatus::Success
-                                    }
-                                    lash_sansio::ToolCallStatus::Failure => {
-                                        lash_trace::TraceToolCallStatus::Failure
-                                    }
-                                    lash_sansio::ToolCallStatus::Cancelled => {
-                                        lash_trace::TraceToolCallStatus::Cancelled
-                                    }
-                                },
-                            })
-                            .collect(),
-                    }
-                }
-                Err(error) => lash_trace::TraceEvent::ExecCodeFailed {
-                    language: language.clone(),
-                    started_at_ms: first_started_at_ms,
-                    duration_ms,
-                    reason: error.reason,
-                    error: error.message.clone(),
-                },
-            };
-            self.answered_cell_close = Some((id, cell_trace.close(self, ended_at_ms, event)));
+                        reason: error.reason,
+                        error: content.capture(lash_trace::ContentCategory::CodeOutput, || {
+                            error.message.clone()
+                        }),
+                    },
+                };
+                self.answered_cell_close =
+                    Some((id, cell_trace.close(standing, ended_at_ms, event)));
+            }
         }
         // A cancelled tool call ended the cell as an uncatchable host terminal,
         // so the execution settles as cancelled even without a host cancel
@@ -903,16 +936,10 @@ impl CellTrace {
     /// execution, gives the right to publish it (P1).
     fn close(
         &self,
-        driver: &RuntimeTurnDriver<'_>,
+        standing: crate::trace::TraceStanding,
         ended_at_ms: u64,
         event: lash_trace::TraceEvent,
     ) -> crate::runtime::durable::session::CellClose {
-        let committed = driver
-            .host
-            .core
-            .tracing
-            .unreplayed(driver.trace.scope().cloned());
-        let standing = self.standing(&committed);
         let context = self.context.clone();
         crate::runtime::durable::session::CellClose::new(move || {
             standing.close_scope(ended_at_ms, || (context, event));
@@ -1009,6 +1036,7 @@ impl RuntimeTurnDriver<'_> {
                 (
                     context,
                     lash_trace::TraceEvent::ExecCodeDiscarded {
+                        code: String::new(),
                         language,
                         started_at_ms: first_started_at_ms,
                         duration_ms: ended_at_ms.saturating_sub(first_started_at_ms),

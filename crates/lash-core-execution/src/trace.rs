@@ -127,7 +127,8 @@ fn trace_context_for_invocation_parts(
 /// tool contracts and output contract as well when content is captured.
 pub(crate) fn trace_llm_request(
     req: &LlmRequest,
-    content: lash_trace::TelemetryContent,
+    content: lash_trace::ContentPolicy,
+    composition_fingerprint: String,
 ) -> TraceLlmRequest {
     TraceLlmRequest {
         model: req.model.wire_model().to_string(),
@@ -136,7 +137,17 @@ pub(crate) fn trace_llm_request(
             crate::ReasoningSelection::Disabled => Some("disabled".to_string()),
             crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
         },
-        messages: content.capture(|| req.messages.iter().map(trace_llm_message).collect()),
+        system_instructions: content
+            .capture(lash_trace::ContentCategory::SystemInstructions, || {
+                req.instructions.as_deref().map(str::to_owned)
+            }),
+        composition_fingerprint,
+        messages: content.capture(lash_trace::ContentCategory::InputMessages, || {
+            req.messages
+                .iter()
+                .map(|message| trace_llm_message(message, content))
+                .collect()
+        }),
         tools: trace_tool_specs(&req.tools, content),
         tool_choice: match req.tool_choice {
             LlmToolChoice::Auto => "auto",
@@ -144,7 +155,10 @@ pub(crate) fn trace_llm_request(
             LlmToolChoice::Required => "required",
         }
         .to_string(),
-        output_spec: content.capture(|| req.output_spec.as_ref().map(trace_output_spec)),
+        output_spec: req
+            .output_spec
+            .as_ref()
+            .map(|spec| trace_output_spec(spec, content)),
         stream: req.stream_events.is_some(),
     }
 }
@@ -167,9 +181,9 @@ fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
 /// The offered tools by name, with their contracts when content is captured.
 fn trace_tool_specs(
     tools: &[LlmToolSpec],
-    content: lash_trace::TelemetryContent,
+    content: lash_trace::ContentPolicy,
 ) -> Vec<TraceToolSpec> {
-    if content.is_captured() {
+    if content.captures(lash_trace::ContentCategory::ToolDefinitions) {
         return tools.iter().map(trace_tool_spec).collect();
     }
     tools
@@ -243,14 +257,16 @@ pub struct CompositionTraceSnapshot {
 pub fn trace_composition_snapshot(
     req: &LlmRequest,
     fingerprint: [u8; 32],
-    content: lash_trace::TelemetryContent,
+    content: lash_trace::ContentPolicy,
 ) -> CompositionTraceSnapshot {
     #[cfg(any(test, feature = "testing"))]
-    if content.is_captured() {
+    if content.captures(lash_trace::ContentCategory::SystemInstructions) {
         COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
     }
-    let rendered_system_prompt =
-        content.capture(|| req.instructions.as_deref().unwrap_or_default().to_owned());
+    let rendered_system_prompt = content
+        .capture(lash_trace::ContentCategory::SystemInstructions, || {
+            req.instructions.as_deref().unwrap_or_default().to_owned()
+        });
     let tool_schemas = trace_tool_specs(&req.tools, content);
     let fingerprint = fingerprint
         .iter()
@@ -265,26 +281,36 @@ pub fn trace_composition_snapshot(
 
 /// The call's result under the content policy. A success payload and the
 /// control are built only when content is captured; a failure or cancellation
-/// is reported whole, and the record's governing pass keeps its typed
-/// classification.
+/// keeps its typed classification without serializing omitted diagnostics.
 pub(crate) fn trace_tool_call_output(
     output: &ToolCallOutput,
-    content: lash_trace::TelemetryContent,
+    content: lash_trace::ContentPolicy,
 ) -> lash_trace::TraceToolCallOutput {
     let outcome = match &output.outcome {
-        ToolCallOutcome::Success(value) => {
-            lash_trace::TraceToolCallOutcome::Success(content.capture(|| value.to_json_value()))
-        }
-        ToolCallOutcome::Failure(failure) => {
-            lash_trace::TraceToolCallOutcome::Failure(failure.to_json_value())
-        }
-        ToolCallOutcome::Cancelled(cancellation) => {
-            lash_trace::TraceToolCallOutcome::Cancelled(cancellation.to_json_value())
-        }
+        ToolCallOutcome::Success(value) => lash_trace::TraceToolCallOutcome::Success(
+            content.capture(lash_trace::ContentCategory::ToolResults, || {
+                value.to_json_value()
+            }),
+        ),
+        ToolCallOutcome::Failure(failure) => lash_trace::TraceToolCallOutcome::Failure(
+            if content.captures(lash_trace::ContentCategory::ToolResults) {
+                failure.to_json_value()
+            } else {
+                serde_json::json!({"class":failure.class, "code":failure.code,
+                    "source":failure.source, "suggested_delay_ms":failure.suggested_delay_ms})
+            },
+        ),
+        ToolCallOutcome::Cancelled(cancellation) => lash_trace::TraceToolCallOutcome::Cancelled(
+            if content.captures(lash_trace::ContentCategory::ToolResults) {
+                cancellation.to_json_value()
+            } else {
+                serde_json::json!({"source":cancellation.source, "origin":cancellation.origin, "forced":cancellation.forced})
+            },
+        ),
     };
     lash_trace::TraceToolCallOutput {
         outcome,
-        control: content.capture(|| {
+        control: content.capture(lash_trace::ContentCategory::ToolResults, || {
             output
                 .control
                 .as_ref()
@@ -293,7 +319,54 @@ pub(crate) fn trace_tool_call_output(
     }
 }
 
-fn trace_llm_message(message: &LlmMessage) -> TraceLlmMessage {
+/// Build a cell's classification without copying omitted diagnostics or repairs.
+pub fn trace_cell_failure(
+    failure: &crate::CellFailure,
+    content: lash_trace::ContentPolicy,
+) -> crate::CellFailure {
+    if content.captures(lash_trace::ContentCategory::CodeOutput) {
+        return failure.clone();
+    }
+    use lash_sansio::SchemaAdmissionError;
+    crate::CellFailure {
+        kind: failure.kind,
+        message: String::new(),
+        worker_limit: failure.worker_limit,
+        tool_call_limit: failure.tool_call_limit,
+        exec_failure: failure.exec_failure,
+        defect: failure.defect.clone(),
+        schema_admission: failure.schema_admission.as_deref().map(|error| {
+            Box::new(match error {
+                SchemaAdmissionError::InvalidKind { actual } => {
+                    SchemaAdmissionError::InvalidKind { actual: *actual }
+                }
+                SchemaAdmissionError::Compilation { schema_path, .. } => {
+                    SchemaAdmissionError::Compilation {
+                        schema_path: schema_path.clone(),
+                        message: String::new(),
+                    }
+                }
+                SchemaAdmissionError::NonLocalReference { schema_path, .. } => {
+                    SchemaAdmissionError::NonLocalReference {
+                        schema_path: schema_path.clone(),
+                        reference: String::new(),
+                    }
+                }
+            })
+        }),
+        feedback: failure
+            .feedback
+            .iter()
+            .map(|feedback| lash_sansio::CellFailureRepair {
+                plugin_id: feedback.plugin_id.clone(),
+                callback: feedback.callback.clone(),
+                repairs: Vec::new(),
+            })
+            .collect(),
+    }
+}
+
+fn trace_llm_message(message: &LlmMessage, content: lash_trace::ContentPolicy) -> TraceLlmMessage {
     TraceLlmMessage {
         role: match message.role {
             LlmRole::User => "user",
@@ -301,7 +374,15 @@ fn trace_llm_message(message: &LlmMessage) -> TraceLlmMessage {
             LlmRole::System => "system",
         }
         .to_string(),
-        blocks: message.blocks.iter().map(trace_content_block).collect(),
+        blocks: message
+            .blocks
+            .iter()
+            .filter(|block| {
+                content.captures(lash_trace::ContentCategory::Reasoning)
+                    || !matches!(block, LlmContentBlock::Reasoning { .. })
+            })
+            .map(trace_content_block)
+            .collect(),
     }
 }
 
@@ -381,13 +462,16 @@ fn trace_attachment(attachment: &AttachmentRef, position: &str) -> TraceAttachme
     }
 }
 
-fn trace_output_spec(spec: &LlmOutputSpec) -> serde_json::Value {
+fn trace_output_spec(
+    spec: &LlmOutputSpec,
+    content: lash_trace::ContentPolicy,
+) -> serde_json::Value {
     match spec {
         LlmOutputSpec::JsonObject => serde_json::json!({ "type": "json_object" }),
         LlmOutputSpec::JsonSchema(schema) => serde_json::json!({
             "type": "json_schema",
             "name": schema.name,
-            "schema": schema.schema,
+            "schema": content.capture(lash_trace::ContentCategory::OutputSchema,||serde_json::to_value(&schema.schema).unwrap_or_default()),
             "strict": schema.strict,
         }),
     }

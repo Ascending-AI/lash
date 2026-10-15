@@ -13,8 +13,14 @@ struct ProviderCompletionSidebandState {
     open_attempt: Option<lash_trace::TraceAttemptObservation>,
 }
 
-type AttemptObserver =
-    Arc<dyn Fn(lash_trace::TraceModelAttempt, lash_trace::TraceAttemptObservation) + Send + Sync>;
+type AttemptObserver = Arc<
+    dyn Fn(
+            lash_trace::TraceModelAttempt,
+            lash_trace::TraceAttemptObservation,
+            &std::collections::BTreeMap<String, serde_json::Value>,
+        ) + Send
+        + Sync,
+>;
 
 /// Replay safety and sealed attempt facts shared with the runtime independently
 /// of the spawned LLM Provider task's terminal return. This is in-process
@@ -103,7 +109,13 @@ impl ProviderCompletionSideband {
             None,
         );
         attempt.outcome = outcome;
-        self.seal_attempt(attempt);
+        self.seal_attempt(
+            attempt,
+            failure
+                .partial_response
+                .as_deref()
+                .map(|r| &r.response_metadata),
+        );
         self.call_record(call_id)
     }
 
@@ -128,7 +140,11 @@ impl ProviderCompletionSideband {
     /// Seal an attempt into the call record and report it to the observer.
     /// A record sealed with no dispatched attempt open (a call cut between
     /// attempts) is ledger-only: no provider request stands behind it.
-    pub(super) fn seal_attempt(&self, attempt: AttemptRecord) {
+    pub(super) fn seal_attempt(
+        &self,
+        attempt: AttemptRecord,
+        metadata: Option<&std::collections::BTreeMap<String, serde_json::Value>>,
+    ) {
         let observation = self.with_state(|state| {
             state.attempts.push(attempt.clone());
             state.open_attempt.take()
@@ -146,7 +162,11 @@ impl ProviderCompletionSideband {
                     provider: observation.provider.clone()?,
                 })
             });
-            observer(lash_trace::TraceModelAttempt { attempt, span }, observation);
+            observer(
+                lash_trace::TraceModelAttempt { attempt, span },
+                observation,
+                metadata.unwrap_or(&Default::default()),
+            );
         }
     }
 

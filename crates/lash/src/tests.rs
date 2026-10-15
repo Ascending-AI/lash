@@ -441,7 +441,6 @@ mod panic_containment;
 mod projection;
 #[cfg(feature = "rlm")]
 mod recorded_carriers;
-mod telemetry_content;
 #[cfg(feature = "otel-trace")]
 mod trace_call_ids;
 #[cfg(all(feature = "otel-trace", feature = "rlm"))]

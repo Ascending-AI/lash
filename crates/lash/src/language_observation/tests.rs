@@ -56,7 +56,7 @@ fn fixture_record(context: lash_trace::TraceContext, event: TraceEvent) -> Trace
     TraceRecord {
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "language-fixture".into(),
-        content: lash_trace::TelemetryContent::Captured,
+        content: lash_trace::ContentPolicy::captured().into(),
         timestamp: lash_trace::TraceTimestamp::from_unix_ms(1_791_504_000_000),
         context,
         position: None,

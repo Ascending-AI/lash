@@ -18,34 +18,48 @@ pub fn emit_llm_trace_started(
     request: &CoreLlmRequest,
     provider: &str,
 ) -> crate::trace::OpenSpan {
-    let content = standing.content();
-    standing
-        .open(lash_trace::TraceSpanKind::Model, || {
-            (
-                context,
-                lash_trace::TraceEvent::LlmCallStarted {
-                    request: crate::trace::trace_llm_request(request, content),
-                },
-            )
-        })
-        .with_model(|| lash_trace::TraceModelCall {
-            provider: Some(provider.to_string()),
-            request_model: request.model.wire_model().to_string(),
-            stream: request.stream_events.is_some(),
-            reasoning: match &request.model.reasoning {
-                crate::ReasoningSelection::ProviderDefault => None,
-                crate::ReasoningSelection::Disabled => Some("disabled".into()),
-                crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
+    let standing = standing.selected(lash_trace::TraceSpanKind::Model, &context.ids());
+    let fingerprints = standing
+        .runtime()
+        .composition_tool_fingerprints(&request.tools);
+    let fingerprint = crate::trace::trace_composition_key(request, &fingerprints)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let retained = standing
+        .is_observed()
+        .then(|| crate::trace::trace_llm_request(request, standing.content(), fingerprint.clone()));
+    let mut call = standing.open(lash_trace::TraceSpanKind::Model, || {
+        (
+            context,
+            lash_trace::TraceEvent::LlmCallStarted {
+                request: crate::trace::trace_llm_request(
+                    request,
+                    lash_trace::ContentPolicy::omitted(),
+                    fingerprint,
+                ),
             },
-            output_type: request.output_spec.as_ref().map(|_| "json".into()),
-            generation: request.generation.clone(),
-        })
+        )
+    });
+    call.request = retained;
+    call.with_model(|| lash_trace::TraceModelCall {
+        provider: Some(provider.to_string()),
+        request_model: request.model.wire_model().to_string(),
+        stream: request.stream_events.is_some(),
+        reasoning: match &request.model.reasoning {
+            crate::ReasoningSelection::ProviderDefault => None,
+            crate::ReasoningSelection::Disabled => Some("disabled".into()),
+            crate::ReasoningSelection::Effort(effort) => Some(effort.clone()),
+        },
+        output_type: request.output_spec.as_ref().map(|_| "json".into()),
+        generation: request.generation.clone(),
+    })
 }
 
 /// Closes `call`, the model call [`emit_llm_trace_started`] opened, with its
 /// response.
 pub fn emit_llm_trace_completed(
-    call: crate::trace::OpenSpan,
+    mut call: crate::trace::OpenSpan,
     context: lash_trace::TraceContext,
     response: &LlmResponse,
     request_model: &str,
@@ -54,18 +68,43 @@ pub fn emit_llm_trace_completed(
     call_record: Option<&crate::LlmCallRecord>,
 ) {
     super::emit_provider_replay_drops(call.standing(), &context, call_record);
+    call.select_record(&context.ids());
     let content = call.standing().content();
+    let request = call.request.take().unwrap_or_default();
+    let parts = content.capture(lash_trace::ContentCategory::OutputMessages, || {
+        response
+            .parts
+            .iter()
+            .filter(|part| match part {
+                crate::LlmOutputPart::Reasoning { replay, .. } => {
+                    content.captures(lash_trace::ContentCategory::Reasoning)
+                        && !replay.as_ref().is_some_and(|replay| {
+                            replay.redacted || replay.encrypted_content.is_some()
+                        })
+                }
+                _ => true,
+            })
+            .map(crate::LlmOutputPart::without_replay_payloads)
+            .collect::<Vec<_>>()
+    });
     call.close(|| {
         (
             context,
             lash_trace::TraceEvent::LlmCallCompleted {
                 model: None,
+                request,
+                response_metadata: content
+                    .capture(lash_trace::ContentCategory::ResponseMetadata, || {
+                        response.response_metadata.clone()
+                    }),
                 response: crate::trace::trace_llm_response(
-                    content.capture(|| response.full_text()),
+                    content.capture(lash_trace::ContentCategory::OutputMessages, || {
+                        response.full_text()
+                    }),
                     duration_ms,
                     request_model.to_string(),
                     Some(response.terminal_reason),
-                    content.capture(|| response.parts.as_slice()),
+                    &parts,
                     response.generation_disposition,
                 ),
                 usage: Some(response.usage.clone()),
@@ -126,18 +165,21 @@ impl From<&LlmCallError> for LlmTraceFailure {
 /// Closes `call`, the model call [`emit_llm_trace_started`] opened, with its
 /// failure.
 pub fn emit_llm_trace_failed(
-    call: crate::trace::OpenSpan,
+    mut call: crate::trace::OpenSpan,
     context: lash_trace::TraceContext,
     failure: LlmTraceFailure,
     stream_summary: Option<serde_json::Value>,
     call_record: Option<&crate::LlmCallRecord>,
 ) {
     super::emit_provider_replay_drops(call.standing(), &context, call_record);
+    call.select_record(&context.ids());
+    let request = call.request.take().unwrap_or_default();
     call.close(|| {
         (
             context,
             lash_trace::TraceEvent::LlmCallFailed {
                 model: None,
+                request,
                 error: lash_trace::TraceError {
                     retryable: failure.retryable,
                     terminal_reason: failure.terminal_reason,

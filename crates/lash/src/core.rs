@@ -17,6 +17,7 @@ mod recovery;
 mod retired_observers;
 mod runtime_host_config;
 mod session_deletion;
+mod trace_content;
 pub use session_deletion::SessionDeleteCompletion;
 mod tool_live;
 mod work_drivers;
@@ -733,7 +734,9 @@ pub struct LashCoreBuilder {
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
     trace_detail: Option<crate::tracing::TraceDetailPolicy>,
-    telemetry_content: Option<lash_trace::TelemetryContent>,
+    content_policy: Option<lash_trace::ContentPolicy>,
+    capture_selector: Option<Arc<dyn lash_trace::CaptureSelector>>,
+    content_hook: Option<Arc<dyn lash_trace::ContentHook>>,
     trace_limits: Option<crate::tracing::TraceLimits>,
     content_limits: Option<crate::tracing::ContentLimits>,
     evidence_limits: Option<crate::EvidenceLimits>,
@@ -814,7 +817,9 @@ impl LashCoreBuilder {
             #[cfg(feature = "otel-trace")]
             telemetry: None,
             trace_detail: None,
-            telemetry_content: None,
+            content_policy: None,
+            capture_selector: None,
+            content_hook: None,
             trace_limits: None,
             content_limits: None,
             evidence_limits: None,
@@ -1058,30 +1063,11 @@ impl LashCoreBuilder {
         self
     }
 
-    /// State whether built-in telemetry carries content: prompts, responses,
-    /// rendered instructions, tool arguments and results, executed code and
-    /// diagnostic or provider text. One choice governs every record sink and
-    /// the telemetry adapter. Defaults to
-    /// [`crate::tracing::TelemetryContent::standard`] (omitted): records keep
-    /// identities, statuses and counts. It never changes what a session
-    /// stores or returns.
-    pub fn telemetry_content(mut self, content: crate::tracing::TelemetryContent) -> Self {
-        self.telemetry_content = Some(content);
-        self
-    }
-
     /// Select the tracing seam's admission and buffering bounds. Defaults to
     /// [`TraceLimits::standard`](crate::tracing::TraceLimits::standard). No
     /// sink is installed.
     pub fn trace_limits(mut self, limits: crate::tracing::TraceLimits) -> Self {
         self.trace_limits = Some(limits);
-        self
-    }
-
-    /// Select the bounds on the content a record carries. Defaults to
-    /// [`ContentLimits::standard`](crate::tracing::ContentLimits::standard).
-    pub fn content_limits(mut self, limits: crate::tracing::ContentLimits) -> Self {
-        self.content_limits = Some(limits);
         self
     }
 

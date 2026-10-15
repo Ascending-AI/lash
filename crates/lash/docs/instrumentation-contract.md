@@ -76,10 +76,17 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.outcome` | String | Provenance | agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent |
 | `lash.turn.inputs` | Integer | Provenance | agent |
 | `lash.cancel.origin` | String | Provenance | agent |
-| `lash.payload.json` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
-| `lash.payload.truncated` | Boolean | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
-| `lash.payload.truncated_fields` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
-| `lash.content.omitted` | Boolean | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `gen_ai.system_instructions` | String | Provenance | model |
+| `gen_ai.input.messages` | String | Provenance | model |
+| `gen_ai.output.messages` | String | Provenance | model |
+| `gen_ai.tool.definitions` | String | Provenance | model |
+| `gen_ai.tool.call.arguments` | String | Provenance | tool, cell |
+| `gen_ai.tool.call.result` | String | Provenance | tool, cell |
+| `lash.tool.arguments.wrapped` | Boolean | Provenance | tool |
+| `lash.tool.result.wrapped` | Boolean | Provenance | tool |
+| `lash.content.truncated` | StringArray | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.content.oversize` | StringArray | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
+| `lash.content.dropped_messages` | Integer | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.tool_intent.kind` | String | Provenance | process, tool_intent |
 | `lash.tool_intent.refusal_reason` | String | Provenance | process, tool_intent |
 | `lash.trace.omitted` | StringArray | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
@@ -100,18 +107,18 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 
 | Span kind | Attribute reserve |
 |---|---|
-| `producer` | 21 |
-| `agent` | 24 |
-| `model` | 42 |
-| `model_attempt` | 29 |
-| `tool` | 28 |
-| `cell` | 27 |
-| `process` | 27 |
-| `workflow` | 25 |
-| `workflow_node` | 21 |
-| `tool_intent` | 25 |
-| `extension` | 20 |
-| `point` | 20 |
+| `producer` | 20 |
+| `agent` | 23 |
+| `model` | 45 |
+| `model_attempt` | 28 |
+| `tool` | 31 |
+| `cell` | 28 |
+| `process` | 26 |
+| `workflow` | 24 |
+| `workflow_node` | 20 |
+| `tool_intent` | 24 |
+| `extension` | 19 |
+| `point` | 19 |
 
 | Metric | Kind | Unit | Ownership |
 |---|---|---|---|

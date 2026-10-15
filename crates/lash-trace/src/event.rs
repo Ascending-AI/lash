@@ -107,6 +107,9 @@ pub enum TraceEvent {
     LlmCallCompleted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<crate::TraceModelCall>,
+        request: TraceLlmRequest,
+        #[serde(default)]
+        response_metadata: BTreeMap<String, Value>,
         response: TraceLlmResponse,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<LlmUsage>,
@@ -120,6 +123,7 @@ pub enum TraceEvent {
     LlmCallFailed {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<crate::TraceModelCall>,
+        request: TraceLlmRequest,
         error: TraceError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stream_summary: Option<Value>,
@@ -131,6 +135,8 @@ pub enum TraceEvent {
     /// record the call's `attempts` ledger carries under the same ordinal. A
     /// call that retried reports one per attempt.
     LlmAttemptCompleted {
+        #[serde(default)]
+        response_metadata: BTreeMap<String, Value>,
         attempt: AttemptRecord,
         observation: TraceAttemptObservation,
     },
@@ -189,6 +195,7 @@ pub enum TraceEvent {
     /// its span. `started_at_ms` is the cell's first start, which a
     /// suspension or a re-run keeps; `duration_ms` runs from it.
     ExecCodeCompleted {
+        code: String,
         language: String,
         started_at_ms: u64,
         duration_ms: u64,
@@ -203,6 +210,7 @@ pub enum TraceEvent {
     /// A code cell answered with a failure, and the commit that consumed its
     /// answer closes its span, from its first start.
     ExecCodeFailed {
+        code: String,
         language: String,
         started_at_ms: u64,
         duration_ms: u64,
@@ -216,6 +224,7 @@ pub enum TraceEvent {
     /// terminal's owner closes its span, from its first start. A discard is
     /// not a failure.
     ExecCodeDiscarded {
+        code: String,
         language: String,
         started_at_ms: u64,
         duration_ms: u64,

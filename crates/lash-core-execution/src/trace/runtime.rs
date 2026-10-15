@@ -18,9 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_trace::{
-    DurableTraceScope, EmissionPermit, LashIdentity, ProducerKind, ProducerSpan, ProducerSpec,
-    ProductObservationSink, SpanRole, TelemetryContent, TraceAttemptId, TraceAttemptLink,
-    TraceCall, TraceCarrier, TraceContext, TraceDetailPolicy, TraceEvent, TraceIdentity, TraceIds,
+    ContentPolicy, DurableTraceScope, EmissionPermit, LashIdentity, ProducerKind, ProducerSpan,
+    ProducerSpec, ProductObservationSink, SpanRole, TraceAttemptId, TraceAttemptLink, TraceCall,
+    TraceCarrier, TraceContext, TraceDetailPolicy, TraceEvent, TraceIdentity, TraceIds,
     TraceLinkMode, TraceLinks, TracePosition, TraceRecord, TraceRecordIdentity, TraceScopeId,
     TraceScopeKind, TraceScopeOwner, TraceSink, TraceSpanKind, TraceTimestamp, TraceTransitionKind,
     telemetry::metrics::TelemetryMetrics,
@@ -54,11 +54,15 @@ struct TraceRuntimeParts {
 impl TraceRuntime {
     /// A runtime with no observer: lash's own identity, no sink.
     pub fn new(clock: Arc<dyn crate::Clock>) -> Self {
+        let omissions = Arc::new(lash_trace::TraceOmissionLedger::default());
         Self {
             parts: Arc::new(TraceRuntimeParts {
                 identity: Arc::new(LashIdentity),
                 clock,
-                emitter: TraceEmitter::default(),
+                emitter: TraceEmitter {
+                    omissions: omissions.clone(),
+                    ..Default::default()
+                },
                 detail: TraceDetailPolicy::standard(),
                 metrics: TelemetryMetrics::default(),
                 limits: lash_trace::TraceLimits::standard(),
@@ -66,7 +70,7 @@ impl TraceRuntime {
                 evidence: crate::EvidenceLimits::standard(),
                 diagnostics: crate::DiagnosticLimits::standard(),
                 composition: crate::CompositionCacheLimits::standard(),
-                omissions: Arc::default(),
+                omissions,
                 compositions: Arc::default(),
             }),
         }
@@ -162,14 +166,18 @@ impl TraceRuntime {
     /// Installs the tracing seam's bounds.
     #[must_use]
     pub fn with_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
-        Arc::make_mut(&mut self.parts).limits = limits;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.limits = limits;
+        parts.emitter.policy.limits = limits;
         self
     }
 
     /// Installs the bounds on the content a record carries.
     #[must_use]
     pub fn with_content_limits(mut self, limits: lash_trace::ContentLimits) -> Self {
-        Arc::make_mut(&mut self.parts).content_limits = limits;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.content_limits = limits;
+        parts.emitter.policy.content_limits = limits;
         self
     }
 
@@ -206,16 +214,33 @@ impl TraceRuntime {
         }
     }
 
-    /// The host's telemetry content policy: [`TelemetryContent::standard`]
+    /// The host's telemetry content policy: [`ContentPolicy::standard`]
     /// (omitted) unless the host opted in.
-    pub fn content(&self) -> TelemetryContent {
+    pub fn content(&self) -> ContentPolicy {
         self.parts.emitter.content
     }
 
     /// States whether records to the sinks carry content.
     #[must_use]
-    pub fn with_content(mut self, content: TelemetryContent) -> Self {
-        Arc::make_mut(&mut self.parts).emitter.content = content;
+    pub fn with_content(mut self, content: ContentPolicy) -> Self {
+        let emitter = &mut Arc::make_mut(&mut self.parts).emitter;
+        emitter.content = content;
+        emitter.policy.content = content;
+        self
+    }
+
+    /// Installs the one pre-build, narrowing selector.
+    pub fn with_capture_selector(mut self, selector: Arc<dyn lash_trace::CaptureSelector>) -> Self {
+        Arc::make_mut(&mut self.parts).emitter.selector = Some(selector);
+        self
+    }
+    /// Installs the synchronous transactional content hook.
+    pub fn with_content_hook(mut self, hook: Arc<dyn lash_trace::ContentHook>) -> Self {
+        let emitter = &mut Arc::make_mut(&mut self.parts).emitter;
+        emitter.hook = Some(Arc::new(HookEpisode {
+            hook,
+            failed: emitter.hook_failure.clone(),
+        }));
         self
     }
 
@@ -265,7 +290,9 @@ impl TraceRuntime {
     /// Installs what lash builds for each span kind.
     #[must_use]
     pub fn with_detail(mut self, detail: TraceDetailPolicy) -> Self {
-        Arc::make_mut(&mut self.parts).detail = detail;
+        let parts = Arc::make_mut(&mut self.parts);
+        parts.detail = detail;
+        parts.emitter.policy.detail = detail;
         self
     }
 
@@ -416,6 +443,8 @@ impl TraceRuntime {
             leaf: None,
             right,
             silenced: false,
+            narrowing: None,
+            selector_failed: false,
         }
     }
 }
@@ -437,6 +466,21 @@ impl std::fmt::Debug for TraceRuntime {
     }
 }
 
+struct HookEpisode {
+    hook: Arc<dyn lash_trace::ContentHook>,
+    failed: Arc<std::sync::atomic::AtomicBool>,
+}
+impl lash_trace::ContentHook for HookEpisode {
+    fn on_content(
+        &self,
+        view: &lash_trace::ContentView<'_>,
+        content: &mut lash_trace::RecordContent<'_>,
+    ) {
+        self.hook.on_content(view, content);
+        self.failed.store(false, Ordering::Relaxed);
+    }
+}
+
 /// The one path an external observation takes out of the engine: the record
 /// sinks, the OpenTelemetry exporter among them when one is installed.
 #[derive(Clone, Default)]
@@ -445,7 +489,14 @@ pub struct TraceEmitter {
     sink_failures: Arc<[Arc<Mutex<u64>>]>,
     product: Arc<[Arc<dyn ProductObservationSink>]>,
     /// Applied to every record before a sink sees it.
-    content: TelemetryContent,
+    content: ContentPolicy,
+    policy: lash_trace::TracePolicySnapshot,
+    hook: Option<Arc<dyn lash_trace::ContentHook>>,
+    selector: Option<Arc<dyn lash_trace::CaptureSelector>>,
+    hook_failure: Arc<std::sync::atomic::AtomicBool>,
+    selected: bool,
+    selector_failed: bool,
+    omissions: Arc<lash_trace::TraceOmissionLedger>,
 }
 
 impl TraceEmitter {
@@ -494,7 +545,73 @@ impl TraceEmitter {
             event,
             TraceTimestamp::from_unix_ms(at_ms),
         ) {
-            Ok(record) => self.append(&record.at(position).governed(self.content)),
+            Ok(record) => {
+                let mut record = record.at(position);
+                let mut policy = self.policy.clone();
+                let mut failed = self.selector_failed;
+                if !self.selected
+                    && let Some(selector) = &self.selector
+                {
+                    let ids = record.context.ids();
+                    let mut narrow = lash_trace::core_internal::content_narrowing(&policy, None);
+                    let kind = record
+                        .position
+                        .as_ref()
+                        .map_or(TraceSpanKind::Point, |p| p.kind);
+                    if let Err(payload) =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            selector.select(
+                                &lash_trace::SelectorView {
+                                    kind,
+                                    ids: &ids,
+                                    policy: &policy,
+                                },
+                                &mut narrow,
+                            )
+                        }))
+                    {
+                        narrow = lash_trace::core_internal::content_narrowing(&policy, None);
+                        narrow.omit_all();
+                        failed = true;
+                        if crate::panic_containment::is_loud() {
+                            std::panic::resume_unwind(payload);
+                        }
+                    }
+                    if !narrow.builds(kind) {
+                        return;
+                    }
+                    policy.content = narrow.content();
+                }
+                if failed {
+                    record
+                        .omissions
+                        .add(lash_trace::TraceOmission::SelectorFailed);
+                }
+                let panic = record.apply_content(&policy, self.hook.as_deref());
+                if record.content.hook_failed && !self.hook_failure.swap(true, Ordering::Relaxed) {
+                    tracing::warn!(
+                        event = "trace.content_hook.failed",
+                        "content hook panicked; content omitted"
+                    );
+                }
+                if let Some(payload) = panic
+                    && crate::panic_containment::is_loud()
+                {
+                    std::panic::resume_unwind(payload);
+                }
+                self.omissions.record(
+                    &lash_trace::TraceOmissionSite::Record {
+                        kind: record
+                            .position
+                            .as_ref()
+                            .map_or(TraceSpanKind::Point, |p| p.kind),
+                        record: record.id.clone(),
+                        span: record.position.as_ref().map(|p| p.span.span_id()),
+                    },
+                    &record.omissions,
+                );
+                self.append(&record);
+            }
             Err(error) => tracing::warn!(%error, "failed to derive a trace record identity"),
         }
     }
@@ -904,6 +1021,8 @@ pub struct TraceStanding {
     /// Inside a span of a kind the detail policy turns off: nothing here
     /// is built, and nothing a child opens is either.
     silenced: bool,
+    narrowing: Option<Arc<lash_trace::TraceNarrowing>>,
+    selector_failed: bool,
 }
 
 /// The span a standing's records name instead of its scope's: a model call,
@@ -939,9 +1058,47 @@ impl TraceStanding {
 
     /// The host's telemetry content policy. A site that would clone, render
     /// or serialize content for a record builds it through
-    /// [`TelemetryContent::capture`], so omitted content costs nothing.
-    pub fn content(&self) -> TelemetryContent {
-        self.runtime.content()
+    /// [`ContentPolicy::capture`], so omitted content costs nothing.
+    pub fn content(&self) -> ContentPolicy {
+        self.narrowing
+            .as_deref()
+            .map_or_else(|| self.runtime.content(), |n| n.content())
+    }
+
+    /// Select before capturing any fields. Children of a leaf retain this
+    /// narrowing, including a skipped leaf's no-op standing.
+    pub fn selected(&self, kind: TraceSpanKind, ids: &TraceIds) -> Self {
+        let policy = self.runtime.policy();
+        let mut narrow =
+            lash_trace::core_internal::content_narrowing(&policy, self.narrowing.as_deref());
+        let mut failed = false;
+        if let Some(selector) = &self.runtime.parts.emitter.selector {
+            let view = lash_trace::SelectorView {
+                kind,
+                ids,
+                policy: &policy,
+            };
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                selector.select(&view, &mut narrow)
+            })) {
+                narrow = lash_trace::core_internal::content_narrowing(
+                    &policy,
+                    self.narrowing.as_deref(),
+                );
+                narrow.omit_all();
+                failed = true;
+                if crate::panic_containment::is_loud() {
+                    std::panic::resume_unwind(payload);
+                }
+            }
+        }
+        let silenced = self.silenced || !narrow.builds(kind);
+        Self {
+            narrowing: Some(Arc::new(narrow)),
+            selector_failed: failed,
+            silenced,
+            ..self.clone()
+        }
     }
 
     pub fn scope(&self) -> Option<&DurableTraceScope> {
@@ -980,7 +1137,9 @@ impl TraceStanding {
             scope: Some(Arc::new(scope)),
             leaf: None,
             right: self.right.clone(),
-            silenced: self.silenced,
+            silenced: false,
+            narrowing: None,
+            selector_failed: false,
         }
     }
 
@@ -993,6 +1152,8 @@ impl TraceStanding {
             leaf: self.leaf.clone(),
             right: EmissionRight::Body(Arc::clone(live)),
             silenced: self.silenced,
+            narrowing: self.narrowing.clone(),
+            selector_failed: self.selector_failed,
         }
     }
 
@@ -1091,6 +1252,7 @@ impl TraceStanding {
                     silenced: true,
                     ..self.clone()
                 },
+                request: None,
             };
         }
         let Some(parent) = self.container().cloned().filter(|_| self.is_observed()) else {
@@ -1100,6 +1262,7 @@ impl TraceStanding {
             return OpenSpan {
                 model: None,
                 standing: self.clone(),
+                request: None,
             };
         };
         let span = TraceCarrier::new(
@@ -1119,11 +1282,14 @@ impl TraceStanding {
             })),
             right: self.right.clone(),
             silenced: false,
+            narrowing: self.narrowing.clone(),
+            selector_failed: self.selector_failed,
         };
         standing.observe_as(SpanRole::Opens, None, record);
         OpenSpan {
             standing,
             model: None,
+            request: None,
         }
     }
 
@@ -1151,6 +1317,8 @@ impl TraceStanding {
             })),
             right: self.right.clone(),
             silenced: self.silenced || !self.runtime.parts.detail.builds(kind),
+            narrowing: self.narrowing.clone(),
+            selector_failed: self.selector_failed,
         })
     }
 
@@ -1235,10 +1403,14 @@ impl TraceStanding {
             },
             None => TraceRecordIdentity::UnscopedLive { attempt, ordinal },
         };
-        self.runtime
-            .parts
-            .emitter
-            .emit(Some(permit), position, || identity, at_ms, record);
+        let mut emitter = self.runtime.parts.emitter.clone();
+        if self.narrowing.is_some() {
+            emitter.policy.content = self.content();
+            emitter.content = self.content();
+            emitter.selected = true;
+            emitter.selector_failed = self.selector_failed;
+        }
+        emitter.emit(Some(permit), position, || identity, at_ms, record);
     }
 
     /// The live permit of the body this standing is in, and none for shift
@@ -1340,133 +1512,4 @@ pub fn tool_trace_scope(
 }
 
 #[cfg(test)]
-mod diagnostic_tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize};
-
-    struct FailingSink(AtomicBool);
-    impl TraceSink for FailingSink {
-        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
-            if self.0.load(Ordering::SeqCst) {
-                Err(lash_trace::TraceSinkError::Write {
-                    path: "injected-sink".into(),
-                    source: std::io::Error::other("injected append failure"),
-                })
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    /// FIG-5531: a sink failure episode has one warning and a counted recovery;
-    /// another sink and cloned runtime keep their own delivery contracts.
-    #[test]
-    fn repeated_sink_failures_report_transitions_and_count() {
-        let failed = Arc::new(FailingSink(AtomicBool::new(true)));
-        let healthy = Arc::new(FailingSink(AtomicBool::new(false)));
-        let runtime = TraceRuntime::default().with_trace_sink(failed.clone());
-        let other = runtime.clone().with_trace_sink(healthy);
-        let record = TraceRecord {
-            schema_version: lash_trace::TRACE_SCHEMA_VERSION,
-            id: "sink-law".into(),
-            timestamp: TraceTimestamp::from_unix_ms(0),
-            content: TelemetryContent::Captured,
-            context: TraceContext::default(),
-            position: None,
-            omissions: Default::default(),
-            event: TraceEvent::TurnStarted {
-                metadata: Default::default(),
-            },
-        };
-        let (_, capture) = crate::testing::trace_capture::capturing_sync(|| {
-            runtime.emitter().append(&record);
-            other.emitter().append(&record);
-            runtime.emitter().append(&record);
-            failed.0.store(false, Ordering::SeqCst);
-            other.emitter().append(&record);
-        });
-        assert_eq!(capture.exactly_one("trace_sink.degraded").level, "WARN");
-        assert_eq!(
-            capture
-                .exactly_one("trace_sink.recovered")
-                .field("failure_count"),
-            "3"
-        );
-    }
-
-    struct Counting(Arc<AtomicUsize>);
-    impl TraceSink for Counting {
-        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
-            self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    struct Panicking;
-    impl TraceSink for Panicking {
-        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
-            panic!("the sink panics")
-        }
-    }
-
-    /// L1(g): sink acceptance is per sink. A sink that panics, and a flight
-    /// recorder whose snapshot callback panics, each cost only their own
-    /// delivery: the sink after them sees every record, and each panic
-    /// counts against its own sink alone.
-    #[test]
-    fn a_panicking_sink_or_snapshot_callback_costs_only_its_own_delivery() {
-        let forwarded = Arc::new(AtomicUsize::new(0));
-        let after = Arc::new(AtomicUsize::new(0));
-        let recorder = lash_trace::FlightRecorderSink::new(
-            Counting(Arc::clone(&forwarded)),
-            lash_trace::FlightRecorderSettings::new(
-                256,
-                Some(std::time::Duration::from_millis(1)),
-                std::time::Duration::ZERO,
-                true,
-            )
-            .expect("valid recorder settings"),
-            |_snapshot| panic!("the snapshot callback panics"),
-        );
-        let runtime = TraceRuntime::default()
-            .with_trace_sink(Arc::new(Panicking))
-            .with_trace_sink(Arc::new(recorder))
-            .with_trace_sink(Arc::new(Counting(Arc::clone(&after))));
-        let record = TraceRecord {
-            schema_version: lash_trace::TRACE_SCHEMA_VERSION,
-            id: "containment-law".into(),
-            timestamp: TraceTimestamp::from_unix_ms(0),
-            content: TelemetryContent::Captured,
-            context: TraceContext::default(),
-            position: None,
-            omissions: Default::default(),
-            event: TraceEvent::ToolCallCompleted {
-                call_id: crate::ToolCallId::fixture("call"),
-                provider_call_id: None,
-                name: "slow".into(),
-                args: serde_json::Value::Null,
-                output: lash_trace::TraceToolCallOutput {
-                    outcome: lash_trace::TraceToolCallOutcome::Success(serde_json::Value::Null),
-                    control: None,
-                },
-                duration_ms: 10,
-                issuing_node_id: None,
-                attempts: None,
-            },
-        };
-        for _ in 0..3 {
-            runtime.emitter().append(&record);
-        }
-        assert_eq!(
-            after.load(Ordering::SeqCst),
-            3,
-            "the last sink sees every record"
-        );
-        assert_eq!(
-            forwarded.load(Ordering::SeqCst),
-            3,
-            "the recorder forwards each"
-        );
-        assert_eq!(runtime.emitter().sink_failures(), vec![3, 3, 0]);
-    }
-}
+mod diagnostic_tests;

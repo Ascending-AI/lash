@@ -317,7 +317,7 @@ mod admission_identity_tests {
             schema_version: 1,
             id: format!("{name}-record"),
             timestamp: lash_core::TraceTimestamp::from_unix_ms(0),
-            content: lash_core::TelemetryContent::Captured,
+            content: lash_core::ContentPolicy::captured().into(),
             context: lash_core::TraceContext::default(),
             position: None,
             omissions: Default::default(),

@@ -55,8 +55,14 @@ impl LashCoreBuilder {
         if let Some(detail) = self.trace_detail.take() {
             tracing = tracing.with_detail(detail);
         }
-        if let Some(content) = self.telemetry_content.take() {
+        if let Some(content) = self.content_policy.take() {
             tracing = tracing.with_content(content);
+        }
+        if let Some(selector) = self.capture_selector.take() {
+            tracing = tracing.with_capture_selector(selector);
+        }
+        if let Some(hook) = self.content_hook.take() {
+            tracing = tracing.with_content_hook(hook);
         }
         if let Some(limits) = self.content_limits.take() {
             tracing = tracing.with_content_limits(limits);

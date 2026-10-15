@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::*;
-use crate::{TelemetryContent, TraceContext, TraceToolCallOutcome, TraceToolCallOutput};
+use crate::{ContentPolicy, TraceContext, TraceToolCallOutcome, TraceToolCallOutput};
 use serde_json::json;
 
 #[derive(Clone, Default)]
@@ -61,7 +61,7 @@ fn record(id: &str, timestamp_ms: i64, event: TraceEvent) -> TraceRecord {
         schema_version: crate::TRACE_SCHEMA_VERSION,
         id: id.into(),
         timestamp: crate::TraceTimestamp::from_unix_ms(u64::try_from(timestamp_ms).unwrap()),
-        content: TelemetryContent::Captured,
+        content: ContentPolicy::captured().into(),
         context: TraceContext::default()
             .for_session("session")
             .for_turn("turn"),
@@ -93,6 +93,7 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
 
 fn failure() -> TraceEvent {
     TraceEvent::ExecCodeFailed {
+        code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
         duration_ms: 0,

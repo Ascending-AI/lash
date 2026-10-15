@@ -43,7 +43,8 @@ impl From<Cow<'static, str>> for AttrKey {
 
 /// A contributed value. `Json` is the declared JSON exception of the
 /// tracing seam.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum TraceValue {
     Str(Cow<'static, str>),
     Int(i64),
@@ -54,6 +55,18 @@ pub enum TraceValue {
 }
 
 impl TraceValue {
+    /// The value retained on a record, before OTel's string encoding of JSON.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Str(v) => serde_json::json!(v),
+            Self::Int(v) => serde_json::json!(v),
+            Self::Float(v) => serde_json::json!(v),
+            Self::Bool(v) => serde_json::json!(v),
+            Self::StrArray(v) => serde_json::json!(v),
+            Self::Json(v) => v.clone(),
+        }
+    }
+
     /// The bytes the value charges: UTF-8 length of a string, 8 for a
     /// number or a boolean, each element's length plus one for an array, and
     /// the serialized length of JSON.

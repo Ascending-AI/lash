@@ -47,7 +47,7 @@ impl Traced {
             explicit_ephemeral_facets(LashCore::standard_builder(backend))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
                 .trace_sink(sink.clone())
-                .telemetry_content(lash_trace::TelemetryContent::Captured),
+                .content_policy(lash_trace::ContentPolicy::captured()),
         )
         .build(owner)?;
         Ok(Self { core, sink })
@@ -1044,7 +1044,10 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() -> 
     let traced = Traced::new(provider, |builder| {
         builder
             .trace_detail(lash_trace::TraceDetailPolicy::extended_models())
-            .content_limits(crate::tracing::ContentLimits::new(32).expect("valid content limits"))
+            .content_limits(
+                crate::tracing::ContentLimits::new(16384, 131072, 32)
+                    .expect("valid content limits"),
+            )
     })
     .await?;
     let session = traced.session("trace-provider-stream").await?;

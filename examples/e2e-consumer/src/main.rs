@@ -392,7 +392,7 @@ async fn main() -> Result<()> {
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_sink(Arc::new(trace_file::JsonlFileSink::new(trace)))
         .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
-        .telemetry_content(lash::tracing::TelemetryContent::Captured);
+        .content_policy(lash::tracing::ContentPolicy::captured());
     let builder = match live_replay().await? {
         Some(store) => builder.live_replay_store(store),
         None => builder,

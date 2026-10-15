@@ -22,9 +22,30 @@ fn attempt(
     companions: &[(F, u64)],
 ) -> std::result::Result<u64, TracePolicyError> {
     match field {
-        F::MaxProviderBodyBytes => {
-            ContentLimits::new(value).map(|limits| limits.max_provider_body_bytes())
+        F::MaxPartBytes | F::MaxAttributeBytes | F::MaxProviderBodyBytes => {
+            let values = [
+                F::MaxPartBytes,
+                F::MaxAttributeBytes,
+                F::MaxProviderBodyBytes,
+            ]
+            .map(|row| {
+                if row == field {
+                    value
+                } else {
+                    companions
+                        .iter()
+                        .find_map(|(f, v)| (*f == row).then_some(*v))
+                        .unwrap_or_else(|| default(row))
+                }
+            });
+            let limits = ContentLimits::new(values[0], values[1], values[2])?;
+            Ok(match field {
+                F::MaxPartBytes => limits.max_part_bytes(),
+                F::MaxAttributeBytes => limits.max_attribute_bytes(),
+                _ => limits.max_provider_body_bytes(),
+            })
         }
+
         F::TracestateMembers
         | F::TracestateChars
         | F::TracestateKeyBytes
@@ -154,6 +175,21 @@ const CONTENT_KINDS: [K; 4] = [K::Model, K::Tool, K::Cell, K::Extension];
 /// documented relations (§6.7.1): the smallest companion values, and the
 /// detail policy the core needs for it.
 fn companions(field: F, value: u64) -> (Vec<(F, u64)>, TraceDetailPolicy) {
+    if matches!(field, F::MaxPartBytes | F::MaxProviderBodyBytes)
+        && value > default(F::MaxAttributeBytes)
+    {
+        return (
+            vec![(F::MaxAttributeBytes, value)],
+            TraceDetailPolicy::standard(),
+        );
+    }
+    if field == F::MaxAttributeBytes {
+        return (
+            vec![(F::MaxPartBytes, 1024), (F::MaxProviderBodyBytes, 0)],
+            TraceDetailPolicy::standard(),
+        );
+    }
+
     let mut rows = Vec::new();
     let mut detail = TraceDetailPolicy::standard();
     match field {
@@ -263,13 +299,41 @@ async fn every_tracing_knob_is_refused_typed_out_of_range_and_builds_at_its_endp
             );
             let in_core = standard.value(field).is_some();
             if in_core {
-                let limits = if field == F::MaxProviderBodyBytes {
+                let limits = if matches!(
+                    field,
+                    F::MaxPartBytes | F::MaxAttributeBytes | F::MaxProviderBodyBytes
+                ) {
                     TraceLimits::standard()
                 } else {
                     limits(rows.iter().copied().chain([(field, value)]))?
                 };
-                let content = if field == F::MaxProviderBodyBytes {
-                    ContentLimits::new(value)?
+                let content = if matches!(
+                    field,
+                    F::MaxPartBytes | F::MaxAttributeBytes | F::MaxProviderBodyBytes
+                ) {
+                    ContentLimits::new(
+                        if field == F::MaxPartBytes {
+                            value
+                        } else {
+                            rows.iter()
+                                .find_map(|(f, v)| (*f == F::MaxPartBytes).then_some(*v))
+                                .unwrap_or_else(|| default(F::MaxPartBytes))
+                        },
+                        if field == F::MaxAttributeBytes {
+                            value
+                        } else {
+                            rows.iter()
+                                .find_map(|(f, v)| (*f == F::MaxAttributeBytes).then_some(*v))
+                                .unwrap_or_else(|| default(F::MaxAttributeBytes))
+                        },
+                        if field == F::MaxProviderBodyBytes {
+                            value
+                        } else {
+                            rows.iter()
+                                .find_map(|(f, v)| (*f == F::MaxProviderBodyBytes).then_some(*v))
+                                .unwrap_or_else(|| default(F::MaxProviderBodyBytes))
+                        },
+                    )?
                 } else {
                     ContentLimits::standard()
                 };

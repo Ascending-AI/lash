@@ -542,13 +542,13 @@ pub use lash_trace::otel::{
     LashTracerProvider, OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView,
 };
 pub use lash_trace::{
-    DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
-    ProductObservationSink, SpanKey, SpanRole, TelemetryContent, TraceAttemptId, TraceAttemptLink,
-    TraceCall, TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceIds, TraceLinkMode,
-    TraceLinks, TraceParent, TracePosition, TraceScopeAdmission, TraceScopeId, TraceScopeKind,
-    TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceTimestamp, W3cSpanId, W3cTraceFlags,
-    W3cTraceId, W3cTraceState, derive_span,
+    ContentPolicy, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
+    InvalidTraceLinks, LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
+    ProductObservationSink, SpanKey, SpanRole, TraceAttemptId, TraceAttemptLink, TraceCall,
+    TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceIds, TraceLinkMode, TraceLinks,
+    TraceParent, TracePosition, TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer,
+    TraceScopeOwner, TraceSpanKind, TraceTimestamp, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState, derive_span,
 };
 pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,

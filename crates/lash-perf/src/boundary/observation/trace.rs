@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, ensure};
 use lash::tracing::{
-    TelemetryContent, TraceDetailPolicy, TraceEvent, TraceRecord, TraceSink, TraceSinkError,
+    ContentPolicy, TraceDetailPolicy, TraceEvent, TraceRecord, TraceSink, TraceSinkError,
 };
 use lash_sansio::sync::MutexExt;
 
@@ -143,9 +143,9 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     }
     let sink = Arc::new(sink);
     let content = if matches!(args.case, Case::TraceSinkCaptured) {
-        TelemetryContent::Captured
+        ContentPolicy::captured()
     } else {
-        TelemetryContent::Omitted
+        ContentPolicy::omitted()
     };
 
     let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
@@ -170,7 +170,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         let builder = builder
             .trace_sink(sink.clone())
             .trace_detail(TraceDetailPolicy::extended_models())
-            .telemetry_content(content);
+            .content_policy(content);
         Ok(if otel {
             builder.telemetry(lash::tracing::OtelTelemetry::new(
                 &tracer,
@@ -209,7 +209,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                         std::time::SystemTime::now(),
                     )
                     .unwrap_or(lash::tracing::TraceTimestamp::from_unix_ms(0)),
-                    content,
+                    content: content.into(),
                     context: Default::default(),
                     position: None,
                     omissions: Default::default(),
@@ -239,7 +239,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         .map_err(|error| anyhow::anyhow!("read exported spans: {error}"))?
         .len();
     let counters = serde_json::json!({
-        "content": content,
+        "content": if content==ContentPolicy::captured() {"captured"}else{"omitted"},
         "records_offered": sink.offered.load(Ordering::Relaxed),
         "records_refused_and_lost": refused,
         "records_by_kind": *sink.kinds.lock_recover(),

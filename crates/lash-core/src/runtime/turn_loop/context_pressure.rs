@@ -265,7 +265,9 @@ impl LashRuntime {
         let tracing = &self.host.core.tracing;
         if tracing.is_observed() {
             // The task is model-facing text; the rest is the frame's identity.
-            let task = tracing.content().capture(|| Some(task));
+            let task = tracing
+                .content()
+                .capture(lash_trace::ContentCategory::Extension, || Some(task));
             tracing
                 .unreplayed(committing.trace_scope().cloned())
                 .observe(|| {

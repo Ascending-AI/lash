@@ -583,7 +583,7 @@ impl PluginExecutionTrace {
                 timestamp: lash_trace::TraceTimestamp::from_unix_ms(
                     self.trace_runtime().clock().timestamp_ms(),
                 ),
-                content: lash_trace::TelemetryContent::Captured,
+                content: lash_trace::ContentPolicy::captured().into(),
                 context,
                 position: None,
                 omissions: Default::default(),
@@ -621,7 +621,7 @@ impl PluginSessionContext {
     /// without inspection. A plugin must honour this policy for content it
     /// includes in those payloads. Reopening under another host uses that
     /// host's policy; this operational setting is not session config.
-    pub fn telemetry_content(&self) -> lash_trace::TelemetryContent {
+    pub fn content_policy(&self) -> lash_trace::ContentPolicy {
         self.tracing.content()
     }
 

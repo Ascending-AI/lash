@@ -310,6 +310,11 @@ impl RuntimeTurnDriver<'_> {
         let mut reasoning_attempt_correlations = Vec::new();
         let mut stream_chunks = Vec::new();
         let mut stream_state = LlmStreamState {
+            trace: call
+                .as_ref()
+                .map_or_else(|| self.trace.clone(), |call| call.standing().clone()),
+            trace_context: crate::trace::trace_context_from_invocation(&invocation)
+                .for_llm_call(llm_call_id.clone()),
             text_streamed: &mut text_streamed,
             streamed_usage: &mut streamed_usage,
             stream_accumulator: &mut stream_accumulator,
@@ -839,6 +844,8 @@ impl RuntimeTurnDriver<'_> {
                             )),
                         TraceEvent::LlmCallCompleted {
                             model: None,
+                            request: Default::default(),
+                            response_metadata: Default::default(),
                             response: crate::trace::trace_llm_response(
                                 response_text,
                                 0,
@@ -879,6 +886,7 @@ impl RuntimeTurnDriver<'_> {
                             )),
                         TraceEvent::LlmCallFailed {
                             model: None,
+                            request: Default::default(),
                             error: TraceError {
                                 retryable,
                                 terminal_reason,
@@ -900,14 +908,31 @@ impl RuntimeTurnDriver<'_> {
     fn trace_stream_event(
         &self,
         state: &mut LlmStreamState<'_>,
+        category: Option<lash_trace::ContentCategory>,
         payload: impl FnOnce() -> TraceRuntimeStreamPayload,
     ) {
-        if !self.trace.is_observed()
-            || !self
+        if !state.trace.is_observed()
+            || !state
                 .trace
                 .detail()
                 .get(lash_trace::TraceSpanKind::Model)
                 .is_extended()
+        {
+            return;
+        }
+        let context = state.trace_context.clone();
+        let trace = state
+            .trace
+            .selected(lash_trace::TraceSpanKind::Model, &context.ids());
+        if !trace.is_observed() {
+            return;
+        }
+        if let Some(category) = category
+            && (!trace.content().captures(category)
+                || (category == lash_trace::ContentCategory::Reasoning
+                    && !trace
+                        .content()
+                        .captures(lash_trace::ContentCategory::OutputMessages)))
         {
             return;
         }
@@ -916,12 +941,7 @@ impl RuntimeTurnDriver<'_> {
             elapsed_ms: state.debug.elapsed_ms(self.host.core.clock.as_ref()),
             payload: payload(),
         };
-        self.trace.observe(|| {
-            (
-                self.trace_context(state.protocol_iteration),
-                TraceEvent::RuntimeStreamEvent { event },
-            )
-        });
+        trace.observe(|| (context, TraceEvent::RuntimeStreamEvent { event }));
     }
 
     /// The sender of the call's provider events, each an event of the call
@@ -951,6 +971,11 @@ impl RuntimeTurnDriver<'_> {
 
         Some(LlmProviderTraceSender::new(
             move |provider_event: LlmProviderTraceEvent| {
+                let context = context.clone().for_llm_call(llm_call_id.clone());
+                let trace = trace.selected(lash_trace::TraceSpanKind::Model, &context.ids());
+                if !trace.is_observed() {
+                    return;
+                }
                 let sequence = sequence.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let elapsed_ms = clock
                     .now()
@@ -968,7 +993,9 @@ impl RuntimeTurnDriver<'_> {
                         > trace.runtime().content_limits().max_provider_body_bytes();
                 // An omitted request body is never parsed; a response event
                 // is parsed for its item identity whatever the policy.
-                let omitted_request = !trace.content().is_captured()
+                let omitted_request = !trace
+                    .content()
+                    .captures(lash_trace::ContentCategory::ProviderPayloads)
                     && matches!(direction, LlmProviderTraceDirection::Request { .. });
                 let (raw_json, raw_json_omitted_reason) = if omitted_request {
                     (None, Some(TraceProviderBodyOmission::ContentPolicy))
@@ -998,12 +1025,7 @@ impl RuntimeTurnDriver<'_> {
                     raw_json,
                     raw_json_omitted_reason,
                 };
-                trace.observe(|| {
-                    (
-                        context.clone().for_llm_call(llm_call_id.clone()),
-                        TraceEvent::ProviderEvent { event },
-                    )
-                });
+                trace.observe(|| (context, TraceEvent::ProviderEvent { event }));
             },
         ))
     }
@@ -1048,10 +1070,14 @@ impl RuntimeTurnDriver<'_> {
                 .summary
                 .record_text_chunk(event.delta_text(), elapsed_ms);
         }
-        self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
-            event: event.clone(),
-            raw_text,
-        });
+        self.trace_stream_event(
+            state,
+            Some(lash_trace::ContentCategory::OutputMessages),
+            || TraceRuntimeStreamPayload::Block {
+                event: event.clone(),
+                raw_text,
+            },
+        );
         if event.delta_text().is_some_and(|text| !text.is_empty()) {
             fold_llm_stream_event(
                 state.stream_accumulator,
@@ -1214,10 +1240,14 @@ impl RuntimeTurnDriver<'_> {
                     text.clone()
                 };
                 let sealed = StreamBlockEvent::completed(kind, block.clone(), sealed);
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
-                    event: sealed.clone(),
-                    raw_text: Some(text.clone()),
-                });
+                self.trace_stream_event(
+                    state,
+                    Some(lash_trace::ContentCategory::OutputMessages),
+                    || TraceRuntimeStreamPayload::Block {
+                        event: sealed.clone(),
+                        raw_text: Some(text.clone()),
+                    },
+                );
                 *state.text_streamed = true;
                 Self::remember_attempt_block(forwarder, kind, &block, state);
                 fold_llm_stream_event(
@@ -1243,10 +1273,14 @@ impl RuntimeTurnDriver<'_> {
                 if event.delta_text().is_some_and(str::is_empty) {
                     return Ok(());
                 }
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Block {
-                    event: event.clone(),
-                    raw_text: None,
-                });
+                self.trace_stream_event(
+                    state,
+                    Some(lash_trace::ContentCategory::Reasoning),
+                    || TraceRuntimeStreamPayload::Block {
+                        event: event.clone(),
+                        raw_text: None,
+                    },
+                );
                 Self::remember_attempt_block(forwarder, event.kind(), event.block(), state);
                 fold_llm_stream_event(
                     state.stream_accumulator,
@@ -1259,10 +1293,14 @@ impl RuntimeTurnDriver<'_> {
                 text,
                 response_meta,
             }) => {
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::TextPart {
-                    text: text.clone(),
-                    item_id: response_meta.as_ref().and_then(|meta| meta.id.clone()),
-                });
+                self.trace_stream_event(
+                    state,
+                    Some(lash_trace::ContentCategory::OutputMessages),
+                    || TraceRuntimeStreamPayload::TextPart {
+                        text: text.clone(),
+                        item_id: response_meta.as_ref().and_then(|meta| meta.id.clone()),
+                    },
+                );
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1278,13 +1316,17 @@ impl RuntimeTurnDriver<'_> {
                 input_json,
                 replay,
             }) => {
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::ToolCallPart {
-                    call_id: call_id.clone(),
-                    tool_name: tool_name.clone(),
-                    input_json: serde_json::from_str(&input_json)
-                        .unwrap_or_else(|_| serde_json::Value::String(input_json.clone())),
-                    item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
-                });
+                self.trace_stream_event(
+                    state,
+                    Some(lash_trace::ContentCategory::OutputMessages),
+                    || TraceRuntimeStreamPayload::ToolCallPart {
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        input_json: serde_json::from_str(&input_json)
+                            .unwrap_or_else(|_| serde_json::Value::String(input_json.clone())),
+                        item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
+                    },
+                );
                 fold_llm_stream_event(
                     state.stream_accumulator,
                     state.streamed_usage,
@@ -1297,10 +1339,14 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Part(LlmOutputPart::Reasoning { text, replay }) => {
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::ReasoningPart {
-                    text: text.clone(),
-                    item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
-                });
+                self.trace_stream_event(
+                    state,
+                    Some(lash_trace::ContentCategory::Reasoning),
+                    || TraceRuntimeStreamPayload::ReasoningPart {
+                        text: text.clone(),
+                        item_id: replay.as_ref().and_then(|meta| meta.item_id.clone()),
+                    },
+                );
                 let part = LlmOutputPart::Reasoning { text, replay };
                 // Item-level completion: replay material (encrypted content,
                 // signatures, summary) rides here, while any of the item's
@@ -1332,7 +1378,7 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
             LlmStreamEvent::Usage(usage) => {
-                self.trace_stream_event(state, || TraceRuntimeStreamPayload::Usage {
+                self.trace_stream_event(state, None, || TraceRuntimeStreamPayload::Usage {
                     usage: usage.clone(),
                 });
                 fold_llm_stream_event(

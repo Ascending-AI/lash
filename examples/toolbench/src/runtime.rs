@@ -384,7 +384,7 @@ fn build_turn_core(
     let core = builder
         .trace_sink(Arc::new(telemetry.capture.clone()))
         .trace_detail(lash::tracing::TraceDetailPolicy::extended_models())
-        .telemetry_content(lash::tracing::TelemetryContent::Captured)
+        .content_policy(lash::tracing::ContentPolicy::captured())
         .configure_plugins(|stack| {
             stack.push(telemetry.plugin());
             if let Some(marker) = shutdown_marker {

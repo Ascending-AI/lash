@@ -1679,6 +1679,8 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         lash_trace::TraceContext::default(),
         lash_trace::TraceEvent::LlmCallCompleted {
             model: None,
+            request: Default::default(),
+            response_metadata: Default::default(),
             response: crate::trace::trace_llm_response(
                 "ok".to_string(),
                 0,

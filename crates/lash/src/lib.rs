@@ -635,7 +635,7 @@ pub mod prompt {
 ///
 /// fn custom_payload(ctx: &PluginSessionContext, text: &str) -> serde_json::Value {
 ///     serde_json::json!({
-///         "text": ctx.telemetry_content().capture(|| text.to_owned()),
+///         "text": ctx.content_policy().capture(lash::tracing::ContentCategory::Extension, || text.to_owned()),
 ///     })
 /// }
 /// ```

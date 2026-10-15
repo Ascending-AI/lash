@@ -6,3 +6,5 @@ Unmodified model definitions from
 plus the MCP definitions, are pinned here for default-projection conformance.
 The law resolves attribute groups from these definitions; host enrichment is
 outside this default contract. MCP projection is covered by its owning lane.
+
+The six root content JSON schemas use the same pinned snapshot. Their tool-definition schema resolves the standard Draft 7 meta-schema locally from `draft-07.schema.json`.

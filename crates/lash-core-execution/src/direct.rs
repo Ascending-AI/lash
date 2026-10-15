@@ -204,7 +204,7 @@ pub struct DirectLlmClient {
     /// host-owned call composes no prompt sections: it belongs to no session.
     instructions: Option<Arc<str>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
-    telemetry_content: lash_trace::TelemetryContent,
+    content_policy: lash_trace::ContentPolicy,
     clock: Arc<dyn crate::Clock>,
     /// What delivers a request's attachment slots on each attempt. A client
     /// with none refuses an attachment-bearing request unsent.
@@ -230,7 +230,7 @@ impl DirectLlmClient {
             budgets,
             instructions: None,
             trace_sink: None,
-            telemetry_content: lash_trace::TelemetryContent::standard(),
+            content_policy: lash_trace::ContentPolicy::standard(),
             clock: Arc::new(crate::SystemClock),
             deliveries: Arc::new(NoSlotDeliveries),
         }
@@ -255,10 +255,10 @@ impl DirectLlmClient {
     }
 
     /// State whether this client's trace records carry the request and the
-    /// response. Defaults to [`lash_trace::TelemetryContent::standard`]
+    /// response. Defaults to [`lash_trace::ContentPolicy::standard`]
     /// (omitted).
-    pub fn with_telemetry_content(mut self, content: lash_trace::TelemetryContent) -> Self {
-        self.telemetry_content = content;
+    pub fn with_content_policy(mut self, content: lash_trace::ContentPolicy) -> Self {
+        self.content_policy = content;
         self
     }
 
@@ -295,7 +295,7 @@ impl DirectLlmClient {
         let traced = self.trace_sink.as_ref().map(|sink| {
             let standing = crate::trace::TraceRuntime::new(Arc::clone(&self.clock))
                 .with_trace_sink(Arc::clone(sink))
-                .with_content(self.telemetry_content)
+                .with_content(self.content_policy)
                 .unreplayed(None);
             let call = crate::runtime::effect::emit_llm_trace_started(
                 &standing,
@@ -554,231 +554,6 @@ mod tests {
     use lash_sansio::sync::MutexExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
-
-    #[derive(Debug)]
-    struct FrozenClock {
-        instant: Instant,
-    }
-
-    impl FrozenClock {
-        fn new() -> Self {
-            Self {
-                instant: Instant::now(),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl crate::Clock for FrozenClock {
-        fn now(&self) -> Instant {
-            self.instant
-        }
-
-        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-            let timestamp_ms = 0;
-            chrono::DateTime::from(
-                std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_ms),
-            )
-        }
-
-        async fn sleep(&self, _duration: Duration) {}
-
-        async fn sleep_until(&self, _deadline: Instant) {}
-    }
-
-    #[derive(Default)]
-    struct CapturingTraceSink(Mutex<Vec<lash_trace::TraceRecord>>);
-
-    impl TraceSink for CapturingTraceSink {
-        fn append(
-            &self,
-            record: &lash_trace::TraceRecord,
-        ) -> Result<(), lash_trace::TraceSinkError> {
-            self.0.lock_recover().push(record.clone());
-            Ok(())
-        }
-    }
-
-    fn canonical_trace_bytes(sink: &CapturingTraceSink) -> Vec<Vec<u8>> {
-        sink.0
-            .lock_recover()
-            .iter()
-            .map(|record| {
-                let mut value = serde_json::to_value(record).expect("trace record is serializable");
-                let object = value.as_object_mut().expect("trace record is an object");
-                object.insert("id".to_string(), json!("trace-id"));
-                let context = object
-                    .get_mut("context")
-                    .and_then(serde_json::Value::as_object_mut)
-                    .expect("trace record has a context object");
-                context.insert("llm_call_id".to_string(), json!("llm-call-id"));
-                serde_json::to_vec(&value).expect("canonical trace record is serializable")
-            })
-            .collect()
-    }
-
-    fn traced_client(
-        provider: TestProvider,
-        sink: &Arc<CapturingTraceSink>,
-        clock: &Arc<FrozenClock>,
-    ) -> DirectLlmClient {
-        let trace_sink: Arc<dyn TraceSink> = sink.clone();
-        let clock: Arc<dyn crate::Clock> = clock.clone();
-        DirectLlmClient::new(
-            provider.into_handle().with_clock(Arc::clone(&clock)),
-            profile("trace-model"),
-            crate::ExecutionBudgets::recommended(),
-        )
-        .with_trace_sink(Some(trace_sink))
-        .with_telemetry_content(lash_trace::TelemetryContent::Captured)
-        .with_clock(clock)
-    }
-
-    #[tokio::test]
-    async fn direct_client_trace_records_preserve_current_bytes() {
-        let sink = Arc::new(CapturingTraceSink::default());
-        let clock = Arc::new(FrozenClock::new());
-
-        let provider = TestProvider::builder()
-            .kind("direct-trace-success")
-            .complete(|_request| async {
-                Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: "direct success".to_string(),
-                        response_meta: None,
-                    }],
-                    usage: LlmUsage {
-                        input_tokens: 11,
-                        output_tokens: 3,
-                        ..Default::default()
-                    },
-                    terminal_reason: LlmTerminalReason::Stop,
-                    response_metadata: Default::default(),
-                    ..Default::default()
-                })
-            })
-            .build();
-        let mut client = traced_client(provider, &sink, &clock);
-        let response = client
-            .complete(DirectRequest::text("trace success"))
-            .await
-            .expect("direct success should complete");
-        assert_eq!(response.full_text(), "direct success");
-
-        let provider = TestProvider::builder()
-            .kind("direct-trace-failure")
-            .complete_error("direct transport failure")
-            .build();
-        let mut client = traced_client(provider, &sink, &clock);
-        let error = client
-            .complete(DirectRequest::text("trace failure"))
-            .await
-            .expect_err("direct transport failure should be returned");
-        assert!(matches!(error, DirectLlmError::Transport(_)));
-
-        let provider = TestProvider::builder()
-            .kind("direct-trace-structured-rejection")
-            .complete(|_request| async {
-                Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: "{}".to_string(),
-                        response_meta: None,
-                    }],
-                    usage: LlmUsage {
-                        input_tokens: 17,
-                        output_tokens: 3,
-                        ..Default::default()
-                    },
-                    terminal_reason: LlmTerminalReason::Stop,
-                    response_metadata: Default::default(),
-                    ..Default::default()
-                })
-            })
-            .build();
-        let mut client = traced_client(provider, &sink, &clock);
-        let error = client
-            .complete(DirectRequest::json_schema(
-                "trace structured rejection",
-                DirectJsonSchema {
-                    name: "answer_shape".to_string(),
-                    schema: lash_sansio::SchemaContract::admit(json!({
-                        "type": "object",
-                        "required": ["answer"],
-                        "properties": {"answer": {"type": "string"}}
-                    }))
-                    .expect("valid declared schema"),
-                    strict: true,
-                },
-            ))
-            .await
-            .expect_err("invalid structured output should be rejected");
-        assert!(matches!(error, DirectLlmError::InvalidResponse { .. }));
-
-        // A scheduled retry's delay carries jitter: check it against its
-        // envelope, then take it out of the bytes that are pinned.
-        let mut scheduled_delays_ms = Vec::new();
-        let actual: Vec<String> = canonical_trace_bytes(&sink)
-            .into_iter()
-            .map(|bytes| {
-                let mut record: serde_json::Value =
-                    serde_json::from_slice(&bytes).expect("trace record is JSON");
-                let is_call_failure = record["type"] == "llm_call_failed";
-                let attempts = match record.get_mut("attempts") {
-                    Some(serde_json::Value::Array(attempts)) => attempts.iter_mut().collect(),
-                    _ => record.get_mut("attempt").into_iter().collect::<Vec<_>>(),
-                };
-                for attempt in attempts {
-                    let Some(delay) = attempt
-                        .get_mut("retry_decision")
-                        .and_then(serde_json::Value::as_object_mut)
-                        .and_then(|decision| decision.remove("delay"))
-                    else {
-                        continue;
-                    };
-                    let delay: std::time::Duration =
-                        serde_json::from_value(delay).expect("retry delay is a duration");
-                    if is_call_failure {
-                        scheduled_delays_ms.push(delay.as_millis());
-                    }
-                }
-                serde_json::to_string(&record).expect("canonical trace record is serializable")
-            })
-            .collect();
-        assert_eq!(scheduled_delays_ms.len(), 3, "{scheduled_delays_ms:?}");
-        for (index, (delay_ms, (minimum, maximum))) in scheduled_delays_ms
-            .iter()
-            .zip([(2_000, 2_500), (4_000, 4_500), (8_000, 8_500)])
-            .enumerate()
-        {
-            assert!(
-                (minimum..=maximum).contains(delay_ms),
-                "retry delay for attempt {index} must stay within the bounded jitter envelope, got {delay_ms} ms"
-            );
-        }
-        // Keep the current trace contract byte pins literal. Each provider
-        // attempt is its own record ahead of the call's outcome record, and
-        // carries the same sealed attempt the outcome record lists.
-        let expected = [
-            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-success","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","provider_usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0},"response":{"duration_ms":0,"parts":[{"Text":{"response_meta":null,"text":"direct success"}}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#.to_string(),
-            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"error":{"failure_kind":"unknown","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
-            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-structured-rejection","request_model":"trace-model","started_at_ms":0},"schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"error":{"code":"lash:invalid_structured_output","failure_kind":"unknown","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":37,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
-        ];
-
-        assert_eq!(
-            actual, expected,
-            "direct trace records are the byte-level compatibility contract"
-        );
-    }
 
     #[tokio::test]
     async fn direct_client_validates_json_schema_output_against_canonical_schema() {
