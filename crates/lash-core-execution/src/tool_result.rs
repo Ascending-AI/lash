@@ -308,6 +308,8 @@ impl ToolOutcome {
 
     /// Constructs a tool execution failure with code `tool_error` and a plain message.
     ///
+    /// Read its plain message with [`crate::ToolFailure::model_text`], never by
+    /// stringifying [`Self::value_for_projection`].
     /// For a structured refusal, use
     /// `ToolOutcome::failure(ToolFailure::new(code, message).with_raw(data))`.
     pub fn err(message: impl Into<String>) -> Self {
@@ -414,6 +416,12 @@ impl ToolOutcome {
     /// internal `$lash_tool_value: "untrusted_json"` discriminant and `value`
     /// wrapper into the public shape. This method removes that envelope while
     /// preserving typed attachment projection.
+    ///
+    /// A failure with `raw` projects that evidence; otherwise it projects the
+    /// typed failure object, including `class`, `code`, `message` and `source`.
+    /// For the model's plain failure text use [`crate::ToolFailure::model_text`],
+    /// never stringify this projection. For complete model content use
+    /// [`crate::ModelToolReturn::from_output`] on [`Self::as_output`].
     #[expect(
         clippy::expect_used,
         reason = "the doc comment above states the contract: calling this on a pending result is a caller error"
@@ -536,6 +544,39 @@ pub fn tool_output_from_completion_resolution(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_error_exposes_its_plain_model_text_without_the_projection_envelope() {
+        let outcome = ToolOutcome::err("x");
+        let crate::ToolCallOutcome::Failure(failure) = &outcome.as_output().outcome else {
+            panic!("a tool error must be a typed failure");
+        };
+
+        assert_eq!(failure.model_text(), "x");
+        assert_eq!(
+            outcome.as_output().value_for_projection(),
+            serde_json::json!({
+                "class": "execution",
+                "code": "tool_error",
+                "message": "x",
+                "source": "tool",
+            }),
+        );
+        let failure = failure
+            .clone()
+            .with_raw(serde_json::json!({ "detail": "provider evidence" }));
+        assert_eq!(failure.model_text(), "x");
+        assert_eq!(
+            crate::ModelToolReturn::from_output(
+                "tool".into(),
+                &crate::ToolCallOutput::failure(failure),
+            )
+            .parts,
+            vec![crate::ModelToolReturnPart::text(
+                "[Tool execution failed]\nx"
+            )],
+        );
+    }
 
     // -----------------------------------------------------------------------
     // One wait, one shape (ADR 0095).

@@ -162,6 +162,10 @@ pub enum ToolLiveReadFault {
 
 /// One subscription item. Call filters receive their call's emissions and
 /// every owner-level item (owner omissions, faults and gaps).
+///
+/// Its Serde JSON is a stable host wire contract: internally tagged by `kind`,
+/// with snake_case variant names and typed payloads. Hosts may receive this
+/// readable JSON directly, paired with [`ToolLiveFilter`] requests.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolLiveItem {
@@ -195,6 +199,10 @@ impl ToolLiveItem {
 
 /// What a subscription reads: every item of one execution owner, or one
 /// call's emissions with the owner-level items.
+///
+/// Its Serde JSON is a stable host wire contract: internally tagged by `kind`
+/// (`"owner"` or `"call"`), with typed payloads. Hosts may send this readable
+/// JSON directly and receive [`ToolLiveItem`] without a wire mirror.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolLiveFilter {

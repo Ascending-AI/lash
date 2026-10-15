@@ -357,7 +357,9 @@ migrated.
 ### 4. Host wire contracts
 
 Hosts define their own transport DTOs and compatibility policy. Core Rust
-types carry no wire-stability promise ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
+types carry no wire-stability promise except the explicitly stable
+`ToolLiveFilter` and `ToolLiveItem` Serde JSON contracts
+([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
 
 ### 5. Per-surface obligations
 

@@ -323,7 +323,10 @@ writers, and recovery then rolls forward.
 Lash ships no client/server wire protocol or version negotiation. A host
 owns its transport's DTOs, version skew and compatibility policy
 ([ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md)). Lash's Rust types
-carry no wire-stability promise.
+carry no wire-stability promise except `ToolLiveFilter` and `ToolLiveItem`:
+their Serde JSON is a stable host wire contract, internally tagged by `kind`,
+with snake_case variant names and typed payloads. Hosts may exchange this
+readable typed JSON directly without a wire mirror.
 
 Across N and N+1, lash owns compatibility of its stored formats and recorded
 routes. Keep the recorded config and model routes available to the builds
@@ -332,3 +335,15 @@ actor format sets to decide which build can serve it. A typed incompatibility
 stops traffic to that build until its recorded version or route is resolved.
 Host endpoint availability and client transport compatibility follow the
 host's own contract.
+
+## Host notes
+
+- FIG-6320: `ToolOutcome::err("x")` projects the typed failure object
+  `{"class":"execution","code":"tool_error","message":"x","source":"tool"}`,
+  replacing the previous JSON string `"x"`. `ToolCallOutput::value_for_projection()`
+  always projects a failure as that typed object, with optional evidence;
+  `ToolOutcome::value_for_projection()` projects explicit `raw` evidence when
+  present. Never stringify either projection for the model. Use
+  `ToolFailure::model_text()` for the plain message or
+  `ModelToolReturn::from_output()` for complete model content with failure
+  markers and attachments (FIG-6331).

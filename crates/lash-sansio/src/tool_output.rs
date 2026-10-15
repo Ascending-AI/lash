@@ -331,6 +331,13 @@ impl ToolCallOutput {
         }
     }
 
+    /// Projects output as typed JSON for host views and persisted projections.
+    /// A failure returns the typed failure object (`class`, `code`, `message`,
+    /// `source` and optional evidence), not just its message. Trust envelopes in
+    /// `raw` are removed while typed attachments are preserved.
+    /// For model text use [`ToolFailure::model_text`]; for complete model
+    /// content use [`ModelToolReturn::from_output`]. Never stringify this
+    /// projection as a failure message.
     pub fn value_for_projection(&self) -> Value {
         match &self.outcome {
             ToolCallOutcome::Success(value) => self
@@ -342,6 +349,7 @@ impl ToolCallOutput {
         }
     }
 
+    /// Consuming form of [`Self::value_for_projection`], with the same contract.
     pub fn into_value_for_projection(self) -> Value {
         match self.outcome {
             ToolCallOutcome::Success(value) => self
@@ -737,6 +745,12 @@ pub struct ToolFailure {
 }
 
 impl ToolFailure {
+    /// The plain message to present to the model, without JSON or added markers.
+    /// Structured diagnostics and provider evidence stay in the other fields.
+    pub fn model_text(&self) -> &str {
+        &self.message
+    }
+
     pub fn with_cause(mut self, cause: ToolFailureCause) -> Self {
         self.cause = Some(Box::new(cause));
         self
@@ -1068,6 +1082,9 @@ pub struct ModelToolReturn {
 }
 
 impl ModelToolReturn {
+    /// Presents complete model content, including failure markers and attachments.
+    /// Failure text comes from [`ToolFailure::model_text`], never a stringified
+    /// [`ToolCallOutput::value_for_projection`] object.
     pub fn from_output(tool_name: String, output: &ToolCallOutput) -> Self {
         let parts = match &output.outcome {
             ToolCallOutcome::Success(value) => Self::parts_from_value(value),
@@ -1280,10 +1297,11 @@ fn push_text_part(parts: &mut Vec<ModelToolReturnPart>, text: impl Into<String>)
 }
 
 fn format_failure_message(failure: &ToolFailure) -> String {
-    if failure.message.is_empty() {
+    let message = failure.model_text();
+    if message.is_empty() {
         "[Tool execution failed]".to_string()
     } else {
-        format!("[Tool execution failed]\n{}", failure.message)
+        format!("[Tool execution failed]\n{message}")
     }
 }
 

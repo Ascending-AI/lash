@@ -19,9 +19,14 @@ transport vocabulary couples Rust changes to contracts owned by host products.
 
 Lash ships no engine wire protocol, transport DTOs, negotiation, or engine
 wire schemas. Hosts define their own DTOs around the Rust API and own their
-transport, authentication, version skew, and compatibility policy. Lash core
-types carry no wire-stability promise; deriving serialization does not create
-one. A host may serialize core values when its own contract permits it.
+transport, authentication, version skew, and compatibility policy. Deriving
+serialization alone does not create a wire-stability promise. The explicit
+exception is `ToolLiveFilter` and `ToolLiveItem`: their Serde JSON is a stable
+host wire contract (FIG-6331), internally tagged by `kind`, with snake_case
+variant names and typed payloads. This typed JSON is the readable host form,
+so hosts may exchange it directly without a wire mirror. Other core types
+carry no wire-stability promise; a host may serialize them when its own
+contract permits it.
 
 The workbench owns its small NDJSON observation envelope in the example. It
 continues the local recoverable observation feed with cursors, replacement

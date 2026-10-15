@@ -11,6 +11,13 @@
 //! app state, HTTP protocols, auth, and frontend streaming; this crate
 //! owns only the ergonomic core/session/turn API.
 //!
+//! Tool failures expose their plain model-facing message through
+//! [`tools::ToolFailure::model_text`]. Never stringify a failure's
+//! `value_for_projection()` as model text: it projects typed JSON for host views.
+//! [`ToolLiveFilter`] and [`ToolLiveItem`] Serde JSON are stable host wire
+//! contracts, internally tagged by `kind`. Their typed JSON is the readable
+//! host form; hosts may exchange it directly without a wire mirror.
+//!
 //! # Three verbs for one session
 //!
 //! A session id reaches Lash three ways, and the choice is the first thing to
