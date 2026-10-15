@@ -470,6 +470,235 @@ mod tests {
         );
     }
 
+    /// GRAPH-READ-BATCH-WORK: N stored nodes at depth D need at most
+    /// D + ceil(N / 128) body SELECTs, each returning at most 128 bodies.
+    #[tokio::test]
+    async fn run_fact_hydration_uses_bounded_frontiers() {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+        };
+        for (width, depth, sparse) in [
+            (1_usize, 3, false),
+            (127, 3, false),
+            (128, 3, false),
+            (129, 3, false),
+            (513, 3, false),
+            (257, 64, true),
+        ] {
+            let mut conn = Connection::open_in_memory().expect("SQLite");
+            conn.execute_batch(crate::schema::SCHEMA).expect("schema");
+            conn.execute_batch(TABLES).expect("facts");
+            crate::observed_sql::enable(&conn);
+            let owner = OwnerKey::Turn("frontier-session".into(), "turn".into());
+            let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            for ordinal in 0..width {
+                let branch_depth = if sparse && ordinal % 128 != 0 {
+                    1
+                } else {
+                    depth
+                };
+                let mut child = None;
+                for level in 0..branch_depth {
+                    let mut body = TokenWriter::new();
+                    body.seq(if child.is_some() { 2 } else { 1 });
+                    body.text(&format!("frontier-{ordinal}-{level}"));
+                    if let Some(child) = child {
+                        body.child(child);
+                    }
+                    let root = staging
+                        .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
+                        .expect("fact node");
+                    child = Some(root.child_ref());
+                    if level == branch_depth - 1 {
+                        conn.execute(
+                            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
+                            rusqlite::params![root.to_hex(), staging.nodes()[&root].bytes.as_ref()],
+                        )
+                        .expect("root body");
+                        conn.execute(
+                            "INSERT INTO run_records VALUES (?1, 1, ?2, 'admit', NULL, ?3, 1)",
+                            rusqlite::params![owner.stored(), ordinal, root.to_hex()],
+                        )
+                        .expect("ledger root");
+                    }
+                }
+            }
+            for (id, node) in staging.nodes() {
+                conn.execute(
+                    "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1) ON CONFLICT DO NOTHING",
+                    rusqlite::params![id.to_hex(), node.bytes.as_ref()],
+                )
+                .expect("body");
+            }
+            let tx = conn.transaction().expect("read snapshot");
+            let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+                "graph.frontiers",
+                "sqlite",
+                async {
+                    facts(
+                        &tx,
+                        &owner,
+                        None,
+                        lash_durable::domain::graph::OWNER_READ_LIMITS,
+                    )
+                },
+            )
+            .await;
+            let recovered = answer.expect("read").expect("hydrate");
+            assert_eq!(recovered.rows.len(), width);
+            assert_eq!(
+                recovered.nodes.len(),
+                if sparse {
+                    width + width.div_ceil(128) * (depth - 1)
+                } else {
+                    width * depth
+                }
+            );
+            for (id, node) in staging.nodes() {
+                assert_eq!(&*recovered.nodes[id].bytes, &*node.bytes);
+            }
+            let bodies: Vec<_> = receipt
+                .shapes
+                .iter()
+                .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("main.blobs"))
+                .map(|(_, shape)| shape)
+                .collect();
+            let selects = bodies.iter().map(|shape| shape.statements).sum::<u64>();
+            let rows = bodies.iter().map(|shape| shape.rows_returned).sum::<u64>();
+            assert_eq!(receipt.unretained_shape_statements, 0);
+            assert_eq!(rows, recovered.nodes.len() as u64);
+            assert!(
+                bodies
+                    .iter()
+                    .all(|shape| shape.rows_returned <= 128 * shape.statements)
+            );
+            let bound = depth + recovered.nodes.len().div_ceil(128);
+            eprintln!(
+                "frontiers: nodes={} depth={depth} body_selects={selects} rows={rows} bound={bound}",
+                recovered.nodes.len()
+            );
+            assert!(
+                selects <= bound as u64,
+                "per-node fetches exceed frontier bound: {receipt:?}"
+            );
+        }
+    }
+
+    /// GRAPH-READ-ORDER: fetching sibling roots together must not let a
+    /// later root's corruption precede an earlier root's descendant or budget.
+    #[test]
+    fn frontier_batches_preserve_depth_first_refusals() {
+        use lash_core_store::checkpoint_graph::{
+            BlobEncoding, DecodeDimension, DecodeLimits, EncodeBudget, ExplicitLimit, GraphRefusal,
+            GraphStaging, NodeId, NodeKind, NodeSource as _, TokenWriter, TypedBody,
+        };
+        let conn = Connection::open_in_memory().expect("SQLite");
+        conn.execute_batch(crate::schema::SCHEMA).expect("schema");
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let missing = NodeId([47; 32]);
+        let mut body = TokenWriter::new();
+        body.child(missing.child_ref());
+        let first = staging
+            .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
+            .expect("first root");
+        let bytes = &staging.nodes()[&first].bytes;
+        conn.execute(
+            "INSERT INTO blobs VALUES (?1, ?2, 1)",
+            rusqlite::params![first.to_hex(), bytes.as_ref()],
+        )
+        .expect("first root");
+        let later = NodeId([0; 32]);
+        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("foreign corruption");
+        conn.execute("INSERT INTO blobs VALUES (?1, x'00', 7)", [later.to_hex()])
+            .expect("corrupt later root");
+        let roots = [first, later];
+        let walk = |limits: &DecodeLimits| {
+            super::super::graph::walk_roots(&conn, &roots, limits).expect("read")
+        };
+        let limits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+        assert_eq!(walk(&limits), Err(GraphRefusal::MissingNode(missing)));
+        assert_eq!(
+            walk(&DecodeLimits { nodes: 0, ..limits }),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::Nodes,
+                actual: 1,
+                limit: 0
+            })
+        );
+        assert_eq!(
+            walk(&DecodeLimits {
+                total_bytes: 0,
+                ..limits
+            }),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::TotalBytes,
+                actual: bytes.len() as u64,
+                limit: 0
+            })
+        );
+        conn.execute(
+            "INSERT INTO blobs VALUES (?1, x'00', 1)",
+            [missing.to_hex()],
+        )
+        .expect("corrupt descendant");
+        assert_eq!(walk(&limits), Err(GraphRefusal::HashMismatch(missing)));
+        assert_eq!(
+            walk(&DecodeLimits { nodes: 1, ..limits }),
+            Err(GraphRefusal::DecodeLimit {
+                dimension: DecodeDimension::Nodes,
+                actual: 2,
+                limit: 1
+            })
+        );
+        conn.execute(
+            "UPDATE blobs SET encoding = 9 WHERE hash = ?1",
+            [missing.to_hex()],
+        )
+        .expect("corrupt encoding");
+        let expected = GraphRefusal::Backend(lash_durable::StoreFailure {
+            kind: lash_durable::StoreFailureKind::Corrupt,
+            message: "stored blob encoding `9` does not decode".into(),
+        });
+        assert_eq!(
+            walk(&DecodeLimits { nodes: 1, ..limits }),
+            Err(expected.clone())
+        );
+        // Graph-only readers preserve the same encoding refusal, without
+        // asking SQLite to convert a skipped opaque payload to a blob.
+        conn.execute(
+            "UPDATE blobs SET content = 'not a blob' WHERE hash = ?1",
+            [missing.to_hex()],
+        )
+        .expect("foreign payload");
+        assert!(
+            matches!(super::super::graph::graph_closure(&conn, first, &limits).expect("read"), Err(refusal) if refusal == expected)
+        );
+        conn.execute(
+            "UPDATE blobs SET encoding = 0 WHERE hash = ?1",
+            [missing.to_hex()],
+        )
+        .expect("opaque descendant");
+        let closure = super::super::graph::graph_closure(&conn, first, &limits)
+            .expect("read")
+            .expect("graph-only closure");
+        assert_eq!(
+            closure.fetch(&missing).expect("opaque identity").encoding,
+            BlobEncoding::Opaque
+        );
+        assert!(
+            closure
+                .fetch(&missing)
+                .expect("opaque identity")
+                .bytes
+                .is_empty()
+        );
+        assert!(
+            super::super::graph::walk_roots(&conn, &[first], &limits).is_err(),
+            "a full reader must still convert the opaque payload"
+        );
+    }
+
     #[test]
     fn negative_record_identity_is_corruption() {
         let conn = Connection::open_in_memory().expect("open records");

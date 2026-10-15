@@ -131,6 +131,15 @@ lash_store_sql::statements! {
         stored_nodes = "SELECT hash, content, encoding FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
+        /// One bounded frontier of `[hash, read_opaque_body]` requests.
+        /// Graph-only reads retain opaque identities without their payloads.
+        hydration_nodes = "SELECT stored.hash,
+             CASE WHEN json_extract(wanted.value, '$[1]') OR stored.encoding <> 0
+                  THEN stored.content ELSE x'' END,
+             stored.encoding
+             FROM json_each(?1) AS wanted JOIN blobs AS stored
+               ON stored.hash = json_extract(wanted.value, '$[0]')";
+
         /// The one-row template for bounded graph-body VALUES batches.
         /// Graph encoding is fixed at 1; only digests and bytes are bound.
         insert_blobs = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)
@@ -258,28 +267,6 @@ fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
         1 => Ok(BlobEncoding::Graph),
         other => Err(corrupt("blob encoding", &other.to_string())),
     }
-}
-
-/// One stored blob: its bytes and encoding.
-fn stored_blob(tx: &Connection, hash: &str) -> GraphAnswer<Option<(Vec<u8>, BlobEncoding)>> {
-    let row = tx
-        .prepare_cached(SQL.graph.blob.sql())?
-        .query_row([hash], |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
-        })
-        .optional()?;
-    Ok(match row {
-        None => Ok(None),
-        Some((bytes, encoding)) => encoding_of(encoding).map(|encoding| Some((bytes, encoding))),
-    })
-}
-
-fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEncoding>> {
-    let row = tx
-        .prepare_cached(SQL.graph.blob_encoding.sql())?
-        .query_row([node.to_hex()], |row| row.get::<_, i64>(0))
-        .optional()?;
-    Ok(row.map(encoding_of).transpose())
 }
 
 /// `owner`'s current root, or none when its row is gone or holds none.
@@ -436,6 +423,171 @@ pub(crate) fn install_staged(
     Ok(install(tx, &checked)?.map(|_| ()))
 }
 
+/// A fixed-size read uses one JSON bind, independent of SQLite's variable
+/// limit. Each body statement requests at most this many identities.
+const READ_BATCH_ROWS: usize = 128;
+
+struct ReadNode {
+    encoding: BlobEncoding,
+    bytes: Vec<u8>,
+    children: Result<Vec<NodeId>, GraphRefusal>,
+}
+
+/// Read-local frontier buffers. Fetching discovers the next frontier, but a
+/// node's result is consumed only at its depth-first validation position.
+/// In particular, SQL row order cannot choose the first refusal, and a
+/// prefetched envelope refusal cannot overtake the visited-node budget.
+struct FrontierReader {
+    roots: BTreeSet<NodeId>,
+    pending: BTreeMap<usize, std::collections::VecDeque<NodeId>>,
+    discovered: BTreeSet<NodeId>,
+    fetched: BTreeSet<NodeId>,
+    bodies: BTreeMap<NodeId, GraphAnswer<ReadNode>>,
+    graph_only: bool,
+    read_nodes: u64,
+    read_bytes: u64,
+}
+
+impl FrontierReader {
+    fn new(roots: &[NodeId], graph_only: bool) -> Self {
+        let roots_set: BTreeSet<_> = roots.iter().copied().collect();
+        Self {
+            roots: roots_set.clone(),
+            pending: BTreeMap::from([(0, roots.iter().copied().collect())]),
+            discovered: roots_set,
+            fetched: BTreeSet::new(),
+            bodies: BTreeMap::new(),
+            graph_only,
+            read_nodes: 0,
+            read_bytes: 0,
+        }
+    }
+
+    fn take(
+        &mut self,
+        tx: &Connection,
+        id: NodeId,
+        depth: usize,
+        visited: &BTreeSet<NodeId>,
+        limits: &DecodeLimits,
+    ) -> GraphAnswer<ReadNode> {
+        while !self.fetched.contains(&id) {
+            // Complete earlier frontiers before descending, so an uneven
+            // forest cannot pay one partial batch per depth per root batch.
+            // Read-ahead admits only the remaining decode budget. Once it
+            // is spent, read only the node validation needs: the validator
+            // still chooses the refusal, in its original traversal order.
+            let remaining_nodes = limits.nodes.saturating_sub(self.read_nodes);
+            let remaining_bytes = limits.total_bytes.saturating_sub(self.read_bytes);
+            let level = if remaining_nodes > 0 && remaining_bytes > 0 {
+                self.pending
+                    .first_key_value()
+                    .map_or(depth, |(&level, _)| level.min(depth))
+            } else {
+                depth
+            };
+            let batch_rows = if remaining_bytes == 0 {
+                1
+            } else {
+                usize::try_from(remaining_nodes)
+                    .unwrap_or(usize::MAX)
+                    .clamp(1, READ_BATCH_ROWS)
+            };
+            let mut batch = Vec::with_capacity(batch_rows);
+            // A shared node can first have been discovered at another depth.
+            if level == depth {
+                self.fetched.insert(id);
+                batch.push(id);
+            }
+            if let Some(frontier) = self.pending.get_mut(&level) {
+                while batch.len() < batch_rows {
+                    let Some(next) = frontier.pop_front() else {
+                        break;
+                    };
+                    if !visited.contains(&next) && self.fetched.insert(next) {
+                        batch.push(next);
+                    }
+                }
+                if frontier.is_empty() {
+                    self.pending.remove(&level);
+                }
+            }
+            if batch.is_empty() {
+                continue;
+            }
+            self.read_nodes = self.read_nodes.saturating_add(batch.len() as u64);
+            let wanted: Vec<_> = batch
+                .iter()
+                .map(|node| (node.to_hex(), !self.graph_only || self.roots.contains(node)))
+                .collect();
+            let mut statement = tx.prepare_cached(SQL.sqlite.hydration_nodes.sql())?;
+            let mut rows = statement.query([json_array(&wanted)])?;
+            while let Some(row) = rows.next()? {
+                let hash: String = row.get(0)?;
+                let Some(node) = NodeId::from_hex(&hash) else {
+                    continue;
+                };
+                // Conversion failures, invalid encodings and envelope refusals
+                // belong to this node, not to whichever row SQL returns first.
+                let answer = (|| -> GraphAnswer<ReadNode> {
+                    let graph_child = self.graph_only && !self.roots.contains(&node);
+                    // Graph-only readers used to inspect a child's encoding
+                    // before reading its body. Keep that refusal order too.
+                    let child_encoding = if graph_child {
+                        match encoding_of(row.get(2)?) {
+                            Ok(encoding) => Some(encoding),
+                            Err(refusal) => return Ok(Err(refusal)),
+                        }
+                    } else {
+                        None
+                    };
+                    let bytes = row.get::<_, Vec<u8>>(1)?;
+                    let encoding = match child_encoding {
+                        Some(encoding) => encoding,
+                        None => match encoding_of(row.get(2)?) {
+                            Ok(encoding) => encoding,
+                            Err(refusal) => return Ok(Err(refusal)),
+                        },
+                    };
+                    let children = match encoding {
+                        BlobEncoding::Opaque => Ok(Vec::new()),
+                        BlobEncoding::Graph => check_envelope(&bytes, node, limits)
+                            .map(|envelope| envelope.children.iter().collect()),
+                    };
+                    Ok(Ok(ReadNode {
+                        encoding,
+                        bytes,
+                        children,
+                    }))
+                })();
+                if let Ok(Ok(body)) = &answer {
+                    self.read_bytes = self.read_bytes.saturating_add(body.bytes.len() as u64);
+                    if self.graph_only
+                        && !self.roots.contains(&node)
+                        && body.encoding == BlobEncoding::Opaque
+                    {
+                        self.read_nodes = self.read_nodes.saturating_sub(1);
+                    }
+                    if let Ok(children) = &body.children {
+                        for child in children.iter().rev() {
+                            if self.discovered.insert(*child)
+                                && (self.roots.contains(child)
+                                    || immutable_closure(*child).is_none())
+                            {
+                                self.pending.entry(level + 1).or_default().push_back(*child);
+                            }
+                        }
+                    }
+                }
+                self.bodies.insert(node, answer);
+            }
+        }
+        self.bodies
+            .remove(&id)
+            .unwrap_or(Ok(Err(GraphRefusal::MissingNode(id))))
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     pub(super) static WALK_COUNTS: std::cell::RefCell<(u64, BTreeMap<NodeId, u64>)> = const { std::cell::RefCell::new((0, BTreeMap::new())) };
@@ -451,10 +603,11 @@ fn walk_within(
     WALK_COUNTS.with_borrow_mut(|counts| counts.0 += 1);
     let mut nodes = BTreeMap::new();
     // Visit roots in fact order, as the individual walks did.
-    let mut stack: Vec<_> = roots.iter().rev().copied().collect();
+    let mut stack: Vec<_> = roots.iter().rev().map(|id| (*id, 0)).collect();
+    let mut reader = FrontierReader::new(roots, skipped.is_some());
     let mut visited = BTreeSet::new();
     let mut total = 0_u64;
-    while let Some(id) = stack.pop() {
+    while let Some((id, depth)) = stack.pop() {
         if !visited.insert(id) {
             continue;
         }
@@ -498,34 +651,27 @@ fn walk_within(
             }
             continue;
         }
-        // A reader of the graph alone records an opaque blob as opaque and
-        // reads nothing of it.
-        if let Some(skipped) = skipped.as_deref_mut()
-            && !roots.contains(&id)
-        {
-            match stored_encoding(tx, &id)? {
-                Ok(Some(BlobEncoding::Opaque)) => {
-                    skipped.insert(id);
-                    continue;
-                }
-                Ok(_) => {}
-                Err(refusal) => return Ok(Err(refusal)),
-            }
-        }
-        let Some((bytes, encoding)) = (match stored_blob(tx, &id.to_hex())? {
-            Ok(found) => found,
+        let ReadNode {
+            encoding,
+            bytes,
+            children,
+        } = match reader.take(tx, id, depth, &visited, limits)? {
+            Ok(body) => body,
             Err(refusal) => return Ok(Err(refusal)),
-        }) else {
-            return Ok(Err(GraphRefusal::MissingNode(id)));
         };
+        if encoding == BlobEncoding::Opaque
+            && !roots.contains(&id)
+            && let Some(skipped) = skipped.as_deref_mut()
+        {
+            skipped.insert(id);
+            continue;
+        }
         if let Err(refusal) = count(&nodes, &mut total, bytes.len(), limits) {
             return Ok(Err(refusal));
         }
-        if encoding == BlobEncoding::Graph {
-            match check_envelope(&bytes, id, limits) {
-                Ok(envelope) => stack.extend(envelope.children.iter()),
-                Err(refusal) => return Ok(Err(refusal)),
-            }
+        match children {
+            Ok(children) => stack.extend(children.into_iter().map(|child| (child, depth + 1))),
+            Err(refusal) => return Ok(Err(refusal)),
         }
         nodes.insert(
             id,
