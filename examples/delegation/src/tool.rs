@@ -109,7 +109,9 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
             "required": ["task"],
             "additionalProperties": false
         }),
-        json!({ "type": "object", "additionalProperties": true }),
+        // Without `output`, the child may answer any final value, including
+        // prose. A call's explicit output schema still constrains its result.
+        json!({}),
     )
     .with_examples(vec![
         r#"typed = await agents.spawn({ task: "Find the longest line in src/main.rs", output: { line: "str", length: "int" } })?"#.to_string(),
