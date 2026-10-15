@@ -1719,7 +1719,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
         .filter(|call| call.operation != "control.finish")
     {
         assert_eq!(call.operation, "tools.app_lookup");
-        assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Ok);
+        assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Ok {});
     }
     reopened.shutdown().await?;
     Ok(())

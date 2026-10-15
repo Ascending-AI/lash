@@ -165,11 +165,7 @@ impl CellHostLedgers {
                 Some(lash_core::ExecutedCall {
                     result_summary: None,
                     operation: call.operation.to_string(),
-                    outcome: if record.output.is_success() {
-                        lash_core::ExecutedCallOutcome::Ok
-                    } else {
-                        lash_core::ExecutedCallOutcome::Err
-                    },
+                    outcome: lash_core::ExecutedCallOutcome::from(&record.output.outcome),
                     call_id: Some(record.call_id.clone()),
                 })
             })

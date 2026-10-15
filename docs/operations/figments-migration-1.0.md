@@ -18,6 +18,23 @@ Each row is marked:
 - **decision needed:** Figments has to choose first. The choices are listed in
   [Decisions](#decisions).
 
+## Committed cell call verdicts (FIG-6357)
+
+Replace matches on `ExecutedCallOutcome::Err` with
+`ExecutedCallOutcome::Failed { code, message }`, and construct or match success
+as `ExecutedCallOutcome::Ok {}`. The verdict is `Clone` rather than `Copy`
+because failure carries owned text. The stored and wire `outcome`
+member changes in place from `"ok"` / `"err"` to `{"kind":"ok"}` /
+`{"kind":"failed","code":"...","message":"..."}`. `history[N].calls` uses
+this same verdict shape. A cell's mirrored call entries now carry Lash's
+settle failure, including an output-schema refusal of the host's Success;
+render those details directly instead of issuing a read for each card.
+The message is at most 4,096 bytes, cut on a UTF-8 boundary. Call
+`DurableSession::read_tool_call` when the full message or typed cause is needed.
+A cancelled call carries code `cancelled` and its cancellation message.
+Update host mirror decoders with the pin; the pre-1.0 version freeze provides
+no legacy decoder or migration between these development shapes.
+
 ## Restate deployment and configuration
 
 Figments also runs Restate for its own services (control-plane,

@@ -1,8 +1,9 @@
 # Retained parked-run upgrade witnesses
 
-`lashvm/` and `session/` are the original 1.0 SQLite images. Their last
-recording build is `95bc17cfa86757844c2aea97bfbc8243206f39a1`, kernel semantics
-1, helper release 1.0. Keep their database and WAL bytes unchanged.
+`lashvm/` and `session/` are the original pre-cut 1.0 SQLite images. Their
+original recording build is `95bc17cfa86757844c2aea97bfbc8243206f39a1`, kernel semantics
+1, helper release 1.0. Shape re-recordings authorized before the cut are
+listed below; otherwise keep their database and WAL bytes unchanged.
 
 `corpus.json` is an append-only archive of realistic images, grouped by the
 full recording build commit. Each set names its kernel semantics version and
@@ -63,6 +64,26 @@ its turn rows. The orchestrator authorized re-recording `lashvm`, `session`
 and all six images of set `4b1b3a0d68` in place on one build rebased onto
 `origin/main`. The set keeps its id, programs and expected results; every
 re-recorded image resumed to the result it recorded before.
+
+FIG-6357 replaced each executed call's bare outcome with a tagged verdict
+carrying the settle failure's code and bounded message. The orchestrator
+authorized re-recording `lashvm`, `session` and set `4b1b3a0d68`'s
+`pending-tool-python` image in place on one build rebased onto `origin/main`.
+The three kernel images and the `pending-tool-typescript` and
+`saved-declared-read` images remain byte-identical. The set keeps its id and
+programs; only the call outcome members of its session oracles change,
+derived from their own committed records.
+
+The fresh FIG-6357 recording (recorder build tag
+`05d23c0b22fa93f086c4d63227c63ef9797abed5`, including this change's working
+tree) produced `{"ok":true,"wrote":{"x":7}}` for the two TypeScript result
+summaries; the retained set recorded on
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1` expects
+`{"ok":true,"wrote":{"x":7.0}}`. The orchestrator ruled to preserve those
+original byte pairs and summary strings, subject to the retained-image resume
+law. This numeric encoding observation is routed separately; no oracle
+accepts that drift. Every retained image resumes to its previously recorded
+result, with only the new call verdict spelling.
 
 FIG-6293 added `result_summary`, a presentation projection of a call's
 committed ledger record, to each executed call that a cell's committed record

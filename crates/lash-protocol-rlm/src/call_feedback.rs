@@ -265,16 +265,11 @@ pub(crate) fn write_calls_block(
     let mut kept = vec![false; calls.len()];
     let mut kept_count = 0usize;
     let (mut omitted_ok, mut omitted_err) = (0usize, 0usize);
-    let selection = [
-        lash_core::ExecutedCallOutcome::Ok,
-        lash_core::ExecutedCallOutcome::Err,
-    ]
-    .into_iter()
-    .flat_map(|outcome| {
+    let selection = [true, false].into_iter().flat_map(|ok| {
         calls
             .iter()
             .enumerate()
-            .filter(move |(_, call)| call.outcome == outcome)
+            .filter(move |(_, call)| (call.outcome == lash_core::ExecutedCallOutcome::Ok {}) == ok)
             .map(|(index, _)| index)
     });
     for index in selection {
@@ -283,7 +278,7 @@ pub(crate) fn write_calls_block(
             room -= cost;
             kept[index] = true;
             kept_count += 1;
-        } else if calls[index].outcome == lash_core::ExecutedCallOutcome::Ok {
+        } else if calls[index].outcome == (lash_core::ExecutedCallOutcome::Ok {}) {
             omitted_ok += 1;
         } else {
             omitted_err += 1;

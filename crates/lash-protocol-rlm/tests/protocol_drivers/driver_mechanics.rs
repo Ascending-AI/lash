@@ -618,7 +618,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             calls: vec![lash_core::ExecutedCall {
                 result_summary: None,
                 operation: "tools.attachment_tool".to_string(),
-                outcome: lash_core::ExecutedCallOutcome::Ok,
+                outcome: lash_core::ExecutedCallOutcome::Ok {},
                 call_id: Some(lash_core::ToolCallId::fixture("replayed-call")),
             }],
             tool_calls: vec![lash_core::ToolCallRecord {
@@ -980,19 +980,25 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 lash_core::ExecutedCall {
                     result_summary: None,
                     operation: "module.ok".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                    outcome: lash_core::ExecutedCallOutcome::Ok {},
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
                 },
                 lash_core::ExecutedCall {
                     result_summary: None,
                     operation: "module.fail".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Err,
+                    outcome: lash_core::ExecutedCallOutcome::Failed {
+                        code: "tool_failed".into(),
+                        message: "failed but captured".into(),
+                    },
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
                 },
                 lash_core::ExecutedCall {
                     result_summary: None,
                     operation: "module.stop".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Err,
+                    outcome: lash_core::ExecutedCallOutcome::Failed {
+                        code: "cancelled".into(),
+                        message: "cancelled sibling".into(),
+                    },
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),
                 },
             ],
@@ -1110,19 +1116,25 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             lash_core::ExecutedCall {
                 result_summary: None,
                 operation: "module.ok".to_string(),
-                outcome: lash_core::ExecutedCallOutcome::Ok,
+                outcome: lash_core::ExecutedCallOutcome::Ok {},
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
             },
             lash_core::ExecutedCall {
                 result_summary: None,
                 operation: "module.fail".to_string(),
-                outcome: lash_core::ExecutedCallOutcome::Err,
+                outcome: lash_core::ExecutedCallOutcome::Failed {
+                    code: "tool_failed".into(),
+                    message: "failed but captured".into()
+                },
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
             },
             lash_core::ExecutedCall {
                 result_summary: None,
                 operation: "module.stop".to_string(),
-                outcome: lash_core::ExecutedCallOutcome::Err,
+                outcome: lash_core::ExecutedCallOutcome::Failed {
+                    code: "cancelled".into(),
+                    message: "cancelled sibling".into()
+                },
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),
             },
         ]

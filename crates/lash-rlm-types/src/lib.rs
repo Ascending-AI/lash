@@ -31,7 +31,7 @@ impl From<&ExecutedCall> for HistoryExecutedCall {
     fn from(call: &ExecutedCall) -> Self {
         Self {
             operation: call.operation.clone(),
-            outcome: call.outcome,
+            outcome: call.outcome.clone(),
         }
     }
 }
@@ -315,7 +315,7 @@ mod rlm_step_serde_tests {
             calls: vec![lash_sansio::ExecutedCall {
                 result_summary: None,
                 operation: "math.add".to_string(),
-                outcome: lash_sansio::ExecutedCallOutcome::Ok,
+                outcome: lash_sansio::ExecutedCallOutcome::Ok {},
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
             bindings: Default::default(),

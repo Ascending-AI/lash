@@ -784,11 +784,7 @@ fn rlm_exec_response_with_tool_calls(
             } else {
                 format!("tools.{}", record.tool)
             },
-            outcome: if record.output.is_success() {
-                lash_core::ExecutedCallOutcome::Ok
-            } else {
-                lash_core::ExecutedCallOutcome::Err
-            },
+            outcome: lash_core::ExecutedCallOutcome::from(&record.output.outcome),
             call_id: Some(record.call_id.clone()),
         })
         .collect();

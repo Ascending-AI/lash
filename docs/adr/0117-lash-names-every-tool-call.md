@@ -167,7 +167,9 @@ protocol knows beyond the record is an extra field on it or an extra record
 that names it by `call_id`.
 
 A code cell names those records through `ExecutedCall`, which carries the
-source `operation` the cell ran, its `outcome`, and `call_id:
+source `operation` the cell ran, its `outcome` (`Ok {}` or
+`Failed { code, message }`, derived from the settled output, with the message
+cut to a UTF-8 prefix of at most 4,096 bytes), and `call_id:
 Option<ToolCallId>`, the id of the host tool call the dispatch resolved to. It
 is `None` only for a dispatch lash handled itself, with no host tool call. The
 cell's result (`ExecResponse`) and its committed `CellRecord`, which the RLM

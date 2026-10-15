@@ -4,9 +4,12 @@ use crate::{AttachmentRef, ToolCallId, ToolCallRecord};
 ///
 /// `operation` and `outcome` are what the cell ran and how it settled.
 /// `call_id` names the [`ToolCallRecord`] of the host tool call the dispatch
-/// resolved to: that record, keyed by the same id, carries the tool, its
-/// arguments and its settled output, including a failure's code, message and
-/// typed cause. Hosts read it through `DurableSession::read_tool_call`, pairing
+/// resolved to. `outcome` carries that record's settle verdict: success or
+/// its failure code and a UTF-8 prefix of its message, at most
+/// [`ExecutedCallOutcome::MAX_MESSAGE_BYTES`] bytes. A host can render a
+/// mirrored cell's refusal without loading each call body.
+/// The record, keyed by the same id, keeps the tool, arguments, whole message
+/// and typed cause. Hosts read it through `DurableSession::read_tool_call`, pairing
 /// `call_id` with the enclosing transcript entry's turn provenance, or through
 /// `DurableSession::read_cell_tool_calls` for the whole cell.
 /// `None` only for a dispatch lash handled itself,
@@ -39,20 +42,57 @@ pub struct CallResultSummary {
     pub truncated: bool,
 }
 
+/// A cell dispatch's settled verdict, derived from its committed call output.
+/// Failure details have no spelling on a successful verdict.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutedCallOutcome {
-    Ok,
-    Err,
+    Ok {},
+    /// The committed failure's code and bounded message. A cancelled call
+    /// uses code `cancelled` and its recorded cancellation message.
+    Failed {
+        code: String,
+        message: String,
+    },
 }
 
 impl ExecutedCallOutcome {
-    pub fn as_str(self) -> &'static str {
+    /// The fixed byte cap for a call verdict's failure message. The call
+    /// ledger retains the whole message; this projection keeps its longest
+    /// UTF-8 prefix within 4 KiB, without an added omission marker.
+    pub const MAX_MESSAGE_BYTES: usize = 4096;
+
+    /// The short status used in the model's calls block.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Ok => "ok",
-            Self::Err => "err",
+            Self::Ok {} => "ok",
+            Self::Failed { .. } => "err",
+        }
+    }
+}
+
+impl From<&crate::ToolCallOutcome> for ExecutedCallOutcome {
+    fn from(outcome: &crate::ToolCallOutcome) -> Self {
+        let (code, message) = match outcome {
+            crate::ToolCallOutcome::Success(_) => return Self::Ok {},
+            crate::ToolCallOutcome::Failure(failure) => {
+                (failure.code.as_str(), failure.model_text())
+            }
+            // A cancellation has no failure code in the call body. Keep its
+            // message with an explicit cancellation code in this binary verdict.
+            crate::ToolCallOutcome::Cancelled(cancellation) => {
+                ("cancelled", cancellation.message.as_str())
+            }
+        };
+        let mut end = message.len().min(Self::MAX_MESSAGE_BYTES);
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        Self::Failed {
+            code: code.to_owned(),
+            message: message[..end].to_owned(),
         }
     }
 }
@@ -568,6 +608,59 @@ mod tests {
                 .expect("typed failure decodes");
         assert_eq!(round_trip, typed);
         assert_eq!(round_trip.reason, ExecCodeFailureReason::RuntimeStopped);
+    }
+
+    /// FIG-6357: verdict messages keep the longest UTF-8 prefix within
+    /// their byte cap; the committed failure remains whole.
+    #[test]
+    fn a_call_verdict_caps_failure_text_on_a_character_boundary() {
+        let cap = ExecutedCallOutcome::MAX_MESSAGE_BYTES;
+        for (message, expected) in [
+            ("a".repeat(cap), "a".repeat(cap)),
+            (
+                format!("{}éafter", "a".repeat(cap - 1)),
+                "a".repeat(cap - 1),
+            ),
+            (
+                format!("{}🦀after", "a".repeat(cap - 2)),
+                "a".repeat(cap - 2),
+            ),
+            (
+                format!("{}éafter", "a".repeat(cap - 2)),
+                format!("{}é", "a".repeat(cap - 2)),
+            ),
+        ] {
+            let output =
+                crate::ToolCallOutcome::Failure(crate::ToolFailure::new("refused", &message));
+            let verdict = ExecutedCallOutcome::from(&output);
+            assert_eq!(
+                verdict,
+                ExecutedCallOutcome::Failed {
+                    code: "refused".into(),
+                    message: expected,
+                }
+            );
+            let crate::ToolCallOutcome::Failure(failure) = output else {
+                unreachable!()
+            };
+            assert_eq!(failure.message, message, "the ledger message is unchanged");
+            let encoded = serde_json::to_value(&verdict).expect("encode verdict");
+            assert_eq!(
+                serde_json::from_value::<ExecutedCallOutcome>(encoded).expect("decode verdict"),
+                verdict
+            );
+        }
+        for malformed in [
+            serde_json::json!({"kind": "ok", "message": "stray"}),
+            serde_json::json!({"kind": "failed", "code": "missing_message"}),
+            serde_json::json!("err"),
+            serde_json::json!("ok"),
+        ] {
+            assert!(
+                serde_json::from_value::<ExecutedCallOutcome>(malformed.clone()).is_err(),
+                "{malformed}"
+            );
+        }
     }
 
     fn retained(witness: &str) -> crate::RetainedValue {

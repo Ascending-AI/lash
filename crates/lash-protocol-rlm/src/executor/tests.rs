@@ -612,11 +612,11 @@ async fn a_tool_loop_runs_each_call_once_and_records_it() {
         response
             .calls
             .iter()
-            .map(|call| (call.operation.as_str(), call.outcome))
+            .map(|call| (call.operation.as_str(), call.outcome.clone()))
             .collect::<Vec<_>>(),
         [
-            vec![("echo.say", lash_core::ExecutedCallOutcome::Ok); 3],
-            vec![("control.finish", lash_core::ExecutedCallOutcome::Ok)],
+            vec![("echo.say", lash_core::ExecutedCallOutcome::Ok {}); 3],
+            vec![("control.finish", lash_core::ExecutedCallOutcome::Ok {})],
         ]
         .concat(),
         "the three calls, then the control call that ended the cell"
@@ -699,13 +699,16 @@ async fn a_cell_resumes_from_its_park_after_its_node_dies() {
         response
             .calls
             .iter()
-            .map(|call| call.outcome)
+            .map(|call| call.outcome.clone())
             .collect::<Vec<_>>(),
         vec![
-            lash_core::ExecutedCallOutcome::Ok,
-            lash_core::ExecutedCallOutcome::Err,
+            lash_core::ExecutedCallOutcome::Ok {},
+            lash_core::ExecutedCallOutcome::Failed {
+                code: "tool_interrupted".into(),
+                message: "tool was interrupted by a runtime restart; it may or may not have taken effect, and may still be running.".into(),
+            },
             // The control call that ended the cell.
-            lash_core::ExecutedCallOutcome::Ok
+            lash_core::ExecutedCallOutcome::Ok {}
         ]
     );
 }

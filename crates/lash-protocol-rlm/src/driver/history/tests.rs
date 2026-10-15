@@ -274,13 +274,16 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                         truncated: false,
                     }),
                     operation: "module.ok".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok,
+                    outcome: lash_core::ExecutedCallOutcome::Ok {},
                     call_id: Some(lash_core::ToolCallId::fixture("module-ok")),
                 },
                 lash_core::ExecutedCall {
                     result_summary: None,
                     operation: "module.fail".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Err,
+                    outcome: lash_core::ExecutedCallOutcome::Failed {
+                        code: "tool_failed".into(),
+                        message: "failed".into(),
+                    },
                     call_id: None,
                 },
             ],

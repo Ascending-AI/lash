@@ -4,9 +4,12 @@ fn call(operation: &str, ok: bool, id: &str, text: Option<&str>) -> lash_core::E
     lash_core::ExecutedCall {
         operation: operation.to_string(),
         outcome: if ok {
-            lash_core::ExecutedCallOutcome::Ok
+            lash_core::ExecutedCallOutcome::Ok {}
         } else {
-            lash_core::ExecutedCallOutcome::Err
+            lash_core::ExecutedCallOutcome::Failed {
+                code: "tool_failed".into(),
+                message: "failed".into(),
+            }
         },
         call_id: Some(lash_core::ToolCallId::fixture(id)),
         result_summary: text.map(|text| lash_core::CallResultSummary {

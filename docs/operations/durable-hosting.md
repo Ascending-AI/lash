@@ -1193,7 +1193,15 @@ message naming the tool and mismatch, and
 `ToolFailureCause::Declaration { refusal: DeclarationRefusal::OutputValueMismatch { .. } }`.
 The host's original answer does not establish the committed outcome.
 
-For a cell, take `call_id` from its `ExecutedCall` and `turn_id` from the
+Each committed cell's `ExecutedCall.outcome` is an
+`ExecutedCallOutcome::Ok {}` or `Failed { code, message }`, derived from that same
+settled output. A mirrored cell therefore has the refusal reason without
+another read per card. The message keeps the longest UTF-8 prefix within
+`ExecutedCallOutcome::MAX_MESSAGE_BYTES` (4,096 bytes); the ledger retains the
+whole message and typed cause. A cancelled call is failed with code
+`cancelled` and its recorded cancellation message.
+
+To read those full details, take `call_id` from `ExecutedCall` and `turn_id` from the
 enclosing transcript entry's provenance. `read_cell_tool_calls(turn_id,
 &cell.calls)` reads all of that cell's host call records in order. These
 reads use the retained call ledger and work through a cold durable handle;

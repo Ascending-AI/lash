@@ -220,7 +220,6 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     let [call] = cell.calls.as_slice() else {
         panic!("one executed call: {:?}", cell.calls);
     };
-    assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Err);
     let call_id = call.call_id.as_ref().expect("host call id");
     let crate::ToolCallRead::Settled { record } = durable
         .read_tool_call(&crate::TurnToolCallRef {
@@ -240,6 +239,15 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     let lash_core::ToolCallOutcome::Failure(failure) = &record.output.outcome else {
         panic!("lash refused the host's Success: {:?}", record.output);
     };
+    assert_eq!(
+        serde_json::to_value(&call.outcome)?,
+        serde_json::json!({
+            "kind": "failed",
+            "code": failure.code,
+            "message": failure.message,
+        }),
+        "FIG-6357: the cell carries the settle refusal without a second read"
+    );
     assert_eq!(failure.code, "tool_outcome_not_declared");
     assert!(failure.message.contains("tool `search`"), "{failure:?}");
     assert!(failure.message.contains("/diagnostics"), "{failure:?}");

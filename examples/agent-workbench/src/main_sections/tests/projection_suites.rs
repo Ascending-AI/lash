@@ -125,13 +125,16 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             lash::persistence::ExecutedCall {
                 result_summary: None,
                 operation: "durable.success".to_string(),
-                outcome: lash::persistence::ExecutedCallOutcome::Ok,
+                outcome: lash::persistence::ExecutedCallOutcome::Ok {},
                 call_id: None,
             },
             lash::persistence::ExecutedCall {
                 result_summary: None,
                 operation: "durable.failure".to_string(),
-                outcome: lash::persistence::ExecutedCallOutcome::Err,
+                outcome: lash::persistence::ExecutedCallOutcome::Failed {
+                    code: "tool_failed".into(),
+                    message: "failed".into(),
+                },
                 call_id: None,
             },
         ],

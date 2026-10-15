@@ -135,7 +135,10 @@ impl DurableSession {
     /// and typed `cause` from this record.
     ///
     /// For a cell's [`ExecutedCall`](crate::persistence::ExecutedCall), pair
-    /// its `call_id` with the enclosing transcript entry's turn provenance,
+    /// its `outcome` already carries the failure code and up to 4 KiB of its
+    /// message, so mirrored cells can render refusals without another read.
+    /// To read the full message and typed cause, pair its `call_id` with
+    /// the enclosing transcript entry's turn provenance,
     /// or read the whole cell through [`Self::read_cell_tool_calls`].
     pub async fn read_tool_call(
         &self,

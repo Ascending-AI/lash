@@ -208,9 +208,9 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
             .iter()
             .map(|call| ChatTool {
                 operation: call.operation.clone(),
-                status: match call.outcome {
-                    lash::persistence::ExecutedCallOutcome::Ok => "success",
-                    lash::persistence::ExecutedCallOutcome::Err => "failure",
+                status: match &call.outcome {
+                    lash::persistence::ExecutedCallOutcome::Ok {} => "success",
+                    lash::persistence::ExecutedCallOutcome::Failed { .. } => "failure",
                 }
                 .into(),
             })
