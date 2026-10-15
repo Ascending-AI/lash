@@ -5,10 +5,17 @@
 //! authorities here govern writes. Hosts and plugins read
 //! [`crate::process::ObservedProcess`] through `processes()` or their
 //! runtime-provided services instead.
+//!
+//! [`Durable`] explicitly encodes tool values, outputs, failures, cancellations,
+//! controls and call records, process observations, changes, change pages and
+//! event reads. It preserves the internal trust envelope for persistence and
+//! trusted relays. Public JSON uses the value or process projection methods.
+//! [`DurableSerialize`] lets hosts opt their own containers into that format.
 pub use lash_core::{Durable, ProcessAuthorityReads};
 pub use lash_core_store::checkpoint_graph::{
     DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
 };
+pub use lash_sansio::DurableSerialize;
 
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core::{

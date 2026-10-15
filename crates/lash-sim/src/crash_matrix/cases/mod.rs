@@ -231,9 +231,9 @@ pub async fn outcome(world: &World, process: &ProcessId) -> Option<Value> {
         .get_process(process)
         .await
         .ok()??;
-    record
-        .terminal()
-        .and_then(|terminal| serde_json::to_value(terminal.clone().into_await_output()).ok())
+    record.terminal().and_then(|terminal| {
+        serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).ok()
+    })
 }
 
 /// The types of `process`'s events, oldest first.

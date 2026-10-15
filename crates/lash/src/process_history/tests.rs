@@ -501,3 +501,105 @@ impl Fixture {
             .expect("commit the terminal effect history");
     }
 }
+
+/// FIG-6353: trusted relays can encode every change and its page without
+/// reconstructing the decoder's wire shape in host code.
+#[tokio::test]
+async fn durable_change_page_round_trips_upsert_and_tombstone() {
+    use lash_core::facade_support::{
+        ObservedProcessChange, ObservedProcessChangeKind, ProcessWorkObserver,
+    };
+    let fixture = Fixture::new("durable-change-page").await;
+    fixture
+        .registry
+        .complete_process(
+            &fixture.process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({"$lash_tool_value": "foreign", "answer": 42}),
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(&fixture.process_id),
+        )
+        .await
+        .expect("complete process");
+    let process = ProcessWorkObserver::new(fixture.registry.clone())
+        .process(&fixture.process_id)
+        .await
+        .expect("read")
+        .expect("retained");
+    let page = crate::ChangePage {
+        changes: vec![
+            ObservedProcessChange {
+                cursor: lash_core::ProcessChangeCursor::from_store_sequence(7),
+                kind: ObservedProcessChangeKind::Upsert {
+                    process: Box::new(process),
+                },
+            },
+            ObservedProcessChange {
+                cursor: lash_core::ProcessChangeCursor::from_store_sequence(8),
+                kind: ObservedProcessChangeKind::Deleted {
+                    tombstone: lash_core::ProcessTombstone {
+                        process_id: fixture.process_id.clone(),
+                        terminal_label: lash_core::RetiredProcessStatus::Completed,
+                        pruned_at_ms: 123,
+                        pruned_change_seq: 8,
+                    },
+                },
+            },
+        ],
+        next: lash_core::ProcessChangeCursor::from_store_sequence(8),
+        retained_after: Some(lash_core::ProcessChangeCursor::from_store_sequence(3)),
+    };
+    for change in &page.changes {
+        let encoded = serde_json::to_value(lash_core::Durable(change)).expect("encode change");
+        let decoded: ObservedProcessChange =
+            serde_json::from_value(encoded).expect("decode change");
+        assert_eq!(&decoded, change);
+    }
+    let encoded = serde_json::to_value(lash_core::Durable(&page)).expect("encode page");
+    assert_eq!(encoded["changes"][0]["kind"], "upsert");
+    assert_eq!(encoded["changes"][1]["kind"], "deleted");
+    let decoded: crate::ChangePage<ObservedProcessChange, lash_core::ProcessChangeCursor> =
+        serde_json::from_value(encoded).expect("decode page");
+    assert_eq!(decoded, page);
+}
+
+/// FIG-6353: encoding an events read retains full facts, lite metadata,
+/// retention outcomes and the next-page continuation accepted by its decoder.
+#[tokio::test]
+async fn durable_events_read_round_trips_with_next_page() {
+    let fixture = Fixture::new("durable-events-read").await;
+    fixture.commit_outcome(1).await;
+    fixture.commit_outcome(2).await;
+    for mode in [ProcessEventQueryMode::Full, ProcessEventQueryMode::Lite] {
+        let read = read_events(
+            &fixture.registry,
+            ProcessHistoryContinuation::start(fixture.process_id.clone()),
+            std::num::NonZeroUsize::new(1).expect("nonzero"),
+            mode,
+        )
+        .await
+        .expect("read events");
+        let ProcessEventReadOutcome::Retained(page) = &read.outcome else {
+            panic!("retained")
+        };
+        assert!(matches!(page.more, ProcessEventPageMore::More { .. }));
+        let encoded = serde_json::to_value(lash_core::Durable(&read)).expect("encode read");
+        let decoded: ProcessEventsRead = serde_json::from_value(encoded).expect("decode read");
+        assert_eq!(decoded.outcome, read.outcome);
+        assert_eq!(decoded.next, read.next);
+    }
+    let read = ProcessEventsRead {
+        outcome: ProcessEventReadOutcome::NoLongerRetained(
+            ProcessEventHistoryRetention::Released {
+                released_through: 2,
+            },
+        ),
+        next: ProcessHistoryContinuation::after(fixture.process_id, 2),
+    };
+    let decoded: ProcessEventsRead = serde_json::from_value(
+        serde_json::to_value(lash_core::Durable(&read)).expect("encode retention"),
+    )
+    .expect("decode retention");
+    assert_eq!(decoded.outcome, read.outcome);
+    assert_eq!(decoded.next, read.next);
+}

@@ -98,6 +98,7 @@ pub struct AssembledTurn {
     #[serde(default)]
     pub llm_calls: Vec<crate::LlmCallRecord>,
     #[serde(default)]
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     pub tool_calls: Vec<ToolCallRecord>,
     /// Outputs the turn's code cells retained out of history (FIG-1643):
     /// history keeps each one's witness and reference, and the turn's commit
@@ -298,6 +299,7 @@ pub enum TurnEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         output: crate::ToolCallOutput,
         duration_ms: u64,
         /// Graph key of the enclosing code block, when this tool call ran

@@ -180,10 +180,24 @@ pub struct ToolResultCheckInput {
 /// and it runs through the result transforms and after-checks like a body
 /// result.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(remote = "Self")]
 pub struct CachedToolSuccess {
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     pub value: crate::ToolValue,
     pub view: Option<crate::ToolView>,
     pub projection_value: Option<serde_json::Value>,
+}
+
+impl lash_sansio::DurableSerialize for CachedToolSuccess {
+    fn serialize_durable<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CachedToolSuccess {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::deserialize(deserializer)
+    }
 }
 
 impl CachedToolSuccess {
@@ -210,11 +224,13 @@ impl CachedToolSuccess {
 pub enum BeforeToolDecision {
     Allow,
     /// Serve this success instead of running the body.
-    Cached(CachedToolSuccess),
+    Cached(#[serde(serialize_with = "lash_sansio::durable_serde::serialize")] CachedToolSuccess),
     /// Fail the call.
-    Deny(crate::ToolFailure),
+    Deny(#[serde(serialize_with = "lash_sansio::durable_serde::serialize")] crate::ToolFailure),
     /// Cancel the call.
-    Cancel(crate::ToolCancellation),
+    Cancel(
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")] crate::ToolCancellation,
+    ),
     /// Fail the call and stop the owning logical Run.
     AbortRun(PluginAbort),
 }
@@ -227,8 +243,10 @@ pub enum BeforeToolDecision {
 pub enum AfterToolDecision {
     #[default]
     Allow,
-    Deny(crate::ToolFailure),
-    Cancel(crate::ToolCancellation),
+    Deny(#[serde(serialize_with = "lash_sansio::durable_serde::serialize")] crate::ToolFailure),
+    Cancel(
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")] crate::ToolCancellation,
+    ),
     AbortRun(PluginAbort),
 }
 

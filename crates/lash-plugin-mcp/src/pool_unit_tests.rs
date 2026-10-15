@@ -1822,9 +1822,10 @@ async fn mcp_law_tool_error_preserves_cause_and_attachment_roots() {
     assert_eq!(raw.to_json_value()["kind"], "tool_error");
     let roots = raw.attachments();
     assert_eq!(roots.len(), 1, "only the retained image is a typed root");
-    let reloaded: lash_core::ToolCallOutput =
-        serde_json::from_value(serde_json::to_value(&output).expect("recorded output"))
-            .expect("replayed output");
+    let reloaded: lash_core::ToolCallOutput = serde_json::from_value(
+        serde_json::to_value(lash_core::Durable(&output)).expect("recorded output"),
+    )
+    .expect("replayed output");
     let lash_core::ToolCallOutcome::Failure(failure) = reloaded.outcome else {
         panic!("replay preserves failure");
     };

@@ -405,6 +405,7 @@ pub enum RuntimeEffectCommand {
         tool_name: String,
         render: Option<crate::RecordedRender>,
         args: serde_json::Value,
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         output: Box<crate::ToolCallOutput>,
     },
     Process {
@@ -867,6 +868,7 @@ pub enum ProcessEffectOutcome {
     Await {
         // Keep the full terminal record while bounding every process outcome
         // carried through the recursive effect executor.
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         output: Box<ProcessAwaitOutput>,
     },
     Cancel {
@@ -890,6 +892,7 @@ pub struct ToolAttemptEffectOutcome {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolAttemptLaunch {
     Done {
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         record: Box<crate::ToolCallRecord>,
         intents: crate::ToolIntents,
     },

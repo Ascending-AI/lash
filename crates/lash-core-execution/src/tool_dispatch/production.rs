@@ -94,13 +94,16 @@ struct Prepared {
     input: CallInput,
     original_args: Option<serde_json::Value>,
     call: PreparedToolCall,
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     failure: Option<crate::ToolFailure>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Captured {
     check_phase: Option<crate::plugin::ControlPhaseDeadline>,
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     original: Option<ToolCallOutput>,
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     output: ToolCallOutput,
     occurrence: crate::plugin::ToolHookOccurrence,
     intents: ToolIntents,

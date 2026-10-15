@@ -281,7 +281,7 @@ async fn prove(tool: bool, denied: bool) {
         recorded["outcome"]
     );
     assert_eq!(
-        serde_json::to_value(&replay.result.tool_calls).unwrap(),
+        serde_json::to_value(lash_core::Durable(&replay.result.tool_calls)).unwrap(),
         recorded["tool_calls"]
     );
     assert_eq!(

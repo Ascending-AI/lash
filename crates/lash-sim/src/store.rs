@@ -632,7 +632,7 @@ impl ModelStore {
                         "kind": "tool_attempt",
                         "local_executor_called": true,
                     },
-                    "runtime_tool_output": tool_output,
+                    "runtime_tool_output": lash_core::Durable(&tool_output),
                     "runtime_tool_record": {
                         "call_id": lash_core::ToolCallId::fixture(&event.boundary_id),
                         "tool": tool_name,
@@ -640,7 +640,7 @@ impl ModelStore {
                             "boundary_id": event.boundary_id,
                             "session": event.actor_alias,
                         },
-                        "output": tool_output,
+                        "output": lash_core::Durable(&tool_output),
                     },
                 })
             }
@@ -859,7 +859,7 @@ impl ModelStore {
                     "durable_key": durable_key,
                     "session": event.actor_alias,
                 },
-                "output": lash_core::ToolCallOutput::success(result),
+                "output": lash_core::Durable(&lash_core::ToolCallOutput::success(result)),
             },
         })
     }

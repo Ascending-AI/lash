@@ -583,7 +583,8 @@ async fn result_checks_without_a_decision_record_publish_no_state_before_settlem
                 })
             );
             let restored: crate::ToolFailure =
-                serde_json::from_value(serde_json::to_value(&failure).unwrap()).unwrap();
+                serde_json::from_value(serde_json::to_value(crate::Durable(&failure)).unwrap())
+                    .unwrap();
             assert_eq!(
                 restored.cause, failure.cause,
                 "the host receives a typed refusal"

@@ -158,6 +158,20 @@ file, each as a node of its own
 
 ## Process retention and projection
 
+Process observations, terminals, lifecycle states and events encode only through
+`lash::persistence::Durable(&record)` when relaying trusted records. The same
+opt-in covers `ObservedProcessChange`, its `ChangePage` and `ProcessEventsRead`;
+remove host-written serializers for those containers. Their existing decoders
+and encoded shapes are unchanged.
+
+`ToolValue`, `ToolCallOutcome`, `ToolCallOutput`, `ToolCallRecord`, `ToolFailure`,
+`ToolCancellation`, `TurnControl`, `ToolControl`, `CachedToolSuccess` and `ProcessAwaitOutput` no
+longer implement plain `Serialize`. Use `Durable` for persistence and trusted
+transport. Workflow results and displayed JSON use `to_json_value()`,
+`value_for_projection()` or the process `projection()`; model presentation uses
+`ModelToolReturn::from_output()`. The compiler now refuses implicit tool-value
+trust-envelope serialization as well as implicit process-record serialization.
+
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
 | [ ] | `apps/lash-runtime/src/main.rs:669` | `spawn_terminal_process_prune` calls `prune_terminal_process_scopes` on an interval. | That function is gone; the host schedules `core.processes().prune(cutoff_epoch_ms, filter, watermark)`. Supply the projector's acknowledged `ProjectionWatermark::UpTo` or explicitly `NoProjector`, retain rows through outstanding delivery/reconciliation and await horizons, and persist each start-key binding before pruning. Check `live_until_descendants` when the product needs subtree quiescence. | contract change |

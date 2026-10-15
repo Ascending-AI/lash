@@ -468,6 +468,7 @@ pub enum SessionStreamEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
+        #[serde(serialize_with = "crate::durable_serde::serialize")]
         output: crate::ToolCallOutput,
     },
     #[serde(rename = "tool_call_start")]
@@ -638,6 +639,7 @@ pub struct CompletionCandidate {
     pub iteration: usize,
     pub call_id: crate::ToolCallId,
     pub tool_name: String,
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub control: crate::TurnControl,
 }
 

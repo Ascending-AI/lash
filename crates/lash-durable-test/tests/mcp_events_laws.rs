@@ -824,7 +824,8 @@ async fn an_isolated_reaction_runs_each_event_in_its_own_child_once(tier: Tier) 
         .await
         .expect("the child turn ends")
         .expect("its output");
-        let answer = serde_json::to_string(&output).expect("the output serializes");
+        let answer =
+            serde_json::to_string(&lash_core::Durable(&output)).expect("the output serializes");
         assert!(answer.contains("noted"), "{answer}");
     }
     deployment.shutdown().await;

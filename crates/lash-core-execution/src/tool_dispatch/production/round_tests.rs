@@ -44,7 +44,9 @@ fn resolved_finish(
         args: serde_json::json!({}),
         replay: None,
     };
-    let resolution = Resolution::Ok(serde_json::to_value(terminal).expect("a terminal encodes"));
+    let resolution = Resolution::Ok(
+        serde_json::to_value(crate::Durable(&terminal)).expect("a terminal encodes"),
+    );
     let SettledOutput::Completed(material) = resolved_member(&owner, &call, &parked, resolution)
     else {
         panic!("a resolved park completes the call");

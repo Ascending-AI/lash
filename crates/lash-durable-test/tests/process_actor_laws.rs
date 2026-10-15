@@ -181,7 +181,7 @@ impl ProcessEngine for LawEngine {
                 site: None,
             },
             ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
-                "ended": serde_json::to_value(&outcome).map_err(infra)?,
+                "ended": serde_json::to_value(lash_core::Durable(&outcome)).map_err(infra)?,
             })),
             ("await", EngineEvent::ProcessWaitTimedOut { .. }) => {
                 success(json!({ "timed_out": true }))
@@ -390,9 +390,9 @@ impl World {
     /// `process`'s terminal outcome, encoded, once it has one.
     async fn terminal(&self, process: &ProcessId) -> Option<Value> {
         let record = self.record(process).await?;
-        record
-            .terminal()
-            .map(|terminal| serde_json::to_value(terminal.clone().into_await_output()).unwrap())
+        record.terminal().map(|terminal| {
+            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).unwrap()
+        })
     }
 
     async fn actor_state(&self, process: &ProcessId) -> Option<ActorState> {

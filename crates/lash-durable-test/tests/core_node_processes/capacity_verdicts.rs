@@ -86,8 +86,11 @@ impl lash_core::EngineSteps for Saturating {
                     "the saturating body failed on its own",
                 ));
                 lash_core::SettledOutput::Failed(
-                    material(serde_json::to_string(&output).expect("a tool output encodes"))
-                        .failure(KnownFailureReason::Reported, None),
+                    material(
+                        serde_json::to_string(&lash_core::Durable(&output))
+                            .expect("a tool output encodes"),
+                    )
+                    .failure(KnownFailureReason::Reported, None),
                 )
                 .into()
             }

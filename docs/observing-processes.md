@@ -80,6 +80,20 @@ the completion authority and other event facts are preserved.
 observation snapshots, change pages and event pages also have no automatic
 serialization. Hosts explicitly serialize the projection.
 
+Trusted HTTP relays can encode `ObservedProcessChange`,
+`ChangePage<ObservedProcessChange, ProcessChangeCursor>` and `ProcessEventsRead`
+with `Durable(&record)` as well. These encoders retain upserts, tombstones,
+retention outcomes and pagination cursors in the form the existing decoders
+accept; hosts need no mirror wire structs.
+
+`ToolValue`, `ToolCallOutcome`, `ToolCallOutput`, `ToolCallRecord`,
+`ToolFailure`, `ToolCancellation`, `TurnControl`, `ToolControl` and
+`ProcessAwaitOutput` and `CachedToolSuccess` also require `Durable(&record)` for their internal form.
+For public JSON use `ToolValue::to_json_value()`,
+`ToolCallOutput::value_for_projection()` or the process projection methods.
+Failures and cancellations provide `to_json_value()` too. Model content uses
+`ModelToolReturn::from_output()`.
+
 Store implementations and replay fixtures opt into the internal record form
 with `lash::persistence::Durable(&record)`. It retains the existing trust
 envelope, controls and model views; decoding still uses the original record's

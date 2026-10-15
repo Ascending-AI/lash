@@ -491,7 +491,7 @@ pub(crate) fn trace_tool_call_output(
             output
                 .control
                 .as_ref()
-                .and_then(|control| serde_json::to_value(control).ok())
+                .and_then(|control| serde_json::to_value(crate::Durable(control)).ok())
         }),
     }
 }

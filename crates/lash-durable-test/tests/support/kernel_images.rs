@@ -432,7 +432,9 @@ pub async fn resume(image: &images::Image) -> serde_json::Value {
     );
     let end = record
         .terminal()
-        .map(|terminal| serde_json::to_value(terminal.clone().into_await_output()).unwrap())
+        .map(|terminal| {
+            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).unwrap()
+        })
         .unwrap_or_default();
     assert!(
         entered

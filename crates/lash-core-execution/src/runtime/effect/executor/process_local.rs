@@ -28,7 +28,7 @@ async fn await_process_terminal(
 /// answers, in every terminal state. See
 /// `crate::tool_result::tool_output_from_completion_resolution`.
 pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> Resolution {
-    match serde_json::to_value(&output) {
+    match serde_json::to_value(crate::Durable(&output)) {
         Ok(value) => Resolution::Ok(value),
         Err(error) => Resolution::Err(crate::runtime::ExternalCompletionError {
             code: crate::TurnFailureCode::from_wire("process_terminal_encode").into(),

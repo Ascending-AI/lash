@@ -413,7 +413,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 }
 
 fn render_output(output: &ToolCallOutput) -> String {
-    serde_json::to_string(&output.outcome).unwrap()
+    serde_json::to_string(&lash_core::Durable(&output.outcome)).unwrap()
 }
 
 #[derive(Debug)]

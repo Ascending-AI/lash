@@ -759,7 +759,8 @@ fn step_failure(
                 process_id: process.id.clone(),
             },
             MaterialRole::AttemptOutput,
-            serde_json::to_string(&output).expect("an engine step failure encodes"),
+            serde_json::to_string(&lash_core::Durable(&output))
+                .expect("an engine step failure encodes"),
         )
         .failure(KnownFailureReason::Reported, None),
     )

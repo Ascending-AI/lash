@@ -207,6 +207,7 @@ impl<'run> ToolDispatchContext<'run> {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ToolDispatchOutcome {
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     pub record: ToolCallRecord,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,

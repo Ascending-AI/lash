@@ -123,19 +123,25 @@ pub struct ProcessRosterPage {
 /// The host may atomically commit the projection and `cursor` in its own
 /// database, then resume strictly after that cursor following a crash. Lash
 /// provides no transaction spanning its store and the host's database.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ObservedProcessChange {
     pub cursor: ProcessChangeCursor,
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "super::durable_serde::serialize")]
     pub kind: ObservedProcessChangeKind,
 }
 
 /// The current observed process or a pruned process's tombstone.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self", tag = "kind", rename_all = "snake_case")]
 pub enum ObservedProcessChangeKind {
-    Upsert { process: Box<ObservedProcess> },
-    Deleted { tombstone: ProcessTombstone },
+    Upsert {
+        #[serde(serialize_with = "super::durable_serde::serialize")]
+        process: Box<ObservedProcess>,
+    },
+    Deleted {
+        tombstone: ProcessTombstone,
+    },
 }
 
 /// One lifecycle fact of a process's log, as a host observes it. It travels

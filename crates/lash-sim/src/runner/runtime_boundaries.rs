@@ -232,8 +232,8 @@ impl RuntimeBoundaryHarness {
             "tool_name": tool_name,
             "tool_call_id": event.boundary_id,
             "execution_count": execution_count,
-            "runtime_tool_output": record.output,
-            "runtime_tool_record": record,
+            "runtime_tool_output": lash_core::Durable(&record.output),
+            "runtime_tool_record": lash_core::Durable(&record),
             "runtime_effect": {
                 "kind": RuntimeEffectKind::ToolAttempt.as_str(),
                 "controller": RUNTIME_EFFECT_CONTROLLER,
@@ -469,7 +469,7 @@ impl RuntimeBoundaryHarness {
                 "provider_call_id": record.provider_call_id,
                 "tool": record.tool,
                 "args": record.args,
-                "output": record.output,
+                "output": lash_core::Durable(&record.output),
             },
         }))
     }

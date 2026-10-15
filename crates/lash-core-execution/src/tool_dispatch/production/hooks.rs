@@ -35,7 +35,7 @@ impl ProductionToolHandlers<'_> {
             return Ok(vec![AttributedVerdict {
                 callback: host,
                 verdict: BeforeCheckReply::Deny {
-                    cause: cause("tool_failure", failure),
+                    cause: cause("tool_failure", &crate::Durable(failure)),
                 },
             }]);
         }
@@ -59,7 +59,7 @@ impl ProductionToolHandlers<'_> {
                 return Ok(vec![AttributedVerdict {
                     callback: host,
                     verdict: BeforeCheckReply::Deny {
-                        cause: cause("tool_failure", &failure),
+                        cause: cause("tool_failure", &crate::Durable(&failure)),
                     },
                 }]);
             }
@@ -75,10 +75,10 @@ impl ProductionToolHandlers<'_> {
             let verdict = match reply.verdict {
                 BeforeToolDecision::Allow => BeforeCheckReply::Allow,
                 BeforeToolDecision::Deny(failure) => BeforeCheckReply::Deny {
-                    cause: cause("tool_failure", &failure),
+                    cause: cause("tool_failure", &crate::Durable(&failure)),
                 },
                 BeforeToolDecision::Cancel(cancel) => BeforeCheckReply::Cancel {
-                    cause: cause("tool_cancellation", &cancel),
+                    cause: cause("tool_cancellation", &crate::Durable(&cancel)),
                 },
                 BeforeToolDecision::AbortRun(abort) => BeforeCheckReply::AbortRun {
                     cause: cause("plugin_abort", &abort),
@@ -156,7 +156,7 @@ impl ProductionToolHandlers<'_> {
             return Ok(vec![AttributedVerdict {
                 callback: prepared.input.binding.executable,
                 verdict: AfterCheckVerdict::Cancel {
-                    cause: cause("tool_cancellation", cancel),
+                    cause: cause("tool_cancellation", &crate::Durable(cancel)),
                 },
             }]);
         }
@@ -188,7 +188,7 @@ impl ProductionToolHandlers<'_> {
                 return Ok(vec![AttributedVerdict {
                     callback: prepared.input.binding.executable,
                     verdict: AfterCheckVerdict::Deny {
-                        cause: cause("tool_failure", &failure),
+                        cause: cause("tool_failure", &crate::Durable(&failure)),
                     },
                 }]);
             }
@@ -215,11 +215,11 @@ impl ProductionToolHandlers<'_> {
                 verdict: AfterCheckVerdict::Deny {
                     cause: cause(
                         "tool_failure",
-                        &crate::ToolFailure::runtime(
+                        &crate::Durable(&crate::ToolFailure::runtime(
                             crate::ToolFailureClass::Internal,
                             "tool_state_unrecorded",
                             crate::plugin::proposal_failure_message(&error),
-                        ),
+                        )),
                     ),
                 },
             }]);
@@ -234,10 +234,10 @@ impl ProductionToolHandlers<'_> {
                 verdict: match reply.verdict {
                     AfterToolDecision::Allow => AfterCheckVerdict::Allow,
                     AfterToolDecision::Deny(failure) => AfterCheckVerdict::Deny {
-                        cause: cause("tool_failure", &failure),
+                        cause: cause("tool_failure", &crate::Durable(&failure)),
                     },
                     AfterToolDecision::Cancel(cancel) => AfterCheckVerdict::Cancel {
-                        cause: cause("tool_cancellation", &cancel),
+                        cause: cause("tool_cancellation", &crate::Durable(&cancel)),
                     },
                     AfterToolDecision::AbortRun(abort) => AfterCheckVerdict::AbortRun {
                         cause: cause("plugin_abort", &abort),

@@ -960,7 +960,7 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             assert_eq!(plugin_type, "durable-read-plugin");
             assert_eq!(
                 body.as_ref(),
-                &serde_json::json!({"fixture": true, "order": 2, "output": fixture_tool_output()}),
+                &serde_json::json!({"fixture": true, "order": 2, "output": lash_core::Durable(&fixture_tool_output())}),
                 "durable fixture semantic drift: plugin node body changed"
             );
         }
@@ -1088,7 +1088,7 @@ fn fixture_append_nodes() -> Vec<SessionAppendNode> {
         )),
         SessionAppendNode::plugin(
             "durable-read-plugin",
-            serde_json::json!({"fixture": true, "order": 2, "output": fixture_tool_output()}),
+            serde_json::json!({"fixture": true, "order": 2, "output": lash_core::Durable(&fixture_tool_output())}),
         ),
     ]
 }

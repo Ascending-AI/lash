@@ -39,6 +39,7 @@ pub struct CompletedToolCall<I = ()> {
     pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: Value,
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub output: ToolCallOutput,
     pub model_return: ModelToolReturn,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

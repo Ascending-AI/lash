@@ -14,4 +14,6 @@ fn store_event(event: &ObservedProcessEvent) {
     let _ = serde_json::to_value(event);
 }
 
-fn main() {}
+fn main() {
+    let _ = serde_json::to_value(lash::tools::ToolValue::untrusted_json(serde_json::json!(1)));
+}

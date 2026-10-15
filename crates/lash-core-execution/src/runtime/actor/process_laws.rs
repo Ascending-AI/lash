@@ -826,7 +826,8 @@ async fn record(backend: &Backend, process: &ProcessId) -> Result<ProcessRecord,
 /// `process`'s terminal outcome, encoded, once it has one.
 async fn terminal(backend: &Backend, process: &ProcessId) -> Result<Option<Value>, LawBroken> {
     Ok(record(backend, process).await?.terminal().map(|terminal| {
-        serde_json::to_value(terminal.clone().into_await_output()).unwrap_or(Value::Null)
+        serde_json::to_value(crate::Durable(&terminal.clone().into_await_output()))
+            .unwrap_or(Value::Null)
     }))
 }
 

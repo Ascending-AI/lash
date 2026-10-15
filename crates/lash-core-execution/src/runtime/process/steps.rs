@@ -525,7 +525,7 @@ pub fn tool_step_output(
             replace_payload(
                 process,
                 settled,
-                record.and_then(|record| serde_json::to_string(&record).ok()),
+                record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()),
             )
         }
     };
@@ -585,7 +585,7 @@ pub fn tool_step_refused(
     replace_payload(
         process,
         settled,
-        record.and_then(|record| serde_json::to_string(&record).ok()),
+        record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()),
     )
 }
 
@@ -607,7 +607,7 @@ pub fn dynamic_resolution(
             args: call.args.clone(),
             output: crate::ToolCallOutput::success(value),
         });
-    match record.and_then(|record| serde_json::to_string(&record).ok()) {
+    match record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()) {
         Some(text) => SettledOutput::Completed(process_material(process, text)),
         None => SettledOutput::Interrupted,
     }
@@ -694,7 +694,8 @@ pub fn dynamic_decision(
             note: note.clone(),
         }),
     };
-    let text = serde_json::to_string(&crate::ToolCallOutput::failure(failure)).ok()?;
+    let text =
+        serde_json::to_string(&crate::Durable(&crate::ToolCallOutput::failure(failure))).ok()?;
     Some(SettledOutput::Failed(
         process_material(process, text).failure(
             lash_core_store::tool_run::KnownFailureReason::Reported,
@@ -709,7 +710,7 @@ pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> Settled
     let output = settled
         .payload()
         .and_then(|payload| serde_json::from_str::<crate::ToolCallRecord>(payload).ok())
-        .and_then(|record| serde_json::to_string(&record.output).ok());
+        .and_then(|record| serde_json::to_string(&crate::Durable(&record.output)).ok());
     replace_payload(process, settled, output)
 }
 
@@ -735,7 +736,7 @@ pub fn tool_step_resolved(
         args: retained.call.args,
         output,
     };
-    match serde_json::to_string(&record) {
+    match serde_json::to_string(&crate::Durable(&record)) {
         Ok(text) => SettledOutput::Completed(process_material(process, text)),
         Err(_) => SettledOutput::Interrupted,
     }

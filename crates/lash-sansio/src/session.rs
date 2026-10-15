@@ -498,6 +498,7 @@ pub struct ExecResponse {
     pub calls: Vec<ExecutedCall>,
     /// The record of each host tool call the cell made, in execution order.
     /// A `calls` entry references its record by `call_id`.
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub tool_calls: Vec<ToolCallRecord>,
     pub printed_images: Vec<AttachmentRef>,
     /// What the cell resolved to, as history records it. A finish value is

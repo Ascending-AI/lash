@@ -448,7 +448,9 @@ impl Scenario for Drain {
         let end = record
             .as_ref()
             .and_then(|record| record.terminal())
-            .and_then(|terminal| serde_json::to_value(terminal.clone().into_await_output()).ok())
+            .and_then(|terminal| {
+                serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output())).ok()
+            })
             .unwrap_or_default();
         if !end.to_string().contains("\"drained\":true") {
             violations.push(format!("the process did not end with its result: {end}"));

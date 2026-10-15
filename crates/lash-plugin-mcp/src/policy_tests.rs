@@ -1803,7 +1803,7 @@ async fn mcp_law_invalid_arguments_keep_request_class_and_cause() {
     assert_eq!(error.code, "mcp_invalid_arguments");
     assert_eq!(error.source, ToolFailureSource::Plugin);
     let restored: ToolFailure =
-        serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
+        serde_json::from_value(serde_json::to_value(lash_core::Durable(&error)).unwrap()).unwrap();
     assert_eq!(
         restored.raw.unwrap().to_json_value()["kind"],
         "invalid_arguments"
@@ -1830,7 +1830,7 @@ async fn mcp_law_json_rpc_error_keeps_code_and_data() {
     assert_eq!(error.code, "mcp_json_rpc_error");
     assert_eq!(error.source, ToolFailureSource::Tool);
     let restored: ToolFailure =
-        serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
+        serde_json::from_value(serde_json::to_value(lash_core::Durable(&error)).unwrap()).unwrap();
     let cause = restored.raw.unwrap().to_json_value();
     assert_eq!(cause["kind"], "json_rpc");
     assert_eq!(cause["error"]["code"], -32602);

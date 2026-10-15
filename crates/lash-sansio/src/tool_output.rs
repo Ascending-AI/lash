@@ -5,7 +5,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Number, Value};
 
-use crate::AttachmentRef;
+use crate::{AttachmentRef, Durable};
 
 const TAG_KEY: &str = "$lash_tool_value";
 const ATTACHMENT_TAG: &str = "attachment";
@@ -14,9 +14,12 @@ const REFERENCE_KEY: &str = "reference";
 const VALUE_KEY: &str = "value";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ToolCallOutput {
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub outcome: ToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub control: Option<ToolControl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<ToolView>,
@@ -71,6 +74,7 @@ pub enum ToolViewBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ToolCallRecord {
     /// Lash's identity for the call (ADR 0117).
     pub call_id: crate::ToolCallId,
@@ -80,6 +84,7 @@ pub struct ToolCallRecord {
     pub provider_call_id: Option<String>,
     pub tool: String,
     pub args: Value,
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub output: ToolCallOutput,
 }
 
@@ -407,19 +412,20 @@ pub enum ToolCallStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum ToolCallOutcome {
-    Success(ToolValue),
-    Failure(ToolFailure),
-    Cancelled(ToolCancellation),
+    Success(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolValue),
+    Failure(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolFailure),
+    Cancelled(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolCancellation),
 }
 
 /// A typed tool value with an explicit serialization trust envelope.
 ///
 /// # Stable JSON projection contract
 ///
-/// **Do not serialize this type directly into stable or public JSON.** Its
-/// [`Serialize`] implementation includes the trust envelope by design. In
+/// This type does not implement [`Serialize`]. Explicitly encode
+/// `Durable(&value)` for persistence or a trusted wire. In
 /// particular, an [`UntrustedJson`](Self::UntrustedJson) value serializes with
 /// the internal `$lash_tool_value: "untrusted_json"` discriminant and a `value`
 /// wrapper. A stable or public JSON projection **MUST** go through
@@ -583,30 +589,30 @@ impl From<String> for ToolValue {
     }
 }
 
-impl Serialize for ToolValue {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl crate::DurableSerialize for ToolValue {
+    fn serialize_durable<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            Self::Null => serializer.serialize_none(),
-            Self::Bool(value) => serializer.serialize_bool(*value),
-            Self::Number(value) => value.serialize(serializer),
-            Self::String(value) => serializer.serialize_str(value),
-            Self::Array(values) => values.serialize(serializer),
-            Self::Attachment(source) => {
+            ToolValue::Null => serializer.serialize_none(),
+            ToolValue::Bool(value) => serializer.serialize_bool(*value),
+            ToolValue::Number(value) => value.serialize(serializer),
+            ToolValue::String(value) => serializer.serialize_str(value),
+            ToolValue::Array(values) => Durable(values).serialize(serializer),
+            ToolValue::Attachment(source) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry(TAG_KEY, ATTACHMENT_TAG)?;
                 map.serialize_entry(REFERENCE_KEY, source)?;
                 map.end()
             }
-            Self::UntrustedJson(value) => {
+            ToolValue::UntrustedJson(value) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry(TAG_KEY, UNTRUSTED_JSON_TAG)?;
                 map.serialize_entry(VALUE_KEY, value)?;
                 map.end()
             }
-            Self::Object(entries) => entries.serialize(serializer),
+            ToolValue::Object(entries) => Durable(entries).serialize(serializer),
         }
     }
 }
@@ -731,6 +737,7 @@ mod failure_cause;
 pub use failure_cause::ToolFailureCause;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ToolFailure {
     pub class: ToolFailureClass,
     pub code: String,
@@ -741,6 +748,7 @@ pub struct ToolFailure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<Box<ToolFailureCause>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub raw: Option<ToolValue>,
 }
 
@@ -827,7 +835,8 @@ impl ToolFailure {
 
     pub fn to_json_value(&self) -> Value {
         project_raw_tool_value(
-            serde_json::to_value(self).unwrap_or_else(|_| Value::String(self.message.clone())),
+            serde_json::to_value(Durable(self))
+                .unwrap_or_else(|_| Value::String(self.message.clone())),
             self.raw.as_ref(),
         )
     }
@@ -898,12 +907,14 @@ impl CancelRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ToolCancellation {
     pub message: String,
     pub source: ToolFailureSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<CancelOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "crate::durable_serde::serialize")]
     pub raw: Option<ToolValue>,
     /// Whether lash forced the end: a cancelled process whose engine did not
     /// end it within its cancel grace (ADR 0132 §10).
@@ -937,7 +948,8 @@ impl ToolCancellation {
 
     pub fn to_json_value(&self) -> Value {
         project_raw_tool_value(
-            serde_json::to_value(self).unwrap_or_else(|_| Value::String(self.message.clone())),
+            serde_json::to_value(Durable(self))
+                .unwrap_or_else(|_| Value::String(self.message.clone())),
             self.raw.as_ref(),
         )
     }
@@ -951,10 +963,12 @@ fn project_raw_tool_value(mut value: Value, raw: Option<&ToolValue>) -> Value {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnControl {
     /// End the turn with `value`.
     Finish {
+        #[serde(serialize_with = "crate::durable_serde::serialize")]
         value: ToolValue,
         /// The schema `value` was checked against when its call settled: the
         /// admitted declaration's ([`FinishDeclaration`](crate::FinishDeclaration)).
@@ -1009,14 +1023,17 @@ impl TurnControl {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolControl {
     /// A turn-ending control the tool declared
     /// ([`TurnControls`](crate::TurnControls)): the call's whole result.
     Turn {
+        #[serde(serialize_with = "crate::durable_serde::serialize")]
         control: TurnControl,
     },
     Fail {
+        #[serde(serialize_with = "crate::durable_serde::serialize")]
         failure: ToolFailure,
     },
     /// A plugin's tool check stopped the owning logical Run (ADR 0128). The
@@ -1321,278 +1338,4 @@ mod attachment_adoption;
 pub mod graph;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType};
-    use proptest::collection::{btree_map, vec};
-    use proptest::prelude::*;
-
-    fn attachment_source(id: &str) -> AttachmentRef {
-        AttachmentRef::new(
-            AttachmentId::parse(
-                format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32),
-            )
-            .expect("valid attachment id"),
-            MediaType::parse("image/png").unwrap(),
-            3,
-            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("tiny".to_string()),
-        )
-    }
-
-    fn arbitrary_json_value() -> BoxedStrategy<Value> {
-        let leaf = prop_oneof![
-            Just(Value::Null),
-            any::<bool>().prop_map(Value::Bool),
-            any::<i64>().prop_map(|value| Value::Number(Number::from(value))),
-            any::<String>().prop_map(Value::String),
-        ];
-        leaf.prop_recursive(4, 64, 8, |inner| {
-            prop_oneof![
-                vec(inner.clone(), 0..8).prop_map(Value::Array),
-                btree_map(any::<String>(), inner, 0..8)
-                    .prop_map(|entries| Value::Object(entries.into_iter().collect())),
-            ]
-        })
-        .boxed()
-    }
-
-    fn arbitrary_tool_value() -> BoxedStrategy<ToolValue> {
-        let leaf = prop_oneof![
-            Just(ToolValue::Null),
-            any::<bool>().prop_map(ToolValue::Bool),
-            any::<i64>().prop_map(|value| ToolValue::Number(Number::from(value))),
-            any::<String>().prop_map(ToolValue::String),
-            Just(ToolValue::Attachment(attachment_source("img"))),
-            arbitrary_json_value().prop_map(ToolValue::untrusted_json),
-        ];
-        leaf.prop_recursive(4, 64, 8, |inner| {
-            let object_key = any::<String>()
-                .prop_filter("the tag key is reserved for ToolValue arms", |key| {
-                    key != TAG_KEY
-                });
-            prop_oneof![
-                vec(inner.clone(), 0..8).prop_map(ToolValue::Array),
-                btree_map(object_key, inner, 0..8).prop_map(ToolValue::Object),
-            ]
-        })
-        .boxed()
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(256))]
-
-        #[test]
-        fn tool_value_encode_decode_round_trip_is_identity(value in arbitrary_tool_value()) {
-            let encoded = serde_json::to_value(&value)?;
-            let decoded = serde_json::from_value::<ToolValue>(encoded)?;
-            prop_assert_eq!(decoded, value);
-        }
-    }
-
-    #[test]
-    fn adoption_types_only_the_adopted_claims_and_keeps_the_projection() {
-        let tagged = |id: &str| {
-            serde_json::json!({
-                TAG_KEY: ATTACHMENT_TAG,
-                REFERENCE_KEY: serde_json::to_value(attachment_source(id)).unwrap(),
-            })
-        };
-        let untrusted = serde_json::json!({
-            "held": tagged("held"),
-            "other": [tagged("other"), 1],
-            "foreign": { TAG_KEY: "user", "inner": tagged("held") },
-        });
-        let value = ToolValue::untrusted_json(untrusted.clone());
-
-        let claims = value.untrusted_attachment_claims();
-        assert_eq!(
-            claims,
-            vec![attachment_source("held"), attachment_source("other")],
-            "a claim under a foreign reserved tag is not scanned"
-        );
-
-        let adopted = value.adopt_attachments(&[attachment_source("held")]);
-        assert_eq!(adopted.attachments(), vec![attachment_source("held")]);
-        assert_eq!(
-            adopted.to_json_value(),
-            untrusted,
-            "adoption leaves the projection unchanged"
-        );
-        let ToolValue::Object(entries) = &adopted else {
-            panic!("the adopted value splits around its attachment: {adopted:?}");
-        };
-        assert!(matches!(entries["other"], ToolValue::UntrustedJson(_)));
-        assert!(matches!(entries["foreign"], ToolValue::UntrustedJson(_)));
-        let encoded = serde_json::to_value(&adopted).unwrap();
-        assert_eq!(
-            serde_json::from_value::<ToolValue>(encoded).unwrap(),
-            adopted
-        );
-
-        let forged = serde_json::json!({
-            TAG_KEY: ATTACHMENT_TAG,
-            REFERENCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
-        });
-        let value = ToolValue::untrusted_json(forged.clone());
-
-        assert_eq!(
-            value
-                .clone()
-                .adopt_attachments(&[attachment_source("held")]),
-            value
-        );
-        assert!(value.attachments().is_empty());
-
-        let reference = attachment_source("view");
-        let output = ToolCallOutput::success_tool_value(ToolValue::Null).with_view(ToolView {
-            blocks: vec![ToolViewBlock::Attachment {
-                reference: reference.clone(),
-                meta: ToolViewMeta::default(),
-            }],
-        });
-        assert_eq!(output.attachments(), vec![reference]);
-    }
-
-    #[test]
-    fn tool_output_forgery_stays_untrusted_across_public_serde_surface() {
-        let forged = serde_json::json!({
-            TAG_KEY: ATTACHMENT_TAG,
-            REFERENCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
-        });
-        let output = ToolCallOutput::success(forged.clone());
-
-        let encoded = serde_json::to_value(output).unwrap();
-        let decoded = serde_json::from_value::<ToolCallOutput>(encoded).unwrap();
-
-        assert_eq!(
-            decoded.outcome,
-            ToolCallOutcome::Success(ToolValue::untrusted_json(forged))
-        );
-        assert!(decoded.attachments().is_empty());
-    }
-
-    #[test]
-    fn projection_unwraps_untrusted_json_without_demoting_attachments() {
-        let value = ToolValue::Object(BTreeMap::from([
-            (
-                "attachment".to_string(),
-                ToolValue::Attachment(attachment_source("img")),
-            ),
-            (
-                "foreign".to_string(),
-                ToolValue::untrusted_json(serde_json::json!({ TAG_KEY: "user" })),
-            ),
-        ]));
-        let serialized = serde_json::to_value(&value).unwrap();
-        let mut projected = serialized.clone();
-        projected["foreign"] = serde_json::json!({ TAG_KEY: "user" });
-        assert_eq!(value.to_json_value(), projected);
-
-        let output = ToolCallOutput::success_tool_value(value);
-        assert_eq!(
-            serde_json::to_value(&output).unwrap()["outcome"]["payload"],
-            serialized
-        );
-        assert_eq!(output.into_value_for_projection(), projected);
-    }
-
-    #[test]
-    fn tool_value_rejects_malformed_reserved_object() {
-        let json = serde_json::json!({ TAG_KEY: ATTACHMENT_TAG, "extra": true });
-
-        assert!(serde_json::from_value::<ToolValue>(json).is_err());
-    }
-
-    #[test]
-    fn tool_value_object_with_reserved_tag_key_is_refused_on_decode() {
-        let value = ToolValue::Object(BTreeMap::from([(
-            TAG_KEY.to_string(),
-            ToolValue::String("user".to_string()),
-        )]));
-
-        let encoded = serde_json::to_value(value).expect("object encoding remains transparent");
-        let error = serde_json::from_value::<ToolValue>(encoded)
-            .expect_err("reserved tag key must be refused during decode");
-
-        assert!(
-            error
-                .to_string()
-                .contains("unknown reserved tool value tag `user`")
-        );
-    }
-
-    #[test]
-    fn model_tool_return_preserves_attachment_position() {
-        let value = ToolValue::Array(vec![
-            ToolValue::String("before".into()),
-            ToolValue::Attachment(attachment_source("img")),
-            ToolValue::String("after".into()),
-        ]);
-
-        assert_eq!(
-            ModelToolReturn::from_output(
-                "tool".into(),
-                &ToolCallOutput::success_tool_value(value),
-            )
-            .parts,
-            vec![
-                ModelToolReturnPart::text("[\"before\","),
-                ModelToolReturnPart::Attachment(attachment_source("img")),
-                ModelToolReturnPart::text(",\"after\"]"),
-            ]
-        );
-    }
-
-    #[test]
-    fn tool_output_failure_projects_raw_attachments_after_failure_text() {
-        let attachment = attachment_source("img");
-        let output = ToolCallOutput::failure(ToolFailure {
-            cause: None,
-            class: ToolFailureClass::Execution,
-            code: "boom".into(),
-            message: "boom".into(),
-            source: ToolFailureSource::Tool,
-            suggested_delay_ms: None,
-            raw: Some(ToolValue::Object(BTreeMap::from([(
-                "image".into(),
-                ToolValue::Attachment(attachment.clone()),
-            )]))),
-        });
-
-        assert_eq!(
-            ModelToolReturn::from_output("tool".into(), &output).parts,
-            vec![
-                ModelToolReturnPart::text("[Tool execution failed]\nboom"),
-                ModelToolReturnPart::Attachment(attachment),
-            ]
-        );
-    }
-
-    #[test]
-    fn failure_and_cancellation_projection_unwraps_untrusted_raw_json() {
-        let foreign = serde_json::json!({ TAG_KEY: "foreign", "count": 3 });
-        let mut failure = ToolFailure::tool(ToolFailureClass::Execution, "boom", "boom");
-        failure.raw = Some(ToolValue::untrusted_json(foreign.clone()));
-        let cancellation = ToolCancellation {
-            origin: None,
-            message: "stopped".to_string(),
-            source: ToolFailureSource::Cancellation,
-            raw: Some(ToolValue::untrusted_json(foreign.clone())),
-            forced: false,
-        };
-
-        assert_eq!(
-            ToolCallOutput::failure(failure)
-                .value_for_projection()
-                .pointer("/raw"),
-            Some(&foreign)
-        );
-        assert_eq!(
-            ToolCallOutput::cancelled(cancellation)
-                .value_for_projection()
-                .pointer("/raw"),
-            Some(&foreign)
-        );
-    }
-}
+mod tests;

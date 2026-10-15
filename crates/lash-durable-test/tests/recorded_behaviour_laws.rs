@@ -379,7 +379,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .await
         .expect("deadlock watchdog: the redeploying node never ran the process")
         .expect("the process's end is read");
-    let spelled = serde_json::to_string(&output).expect("terminal JSON");
+    let spelled = serde_json::to_string(&lash_core::Durable(&output)).expect("terminal JSON");
     assert!(
         matches!(
             output,

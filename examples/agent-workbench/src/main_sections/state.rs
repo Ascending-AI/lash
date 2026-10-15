@@ -986,9 +986,17 @@ pub(crate) struct WorkProcess {
     pub(crate) label: String,
 }
 
+fn serialize_durable<T: lash::persistence::DurableSerialize, S: serde::Serializer>(
+    record: &T,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&lash::persistence::Durable(record), serializer)
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct WorkAwaitResult {
     pub(crate) process_id: ProcessId,
+    #[serde(serialize_with = "serialize_durable")]
     pub(crate) outcome: lash::process::ProcessAwaitOutput,
     /// Reconciled from the durable log at terminal (ADR 0017): the authoritative,
     /// complete record, unlike the best-effort event sink.

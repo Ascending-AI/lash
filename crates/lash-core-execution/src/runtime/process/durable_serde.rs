@@ -6,20 +6,14 @@ use super::events::ProcessTerminal;
 use super::model::ProcessLifecycleState;
 use super::observation::{ObservedProcess, ObservedProcessEvent};
 
-/// Opt into the internal process record format for durable persistence.
-///
-/// Host observations and terminal outcomes intentionally do not implement
-/// `Serialize`: store their `projection()` instead. Stores and replay fixtures
-/// use `Durable(&record)` to retain output trust, controls and model views.
-/// Decoding continues to use the record's `Deserialize` implementation.
-#[derive(Clone, Copy, Debug)]
-pub struct Durable<T>(pub T);
+pub use lash_sansio::Durable;
+use lash_sansio::DurableSerialize;
 
 macro_rules! durable_serialize {
     ($($record:ty),+ $(,)?) => {$(
-        impl Serialize for Durable<&$record> {
-            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                <$record>::serialize(self.0, serializer)
+        impl DurableSerialize for $record {
+            fn serialize_durable<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                <$record>::serialize(self, serializer)
             }
         }
     )+};
@@ -29,7 +23,10 @@ durable_serialize!(
     ObservedProcess,
     ObservedProcessEvent,
     ProcessTerminal,
-    ProcessLifecycleState
+    ProcessLifecycleState,
+    super::observation::ObservedProcessChange,
+    super::observation::ObservedProcessChangeKind,
+    super::events::ProcessAwaitOutput
 );
 
 // Remote derives keep the field declarations as the single definition of the
@@ -44,7 +41,14 @@ macro_rules! durable_deserialize {
     )+};
 }
 
-durable_deserialize!(ObservedProcess, ObservedProcessEvent, ProcessLifecycleState);
+durable_deserialize!(
+    ObservedProcess,
+    ObservedProcessEvent,
+    ProcessLifecycleState,
+    super::observation::ObservedProcessChange,
+    super::observation::ObservedProcessChangeKind,
+    super::events::ProcessAwaitOutput
+);
 
 pub(crate) fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -54,19 +58,38 @@ where
     Durable(value).serialize(serializer)
 }
 
-impl Serialize for Durable<&Box<ObservedProcess>> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        Durable(self.0.as_ref()).serialize(serializer)
+impl<Full: DurableSerialize, Lite: Serialize> DurableSerialize
+    for super::ProcessEventPage<Full, Lite>
+{
+    fn serialize_durable<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use super::ProcessEventPageEvents;
+        let events = match &self.events {
+            ProcessEventPageEvents::Full(events) => {
+                ProcessEventPageEvents::Full(events.iter().map(Durable).collect::<Vec<_>>())
+            }
+            ProcessEventPageEvents::Lite(events) => {
+                ProcessEventPageEvents::Lite(events.iter().collect::<Vec<_>>())
+            }
+        };
+        super::ProcessEventPage {
+            events,
+            more: self.more.clone(),
+        }
+        .serialize(serializer)
     }
 }
 
-impl Serialize for Durable<&Vec<ObservedProcess>> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeSeq;
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for value in self.0 {
-            sequence.serialize_element(&Durable(value))?;
-        }
-        sequence.end()
+impl<Page: DurableSerialize> DurableSerialize for super::ProcessEventReadOutcome<Page> {
+    fn serialize_durable<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use super::ProcessEventReadOutcome;
+        let outcome = match self {
+            ProcessEventReadOutcome::Retained(page) => {
+                ProcessEventReadOutcome::Retained(Durable(page))
+            }
+            ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                ProcessEventReadOutcome::NoLongerRetained(retention.clone())
+            }
+        };
+        outcome.serialize(serializer)
     }
 }

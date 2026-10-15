@@ -296,6 +296,7 @@ pub(crate) enum KernelRunOutput {
     },
     /// The run ended.
     Ended {
+        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
         outcome: Box<lash_core::ProcessOutcome>,
     },
 }

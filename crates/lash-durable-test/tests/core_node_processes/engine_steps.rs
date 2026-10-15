@@ -273,7 +273,7 @@ impl lash_core::EngineSteps for Flaky {
                     process_id: run.process,
                 },
                 MaterialRole::AttemptOutput,
-                serde_json::to_string(&output).expect("a tool output encodes"),
+                serde_json::to_string(&lash_core::Durable(&output)).expect("a tool output encodes"),
             )
             .failure(KnownFailureReason::Reported, None),
         )

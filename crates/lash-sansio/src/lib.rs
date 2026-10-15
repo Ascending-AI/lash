@@ -17,6 +17,7 @@ mod run_aggregate;
 pub use json_schema::{
     InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch, tool_signature,
 };
+pub mod durable_serde;
 mod execution_budgets;
 pub mod llm;
 pub mod llm_profile;
@@ -38,6 +39,7 @@ pub mod tool_contract;
 mod tool_declaration;
 mod tool_intents;
 pub mod tool_output;
+pub use durable_serde::{Durable, DurableSerialize};
 pub mod turn;
 pub mod turn_driver;
 pub mod value_shape;

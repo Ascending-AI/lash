@@ -294,7 +294,9 @@ impl Scenario for ChildTurn {
             record
                 .as_ref()
                 .and_then(|record| record.terminal())
-                .map(|terminal| serde_json::to_value(terminal.clone().into_await_output()))
+                .map(|terminal| {
+                    serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output()))
+                })
         }) {
             Ok(Some(Ok(answer))) if answer.to_string().contains(ANSWER) => {}
             other => violations.push(format!(

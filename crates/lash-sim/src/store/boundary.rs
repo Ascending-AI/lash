@@ -67,7 +67,7 @@ pub(super) fn project_suspend_boundary(event: &BoundaryEvent) -> Option<Value> {
             "tool_name": tool_name,
             "tool_call_id": event.boundary_id,
             "execution_count": 1,
-            "runtime_tool_output": lash_core::ToolCallOutput::success(output.clone()),
+            "runtime_tool_output": lash_core::Durable(&lash_core::ToolCallOutput::success(output.clone())),
             "runtime_suspend": {
                 "suspend_kind": suspend_kind,
                 "turn_suspended_before_completion": true,

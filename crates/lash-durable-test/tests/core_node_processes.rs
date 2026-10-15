@@ -2258,7 +2258,8 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
         assert_eq!(decoded, record_projection);
         assert_eq!(
             serde_json::to_value(lash::persistence::Durable(terminal)).unwrap(),
-            serde_json::to_value(terminal.clone().into_await_output()).unwrap(),
+            serde_json::to_value(lash_core::Durable(&terminal.clone().into_await_output()))
+                .unwrap(),
             "durable terminals retain the existing await encoding"
         );
         // All other observed facts survive the projection unchanged.

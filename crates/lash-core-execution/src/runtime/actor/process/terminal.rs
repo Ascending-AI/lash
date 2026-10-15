@@ -161,7 +161,7 @@ pub fn record_terminal(
     process: &ProcessId,
     outcome: &ProcessOutcome,
 ) -> Result<(), DurableError> {
-    let outcome_json = serde_json::to_string(outcome).map_err(|error| {
+    let outcome_json = serde_json::to_string(&crate::Durable(outcome)).map_err(|error| {
         DurableError::Store(StoreFailure {
             kind: StoreFailureKind::Corrupt,
             message: format!("the terminal of process {process} does not encode: {error}"),

@@ -299,7 +299,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for Protocol {
                 format!(
                     "{}={}",
                     call.tool_name,
-                    serde_json::to_string(&call.output.outcome).unwrap_or_default()
+                    serde_json::to_string(&lash_core::Durable(&call.output.outcome))
+                        .unwrap_or_default()
                 )
             })
             .collect();

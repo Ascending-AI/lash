@@ -1962,7 +1962,7 @@ impl ProcessCrash {
             .map_err(|error| format!("read the process: {error}"))?
             .and_then(|record| record.terminal().cloned())
             .ok_or("the process holds no terminal")?;
-        let answer = serde_json::to_value(terminal.into_await_output())
+        let answer = serde_json::to_value(lash_core::Durable(&terminal.into_await_output()))
             .map_err(|error| format!("the terminal encodes: {error}"))?;
         Ok((find_text(&answer, "set"), find_text(&answer, "seen")))
     }

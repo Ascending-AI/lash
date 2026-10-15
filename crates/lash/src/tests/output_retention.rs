@@ -602,7 +602,8 @@ where
         .expect("the reading turn finishes with a value");
     Ok((
         value,
-        serde_json::to_value(&output.result.tool_calls).expect("the records serialize"),
+        serde_json::to_value(lash_core::Durable(&output.result.tool_calls))
+            .expect("the records serialize"),
     ))
 }
 

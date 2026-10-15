@@ -895,7 +895,7 @@ fn decode_resolution(row: &WaitRow) -> Result<Resolution, DurableError> {
 }
 
 fn encode_process_outcome(outcome: &ProcessOutcome) -> Result<(String, String), DurableError> {
-    let value = serde_json::to_value(outcome)
+    let value = serde_json::to_value(crate::Durable(outcome))
         .map_err(|error| corrupt(&format!("a process outcome does not encode: {error}")))?;
     encode_resolution(&Resolution::Ok(value))
 }

@@ -977,12 +977,8 @@ fn reassemble_standard_response(
 }
 
 /// Build the `CompletedToolCall` for a call refused before dispatch. The
-/// refusal is typed (`output`) and the model sees its serialized form
-/// through `model_return`, the same shape execution results take.
-#[expect(
-    clippy::expect_used,
-    reason = "the typed refusal is a crate-owned ToolCallOutput tree whose serde_json encoding cannot fail"
-)]
+/// refusal is typed (`output`) and the model reads its projected JSON
+/// through `model_return`, retaining its code, message and projected evidence.
 fn refused_tool_call_completion(
     call_id: lash_core::ToolCallId,
     provider_call_id: Option<String>,
@@ -995,7 +991,7 @@ fn refused_tool_call_completion(
         attachment_notices: Vec::new(),
         tool_name: tool_name.clone(),
         parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
-            text: serde_json::to_string(&output).expect("typed refusal serializes"),
+            text: output.value_for_projection().to_string(),
         }],
     };
     CompletedToolCall {

@@ -598,7 +598,7 @@ mod tests {
     /// `process_terminal_resolution` journals.
     fn terminal_resolution(terminal: &crate::ProcessAwaitOutput) -> crate::Resolution {
         crate::Resolution::Ok(
-            serde_json::to_value(terminal).expect("a process terminal serializes"),
+            serde_json::to_value(crate::Durable(terminal)).expect("a process terminal serializes"),
         )
     }
 

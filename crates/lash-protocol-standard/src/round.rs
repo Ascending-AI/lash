@@ -313,12 +313,8 @@ fn unlisted(tool_name: &str, batch: BatchSugar) -> ToolCallOutput {
 
 /// A refused member's row error: the typed failure, as the model reads a
 /// refused call's.
-#[expect(
-    clippy::expect_used,
-    reason = "a ToolFailure is a crate-owned tree whose serde_json encoding cannot fail"
-)]
 fn failure_value(failure: ToolFailure) -> Value {
-    serde_json::to_value(failure).expect("a tool failure encodes")
+    failure.to_json_value()
 }
 
 /// Slot and member counts are bounded by admission, far below `u32::MAX`.

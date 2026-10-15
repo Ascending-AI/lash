@@ -51,13 +51,27 @@ impl ProcessHistoryContinuation {
 }
 
 /// One durable event page and where the next read continues.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct ProcessEventsRead {
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
     pub outcome: lash_core::facade_support::ObservedProcessEventReadOutcome,
     /// After the last event this page returned; after the released prefix
     /// when the read started inside one; unchanged when the page returned
     /// nothing or the process was pruned.
     pub next: ProcessHistoryContinuation,
+}
+
+impl lash_sansio::DurableSerialize for ProcessEventsRead {
+    fn serialize_durable<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProcessEventsRead {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::deserialize(deserializer)
+    }
 }
 
 /// Read one durable event page after `from`.
