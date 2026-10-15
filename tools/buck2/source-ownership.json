@@ -160,6 +160,11 @@
       "Cargo.toml"
     ]
   },
+  "examples/workflow-graph-roundtrip": {
+    "compile_data": [
+      "catalog/*.ts"
+    ]
+  },
   "crates/lash-perf": {
     "compile_data": [
       "workloads/*.json",

@@ -7,7 +7,7 @@ use lash::workflow::document::Correspondence;
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::document::{Document, Name, Site, SourceMap};
 use lash::workflow::edit::Edit;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,8 +43,24 @@ pub struct WorkflowView {
     /// The document as the TypeScript printer spells it: a read-only lens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Lash's map from the document's sites to byte ranges of `source`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_map: Option<SourceMap>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_unavailable: Option<String>,
+    /// The TypeScript this workflow was imported from; absent for a
+    /// workflow opened as a kernel document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authored: Option<AuthoredSource>,
+}
+
+/// Authored TypeScript and the version importing it saved. Later versions
+/// are edits of the imported document; the text is not changed by them.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthoredSource {
+    pub text: String,
+    pub version: u64,
 }
 
 /// What this host offers a workflow document.

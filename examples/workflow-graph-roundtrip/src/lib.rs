@@ -33,11 +33,11 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
-pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
+pub use catalog::{CatalogGroup, SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    CallData, DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse,
-    EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse, OpenWorkflowRequest, RunEvent,
-    RunStatus, WorkflowView,
+    AuthoredSource, CallData, DisplayDelta, DisplayState, EditWorkflowRequest,
+    EditWorkflowResponse, EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse,
+    OpenWorkflowRequest, RunEvent, RunStatus, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 
@@ -55,6 +55,7 @@ pub struct AppState {
     core: lash::LashCore,
     commands: runtime::CommandClient,
     host: Arc<display::HostTools>,
+    catalog: Arc<catalog::Catalog>,
 }
 
 /// The saved version: host revision state. The workflow itself is the
@@ -68,6 +69,18 @@ struct SavedWorkflow {
     entry: Name,
     /// What a run starts, or why lash did not admit the version.
     published: Result<runtime::Published, Arc<runtime::RunError>>,
+    /// The TypeScript the workflow was imported from, if it was.
+    authored: Option<AuthoredSource>,
+}
+
+/// How a saved version came to be, which says what authored source it has.
+pub(crate) enum Origin {
+    /// Opened as a kernel document: it has no authored source.
+    Document,
+    /// Imported from this TypeScript.
+    Imported(String),
+    /// An edit of the saved version: it keeps that version's source.
+    Edited,
 }
 
 impl SavedWorkflow {
@@ -80,18 +93,22 @@ impl SavedWorkflow {
             },
             functions,
         );
-        let (view, view_unavailable, source, source_unavailable) = match &derived {
+        let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
                 let (view, view_unavailable) =
                     match lash::workflow::view::derive(derived, functions) {
                         Ok(view) => (Some(view), None),
                         Err(error) => (None, Some(error.to_string())),
                     };
-                let (source, source_unavailable) = match derived.typescript(Default::default()) {
-                    Ok(printed) => (Some(printed.source), None),
+                let options = lash::dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                };
+                let (printed, source_unavailable) = match derived.typescript(options) {
+                    Ok(printed) => (Some(printed), None),
                     Err(error) => (None, Some(error.to_string())),
                 };
-                (view, view_unavailable, source, source_unavailable)
+                (view, view_unavailable, printed, source_unavailable)
             }
             Err(refusal) => (
                 None,
@@ -117,8 +134,12 @@ impl SavedWorkflow {
             text: print_document(&document),
             view,
             view_unavailable,
-            source,
+            source_map: printed
+                .as_ref()
+                .and_then(|printed| printed.source_map.clone()),
+            source: printed.map(|printed| printed.source),
             source_unavailable,
+            authored: self.authored.clone(),
             document,
         }
     }
@@ -129,21 +150,29 @@ impl AppState {
     /// version 1.
     pub async fn new(runtime: WorkflowHost) -> Result<Self, StartupError> {
         let core = runtime.core;
+        let environment = runtime::workflow_environment(&core)
+            .await
+            .map_err(|error| StartupError(error.to_string()))?;
+        let catalog = catalog::Catalog::load(&core, &environment)
+            .await
+            .map_err(|error| StartupError(error.to_string()))?;
         let state = Self {
             store: Arc::new(Mutex::new(None)),
             publishing: Arc::new(tokio::sync::Mutex::new(())),
             host: runtime.tools,
             commands: runtime::CommandClient::new(core.clone()),
             core,
+            catalog: Arc::new(catalog),
         };
-        let environment = runtime::workflow_environment(&state.core)
-            .await
-            .map_err(|error| StartupError(error.to_string()))?;
-        let (document, entry) = catalog::document(catalog::DEFAULT_WORKFLOW, &environment)
-            .ok_or_else(|| StartupError("the catalog has no default workflow".into()))?
-            .map_err(|error| StartupError(error.to_string()))?;
-        let draft = Draft::open(document).map_err(|error| StartupError(format!("{error:?}")))?;
-        state.install(draft, entry).await;
+        let opening = state
+            .catalog
+            .default_workflow()
+            .ok_or_else(|| StartupError("the catalog has no default workflow".into()))?;
+        let draft = Draft::open(opening.document.clone())
+            .map_err(|error| StartupError(format!("{error:?}")))?;
+        state
+            .install(draft, opening.entry.clone(), opening.origin())
+            .await;
         Ok(state)
     }
 
@@ -171,6 +200,7 @@ impl AppState {
         &self,
         draft: Draft,
         entry: Name,
+        origin: Origin,
     ) -> (SavedWorkflow, Option<runtime::Publication>) {
         let publication = runtime::publish(&self.core, &draft, &entry).await;
         let (published, publication) = match publication {
@@ -179,11 +209,18 @@ impl AppState {
         };
         let (saved, superseded) = {
             let mut store = self.store.lock_recover();
+            let version = store.as_ref().map_or(1, |saved| saved.version + 1);
+            let authored = match origin {
+                Origin::Document => None,
+                Origin::Imported(text) => Some(AuthoredSource { text, version }),
+                Origin::Edited => store.as_ref().and_then(|saved| saved.authored.clone()),
+            };
             let saved = SavedWorkflow {
-                version: store.as_ref().map_or(1, |saved| saved.version + 1),
+                version,
                 draft,
                 entry,
                 published,
+                authored,
             };
             let superseded = store
                 .replace(saved.clone())
@@ -209,7 +246,6 @@ pub fn app(state: AppState) -> Router {
         .route("/workflow", get(get_workflow).post(open_workflow))
         .route("/workflow/select", post(select_workflow))
         .route("/workflow/edits", post(edit_workflow))
-        .route("/workflow/templates", get(authoring_http::templates))
         .route("/workflow/source", post(authoring_http::import_source))
         .route("/workflow/plan", post(authoring_http::preview))
         .route("/run", post(run_workflow))
@@ -221,8 +257,8 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn list_workflows() -> Json<Vec<WorkflowCatalogEntry>> {
-    Json(catalog::entries())
+async fn list_workflows(State(state): State<AppState>) -> Json<Vec<WorkflowCatalogEntry>> {
+    Json(state.catalog.entries())
 }
 
 /// What a document must be written against to be admitted here.
@@ -251,13 +287,16 @@ async fn select_workflow(
     Json(request): Json<SelectWorkflowRequest>,
 ) -> Result<Json<WorkflowView>, ErrorResponse> {
     let environment = state.environment().await?;
-    let (document, entry) = catalog::document(&request.id, &environment)
-        .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?
-        .map_err(|error| ErrorResponse::invalid("document", error))?;
-    let draft = Draft::open(document)
+    let example = state
+        .catalog
+        .get(&request.id)
+        .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?;
+    let draft = Draft::open(example.document.clone())
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
-    let (saved, _) = state.install(draft, entry).await;
+    let (saved, _) = state
+        .install(draft, example.entry.clone(), example.origin())
+        .await;
     Ok(Json(saved.view(environment.functions())))
 }
 
@@ -273,7 +312,7 @@ async fn open_workflow(
     let draft = Draft::open(document)
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
-    let (saved, _) = state.install(draft, request.entry).await;
+    let (saved, _) = state.install(draft, request.entry, Origin::Document).await;
     Ok(Json(saved.view(environment.functions())))
 }
 
@@ -324,7 +363,7 @@ async fn edit_workflow(
                 serde_json::json!({ "diagnostics": diagnostics }),
             )
         })?;
-    let (saved, _) = state.install(draft, current.entry).await;
+    let (saved, _) = state.install(draft, current.entry, Origin::Edited).await;
     Ok(Json(EditWorkflowResponse {
         workflow: saved.view(environment.functions()),
         // The published document is the draft's, so the transaction's

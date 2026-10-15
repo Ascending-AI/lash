@@ -37,10 +37,12 @@ async fn answer(response: reqwest::Response) -> Value {
     body
 }
 
-/// Runs the saved workflow to its end, approving whatever it asks for.
-async fn run(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
+/// Runs the saved workflow with `inputs` to its end, approving whatever it
+/// asks for.
+async fn run(client: &reqwest::Client, base: &str, inputs: Value) -> Vec<RunEvent> {
     let mut response = client
         .post(format!("{base}/run"))
+        .json(&json!({ "inputs": inputs }))
         .send()
         .await
         .expect("POST /run");
@@ -148,12 +150,15 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         "the view is lash's read of the published document"
     );
 
-    // The message the workflow shows first is a text literal of its second
-    // statement pair: `let shown_2 = {text: ...}`.
+    // The message the workflow shows first is the text literal of the record
+    // lash binds before performing it: `let tN = {text: "Welcome ..."}`.
     let statements = opened["view"]["statements"].as_array().expect("statements");
     let bound = statements
         .iter()
-        .find(|statement| statement["statement"]["let"]["name"] == "shown_2")
+        .find(|statement| {
+            statement["statement"]["let"]["value"]["expr"]["record"][0]["value"]["literal"]["text"]
+                == "Welcome to the workflow graph"
+        })
         .expect("the statement binding the welcome message");
     let record = {
         let mut site = bound["site"].clone();
@@ -203,7 +208,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
                     "with": {"literal": {"text": "Edited as a kernel document"}},
                 }}},
                 {"insert_effect": {
-                    "at": {"block": {"unit": {"function": "onboarding"}, "path": []}, "before": bound["site"]},
+                    "at": {"block": bound["block"], "before": bound["site"]},
                     "effect": "display.show_message",
                     "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],
                     "result": "null",
@@ -260,7 +265,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         "the correspondence marks the replaced literal alone as edited"
     );
 
-    let events = run(&client, &base).await;
+    let events = run(&client, &base, json!({})).await;
     let sites: Vec<&Value> = workflow["view"]["execution_sites"]
         .as_array()
         .expect("execution sites")
@@ -439,4 +444,117 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
         terminal.output,
         Some(json!("Named input from imported source"))
     );
+}
+
+/// FIG-6401: every example is authored TypeScript and opens as exactly what
+/// lash's workflow import lowers it to (its view is the size the catalog
+/// lists, and its authored text is kept beside the printer's TypeScript and
+/// map), then runs to its authored result against the mock tools.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let catalog = answer(
+        client
+            .get(format!("{base}/workflows"))
+            .send()
+            .await
+            .expect("the catalog"),
+    )
+    .await;
+    let topic = json!([{"title": "Release notes", "urgent": true}]);
+    let runs = [
+        ("deep-research", json!({"topic": "Loops"}), None),
+        ("weekly-kpis", json!({"workspace": "Acme Cloud"}), None),
+        ("blank", json!({}), Some(Value::Null)),
+        ("onboarding", json!({}), Some(json!({"approved": true}))),
+        ("summarize-emails", json!({}), None),
+        ("research-nvidia-stock", json!({}), None),
+        ("team-standup-digest", json!({}), None),
+        ("traffic-lights", json!({}), Some(Value::Null)),
+        (
+            "branching-approval",
+            json!({}),
+            Some(json!({"approved": true})),
+        ),
+        ("counter-loop", json!({}), Some(json!(3))),
+        ("flat", json!({}), None),
+        ("branch", json!({}), Some(Value::Null)),
+        ("digest", json!({"topics": topic}), Some(json!({"seen": 1}))),
+        ("typed", json!({"topics": topic}), Some(json!({"seen": 1}))),
+        (
+            "inbox",
+            json!({"items": [{"title": "Hello"}]}),
+            Some(json!({"sent": 1})),
+        ),
+        ("countdown", json!({}), Some(json!({"count": 4}))),
+        ("nested", json!({}), Some(json!({"filed": 6}))),
+        ("retry", json!({}), Some(json!({"failures": 1}))),
+        ("helper", json!({}), None),
+        ("unread", json!({}), None),
+    ];
+    let entries = catalog.as_array().expect("a list");
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| entry["id"].as_str().expect("an id"))
+            .collect::<Vec<_>>(),
+        runs.iter().map(|(id, _, _)| *id).collect::<Vec<_>>(),
+        "the catalog lists each example"
+    );
+    for ((id, inputs, output), entry) in runs.into_iter().zip(entries) {
+        let opened = answer(
+            client
+                .post(format!("{base}/workflow/select"))
+                .json(&json!({ "id": id }))
+                .send()
+                .await
+                .expect("select"),
+        )
+        .await;
+        assert!(
+            opened["definition"].is_string(),
+            "{id} is admitted: {}",
+            opened["notAdmitted"]
+        );
+        assert_eq!(
+            (
+                opened["view"]["statements"].as_array().map(Vec::len),
+                opened["view"]["scopes"].as_array().map(Vec::len),
+            ),
+            (
+                entry["statements"].as_u64().map(|count| count as usize),
+                entry["scopes"].as_u64().map(|count| count as usize),
+            ),
+            "{id} opens as the lowering the catalog counts"
+        );
+        assert_eq!(
+            opened["authored"]["version"], opened["version"],
+            "{id} keeps the source it was imported from"
+        );
+        assert!(
+            opened["sourceMap"]["sites"]
+                .as_array()
+                .is_some_and(|sites| !sites.is_empty()),
+            "{id} has lash's TypeScript source map"
+        );
+        let events = run(&client, &base, inputs).await;
+        let last = events.last().expect("the run reports");
+        assert!(
+            last.site.is_none() && last.status == RunStatus::Succeeded,
+            "{id} runs to its end: {last:?}"
+        );
+        if let Some(output) = output {
+            // A `null` result reads back as an absent output.
+            assert_eq!(
+                last.output.clone().unwrap_or_default(),
+                output,
+                "{id} returns what it authored"
+            );
+        }
+        println!(
+            "{id}: {} statements, {} scopes",
+            entry["statements"], entry["scopes"]
+        );
+    }
 }

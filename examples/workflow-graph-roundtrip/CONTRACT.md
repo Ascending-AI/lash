@@ -12,19 +12,25 @@ own serialized shapes and pass through unchanged (snake_case).
 
 | Method | Path | Response |
 | --- | --- | --- |
-| `GET` | `/workflows` | The built-in catalog: `[{ id, name, description }]` |
+| `GET` | `/workflows` | The example catalog: `[{ id, name, description, group, statements, scopes }]` |
 | `GET` | `/environment` | What a document must be written against: `{ effects, functions }` |
 | `GET` | `/workflow` | The saved workflow as a `WorkflowView` |
-| `POST` | `/workflow/select` | `{ id }`: save a built-in example as the next version; its `WorkflowView` |
+| `POST` | `/workflow/select` | `{ id }`: save an example's imported document as the next version; its `WorkflowView` |
 | `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
 | `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
-| `GET` | `/workflow/templates` | TypeScript source templates for the visual editor |
 | `POST` | `/workflow/source` | `{ version, source, entry }`: import and admit source before replacing the current document |
 | `POST` | `/workflow/plan` | `{ version, operations }`: preview Lash authoring operations without publishing; `{ version, transaction, preview, correspondence }` |
 | `POST` | `/run` | `{ version?, inputs? }`: start a run with named input values; its `text/event-stream` |
 | `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
 | `GET` | `/` and `/{path}` | Files from `frontend/` |
+
+Every example is authored TypeScript in `catalog/`, imported once at startup
+through `HostArtifacts::import_typescript_workflow`, exactly as written. A
+catalog entry's `group` is `app` or `controlFlow`; `statements` and `scopes`
+count the statements and blocks of lash's view of its entry, the size of what
+the import lowered it to. An example lash refuses to import stops the host at
+startup.
 
 An error is `{ "error": { code, message, details } }`. An unknown catalog id
 is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
@@ -51,6 +57,8 @@ here.
 | `text` | The document in kernel notation. |
 | `view` | Lash's canvas read of the entry, exactly as `lash::workflow::view::derive` answers it: see [The view](#the-view). Absent when the document has none; `viewUnavailable` then says why. |
 | `source` | The exact TypeScript export. Editing this text has no effect until `POST /workflow/source` admits it. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
+| `sourceMap` | Lash's `SourceMap` for `source` (snake_case, lash's shape): UTF-8 byte ranges of `source` for each site of the document. |
+| `authored` | `{ text, version }`: the TypeScript this workflow was imported from (an example or `POST /workflow/source`) and the version the import saved. Edits keep it unchanged; opening a kernel document with `POST /workflow` drops it. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 

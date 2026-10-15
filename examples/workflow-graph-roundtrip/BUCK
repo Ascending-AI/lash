@@ -23,6 +23,9 @@ lash_rust_library(
     crate_name = "workflow_graph_roundtrip",
     declared_features = [],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip"),
+    compile_data_patterns = [
+        "catalog/*.ts",
+    ],
     extra_compile_data = [],
     manifest_dir = "examples/workflow-graph-roundtrip",
     package_name = "workflow-graph-roundtrip",
@@ -61,6 +64,9 @@ lash_rust_binary(
     crate_name = "workflow_graph_roundtrip",
     crate_root = "src/main.rs",
     declared_features = [],
+    compile_data_patterns = [
+        "catalog/*.ts",
+    ],
     exec_properties = sized_exec_properties("workflow-graph-roundtrip", "workflow_graph_roundtrip"),
     extra_compile_data = [
         "//examples:shared_rust_sources",

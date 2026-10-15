@@ -18,14 +18,19 @@ creates a scratch SQLite database under `/tmp`. Workflow editing state lives in
 memory. The existing Lash runtime executes the examples; email and display tools
 are deterministic mocks. No model or external email service is called.
 
-The default screen is a visual workflow editor: app action tiles on a dotted
+The default screen splits into the graph on the left and the workflow's code on
+the right, with a draggable divider. **Graph | Split | Code** in the toolbar
+shows both panes or one of them; the browser remembers the choice and the
+divider position. The graph is a visual workflow editor: app action tiles on a dotted
 canvas, named and typed ports, true/false paths, and explicit workflow input and
 Return or Finish steps. Blue connections carry values; dashed gray connections show execution
 order. Click an output port and then an input port to connect them, or select a
 source in the input inspector. Click a tile to edit its fields, or a connection's
 **+** to choose another action. Adding,
 editing, and deleting steps plan and validate a transaction, then save it through
-the existing version-guarded endpoint. The canvas supports panning and zooming.
+the existing version-guarded endpoint. Drag or scroll with two fingers to pan.
+The mouse wheel and a trackpad pinch zoom around the cursor, between 30% and
+160%; **Fit** shows the whole graph, and loading an example fits it.
 **Run workflow** executes the saved document and opens its recorded outputs.
 
 The canvas scope selector uses the blocks of Lash's view, including empty
@@ -44,7 +49,36 @@ This is a small visual editor for canonical actions and scopes, not an inverse
 compiler. It deliberately does not infer a high-level form for arbitrary computed
 inputs. Node positions are derived, not persistent user layout.
 
-**Advanced** contains TypeScript import/export, the kernel document, and the
+## Examples and the code pane
+
+Every example is authored TypeScript in `catalog/`, written the way a person
+would write it, and imported at startup through lash's public
+`import_typescript_workflow`, exactly as written: no kernel document is written
+by hand and the host rewrites nothing, so the canvas shows lash's current
+lowering. The **Example** dropdown lists each one once, grouped as apps or
+control-flow examples, with the statement and scope count of its lowering
+(the same counts appear under the canvas caption). Choosing one loads it at
+once. The dialect toggle beside it offers TypeScript; Python is disabled until
+lash has a public Python workflow import (FIG-6380).
+
+The code pane is read-only and shows the saved revision as:
+
+- **Source**: the authored TypeScript the workflow was imported from, as
+  imported. Edits do not change it; the pane says when the revision was edited
+  since. It is not linked to the canvas: lash's import returns no map from
+  authored source to the document.
+- **TypeScript**: lash's exact readable printer. Lines are linked through the
+  printer's source map.
+- **Kernel**: the kernel document text. The kernel printer starts every
+  statement on its own line in document order; the pane matches each statement
+  of lash's view to its line and checks its keyword. If any statement does not
+  match, the tab is shown without linking.
+
+Selecting a node marks the line its statement starts on and scrolls to it.
+Clicking a linked line selects that statement: the canvas switches to its scope
+and opens its node. Edits and imports refresh the pane.
+
+**Advanced** contains TypeScript import/export and the
 helper/direct-edit transaction inspector. Queue a direct edit between
 two helpers, preview their combined transaction, then apply it. The preview
 validates a cloned draft without publishing. Generated statements remain
@@ -158,11 +192,14 @@ objects, a second graph model or unrestricted same-batch references to new nodes
 Run the focused host projection laws with:
 
 ```sh
-node --test examples/workflow-graph-roundtrip/frontend/projection.test.mjs examples/workflow-graph-roundtrip/frontend/dataflow.test.mjs
+node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs
 ```
 
 These pin the unused-closure, opaque-library-call, shared/shadowed-input,
-empty-scope and terminal-insertion rules. The HTTP regression
+empty-scope and terminal-insertion rules, zooming around the cursor and the
+wheel/pinch/pan split, and the code pane's statement-to-line linking. The Rust law
+`every_example_opens_as_its_imported_source_and_runs_with_the_mocks` imports
+every catalog example and runs it against the mocks. The HTTP regression
 `each_edit_response_maps_its_immediate_base` pins per-transaction correspondence
 across consecutive edits. The dataflow value-encoding law preserves integral
 floats, negative zero and typed nested record values.
@@ -176,8 +213,8 @@ executions, output reset between runs and mobile layout.
 
 ## Dataflow examples
 
-The Examples menu includes **Deep research brief** and **Weekly business KPIs**.
-Both are canonical kernel documents. Research maps the search result's topic and
+The examples include **Deep research brief** and **Weekly business KPIs**.
+Research maps the search result's topic and
 sources into a cited brief. KPIs maps current and previous period records into a
 comparison with calculated percentage changes. Their last step displays the
 report summary. Edit `topic` or `workspace` in the workflow Input node to try

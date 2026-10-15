@@ -22,6 +22,12 @@ import {
   viewOf,
 } from "./projection.mjs";
 import { approvalControl } from "./approvals.mjs";
+import {
+  highlightLine,
+  kernelLinking,
+  sourceMapLinking,
+} from "./codepane.mjs";
+import { clampZoom, fitZoom, wheelFactor, wheelIntent, zoomAt } from "./viewport.mjs";
 const $ = (id) => document.getElementById(id);
 const approvals = approvalControl(
   $("approve"),
@@ -30,7 +36,9 @@ const approvals = approvalControl(
 );
 const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
-  templates = [],
+  examples = [],
+  codeView = "kernel",
+  codeLinking,
   calls = new Map(),
   runInputs = {},
   dataView,
@@ -156,6 +164,7 @@ function show(next, correspondence) {
     ? "Ready to run"
     : `Not admitted: ${next.notAdmitted}`;
   $("source").value = next.source ?? "";
+  renderCode();
   $("source").scrollTop = 0;
   $("source").scrollLeft = 0;
   $("entry").value = next.entry;
@@ -196,6 +205,7 @@ function renderSelection() {
     ? `${summary(selected.statement)}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ""}`
     : "Select a statement on the canvas.";
   $("selection").style.whiteSpace = "pre-wrap";
+  markCode();
 }
 function renderPane() {
   document
@@ -207,14 +217,12 @@ function renderPane() {
   $("source-actions").hidden = tab !== "source";
   $("code").hidden = tab === "source";
   $("code").textContent =
-    tab === "document"
-      ? JSON.stringify(workflow?.document, null, 2)
-      : tab === "transaction"
-        ? plan
-          ? JSON.stringify(plan.transaction, null, 2)
-          : "Preview pending changes to inspect the typed transaction."
-        : (plan?.preview?.source ??
-          "Preview pending changes to inspect the resulting TypeScript.");
+    tab === "transaction"
+      ? plan
+        ? JSON.stringify(plan.transaction, null, 2)
+        : "Preview pending changes to inspect the typed transaction."
+      : (plan?.preview?.source ??
+        "Preview pending changes to inspect the resulting TypeScript.");
 }
 function invalidate() {
   plan = undefined;
@@ -355,27 +363,55 @@ $("import").onclick = () =>
     plan = undefined;
     selected = undefined;
     show(next);
+    $("example").value = "";
     report(`Imported TypeScript · revision ${workflow.version}.`);
   });
-$("load").onclick = () =>
-  action(async () => {
+async function loadExample(id) {
+  const example = examples.find((entry) => entry.id === id);
+  if (!example) return;
+  await action(async () => {
     if (operations.length)
       throw Error("Apply or clear pending changes before loading an example.");
-    const template = templates.find((t) => t.id === $("template").value);
-    if (!template) throw Error("Choose an example.");
-    const next = template.canonical
-      ? await call("/workflow/select", { id: template.id })
-      : await call("/workflow/source", {
-          version: workflow.version,
-          source: template.source,
-          entry: template.entry,
-        });
+    const next = await call("/workflow/select", { id });
     selected = undefined;
-    show(next);
     plan = undefined;
+    show(next);
     renderPane();
-    report(`Loaded ${template.name}.`);
+    fit();
+    report(`Loaded ${example.name}.`);
   });
+  $("example").value = id;
+}
+// One option per example, grouped, with the size of its lowering.
+function renderExamples() {
+  const groups = { app: "Apps", controlFlow: "Control flow" };
+  const placeholder = el("option", null, "Choose an example…");
+  placeholder.value = "";
+  placeholder.disabled = true;
+  $("example").replaceChildren(
+    placeholder,
+    ...Object.entries(groups).map(([group, label]) => {
+      const optgroup = el("optgroup");
+      optgroup.label = label;
+      optgroup.append(
+        ...examples
+          .filter((example) => example.group === group)
+          .map((example) => {
+            const option = el(
+              "option",
+              null,
+              `${example.name} · ${example.statements} statements · ${example.scopes} scopes`,
+            );
+            option.value = example.id;
+            option.title = example.description;
+            return option;
+          }),
+      );
+      return optgroup;
+    }),
+  );
+  $("example").value = "";
+}
 for (const button of document.querySelectorAll("[data-tab]"))
   button.onclick = () => {
     tab = button.dataset.tab;
@@ -1092,8 +1128,9 @@ function renderCanvas() {
   );
   $("scene").style.width = graphWidth + "px";
   $("scene").style.height = graphHeight + "px";
+  setZoom(zoom);
   $("node-count").textContent =
-    `${visualNodes.length} nodes · Select an input to edit its source`;
+    `${visualNodes.length} nodes · ${viewOf(workflow).statements.length} statements · ${viewOf(workflow).scopes.length} scopes`;
   document.querySelector("h1").textContent = workflow.entry.replaceAll(
     "_",
     " ",
@@ -1313,14 +1350,20 @@ function renderCallData(statement) {
   showRecord();
 }
 function initialInputs(next) {
+  // Mock invocation arguments for the examples' parameters, by name.
   const presets = {
-    deep_research: { topic: "Reducing customer onboarding drop-off" },
-    weekly_kpis: { workspace: "Acme Cloud" },
+    topic: "Reducing customer onboarding drop-off",
+    workspace: "Acme Cloud",
+    topics: [
+      { title: "Release notes", urgent: true },
+      { title: "Team offsite", urgent: false },
+    ],
+    items: [{ title: "Welcome aboard" }, { title: "Weekly summary" }],
   };
   return Object.fromEntries(
     (next.document.entries[next.entry]?.params ?? []).map((param) => [
       param.name,
-      presets[next.entry]?.[param.name] ?? defaultValue(param.ty),
+      presets[param.name] ?? defaultValue(param.ty),
     ]),
   );
 }
@@ -1884,22 +1927,199 @@ function openNode(node) {
   renderCanvas();
   controls();
 }
+// The stage is the scene's scaled size, so the viewport scrolls exactly
+// over the zoomed graph.
 function setZoom(value) {
-  zoom = Math.max(0.3, Math.min(1.6, value));
+  zoom = clampZoom(value);
   $("scene").style.transform = `scale(${zoom})`;
+  $("stage").style.width = graphWidth * zoom + "px";
+  $("stage").style.height = graphHeight * zoom + "px";
   $("zoom-label").textContent = Math.round(zoom * 100) + "%";
+}
+function zoomAround(next, point) {
+  const viewport = $("viewport");
+  const view = zoomAt(
+    { zoom, scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop },
+    point ?? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 },
+    next,
+  );
+  setZoom(view.zoom);
+  viewport.scrollLeft = view.scrollLeft;
+  viewport.scrollTop = view.scrollTop;
 }
 function fit() {
   const viewport = $("viewport");
+  if (!viewport.clientWidth) return;
   setZoom(
-    Math.min(
-      1,
-      (viewport.clientWidth - 60) / graphWidth,
-      (viewport.clientHeight - 80) / graphHeight,
+    fitZoom(
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      { width: graphWidth, height: graphHeight },
     ),
   );
   viewport.scrollLeft = 0;
   viewport.scrollTop = 0;
+}
+// The code pane: the workflow as authored source, lash's TypeScript or
+// kernel text, linked to canvas statements where lash gives the lines.
+function codeText() {
+  if (!workflow) return undefined;
+  if (codeView === "source") return workflow.authored?.text;
+  if (codeView === "typescript") return workflow.source;
+  return workflow.text;
+}
+function codeNote() {
+  if (codeView === "source") {
+    const authored = workflow.authored;
+    if (!authored) return "No authored source: this revision was opened as a kernel document.";
+    const edited =
+      authored.version === workflow.version
+        ? ""
+        : ` · edited since (revision ${workflow.version}); shown as imported`;
+    return `Authored TypeScript imported at revision ${authored.version}${edited} · not linked: lash's import keeps no source map`;
+  }
+  if (codeView === "typescript")
+    return workflow.source
+      ? `Lash's exact TypeScript printer${codeLinking ? " · linked through its source map" : ""}`
+      : `No TypeScript: ${workflow.sourceUnavailable}`;
+  return `Kernel document text${codeLinking ? " · linked by statement" : " · not linked: its lines do not match the view"}`;
+}
+function renderCode() {
+  if (!workflow) return;
+  document
+    .querySelectorAll("[data-code]")
+    .forEach((button) =>
+      button.setAttribute("aria-pressed", String(button.dataset.code === codeView)),
+    );
+  const text = codeText();
+  codeLinking =
+    codeView === "typescript" && workflow.source
+      ? sourceMapLinking(workflow.source, workflow.sourceMap, viewOf(workflow))
+      : codeView === "kernel"
+        ? kernelLinking(workflow.text, viewOf(workflow), workflow.entry)
+        : undefined;
+  $("code-note").textContent = codeNote();
+  $("code-note").title = codeNote();
+  const language = codeView === "kernel" ? "kernel" : "typescript";
+  $("code-view").innerHTML = text
+    ? text
+        .replace(/\n$/, "")
+        .split("\n")
+        .map(
+          (line, index) =>
+            `<div class="code-line${codeLinking ? " linked" : ""}" data-line="${index}"><span class="ln">${index + 1}</span><span class="code">${highlightLine(line, language)}</span></div>`,
+        )
+        .join("")
+    : `<p class="code-empty">${codeNote()}</p>`;
+  markCode();
+}
+// Highlights the line the selected statement starts on and scrolls to it.
+// A compound statement spans its whole body, so only its first line is
+// marked.
+function markCode() {
+  const view = $("code-view");
+  view.querySelector(".current")?.classList.remove("current");
+  const span = selected && codeLinking?.lines(selected.site);
+  if (!span) return;
+  const first = view.children[span.start];
+  first?.classList.add("current");
+  if (first)
+    view.scrollTop = Math.max(0, first.offsetTop - view.offsetTop - view.clientHeight / 3);
+}
+// Selects the statement a code line shows: its scope on the canvas, and
+// its node when the canvas draws one.
+function selectStatement(siteKey) {
+  const statement = viewOf(workflow).statements.find((s) => key(s.site) === siteKey);
+  if (!statement || busy) return;
+  const scope = viewOf(workflow).scopes.find((s) => key(s.block) === key(statement.block));
+  if (scope && key(scope.block) !== key(activeScope)) {
+    activeScope = scope.block;
+    renderScopes();
+  }
+  $("node-panel").hidden = true;
+  renderCanvas();
+  const node = visualNodes.find((n) => n.s && key(n.s.site) === siteKey);
+  if (node) {
+    openNode(node);
+    const viewport = $("viewport");
+    viewport.scrollLeft = node.x * zoom - viewport.clientWidth / 5;
+    viewport.scrollTop = node.y * zoom - viewport.clientHeight / 3;
+  } else {
+    selected = statement;
+    renderPlacement();
+    renderSelection();
+    report(`${summary(statement.statement)} is not drawn as its own node in this scope.`);
+  }
+}
+const LAYOUT_KEY = "workflow-editor.layout",
+  SPLIT_KEY = "workflow-editor.split";
+function remembered(name) {
+  try {
+    return localStorage.getItem(name);
+  } catch {
+    return null;
+  }
+}
+function remember(name, value) {
+  try {
+    localStorage.setItem(name, value);
+  } catch {
+    // Storage is a convenience: the layout still applies for this page.
+  }
+}
+function setLayout(layout) {
+  const previous = $("workspace").dataset.layout;
+  $("workspace").dataset.layout = layout;
+  document
+    .querySelectorAll("[data-layout]")
+    .forEach(
+      (button) =>
+        button.tagName === "BUTTON" &&
+        button.setAttribute("aria-pressed", String(button.dataset.layout === layout)),
+    );
+  remember(LAYOUT_KEY, layout);
+  if (previous === "code" && layout !== "code") fit();
+}
+function setSplit(fraction) {
+  const split = Math.max(0.2, Math.min(0.8, fraction));
+  $("workspace").style.setProperty("--split", `${(split * 100).toFixed(1)}%`);
+  remember(SPLIT_KEY, String(split));
+}
+function setupCodePane() {
+  for (const button of document.querySelectorAll("button[data-layout]"))
+    button.onclick = () => setLayout(button.dataset.layout);
+  const layout = remembered(LAYOUT_KEY);
+  setLayout(["graph", "split", "code"].includes(layout) ? layout : "split");
+  const split = Number(remembered(SPLIT_KEY));
+  if (split) setSplit(split);
+  for (const button of document.querySelectorAll("[data-code]"))
+    button.onclick = () => {
+      codeView = button.dataset.code;
+      renderCode();
+    };
+  $("code-view").onclick = (e) => {
+    const line = e.target.closest(".code-line");
+    const siteKey = line && codeLinking?.siteAt(Number(line.dataset.line));
+    if (siteKey) selectStatement(siteKey);
+  };
+  const divider = $("divider");
+  divider.onpointerdown = (e) => {
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add("dragging");
+  };
+  divider.onpointermove = (e) => {
+    if (!divider.hasPointerCapture(e.pointerId)) return;
+    const bounds = $("workspace").getBoundingClientRect();
+    setSplit((e.clientX - bounds.left) / bounds.width);
+  };
+  divider.onpointerup = divider.onpointercancel = () =>
+    divider.classList.remove("dragging");
+  divider.onkeydown = (e) => {
+    const step = { ArrowLeft: -0.02, ArrowRight: 0.02 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const current = parseFloat(getComputedStyle($("workspace")).getPropertyValue("--split")) / 100;
+    setSplit((current || 0.58) + step);
+  };
 }
 function setupVisual() {
   $("scope").onchange = () => {
@@ -1914,7 +2134,6 @@ function setupVisual() {
     $("node-panel").hidden = true;
     renderCanvas();
   };
-  $("examples-button").onclick = () => $("examples").showModal();
   $("advanced-button").onclick = () => $("advanced").showModal();
   $("history-button").onclick = () => $("execution").showModal();
   document
@@ -1922,22 +2141,29 @@ function setupVisual() {
     .forEach(
       (button) => (button.onclick = () => $(button.dataset.close).close()),
     );
-  const load = $("load").onclick;
-  $("load").onclick = async () => {
-    await load();
-    $("examples").close();
-    $("node-panel").hidden = true;
-    fit();
-  };
+  $("example").onchange = () => loadExample($("example").value);
   $("add-step").onclick = () => {
     openCatalog(
       activeScope ? appendPosition(workflow, activeScope) : undefined,
     );
   };
-  $("zoom-in").onclick = () => setZoom(zoom + 0.1);
-  $("zoom-out").onclick = () => setZoom(zoom - 0.1);
+  $("zoom-in").onclick = () => zoomAround(zoom + 0.1);
+  $("zoom-out").onclick = () => zoomAround(zoom - 0.1);
   $("fit").onclick = fit;
   const viewport = $("viewport");
+  viewport.addEventListener(
+    "wheel",
+    (e) => {
+      if (wheelIntent(e) !== "zoom") return;
+      e.preventDefault();
+      const bounds = viewport.getBoundingClientRect();
+      zoomAround(zoom * wheelFactor(e), {
+        x: e.clientX - bounds.left,
+        y: e.clientY - bounds.top,
+      });
+    },
+    { passive: false },
+  );
   let drag;
   viewport.onpointerdown = (e) => {
     if (e.target.closest("button, input, select, textarea, .data-node")) return;
@@ -1974,29 +2200,13 @@ $("run").onclick = () => {
   run();
 };
 setupVisual();
+setupCodePane();
 controls();
 renderQueue();
 await action(async () => {
   show(await call("/workflow"));
-  const [canonical, sourceTemplates] = await Promise.all([
-    call("/workflows"),
-    call("/workflow/templates"),
-  ]);
-  templates = [
-    ...canonical
-      .filter((t) => ["deep-research", "weekly-kpis"].includes(t.id))
-      .map((t) => ({ ...t, canonical: true })),
-    ...sourceTemplates,
-  ];
-  $("template").replaceChildren(
-    ...templates.map((template) => {
-      const option = document.createElement("option");
-      option.value = template.id;
-      option.textContent = template.name;
-      option.title = template.description;
-      return option;
-    }),
-  );
+  examples = await call("/workflows");
+  renderExamples();
   report("");
 });
 

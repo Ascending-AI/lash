@@ -1,61 +1,16 @@
 //! Example-owned HTTP adapter for Lash's public authoring API.
-//! The planner knows no HTTP, revisions, template catalog or publication policy.
+//! The planner knows no HTTP, revisions, example catalog or publication policy.
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
 use lash::workflow::authoring::{Operation, plan};
-use lash::workflow::document::Correspondence;
-use lash::workflow::document::Name;
+use lash::workflow::document::{Correspondence, Document, Name};
 use lash::workflow::edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::{AppState, ErrorResponse, WorkflowView, runtime};
-
-#[derive(Serialize)]
-pub(crate) struct Template {
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
-    entry: &'static str,
-    source: &'static str,
-}
-
-pub(crate) async fn templates() -> Json<Vec<Template>> {
-    Json(vec![
-        Template {
-            id: "inbox",
-            name: "Inbox review",
-            description: "A TypeScript workflow with deterministic email and display effects.",
-            entry: "demo",
-            source: r#"export async function demo() {
-  const greeting = "Inbox review started";
-  await display.show_message({ text: greeting });
-  const emails = await gmail.list_recent({ count: 3 });
-  await display.set_status({ key: "inbox", value: "Reviewed three mock emails" });
-  return emails;
-}
-"#,
-        },
-        Template {
-            id: "branch",
-            name: "Conditional notification",
-            description: "A nested block exercises insertion without flattening control flow.",
-            entry: "demo",
-            source: r#"export async function demo() {
-  const notify = true;
-  if (notify) {
-    await display.show_message({ text: "Inside the notification branch" });
-  } else {
-    await display.show_message({ text: "Notifications disabled" });
-  }
-  return null;
-}
-"#,
-        },
-    ])
-}
+use crate::{AppState, ErrorResponse, Origin, WorkflowView, runtime};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,50 +27,52 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let environment =
-        runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
-    let imported = state
-        .core
-        .host_artifacts()
-        .import_typescript_workflow(&request.source, &environment)
-        .await
-        .map_err(|error| ErrorResponse::invalid("source_import", error))?;
-    let document = match imported {
-        WorkflowImport::Imported { document } => document,
-        WorkflowImport::Refused(diagnostics) => {
-            return Err(ErrorResponse::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "source_refused",
-                "TypeScript import was refused; the current document is unchanged",
-                serde_json::json!({"diagnostics": diagnostics.iter().map(|diagnostic| {
-                    serde_json::json!({
-                        "message": diagnostic.message,
-                        "span": diagnostic.span.map(|span| serde_json::json!({"start":span.start,"end":span.end})),
-                    })
-                }).collect::<Vec<_>>()}),
-            ));
-        }
-        WorkflowImport::Admission(refusal) => {
-            return Err(ErrorResponse::invalid("source_admission", refusal));
-        }
-        other => {
-            return Err(ErrorResponse::invalid(
-                "source_unsupported",
-                format!("{other:?}"),
-            ));
-        }
-    };
-    if !document.document().entries.contains_key(&request.entry) {
+    let document = import(&state.core, &request.source).await?;
+    if !document.entries.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
             "Select an exported workflow function",
         ));
     }
-    let draft = Draft::open(document.document().clone())
-        .map_err(|error| ErrorResponse::invalid("document", error))?;
+    let draft = Draft::open(document).map_err(|error| ErrorResponse::invalid("document", error))?;
     let checked = state.environment().await?;
-    let (saved, _) = state.install(draft, request.entry).await;
+    let (saved, _) = state
+        .install(draft, request.entry, Origin::Imported(request.source))
+        .await;
     Ok(Json(saved.view(checked.functions())))
+}
+
+/// Lowers authored TypeScript through lash's workflow import and admits it
+/// against the run environment, as written: the host rewrites nothing.
+pub(crate) async fn import(core: &lash::LashCore, source: &str) -> Result<Document, ErrorResponse> {
+    let environment =
+        runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
+    let imported = core
+        .host_artifacts()
+        .import_typescript_workflow(source, &environment)
+        .await
+        .map_err(|error| ErrorResponse::invalid("source_import", error))?;
+    match imported {
+        WorkflowImport::Imported { document } => Ok(document.document().clone()),
+        WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_refused",
+            "TypeScript import was refused; the current document is unchanged",
+            serde_json::json!({"diagnostics": diagnostics.iter().map(|diagnostic| {
+                serde_json::json!({
+                    "message": diagnostic.message,
+                    "span": diagnostic.span.map(|span| serde_json::json!({"start":span.start,"end":span.end})),
+                })
+            }).collect::<Vec<_>>()}),
+        )),
+        WorkflowImport::Admission(refusal) => {
+            Err(ErrorResponse::invalid("source_admission", refusal))
+        }
+        other => Err(ErrorResponse::invalid(
+            "source_unsupported",
+            format!("{other:?}"),
+        )),
+    }
 }
 
 #[derive(Deserialize)]

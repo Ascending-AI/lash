@@ -20,7 +20,6 @@
         <h1>Notification workflow</h1>
       </div>
       <span class="saved" id="revision">Connecting…</span
-      ><button id="examples-button" class="quiet">Examples</button
       ><button id="advanced-button" class="quiet" aria-label="Advanced">
         Advanced</button
       ><button id="run" class="primary" data-write>
@@ -28,65 +27,93 @@
       </button>
     </header>
     <nav class="viewbar">
+      <select id="example" aria-label="Example workflow"></select>
+      <div class="segmented" role="group" aria-label="Source dialect">
+        <button id="dialect-typescript" aria-pressed="true">TypeScript</button
+        ><span title="Python workflow import lands with FIG-6380"
+          ><button id="dialect-python" aria-pressed="false" disabled>
+            Python
+          </button></span
+        >
+      </div>
       <select id="scope" aria-label="Canvas scope"></select>
-      <span class="active-view">Editor</span
-      ><button id="history-button" class="quiet">Execution</button
+      <div class="segmented layout-toggle" role="group" aria-label="Layout">
+        <button data-layout="graph" aria-pressed="false">Graph</button
+        ><button data-layout="split" aria-pressed="true">Split</button
+        ><button data-layout="code" aria-pressed="false">Code</button>
+      </div>
+      <button id="history-button" class="quiet">Execution</button
       ><span class="mock"><i></i> Mock connections</span>
     </nav>
-    <main class="workspace">
-      <div id="viewport" class="viewport" aria-label="Workflow canvas">
-        <div id="scene">
-          <svg id="wires" aria-hidden="true"></svg>
-          <div id="flow"></div>
+    <main id="workspace" class="workspace" data-layout="split">
+      <section class="canvas-area">
+        <div id="viewport" class="viewport" aria-label="Workflow canvas">
+          <div id="stage">
+            <div id="scene">
+              <svg id="wires" aria-hidden="true"></svg>
+              <div id="flow"></div>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="canvas-caption">
-        <span class="eyebrow">WORKFLOW</span>
-        <p>Connect values. Configure each step.</p>
-        <span id="node-count"></span>
-        <div class="canvas-legend">
-          <span>Data</span><span>Execution order</span>
+        <div class="canvas-caption">
+          <span class="eyebrow">WORKFLOW</span>
+          <p>Connect values. Configure each step.</p>
+          <span id="node-count"></span>
+          <div class="canvas-legend">
+            <span>Data</span><span>Execution order</span>
+          </div>
         </div>
-      </div>
-      <div class="canvas-tools">
-        <button id="zoom-out" aria-label="Zoom out">−</button
-        ><span id="zoom-label">100%</span
-        ><button id="zoom-in" aria-label="Zoom in">+</button
-        ><span class="tool-rule"></span
-        ><button id="fit" aria-label="Fit workflow">Fit</button>
-      </div>
-      <button id="add-step" class="add-step" data-write>
-        + &nbsp; Add step
-      </button>
-      <aside id="node-panel" hidden aria-label="Node settings">
-        <div class="panel-top">
-          <span id="panel-kicker" class="eyebrow">STEP SETTINGS</span
-          ><button
-            id="close-panel"
-            class="quiet"
-            aria-label="Close node settings"
-          >
-            ×
-          </button>
+        <div class="canvas-tools">
+          <button id="zoom-out" aria-label="Zoom out">−</button
+          ><span id="zoom-label">100%</span
+          ><button id="zoom-in" aria-label="Zoom in">+</button
+          ><span class="tool-rule"></span
+          ><button id="fit" aria-label="Fit workflow">Fit</button>
         </div>
-        <div id="node-form"></div>
-      </aside>
-      <div id="result" class="result" role="status" aria-live="polite"></div>
+        <button id="add-step" class="add-step" data-write>
+          + &nbsp; Add step
+        </button>
+        <aside id="node-panel" hidden aria-label="Node settings">
+          <div class="panel-top">
+            <span id="panel-kicker" class="eyebrow">STEP SETTINGS</span
+            ><button
+              id="close-panel"
+              class="quiet"
+              aria-label="Close node settings"
+            >
+              ×
+            </button>
+          </div>
+          <div id="node-form"></div>
+        </aside>
+        <div id="result" class="result" role="status" aria-live="polite"></div>
+      </section>
+      <div
+        id="divider"
+        class="divider-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize graph and code"
+        tabindex="0"
+      ></div>
+      <section id="code-pane" class="code-pane-area" aria-label="Workflow code">
+        <div class="code-top">
+          <div class="segmented" role="group" aria-label="Code view">
+            <button data-code="source" aria-pressed="false">Source</button
+            ><button data-code="typescript" aria-pressed="false">
+              TypeScript</button
+            ><button data-code="kernel" aria-pressed="true">Kernel</button>
+          </div>
+          <span id="code-note" class="code-note"></span>
+        </div>
+        <div id="code-view" class="code-view" tabindex="0"></div>
+      </section>
     </main>
-    <dialog id="examples">
-      <div class="dialog-top">
-        <h2>Start from an example</h2>
-        <button data-close="examples" aria-label="Close examples">×</button>
-      </div>
-      <p class="help">Replace the current workflow with a sample.</p>
-      <select id="template" aria-label="Example workflow"></select
-      ><button id="load" class="primary" data-write>Load example</button>
-    </dialog>
     <dialog id="advanced">
       <div class="dialog-top">
         <div>
           <h2>Advanced authoring</h2>
-          <p class="help">Source, document and direct edits</p>
+          <p class="help">TypeScript import, export and direct edits</p>
         </div>
         <button data-close="advanced" aria-label="Close advanced">×</button>
       </div>
@@ -189,7 +216,6 @@
           <section class="source-panel">
             <div class="tabs" role="group" aria-label="Document views">
               <button data-tab="source" class="active">TypeScript</button
-              ><button data-tab="document">Kernel document</button
               ><button data-tab="transaction">Planned transaction</button
               ><button data-tab="preview">Preview source</button>
             </div>
