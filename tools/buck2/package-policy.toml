@@ -180,6 +180,19 @@ kinds = ["test"]
 targets = ["tool_batches"]
 shards = 3
 
+# The steering crash laws' eight laws ran in one action: 250 s, then 301.7 s
+# under shared load with no code change, against the 300 s bound (FIG-6405).
+# Its two PostgreSQL matrices (70 and 60 cells) took 175-225 s and 148-192 s
+# of that; on separate actions they ran 44.7 s (124.6 s on a loaded executor)
+# and 37.5 s, and the six SQLite laws 0.1-19.3 s each (FIG-6412). Three
+# shards give each PostgreSQL matrix an action of its own and the five SQLite
+# matrices the third; the bound is unchanged.
+[[rule]]
+packages = ["lash-internal-durable-test"]
+kinds = ["test"]
+targets = ["steering_crash_laws"]
+shards = 3
+
 # The lash-postgres-workers runbook's harness (FIG-5199) owns its PostgreSQL server, so a
 # case can stop and restart it: the pinned tree, and the NSS wrapper `initdb`
 # needs on the pool, are data named to the test by path. Every case but the

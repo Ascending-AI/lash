@@ -122,6 +122,16 @@
     "sqlite_memory::an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash": 1419,
     "sqlite_memory::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill": 20449
   },
+  "//crates/lash-durable-test:steering_crash_laws__test": {
+    "a_steer_at_a_completion_candidate_killed_at_every_label_supersedes_once_on_sqlite_memory": 5961,
+    "a_steer_at_a_completion_candidate_supersedes_it_and_the_turn_goes_on_on_sqlite_memory": 138,
+    "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_postgres": 44742,
+    "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_file": 10106,
+    "a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory": 10484,
+    "a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres": 37482,
+    "a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_file": 6955,
+    "a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory": 5029
+  },
   "//crates/lash-durable-test:tool_batches__test": {
     "postgres::batch_admission_and_identity_contract": 12562,
     "postgres::batch_folds_to_one_transcript_call": 1752,

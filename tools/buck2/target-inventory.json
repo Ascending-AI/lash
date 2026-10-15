@@ -66866,6 +66866,7 @@
           "clippy_label": "//crates/lash-durable-test:steering_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:steering_crash_laws__test",
+          "shard_count": 3,
           "tags": [
             "hermetic-postgres"
           ]
