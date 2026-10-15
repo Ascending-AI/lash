@@ -405,6 +405,30 @@ pub enum ToolCallOutcome {
 /// wrapper. A stable or public JSON projection **MUST** go through
 /// [`ToolCallOutput::value_for_projection`], which removes that internal
 /// envelope while preserving typed attachment projection.
+///
+/// # Remote tool hosts
+///
+/// A provider that forwards a call to a remote tool host returns the host's
+/// answer as this value, with [`ToolCallOutput::success_tool_value`]. The
+/// host answers the typed value the tool's contract declares
+/// ([`ToolContract::output_schema`](crate::ToolContract::output_schema)), never
+/// model-facing presentation parts. Lash takes it from there:
+///
+/// - Lash admits the value against the call's contract where program code
+///   receives it. A code cell that calls the tool decodes the answer by the
+///   result type that output schema gives, with every record open, so extra
+///   fields pass. A value that does not fit raises `effect_result` in the
+///   cell, after the call has already settled as a success.
+/// - Lash presents the value to the model with
+///   [`ModelToolReturn::from_output`]. A host that shows the call, as a card
+///   or in a transcript, calls it too instead of deriving its own parts.
+///
+/// This type's serialized form keeps the envelope, so it can carry the
+/// answer over the host's wire. Deserializing it trusts the sender's
+/// reserved tags: an attachment the host tags becomes an
+/// [`Attachment`](Self::Attachment). A provider that does not trust its host
+/// to name attachments reads the answer as plain JSON and wraps it with
+/// [`untrusted_json`](Self::untrusted_json).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToolValue {
     Null,

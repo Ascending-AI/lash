@@ -421,6 +421,10 @@ pub mod observe {
 /// provider sent.
 /// [`AttemptContext::attempt_number`](crate::tools::AttemptContext::attempt_number)
 /// counts the runs apart from it.
+///
+/// A provider that forwards calls to a remote tool host has that host answer
+/// the typed [`ToolValue`](crate::tools::ToolValue), not presentation parts:
+/// see its section on remote tool hosts.
 pub mod tools {
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};

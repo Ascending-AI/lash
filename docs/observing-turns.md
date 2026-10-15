@@ -131,6 +131,39 @@ if let lash::observe::SessionObservationEventPayload::Committed { entries, .. } 
 `entry_id` supports equality and transport. An entry's position in a
 transcript orders it; that order is not a cursor.
 
+## Knowing a turn settled
+
+A turn that commits publishes one `Committed` whose event `turn_id` names
+the turn. It does so for every outcome: finished, stopped (a cancel or a
+failure), or switched to another agent frame. The event comes after
+everything the turn streamed and after the turn's outcome activity, and only
+once the commit is durable. That event is the signal to settle the turn. Read how its run ended from the run's answer, which reads
+the durable terminal and answers at once: `SendHandle::outcome` for the
+send, or `session.run(run).outcome()` by the run's id.
+
+Do not wait for a reply entry. A turn commits a reply, an entry whose
+provenance has `is_turn_reply`, only when it finishes. A stopped turn
+commits no reply. An `Immediate` stop commits the turn backtracked to its
+last checkpoint, and an `AfterStep` stop commits through the step it waited
+for. Neither has a reply.
+
+A `Committed` is a wake, not the answer:
+
+- **It names a physical turn.** A run that goes on past a commit, after an
+  agent-frame switch, commits each of its turns. The first commits under the
+  run's id and each later one under an id lash derives from it. The run's
+  answer says whether the run has ended.
+- **Some endings commit nothing.** A turn that ends with a refusal commits
+  nothing, whether the refusal came as it prepared or as it finished. Neither
+  does a stop that has no state to commit: one made before the turn's first
+  phase recorded any, or one whose state this build cannot decode or whose
+  head commit is refused. These endings publish no `Committed`, and the run's
+  answer is the only place they show.
+- **Publication is best effort.** A node lost after its commit publishes
+  nothing, and the next pass announces the durable head as a `Committed` with
+  no `turn_id` and no entries. On such an announcement or a replay gap, read
+  the answer of every run the host still holds open.
+
 ## A stopped turn's tail: the live stream is the contract
 
 Lash keeps no durable record of what a stopped turn streamed after its last
