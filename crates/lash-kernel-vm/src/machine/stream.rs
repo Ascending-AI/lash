@@ -460,7 +460,9 @@ impl KernelMachine {
                 ),
             );
         }
-        let tuple = Value::Tuple(self.heap.tuple(items)?);
+        let tuple = Value::Tuple(
+            self.heap_write(|heap| heap.tuple(items.clone()).map_err(Interrupt::from))?,
+        );
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())
@@ -576,7 +578,10 @@ impl KernelMachine {
                 frame.set_slot(local.at, SlotState::Value(value))?;
             }
             SlotState::Cell(cell) => {
-                self.heap.variable_write(cell, value)?;
+                self.heap_write(|heap| {
+                    heap.variable_write(cell, value.clone())
+                        .map_err(Interrupt::from)
+                })?;
             }
             SlotState::Empty => return unbound(&exe.code(code).slots[local.slot as usize].name),
         }

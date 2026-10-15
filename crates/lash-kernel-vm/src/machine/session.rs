@@ -292,9 +292,10 @@ impl KernelMachine {
             record,
             &self.heap.access,
         )?;
-        self.heap
-            .set_session_root(bindings)
-            .map_err(|error| self.heap_halt(error))
+        self.heap_write(|heap| {
+            heap.set_session_root(bindings.clone())
+                .map_err(super::write_halt)
+        })
     }
     pub(super) fn finished(&mut self, result: Datum, finish: bool) -> Result<Finished, Halt> {
         if !self.session_cell {
@@ -306,6 +307,7 @@ impl KernelMachine {
             });
         }
         self.publish_roots()?;
+        self.heap.release_statement_holds()?;
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
         if !self.host.is_empty() {

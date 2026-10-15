@@ -35,15 +35,18 @@ pub struct PagedHeap {
     temporary: Vec<Value>,
     temporary_fresh: Vec<EntityId>,
     pub(super) reserved: u64,
+    /// What the machine holds for its frames since it last published:
+    /// counted in U, and taken as credit when the roots it pays for are
+    /// installed (FIG-6318).
+    pub(super) held: u64,
     /// Whether the installed task and join trees are the execution state's
-    /// current roots: a machine clears it once its state moves past what
-    /// it published, and no collection traces until it publishes again
-    /// (FIG-6318).
+    /// current roots. A machine clears it once its state moves past what it
+    /// published; a write that then needs a refinement refuses rather than
+    /// trace them (FIG-6318).
     pub(super) roots_current: bool,
-    /// The bytes of the reservations a refinement owes since the roots
-    /// went stale: `Some` once one needed precision while no trace could
-    /// see the machine's holdings (FIG-6318).
-    pub(super) owed: Option<u64>,
+    /// The bytes the last write refused for (FIG-6318): the refusal also
+    /// crosses the native face, whose errors cannot name it.
+    refused: Option<u64>,
 }
 /// The heap root a heap-header page holds: a keyed leaf of one current
 /// header record.
@@ -129,8 +132,9 @@ impl PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            held: 0,
             roots_current: true,
-            owed: None,
+            refused: None,
             reserved: 0,
         })
     }
@@ -168,52 +172,119 @@ impl PagedHeap {
         *self.family_base.borrow_mut() = Some(base);
     }
     /// The execution state moved past the roots last installed with
-    /// [`Self::set_execution_roots`]: until the next installation, the
-    /// refinement a reservation needs is deferred and any other trace of
-    /// them refused, so a machine that publishes lazily cannot have a live
-    /// value it has not published swept (FIG-6318).
+    /// [`Self::set_execution_roots`]: until the next installation, a write
+    /// that needs an exact refinement refuses with
+    /// [`HeapWriteError::NeedsPrecision`] before it changes anything, so no
+    /// trace ever runs over roots the machine has not published (FIG-6318).
     pub fn execution_roots_moved(&mut self) {
         self.roots_current = false;
     }
-    /// Whether a refinement waits for the machine to publish its roots.
-    pub fn precision_owed(&self) -> bool {
-        self.owed.is_some()
-    }
-    /// Defers the refinement a reservation of `bytes` needs while the
-    /// installed roots are stale, granting it until the machine publishes:
-    /// a trace then could not see what the machine holds, and would free
-    /// it. `false` when the roots are current and the refinement runs now.
-    pub(super) fn defers_precision(&mut self, bytes: u64) -> bool {
-        if self.roots_current {
-            return false;
-        }
-        self.owed = Some(self.owed.unwrap_or(0).saturating_add(bytes));
-        true
-    }
-    /// Runs the refinement deferred while the roots were stale, now that
-    /// [`Self::set_execution_roots`] installed current ones: the verdict
-    /// the deferred reservations would have had, with what they allocated
-    /// counted (FIG-6318).
+    /// Holds `bytes` the running statement pays for, as a native
+    /// reservation does: U grows by them at once. A statement's hold is
+    /// credit for its writes and is released at the statement's end; a
+    /// persistent one pays for what the machine keeps in its frames and is
+    /// taken as credit when it next publishes them (FIG-6318). `false`, with
+    /// nothing held, when the census needs an exact refinement first.
     ///
     /// # Errors
     ///
-    /// [`HeapWriteError::Memory`] when what is live and still reserved
-    /// does not fit the bound; a fault reading the graph.
-    pub fn settle_precision(&mut self) -> Result<(), HeapWriteError> {
-        let Some(bytes) = self.owed.take() else {
-            return Ok(());
-        };
+    /// A fault of the census.
+    pub fn hold(&mut self, bytes: u64, persistent: bool) -> Result<bool, HeapFault> {
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
+        if !matches!(
+            census.reserve(LogicalBytes(bytes)),
+            ReservationDecision::Granted(_)
+        ) {
+            return Ok(false);
+        }
+        self.held_now(bytes, persistent)?;
+        Ok(true)
+    }
+    /// Refines exactly over the roots the machine has just published, with
+    /// `bytes` pending: after it, a hold or write of `bytes` is granted.
+    ///
+    /// # Errors
+    ///
+    /// [`HeapWriteError::Memory`] when what is live, held and pending does
+    /// not fit the bound; a fault when the roots are not published.
+    pub fn refine(&mut self, bytes: u64) -> Result<(), HeapWriteError> {
+        if !self.roots_current {
+            return Err(HeapFault::Malformed(
+                "a refinement would trace roots the machine has not published".into(),
+            )
+            .into());
+        }
         let mut census = self
             .census
             .take()
-            .ok_or_else(|| HeapFault::Malformed("an owed refinement has no census".into()))?;
+            .ok_or_else(|| HeapFault::Malformed("a refinement has no census".into()))?;
         let result = self.refine_installed(census.as_mut(), &[], bytes);
-        if self.accounting != census.certificate() {
-            self.accounting = census.certificate();
-            self.header = None;
-        }
+        self.accounting = census.certificate();
+        self.header = None;
         self.census = Some(census);
         result
+    }
+    fn held_now(&mut self, bytes: u64, persistent: bool) -> Result<(), HeapFault> {
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
+        census
+            .changed(LogicalBytes(0), LogicalBytes(bytes))
+            .map_err(census_fault)?;
+        self.accounting = census.certificate();
+        self.header = None;
+        let counter = if persistent {
+            &mut self.held
+        } else {
+            &mut self.reserved
+        };
+        *counter = counter
+            .checked_add(bytes)
+            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
+        Ok(())
+    }
+    /// The refusal of a write that needs an exact refinement of `bytes`
+    /// while the installed roots are not the machine's: `None` when the
+    /// refinement may run now.
+    pub(super) fn refuses_precision(&mut self, bytes: u64) -> Option<HeapWriteError> {
+        if self.roots_current {
+            return None;
+        }
+        self.refused = Some(bytes);
+        Some(HeapWriteError::NeedsPrecision { bytes })
+    }
+    /// The bytes of the refinement the last write refused for, if it
+    /// refused with [`HeapWriteError::NeedsPrecision`], however its error
+    /// reached the caller; clearing it.
+    pub fn take_refusal(&mut self) -> Option<u64> {
+        self.refused.take()
+    }
+    /// Releases what the running statement holds, keeping its installed
+    /// roots: a cell's end seals the session priced exactly, not by the
+    /// holds its last statement took on the way (FIG-6318).
+    ///
+    /// # Errors
+    ///
+    /// A fault of the census.
+    pub fn release_statement_holds(&mut self) -> Result<(), HeapFault> {
+        if self.reserved == 0 {
+            return Ok(());
+        }
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
+        census
+            .changed(LogicalBytes(self.reserved), LogicalBytes(0))
+            .map_err(census_fault)?;
+        self.reserved = 0;
+        self.accounting = census.certificate();
+        self.header = None;
+        Ok(())
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
         let before = self.accounting;
@@ -243,7 +314,7 @@ impl PagedHeap {
         &self.temporary_fresh
     }
     pub(super) fn outstanding_reserved(&self) -> u64 {
-        self.reserved
+        self.reserved.saturating_add(self.held)
     }
     pub fn epoch(&self) -> EditEpoch {
         self.epoch
@@ -336,7 +407,7 @@ impl PagedHeap {
         pending: u64,
     ) -> Result<(), HeapWriteError> {
         let registers = self.temporary.clone();
-        let reserved = self.reserved;
+        let reserved = self.outstanding_reserved();
         let mut seeds = self.temporary_fresh.clone();
         seeds.extend_from_slice(fresh);
         match census.refine(
@@ -369,10 +440,14 @@ impl PagedHeap {
     /// One exact refinement outside pressure: traces from the persistent
     /// roots and the installed statement roots, sweeps what it did not
     /// reach and makes U exact. Nothing is pending, so no verdict follows;
-    /// a heap with no census has nothing to refine. Over roots the machine
-    /// has not published since they went stale, the trace is refused
-    /// (FIG-6318).
+    /// a heap with no census has nothing to refine. It is refused over
+    /// roots the machine has not published (FIG-6318).
     pub fn collect(&mut self) -> Result<(), HeapFault> {
+        if !self.roots_current {
+            return Err(HeapFault::Malformed(
+                "a collection would trace roots the machine has not published".into(),
+            ));
+        }
         let Some(mut census) = self.census.take() else {
             return Ok(());
         };
@@ -399,6 +474,9 @@ impl PagedHeap {
         ) {
             return Ok(());
         }
+        if let Some(refusal) = self.refuses_precision(bytes) {
+            return Err(refusal);
+        }
         let fresh = self.temporary_fresh.clone();
         let mut values = self.temporary.clone();
         values.extend_from_slice(extra);
@@ -409,7 +487,7 @@ impl PagedHeap {
                 pinned: &[],
                 native_args: &[],
                 fresh: &fresh,
-                reserved: LogicalBytes(self.reserved),
+                reserved: LogicalBytes(self.outstanding_reserved()),
             },
         )
     }
@@ -424,6 +502,12 @@ impl PagedHeap {
         let decision = census.reserve(LogicalBytes(
             after.saturating_sub(before).saturating_sub(credit),
         ));
+        if let ReservationDecision::NeedsPrecision(pending) = &decision
+            && let Some(refusal) = self.refuses_precision(pending.bytes.0)
+        {
+            self.census = Some(census);
+            return Err(refusal);
+        }
         let result = (|| {
             census
                 .changed(LogicalBytes(credit), LogicalBytes(0))
@@ -449,9 +533,7 @@ impl PagedHeap {
             self.directory
                 .write(entity_key(entity), head, &self.access)?;
             self.header = None;
-            if matches!(decision, ReservationDecision::NeedsPrecision(_))
-                && !self.defers_precision(0)
-            {
+            if matches!(decision, ReservationDecision::NeedsPrecision(_)) {
                 return self.refine_installed(&mut *census, &[entity], 0);
             }
             if before == 0 {
@@ -715,8 +797,9 @@ impl SemanticHeap for PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            held: 0,
             roots_current: true,
-            owed: None,
+            refused: None,
             reserved: 0,
         }
     }
@@ -744,8 +827,9 @@ impl SemanticHeap for PagedHeap {
             joins: Tree::new(false),
             temporary: Vec::new(),
             temporary_fresh: Vec::new(),
+            held: 0,
             roots_current: true,
-            owed: None,
+            refused: None,
             reserved: 0,
         })
     }
@@ -1020,11 +1104,6 @@ impl SemanticHeap for PagedHeap {
         };
         let result = match census.reserve(bytes) {
             ReservationDecision::Granted(_) => Ok(()),
-            ReservationDecision::NeedsPrecision(pending)
-                if self.defers_precision(pending.bytes.0) =>
-            {
-                Ok(())
-            }
             ReservationDecision::NeedsPrecision(pending) => {
                 match census.refine(self, transient, pending) {
                     Ok(RefinedDecision::Granted(_)) => Ok(()),
@@ -1220,6 +1299,9 @@ pub(super) fn native_write(error: HeapWriteError) -> NativeError {
         HeapWriteError::Raised { kind, message } => native_raised(kind, &message),
         HeapWriteError::Memory => NativeError::Memory,
         HeapWriteError::Fault(e) => NativeError::Heap(e),
+        // The heap recorded the refusal; the machine's write wrapper reads
+        // it (FIG-6318).
+        HeapWriteError::NeedsPrecision { .. } => NativeError::Memory,
     }
 }
 pub(super) fn write_native(error: NativeError) -> HeapWriteError {

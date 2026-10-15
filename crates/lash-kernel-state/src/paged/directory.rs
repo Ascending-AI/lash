@@ -842,7 +842,7 @@ impl PagedHeap {
         if frozen.summary.entities == 0 {
             return Ok(family);
         }
-        let credit = self.outstanding_reserved().min(frozen.summary.cost.0);
+        let credit = self.reserved.min(frozen.summary.cost.0);
         self.admit(frozen.summary.cost.0 - credit, &[])?;
         self.reserved -= credit;
         let mut membership = Tree::new(false);
@@ -1060,7 +1060,7 @@ impl PagedHeap {
         fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {
         // The proposed roots are current: a precision check installing them
-        // traces them.
+        // traces them, and what the machine held for them is their credit.
         self.roots_current = true;
         let before = checked_sum(
             [self.tasks.cost(), self.joins.cost()]
@@ -1075,9 +1075,10 @@ impl PagedHeap {
         // Republishing the installed trees changes only the statement
         // roots: their task edges are those already counted (FIG-6318).
         if tasks.same_version(&self.tasks) && joins.same_version(&self.joins) {
-            return self.replace_holding(before, after, 0, 0, |heap| {
+            self.replace_holding(before, after, 0, 0, |heap| {
                 heap.install_transient(registers, pinned, fresh);
-            });
+            })?;
+            return self.release_held();
         }
         let old_tasks = checked_sum(
             [
@@ -1093,7 +1094,26 @@ impl PagedHeap {
             heap.tasks = tasks.with_task_edges(task_edges);
             heap.joins = joins.with_task_edges(join_edges);
             heap.install_transient(registers, pinned, fresh);
-        })
+        })?;
+        self.release_held()
+    }
+    /// Releases what the machine held for its frames beyond what the roots
+    /// just installed cost: they are priced exactly now (FIG-6318).
+    fn release_held(&mut self) -> Result<(), HeapWriteError> {
+        if self.held == 0 {
+            return Ok(());
+        }
+        let census = self
+            .census
+            .as_mut()
+            .ok_or_else(|| HeapFault::Malformed("persistent root has no census".into()))?;
+        census
+            .changed(LogicalBytes(self.held), LogicalBytes(0))
+            .map_err(census_fault)?;
+        self.held = 0;
+        self.accounting = census.certificate();
+        self.header = None;
+        Ok(())
     }
     fn replace_execution_root<T: Cell>(
         &mut self,
@@ -1123,15 +1143,25 @@ impl PagedHeap {
             .census
             .take()
             .ok_or_else(|| HeapFault::Malformed("persistent root has no census".into()))?;
-        let credit = self.reserved.min(after.saturating_sub(before));
-        let decision = census.reserve(LogicalBytes(
-            after.saturating_sub(before).saturating_sub(credit),
-        ));
+        // What the machine held for these roots pays for their growth
+        // first, then what the running statement holds.
+        let growth = after.saturating_sub(before);
+        let from_held = self.held.min(growth);
+        let from_reserved = self.reserved.min(growth - from_held);
+        let credit = from_held + from_reserved;
+        let decision = census.reserve(LogicalBytes(growth - credit));
+        if let ReservationDecision::NeedsPrecision(pending) = &decision
+            && let Some(refusal) = self.refuses_precision(pending.bytes.0)
+        {
+            self.census = Some(census);
+            return Err(refusal);
+        }
         let result = (|| {
             census
                 .changed(LogicalBytes(credit), LogicalBytes(0))
                 .map_err(census_fault)?;
-            self.reserved -= credit;
+            self.held -= from_held;
+            self.reserved -= from_reserved;
             install(self);
             self.population.task_edges = self
                 .population
@@ -1141,10 +1171,6 @@ impl PagedHeap {
                 .ok_or_else(|| HeapFault::Malformed("root task-edge population overflow".into()))?;
             match decision {
                 ReservationDecision::Granted(_) => census
-                    .changed(LogicalBytes(before), LogicalBytes(after))
-                    .map_err(census_fault)
-                    .map_err(HeapWriteError::from),
-                ReservationDecision::NeedsPrecision(_) if self.defers_precision(0) => census
                     .changed(LogicalBytes(before), LogicalBytes(after))
                     .map_err(census_fault)
                     .map_err(HeapWriteError::from),
@@ -1217,13 +1243,6 @@ impl CensusGraph for PagedHeap {
         &mut self,
         visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        // Every collection traces from here: none may see execution roots
-        // the machine moved past without publishing (FIG-6318).
-        if !self.roots_current {
-            return Err(HeapFault::Malformed(
-                "a collection would trace execution roots the machine has not published".into(),
-            ));
-        }
         let binding =
             |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
                 match &binding.value {

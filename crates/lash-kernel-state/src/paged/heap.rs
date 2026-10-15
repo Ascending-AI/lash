@@ -109,6 +109,12 @@ pub enum HeapWriteError {
     /// The memory bound refused, after exact refinement (S7).
     #[error("the run's memory bound refused an allocation")]
     Memory,
+    /// The write needs an exact refinement of `bytes` and the machine has
+    /// not published the roots one would trace; nothing changed. The
+    /// machine publishes, refines and holds them, and writes again
+    /// (FIG-6318).
+    #[error("a write needs an exact refinement of {bytes} bytes over unpublished roots")]
+    NeedsPrecision { bytes: u64 },
     #[error(transparent)]
     Fault(#[from] HeapFault),
 }

@@ -81,10 +81,18 @@ impl KernelMachine {
             Literal::Absent => Value::Absent,
             Literal::Bool(value) => Value::Bool(*value),
             Literal::Float(value) => Value::Float(*value),
-            Literal::Int(value) => Value::Int(self.heap.int(value.clone())?),
-            Literal::Text(value) => Value::Text(self.heap.text(value)?),
-            Literal::Bytes(value) => Value::Bytes(self.heap.bytes(value.as_slice())?),
-            Literal::Function(name) => Value::Function(self.heap.text(name.as_str())?),
+            Literal::Int(value) => Value::Int(
+                self.heap_write(|heap| heap.int(value.clone()).map_err(Interrupt::from))?,
+            ),
+            Literal::Text(value) => {
+                Value::Text(self.heap_write(|heap| heap.text(value).map_err(Interrupt::from))?)
+            }
+            Literal::Bytes(value) => Value::Bytes(
+                self.heap_write(|heap| heap.bytes(value.as_slice()).map_err(Interrupt::from))?,
+            ),
+            Literal::Function(name) => Value::Function(
+                self.heap_write(|heap| heap.text(name.as_str()).map_err(Interrupt::from))?,
+            ),
         })
     }
 }
@@ -233,10 +241,10 @@ impl KernelMachine {
     ) -> Result<(), Halt> {
         loop {
             if let Completion::Return(value) | Completion::Throw(value) = &mut departure {
-                *value = self
-                    .heap
-                    .canonical_value(value.clone())
-                    .map_err(|error| self.heap_halt(error))?;
+                *value = self.heap_write(|heap| {
+                    heap.canonical_value(value.clone())
+                        .map_err(super::write_halt)
+                })?;
             }
             match &departure {
                 Completion::Normal => return Ok(()),
@@ -519,7 +527,7 @@ impl KernelMachine {
         if depth as u64 > u64::from(self.bounds.call_depth) {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.reserve(super::FRAME_BYTES)?;
+        self.reserve_held(super::FRAME_BYTES)?;
         let FrameStorage { mut control, .. } = self.storage.frames.pop().unwrap_or_default();
         control.push(Control::Block {
             block: code.body,
@@ -543,10 +551,11 @@ impl KernelMachine {
             let mut args = super::Tree::new(true);
             if exe.lib(lib).native {
                 for at in 0..given {
-                    let value = self
-                        .heap
-                        .canonical_value(self.regs[base + at].clone())
-                        .map_err(|error| self.heap_halt(error))?;
+                    let given = self.regs[base + at].clone();
+                    let value = self.heap_write(|heap| {
+                        heap.canonical_value(given.clone())
+                            .map_err(super::write_halt)
+                    })?;
                     args.write(
                         lash_kernel_state::paged::directory::ordinal_key(at as u64),
                         value,
@@ -599,7 +608,8 @@ impl KernelMachine {
         };
         for (name, local) in &code.free {
             if let Some(frozen) = saved.captures.get(name) {
-                let value = self.heap.instantiate(frozen)?;
+                let value =
+                    self.heap_write(|heap| heap.instantiate(frozen).map_err(super::write_halt))?;
                 self.bind(task, local.at, local.shared, value)?;
             }
         }
@@ -615,14 +625,14 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        let value = self
-            .heap
-            .canonical_value(value)
-            .map_err(|error| self.heap_halt(error))?;
+        let value = self.heap_write(|heap| {
+            heap.canonical_value(value.clone())
+                .map_err(super::write_halt)
+        })?;
         let state = if shared {
             SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {
-            self.reserve(value_bytes(&value))?;
+            self.reserve_held(value_bytes(&value))?;
             SlotState::Value(value)
         };
         self.frame(task)?.set_slot(at, state)?;
@@ -688,10 +698,14 @@ impl KernelMachine {
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let (value, failed) = match outcome {
             CommittedOutcomeRecord::Elapsed => (Value::Null, false),
-            CommittedOutcomeRecord::Rejected(frozen) => (self.heap.instantiate(&frozen)?, true),
+            CommittedOutcomeRecord::Rejected(frozen) => (
+                self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?,
+                true,
+            ),
             CommittedOutcomeRecord::Completed(frozen) | CommittedOutcomeRecord::Failed(frozen) => {
                 let charge = self.heap.frozen_charge(&frozen)?;
-                let value = self.heap.instantiate(&frozen)?;
+                let value =
+                    self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
                 self.charge(charge)?;
                 (value, matches!(outcome, CommittedOutcomeRecord::Failed(_)))
             }
@@ -766,9 +780,10 @@ impl KernelMachine {
                 );
             }
         };
-        let frozen = self.heap.freeze_datum(&decoded)?;
+        let frozen =
+            self.heap_write(|heap| heap.freeze_datum(&decoded).map_err(Interrupt::from))?;
         let charge = self.heap.frozen_charge(&frozen)?;
-        let value = self.heap.instantiate(&frozen)?;
+        let value = self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
         self.charge(charge)?;
         Ok(value)
     }

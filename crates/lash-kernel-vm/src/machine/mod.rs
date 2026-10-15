@@ -119,8 +119,7 @@ impl From<HeapWriteError> for Interrupt {
             HeapWriteError::Raised { kind, message } => {
                 Self::raised(super::machine::error(kind, message))
             }
-            HeapWriteError::Memory => Self::Halt(Halt::Memory),
-            HeapWriteError::Fault(error) => Self::Halt(Halt::Heap(error)),
+            other => Self::Halt(write_halt(other)),
         }
     }
 }
@@ -472,10 +471,7 @@ impl KernelMachine {
     fn heap_halt(&self, error: HeapWriteError) -> Halt {
         match error {
             HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
-            HeapWriteError::Fault(error) => Halt::Heap(error),
-            HeapWriteError::Raised { kind, message } => {
-                Halt::Fault(format!("an allocation returned {kind}: {message}"))
-            }
+            other => write_halt(other),
         }
     }
 }
@@ -598,11 +594,6 @@ impl KernelMachine {
                 &self.fresh,
             )
             .map_err(|e| self.heap_halt(e))?;
-        // A refinement the heap deferred while these roots were stale runs
-        // now that it can trace them (FIG-6318).
-        self.heap
-            .settle_precision()
-            .map_err(|e| self.heap_halt(e))?;
         self.reconcile_sweep()
     }
 
@@ -639,14 +630,47 @@ impl KernelMachine {
         }
     }
 
-    /// The statement boundary's collection point: publishes what the run
-    /// holds when, and only when, a reservation since the last publication
-    /// needed a refinement the heap could not trace then (FIG-6318).
-    fn collect_owed(&mut self) -> Result<(), Halt> {
-        if self.heap.precision_owed() {
-            self.publish_holdings()?;
+    /// The collection point: under pressure, publishes what the run holds
+    /// and refines exactly with `bytes` pending, so the verdict is given
+    /// here, over current roots (FIG-6318).
+    pub(super) fn refine_for(&mut self, bytes: u64) -> Result<(), Halt> {
+        self.publish_holdings()?;
+        self.heap.refine(bytes).map_err(|e| self.heap_halt(e))
+    }
+
+    /// Makes a heap write. One that needs an exact refinement while the
+    /// run's roots are unpublished refuses before it changes anything; the
+    /// run refines at its collection point and makes the write again,
+    /// which the refinement left room for (FIG-6318).
+    pub(super) fn heap_write<T, E: From<Halt>>(
+        &mut self,
+        mut write: impl FnMut(&mut PagedHeap) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.heap.take_refusal();
+        match write(&mut self.heap) {
+            Err(error) => match self.heap.take_refusal() {
+                Some(bytes) => {
+                    self.refine_for(bytes)?;
+                    write(&mut self.heap)
+                }
+                None => Err(error),
+            },
+            done => done,
         }
-        Ok(())
+    }
+
+    /// The end a halt outside a step gives the run: a bound ends it as the
+    /// guest's own error, anything else is the machine's.
+    fn ended_by(&mut self, halt: Halt) -> Result<Step, MachineError> {
+        match halt {
+            Halt::Bound(exceeded) => Ok(self.finish_with(End::Error(RunError::Bound(exceeded)))),
+            Halt::Memory => Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
+                bound: Bound::Memory,
+                limit: self.bounds.memory,
+                function: None,
+            })))),
+            other => Err(machine_error(other)),
+        }
     }
 
     /// Runs one statement of `task`, or resumes the one it waits in.
@@ -655,10 +679,9 @@ impl KernelMachine {
         crate::perf_witness::step();
         // What the run holds is published only where something can read
         // it: the slice's yield, park, end or seal, a native call handed
-        // the heap, and the statement boundary after a reservation the
-        // heap could not refine. From here the installed roots are stale,
-        // and the heap defers any refinement until the next publication
-        // rather than trace them (FIG-6318).
+        // the heap, and a reservation or write under pressure. From here
+        // the installed roots are stale, and a write that needs a
+        // refinement refuses rather than trace them (FIG-6318).
         self.heap.execution_roots_moved();
         if self.observer.is_some() {
             self.observe_step(task, exe);
@@ -916,18 +939,14 @@ impl KernelMachine {
                         task
                     }
                     None => {
-                        self.publish_holdings().map_err(machine_error)?;
+                        if let Err(halt) = self.publish_holdings() {
+                            return self.ended_by(halt);
+                        }
                         return self.park(host);
                     }
                 },
             };
-            let mut stepped = self.step(task, host, &exe);
-            if matches!(stepped, Ok(()) | Err(Halt::Finish(_) | Halt::Fail(_)))
-                && let Err(halt) = self.collect_owed()
-            {
-                stepped = Err(halt);
-            }
-            match stepped {
+            match self.step(task, host, &exe) {
                 Ok(()) => {}
                 Err(Halt::Fault(problem)) => {
                     self.ended = true;
@@ -957,16 +976,16 @@ impl KernelMachine {
                     }))));
                 }
                 Err(Halt::Finish(result)) => {
-                    let end = self
-                        .conclude(Some(task), Ending::Finished(result))
-                        .map_err(machine_error)?;
-                    return Ok(self.finish_with(end));
+                    return match self.conclude(Some(task), Ending::Finished(result)) {
+                        Ok(end) => Ok(self.finish_with(end)),
+                        Err(halt) => self.ended_by(halt),
+                    };
                 }
                 Err(Halt::Fail(reason)) => {
-                    let end = self
-                        .conclude(Some(task), Ending::Failed(reason))
-                        .map_err(machine_error)?;
-                    return Ok(self.finish_with(end));
+                    return match self.conclude(Some(task), Ending::Failed(reason)) {
+                        Ok(end) => Ok(self.finish_with(end)),
+                        Err(halt) => self.ended_by(halt),
+                    };
                 }
             }
             self.regs.clear();
@@ -978,18 +997,38 @@ impl KernelMachine {
             #[cfg(test)]
             self.at_boundary()?;
             if let Some(end) = self.end.take() {
-                self.publish_holdings().map_err(machine_error)?;
+                if let Err(halt) = self.publish_holdings() {
+                    return self.ended_by(halt);
+                }
                 return Ok(self.finish_with(end));
             }
             let more = self.current.is_some() || !self.ready.is_empty();
             if more && self.charged.saturating_sub(before) >= slice {
-                self.publish_holdings().map_err(machine_error)?;
+                if let Err(halt) = self.publish_holdings() {
+                    return self.ended_by(halt);
+                }
                 if host.cancel_requested() {
                     return Ok(self.finish_with(End::Cancelled));
                 }
                 return Ok(Step::Slice);
             }
         }
+    }
+}
+
+/// The halt a heap write's error gives a run.
+fn write_halt(error: HeapWriteError) -> Halt {
+    match error {
+        HeapWriteError::Memory => Halt::Memory,
+        HeapWriteError::Fault(error) => Halt::Heap(error),
+        HeapWriteError::Raised { kind, message } => {
+            Halt::Fault(format!("an allocation returned {kind}: {message}"))
+        }
+        // Every write a run makes goes through `heap_write`, which retries
+        // a refused one.
+        HeapWriteError::NeedsPrecision { bytes } => Halt::Heap(HeapFault::Malformed(format!(
+            "a write refused for a refinement of {bytes} bytes outside the write wrapper"
+        ))),
     }
 }
 

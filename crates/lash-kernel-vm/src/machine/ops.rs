@@ -36,8 +36,8 @@ use crate::heap::within_depth;
 use crate::interface::{Bound, Host};
 use crate::observe::Event;
 use lash_kernel_doc::NativeHeap;
-use lash_kernel_doc::heap::{FieldName, IntRef, LogicalBytes};
-use lash_kernel_state::paged::{ObjectInit, SemanticHeap, TaskStateRecord, TransientRoots};
+use lash_kernel_doc::heap::{FieldName, IntRef};
+use lash_kernel_state::paged::{ObjectInit, SemanticHeap, TaskStateRecord};
 
 /// A register: a position in the machine's register stack.
 pub(super) type Reg = usize;
@@ -127,28 +127,37 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// The memory anchor: accounts `bytes` more memory, collecting when
-    /// the heap is due (at the statement's end, where the run publishes
-    /// what it holds) and ending the run when what is live does not leave
-    /// room.
+    /// The memory anchor: holds `bytes` more memory until the statement
+    /// ends, refining exactly at the collection point when the heap is due
+    /// and ending the run when what is live does not leave room.
     pub(super) fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        let transient = TransientRoots {
-            registers: &self.regs,
-            pinned: &self.pins.values,
-            native_args: &[],
-            fresh: &self.fresh,
-            reserved: LogicalBytes(0),
-        };
-        self.heap
-            .reserve_logical(LogicalBytes(bytes), &transient)
-            .map_err(|error| self.heap_halt(error))
+        self.hold(bytes, false)
+    }
+
+    /// The memory anchor for what the run keeps in its frames (a frame, a
+    /// bound value): held until the frames are next published, which
+    /// prices them exactly (FIG-6318).
+    pub(super) fn reserve_held(&mut self, bytes: u64) -> Result<(), Halt> {
+        self.hold(bytes, true)
+    }
+
+    fn hold(&mut self, bytes: u64, persistent: bool) -> Result<(), Halt> {
+        if self.heap.hold(bytes, persistent)? {
+            return Ok(());
+        }
+        self.refine_for(bytes)?;
+        if self.heap.hold(bytes, persistent)? {
+            Ok(())
+        } else {
+            Err(bound(Bound::Memory, self.bounds.memory))
+        }
     }
 
     pub(super) fn alloc(&mut self, object: ObjectInit) -> Result<EntityId, Halt> {
-        let id = self
-            .heap
-            .allocate_object(object)
-            .map_err(|error| self.heap_halt(error))?;
+        let id = self.heap_write(|heap| {
+            heap.allocate_object(object.clone())
+                .map_err(super::write_halt)
+        })?;
         self.fresh.push(id);
         Ok(id)
     }
@@ -286,7 +295,10 @@ impl KernelMachine {
                     );
                 };
                 let value = self.take(value);
-                self.heap.list_write(list, position as u64, value)?;
+                self.heap_write(|heap| {
+                    heap.list_write(list, position as u64, value.clone())
+                        .map_err(Interrupt::from)
+                })?;
             }
             Value::Record(record) => {
                 let Value::Text(field) = self.take(index) else {
@@ -300,7 +312,10 @@ impl KernelMachine {
                 self.key(&self.regs[index])?;
                 let key = self.take(index);
                 let value = self.take(value);
-                self.heap.map_write(map, key, value)?;
+                self.heap_write(|heap| {
+                    heap.map_write(map, key.clone(), value.clone())
+                        .map_err(Interrupt::from)
+                })?;
             }
             Value::Set(set) => {
                 self.key(&self.regs[index])?;
@@ -311,7 +326,10 @@ impl KernelMachine {
                     );
                 };
                 let member = self.take(index);
-                self.heap.set_write(set, member, present)?;
+                self.heap_write(|heap| {
+                    heap.set_write(set, member.clone(), present)
+                        .map_err(Interrupt::from)
+                })?;
             }
             _ => {
                 return raise(
