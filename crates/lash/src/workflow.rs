@@ -181,7 +181,7 @@ pub mod view {
     pub use lash_kernel_edit::view::{
         ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
         ExecutionSiteView, ExpressionView, ReturnView, ScopeKind, ScopeView, SiteKind,
-        StatementView, ViewError, WorkflowView,
+        StatementView, Use, ViewError, WorkflowView,
     };
 
     /// The view of `document` at the entry it is entered at.

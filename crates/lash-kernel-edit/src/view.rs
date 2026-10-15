@@ -22,8 +22,8 @@ use lash_kernel_check::{
     Reference, StmtNode,
 };
 use lash_kernel_doc::{
-    Action, Atom, Callee, Document, Expr, FunctionCatalog, FunctionId, FunctionName, Name, Node,
-    Param, Place, Site, Stmt, Type, Unit,
+    Action, Atom, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId, FunctionName,
+    Name, Node, Param, Place, Site, Stmt, Type, Unit,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,9 @@ pub struct StatementView {
 #[serde(deny_unknown_fields)]
 pub struct ScopeView {
     pub block: Site,
+    /// The statement that opens this block; absent for the entry body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<Site>,
     pub kind: ScopeKind,
 }
 
@@ -134,7 +137,15 @@ pub struct BindingView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_site: Option<Site>,
     /// Every node that reads it, in document order.
-    pub uses: Vec<Site>,
+    pub uses: Vec<Use>,
+}
+
+/// One read of a binding and the statement that contains it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Use {
+    pub site: Site,
+    pub statement: Site,
 }
 
 /// How a variable is declared.
@@ -172,12 +183,13 @@ pub struct ExpressionView {
 #[serde(deny_unknown_fields)]
 pub struct ActionView {
     pub site: Site,
+    pub kind: SiteKind,
     pub statement: Site,
     pub block: Site,
     /// What an assignment of the action's result writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Place>,
-    /// The statically named target of a library or declared call or spawn.
+    /// The statically named target of a call, spawn or perform.
     /// Calls through values have no static callee name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<CalleeView>,
@@ -188,19 +200,21 @@ pub struct ActionView {
 }
 
 /// A statically named call target. Declared names are arbitrary kernel names;
-/// library names are qualified [`FunctionName`]s.
+/// library names are qualified [`FunctionName`]s, and effects use their
+/// manifest names.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CalleeView {
     Library(FunctionName),
     Declared(Name),
+    Effect(EffectName),
 }
 
 /// One argument of an action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArgumentView {
-    /// The parameter the library, declared function or effect names here.
+    /// The parameter or builtin operand the kernel names here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<Name>,
     /// That parameter's type; `any` for an untyped declared parameter or
@@ -438,7 +452,7 @@ struct Walk<'a> {
     functions: &'a dyn FunctionCatalog,
     entry: Callable,
     view: WorkflowView,
-    uses: BTreeMap<BindingId, Vec<Site>>,
+    uses: BTreeMap<BindingId, Vec<Use>>,
 }
 
 impl<'a> Walk<'a> {
@@ -446,10 +460,10 @@ impl<'a> Walk<'a> {
         let graph = self.graph;
         let node = graph.node(id);
         for binding in direct_references(&node.kind) {
-            self.uses
-                .entry(binding)
-                .or_default()
-                .push(node.site.clone());
+            self.uses.entry(binding).or_default().push(Use {
+                site: node.site.clone(),
+                statement: at.statement.clone().ok_or_else(|| mismatch(node))?,
+            });
         }
         let mut inner = Context {
             block: at.block.clone(),
@@ -466,6 +480,7 @@ impl<'a> Walk<'a> {
                 let kind = at.opens.ok_or_else(|| mismatch(node))?;
                 self.view.scopes.push(ScopeView {
                     block: node.site.clone(),
+                    statement: at.statement.clone(),
                     kind,
                 });
                 inner.block = node.site.clone();
@@ -665,10 +680,15 @@ impl<'a> Walk<'a> {
                 }
                 Callee::Value(_) => (None, Vec::new()),
             },
-            _ => (
-                None,
+            Action::Perform { effect, .. } => (
+                Some(CalleeView::Effect(effect.clone())),
                 signature.map_or_else(Vec::new, |signature| signature.params.clone()),
             ),
+            Action::Sleep { .. }
+            | Action::Join { .. }
+            | Action::JoinMany { .. }
+            | Action::Cancel { .. }
+            | Action::Yield => (None, Vec::new()),
         };
         let args = written_atoms(written)
             .into_iter()
@@ -677,7 +697,17 @@ impl<'a> Walk<'a> {
             .map(|(index, (atom, derived))| {
                 let param = params.get(index);
                 ArgumentView {
-                    name: param.map(|param| param.name.clone()),
+                    name: param
+                        .map(|param| param.name.clone())
+                        .or_else(|| match written {
+                            Action::Sleep { .. } => Some(Name::new("duration")),
+                            Action::Join { .. } | Action::Cancel { .. } => Some(Name::new("task")),
+                            Action::JoinMany { .. } => Some(Name::new("tasks")),
+                            Action::Call { .. }
+                            | Action::Spawn { .. }
+                            | Action::Perform { .. }
+                            | Action::Yield => None,
+                        }),
                     ty: param.map_or(Type::Any, |param| param.ty.clone()),
                     atom: atom.clone(),
                     binding: match derived {
@@ -695,6 +725,16 @@ impl<'a> Walk<'a> {
         };
         self.view.dataflow.actions.push(ActionView {
             site: node.site.clone(),
+            kind: match derived {
+                ActionNode::Call { .. } => SiteKind::Call,
+                ActionNode::Perform { .. } => SiteKind::Perform,
+                ActionNode::Sleep { .. } => SiteKind::Sleep,
+                ActionNode::Join { .. } => SiteKind::Join,
+                ActionNode::JoinMany { .. } => SiteKind::JoinMany,
+                ActionNode::Yield => SiteKind::Yield,
+                ActionNode::Spawn { .. } => SiteKind::Spawn,
+                ActionNode::Cancel { .. } => SiteKind::Cancel,
+            },
             statement,
             block: at.block.clone(),
             destination: at.assigns.clone(),

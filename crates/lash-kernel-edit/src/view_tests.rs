@@ -70,6 +70,7 @@ fn notify(to) {
   do invoke text.pad(to, 2)
   do call wrap(to, 2)
   do spawn call wrap(to, 2)
+  do sleep 10
 }
 
 fn wrap(value, copies) {
@@ -83,17 +84,18 @@ main {
 
 const PINNED_VIEW: &str = r#"dataflow:
   actions:
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"line"},"binding":2,"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":"text.pad"},"result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"callee":{"effect":"mail.send"},"kind":"perform","result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"line"},"binding":2,"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"callee":{"effect":"log.write"},"kind":"perform","result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":"text.pad"},"kind":"call","result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"call","result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"spawn","result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
+    {"args":[{"atom":{"literal":{"int":"10"}},"name":"duration","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"kind":"sleep","result_type":"any","site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
   assignments: []
   bindings:
-    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":0,"kind":"param","name":"to","site":{"unit":{"function":"notify"}},"type":"any","uses":[{"path":[0,0],"unit":{"function":"notify"}},{"path":[3,0],"unit":{"function":"notify"}},{"path":[4,0],"unit":{"function":"notify"}},{"path":[5,0],"unit":{"function":"notify"}}]}
-    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":1,"kind":"let","name":"sent","site":{"path":[0],"unit":{"function":"notify"}},"type":"any","uses":[{"path":[1,0],"unit":{"function":"notify"}},{"path":[2,0,0,0],"unit":{"function":"notify"}}],"value_site":{"path":[0,0],"unit":{"function":"notify"}}}
-    {"assigned":false,"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"captured":false,"id":2,"kind":"for","name":"line","site":{"path":[1,1,0],"unit":{"function":"notify"}},"type":"text","uses":[{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}}]}
-    {"assigned":false,"block":{"path":[2,1],"unit":{"function":"notify"}},"captured":false,"id":3,"kind":"catch","name":"e","site":{"path":[2],"unit":{"function":"notify"}},"type":"any","uses":[{"path":[2,1,0,0],"unit":{"function":"notify"}}]}
+    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":0,"kind":"param","name":"to","site":{"unit":{"function":"notify"}},"type":"any","uses":[{"site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}},{"site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}},{"site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}},{"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}]}
+    {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":1,"kind":"let","name":"sent","site":{"path":[0],"unit":{"function":"notify"}},"type":"any","uses":[{"site":{"path":[1,0],"unit":{"function":"notify"}},"statement":{"path":[1],"unit":{"function":"notify"}}},{"site":{"path":[2,0,0,0],"unit":{"function":"notify"}},"statement":{"path":[2,0,0],"unit":{"function":"notify"}}}],"value_site":{"path":[0,0],"unit":{"function":"notify"}}}
+    {"assigned":false,"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"captured":false,"id":2,"kind":"for","name":"line","site":{"path":[1,1,0],"unit":{"function":"notify"}},"type":"text","uses":[{"site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}]}
+    {"assigned":false,"block":{"path":[2,1],"unit":{"function":"notify"}},"captured":false,"id":3,"kind":"catch","name":"e","site":{"path":[2],"unit":{"function":"notify"}},"type":"any","uses":[{"site":{"path":[2,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[2,1,0],"unit":{"function":"notify"}}}]}
   expressions:
     {"available":[1,0],"block":{"unit":{"function":"notify"}},"expression":{"variable":"sent"},"references":[1],"site":{"path":[1,0],"unit":{"function":"notify"}},"statement":{"path":[1],"unit":{"function":"notify"}},"type":"any"}
     {"available":[1,0],"block":{"path":[1,1],"unit":{"function":"notify"}},"expression":{"list":[{"literal":{"text":"a"}}]},"references":[],"site":{"path":[1,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0],"unit":{"function":"notify"}},"type":{"list":"text"}}
@@ -110,13 +112,14 @@ execution_sites:
   {"kind":"call","loops":[],"site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
   {"kind":"call","loops":[],"site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
   {"kind":"spawn","loops":[],"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
+  {"kind":"sleep","loops":[],"site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
 scopes:
   {"block":{"unit":{"function":"notify"}},"kind":"entry"}
-  {"block":{"path":[1,1],"unit":{"function":"notify"}},"kind":"then"}
-  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"kind":"for"}
-  {"block":{"path":[1,2],"unit":{"function":"notify"}},"kind":"else"}
-  {"block":{"path":[2,0],"unit":{"function":"notify"}},"kind":"try"}
-  {"block":{"path":[2,1],"unit":{"function":"notify"}},"kind":"catch"}
+  {"block":{"path":[1,1],"unit":{"function":"notify"}},"kind":"then","statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"kind":"for","statement":{"path":[1,1,0],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,2],"unit":{"function":"notify"}},"kind":"else","statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,0],"unit":{"function":"notify"}},"kind":"try","statement":{"path":[2],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,1],"unit":{"function":"notify"}},"kind":"catch","statement":{"path":[2],"unit":{"function":"notify"}}}
 statements:
   {"action":{"path":[0,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
   {"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
@@ -128,6 +131,7 @@ statements:
   {"action":{"path":[3,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"c4d9bb90b9e1114bd9196a9014d9723a58d66becb5cbd9c5c60f5426e58fab63"}}}}}}
   {"action":{"path":[4,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
   {"action":{"path":[5,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"action":{"path":[6,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[6],"unit":{"function":"notify"}},"statement":{"do":{"action":{"sleep":{"duration":{"literal":{"int":"10"}}}}}}}
 "#;
 
 /// The serialized view of one workflow with a branch, a loop, a try and
@@ -162,6 +166,27 @@ fn the_view_of_a_branch_a_loop_a_try_and_two_effects_is_pinned() {
         Err(crate::view::ViewError::MissingFunction { function }),
     );
     let wire = serde_json::to_value(&view).unwrap();
+    assert_eq!(
+        wire["dataflow"]["bindings"][1]["uses"],
+        serde_json::json!([
+            {"site": site("notify", &[1, 0]), "statement": site("notify", &[1])},
+            {"site": site("notify", &[2, 0, 0, 0]), "statement": site("notify", &[2, 0, 0])},
+        ])
+    );
+    assert_eq!(
+        wire["scopes"][1]["statement"],
+        serde_json::json!(site("notify", &[1]))
+    );
+    assert_eq!(
+        wire["dataflow"]["actions"][0]["callee"],
+        serde_json::json!({"effect": "mail.send"})
+    );
+    assert_eq!(wire["dataflow"]["actions"][0]["kind"], "perform");
+    assert_eq!(wire["dataflow"]["actions"][5]["kind"], "sleep");
+    assert_eq!(
+        wire["dataflow"]["actions"][5]["args"][0]["name"],
+        "duration"
+    );
     assert_eq!(
         wire["dataflow"]["actions"][2]["callee"],
         serde_json::json!({"library": "text.pad"})
@@ -290,10 +315,10 @@ fn an_effect_in_a_closure_body_is_listed_at_its_site() {
         r#"kernel 1
 numbers float
 effect display.show_message(input: Any) -> Any
-entry demo() -> Any
-fn demo() {
+entry demo(seed: Any) -> Any
+fn demo(seed) {
   let task = fn() {
-    let input = {text: "inside closure"}
+    let input = seed
     do perform display.show_message(input) as Any
   }
   return null
@@ -305,11 +330,15 @@ main { finish null }
     let view = view_of(&document, "demo");
     let body = site("demo", &[0, 0, 0]);
     let effect = site("demo", &[0, 0, 0, 1]);
-    assert!(
-        view.scopes
-            .iter()
-            .any(|scope| scope.block == body && scope.kind == ScopeKind::Closure)
-    );
+    assert!(view.scopes.iter().any(|scope| scope.block == body
+        && scope.kind == ScopeKind::Closure
+        && scope.statement == Some(site("demo", &[0]))));
+    let reads = &view.dataflow.bindings[0].uses;
+    assert_eq!(reads.len(), 2, "capture and body read are both named");
+    assert_eq!(reads[0].site, site("demo", &[0, 0]));
+    assert_eq!(reads[0].statement, site("demo", &[0]));
+    assert_eq!(reads[1].site, site("demo", &[0, 0, 0, 0, 0]));
+    assert_eq!(reads[1].statement, site("demo", &[0, 0, 0, 0]));
     let listed = view
         .statements
         .iter()
@@ -476,4 +505,36 @@ main { finish null }
             .iter()
             .all(|output| output.expected_type == Type::Text)
     );
+}
+
+/// Builtin action operands use their kernel names, including both task waits.
+#[test]
+fn builtin_operands_keep_the_kernel_names() {
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+entry demo(task: Task(Any), tasks: List(Task(Any))) -> Any
+fn demo(task, tasks) {
+  do sleep 10
+  do join task
+  do join all tasks
+  do cancel task
+}
+main { finish null }
+"#,
+    )
+    .expect("builtin operands");
+    let view = view_of(&document, "demo");
+    let actions = &view.dataflow.actions;
+    assert_eq!(actions.len(), 4);
+    for (action, (kind, name)) in actions.iter().zip([
+        (SiteKind::Sleep, "duration"),
+        (SiteKind::Join, "task"),
+        (SiteKind::JoinMany, "tasks"),
+        (SiteKind::Cancel, "task"),
+    ]) {
+        assert_eq!(action.kind, kind);
+        assert_eq!(action.args.len(), 1);
+        assert_eq!(action.args[0].name, Some(Name::new(name)));
+    }
 }

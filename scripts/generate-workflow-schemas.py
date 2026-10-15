@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate or check the checked-in workflow JSON Schema documents."""
+"""Generate or check the checked-in workflow JSON Schemas and host TypeScript declarations."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,95 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "schemas" / "host"
+
+
+def typescript_declarations(schema: dict[str, object]) -> str:
+    """Render the view's schema graph, with JSON constraints kept in the schema.
+
+    Fail on unsupported schema forms rather than silently widening host types.
+    Every local definition is exported so hosts can name nested view facts.
+    """
+    definitions = schema.get("$defs", {})
+    title = schema["title"]
+    for name in [title, *definitions]:
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name) is None:
+            raise ValueError(f"invalid TypeScript type name: {name!r}")
+
+    def literal(value: object) -> str:
+        if value is None or isinstance(value, (str, bool, int, float)):
+            return json.dumps(value, ensure_ascii=True)
+        raise ValueError(f"unsupported TypeScript literal: {value!r}")
+
+    def comment(description: str, indent: int = 0) -> str:
+        pad = " " * indent
+        lines = description.replace("*/", "* /").splitlines()
+        return pad + "/**\n" + "".join((pad + " * " + line).rstrip() + "\n" for line in lines) + pad + " */\n"
+
+    def render(node: object, indent: int = 0) -> str:
+        if isinstance(node, bool):
+            return "unknown" if node else "never"
+        supported = {
+            "$defs", "$id", "$schema", "title", "description", "default",
+            "x-lash-schema-version", "x-lash-version-constant",
+            "$ref", "const", "enum", "oneOf", "anyOf", "allOf", "type",
+            "properties", "required", "additionalProperties", "items",
+            "format", "pattern", "minimum", "maximum", "minLength", "maxLength",
+            "minItems", "maxItems", "uniqueItems", "multipleOf",
+            "exclusiveMinimum", "exclusiveMaximum",
+        }
+        unknown = node.keys() - supported
+        if unknown:
+            raise ValueError(f"unsupported TypeScript schema keywords: {sorted(unknown)}")
+        if "$ref" in node:
+            reference = node["$ref"]
+            prefix = "#/$defs/"
+            if not reference.startswith(prefix) or reference[len(prefix):] not in definitions:
+                raise ValueError(f"unresolved TypeScript schema reference: {reference}")
+            return reference[len(prefix):]
+        if "const" in node:
+            return literal(node["const"])
+        if "enum" in node:
+            return "(" + " | ".join(literal(value) for value in node["enum"]) + ")"
+        for keyword, operator in [("oneOf", " | "), ("anyOf", " | "), ("allOf", " & ")]:
+            if keyword in node:
+                return "(" + operator.join(render(part, indent) for part in node[keyword]) + ")"
+        kind = node.get("type")
+        if isinstance(kind, list):
+            return "(" + " | ".join(render(dict(node, type=part), indent) for part in kind) + ")"
+        if kind == "array":
+            return "Array<" + render(node.get("items", True), indent) + ">"
+        if kind == "object":
+            required = node.get("required", [])
+            rows = []
+            pad = " " * (indent + 2)
+            for name, field in node.get("properties", {}).items():
+                if isinstance(field, dict) and field.get("description"):
+                    rows.append(comment(field["description"], indent + 2).rstrip())
+                optional = "" if name in required else "?"
+                rows.append(pad + json.dumps(name) + optional + ": " + render(field, indent + 2) + ";")
+            extra = node.get("additionalProperties", True)
+            if extra is not False:
+                rows.append(pad + "[key: string]: " + render(extra, indent + 2) + ";")
+            if not rows:
+                return "Record<string, never>"
+            return "{\n" + "\n".join(rows) + "\n" + " " * indent + "}"
+        primitives = {"string": "string", "integer": "number", "number": "number",
+                      "boolean": "boolean", "null": "null"}
+        if kind in primitives:
+            return primitives[kind]
+        if kind is None and not (node.keys() - {"description", "default", "title"}):
+            return "unknown"
+        raise ValueError(f"unsupported TypeScript schema form: {node}")
+
+    output = [
+        "// Derived from v1.schema.json by scripts/generate-workflow-schemas.py.\n",
+        "// JSON Schema remains authoritative for value constraints and validation.\n\n",
+    ]
+    for name, definition in [(title, schema), *definitions.items()]:
+        if definition.get("description"):
+            output.append(comment(definition["description"]))
+        output.append(f"export type {name} = {render(definition)};\n\n")
+    return "".join(output).rstrip() + "\n"
 
 
 def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
@@ -25,6 +115,8 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
             raise ValueError("generator returned an invalid shape registration")
         relative = Path(shape) / f"v{version}.schema.json"
         documents[relative] = json.dumps(schema, indent=2) + "\n"
+        if shape == "kernel-workflow-view":
+            documents[Path(shape) / f"v{version}.d.ts"] = typescript_declarations(schema)
     return documents
 
 
@@ -36,10 +128,12 @@ def generate(
 ) -> int:
     output = OUTPUT if output is None else output
     if generated is not None:
-        documents = {
-            path.relative_to(generated): path.read_text(encoding="utf-8")
-            for path in generated.glob("*/*.schema.json")
-        }
+        documents = rendered_documents([
+            {"shape": path.parent.name,
+             "version": int(path.name.removeprefix("v").removesuffix(".schema.json")),
+             "schema": json.loads(path.read_text(encoding="utf-8"))}
+            for path in sorted(generated.glob("*/*.schema.json"))
+        ])
         if not documents:
             print("generated workflow schema directory is empty", file=sys.stderr)
             return 1
@@ -82,7 +176,7 @@ def generate(
 
     expected_paths = {output / relative for relative in documents}
     if output.exists():
-        for path in output.glob("*/*.schema.json"):
+        for path in [*output.glob("*/*.schema.json"), *output.glob("*/*.d.ts")]:
             if path not in expected_paths:
                 if check:
                     stale.append(f"{path} is obsolete")

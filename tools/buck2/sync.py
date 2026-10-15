@@ -1222,7 +1222,7 @@ schema_documents(
 schema_check(
     name = "host_schema_check",
     documents = ":host_schema_documents",
-    checked = glob(["schemas/host/*/*.schema.json"]),
+    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]),
     script = "scripts/generate-workflow-schemas.py",
 )
 

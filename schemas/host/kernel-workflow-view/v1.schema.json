@@ -223,7 +223,7 @@
               "type": "null"
             }
           ],
-          "description": "The statically named target of a library or declared call or spawn.\nCalls through values have no static callee name."
+          "description": "The statically named target of a call, spawn or perform.\nCalls through values have no static callee name."
         },
         "destination": {
           "anyOf": [
@@ -235,6 +235,9 @@
             }
           ],
           "description": "What an assignment of the action's result writes."
+        },
+        "kind": {
+          "$ref": "#/$defs/SiteKind"
         },
         "result_type": {
           "$ref": "#/$defs/Type",
@@ -249,6 +252,7 @@
       },
       "required": [
         "site",
+        "kind",
         "statement",
         "block",
         "args",
@@ -282,7 +286,7 @@
               "type": "null"
             }
           ],
-          "description": "The parameter the library, declared function or effect names here."
+          "description": "The parameter or builtin operand the kernel names here."
         },
         "type": {
           "$ref": "#/$defs/Type",
@@ -394,7 +398,7 @@
         "uses": {
           "description": "Every node that reads it, in document order.",
           "items": {
-            "$ref": "#/$defs/Site"
+            "$ref": "#/$defs/Use"
           },
           "type": "array"
         },
@@ -472,7 +476,7 @@
       ]
     },
     "CalleeView": {
-      "description": "A statically named call target. Declared names are arbitrary kernel names;\nlibrary names are qualified [`FunctionName`]s.",
+      "description": "A statically named call target. Declared names are arbitrary kernel names;\nlibrary names are qualified [`FunctionName`]s, and effects use their\nmanifest names.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -495,6 +499,18 @@
           },
           "required": [
             "declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "effect": {
+              "$ref": "#/$defs/QualifiedName"
+            }
+          },
+          "required": [
+            "effect"
           ],
           "type": "object"
         }
@@ -1324,6 +1340,17 @@
         },
         "kind": {
           "$ref": "#/$defs/ScopeKind"
+        },
+        "statement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The statement that opens this block; absent for the entry body."
         }
       },
       "required": [
@@ -1980,6 +2007,23 @@
           "type": "object"
         }
       ]
+    },
+    "Use": {
+      "additionalProperties": false,
+      "description": "One read of a binding and the statement that contains it.",
+      "properties": {
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "statement": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "statement"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://lash.dev/schemas/kernel-workflow-view/v1",
