@@ -60,11 +60,12 @@ fn record(id: &str, timestamp_ms: i64, event: TraceEvent) -> TraceRecord {
     TraceRecord {
         schema_version: crate::TRACE_SCHEMA_VERSION,
         id: id.into(),
-        timestamp: DateTime::from_timestamp_millis(timestamp_ms).unwrap(),
+        timestamp: crate::TraceTimestamp::from_unix_ms(u64::try_from(timestamp_ms).unwrap()),
         content: TelemetryContent::Captured,
         context: TraceContext::default()
             .for_session("session")
             .for_turn("turn"),
+        position: None,
         event,
     }
 }
@@ -227,11 +228,7 @@ fn snapshots_never_contain_payload_even_with_full_content() {
         tool(TraceToolCallOutcome::Failure(json!("PAYLOAD_SECRET")), 100),
     ];
     for (index, event) in events.into_iter().enumerate() {
-        let mut record = record(&index.to_string(), 1000, event);
-        record
-            .context
-            .metadata
-            .insert("secret".into(), json!("PAYLOAD_SECRET"));
+        let record = record(&index.to_string(), 1000, event);
         assert!(format!("{record:?}").contains("PAYLOAD_SECRET"));
         sink.append(&record).unwrap();
     }

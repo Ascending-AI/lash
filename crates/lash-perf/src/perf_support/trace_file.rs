@@ -42,3 +42,12 @@ impl TraceSink for JsonlFileSink {
             })
     }
 }
+
+/// The language-execution observations a run's product graph sees, written
+/// to the same file shape. A failed write loses the observation: the file is
+/// evidence, not the product graph.
+impl lash::tracing::ProductObservationSink for JsonlFileSink {
+    fn observe(&self, record: &TraceRecord) {
+        let _ = self.append(record);
+    }
+}

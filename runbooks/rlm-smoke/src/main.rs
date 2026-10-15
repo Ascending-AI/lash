@@ -494,13 +494,6 @@ async fn main() -> Result<()> {
         },
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
-    let mut trace_context = lash::tracing::TraceContext {
-        run_id: Some(format!("trace-offset-{}", args.trace_offset)),
-        ..lash::tracing::TraceContext::default()
-    };
-    trace_context
-        .metadata
-        .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend, protocol)
         // The smoke run serves one model, keyed by its wire model.
         .llm_profiles(Arc::new(
@@ -525,7 +518,6 @@ async fn main() -> Result<()> {
         .trace_sink(Arc::new(trace_file::JsonlFileSink::new(&trace_path)))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
-        .trace_context(trace_context)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("rlm-smoke"), lash::persistence::LeaseIncarnationId::new(args.session_id.clone())))
         .context("build RLM smoke core")?;
     // A smoke run may name a session an earlier run created: create-or-use,

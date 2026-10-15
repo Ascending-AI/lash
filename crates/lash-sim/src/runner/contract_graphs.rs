@@ -115,11 +115,8 @@ pub(super) fn contract_turn_events(
     })
 }
 
-impl lash::tracing::TraceSink for ContractGraphs {
-    fn append(
-        &self,
-        record: &lash::tracing::TraceRecord,
-    ) -> Result<(), lash::tracing::TraceSinkError> {
+impl lash::tracing::ProductObservationSink for ContractGraphs {
+    fn observe(&self, record: &lash::tracing::TraceRecord) {
         let key = match &record.event {
             lash::tracing::TraceEvent::LanguageExecution { event, .. } => {
                 event.identity.graph_key()
@@ -127,7 +124,7 @@ impl lash::tracing::TraceSink for ContractGraphs {
             lash::tracing::TraceEvent::StepBodyStarted { step } => {
                 format!("process:{}", step.process_id)
             }
-            _ => return Ok(()),
+            _ => return,
         };
         let mut executions = self
             .executions
@@ -142,7 +139,6 @@ impl lash::tracing::TraceSink for ContractGraphs {
         }
         // One execution per accumulator, so the fold cannot refuse the record.
         let _ = execution.overlay.fold(std::slice::from_ref(record));
-        Ok(())
     }
 }
 

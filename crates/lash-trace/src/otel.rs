@@ -1,39 +1,48 @@
-//! Host-owned providers project permitted domain observations under retained anchors.
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+//! The OpenTelemetry exporter: one [`TraceSink`] that builds a host SDK span
+//! from each published record, with lash's span ids and sampling decisions.
+//!
+//! A span is started and ended in one call when its closing (or whole)
+//! record arrives, from the record's retained start and end. No SDK span is
+//! held open anywhere. The exporter is also the runtime's
+//! [`TraceIdentity`]: it reads the caller's ambient context, draws producer
+//! and leaf ids from the host's fallback id generator, and asks the host's
+//! sampler at producers, the one decision every lash span of the trace
+//! follows.
+use std::sync::Arc;
 
-use opentelemetry::global::{BoxedSpan, BoxedTracer};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{
-    Link, Span, SpanContext, SpanId, Status, TraceContextExt, TraceFlags, TraceId, TraceState,
-    Tracer, TracerProvider,
+    Link, Span, SpanBuilder, SpanContext, SpanId, SpanKind, Status, TraceContextExt, TraceFlags,
+    TraceId, TraceState, Tracer, TracerProvider,
 };
 use opentelemetry::{Context, KeyValue};
+use opentelemetry_sdk::trace::{IdGenerator, SamplingDecision, SdkTracer};
 
-use lash_sansio::llm::types::{AttemptOutcome, LlmUsage};
+use lash_sansio::llm::types::LlmUsage;
 
 use crate::telemetry::{
-    AttemptObservation, DurableTraceScope, EmissionSource, ProducerKind, ProducerSpec,
-    TraceAdmissionCandidate, TraceAnchor, TraceCandidateOutcome, TraceCarrier,
-    TraceDomainProjector, TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceToolOwner,
-    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    ProducerKind, ProducerSpec, TraceCarrier, TraceIdentity, TraceLinkMode, TraceScopeId,
+    TraceScopeOwner, TraceToolOwner, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 use crate::{
-    TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TraceRecord,
-    TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceTurnOutcome,
+    TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TracePosition, TraceRecord,
+    TraceRetryAttemptDetail, TraceSink, TraceSinkError, TraceSpanKind, TraceToolAttemptOutcome,
+    TraceTurnOutcome,
 };
 
 /// Exact API namespace supported by this adapter.
 pub use opentelemetry as api;
+/// Exact SDK namespace [`LashTracerProvider`] wraps.
+pub use opentelemetry_sdk as sdk;
 
 mod payload;
+mod provider;
 pub use crate::telemetry::metrics::registry;
 pub use crate::telemetry::metrics::{
     ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics, TelemetryMetrics, ToolIntentMetrics,
 };
-use registry::{AttributeKey as A, DomainSpan, Ownership};
+pub use provider::LashTracerProvider;
+use registry::{AttributeKey as A, DomainSpan};
 pub use registry::{GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT};
 
 /// Host naming and attribute customization over the typed domain record.
@@ -46,57 +55,19 @@ pub trait OtelSpanEnricher: Send + Sync {
 
 #[derive(Clone)]
 pub struct OtelOptions {
-    pub admission_limits: OtelAdmissionLimits,
-    pub include_context_metadata: bool,
-    /// Bytes of one record's exported JSON: its context metadata, when
-    /// included, and its event payload. Whether a payload is exported at all
-    /// follows the host's [`TelemetryContent`](crate::TelemetryContent)
-    /// policy, read from [`TraceRecord::content`].
+    /// Bytes of one record's exported event payload. Whether a payload is
+    /// exported at all follows the host's
+    /// [`TelemetryContent`](crate::TelemetryContent) policy, read from
+    /// [`TraceRecord::content`].
     pub max_payload_bytes: usize,
     pub enrich: Option<Arc<dyn OtelSpanEnricher>>,
 }
 
-/// One identity-producing adapter per runtime. The host owns flush and shutdown.
-#[derive(Clone)]
-pub struct OtelTelemetry {
-    tracer: Arc<BoxedTracer>,
-    metrics: TelemetryMetrics,
-    options: OtelOptions,
-    admissions: Arc<Mutex<Admissions>>,
-}
-
-/// Admission working capacities, independent of trace-carrier wire limits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OtelAdmissionLimits {
-    /// Remembered export identities; zero disables deduplication.
-    pub exported: usize,
-    /// Held deferred candidates; overflow refuses the oldest. Zero holds none.
-    pub deferred: usize,
-}
-impl OtelAdmissionLimits {
-    /// Standard preset: 4096 export identities and 256 deferred candidates.
-    /// No workload measurements justify these exact capacities.
-    pub const fn standard() -> Self {
-        Self {
-            exported: 4096,
-            deferred: 256,
-        }
-    }
-}
-impl Default for OtelAdmissionLimits {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
 impl OtelOptions {
-    /// Standard preset: metadata excluded, 4096 payload bytes per record, no
-    /// enrichment and [`OtelAdmissionLimits::standard`] working capacities.
-    /// Export remains opt-in through installing this adapter; its capacities
-    /// lack workload measurements.
+    /// Standard preset: 4096 payload bytes per record and no enrichment.
+    /// Export remains opt-in through installing this adapter.
     pub fn standard() -> Self {
         Self {
-            admission_limits: OtelAdmissionLimits::standard(),
-            include_context_metadata: false,
             max_payload_bytes: 4096,
             enrich: None,
         }
@@ -108,101 +79,30 @@ impl Default for OtelOptions {
     }
 }
 
-/// An admission's export identity: its anchor's trace and span.
-type AdmissionIdentity = (W3cTraceId, W3cSpanId);
-
-fn identity(anchor: &TraceAnchor) -> Option<AdmissionIdentity> {
-    anchor
-        .context()
-        .map(|context| (context.trace_id(), context.span_id()))
-}
-
-/// A candidate whose admission's export waits for a reconcile of its
-/// anchor.
-struct Deferred {
-    span: BoxedSpan,
-    /// When it was deferred: its span ends here, whenever it is exported.
-    ended: SystemTime,
-    identity: AdmissionIdentity,
-    scope: TraceScopeId,
-}
-
-/// The admissions an adapter exported, by identity, and the candidates it
-/// holds deferred.
-#[derive(Default)]
-struct Admissions {
-    limits: OtelAdmissionLimits,
-    exported: HashSet<AdmissionIdentity>,
-    order: VecDeque<AdmissionIdentity>,
-    deferred: VecDeque<Deferred>,
-}
-
-impl Admissions {
-    /// Records `identity` as exported; `false` when it already was.
-    fn export(&mut self, identity: AdmissionIdentity) -> bool {
-        if !self.exported.insert(identity) {
-            return false;
-        }
-        self.order.push_back(identity);
-        if self.order.len() > self.limits.exported
-            && let Some(oldest) = self.order.pop_front()
-        {
-            self.exported.remove(&oldest);
-        }
-        true
-    }
-
-    /// `identity` was selected for `scope`: its deferred candidate, if one
-    /// is held, and every other deferred candidate of `scope`, which lost.
-    fn select(
-        &mut self,
-        scope: &TraceScopeId,
-        identity: AdmissionIdentity,
-    ) -> (Option<Deferred>, Vec<Deferred>) {
-        let mut selected = None;
-        let mut lost = Vec::new();
-        for deferred in std::mem::take(&mut self.deferred) {
-            if deferred.identity == identity {
-                selected = Some(deferred);
-            } else if deferred.scope == *scope {
-                lost.push(deferred);
-            } else {
-                self.deferred.push_back(deferred);
-            }
-        }
-        (selected, lost)
-    }
-
-    /// Holds `deferred`, returning the oldest held candidate past the bound.
-    fn defer(&mut self, deferred: Deferred) -> Option<Deferred> {
-        self.deferred.push_back(deferred);
-        if self.deferred.len() > self.limits.deferred {
-            return self.deferred.pop_front();
-        }
-        None
-    }
+/// The runtime's OpenTelemetry exporter and identity. The host owns its
+/// provider's flush and shutdown.
+#[derive(Clone)]
+pub struct OtelTelemetry {
+    tracer: SdkTracer,
+    provider: LashTracerProvider,
+    metrics: TelemetryMetrics,
+    options: OtelOptions,
 }
 
 impl OtelTelemetry {
-    pub fn new<P: TracerProvider, M: MeterProvider>(
-        tracer_provider: &P,
-        meter_provider: &M,
+    pub fn new(
+        tracer_provider: &LashTracerProvider,
+        meter_provider: &impl MeterProvider,
         options: OtelOptions,
-    ) -> Self
-    where
-        P::Tracer: Send + Sync + 'static,
-        <P::Tracer as Tracer>::Span: Send + Sync + 'static,
-    {
-        let tracer = tracer_provider.tracer_with_scope(instrumentation_scope());
+    ) -> Self {
         Self {
-            tracer: Arc::new(BoxedTracer::new(Box::new(tracer))),
+            tracer: tracer_provider
+                .provider()
+                .tracer_with_scope(instrumentation_scope()),
+            provider: tracer_provider.clone(),
             metrics: TelemetryMetrics::new(
                 meter_provider.meter_with_scope(instrumentation_scope()),
             ),
-            admissions: Arc::new(Mutex::new(Admissions {
-                limits: options.admission_limits,
-                ..Default::default()
-            })),
             options,
         }
     }
@@ -214,369 +114,168 @@ impl OtelTelemetry {
         &self.options
     }
 
-    fn admissions(&self) -> std::sync::MutexGuard<'_, Admissions> {
-        self.admissions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+    fn fallback(&self) -> &Arc<dyn IdGenerator> {
+        self.provider.id_fallback()
     }
 
-    fn completion(
-        &self,
-        scope: &DurableTraceScope,
-        attempt: Option<&AttemptObservation>,
-        source: &EmissionSource,
-        record: &TraceRecord,
-    ) {
-        let TraceAnchor::Context(anchor) = &scope.anchor else {
-            return;
-        };
-        let Some(projection) = Projection::for_record(record) else {
-            return;
-        };
-        let definition = projection.span.definition();
-        if !matches!(
-            (definition.ownership, source),
-            (Ownership::Live, EmissionSource::LiveExecution { .. })
-                | (Ownership::Transition, EmissionSource::NewTransition)
-        ) {
-            return;
-        }
-        let end: SystemTime = projection
-            .ended_at_ms
-            .map(epoch_ms)
-            .unwrap_or_else(|| record.timestamp.into());
-        let start = projection.started_at_ms.map(epoch_ms).unwrap_or_else(|| {
-            projection
-                .duration_ms
-                .map(|duration| {
-                    end.checked_sub(Duration::from_millis(duration))
-                        .unwrap_or(end)
-                })
-                .unwrap_or_else(|| epoch_ms(scope.started_at_ms))
-        });
-        let mut attributes = vec![A::ScopeKind.value(scope.scope.kind().as_str())];
-        if let Some(operation) = projection.operation {
-            attributes.push(A::OperationName.value(operation));
-        }
-        if let Some(provider) = projection.provider {
-            attributes.push(A::ProviderName.value(provider.to_owned()));
-        }
-        if let Some(model) = projection.model {
-            attributes.push(A::RequestModel.value(model.to_owned()));
-        }
-        if let Some(tool) = projection.tool {
-            attributes.push(A::ToolName.value(tool.to_owned()));
-        }
-        let mut links = Vec::new();
-        // A turn links its fan-in: the other admitted inputs' producers and
-        // those of the inputs it consumed while it ran.
-        if projection.span == DomainSpan::Turn {
-            for context in scope.links.contexts() {
-                if let Some(context) = span_context(context) {
-                    links.push(Link::new(context, Vec::new(), 0));
-                }
-            }
-            if scope.links.omitted() > 0 {
-                attributes.push(A::LinksOmitted.value(i64::from(scope.links.omitted())));
+    fn span_id(&self) -> W3cSpanId {
+        loop {
+            if let Ok(id) = W3cSpanId::from_bytes(self.fallback().new_span_id().to_bytes()) {
+                return id;
             }
         }
-        if let Some(observation) = attempt {
-            if let Some(context) = &observation.context
-                && let Some(context) = span_context(context)
-            {
+    }
+
+    fn trace_id(&self) -> W3cTraceId {
+        loop {
+            if let Ok(id) = W3cTraceId::from_bytes(self.fallback().new_trace_id().to_bytes()) {
+                return id;
+            }
+        }
+    }
+
+    /// Builds the SDK span `record` publishes: a sampled closing or whole
+    /// record, at its position's preset id, under its parent, from its
+    /// retained start to its end.
+    fn export(&self, record: &TraceRecord, position: &TracePosition) {
+        let Some(projection) = Projection::for_record(record, position) else {
+            return;
+        };
+        let Some(own) = span_context(&position.span) else {
+            return;
+        };
+        let parent = position
+            .parent
+            .as_ref()
+            .and_then(span_context)
+            .map_or_else(Context::new, |parent| {
+                Context::new().with_remote_span_context(parent)
+            });
+        let mut links = position
+            .links
+            .contexts()
+            .iter()
+            .filter_map(span_context)
+            .map(|context| Link::new(context, Vec::new(), 0))
+            .collect::<Vec<_>>();
+        let mut attributes = Vec::new();
+        if let Some(scope) = &position.scope {
+            attributes.push(A::ScopeKind.value(scope.kind().as_str()));
+            attributes
+                .push(A::ScopeBoundary.value(i64::try_from(scope.boundary).unwrap_or(i64::MAX)));
+        }
+        if position.links.omitted() > 0 {
+            attributes.push(A::LinksOmitted.value(i64::from(position.links.omitted())));
+        }
+        if let Some(attempt) = &position.attempt {
+            if let Some(context) = attempt.context.as_ref().and_then(span_context) {
                 links.push(Link::new(context, Vec::new(), 0));
             }
-            if let Some(id) = &observation.invocation_id {
+            if let Some(id) = &attempt.invocation_id {
                 attributes.push(A::AttemptInvocationId.value(id.clone()));
             }
         }
-        let Some(anchor_context) = span_context(anchor) else {
-            return;
-        };
-        let parent = Context::new().with_remote_span_context(anchor_context);
-        let mut span = self
-            .tracer
-            .span_builder(projection.name())
-            .with_kind(definition.kind)
-            .with_start_time(start)
-            .with_attributes(attributes)
-            .with_links(links)
-            .start_with_context(self.tracer.as_ref(), &parent);
-        // Sampling is decided for this child, independently of its parent's recording.
-        if span.is_recording() {
-            let mut attrs = vec![
-                A::RecordId.value(record.id.clone()),
-                A::EventType.value(record.event.kind().as_str()),
-                A::ScopeBoundary.value(i64::try_from(scope.scope.boundary).unwrap_or(i64::MAX)),
-            ];
-            correlation_attributes(&scope.scope, Some(&record.context), &mut attrs);
-            projection.attributes(record, &mut attrs);
-            let mut name = projection.name();
-            if let Some(enrich) = &self.options.enrich {
-                if let Some(custom) = enrich.span_name(definition.name, record) {
-                    name = custom;
-                }
-                enrich.attributes(record, &mut attrs);
+        attributes.push(A::RecordId.value(record.id.clone()));
+        attributes.push(A::EventType.value(record.event.kind().as_str()));
+        correlation_attributes(position.scope.as_ref(), &record.context, &mut attributes);
+        projection.attributes(record, &mut attributes);
+        let definition = projection.span.definition();
+        let mut name = projection.name();
+        if let Some(enrich) = &self.options.enrich {
+            if let Some(custom) = enrich.span_name(definition.name, record) {
+                name = custom;
             }
-            span.update_name(name);
-            payload::attributes(record, &self.options, &mut attrs);
-            span.set_attributes(attrs);
-            if projection.failed(record) {
-                span.set_status(Status::error("domain operation failed"));
-            }
+            enrich.attributes(record, &mut attributes);
         }
-        span.end_with_timestamp(end);
+        payload::attributes(record, &self.options, &mut attributes);
+        let builder = SpanBuilder::from_name(name)
+            .with_kind(definition.kind)
+            .with_start_time(position.started_at.to_system_time())
+            .with_attributes(attributes)
+            .with_links(links);
+        let mut span = {
+            let _preset = provider::PresetGuard::set(
+                own.span_id(),
+                position.parent.is_none().then(|| own.trace_id()),
+                own.trace_state().clone(),
+            );
+            self.tracer.build_with_context(builder, &parent)
+        };
+        if projection.failed(record) {
+            span.set_status(Status::error("domain operation failed"));
+        }
+        let end = position.ended_at.unwrap_or(record.timestamp);
+        span.end_with_timestamp(end.to_system_time());
     }
 }
 
-impl TraceScopeFactory for OtelTelemetry {
-    fn capture_current(&self) -> Option<TraceCarrier> {
+/// Builds a span from every sampled record that publishes one. An unsampled
+/// record, an opening record and an event build nothing.
+impl TraceSink for OtelTelemetry {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        if let Some(position) = &record.position
+            && position.publishes()
+            && position.is_sampled()
+        {
+            self.export(record, position);
+        }
+        Ok(())
+    }
+}
+
+impl TraceIdentity for OtelTelemetry {
+    fn ambient(&self) -> Option<TraceCarrier> {
         carrier(Context::current().span().span_context())
     }
 
-    fn open_producer(&self, spec: ProducerSpec) -> Option<Box<dyn TraceHostOperation>> {
-        let definition = producer(spec.kind).definition();
-        let caller = spec.caller.as_ref().and_then(span_context);
-        let (parent, links) = match (caller, spec.link_mode) {
-            (Some(caller), TraceLinkMode::Parent) => {
-                (Context::new().with_remote_span_context(caller), Vec::new())
-            }
-            (Some(caller), TraceLinkMode::Link) => {
-                (Context::new(), vec![Link::new(caller, Vec::new(), 0)])
-            }
-            (None, _) => (Context::new(), Vec::new()),
+    /// Draws the producer's ids from the host's fallback generator, then
+    /// asks the host's sampler: the producer's trace is sampled iff the
+    /// sampler records and samples it, and takes the result's tracestate.
+    fn open_producer(&self, spec: &ProducerSpec) -> TraceCarrier {
+        let span_id = self.span_id();
+        let caller = spec.caller.as_ref();
+        let (parent, trace_id, links) = match (caller.and_then(span_context), spec.link_mode) {
+            (Some(caller), TraceLinkMode::Parent) => (
+                Context::new().with_remote_span_context(caller.clone()),
+                W3cTraceId::from_bytes(caller.trace_id().to_bytes())
+                    .unwrap_or_else(|_| self.trace_id()),
+                Vec::new(),
+            ),
+            (Some(caller), TraceLinkMode::Link) => (
+                Context::new(),
+                self.trace_id(),
+                vec![Link::new(caller, Vec::new(), 0)],
+            ),
+            (None, _) => (Context::new(), self.trace_id(), Vec::new()),
         };
-        let span = self
-            .tracer
-            .span_builder(definition.name)
-            .with_kind(definition.kind)
-            .with_links(links)
-            .start_with_context(self.tracer.as_ref(), &parent);
-        let context = carrier(span.span_context())?;
-        Some(Box::new(HostOperation {
-            span: Some(span),
-            context,
-        }))
+        let result = self.provider.sampler().should_sample(
+            Some(&parent),
+            TraceId::from_bytes(trace_id.to_bytes()),
+            producer(spec.kind).definition().name,
+            &SpanKind::Producer,
+            &[],
+            &links,
+        );
+        let sampled = result.decision == SamplingDecision::RecordAndSample;
+        let caller_flags = match spec.link_mode {
+            TraceLinkMode::Parent => caller.map_or(0, |caller| caller.flags().to_byte()),
+            TraceLinkMode::Link => 0,
+        };
+        let flags = if sampled {
+            caller_flags | W3cTraceFlags::SAMPLED
+        } else {
+            caller_flags & !W3cTraceFlags::SAMPLED
+        };
+        TraceCarrier::new(
+            trace_id,
+            span_id,
+            W3cTraceFlags::from_byte(flags),
+            W3cTraceState::parse(&result.trace_state.header()).unwrap_or_default(),
+        )
     }
 
-    fn propose(
-        &self,
-        scope: &TraceScopeId,
-        parent: &TraceParent,
-        links: &TraceLinks,
-        started_at_ms: u64,
-    ) -> Box<dyn TraceAdmissionCandidate> {
-        let definition = DomainSpan::AdmissionAttempt.definition();
-        let Some(parent_context) = span_context(parent.carrier()) else {
-            return UntracedScopes.propose(scope, parent, links, started_at_ms);
-        };
-        let parent_context = Context::new().with_remote_span_context(parent_context);
-        let mut span_links = Vec::new();
-        for context in links.contexts() {
-            let Some(context) = span_context(context) else {
-                return UntracedScopes.propose(scope, parent, links, started_at_ms);
-            };
-            span_links.push(Link::new(context, Vec::new(), 0));
-        }
-        let mut attributes = vec![A::ScopeKind.value(scope.kind().as_str())];
-        correlation_attributes(scope, None, &mut attributes);
-        if links.omitted() > 0 {
-            attributes.push(A::LinksOmitted.value(i64::from(links.omitted())));
-        }
-        let span = self
-            .tracer
-            .span_builder(definition.name)
-            .with_kind(definition.kind)
-            .with_attributes(attributes)
-            .with_links(span_links)
-            .with_start_time(epoch_ms(started_at_ms))
-            .start_with_context(self.tracer.as_ref(), &parent_context);
-        let anchor = carrier(span.span_context())
-            .map(TraceAnchor::Context)
-            .unwrap_or(TraceAnchor::Untraced);
-        Box::new(AdmissionCandidate {
-            span: Some(span),
-            anchor,
-            scope: scope.clone(),
-            admissions: Arc::clone(&self.admissions),
-        })
-    }
-
-    /// A deferred candidate of the anchor is selected. Without one, the
-    /// anchor's span died with the owner that proposed it, and the SDK mints
-    /// every span's id: the admission is exported as a span under the
-    /// anchor, which names its identity.
-    fn export_admitted(&self, scope: &DurableTraceScope) {
-        let TraceAnchor::Context(anchor) = &scope.anchor else {
-            return;
-        };
-        let identity = (anchor.trace_id(), anchor.span_id());
-        let (selected, lost) = {
-            let mut admissions = self.admissions();
-            if !admissions.export(identity) {
-                return;
-            }
-            admissions.select(&scope.scope, identity)
-        };
-        let kind = scope.scope.kind();
-        for deferred in lost {
-            deferred.end(TraceCandidateOutcome::Refused);
-        }
-        if let Some(deferred) = selected {
-            deferred.end(TraceCandidateOutcome::Selected);
-            return;
-        }
-        let Some(context) = span_context(anchor) else {
-            return;
-        };
-        let definition = admitted(kind).definition();
-        let mut attributes = vec![
-            A::ScopeKind.value(kind.as_str()),
-            A::AdmissionOutcome.value(TraceCandidateOutcome::Selected.as_str()),
-        ];
-        correlation_attributes(&scope.scope, None, &mut attributes);
-        let mut span = self
-            .tracer
-            .span_builder(definition.name)
-            .with_kind(definition.kind)
-            .with_start_time(epoch_ms(scope.started_at_ms))
-            .with_attributes(attributes)
-            .start_with_context(
-                self.tracer.as_ref(),
-                &Context::new().with_remote_span_context(context),
-            );
-        span.end();
-    }
-}
-
-impl TraceDomainProjector for OtelTelemetry {
-    fn project(
-        &self,
-        scope: &DurableTraceScope,
-        attempt: Option<&AttemptObservation>,
-        source: &EmissionSource,
-        record: &TraceRecord,
-    ) {
-        self.completion(scope, attempt, source, record);
-    }
-}
-
-struct HostOperation {
-    span: Option<BoxedSpan>,
-    context: TraceCarrier,
-}
-impl HostOperation {
-    fn finish(&mut self, outcome: TraceCandidateOutcome) {
-        if let Some(mut span) = self.span.take() {
-            if span.is_recording() {
-                span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
-            }
-            span.end();
-        }
-    }
-}
-impl TraceHostOperation for HostOperation {
-    fn carrier(&self) -> TraceCarrier {
-        self.context.clone()
-    }
-    fn settle(mut self: Box<Self>, outcome: TraceCandidateOutcome) {
-        self.finish(outcome);
-    }
-}
-impl Drop for HostOperation {
-    fn drop(&mut self) {
-        self.finish(TraceCandidateOutcome::Refused);
-    }
-}
-
-struct AdmissionCandidate {
-    span: Option<BoxedSpan>,
-    anchor: TraceAnchor,
-    scope: TraceScopeId,
-    admissions: Arc<Mutex<Admissions>>,
-}
-impl AdmissionCandidate {
-    fn finish(&mut self, outcome: TraceCandidateOutcome) {
-        if let Some(span) = self.span.take() {
-            end_candidate(span, self.scope.kind(), outcome, None);
-        }
-    }
-}
-impl Deferred {
-    /// Ends the held candidate's span at the instant it was deferred.
-    fn end(self, outcome: TraceCandidateOutcome) {
-        end_candidate(self.span, self.scope.kind(), outcome, Some(self.ended));
-    }
-}
-/// Ends a candidate's span, at `ended` or now: a selected one takes its
-/// scope's admitted name.
-fn end_candidate(
-    mut span: BoxedSpan,
-    kind: TraceScopeKind,
-    outcome: TraceCandidateOutcome,
-    ended: Option<SystemTime>,
-) {
-    if span.is_recording() {
-        span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
-        if outcome == TraceCandidateOutcome::Selected {
-            span.update_name(admitted(kind).definition().name);
-        }
-    }
-    match ended {
-        Some(ended) => span.end_with_timestamp(ended),
-        None => span.end(),
-    }
-}
-impl TraceAdmissionCandidate for AdmissionCandidate {
-    fn anchor(&self) -> TraceAnchor {
-        self.anchor.clone()
-    }
-    /// A selected candidate's identity is exported: a later reconcile of it
-    /// exports nothing, and the deferred candidates of its scope lost.
-    fn settle(mut self: Box<Self>, outcome: TraceCandidateOutcome) {
-        if outcome == TraceCandidateOutcome::Selected
-            && let Some(identity) = identity(&self.anchor)
-        {
-            let lost = {
-                let mut admissions = self
-                    .admissions
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                admissions.export(identity);
-                admissions.select(&self.scope, identity).1
-            };
-            for deferred in lost {
-                deferred.end(TraceCandidateOutcome::Refused);
-            }
-        }
-        self.finish(outcome);
-    }
-    fn defer(mut self: Box<Self>) {
-        let Some(identity) = identity(&self.anchor) else {
-            self.finish(TraceCandidateOutcome::Refused);
-            return;
-        };
-        let Some(span) = self.span.take() else {
-            return;
-        };
-        let evicted = self
-            .admissions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .defer(Deferred {
-                span,
-                ended: SystemTime::now(),
-                identity,
-                scope: self.scope.clone(),
-            });
-        if let Some(evicted) = evicted {
-            evicted.end(TraceCandidateOutcome::Refused);
-        }
-    }
-}
-impl Drop for AdmissionCandidate {
-    fn drop(&mut self) {
-        self.finish(TraceCandidateOutcome::Refused);
+    fn leaf_span_id(&self) -> W3cSpanId {
+        self.span_id()
     }
 }
 
@@ -587,15 +286,6 @@ fn producer(kind: ProducerKind) -> DomainSpan {
         ProducerKind::ProcessStart => DomainSpan::ProcessStart,
         ProducerKind::ToolIntentSubmit => DomainSpan::IntentSubmit,
         ProducerKind::PluginInvoke => DomainSpan::PluginInvoke,
-    }
-}
-
-fn admitted(kind: TraceScopeKind) -> DomainSpan {
-    match kind {
-        TraceScopeKind::Turn => DomainSpan::TurnAdmitted,
-        TraceScopeKind::Tool => DomainSpan::ToolAdmitted,
-        TraceScopeKind::ToolIntent => DomainSpan::IntentAdmitted,
-        TraceScopeKind::Process => DomainSpan::ProcessAdmitted,
     }
 }
 
@@ -623,24 +313,20 @@ pub fn carrier(context: &SpanContext) -> Option<TraceCarrier> {
     ))
 }
 
-fn epoch_ms(ms: u64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
-}
-
-/// Correlation is exported independently of content. `TraceContext::run_id`
-/// is host metadata; only a scope's logical run owner supplies `lash.run.id`.
+/// Correlation is exported independently of content: the record's stable
+/// ids, and the run its scope's logical owner names.
 fn correlation_attributes(
-    scope: &TraceScopeId,
-    context: Option<&TraceContext>,
+    scope: Option<&TraceScopeId>,
+    context: &TraceContext,
     out: &mut Vec<KeyValue>,
 ) {
-    let (session, turn, run, process) = match &scope.owner {
-        TraceScopeOwner::Turn {
+    let (session, turn, run, process) = match scope.map(|scope| &scope.owner) {
+        Some(TraceScopeOwner::Turn {
             session_id,
             turn_id,
-        } => (Some(session_id), Some(turn_id), None, None),
-        TraceScopeOwner::Process { process_id } => (None, None, None, Some(process_id)),
-        TraceScopeOwner::Tool { owner, .. } => match owner {
+        }) => (Some(session_id), Some(turn_id), None, None),
+        Some(TraceScopeOwner::Process { process_id }) => (None, None, None, Some(process_id)),
+        Some(TraceScopeOwner::Tool { owner, .. }) => match owner {
             TraceToolOwner::Turn {
                 session_id,
                 turn_id,
@@ -648,99 +334,73 @@ fn correlation_attributes(
             TraceToolOwner::Operation { session_id, .. } => (Some(session_id), None, None, None),
             TraceToolOwner::Process { process_id } => (None, None, None, Some(process_id)),
         },
-        TraceScopeOwner::ToolIntent { owner, .. } => {
+        Some(TraceScopeOwner::ToolIntent { owner, .. }) => {
             (owner.session_id(), None, None, owner.process_id())
         }
+        None => (None, None, None, None),
     };
-    if let Some(session) = context
-        .and_then(|context| context.session_id.as_ref())
-        .or(session)
-    {
+    if let Some(session) = context.session_id.as_ref().or(session) {
         out.push(A::SessionId.value(session.to_string()));
         out.push(A::ConversationId.value(session.to_string()));
     }
-    if let Some(turn) = context
-        .and_then(|context| context.turn_id.as_ref())
-        .or(turn)
-    {
+    if let Some(turn) = context.turn_id.as_ref().or(turn) {
         out.push(A::TurnId.value(turn.to_string()));
     }
     if let Some(run) = run {
         out.push(A::RunId.value(run.to_string()));
     }
-    if let Some(process) = process {
+    if let Some(process) = context.process_id.as_ref().or(process) {
         out.push(A::ProcessId.value(process.to_string()));
     }
-    if let Some(context) = context {
-        if let Some(id) = &context.llm_call_id {
-            out.push(A::LlmCallId.value(id.clone()));
-        }
-        if let Some(id) = &context.run_id {
-            out.push(A::HostRunId.value(id.clone()));
-        }
+    if let Some(send) = &context.send_id {
+        out.push(A::SendId.value(send.to_string()));
+    }
+    if let Some(id) = &context.llm_call_id {
+        out.push(A::LlmCallId.value(id.clone()));
     }
 }
 
 struct Projection<'a> {
     span: DomainSpan,
-    operation: Option<&'static str>,
-    provider: Option<&'a str>,
     model: Option<&'a str>,
     tool: Option<&'a str>,
-    duration_ms: Option<u64>,
-    started_at_ms: Option<u64>,
-    ended_at_ms: Option<u64>,
 }
 impl<'a> Projection<'a> {
-    fn for_record(record: &'a TraceRecord) -> Option<Self> {
+    fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
         let mut projection = Self {
             span: DomainSpan::Turn,
-            operation: None,
-            provider: None,
             model: None,
             tool: None,
-            duration_ms: None,
-            started_at_ms: None,
-            ended_at_ms: None,
         };
-        match &record.event {
-            TraceEvent::TurnCompleted { .. } => {
-                projection.operation = Some("invoke_agent");
+        match (position.kind, &record.event) {
+            (TraceSpanKind::Producer, TraceEvent::ProducerSettled { producer: kind, .. }) => {
+                projection.span = producer(*kind);
             }
-            TraceEvent::LlmAttemptCompleted { observation, .. } => {
+            (TraceSpanKind::Agent, TraceEvent::TurnCompleted { .. }) => {}
+            (TraceSpanKind::Model, TraceEvent::LlmCallCompleted { response, .. }) => {
                 projection.span = DomainSpan::Model;
-                projection.operation = Some("chat");
-                projection.provider = observation.provider.as_deref();
-                projection.model = Some(&observation.request_model);
-                // Missing provider timings describe an instantaneous observation,
-                // never the duration of the enclosing turn.
-                projection.started_at_ms = Some(observation.started_at_ms.unwrap_or_else(|| {
-                    observation.ended_at_ms.unwrap_or_else(|| {
-                        u64::try_from(record.timestamp.timestamp_millis()).unwrap_or(0)
-                    })
-                }));
-                projection.ended_at_ms = observation.ended_at_ms;
+                projection.model = Some(&response.request_model);
             }
-            TraceEvent::DomainCompleted { completion } => {
-                projection.span = match completion.subject {
-                    TraceDomainSubject::Process {} => DomainSpan::Process,
-                    TraceDomainSubject::ToolIntent { .. } => DomainSpan::Intent,
-                };
-                projection.started_at_ms = Some(completion.started_at_ms);
-                projection.provider = completion.provider.as_deref();
+            (TraceSpanKind::Model, TraceEvent::LlmCallFailed { .. }) => {
+                projection.span = DomainSpan::Model;
+            }
+            (TraceSpanKind::Process, TraceEvent::DomainCompleted { completion }) => {
+                projection.span = DomainSpan::Process;
                 projection.model = completion.model.as_deref();
                 projection.tool = completion.tool_name.as_deref();
             }
-            TraceEvent::ToolCallCompleted { name, .. } => {
+            (TraceSpanKind::ToolIntent, TraceEvent::DomainCompleted { completion }) => {
+                projection.span = DomainSpan::Intent;
+                projection.tool = completion.tool_name.as_deref();
+            }
+            (TraceSpanKind::Tool, TraceEvent::ToolCallCompleted { name, .. }) => {
                 projection.span = DomainSpan::Tool;
-                projection.operation = Some("execute_tool");
                 projection.tool = Some(name);
             }
-            TraceEvent::ExecCodeCompleted { duration_ms, .. } => {
-                projection.span = DomainSpan::ExecCode;
-                projection.duration_ms = Some(*duration_ms);
-            }
-            TraceEvent::ExecCodeFailed { .. } => projection.span = DomainSpan::ExecCode,
+            (
+                TraceSpanKind::Cell,
+                TraceEvent::ExecCodeCompleted { .. } | TraceEvent::ExecCodeFailed { .. },
+            ) => projection.span = DomainSpan::ExecCode,
             _ => return None,
         }
         Some(projection)
@@ -759,9 +419,6 @@ impl<'a> Projection<'a> {
     }
     fn failed(&self, record: &TraceRecord) -> bool {
         match &record.event {
-            TraceEvent::LlmAttemptCompleted { attempt, .. } => {
-                matches!(attempt.outcome, AttemptOutcome::Failed)
-            }
             TraceEvent::DomainCompleted { completion } => {
                 completion.status == TraceDomainStatus::Failed
             }
@@ -769,41 +426,67 @@ impl<'a> Projection<'a> {
         }
     }
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
+        if let Some(operation) = self.operation() {
+            out.push(A::OperationName.value(operation));
+        }
+        if let Some(tool) = self.tool {
+            out.push(A::ToolName.value(tool.to_owned()));
+        }
         match &record.event {
-            TraceEvent::LlmAttemptCompleted { attempt, .. } => {
-                out.push(A::ModelAttemptOrdinal.value(i64::from(attempt.ordinal)));
-                out.push(A::Outcome.value(match attempt.outcome {
-                    AttemptOutcome::Completed => "completed",
-                    AttemptOutcome::Failed => "failed",
-                    AttemptOutcome::Aborted => "aborted",
-                    AttemptOutcome::Interrupted => "interrupted",
-                }));
-                if let Some(model) = attempt
-                    .evidence
-                    .as_ref()
-                    .and_then(|evidence| evidence.served_model.as_ref())
-                {
-                    out.push(A::ResponseModel.value(model.clone()));
+            TraceEvent::ProducerSettled { outcome, .. } => {
+                out.push(A::ProducerOutcome.value(outcome.as_str()));
+                if let crate::ProducerOutcome::Refused { error_type } = outcome {
+                    out.push(A::ErrorType.value(error_type.to_string()));
                 }
-                if let Some(usage) = &attempt.usage {
+            }
+            TraceEvent::LlmCallCompleted {
+                response,
+                usage,
+                attempts,
+                ..
+            } => {
+                out.push(A::RequestModel.value(response.request_model.clone()));
+                if let Some(model) = attempts
+                    .iter()
+                    .flatten()
+                    .rev()
+                    .find_map(|attempt| attempt.evidence.as_ref()?.served_model.clone())
+                {
+                    out.push(A::ResponseModel.value(model));
+                }
+                if let Some(attempts) = attempts {
+                    out.push(
+                        A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)),
+                    );
+                }
+                if let Some(usage) = usage {
                     usage_attributes(usage, out);
                 }
-                if let Some(error) = &attempt.error {
-                    if let Some(status) = error.http_status {
-                        out.push(A::HttpResponseStatusCode.value(i64::from(status)));
-                    }
+            }
+            TraceEvent::LlmCallFailed {
+                error, attempts, ..
+            } => {
+                if let Some(attempts) = attempts {
                     out.push(
-                        A::ErrorType.value(
-                            error
-                                .code
-                                .as_ref()
-                                .map(ToString::to_string)
-                                .unwrap_or_else(|| error.class.code().to_owned()),
-                        ),
+                        A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)),
                     );
-                } else if self.failed(record) {
-                    out.push(A::ErrorType.value("provider_failure"));
                 }
+                let last = attempts
+                    .iter()
+                    .flatten()
+                    .rev()
+                    .find_map(|attempt| attempt.error.as_ref());
+                out.push(
+                    A::ErrorType.value(match (last, &error.code) {
+                        (Some(error), _) => error
+                            .code
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| error.class.code().to_owned()),
+                        (None, Some(code)) => code.to_string(),
+                        (None, None) => "provider_failure".to_owned(),
+                    }),
+                );
             }
             TraceEvent::DomainCompleted { completion } => {
                 out.push(A::Outcome.value(match completion.status {
@@ -811,6 +494,12 @@ impl<'a> Projection<'a> {
                     TraceDomainStatus::Failed => "failed",
                     TraceDomainStatus::Cancelled => "cancelled",
                 }));
+                if let Some(model) = &completion.model {
+                    out.push(A::RequestModel.value(model.clone()));
+                }
+                if let Some(provider) = &completion.provider {
+                    out.push(A::ProviderName.value(provider.clone()));
+                }
                 if let TraceDomainSubject::ToolIntent { kind } = completion.subject {
                     out.push(A::ToolIntentKind.value(kind.as_str()));
                 }
@@ -833,6 +522,12 @@ impl<'a> Projection<'a> {
                 ..
             } => {
                 out.push(A::ToolCallId.value(call_id.to_string()));
+                out.push(A::Outcome.value(match output.status() {
+                    crate::TraceToolCallStatus::Success => "completed",
+                    crate::TraceToolCallStatus::Failure => "failed",
+                    crate::TraceToolCallStatus::Cancelled => "cancelled",
+                    crate::TraceToolCallStatus::Discarded => "discarded",
+                }));
                 if self.failed(record) {
                     // A controller failure after an attempt can replace the
                     // terminal output; its class is authoritative over earlier attempts.
@@ -869,6 +564,11 @@ impl<'a> Projection<'a> {
                     TraceTurnOutcome::Cancelled { .. } => "cancelled",
                     TraceTurnOutcome::Failed { .. } => "failed",
                 }));
+                if let TraceTurnOutcome::Cancelled { evidence } = outcome
+                    && let Some(origin) = &evidence.origin
+                {
+                    out.push(A::CancelOrigin.value(origin.clone()));
+                }
                 if let TraceTurnOutcome::Failed { done_reason } = outcome {
                     out.push(A::ErrorType.value(done_reason.wire_tag()));
                 }
@@ -888,6 +588,14 @@ impl<'a> Projection<'a> {
             }
             _ if self.failed(record) => out.push(A::ErrorType.value("domain_failure")),
             _ => {}
+        }
+    }
+    fn operation(&self) -> Option<&'static str> {
+        match self.span {
+            DomainSpan::Turn => Some("invoke_agent"),
+            DomainSpan::Model => Some("chat"),
+            DomainSpan::Tool => Some("execute_tool"),
+            _ => None,
         }
     }
 }

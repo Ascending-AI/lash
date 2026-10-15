@@ -96,8 +96,8 @@ impl BoundSession {
         Arc::clone(&self.published_heads)
     }
 
-    pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
-        Arc::clone(self.tracing.scopes())
+    pub(crate) fn tracing(&self) -> lash_core::facade_support::TraceRuntime {
+        self.tracing.clone()
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {

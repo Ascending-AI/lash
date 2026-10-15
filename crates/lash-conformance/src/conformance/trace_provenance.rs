@@ -1,14 +1,13 @@
 //! FIG-4829: the first writer's trace provenance is retained.
 //!
-//! An admitted operation retains what caused it, and where it parents later
-//! work the anchor its first admission selected, in the write that inserts
-//! its owning row. A retry of the same business submission under another
+//! An admitted operation retains what caused it, and the span derived from
+//! that cause and its identity, in the write that inserts its owning row. A retry of the same business submission under another
 //! trace context is the same submission: it reads the retained provenance
 //! back, changes no hash or key, and turns no retry into a conflict. A
 //! changed submission is refused exactly as it was before any provenance
 //! existed. An admission that finds its row already there reports an
 //! existing scope, which holds no emission permit, so nothing is dispatched
-//! or emitted under an anchor that lost.
+//! or emitted under a span that lost.
 //!
 //! The law walks every owning row through the stores under test: a turn
 //! input, a process start and a host-submitted tool intent.
@@ -16,8 +15,8 @@
 use std::sync::Arc;
 
 use lash_core::{
-    DurableTraceScope, TraceAnchor, TraceCarrier, TraceCause, TraceLinks, TraceScopeAdmission,
-    TraceScopeId, TraceScopeOffer, TraceScopeOwner,
+    DurableTraceScope, TraceCarrier, TraceCause, TraceLinks, TraceScopeAdmission, TraceScopeId,
+    TraceScopeOffer, TraceScopeOwner,
 };
 use pretty_assertions::assert_eq;
 
@@ -45,22 +44,27 @@ fn caused(producer: u8) -> TraceCause {
     TraceCause::Parent(context(producer))
 }
 
-/// The offer of an admission caused by `producer` whose candidate proposed
-/// the anchor `candidate`.
-fn offer(producer: u8, candidate: u8) -> TraceScopeOffer {
-    TraceScopeOffer::new(
-        caused(producer),
-        TraceLinks::new(),
-        TraceAnchor::Context(context(candidate)),
-    )
+/// The offer of an admission caused by `producer`, carrying the span
+/// `span`: a retained scope's span is derived from its cause and identity
+/// whatever span an offer carried.
+fn offer(producer: u8, span: u8) -> TraceScopeOffer {
+    TraceScopeOffer::new(caused(producer), TraceLinks::new(), Some(context(span)))
+}
+
+/// The span the scope `scope` caused by `producer` retains.
+fn derived(producer: u8, scope: &TraceScopeId) -> Option<TraceCarrier> {
+    Some(lash_core::derive_span(
+        &context(producer),
+        &lash_core::SpanKey::Scope { scope },
+    ))
 }
 
 const FIRST: u8 = 1;
 const SECOND: u8 = 2;
-const FIRST_ANCHOR: u8 = 0xa1;
-const SECOND_ANCHOR: u8 = 0xa2;
+const FIRST_SPAN: u8 = 0xa1;
+const SECOND_SPAN: u8 = 0xa2;
 
-/// Law P2: the first admission's cause and anchor are retained across
+/// Law P2 (C1): the first admission's cause and span are retained across
 /// retried inputs, process starts and host tool intents, without changing a business hash, key
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
@@ -194,24 +198,25 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
             .with_trace(offer)
     };
     let created = registry
-        .register_process_reporting_outcome(start(offer(FIRST, FIRST_ANCHOR)), &[])
+        .register_process_reporting_outcome(start(offer(FIRST, FIRST_SPAN)), &[])
         .await
         .expect("the first start");
     assert_eq!(created.outcome, crate::ProcessRegistrationOutcome::Created);
+    let id = TraceScopeId::admission(TraceScopeOwner::Process {
+        process_id: created.record.id.clone(),
+    });
     let scope = DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::Process {
-            process_id: created.record.id.clone(),
-        }),
+        span: derived(FIRST, &id),
+        scope: id,
         cause: caused(FIRST),
         links: TraceLinks::new(),
-        anchor: TraceAnchor::Context(context(FIRST_ANCHOR)),
         started_at_ms: created.record.created_at_ms,
     };
     assert_eq!(created.record.trace, Some(scope.clone()));
 
     // A host key fences the start's content, and the offer is not content:
-    // a retry under another context and candidate is the retained process.
-    for retry in [offer(SECOND, SECOND_ANCHOR), TraceScopeOffer::default()] {
+    // a retry under another context and span is the retained process.
+    for retry in [offer(SECOND, SECOND_SPAN), TraceScopeOffer::default()] {
         let retried = registry
             .register_process_reporting_outcome(start(retry), &[])
             .await
@@ -237,7 +242,7 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
     );
 
     // Changed content under the key is the typed conflict it always was.
-    let mut changed = start(offer(FIRST, FIRST_ANCHOR));
+    let mut changed = start(offer(FIRST, FIRST_SPAN));
     changed.input = Arc::new(lash_core::testing::held_engine_input(
         serde_json::json!({"changed": true}),
     ));
@@ -278,24 +283,21 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
             .expect("the submission has a payload hash")
             .with_trace_offer(submitted, at_ms)
     };
-    let first = submission(TraceScopeOffer::default(), offer(FIRST, FIRST_ANCHOR), 7);
-    let second = submission(
-        offer(SECOND, SECOND_ANCHOR),
-        offer(SECOND, SECOND_ANCHOR),
-        9,
-    );
+    let first = submission(TraceScopeOffer::default(), offer(FIRST, FIRST_SPAN), 7);
+    let second = submission(offer(SECOND, SECOND_SPAN), offer(SECOND, SECOND_SPAN), 9);
     assert_eq!(
         first.payload_hash, second.payload_hash,
         "neither the submission's scope nor an offer inside the intent is hashed"
     );
+    let id = TraceScopeId::admission(TraceScopeOwner::ToolIntent {
+        owner,
+        replay_key: identity.replay_key.clone(),
+    });
     let scope = DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::ToolIntent {
-            owner,
-            replay_key: identity.replay_key.clone(),
-        }),
+        span: derived(FIRST, &id),
+        scope: id,
         cause: caused(FIRST),
         links: TraceLinks::new(),
-        anchor: TraceAnchor::Context(context(FIRST_ANCHOR)),
         started_at_ms: 7,
     };
     assert_eq!(first.trace, Some(scope.clone()));

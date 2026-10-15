@@ -202,6 +202,7 @@ impl TraceEvent {
                     TraceToolCallOutcome::Success(payload) => *payload = Value::Null,
                     TraceToolCallOutcome::Failure(payload)
                     | TraceToolCallOutcome::Cancelled(payload) => omit_outcome_text(payload),
+                    TraceToolCallOutcome::Discarded => {}
                 }
                 output.control = None;
                 omit_attempt_content(attempts);
@@ -273,6 +274,7 @@ impl TraceEvent {
             | Self::ToolCheckConflict { .. }
             | Self::ObservationProjection { .. }
             | Self::TurnCompleted { .. }
+            | Self::ProducerSettled { .. }
             // The producer's own structured evidence (`TelemetryContent`).
             | Self::Custom { .. } => {}
         }

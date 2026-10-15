@@ -416,12 +416,12 @@ impl TurnServices for RuntimeTurnServices {
         self
     }
 
-    fn propose_turn_trace(
+    fn turn_trace_scope(
         &self,
         cx: &ActorContext,
         run: &TurnId,
         inputs: &[lash_trace::TraceCause],
-    ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
+    ) -> Option<lash_trace::DurableTraceScope> {
         let session = SessionId::parse(cx.actor().id()).ok()?;
         let tracing = self.runtimes.tracing();
         let scope = lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
@@ -430,15 +430,20 @@ impl TurnServices for RuntimeTurnServices {
         });
         // A turn joins the trace of the send that caused it: the head
         // input's producer parents it, and the other inputs' producers fan
-        // in as links (D1).
+        // in as links (D1). A turn admitted while nothing observes the
+        // runtime retains no cause and no span.
         let (parent, links) = lash_trace::TraceCause::of_admitted(inputs);
-        let (scope, candidate) = tracing.scopes().propose_scope(
+        let (parent, links) = if tracing.is_observed() {
+            (parent, links)
+        } else {
+            (None, lash_trace::TraceLinks::new())
+        };
+        Some(lash_trace::DurableTraceScope::admit(
             scope,
             parent.as_ref(),
             links,
             tracing.clock().timestamp_ms(),
-        );
-        Some(lash_core_execution::runtime::actor::round::TraceProposal { scope, candidate })
+        ))
     }
 
     fn tracing(&self) -> Option<&crate::trace::TraceRuntime> {

@@ -67,6 +67,9 @@ pub enum TraceEvent {
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media_type: Option<String>,
+        /// On the wire `attachment_position`: a record's own `position`
+        /// is its place in the trace.
+        #[serde(rename = "attachment_position")]
         position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
         reason: lash_sansio::AttachmentMaterializationReason,
     },
@@ -226,6 +229,13 @@ pub enum TraceEvent {
     TurnCompleted {
         outcome: TraceTurnOutcome,
     },
+    /// A host call that admits durable work ended: its producer span's one
+    /// record.
+    ProducerSettled {
+        producer: crate::ProducerKind,
+        #[serde(flatten)]
+        outcome: crate::ProducerOutcome,
+    },
     /// A built-in tool check selected one terminal reply over others. The
     /// same fact reaches session observers as a plugin runtime event.
     ToolCheckConflict {
@@ -274,9 +284,14 @@ impl TraceEvent {
             },
             Self::ToolCallCompleted { output, .. } => match &output.outcome {
                 TraceToolCallOutcome::Failure(_) => true,
-                TraceToolCallOutcome::Success(_) | TraceToolCallOutcome::Cancelled(_) => false,
+                TraceToolCallOutcome::Success(_)
+                | TraceToolCallOutcome::Cancelled(_)
+                | TraceToolCallOutcome::Discarded => false,
             },
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
+            Self::ProducerSettled { outcome, .. } => {
+                matches!(outcome, crate::ProducerOutcome::Refused { .. })
+            }
             Self::DomainCompleted { completion } => completion.status == TraceDomainStatus::Failed,
             Self::LanguageExecution { event, .. } => match &event.payload {
                 TraceLanguageExecutionPayload::Node { fact, .. } => {

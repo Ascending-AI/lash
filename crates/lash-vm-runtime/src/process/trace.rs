@@ -10,7 +10,7 @@
 use lash_core::plugin::PluginExecutionTrace;
 use lash_kernel_doc::EffectIdentity;
 use lash_trace::{
-    TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
+    TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceNodeAwaited, TraceNodeFact, TraceNodeWaitResolution, TraceRuntimeScope,
     TraceRuntimeSubject, WorkflowDocumentEntry, WorkflowDocumentRef,
@@ -169,8 +169,10 @@ impl ProcessTrace {
             }
         };
         let event_key = format!("kernel_execution:{}:{suffix}", self.identity.graph_key());
-        let mut context = self.tracing.trace_runtime().base_context().clone();
-        context.graph_node_id = node;
+        let context = TraceContext {
+            graph_node_id: node,
+            ..TraceContext::default()
+        };
         let event = TraceLanguageExecution {
             event_key,
             identity: self.identity.clone(),

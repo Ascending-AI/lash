@@ -508,7 +508,7 @@ impl RuntimeTurnDriver<'_> {
         let iteration = machine.protocol_iteration();
         if self.trace.is_observed() {
             let content = self.trace.content();
-            self.emit_cell_trace(held.as_ref(), iteration, || {
+            self.emit_cell_trace(held.as_ref(), iteration, None, || {
                 lash_trace::TraceEvent::ExecCodeStarted {
                     code: content.capture(|| code.clone()),
                     code_chars: code.chars().count(),
@@ -575,6 +575,12 @@ impl RuntimeTurnDriver<'_> {
         // the recorded `ExecResponse` carries no wall-clock fields, so the
         // Completed activity and its trace mirror take the live window here.
         let cell_started = self.host.core.clock.now();
+        let cell_started_at_ms = self.host.core.clock.timestamp_ms();
+        // The cell's span is whole: its closing record carries its start,
+        // and its id derives from the turn's span and the cell's graph key.
+        let cell_span = graph_key
+            .clone()
+            .map(|graph_key| (graph_key, cell_started_at_ms));
         self.answered_cell_end = None;
         drop(self.cell_end.take());
         self.held_response.clone_from(&held);
@@ -735,7 +741,7 @@ impl RuntimeTurnDriver<'_> {
                     })
                     .collect::<Vec<_>>();
                 let content = self.trace.content();
-                self.emit_cell_trace(held.as_ref(), iteration, || {
+                self.emit_cell_trace(held.as_ref(), iteration, cell_span.clone(), || {
                     lash_trace::TraceEvent::ExecCodeCompleted {
                         duration_ms: cell_duration_ms,
                         output: content.capture(|| observations_text.clone()),
@@ -748,7 +754,7 @@ impl RuntimeTurnDriver<'_> {
                     }
                 });
                 if !observation_projections.is_empty() {
-                    self.emit_cell_trace(held.as_ref(), iteration, || {
+                    self.emit_cell_trace(held.as_ref(), iteration, None, || {
                         lash_trace::TraceEvent::ObservationProjection {
                             projections: observation_projections,
                         }
@@ -758,7 +764,7 @@ impl RuntimeTurnDriver<'_> {
         } else if let Err(error) = &result
             && self.trace.is_observed()
         {
-            self.emit_cell_trace(held.as_ref(), iteration, || {
+            self.emit_cell_trace(held.as_ref(), iteration, cell_span, || {
                 lash_trace::TraceEvent::ExecCodeFailed {
                     reason: error.reason,
                     error: error.message.clone(),
@@ -818,24 +824,42 @@ impl crate::engine::ObservationSink for HeldObservations<'_> {
 impl RuntimeTurnDriver<'_> {
     /// [`emit_trace`](Self::emit_trace) for a cell: once a commit holds the
     /// model response that asked for it, now unless `held` still holds it
-    /// (FIG-6000).
+    /// (FIG-6000). With `span`, the cell's graph key and start, the record
+    /// is the cell span's whole record; without, an event of the turn.
     fn emit_cell_trace(
         &self,
         held: Option<&crate::HeldResponse>,
         protocol_iteration: usize,
+        span: Option<(String, u64)>,
         event: impl FnOnce() -> lash_trace::TraceEvent,
     ) {
-        let Some(held) = held else {
-            self.emit_trace(protocol_iteration, event);
-            return;
-        };
         if !self.trace.is_observed() {
             return;
         }
         let trace = self.trace.clone();
         let context = self.trace_context(protocol_iteration);
-        let event = event();
-        held.after_commit(Box::new(move || trace.observe(|| (context, event))));
+        let emit = move |event: lash_trace::TraceEvent| match span {
+            Some((graph_key, started_at_ms)) => trace.whole(
+                lash_trace::TraceSpanKind::Cell,
+                &lash_trace::SpanKey::Cell {
+                    graph_key: &graph_key,
+                },
+                started_at_ms,
+                || {
+                    let mut context = context;
+                    context.cell = Some(graph_key.clone());
+                    (context, event)
+                },
+            ),
+            None => trace.observe(|| (context, event)),
+        };
+        match held {
+            Some(held) => {
+                let event = event();
+                held.after_commit(Box::new(move || emit(event)));
+            }
+            None => emit(event()),
+        }
     }
 }
 

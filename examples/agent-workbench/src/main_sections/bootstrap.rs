@@ -381,7 +381,7 @@ pub(crate) fn workbench_session_defaults(
 /// this export.
 pub(crate) struct WorkbenchTracing {
     pub(crate) trace_sink: Arc<dyn TraceSink>,
-    pub(crate) lash_vm_execution_sink: Option<Arc<dyn TraceSink>>,
+    pub(crate) lash_vm_execution_sink: Option<Arc<dyn lash::tracing::ProductObservationSink>>,
 }
 
 /// The workbench core over `stores`: the durable backend over the store set
@@ -559,7 +559,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     );
     let lash_vm_execution_sink = Arc::new(trace_file::JsonlFileSink::new(
         lash_vm_execution_path.clone(),
-    )) as Arc<dyn TraceSink>;
+    )) as Arc<dyn lash::tracing::ProductObservationSink>;
 
     let model = dev_provider_scenario
         .map(|scenario| scenario.initial_profile().to_string())

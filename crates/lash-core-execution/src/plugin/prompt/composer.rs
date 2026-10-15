@@ -231,8 +231,10 @@ pub fn admission_record(
     let (recorded_body, request_texts) = ChunkedRequestTemplate::chunk(template);
     let recorded_response = RecordedResponseContext::record(
         LlmRequestScope {
-            // The attempt is each send's own.
+            // The attempt, and the trace's id of the call, are each send's
+            // own.
             attempt: None,
+            llm_call_id: None,
             ..response.scope.clone()
         },
         &serde_json::to_string(response.contract.as_ref())?,

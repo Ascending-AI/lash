@@ -24,7 +24,7 @@
 use crate::SessionId;
 use std::sync::Arc;
 
-use lash_trace::{TraceContext, TraceLevel, TraceSink};
+use lash_trace::{TraceLevel, TraceSink};
 
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
@@ -171,8 +171,9 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn with_trace_sink(mut self, sink: Option<Arc<dyn TraceSink>>) -> Self {
-        self.env.core.tracing = self.env.core.tracing.clone().with_trace_sinks(sink);
+    /// Adds `sink` beside the sinks installed already.
+    pub fn with_trace_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
+        self.env.core.tracing = self.env.core.tracing.clone().with_trace_sink(sink);
         self
     }
 
@@ -183,11 +184,6 @@ impl RuntimeEnvironmentBuilder {
 
     pub fn with_telemetry_content(mut self, content: lash_trace::TelemetryContent) -> Self {
         self.env.core.tracing = self.env.core.tracing.clone().with_content(content);
-        self
-    }
-
-    pub fn with_trace_context(mut self, context: TraceContext) -> Self {
-        self.env.core.tracing = self.env.core.tracing.clone().with_base_context(context);
         self
     }
 

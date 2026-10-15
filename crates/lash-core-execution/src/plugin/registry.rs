@@ -562,7 +562,7 @@ impl PluginExecutionTrace {
     }
 
     pub fn observes_language(&self) -> bool {
-        self.trace_runtime().emitter().product_observer().is_some() || self.standing.is_observed()
+        self.trace_runtime().emitter().has_product_observers() || self.standing.is_observed()
     }
 
     pub fn emit(&self, record: impl FnOnce() -> (crate::TraceContext, crate::TraceEvent)) {
@@ -580,9 +580,12 @@ impl PluginExecutionTrace {
             lash_trace::TraceRecord {
                 schema_version: lash_trace::TRACE_SCHEMA_VERSION,
                 id: event_key.to_string(),
-                timestamp: self.trace_runtime().clock().timestamp_datetime(),
+                timestamp: lash_trace::TraceTimestamp::from_unix_ms(
+                    self.trace_runtime().clock().timestamp_ms(),
+                ),
                 content: lash_trace::TelemetryContent::Captured,
                 context,
+                position: None,
                 event,
             }
         });

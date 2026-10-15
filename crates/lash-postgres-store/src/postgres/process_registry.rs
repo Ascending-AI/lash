@@ -222,9 +222,8 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
     async fn commit_process_registration(
         &self,
         prepared: lash_core_execution::PreparedProcessRegistration,
-        anchor: lash_core_execution::TraceAnchor,
     ) -> Result<lash_core_execution::ProcessRegistrationReceipt, PluginError> {
-        let (registration, observers, process_id, retained, now) = prepared.into_commit(anchor);
+        let (registration, observers, process_id, retained, now) = prepared.into_commit();
         let unprepared = registration.clone();
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await

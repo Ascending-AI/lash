@@ -180,7 +180,6 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &turns::INSERT_PHASE,
         &turns::ADVANCE_PHASE,
         &turns::ANSWER_SET,
-        &turns::TRACE_EXPORTED,
         &turns::OPEN_NAMED_RUN,
         &turns::UPSERT_NAMESPACES,
         &turns::WORKING_SET,

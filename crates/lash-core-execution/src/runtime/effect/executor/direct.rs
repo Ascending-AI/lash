@@ -10,8 +10,12 @@ impl LocalDirectEffectRunner {
         &mut self,
         invocation: &crate::RuntimeEffectInvocation,
         provider: crate::ProviderHandle,
-        request: crate::LlmRequest,
+        mut request: crate::LlmRequest,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // The call's id names it on every attempt's request scope and on its
+        // trace records alike, whether or not anything observes it.
+        let llm_call_id = uuid::Uuid::new_v4().to_string();
+        request.scope.llm_call_id = Some(llm_call_id.clone());
         // The request is this body's own work: its records are made here,
         // under the body's live step.
         let traced = self
@@ -22,19 +26,20 @@ impl LocalDirectEffectRunner {
             .map(|standing| {
                 let context = super::super::direct_trace_context(
                     &self.owner,
-                    Some(&uuid::Uuid::new_v4().to_string()),
+                    Some(&llm_call_id),
                     invocation.caused_by.as_ref(),
                 );
-                super::super::emit_llm_trace_started(&standing, context.clone(), &request);
-                (standing, context, request.model.wire_model().to_string())
+                let call =
+                    super::super::emit_llm_trace_started(&standing, context.clone(), &request);
+                (call, context, request.model.wire_model().to_string())
             });
         let (result, call_record) = self
             .run_direct_llm_request(provider, request, traced.as_ref())
             .await;
-        if let Some((standing, context, request_model)) = traced {
+        if let Some((call, context, request_model)) = traced {
             match &result {
                 Ok(response) => super::super::emit_llm_trace_completed(
-                    &standing,
+                    call,
                     context,
                     response,
                     &request_model,
@@ -43,7 +48,7 @@ impl LocalDirectEffectRunner {
                     call_record.as_ref(),
                 ),
                 Err(error) => super::super::emit_llm_trace_failed(
-                    &standing,
+                    call,
                     context,
                     super::super::LlmTraceFailure::from(error),
                     None,
@@ -121,24 +126,24 @@ impl LocalDirectEffectRunner {
         &mut self,
         mut provider: ProviderHandle,
         request: CoreLlmRequest,
-        traced: Option<&(
-            crate::trace::TraceStanding,
-            lash_trace::TraceContext,
-            String,
-        )>,
+        traced: Option<&(crate::trace::OpenSpan, lash_trace::TraceContext, String)>,
     ) -> RuntimeDirectLlmOutcome {
         // The request is the effect's own input: it attributes the call and
         // carries this send's senders. What is sent is the admitted
         // template, and its response is read under the admitted context.
         let mut request = request;
         let sideband = lash_core_llm::core_internal::prepare_completion(&provider, &mut request);
-        let context = self
+        let mut context = self
             .response
             .clone()
             .with_senders(request.stream_events.take(), request.provider_trace.take());
+        context.scope.llm_call_id = request.scope.llm_call_id.clone();
         let sideband = traced.map_or_else(
             || sideband.clone(),
-            |(standing, context, _)| standing.provider_attempts(sideband.clone(), context.clone()),
+            |(call, context, _)| {
+                call.standing()
+                    .provider_attempts(sideband.clone(), context.clone())
+            },
         );
         match lash_core_llm::core_internal::complete_prepared(
             &mut provider,
@@ -148,7 +153,7 @@ impl LocalDirectEffectRunner {
             sideband,
             self.charge_safety.clone(),
             self.tracing.metrics(),
-            traced.and_then(|(standing, _, _)| standing.body_permit()),
+            traced.and_then(|(call, _, _)| call.standing().body_permit()),
             self.bounds.clone(),
         )
         .await

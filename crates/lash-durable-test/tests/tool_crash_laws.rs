@@ -1098,9 +1098,14 @@ impl Crash {
             violations.extend(self.finish_laws(nodes).await);
         }
         if self.trace_adapter {
-            violations.extend(self.telemetry.first_turn_violations(SESSION));
+            // An owner that lost its acknowledgement or its life after a
+            // terminal commit loses that container's close (D4).
+            let lossy = cut
+                .is_some_and(|cut| matches!(cut.fault, Fault::CommitThenAbort | Fault::AckHidden));
+            violations.extend(self.telemetry.first_turn_violations(SESSION, lossy));
+            violations.extend(self.telemetry.publication_violations(lossy));
             if self.turn != Turn::Plain {
-                violations.extend(self.telemetry.first_turn_tool_violations(SESSION));
+                violations.extend(self.telemetry.first_turn_tool_violations(SESSION, lossy));
             }
         }
         if let Some(cut) = cut {
@@ -2286,16 +2291,13 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 
 /// A turn cut at its admission, at its first phase commit or at a later
 /// one, under every fault, and resumed on the other node reads back the
-/// trace scope its admission retained: its scope is admitted exactly once,
-/// and every record of the turn carries that admission's trace (FIG-5363,
-/// FIG-5395). Its call's scope, admitted with its round, is admitted
-/// exactly once on that trace, also when its owner was killed after the
-/// round's admission committed, before it learned so (FIG-5382, FIG-5395),
-/// and when the record of its export (`round.traced`) is cut (FIG-5452). The
-/// turn's admission is exported once too when the commit that carries the
-/// record of its export, its first `model.start`, is cut: the export is
-/// made before that commit is submitted, so one that lands with its owner
-/// killed is exported already (FIG-5998).
+/// trace scope its admission retained: every record of the turn carries
+/// that scope's trace, and its span closes once, on the owner whose
+/// acknowledged commit wrote its terminal (FIG-5363, FIG-6299). Its call's
+/// span, admitted with its round, closes once on that trace, also when its
+/// owner was killed after the round's admission committed, before it
+/// learned so (FIG-5382). Span ids are unique across every owner's
+/// publications (L1(b)).
 async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
@@ -2304,17 +2306,15 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_TRACED,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
         ],
     )
     .await;
 }
 
-/// A code cell's call, cut anywhere, is admitted exactly once, on its
-/// turn's trace: its cell's admission retains its scope, which every
-/// attempt and every later owner reads back (FIG-5395), and the record of
-/// its export (`round.traced`) is among the cuts (FIG-5457).
+/// A code cell's call, cut anywhere, closes once, on its turn's trace: its
+/// cell's admission retains its scope, which every attempt and every later
+/// owner reads back (FIG-5395).
 async fn a_cells_call_trace_admission_is_exported_once_across_a_crash(tier: Tier) {
     prove(Turn::CellTrace, tier).await;
 }

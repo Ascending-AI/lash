@@ -217,7 +217,6 @@ pub enum RunFactKind {
     XStart,
     XOutcome,
     XWait,
-    Decide,
     Present,
     Retry,
     /// A cell's report: a reference-only fact naming the original
@@ -226,12 +225,11 @@ pub enum RunFactKind {
 }
 
 impl RunFactKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::Admit,
         Self::XStart,
         Self::XOutcome,
         Self::XWait,
-        Self::Decide,
         Self::Present,
         Self::Retry,
         Self::CellReport,
@@ -245,7 +243,6 @@ impl RunFactKind {
             Self::XStart => "x_start",
             Self::XOutcome => "x_outcome",
             Self::XWait => "x_wait",
-            Self::Decide => "decide",
             Self::Present => "present",
             Self::Retry => "retry",
             Self::CellReport => "cell_report",
@@ -253,7 +250,8 @@ impl RunFactKind {
     }
 
     /// The RoundFact variant number a fact of this kind holds
-    /// (Admit/Start/Wait/Retry/Decide/Present/Outcome/CellReport are 0–7).
+    /// (Admit/Start/Wait/Retry are 0–3, Present/Outcome/CellReport 5–7;
+    /// 4 is retired).
     #[must_use]
     pub const fn round_fact_variant(self) -> u32 {
         match self {
@@ -261,7 +259,6 @@ impl RunFactKind {
             Self::XStart => 1,
             Self::XWait => 2,
             Self::Retry => 3,
-            Self::Decide => 4,
             Self::Present => 5,
             Self::XOutcome => 6,
             Self::CellReport => 7,

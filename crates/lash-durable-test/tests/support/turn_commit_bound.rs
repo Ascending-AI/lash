@@ -1,6 +1,6 @@
 //! FIG-5954: the owner commits through its answer, with exact retained
 //! boundaries: each model call's receipt (FIG-6230), and the named cell
-//! and trace boundaries.
+//! boundaries. Tracing adds no commit (FIG-6299).
 
 use super::*;
 
@@ -17,10 +17,6 @@ const RECEIPT: (CommitLabel, &str) = (
     CommitLabel::MODEL_ANSWER,
     "FIG-6230: a paid answer commits before its derivation",
 );
-const TRACE_BOUNDARIES: [(CommitLabel, &str); 1] = [(
-    CommitLabel::ROUND_TRACED,
-    "FIG-5452: acknowledge exported tool admissions across owner replacement",
-)];
 
 async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
     let fixtures = Mutex::new(Vec::new());
@@ -58,13 +54,6 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
     let outputs = models + bodies + 1; // actual provider sends, body entries, host answer
     assert_eq!(models, if turn == Turn::Plain { 1 } else { 2 });
     assert_eq!(bodies, usize::from(turn != Turn::Plain));
-    // A traced turn's own admission export rides its first phase commit
-    // (FIG-5998): only a traced call's keeps a boundary.
-    let trace: &[(CommitLabel, &str)] = if traced && turn != Turn::Plain {
-        &TRACE_BOUNDARIES
-    } else {
-        &[]
-    };
     assert_eq!(
         cell.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
         if turn.code() {
@@ -73,19 +62,11 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
             Vec::new()
         }
     );
-    assert_eq!(
-        owner
-            .iter()
-            .filter(|label| TRACE_BOUNDARIES.iter().any(|(trace, _)| trace == *label))
-            .copied()
-            .collect::<Vec<_>>(),
-        trace.iter().map(|(label, _)| *label).collect::<Vec<_>>()
-    );
     let (receipt, why) = RECEIPT;
     assert!(!why.is_empty());
     let receipts = owner.iter().filter(|found| **found == receipt).count();
     assert_eq!(receipts, models, "one receipt per provider send: {why}");
-    for (label, why) in cell.iter().chain(trace) {
+    for (label, why) in cell {
         assert!(!why.is_empty());
         assert_eq!(
             owner.iter().filter(|found| *found == label).count(),
@@ -94,18 +75,16 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
         );
     }
     eprintln!(
-        "{turn:?} traced={traced}: commits={} outputs={outputs} K={} T={} R={receipts} labels={owner:?}; later session maintenance={:?}",
+        "{turn:?} traced={traced}: commits={} outputs={outputs} K={} R={receipts} labels={owner:?}; later session maintenance={:?}",
         owner.len(),
         cell.len(),
-        trace.len(),
         &all[answer + 1..]
     );
     assert!(
-        owner.len() <= outputs + 1 + cell.len() + trace.len() + receipts,
-        "{turn:?} traced={traced}: {} owner commits exceed {outputs} outputs + 1 + K={} + T={} + R={receipts}: {owner:?}",
+        owner.len() <= outputs + 1 + cell.len() + receipts,
+        "{turn:?} traced={traced}: {} owner commits exceed {outputs} outputs + 1 + K={} + R={receipts}: {owner:?}",
         owner.len(),
-        cell.len(),
-        trace.len()
+        cell.len()
     );
 }
 

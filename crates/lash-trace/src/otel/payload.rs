@@ -16,9 +16,6 @@ impl BoundedWriter {
             truncated: false,
         }
     }
-    pub fn len(&self) -> usize {
-        self.bytes.len()
-    }
     pub fn finish(self) -> String {
         let mut bytes = self.bytes;
         while std::str::from_utf8(&bytes).is_err() {
@@ -43,20 +40,12 @@ impl Write for BoundedWriter {
     }
 }
 
-/// Context metadata is the host's own opt-in; the event payload follows the
-/// record's content marker, and an omitted one is never serialized.
+/// The event payload follows the record's content marker, and an omitted
+/// one is never serialized.
 pub(super) fn attributes(record: &TraceRecord, options: &OtelOptions, out: &mut Vec<KeyValue>) {
-    let mut remaining = options.max_payload_bytes;
     let mut truncated = 0_i64;
-    if options.include_context_metadata {
-        let mut writer = BoundedWriter::new(remaining);
-        let _ = serde_json::to_writer(&mut writer, &record.context.metadata);
-        remaining = remaining.saturating_sub(writer.len());
-        truncated += i64::from(writer.truncated);
-        out.push(A::ContextMetadata.value(writer.finish()));
-    }
     if record.content.is_captured() {
-        let mut writer = BoundedWriter::new(remaining);
+        let mut writer = BoundedWriter::new(options.max_payload_bytes);
         let _ = serde_json::to_writer(&mut writer, &record.event);
         truncated += i64::from(writer.truncated);
         out.push(A::Payload.value(writer.finish()));

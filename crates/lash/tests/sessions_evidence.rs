@@ -1176,8 +1176,6 @@ fn drain_area_witnesses() {
     });
     // W0445: lash::runtime::TraceRuntime [struct]
     type_witness::<lash::runtime::TraceRuntime>();
-    // W0446: lash::runtime::TraceRuntime::base_context [function]
-    member_witness(lash::runtime::TraceRuntime::base_context);
     // W0447: lash::runtime::TraceRuntime::level [function]
     member_witness(lash::runtime::TraceRuntime::level);
     // W0448: lash::runtime::TraceEmitter [struct]

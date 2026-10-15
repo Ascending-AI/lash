@@ -30,7 +30,7 @@ pub(super) struct Observed {
     spans: InMemorySpanExporter,
     metrics: InMemoryMetricExporter,
     meter: SdkMeterProvider,
-    _tracer: SdkTracerProvider,
+    _tracer: crate::tracing::LashTracerProvider,
 }
 
 impl Observed {
@@ -40,9 +40,11 @@ impl Observed {
     ) -> (Self, crate::core::LashCoreBuilder) {
         let sink = Arc::new(crate::testing::RecordingTraceSink::new());
         let spans = InMemorySpanExporter::default();
-        let tracer = SdkTracerProvider::builder()
-            .with_simple_exporter(spans.clone())
-            .build();
+        let tracer = crate::tracing::LashTracerProvider::new(
+            SdkTracerProvider::builder().with_simple_exporter(spans.clone()),
+            lash_trace::otel::sdk::trace::Sampler::AlwaysOn,
+            lash_trace::otel::sdk::trace::RandomIdGenerator::default(),
+        );
         let metrics = InMemoryMetricExporter::default();
         let meter = SdkMeterProvider::builder()
             .with_reader(PeriodicReader::builder(metrics.clone()).build())
@@ -63,13 +65,18 @@ impl Observed {
     }
 
     /// Every record the sink holds of kind `kind`.
-    fn records(&self, core: &LashCore, kind: &str) -> Vec<lash_trace::TraceRecord> {
+    pub(super) fn records(&self, core: &LashCore, kind: &str) -> Vec<lash_trace::TraceRecord> {
         core.flush_trace_sink().expect("flush the trace sink");
         self.sink
             .records()
             .into_iter()
             .filter(|record| record.event.kind().as_str() == kind)
             .collect()
+    }
+
+    /// Every exported span.
+    pub(super) fn exported(&self) -> Vec<SpanData> {
+        self.spans.get_finished_spans().expect("exported spans")
     }
 
     /// Every exported span whose name is, or starts with, `name`.
@@ -186,9 +193,8 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
     Ok((observed, core))
 }
 
-/// `turn_started`: the turn's admission, once, as the logical start of its
-/// scope, at the scope's retained start. It has no span of its own: the
-/// turn's admission exports `lash.turn.admitted`.
+/// `turn_started`: the turn's admission, once, opening the turn's span at
+/// its scope's retained start, where the exported `invoke_agent` starts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_served_turn_writes_one_turn_started_at_its_admission() -> Result<()> {
     let (observed, core) = served_turn().await?;
@@ -213,24 +219,31 @@ async fn a_served_turn_writes_one_turn_started_at_its_admission() -> Result<()> 
             metadata: [("input_count".to_owned(), serde_json::json!(1))].into(),
         }
     );
-    let admitted = observed.spans("lash.turn.admitted");
-    assert_eq!(admitted.len(), 1, "the turn's admission is exported once");
+    let position = record.position.as_ref().expect("a positioned record");
+    assert_eq!(position.role, lash_trace::SpanRole::Opens);
+    let turns = observed.spans("invoke_agent");
+    assert_eq!(turns.len(), 1, "the turn's span is exported once");
+    assert_eq!(
+        turns[0].span_context.span_id().to_bytes(),
+        position.span.span_id().to_bytes(),
+        "the start opens the exported span"
+    );
     let since_epoch = |at: std::time::SystemTime| {
         at.duration_since(std::time::UNIX_EPOCH)
             .expect("after the epoch")
             .as_millis()
     };
     assert_eq!(
-        since_epoch(record.timestamp.into()),
-        since_epoch(admitted[0].start_time),
-        "the start is the admission's retained time, in whole milliseconds"
+        since_epoch(record.timestamp.to_system_time()),
+        since_epoch(turns[0].start_time),
+        "the span starts at the admission's retained time, in whole milliseconds"
     );
     core.shutdown().await?;
     Ok(())
 }
 
 /// `turn_completed` and its `invoke_agent` span: the turn's committed
-/// terminal, once, under the admission's anchor.
+/// terminal, once, under the send that admitted it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> Result<()> {
     let (observed, core) = served_turn().await?;
@@ -260,11 +273,15 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
         attribute(span, "lash.session.id").as_deref(),
         Some(TURN_SESSION)
     );
-    let admitted = observed.spans("lash.turn.admitted");
+    let sends = observed.spans("lash.send");
+    let parent = sends
+        .iter()
+        .find(|send| send.span_context.span_id() == span.parent_span_id)
+        .expect("the turn's parent is an exported send");
     assert_eq!(
-        span.parent_span_id,
-        admitted[0].span_context.span_id(),
-        "the completion is a child of the turn's admission anchor"
+        attribute(parent, "lash.producer.outcome").as_deref(),
+        Some("selected"),
+        "the send whose acceptance admitted the turn parents it: {sends:#?}"
     );
     assert!(span.start_time <= span.end_time);
     core.shutdown().await?;
@@ -287,7 +304,12 @@ async fn a_served_tool_call_exports_one_execute_tool_span() -> Result<()> {
         Some("echo_tool")
     );
     assert!(!failed(span), "a successful call is no error");
-    assert_eq!(observed.spans("lash.tool.admitted").len(), 1);
+    let turns = observed.spans("invoke_agent");
+    assert_eq!(
+        span.parent_span_id,
+        turns[0].span_context.span_id(),
+        "the call is a child of its turn"
+    );
     core.shutdown().await?;
     Ok(())
 }
@@ -370,11 +392,15 @@ async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result
     );
     let spans = observed.spans("lash.tool_intent");
     assert_eq!(spans.len(), 2, "{spans:#?}");
-    assert_eq!(
-        observed.spans("lash.tool_intent.admitted").len(),
-        2,
-        "each first submission's admission is exported once"
-    );
+    let producers = observed.spans("lash.tool_intent.submit");
+    for span in &spans {
+        assert!(
+            producers
+                .iter()
+                .any(|producer| producer.span_context.span_id() == span.parent_span_id),
+            "each settlement is a child of its submission: {producers:#?}"
+        );
+    }
     let mut outcomes: Vec<_> = completions
         .iter()
         .map(|record| {
@@ -442,7 +468,7 @@ async fn an_ended_process_exports_one_lash_process_span() -> Result<()> {
         .collect();
     assert_eq!(completions.len(), 1, "one terminal: {completions:#?}");
     assert_eq!(
-        u64::try_from(completions[0].timestamp.timestamp_millis()).ok(),
+        Some(completions[0].timestamp.unix_ms()),
         Some(occurred_at_ms),
         "the record's time is the terminal's retained time"
     );

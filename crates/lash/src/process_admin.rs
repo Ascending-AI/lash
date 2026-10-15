@@ -371,81 +371,85 @@ impl Processes {
         // The start's `lash.process.start` producer opens here, before the
         // first await, under the caller's context the request chose (else
         // the ambient one): the process is admitted under it.
-        let scopes = self.core.env.core.tracing.scopes().as_ref();
-        let producer = scopes.open_producer(
-            request
-                .trace_call()
-                .producer(lash_core::ProducerKind::ProcessStart, scopes),
+        let mut producer = self.core.env.core.tracing.open_producer(
+            lash_core::ProducerKind::ProcessStart,
+            request.trace_call(),
+            lash_core::TraceIds::default(),
         );
-        let request = request.with_trace_parent(
-            producer
-                .as_deref()
-                .map(<dyn lash_core::TraceHostOperation>::parent),
-        );
-        // The registrar mints the id; the key only makes the start idempotent.
-        // A host mints only host keys: a key of a family lash derives for its
-        // own start paths is refused, never adopted (ADR 0107).
-        // The request is registered as the host stated it: lash lays
-        // nothing of its own under a session-turn start (FIG-4594), so the
-        // start-key fence compares only what the host stated.
-        let request = request
-            .keyed_in(&scoped_effect_controller)
-            .map_err(EmbedError::Plugin)?;
-        // A root start's session grant is the host's lookup, whether it came
-        // from `session_scope` or from a remote start's `until_session` data
-        // (FIG-3607 R3). The start's recorded admission checks the session is
-        // live, so a replay after the session was deleted answers the start
-        // its first run made (ADR 0105 §1).
-        let observers = request.observers.clone();
-        let registration = request.into_registration();
-        // A host start is its own operation (ADR 0113 §3.3): its staging
-        // holds the stated environment under `Start(key)` until registration
-        // carries it onto the record. The caller's context names no execution
-        // of the start's own: the core's host context is one scope every host
-        // start shares, settled at once.
-        let mut session_turn_admission = None;
-        if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
-            create_request,
-            ..
-        }) = registration.input.as_ref()
-        {
-            self.check_host_session_turn(create_request)?;
-            session_turn_admission =
-                Some(self.host_session_turn_admission(create_request.as_ref().clone()));
+        let request = request.with_trace_parent(producer.parent());
+        let started = async {
+            // The registrar mints the id; the key only makes the start
+            // idempotent. A host mints only host keys: a key of a family lash
+            // derives for its own start paths is refused, never adopted (ADR
+            // 0107). The request is registered as the host stated it: lash
+            // lays nothing of its own under a session-turn start (FIG-4594),
+            // so the start-key fence compares only what the host stated.
+            let request = request
+                .keyed_in(&scoped_effect_controller)
+                .map_err(EmbedError::Plugin)?;
+            // A root start's session grant is the host's lookup, whether it
+            // came from `session_scope` or from a remote start's
+            // `until_session` data (FIG-3607 R3). The start's recorded
+            // admission checks the session is live, so a replay after the
+            // session was deleted answers the start its first run made (ADR
+            // 0105 §1).
+            let observers = request.observers.clone();
+            let registration = request.into_registration();
+            // A host start is its own operation (ADR 0113 §3.3): its staging
+            // holds the stated environment under `Start(key)` until
+            // registration carries it onto the record. The caller's context
+            // names no execution of the start's own: the core's host context
+            // is one scope every host start shares, settled at once.
+            let mut session_turn_admission = None;
+            if let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+                create_request,
+                ..
+            }) = registration.input.as_ref()
+            {
+                self.check_host_session_turn(create_request)?;
+                session_turn_admission =
+                    Some(self.host_session_turn_admission(create_request.as_ref().clone()));
+            }
+            let start_key = registration.start_key.clone();
+            let command = lash_core::ProcessCommand::Start {
+                registration,
+                observers,
+                execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
+            };
+            let outcome = self
+                .execute_command(
+                    command,
+                    scoped_effect_controller.clone(),
+                    session_turn_admission,
+                )
+                .await
+                .map_err(|error| {
+                    EmbedError::Plugin(host_start_refusal(start_key.as_ref(), error))
+                })?;
+            let lash_core::ProcessEffectOutcome::Start {
+                record,
+                disposition,
+            } = outcome
+            else {
+                return Err(EmbedError::Plugin(lash_core::PluginError::Session(
+                    "process start returned the wrong outcome".to_string(),
+                )));
+            };
+            Ok((record, disposition, start_key))
         }
-        let start_key = registration.start_key.clone();
-        let command = lash_core::ProcessCommand::Start {
-            registration,
-            observers,
-            execution_context: Box::new(lash_core::ProcessExecutionContext::default()),
+        .await;
+        let (record, disposition, start_key) = match started {
+            Ok(started) => started,
+            Err(error) => {
+                producer.settle(crate::tracing::refused(&error));
+                return Err(error);
+            }
         };
-        let outcome = self
-            .execute_command(
-                command,
-                scoped_effect_controller.clone(),
-                session_turn_admission,
-            )
-            .await
-            .map_err(|error| EmbedError::Plugin(host_start_refusal(start_key.as_ref(), error)))?;
-        let lash_core::ProcessEffectOutcome::Start {
-            record,
-            disposition,
-        } = outcome
-        else {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "process start returned the wrong outcome".to_string(),
-            )));
-        };
-        if let Some(producer) = producer {
-            producer.settle(match &disposition {
-                lash_core::ProcessRegistrationOutcome::Created => {
-                    lash_core::TraceCandidateOutcome::Selected
-                }
-                lash_core::ProcessRegistrationOutcome::Existing => {
-                    lash_core::TraceCandidateOutcome::Reused
-                }
-            });
-        }
+        producer.ids_mut().process = Some(record.process_id.clone());
+        producer.settle(match &disposition {
+            lash_core::ProcessRegistrationOutcome::Created => lash_core::ProducerOutcome::Selected,
+            lash_core::ProcessRegistrationOutcome::Existing => lash_core::ProducerOutcome::Reused,
+        });
         // Registration created the process's actor ready, in the same
         // transaction: nothing is left to deliver.
         Ok(lash_core::ProcessStartReceipt {

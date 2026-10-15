@@ -176,7 +176,7 @@ impl SessionBuilder {
             self.core.env.core.control.effect_host.clone(),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
-            Arc::clone(self.core.env.core.tracing.scopes()),
+            self.core.env.core.tracing.clone(),
             Arc::clone(&self.core.observer_pacing),
         )
         .with_transcript_decoders(self.core.transcript_decoders())
@@ -319,7 +319,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
-            Arc::clone(self.core.env.core.tracing.scopes()),
+            self.core.env.core.tracing.clone(),
             Arc::clone(&self.core.observer_pacing),
         )
         .with_transcript_decoders(self.core.transcript_decoders()))
@@ -1078,7 +1078,7 @@ impl LashSession {
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
             self.binding.llm_profiles(),
-            self.binding.trace_scopes(),
+            self.binding.tracing(),
             Arc::clone(&self.binding.observer_pacing),
         )
         .with_transcript_decoders(self.read_view().transcript_decoders().clone())

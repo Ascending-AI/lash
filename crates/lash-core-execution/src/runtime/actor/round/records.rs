@@ -9,7 +9,7 @@ use lash_durable::domain::{
 };
 use lash_durable::{ActorTx, DomainWrite};
 
-use super::graph::{self, AdmitMember, Decision, PinnedMember, RoundFact, SettledFact};
+use super::graph::{self, AdmitMember, PinnedMember, RoundFact, SettledFact};
 use super::{ExecutionDraft, SettledOutput};
 use crate::ToolCallId;
 
@@ -22,7 +22,7 @@ use crate::ToolCallId;
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/graph.rs",
-///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, Decision, StoredOutcome, CallOutcome, ReportView),
+///         cover(RoundFact, AdmitMember, PinnedMember, SettledFact, MaterialNode, StoredOutcome, CallOutcome, ReportView),
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/call_body.rs",
 ///         cover(StoredBody, CallBody),
 ///     ),
@@ -57,11 +57,13 @@ pub(super) struct StartBody {
 /// An `x_outcome` or `x_wait` record's body: the call's final output, or
 /// its park, settling the attempt started at `start`. Its material's
 /// payload is a node of its own, read back through the digest check. A
-/// completion's plugin-state resolutions commit in it (ADR 0132 §5).
+/// completion's plugin-state resolutions commit in it (ADR 0132 §5), with
+/// the member's end: the store's clock at the commit (a park's is unused).
 pub(super) struct OutcomeBody {
     pub(super) start: u64,
     pub(super) output: SettledOutput,
     pub(super) state: Vec<lash_core_store::tool_run::StateResolution>,
+    pub(super) ended_at_ms: Option<u64>,
 }
 
 /// A `retry` record's body: the attempt started at `start` failed in a way
@@ -73,15 +75,6 @@ pub(super) struct RetryBody {
     pub(super) due_at_ms: i64,
 }
 
-/// A `decide` record's body: a decision of the round's coordinator, which
-/// no member's recovery depends on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DecideBody {
-    /// The trace admissions the round's admission retained are exported:
-    /// the admission's export obligation is discharged (FIG-5452).
-    TraceExported,
-}
-
 /// One record's typed body, as its RoundFact holds it.
 pub(super) enum Record {
     Admit(AdmitBody),
@@ -90,7 +83,6 @@ pub(super) enum Record {
     Outcome(OutcomeBody),
     Retry(RetryBody),
     Present,
-    Decide(DecideBody),
     CellReport(NodeId),
 }
 
@@ -103,7 +95,6 @@ impl Record {
             Self::Outcome(_) => RunFactKind::XOutcome,
             Self::Retry(_) => RunFactKind::Retry,
             Self::Present => RunFactKind::Present,
-            Self::Decide(_) => RunFactKind::Decide,
             Self::CellReport(_) => RunFactKind::CellReport,
         }
     }
@@ -165,6 +156,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRef
             start: body.start,
             output: settled_fact(staging, &body.output)?,
             state: body.state.clone(),
+            ended_at_ms: body.ended_at_ms,
         },
         Record::Retry(body) => RoundFact::Retry {
             start: body.start,
@@ -172,7 +164,6 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRef
             due_at_ms: body.due_at_ms,
         },
         Record::Present => RoundFact::Present,
-        Record::Decide(DecideBody::TraceExported) => RoundFact::Decide(Decision::TraceExported),
         Record::CellReport(report) => RoundFact::CellReport { report: *report },
     };
     fact.stage(staging)
@@ -231,15 +222,18 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             start,
             output: settled_output(&mut decoder, output)?,
             state: Vec::new(),
+            ended_at_ms: None,
         }),
         RoundFact::Outcome {
             start,
             output,
             state,
+            ended_at_ms,
         } => Record::Outcome(OutcomeBody {
             start,
             output: settled_output(&mut decoder, output)?,
             state,
+            ended_at_ms,
         }),
         RoundFact::Retry {
             start,
@@ -251,7 +245,6 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             due_at_ms,
         }),
         RoundFact::Present => Record::Present,
-        RoundFact::Decide(Decision::TraceExported) => Record::Decide(DecideBody::TraceExported),
         RoundFact::CellReport { report } => Record::CellReport(report),
     })
 }
@@ -324,16 +317,4 @@ pub(super) fn start_record(
         Some(draft.call()),
         &Record::Start(StartBody { member, attempt }),
     );
-}
-
-/// Append the `decide` record of `decision`, at `ordinal` of `owner`'s run
-/// `run`.
-pub(super) fn decide_record(
-    tx: &mut ActorTx,
-    owner: &OwnerKey,
-    run: RunSeq,
-    ordinal: Ordinal,
-    decision: DecideBody,
-) {
-    append(tx, owner, run, ordinal, None, &Record::Decide(decision));
 }

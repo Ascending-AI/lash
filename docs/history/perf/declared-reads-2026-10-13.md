@@ -1,5 +1,9 @@
 # Declared reads through the facade, 2026-10-13–14
 
+> Historical measurement. FIG-6299 removed the `round.traced` commit and its
+> decision facts, so a traced run now commits what an untraced one does; the
+> numbers below are as measured before that change.
+
 FIG-6154. Fifty dependent reads in TypeScript and Python were measured on SQLite file FULL
 and a private PostgreSQL 18 with fsync, synchronous commit and full-page writes
 on. Both stores confirm the cost model: **99 fewer owner commits untraced,
@@ -17,7 +21,7 @@ saved-function calling convention. The production fix belongs to FIG-6186.
 
 ## Method and scope
 
-The [maintained harness](../../crates/lash-perf/src/bin/durable_substrate/README.md#fifty-dependent-declared-reads-fig-6154)
+The [maintained harness](../../../crates/lash-perf/src/bin/durable_substrate/README.md#fifty-dependent-declared-reads-fig-6154)
 uses the production `LashSession::send()` path, registry, RLM protocol, engine,
 stores and worker transport. The model answers locally with one code cell and
 then prose. Every local provider answer has an ordinal prefix and a fixed body
@@ -83,7 +87,7 @@ Tracing removes another 50 commits and 50 `decide` facts. The extra removed
 ledger has no recorded calls needs none.
 
 The large projection control outlasts its first compute slice and pays one
-standalone `model.done`, as [ADR 0142](../adr/0142-a-cells-first-save-carries-its-turns-model-response.md)
+standalone `model.done`, as [ADR 0142](../../adr/0142-a-cells-first-save-carries-its-turns-model-response.md)
 requires. Read already committed that response with its initial plan. This
 explains the control's extra enclosing transaction; it changes no per-read
 count. Read's initial save adds fixed IPC traffic, and the large Read/control

@@ -162,17 +162,17 @@ pub trait MemberBodies: Send + Sync {
     /// Observe the committed state of a round before any member runs.
     /// Observers keep their own live deduplication; this runs after every fold.
     /// `admitted_here` holds the members this activation's own commit
-    /// admitted and has not started yet.
-    fn observe(&self, _round: &RoundView, _admitted_here: &BTreeSet<AdmittedId>) {}
-
-    /// Export the trace admissions of `members`, an admission that
-    /// committed and still owes its exports
-    /// ([`RoundView::owed_trace_exports`]): select the candidate this owner
-    /// proposed for a member's call, or reconcile the admission's export
-    /// through the adapter when another owner proposed it. Its owner then
-    /// records the exports (`round.traced`), before any member's body runs
-    /// (FIG-5457). Bodies that trace nothing export nothing.
-    fn export_trace_admissions(&self, _members: &[AdmittedExecution]) {}
+    /// admitted and has not started yet; `settled_here` the members whose
+    /// final outcomes this activation's acknowledged commit wrote, which
+    /// only this owner closes (P1). A successor that folds an outcome
+    /// another owner committed closes nothing.
+    fn observe(
+        &self,
+        _round: &RoundView,
+        _admitted_here: &BTreeSet<AdmittedId>,
+        _settled_here: &BTreeSet<AdmittedId>,
+    ) {
+    }
 
     /// The body of `execution`'s attempt, for its call and request.
     fn body(&self, execution: &AdmittedExecution) -> MemberBody;
@@ -352,8 +352,13 @@ pub struct Lifecycle {
     checked: HashSet<WaitRef>,
     /// The members whose committed plugin state this lifecycle published.
     published: BTreeSet<AdmittedId>,
+    /// The members whose outcomes this activation's acknowledged commits
+    /// wrote, until the next fold observes them.
+    settled: BTreeSet<AdmittedId>,
     prepare_final: bool,
-    prepared: Option<lash_durable::ActorTx>,
+    /// A final batch held for the owner's next output, with the members
+    /// whose outcomes it writes.
+    prepared: Option<(lash_durable::ActorTx, BTreeSet<AdmittedId>)>,
 }
 
 impl Lifecycle {
@@ -385,6 +390,7 @@ impl Lifecycle {
             batch_opened: None,
             checked: HashSet::new(),
             published: BTreeSet::new(),
+            settled: BTreeSet::new(),
             prepare_final: false,
             prepared: None,
         }
@@ -402,7 +408,9 @@ impl Lifecycle {
         self.prepare_final = enabled;
     }
 
-    pub(super) fn take_prepared(&mut self) -> Option<lash_durable::ActorTx> {
+    pub(super) fn take_prepared(
+        &mut self,
+    ) -> Option<(lash_durable::ActorTx, BTreeSet<AdmittedId>)> {
         self.prepared.take()
     }
 
@@ -422,6 +430,13 @@ impl Lifecycle {
     /// landed: each one's body may run once.
     pub fn admitted<'a>(&mut self, members: impl IntoIterator<Item = &'a AdmittedExecution>) {
         self.fresh
+            .extend(members.into_iter().map(|member| member.id().clone()));
+    }
+
+    /// `members`' outcomes were written by this activation's own commit,
+    /// which landed: the next fold observes them as settled here.
+    pub fn settled_here<'a>(&mut self, members: impl IntoIterator<Item = &'a AdmittedExecution>) {
+        self.settled
             .extend(members.into_iter().map(|member| member.id().clone()));
     }
 
@@ -530,8 +545,9 @@ impl Lifecycle {
         // acknowledgement was lost.
         self.publish_committed(folded)?;
         for view in folded.rounds() {
-            self.bodies.observe(view, &self.fresh);
+            self.bodies.observe(view, &self.fresh, &self.settled);
         }
+        self.settled.clear();
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.
         self.finished.retain(|id, result| {
@@ -713,7 +729,7 @@ impl Lifecycle {
                     })
                 });
             if final_plain {
-                self.prepared = Some(tx);
+                self.prepared = Some((tx, outcomes));
                 self.finished.clear();
                 self.batch_opened = None;
                 return Ok(Some(Act::Idle(Idle {
@@ -725,6 +741,7 @@ impl Lifecycle {
             }
             let act = self.commit(tx, label).await?;
             if matches!(act, Act::Committed(_)) {
+                self.settled.extend(outcomes.iter().cloned());
                 // The outcomes are durable: their plugin state publishes now,
                 // before the reservations they hold are released.
                 for (id, result) in std::mem::take(&mut self.finished) {
@@ -746,6 +763,11 @@ impl Lifecycle {
             }
             let act = self.commit(tx, self.settlement_label).await?;
             if matches!(act, Act::Committed(_)) {
+                self.settled.extend(
+                    settlements
+                        .iter()
+                        .map(|(execution, _)| execution.id().clone()),
+                );
                 for (execution, outcome) in &settlements {
                     self.bodies.unanswered(execution, outcome);
                 }

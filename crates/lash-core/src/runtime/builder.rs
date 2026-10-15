@@ -92,8 +92,9 @@ impl EmbeddedRuntimeBuilder {
         self.with_plugin_host(stack.into_host(budgets, tracing))
     }
 
-    pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {
-        self.core.tracing = self.core.tracing.clone().with_trace_sinks(sink);
+    /// Adds `sink` beside the sinks installed already.
+    pub fn with_trace_sink(mut self, sink: Arc<dyn lash_trace::TraceSink>) -> Self {
+        self.core.tracing = self.core.tracing.clone().with_trace_sink(sink);
         self
     }
 
@@ -104,11 +105,6 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_telemetry_content(mut self, content: lash_trace::TelemetryContent) -> Self {
         self.core.tracing = self.core.tracing.clone().with_content(content);
-        self
-    }
-
-    pub fn with_trace_context(mut self, context: lash_trace::TraceContext) -> Self {
-        self.core.tracing = self.core.tracing.clone().with_base_context(context);
         self
     }
 

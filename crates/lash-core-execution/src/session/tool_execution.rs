@@ -410,7 +410,7 @@ impl RuntimeExecutionContext<'_> {
         attempts: &[lash_trace::TraceRetryAttempt],
         duration_ms: u64,
     ) {
-        self.trace_tool_call_completed(record, attempts);
+        self.trace_tool_call_completed(record, attempts, None);
         self.emit_tool_call_completed_activity(call_key, record, duration_ms);
     }
 

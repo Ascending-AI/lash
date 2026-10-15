@@ -18,7 +18,7 @@ doctest = false
 
 [features]
 default = []
-otel = ["dep:opentelemetry"]
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk"]
 # Exposes `RecordingTraceSink`, the in-memory sink tests read records from.
 testing = []
 
@@ -30,6 +30,7 @@ lash-kernel-doc = { workspace = true }
 lash-sansio = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 opentelemetry = { version = "0.33", optional = true }
+opentelemetry_sdk = { version = "0.33", optional = true, default-features = false, features = ["trace"] }
 serde = { workspace = true, features = ["derive"] }
 schemars = { workspace = true, features = ["chrono04"] }
 serde_json = { workspace = true }

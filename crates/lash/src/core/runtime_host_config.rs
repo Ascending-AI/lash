@@ -54,11 +54,11 @@ impl LashCoreBuilder {
             let adapter = Arc::new(telemetry);
             core.tracing = core
                 .tracing
-                .with_scopes(adapter.clone())
-                .with_projector(adapter)
+                .with_identity(adapter.clone())
+                .with_trace_sink(adapter)
                 .with_metrics(metrics);
         }
-        if let Some(sink) = self.trace_sink.take() {
+        for sink in std::mem::take(&mut self.trace_sinks) {
             core.tracing = core.tracing.with_trace_sink(sink);
         }
         core.providers.delivery_fetch_horizon = self.delivery_fetch_horizon;
@@ -72,9 +72,6 @@ impl LashCoreBuilder {
         }
         if let Some(content) = self.telemetry_content.take() {
             core.tracing = core.tracing.clone().with_content(content);
-        }
-        if let Some(context) = self.trace_context.take() {
-            core.tracing = core.tracing.clone().with_base_context(context);
         }
         if let Some(cuts) = self.output_cuts.take() {
             core.control.output_cuts = cuts;
@@ -127,7 +124,11 @@ pub(super) mod tests {
     }
     fn telemetry(measurements: Arc<AtomicUsize>) -> OtelTelemetry {
         OtelTelemetry::new(
-            &api::trace::noop::NoopTracerProvider::new(),
+            &lash_trace::otel::LashTracerProvider::new(
+                lash_trace::otel::sdk::trace::SdkTracerProvider::builder(),
+                lash_trace::otel::sdk::trace::Sampler::AlwaysOff,
+                lash_trace::otel::sdk::trace::RandomIdGenerator::default(),
+            ),
             &MeterProvider(measurements),
             OtelOptions::default(),
         )
@@ -143,9 +144,11 @@ pub(super) mod tests {
         }
     }
 
-    /// FIG-5020: repeated sink and telemetry setters replace their own value.
+    /// FIG-5020, FIG-6299: a repeated telemetry setter replaces the earlier
+    /// adapter, and every installed sink receives every record: sinks are
+    /// additive.
     #[tokio::test]
-    async fn trace_configuration_setters_replace_previous_values() {
+    async fn telemetry_setters_replace_and_trace_sinks_add() {
         let backend = crate::tests::sqlite_memory_store_backend().await;
         let old_metrics = Arc::new(AtomicUsize::new(0));
         let metrics = Arc::new(AtomicUsize::new(0));
@@ -166,22 +169,15 @@ pub(super) mod tests {
             .record_executed("start_process");
         assert_eq!(old_metrics.load(Ordering::Relaxed), 0);
         assert_eq!(metrics.load(Ordering::Relaxed), 1);
-        let scope = lash_trace::DurableTraceScope {
-            scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
-                session_id: "s".into(),
-                turn_id: "t".into(),
-            }),
-            cause: lash_trace::TraceCause::None,
-            links: lash_trace::TraceLinks::new(),
-            anchor: lash_trace::TraceAnchor::Untraced,
-            started_at_ms: 1,
-        };
+        let scope = lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+        });
         config.tracing.emitter().emit(
             Some(&lash_trace::EmissionPermit::new_transition()),
-            &scope,
             None,
             || lash_trace::TraceRecordIdentity::Transition {
-                scope: scope.scope.clone(),
+                scope: scope.clone(),
                 transition: lash_trace::TraceTransitionKind::Terminal,
                 ordinal: 0,
             },
@@ -195,7 +191,7 @@ pub(super) mod tests {
                 )
             },
         );
-        assert_eq!(first.0.load(Ordering::Relaxed), 0);
+        assert_eq!(first.0.load(Ordering::Relaxed), 1);
         assert_eq!(second.0.load(Ordering::Relaxed), 1);
     }
     /// FIG-5499: the facade's uploader installer respects cache capacity.

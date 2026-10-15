@@ -5,14 +5,13 @@
 //! numbers are the format: a new variant takes an unused number, and no
 //! variant is renumbered when the Rust declaration moves.
 //!
-//! A RoundFact's own variants (Admit, Start, Wait, Retry, Decide, Present,
-//! Outcome, CellReport: 0 to 7) are pinned by
+//! A RoundFact's own variants (Admit, Start, Wait, Retry, Present, Outcome,
+//! CellReport: 0 to 3 and 5 to 7; 4 is retired) are pinned by
 //! `lash_durable::domain::graph::RunFactKind::round_fact_variant`.
 
 use lash_core_store::checkpoint_graph::CodecVariant;
 
 use super::SettledOutput;
-use super::records::DecideBody;
 
 #[doc(hidden)]
 impl CodecVariant for SettledOutput {
@@ -24,15 +23,6 @@ impl CodecVariant for SettledOutput {
             Self::Interrupted => 3,
             Self::TimedOut { .. } => 4,
             Self::Cancelled { .. } => 5,
-        }
-    }
-}
-
-#[doc(hidden)]
-impl CodecVariant for DecideBody {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::TraceExported => 0,
         }
     }
 }

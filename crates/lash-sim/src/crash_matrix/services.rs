@@ -29,7 +29,7 @@ use lash_core::{
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
     AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
-    PolicyView, RoundTools, SettledOutput, TraceProposal,
+    PolicyView, RoundTools, SettledOutput,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
@@ -481,35 +481,19 @@ impl TurnServices for SimServices {
         }
     }
 
-    /// A [`TurnScript::Round`] turn is traced, so its first `model.start`
-    /// carries the record of its admission's export, which the matrix cuts
-    /// (FIG-5998).
-    fn propose_turn_trace(
+    /// A [`TurnScript::Round`] turn is traced: its admission retains a
+    /// scope under the matrix's told producer, which every cut keeps.
+    fn turn_trace_scope(
         &self,
         cx: &ActorContext,
         run: &TurnId,
         _inputs: &[lash::tracing::TraceCause],
-    ) -> Option<TraceProposal> {
+    ) -> Option<lash::tracing::DurableTraceScope> {
         let session = session_id(cx.actor().id());
         if TurnScript::of(&session) != Some(TurnScript::Round) {
             return None;
         }
-        let told = told_carrier()?;
-        let anchor = lash::tracing::TraceAnchor::Context(told.clone());
-        let scope = lash::tracing::TraceScopeId::admission(lash::tracing::TraceScopeOwner::Turn {
-            session_id: session,
-            turn_id: run.clone(),
-        });
-        Some(TraceProposal {
-            scope: lash::tracing::DurableTraceScope {
-                scope,
-                cause: lash::tracing::TraceCause::Parent(told),
-                links: lash::tracing::TraceLinks::new(),
-                anchor: anchor.clone(),
-                started_at_ms: 0,
-            },
-            candidate: Box::new(Untold(anchor)),
-        })
+        told_turn(session, run.clone())
     }
 }
 
@@ -810,26 +794,23 @@ struct Catalog {
     run: TurnId,
 }
 
-/// A traced turn's or round call's trace admission candidate: an anchor
-/// exported nowhere.
-struct Untold(lash::tracing::TraceAnchor);
-
-/// The carrier every traced scope of the matrix is anchored by.
-fn told_carrier() -> Option<lash::tracing::TraceCarrier> {
-    Some(lash::tracing::TraceCarrier::new(
+/// The scope of a traced turn of the matrix, caused by its told producer.
+fn told_turn(session_id: SessionId, turn_id: TurnId) -> Option<lash::tracing::DurableTraceScope> {
+    let told = lash::tracing::TraceCause::Parent(lash::tracing::TraceCarrier::new(
         lash::tracing::W3cTraceId::from_bytes(1_u128.to_be_bytes()).ok()?,
         lash::tracing::W3cSpanId::from_bytes(1_u64.to_be_bytes()).ok()?,
         lash::tracing::W3cTraceFlags::from_byte(lash::tracing::W3cTraceFlags::SAMPLED),
         lash::tracing::W3cTraceState::default(),
+    ));
+    Some(lash::tracing::DurableTraceScope::admit(
+        lash::tracing::TraceScopeId::admission(lash::tracing::TraceScopeOwner::Turn {
+            session_id,
+            turn_id,
+        }),
+        told.as_parent().as_ref(),
+        lash::tracing::TraceLinks::new(),
+        0,
     ))
-}
-
-impl lash::tracing::TraceAdmissionCandidate for Untold {
-    fn anchor(&self) -> lash::tracing::TraceAnchor {
-        self.0.clone()
-    }
-
-    fn settle(self: Box<Self>, _outcome: lash::tracing::TraceCandidateOutcome) {}
 }
 
 impl RoundTools for Catalog {
@@ -837,25 +818,18 @@ impl RoundTools for Catalog {
         std::time::Duration::from_secs(2)
     }
 
-    /// A [`TurnScript::Round`] turn's calls are traced, so its admission's
-    /// exports are recorded under `round.traced`, which the matrix cuts
-    /// (FIG-5452).
-    fn propose_trace(&self, call: &PendingToolCall) -> Option<TraceProposal> {
+    /// A [`TurnScript::Round`] turn's calls are traced: each member
+    /// retains a scope under its turn's, which every cut keeps.
+    fn trace_scope(&self, call: &PendingToolCall) -> Option<lash::tracing::DurableTraceScope> {
         if TurnScript::of(&self.session) != Some(TurnScript::Round) {
             return None;
         }
-        let anchor = lash::tracing::TraceAnchor::Context(told_carrier()?);
-        let mut scope = lash_core_execution::trace::tool_trace_scope(
+        Some(lash_core_execution::trace::tool_trace_scope(
             &EffectOpener::turn(self.session.clone(), self.run.clone()),
-            None,
+            Some(&told_turn(self.session.clone(), self.run.clone())?),
             &call.call_id,
             0,
-        );
-        scope.anchor = anchor.clone();
-        Some(TraceProposal {
-            scope,
-            candidate: Box::new(Untold(anchor)),
-        })
+        ))
     }
 
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {

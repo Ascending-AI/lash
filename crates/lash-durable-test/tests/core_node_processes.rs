@@ -1403,7 +1403,6 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
             .await
             .expect("preparation is read-only");
         let process = prepared.process_id().clone();
-        let anchor = prepared.trace().anchor().clone();
         if source_ends_after_prepare {
             env_store
                 .end_process_env_referrer(&lash_core::ResolvedArtifactCleanup {
@@ -1414,7 +1413,7 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
                 .expect("the source ends before admission commits");
         }
         let error = registry
-            .commit_process_registration(prepared, anchor)
+            .commit_process_registration(prepared)
             .await
             .expect_err("a reference with no stored bytes is refused at admission");
         let lash_core::PluginError::Runtime(runtime) = &error else {

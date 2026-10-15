@@ -1,7 +1,9 @@
 // The vocabulary this module's signatures name (the facade-completeness rule).
 /// Where engine code stands when it observes, and the journaled-step
 /// boundary that grants the right to.
-pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
+pub use lash_core::facade_support::{
+    JournalFrontier, LiveStep, OpenSpan, StepIssue, TraceStanding,
+};
 pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
 /// Physical SQL windows and the receipt vocabulary their store sinks receive.
 pub use lash_core::operational_metrics::sql;
@@ -13,14 +15,15 @@ pub use lash_trace::telemetry::metrics::{
     TelemetryMetrics, ToolIntentMetrics,
 };
 pub use lash_trace::{
-    AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
-    InvalidTraceLinks, ProducerKind, ProducerSpec, TraceAdmissionCandidate, TraceAnchor,
-    TraceAttemptId, TraceAttemptObservation, TraceCall, TraceCaller, TraceCandidateOutcome,
-    TraceCarrier, TraceCause, TraceDomainCompletion, TraceDomainProjector, TraceDomainStatus,
-    TraceDomainSubject, TraceEventKind, TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent,
-    TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
-    TraceScopeOffer, TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind,
-    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
+    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
+    ProductObservationSink, SpanKey, SpanRole, TraceAttemptId, TraceAttemptLink,
+    TraceAttemptObservation, TraceCall, TraceCaller, TraceCarrier, TraceCause,
+    TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind, TraceIdentity,
+    TraceIds, TraceLinkMode, TraceLinks, TraceParent, TracePosition, TraceRecordIdentity,
+    TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
+    TraceSpanKind, TraceStateLimits, TraceTimestamp, TraceToolOwner, TraceTransitionKind,
+    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 
@@ -43,7 +46,7 @@ pub use lash_trace::otel::registry::{
     contract_markdown, recommended_latency_histogram_boundaries,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     CONTENT_POLICY_OMISSION, FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings,
     FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, TeeTraceSink,
@@ -67,3 +70,24 @@ pub use lash_trace::{
     TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
     TraceTurnFailureReason, TraceTurnOutcome,
 };
+
+/// How a producer's host call that failed with `error` settles: refused,
+/// its `error.type` the runtime error code when the failure carries one,
+/// else `_OTHER`.
+pub(crate) fn refused(error: &crate::EmbedError) -> ProducerOutcome {
+    let code = match error {
+        crate::EmbedError::Runtime(error)
+        | crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => {
+            serde_json::to_value(&error.code)
+                .ok()
+                .and_then(|code| code.as_str().map(str::to_owned))
+        }
+        _ => None,
+    };
+    ProducerOutcome::Refused {
+        error_type: code.map_or(
+            std::borrow::Cow::Borrowed("_OTHER"),
+            std::borrow::Cow::Owned,
+        ),
+    }
+}

@@ -1,6 +1,5 @@
 use crate::ActorContext;
 use crate::SessionId;
-use lash_trace::TraceSink;
 use std::sync::Arc;
 
 use super::process::{
@@ -505,7 +504,10 @@ impl RuntimeHostConfig {
 impl RuntimeHostConfig {}
 
 impl RuntimeHostConfig {
-    pub fn with_process_observation_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
+    pub fn with_process_observation_sink(
+        mut self,
+        sink: Arc<dyn lash_trace::ProductObservationSink>,
+    ) -> Self {
         self.tracing = self.tracing.with_product_observer(sink);
         self
     }

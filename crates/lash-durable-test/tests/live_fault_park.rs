@@ -721,11 +721,10 @@ async fn a_turn_wedged_in_its_tools_phase_by_a_pass_loop_park_finishes_at_the_ne
 }
 
 /// The commits of a cell's call that file its attempts and outcome.
-const CALL_COMMITS: [CommitLabel; 5] = [
+const CALL_COMMITS: [CommitLabel; 4] = [
     CommitLabel::ROUND_START,
     CommitLabel::ROUND_RETRY,
     CommitLabel::ROUND_OUTCOME,
-    CommitLabel::ROUND_TRACED,
     CommitLabel::TOOL_EFFECT,
 ];
 

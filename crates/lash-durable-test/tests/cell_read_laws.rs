@@ -717,7 +717,6 @@ async fn fifty_reads_commit_what_one_read_does_on_sqlite_memory() {
     for per_call in [
         CommitLabel::ROUND_START,
         CommitLabel::ROUND_OUTCOME,
-        CommitLabel::ROUND_TRACED,
         CommitLabel::ROUND_RETRY,
         CommitLabel::CELL_SNAPSHOT_ADMIT,
         CommitLabel::CELL_INJECT,

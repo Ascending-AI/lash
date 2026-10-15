@@ -705,8 +705,8 @@ pub struct ProcessRegistration<I = ProcessInput> {
     /// hold with the row, and prune leaves a held row alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer_hold: Option<ConsumerHold>,
-    /// What the start offers the process's trace scope: its cause and the
-    /// anchor its admission candidate proposed. The registration that
+    /// What the start offers the process's trace scope: its cause and
+    /// links; its span is derived from them. The registration that
     /// inserts the row retains them as the record's
     /// [`trace`](ProcessRecord::trace); one that finds the process already
     /// retained under its key reads the retained scope back and drops the
@@ -1108,11 +1108,14 @@ impl PreparedProcessRegistration {
     pub fn prepared_at_ms(&self) -> u64 {
         self.prepared_at_ms
     }
-    pub fn into_commit(
-        mut self,
-        anchor: lash_trace::TraceAnchor,
-    ) -> (ProcessRegistration, Vec<SessionId>, ProcessId, bool, u64) {
-        self.registration.trace = std::mem::take(&mut self.registration.trace).anchored(anchor);
+    /// The registration to commit, its trace offer carrying the process
+    /// span derived from its cause and the minted id, with its observers,
+    /// id, retention and preparation time.
+    pub fn into_commit(mut self) -> (ProcessRegistration, Vec<SessionId>, ProcessId, bool, u64) {
+        let scope = lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+            process_id: self.process_id.clone(),
+        });
+        self.registration.trace = std::mem::take(&mut self.registration.trace).deriving(&scope);
         (
             self.registration,
             self.observers,

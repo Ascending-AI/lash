@@ -181,7 +181,7 @@ timing has no threshold. The cacheable law runs all 32 populations on fresh
 SQLite memory stores with one shared worker service and two runtime threads.
 Both dialects run in the law. The Python release-pin refusal discovered by
 this benchmark was fixed by FIG-6186 before its final measurement. The dated
-[measurement report](../../../../../docs/perf/declared-reads-2026-10-13.md)
+[measurement report](../../../../../docs/history/perf/declared-reads-2026-10-13.md)
 records that gap.
 
 Build once as above, then run a capped local SQLite matrix and the same

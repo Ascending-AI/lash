@@ -267,12 +267,9 @@ fn facts(transactions: &[Transaction]) -> BTreeMap<String, usize> {
 
 /// READ-COST-MODEL pins the entire owning geometry, not a baseline learned
 /// from this invocation. A new label or fact fails even on the first sample.
-fn assert_geometry(
-    variant: Variant,
-    traced: bool,
-    payload: usize,
-    transactions: &[Transaction],
-) -> Result<()> {
+/// Tracing adds no commit and no fact: the geometry is the same traced or
+/// not.
+fn assert_geometry(variant: Variant, payload: usize, transactions: &[Transaction]) -> Result<()> {
     let labels = crate::support::by_label(transactions);
     let actual_facts = facts(transactions);
     let recorded = variant.recorded();
@@ -305,10 +302,6 @@ fn assert_geometry(
             expected_facts.insert(kind.to_owned(), recorded);
         }
         expected_facts.insert("cell_report".to_owned(), 1);
-        if traced {
-            expected.insert("round.traced", recorded);
-            expected_facts.insert("decide".to_owned(), recorded);
-        }
     }
     ensure!(
         labels == expected,
@@ -519,9 +512,14 @@ async fn measure_with_stores(
                 .context_window_tokens(200_000)
                 .build()?,
         );
-    let tracer = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-        .with_simple_exporter(opentelemetry_sdk::trace::InMemorySpanExporter::default())
-        .build();
+    let tracer = lash::tracing::LashTracerProvider::new(
+        opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_simple_exporter(opentelemetry_sdk::trace::InMemorySpanExporter::default()),
+        opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+            opentelemetry_sdk::trace::Sampler::AlwaysOn,
+        )),
+        opentelemetry_sdk::trace::RandomIdGenerator::default(),
+    );
     let meters = opentelemetry_sdk::metrics::SdkMeterProvider::default();
     if traced {
         builder = builder.telemetry(lash::tracing::OtelTelemetry::new(
@@ -619,7 +617,7 @@ async fn measure_with_stores(
             answers.writes.lock_recover().len() == usize::from(variant == Variant::Mixed),
             "{id}: mixed write count"
         );
-        assert_geometry(variant, traced, payload, &transactions)?;
+        assert_geometry(variant, payload, &transactions)?;
         eprintln!("READ_COUNTS {id}: commits={labels:?}; facts={facts:?}");
         latencies.push(elapsed_us);
         if let Some(plan) = plan {

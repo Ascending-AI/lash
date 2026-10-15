@@ -130,7 +130,7 @@ pub struct ProcessRecord {
     pub session_capability: Option<SessionId>,
     pub identity: ProcessIdentity,
     pub provenance: ProcessProvenance,
-    /// The process's trace scope: the cause and anchor its first
+    /// The process's trace scope: the cause and span its first
     /// registration retained, started when the row was created. Never
     /// updated after registration; a start that finds the process retained
     /// reads it back whatever it offered. `None` on a record written

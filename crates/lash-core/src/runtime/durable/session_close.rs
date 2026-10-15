@@ -48,7 +48,7 @@ use lash_durable::{
     MailTx, Release,
 };
 
-use super::session::{Pass, TurnError, cancel_open_turn, export_owed_admission};
+use super::session::{Pass, TurnError, cancel_open_turn};
 use super::turn_scope::{continue_scope_ends, end_turn_scope, mark_until_children};
 use crate::{ActorContext, Backend, SessionId};
 use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
@@ -247,14 +247,15 @@ pub async fn run_session_close(
                     ..crate::runtime::TurnCancellationEvidence::internal(SESSION_CLOSED)
                 };
                 let cancelled = cancel_open_turn(cx, &mut tx, &cause).await?;
+                // The cancel settles none of the turn's open round: its
+                // members are discarded with it.
+                let mut discarded = Vec::new();
                 if let Some(turn) = &cancelled {
+                    discarded = super::tool_round::open_round_members(cx, turn).await?;
                     end_turn_scope(cx, &mut tx, session, &turn.run).await?;
                     // Nothing the ended turn called is owed any more: no
                     // claim requirement holds the rest of the close back.
                     tx.set_requires(Vec::new());
-                    // A turn the close ends before its first phase commit
-                    // still owes its admission's export (FIG-5998).
-                    export_owed_admission(tracing, turn);
                 }
                 commit_step(cx, tx, session, step).await?;
                 // The close's cancel is the open turn's terminal.
@@ -262,6 +263,12 @@ pub async fn run_session_close(
                     let traced = super::turn_trace::outcome(
                         tracing,
                         &super::session::cancelled_cause(cause),
+                    );
+                    super::turn_trace::members_ended(
+                        tracing,
+                        turn,
+                        &discarded,
+                        super::turn_trace::MemberEnd::Discarded,
                     );
                     super::turn_trace::ended(tracing, turn, traced, &[]);
                 }

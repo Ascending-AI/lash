@@ -297,17 +297,15 @@ impl LanguageObservationDispatcher {
             schema_version: lash_trace::TRACE_SCHEMA_VERSION,
             id: observation.execution.event_key.clone(),
             content: lash_trace::TelemetryContent::Captured,
-            timestamp: (std::time::UNIX_EPOCH
-                + std::time::Duration::from_millis(observation.observed_at_ms))
-            .into(),
+            timestamp: lash_trace::TraceTimestamp::from_unix_ms(observation.observed_at_ms),
             context: lash_trace::TraceContext::default(),
+            position: None,
             event: lash_trace::TraceEvent::LanguageExecution {
                 language: observation.language,
                 event: observation.execution,
             },
         };
-        // The dispatcher's sink never refuses a record.
-        let _ = lash_trace::TraceSink::append(self.publisher.as_ref(), &record);
+        lash_trace::ProductObservationSink::observe(self.publisher.as_ref(), &record);
     }
 
     /// Stop the dispatcher; an undrained observation is explicit loss.

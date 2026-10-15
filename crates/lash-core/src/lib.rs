@@ -146,7 +146,8 @@ pub mod facade_support {
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.
     pub use lash_core_execution::trace::{
-        JournalFrontier, LiveStep, StepIssue, TraceBoundaryReceipt, TraceRuntime, TraceStanding,
+        JournalFrontier, LiveStep, OpenSpan, StepIssue, TraceBoundaryReceipt, TraceRuntime,
+        TraceStanding,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;
@@ -529,14 +530,15 @@ pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 #[cfg(feature = "otel-trace")]
-pub use lash_trace::otel::{OtelOptions, OtelSpanEnricher, OtelTelemetry};
+pub use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    ProducerKind, ProducerSpec, TelemetryContent, TraceAdmissionCandidate, TraceAnchor,
-    TraceAttemptId, TraceCall, TraceCaller, TraceCandidateOutcome, TraceCarrier, TraceCause,
-    TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent, TraceScopeAdmission,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
+    ProductObservationSink, SpanKey, SpanRole, TelemetryContent, TraceAttemptId, TraceAttemptLink,
+    TraceCall, TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceIds, TraceLinkMode,
+    TraceLinks, TraceParent, TracePosition, TraceScopeAdmission, TraceScopeId, TraceScopeKind,
+    TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceTimestamp, W3cSpanId, W3cTraceFlags,
+    W3cTraceId, W3cTraceState, derive_span,
 };
 pub use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,

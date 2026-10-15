@@ -13,8 +13,8 @@
 //! wants records in a file or on a console implements its own sink (see
 //! `docs/architecture/tracing.md`). Records carry schema
 //! [`TRACE_SCHEMA_VERSION`]; [`TeeTraceSink`] fans out to several sinks; and the
-//! optional `otel` feature adds `otel::OtelTelemetry`, which projects permitted
-//! domain completions under retained admission anchors. This is the diagnostics reporting channel —
+//! optional `otel` feature adds `otel::OtelTelemetry`, a sink that exports
+//! each sampled closing or whole record as a span under lash's own ids. This is the diagnostics reporting channel —
 //! distinct from the app-facing `TurnActivity` stream and the low-level
 //! `SessionStreamEvent` stream that the runtime crates expose.
 //!
@@ -29,10 +29,9 @@ pub use limits::{
     MAX_PROCESS_EFFECT_OCCURRENCES, ObservationWorkLimits, TraceLimits, TraceLimitsError,
 };
 
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
-use lash_sansio::TurnId;
-use std::collections::BTreeMap;
+use lash_sansio::{
+    BatchId, CausalRef, InputId, ProcessId, SessionId, ToolCallId, ToolIntentIdentity, TurnId,
+};
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,9 +49,11 @@ mod language_execution;
 mod language_execution_failure;
 #[cfg(feature = "otel")]
 pub mod otel;
+mod position;
 #[cfg(any(test, feature = "testing"))]
 mod recording;
 pub mod telemetry;
+mod time;
 mod workflow_overlay;
 
 pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
@@ -77,18 +78,19 @@ use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
+pub use position::{SpanRole, TracePosition, TraceSpanKind};
 #[cfg(any(test, feature = "testing"))]
 pub use recording::RecordingTraceSink;
 pub use telemetry::{
-    AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
-    InvalidTraceLinks, ProducerKind, ProducerSpec, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT,
-    TRACESTATE_MEMBER_LIMIT, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCall,
-    TraceCaller, TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector,
-    TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent, TraceRecordIdentity,
-    TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
-    TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind, UntracedScopes,
-    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
+    LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec, SpanKey,
+    TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceAttemptId,
+    TraceAttemptLink, TraceCall, TraceCaller, TraceCarrier, TraceCause, TraceIdentity,
+    TraceLinkMode, TraceLinks, TraceParent, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,
+    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceStateLimits, TraceToolOwner,
+    TraceTransitionKind, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
+pub use time::TraceTimestamp;
 pub use workflow_overlay::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,
@@ -207,7 +209,13 @@ pub use workflow_overlay::{
 /// workflow document by reference, node facts name a site and drop its
 /// static kind and label, `branch_selected` drops its edge id, the
 /// `step_body_started` event binds an admitted process step to its site, and
-/// the graph snapshot becomes the workflow execution overlay.
+/// the graph snapshot becomes the workflow execution overlay. FIG-6299
+/// gives every record its W3C `position` (its span, parent, links, role,
+/// kind and times), types `timestamp` as lash's `TraceTimestamp` with the
+/// same wire form, renames `attachment_degraded`'s own `position` to
+/// `attachment_position`, adds `producer_settled` and the `discarded` tool
+/// outcome, and drops the context's `run_id`, `metadata` and
+/// `parent_graph_node_id`.
 ///
 /// version_guard(
 ///     shapes(
@@ -291,50 +299,79 @@ impl TraceLevel {
     }
 }
 
+/// The stable lash ids a span and its records belong to. Every field is a
+/// retained lash identity, the same on every owner: a host keys its own
+/// concepts on these.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceIds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionId>,
+    /// The logical run; a host may choose it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<TurnId>,
+    /// The turn's head input, or a producer's accepted input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send: Option<InputId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process: Option<ProcessId>,
+    /// A batch send's id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<BatchId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_intent: Option<ToolIntentIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<ToolCallId>,
+    /// A code cell's graph key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<String>,
+    /// A model call's id: the `chat` span's `lash.llm_call.id`, and the
+    /// `llm_call_id` of the call's request scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_call: Option<String>,
+}
+
+/// A record's correlation: the stable ids it belongs to and the effect that
+/// made it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceContext {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub experiment_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_parent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub example_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub split: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
-    /// Stable id of the span this record represents (e.g. `turn:<session>:<turn>`,
-    /// `llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn /
-    /// llm / tool / session records so a consumer can build a nested span tree
-    /// from `(graph_node_id, parent_graph_node_id)` with a single `id -> span`
-    /// map. A language-execution record for a node event carries the observed
-    /// node's structural id here, equal to the `WorkflowGraph` node id (ADR
-    /// 0100 R0), so a host joins trace to graph on this key; a child start
-    /// carries its parent node's id, and execution start and finish leave it
-    /// unset.
+    /// The turn's head input, or a producer's accepted input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_id: Option<InputId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<ProcessId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<BatchId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_intent: Option<ToolIntentIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<ToolCallId>,
+    /// A code cell's graph key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<String>,
+    /// The workflow-graph join key of a language-execution record: the
+    /// observed node's structural id, equal to the `WorkflowGraph` node id
+    /// (ADR 0100 R0). A child start carries its parent node's id, and
+    /// execution start and finish leave it unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_node_id: Option<String>,
-    /// Id of the enclosing span — the value of some other record's
-    /// `graph_node_id`. A turn's parent is its causal origin (the spawning tool
-    /// call / effect, via `caused_by`) when known, otherwise the session root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_graph_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_iteration: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_id: Option<String>,
+    /// The replay key of the effect invocation that made the record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_key: Option<String>,
+    /// The fact that caused the effect invocation that made the record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caused_by: Option<CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub metadata: BTreeMap<String, Value>,
 }
 
 impl TraceContext {
@@ -362,51 +399,62 @@ impl TraceContext {
         self.llm_call_id = Some(llm_call_id.into());
         self
     }
-}
 
-/// Node id of the session root span in the `graph_node_id` key space.
-///
-/// These `*_node_id` functions are the single definition of that key space:
-/// the runtime stamps them onto [`TraceContext::graph_node_id`] /
-/// [`TraceContext::parent_graph_node_id`], and span exporters key their
-/// `id -> span` maps with the same strings.
-pub fn session_node_id(session_id: &SessionId) -> String {
-    format!("session:{session_id}")
-}
-
-/// Node id of the turn span this context belongs to, or `None` when the
-/// context carries no session or no turn identity at all.
-pub fn turn_node_id(context: &TraceContext) -> Option<String> {
-    let session_id = context.session_id.as_deref()?;
-    if let Some(turn_id) = context.turn_id.as_deref() {
-        Some(format!("turn:{session_id}:{turn_id}"))
-    } else {
-        context
-            .turn_index
-            .map(|turn_index| format!("turn:{session_id}:idx{turn_index}"))
+    pub fn for_process(mut self, process_id: impl Into<ProcessId>) -> Self {
+        self.process_id = Some(process_id.into());
+        self
     }
-}
 
-/// Node id of one LLM-call span.
-pub fn llm_node_id(llm_call_id: &str) -> String {
-    format!("llm:{llm_call_id}")
-}
+    pub fn for_call(mut self, call_id: impl Into<ToolCallId>) -> Self {
+        self.call_id = Some(call_id.into());
+        self
+    }
 
-/// Node id of one tool-call span.
-pub fn tool_node_id(call_id: &str) -> String {
-    format!("tool:{call_id}")
+    /// The stable ids this record belongs to.
+    pub fn ids(&self) -> TraceIds {
+        TraceIds {
+            session: self.session_id.clone(),
+            turn: self.turn_id.clone(),
+            send: self.send_id.clone(),
+            process: self.process_id.clone(),
+            batch: self.batch_id.clone(),
+            tool_intent: self.tool_intent.clone(),
+            call: self.call_id.clone(),
+            cell: self.cell.clone(),
+            llm_call: self.llm_call_id.clone(),
+        }
+    }
+
+    /// The context of a record that belongs to `ids` and no effect.
+    pub fn of_ids(ids: TraceIds) -> Self {
+        Self {
+            session_id: ids.session,
+            turn_id: ids.turn,
+            send_id: ids.send,
+            process_id: ids.process,
+            batch_id: ids.batch,
+            tool_intent: ids.tool_intent,
+            call_id: ids.call,
+            cell: ids.cell,
+            llm_call_id: ids.llm_call,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TraceRecord {
     pub schema_version: u32,
     pub id: String,
-    #[serde(with = "trace_timestamp_serde")]
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: TraceTimestamp,
     /// Whether this record carries content or had it omitted under the
     /// host's [`TelemetryContent`] policy: how to read an empty content field.
     pub content: TelemetryContent,
     pub context: TraceContext,
+    /// The record's place in the trace. `None` only for an unscoped
+    /// diagnostic and for a record of a scope nothing observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<TracePosition>,
     #[serde(flatten)]
     pub event: TraceEvent,
 }
@@ -428,10 +476,11 @@ impl schemars::JsonSchema for TraceRecord {
         struct TraceRecordSchema {
             schema_version: u32,
             id: String,
-            #[schemars(schema_with = "rfc3339_timestamp_schema")]
-            timestamp: String,
+            timestamp: TraceTimestamp,
             content: TelemetryContent,
             context: TraceContext,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            position: Option<TracePosition>,
             #[serde(flatten)]
             event: TraceEvent,
         }
@@ -440,42 +489,17 @@ impl schemars::JsonSchema for TraceRecord {
     }
 }
 
-fn rfc3339_timestamp_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({ "type": "string", "format": "date-time" })
-}
-
 #[derive(Deserialize)]
 struct TraceRecordWire {
     schema_version: u32,
     id: String,
-    #[serde(with = "trace_timestamp_serde")]
-    timestamp: chrono::DateTime<chrono::Utc>,
+    timestamp: TraceTimestamp,
     content: TelemetryContent,
     context: TraceContext,
+    #[serde(default)]
+    position: Option<TracePosition>,
     #[serde(flatten)]
     event: TraceEvent,
-}
-
-mod trace_timestamp_serde {
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(timestamp: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&timestamp.to_rfc3339())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let timestamp = String::deserialize(deserializer)?;
-        DateTime::parse_from_rfc3339(&timestamp)
-            .map(|timestamp| timestamp.with_timezone(&Utc))
-            .map_err(serde::de::Error::custom)
-    }
 }
 
 impl<'de> Deserialize<'de> for TraceRecord {
@@ -503,6 +527,7 @@ impl<'de> Deserialize<'de> for TraceRecord {
             timestamp: wire.timestamp,
             content: wire.content,
             context: wire.context,
+            position: wire.position,
             event: wire.event,
         })
     }
@@ -593,6 +618,7 @@ impl TraceToolCallOutput {
             TraceToolCallOutcome::Success(_) => TraceToolCallStatus::Success,
             TraceToolCallOutcome::Failure(_) => TraceToolCallStatus::Failure,
             TraceToolCallOutcome::Cancelled(_) => TraceToolCallStatus::Cancelled,
+            TraceToolCallOutcome::Discarded => TraceToolCallStatus::Discarded,
         }
     }
 
@@ -605,6 +631,7 @@ impl TraceToolCallOutput {
             TraceToolCallOutcome::Success(value)
             | TraceToolCallOutcome::Failure(value)
             | TraceToolCallOutcome::Cancelled(value) => value.clone(),
+            TraceToolCallOutcome::Discarded => Value::Null,
         }
     }
 }
@@ -615,6 +642,9 @@ pub enum TraceToolCallOutcome {
     Success(Value),
     Failure(Value),
     Cancelled(Value),
+    /// The call never settled: the session closed while it ran, and its
+    /// turn's terminal owner closed its span. It has no output.
+    Discarded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -623,6 +653,7 @@ pub enum TraceToolCallStatus {
     Success,
     Failure,
     Cancelled,
+    Discarded,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1197,6 +1228,17 @@ pub trait TraceSink: Send + Sync {
     fn flush(&self) -> Result<(), TraceSinkError> {
         Ok(())
     }
+}
+
+/// The product graph's consumer of language-execution observations: the
+/// process and language graph a host reads, not telemetry.
+///
+/// It is fed through its own path, not as a [`TraceSink`]: it takes no
+/// emission permit and sees each record on replay too, because it folds every
+/// record by the record's own identity. A record sink never receives these
+/// observations through it.
+pub trait ProductObservationSink: Send + Sync {
+    fn observe(&self, record: &TraceRecord);
 }
 
 /// Fans each trace record out to several sinks in order (e.g. a host's

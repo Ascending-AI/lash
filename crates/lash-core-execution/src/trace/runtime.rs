@@ -18,15 +18,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_trace::{
-    AttemptObservation, DurableTraceScope, EmissionPermit, TelemetryContent, TraceAttemptId,
-    TraceContext, TraceDomainProjector, TraceEvent, TraceLevel, TraceRecord, TraceRecordIdentity,
-    TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink, TraceTransitionKind,
-    UntracedScopes, telemetry::metrics::TelemetryMetrics,
+    DurableTraceScope, EmissionPermit, LashIdentity, ProducerKind, ProducerSpan, ProducerSpec,
+    ProductObservationSink, SpanRole, TelemetryContent, TraceAttemptId, TraceAttemptLink,
+    TraceCall, TraceCarrier, TraceContext, TraceEvent, TraceIdentity, TraceIds, TraceLevel,
+    TraceLinkMode, TraceLinks, TracePosition, TraceRecord, TraceRecordIdentity, TraceScopeId,
+    TraceScopeKind, TraceScopeOwner, TraceSink, TraceSpanKind, TraceTimestamp, TraceTransitionKind,
+    telemetry::metrics::TelemetryMetrics,
 };
 
-/// The runtime's shared trace handle: the scope factory, the clock, the
-/// emitter and the host's run metadata. Every engine path and every plugin
-/// is handed this same value.
+/// The runtime's shared trace handle: the identity authority, the clock and
+/// the emitter. Every engine path and every plugin is handed this same
+/// value.
 #[derive(Clone)]
 pub struct TraceRuntime {
     /// One allocation, so every holder carries a pointer.
@@ -35,26 +37,24 @@ pub struct TraceRuntime {
 
 #[derive(Clone)]
 struct TraceRuntimeParts {
-    scopes: Arc<dyn TraceScopeFactory>,
+    identity: Arc<dyn TraceIdentity>,
     clock: Arc<dyn crate::Clock>,
     emitter: TraceEmitter,
     level: TraceLevel,
-    base_context: TraceContext,
     metrics: TelemetryMetrics,
     limits: lash_trace::TraceLimits,
     compositions: Arc<super::composition::CompositionMemory>,
 }
 
 impl TraceRuntime {
-    /// A runtime with no observer: untraced scopes, no sink.
+    /// A runtime with no observer: lash's own identity, no sink.
     pub fn new(clock: Arc<dyn crate::Clock>) -> Self {
         Self {
             parts: Arc::new(TraceRuntimeParts {
-                scopes: Arc::new(UntracedScopes),
+                identity: Arc::new(LashIdentity),
                 clock,
                 emitter: TraceEmitter::default(),
                 level: TraceLevel::Standard,
-                base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
                 limits: lash_trace::TraceLimits::standard(),
                 compositions: Arc::default(),
@@ -76,10 +76,18 @@ impl TraceRuntime {
         self
     }
 
-    /// The identity-producing scope factory: [`UntracedScopes`] unless the
-    /// host installed an adapter.
-    pub fn scopes(&self) -> &Arc<dyn TraceScopeFactory> {
-        &self.parts.scopes
+    /// The identity authority: [`LashIdentity`] unless the host installed
+    /// an adapter.
+    pub fn identity(&self) -> &Arc<dyn TraceIdentity> {
+        &self.parts.identity
+    }
+
+    /// Installs the runtime's identity authority: the adapter that captures
+    /// the caller's context, decides producers and draws leaf ids.
+    #[must_use]
+    pub fn with_identity(mut self, identity: Arc<dyn TraceIdentity>) -> Self {
+        Arc::make_mut(&mut self.parts).identity = identity;
+        self
     }
 
     /// The runtime's injected clock.
@@ -137,25 +145,21 @@ impl TraceRuntime {
         self.parts.emitter.content
     }
 
-    /// States whether records to the sinks and the adapter carry content.
+    /// States whether records to the sinks carry content.
     #[must_use]
     pub fn with_content(mut self, content: TelemetryContent) -> Self {
         Arc::make_mut(&mut self.parts).emitter.content = content;
         self
     }
 
-    /// The host's run metadata, merged under every record's own context.
-    pub fn base_context(&self) -> &TraceContext {
-        &self.parts.base_context
-    }
-
-    /// Whether any record sink or domain projector observes this runtime.
-    /// Sites test it before they build anything a record would hold.
+    /// Whether any record sink observes this runtime. Sites test it before
+    /// they build anything a record would hold.
     pub fn is_observed(&self) -> bool {
         self.parts.emitter.has_external_observers()
     }
 
-    /// Adds one passive record sink.
+    /// Adds one record sink after those already installed. Each sink sees
+    /// every record, and fails or panics on its own.
     #[must_use]
     pub fn with_trace_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
         let parts = Arc::make_mut(&mut self.parts);
@@ -176,37 +180,18 @@ impl TraceRuntime {
         self
     }
 
-    /// Replaces the passive record sinks with `sinks`.
+    /// Adds one product observation consumer
+    /// ([`TraceEmitter::observe_product`]) after those already installed.
     #[must_use]
-    pub fn with_trace_sinks(mut self, sinks: impl IntoIterator<Item = Arc<dyn TraceSink>>) -> Self {
+    pub fn with_product_observer(mut self, observer: Arc<dyn ProductObservationSink>) -> Self {
         let parts = Arc::make_mut(&mut self.parts);
-        parts.emitter.sinks = sinks.into_iter().collect();
-        parts.emitter.sink_failures = parts.emitter.sinks.iter().map(|_| Arc::default()).collect();
-        self
-    }
-
-    /// Installs the runtime's one identity-producing adapter half.
-    #[must_use]
-    pub fn with_scopes(mut self, scopes: Arc<dyn TraceScopeFactory>) -> Self {
-        let parts = Arc::make_mut(&mut self.parts);
-        parts.scopes = scopes;
-        self
-    }
-
-    /// Installs the adapter's projection half.
-    #[must_use]
-    pub fn with_projector(mut self, projector: Arc<dyn TraceDomainProjector>) -> Self {
-        let parts = Arc::make_mut(&mut self.parts);
-        parts.emitter.projector = Some(projector);
-        self
-    }
-
-    /// Installs the product observation consumer
-    /// ([`TraceEmitter::observe_product`]).
-    #[must_use]
-    pub fn with_product_observer(mut self, observer: Arc<dyn TraceSink>) -> Self {
-        let parts = Arc::make_mut(&mut self.parts);
-        parts.emitter.product = Some(observer);
+        parts.emitter.product = parts
+            .emitter
+            .product
+            .iter()
+            .cloned()
+            .chain(std::iter::once(observer))
+            .collect();
         self
     }
 
@@ -218,26 +203,86 @@ impl TraceRuntime {
     }
 
     #[must_use]
-    pub fn with_base_context(mut self, context: TraceContext) -> Self {
-        let parts = Arc::make_mut(&mut self.parts);
-        parts.base_context = context;
-        self
-    }
-
-    #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
         let parts = Arc::make_mut(&mut self.parts);
         parts.clock = clock;
         self
     }
 
-    /// Flushes the passive record sinks. An adapter's provider is the host's
-    /// to flush.
+    /// Flushes the record sinks. An adapter's provider is the host's to
+    /// flush.
     pub fn flush(&self) -> Result<(), lash_trace::TraceSinkError> {
         for sink in self.parts.emitter.sinks.iter() {
             sink.flush()?;
         }
         Ok(())
+    }
+
+    /// Opens the producer span of a `kind` host call making `call`'s trace
+    /// choices, which knows `ids` now: its caller is captured once, here,
+    /// and the identity decides the trace. A runtime nothing observes opens
+    /// an unobserved producer, which parents nothing.
+    pub fn open_producer(
+        &self,
+        kind: ProducerKind,
+        call: &TraceCall,
+        ids: TraceIds,
+    ) -> ProducerSpan {
+        if !self.is_observed() {
+            return ProducerSpan::unobserved();
+        }
+        let spec = call.producer(kind, self.parts.identity.as_ref(), ids);
+        self.producer(spec)
+    }
+
+    fn producer(&self, spec: ProducerSpec) -> ProducerSpan {
+        let span = self.parts.identity.open_producer(&spec);
+        let started_at_ms = self.parts.clock.timestamp_ms();
+        let (parent, links) = match (spec.caller, spec.link_mode) {
+            (Some(caller), TraceLinkMode::Parent) => (Some(caller), TraceLinks::new()),
+            (Some(caller), TraceLinkMode::Link) => (None, std::iter::once(caller).collect()),
+            (None, _) => (None, TraceLinks::new()),
+        };
+        let runtime = self.clone();
+        let carrier = span.clone();
+        let kind = spec.kind;
+        ProducerSpan::opened(
+            span,
+            spec.ids,
+            Box::new(move |outcome, ids| {
+                let ended_at_ms = runtime.parts.clock.timestamp_ms();
+                let position = TracePosition {
+                    span: carrier,
+                    parent,
+                    links,
+                    role: SpanRole::Whole,
+                    kind: TraceSpanKind::Producer,
+                    started_at: TraceTimestamp::from_unix_ms(started_at_ms),
+                    ended_at: Some(TraceTimestamp::from_unix_ms(ended_at_ms)),
+                    scope: None,
+                    attempt: None,
+                };
+                let attempt = fresh_attempt();
+                runtime.parts.emitter.emit(
+                    Some(&EmissionPermit::live_execution(attempt.clone())),
+                    Some(position),
+                    || TraceRecordIdentity::UnscopedLive {
+                        attempt,
+                        ordinal: 0,
+                    },
+                    ended_at_ms,
+                    || {
+                        (
+                            TraceContext::of_ids(ids),
+                            TraceEvent::ProducerSettled {
+                                producer: kind,
+                                outcome,
+                            },
+                        )
+                    },
+                );
+            }),
+        )
     }
 
     /// The standing of shift code that issues its steps through `controller`:
@@ -301,6 +346,7 @@ impl TraceRuntime {
         TraceStanding {
             runtime: self.clone(),
             scope: scope.map(Arc::new),
+            leaf: None,
             right,
         }
     }
@@ -323,115 +369,104 @@ impl std::fmt::Debug for TraceRuntime {
     }
 }
 
-/// The one path an external observation takes out of the engine: the passive
-/// record sinks, and the adapter's domain projection when one is installed.
+/// The one path an external observation takes out of the engine: the record
+/// sinks, the OpenTelemetry exporter among them when one is installed.
 #[derive(Clone, Default)]
 pub struct TraceEmitter {
     sinks: Arc<[Arc<dyn TraceSink>]>,
     sink_failures: Arc<[Arc<Mutex<u64>>]>,
-    projector: Option<Arc<dyn TraceDomainProjector>>,
-    product: Option<Arc<dyn TraceSink>>,
-    /// Applied to every record before a sink or the projector sees it.
+    product: Arc<[Arc<dyn ProductObservationSink>]>,
+    /// Applied to every record before a sink sees it.
     content: TelemetryContent,
 }
 
 impl TraceEmitter {
-    /// Whether a record sink or the domain projector observes external
-    /// records. A site tests it before it reads the clock or builds anything
-    /// a record would hold.
+    /// Whether a record sink observes external records. A site tests it
+    /// before it reads the clock or builds anything a record would hold.
     pub fn has_external_observers(&self) -> bool {
-        !self.sinks.is_empty() || self.projector.is_some()
+        !self.sinks.is_empty()
     }
 
     /// Whether a product observation consumer is installed.
     pub fn has_product_observers(&self) -> bool {
-        self.product.is_some()
+        !self.product.is_empty()
     }
 
-    /// The passive record sinks, in installation order.
+    /// The record sinks, in installation order.
     pub fn sinks(&self) -> &[Arc<dyn TraceSink>] {
         &self.sinks
     }
 
-    /// The product observation consumer, when one is installed.
-    pub fn product_observer(&self) -> Option<&Arc<dyn TraceSink>> {
-        self.product.as_ref()
+    /// The product observation consumers, in installation order.
+    pub fn product_observers(&self) -> &[Arc<dyn ProductObservationSink>] {
+        &self.product
     }
 
-    /// Emits one record of `scope`.
+    /// Emits one record at `position`.
     ///
     /// Returns before calling `identity` or `record` when nothing observes or
     /// `permit` is `None`: a replayed step and a retained read build nothing.
-    /// `at_ms` is the retained time of the fact the record reports.
+    /// `at_ms` is the retained time of the fact the record reports. The
+    /// caller holds no engine lock: every sink is host code.
     pub fn emit(
         &self,
         permit: Option<&EmissionPermit>,
-        scope: &DurableTraceScope,
-        attempt: Option<&AttemptObservation>,
+        position: Option<TracePosition>,
         identity: impl FnOnce() -> TraceRecordIdentity,
         at_ms: u64,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
-        let Some(permit) = permit else {
-            return;
-        };
-        if !self.has_external_observers() {
+        if permit.is_none() || !self.has_external_observers() {
             return;
         }
         let (context, event) = record();
-        let record = match TraceRecord::identified(&identity(), context, event, datetime(at_ms)) {
-            Ok(record) => record.governed(self.content),
-            Err(error) => {
-                tracing::warn!(%error, "failed to derive a trace record identity");
-                return;
-            }
-        };
-        self.append(&record);
-        if let Some(projector) = &self.projector {
-            projector.project(scope, attempt, permit.source(), &record);
-        }
-    }
-
-    /// Emits one record that belongs to no admitted scope: a diagnostic of
-    /// session-level work. It reaches the record sinks alone, since a domain
-    /// projection has no scope to place it under.
-    pub fn emit_unscoped(
-        &self,
-        permit: Option<&EmissionPermit>,
-        identity: impl FnOnce() -> TraceRecordIdentity,
-        at_ms: u64,
-        record: impl FnOnce() -> (TraceContext, TraceEvent),
-    ) {
-        if permit.is_none() || self.sinks.is_empty() {
-            return;
-        }
-        let (context, event) = record();
-        match TraceRecord::identified(&identity(), context, event, datetime(at_ms)) {
-            Ok(record) => self.append(&record.governed(self.content)),
-            Err(error) => tracing::warn!(%error, "failed to derive unscoped observation identity"),
+        match TraceRecord::identified(
+            &identity(),
+            context,
+            event,
+            TraceTimestamp::from_unix_ms(at_ms),
+        ) {
+            Ok(record) => self.append(&record.at(position).governed(self.content)),
+            Err(error) => tracing::warn!(%error, "failed to derive a trace record identity"),
         }
     }
 
     /// Publishes one product observation (the process and language graph).
     /// It takes no permit and runs on replay, because the product folds it
-    /// by its own identity; it never reaches a record sink or the adapter.
+    /// by its own identity; it never reaches a record sink.
     pub fn observe_product(&self, record: impl FnOnce() -> TraceRecord) {
-        let Some(product) = &self.product else {
+        if self.product.is_empty() {
             return;
-        };
-        if let Err(error) = product.append(&record()) {
-            tracing::warn!(%error, "failed to publish a product observation");
+        }
+        let record = record();
+        for observer in self.product.iter() {
+            observer.observe(&record);
         }
     }
 
-    fn append(&self, record: &TraceRecord) {
+    /// Hands `record` to every sink in order. Each append runs under panic
+    /// containment and counts its own failures: a sink that fails or panics
+    /// costs only its own delivery.
+    pub(crate) fn append(&self, record: &TraceRecord) {
         for (sink_index, (sink, failures)) in
             self.sinks.iter().zip(self.sink_failures.iter()).enumerate()
         {
-            let result = sink.append(record);
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.append(record)));
+            let failure = match result {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error.to_string()),
+                Err(payload) => {
+                    let message = crate::panic_containment::payload_message(payload.as_ref());
+                    if crate::panic_containment::is_loud() {
+                        std::panic::resume_unwind(payload);
+                    }
+                    Some(format!("the sink panicked: {message}"))
+                }
+            };
             let mut count = failures.lock_recover();
-            match result {
-                Err(error) => {
+            match failure {
+                Some(error) => {
                     *count = count.saturating_add(1);
                     if *count == 1 {
                         // A host subscriber can forward this diagnostic to a
@@ -440,12 +475,11 @@ impl TraceEmitter {
                         tracing::warn!(event = "trace_sink.degraded", sink_index, %error,
                             failure_count = 1_u64,
                             session_id = record.context.session_id.as_ref().map(|id| id.as_str()),
-                            host_run_id = record.context.run_id.as_deref(),
                             turn_id = record.context.turn_id.as_ref().map(|id| id.as_str()),
                             "trace sink append failed; records may be lost");
                     }
                 }
-                Ok(()) if *count > 0 => {
+                None if *count > 0 => {
                     let failure_count = std::mem::take(&mut *count);
                     drop(count);
                     tracing::info!(
@@ -455,17 +489,19 @@ impl TraceEmitter {
                         "trace sink append recovered"
                     );
                 }
-                Ok(()) => {}
+                None => {}
             }
         }
     }
-}
 
-fn datetime(at_ms: u64) -> chrono::DateTime<chrono::Utc> {
-    i64::try_from(at_ms)
-        .ok()
-        .and_then(chrono::DateTime::from_timestamp_millis)
-        .unwrap_or_default()
+    /// The failures each sink has counted since its last success, in
+    /// installation order.
+    pub fn sink_failures(&self) -> Vec<u64> {
+        self.sink_failures
+            .iter()
+            .map(|failures| *failures.lock_recover())
+            .collect()
+    }
 }
 
 /// One real execution of a recorded step's body.
@@ -479,14 +515,14 @@ pub struct LiveStep {
     permit: EmissionPermit,
     attempt: TraceAttemptId,
     next_ordinal: AtomicU64,
-    observation: Option<AttemptObservation>,
+    observation: Option<TraceAttemptLink>,
     scope: Option<DurableTraceScope>,
 }
 
 impl LiveStep {
     fn of(
         attempt: TraceAttemptId,
-        observation: Option<AttemptObservation>,
+        observation: Option<TraceAttemptLink>,
         scope: Option<DurableTraceScope>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -501,7 +537,7 @@ impl LiveStep {
     /// Begun where a recorded step's body starts running.
     pub(crate) fn begin(
         effect_attempt: Option<&crate::EffectAttempt>,
-        observation: Option<AttemptObservation>,
+        observation: Option<TraceAttemptLink>,
         scope: Option<DurableTraceScope>,
     ) -> Arc<Self> {
         let attempt = match effect_attempt {
@@ -525,7 +561,7 @@ impl LiveStep {
     }
 
     /// The substrate attempt this body runs under, if the substrate has one.
-    pub fn attempt_observation(&self) -> Option<&AttemptObservation> {
+    pub fn attempt_observation(&self) -> Option<&TraceAttemptLink> {
         self.observation.as_ref()
     }
 
@@ -690,7 +726,7 @@ impl JournalFrontier {
 #[derive(Debug, Default)]
 pub struct StepIssue {
     frontier: Option<JournalFrontier>,
-    attempt: Option<AttemptObservation>,
+    attempt: Option<TraceAttemptLink>,
     scope: Option<DurableTraceScope>,
     /// Whether dropping this issue unbegun means the journal served the step.
     reports_served: bool,
@@ -722,7 +758,7 @@ impl Drop for StepIssue {
 impl StepIssue {
     pub(crate) fn new(
         frontier: JournalFrontier,
-        attempt: Option<AttemptObservation>,
+        attempt: Option<TraceAttemptLink>,
         scope: Option<DurableTraceScope>,
     ) -> Self {
         Self {
@@ -759,7 +795,7 @@ impl StepIssue {
         self.frontier.as_ref()
     }
 
-    pub fn attempt_observation(&self) -> Option<&AttemptObservation> {
+    pub fn attempt_observation(&self) -> Option<&TraceAttemptLink> {
         self.attempt.as_ref()
     }
 
@@ -779,17 +815,39 @@ enum EmissionRight {
     Body(Arc<LiveStep>),
     Shift {
         frontier: JournalFrontier,
-        attempt: Option<AttemptObservation>,
+        attempt: Option<TraceAttemptLink>,
     },
 }
 
 /// Where one piece of engine code stands when it observes: the runtime, the
-/// scope it runs under and its right to emit.
+/// scope it runs under, the execution-local leaf span it is inside, if any,
+/// and its right to emit.
 #[derive(Clone)]
 pub struct TraceStanding {
     runtime: TraceRuntime,
     scope: Option<Arc<DurableTraceScope>>,
+    leaf: Option<Arc<LeafSpan>>,
     right: EmissionRight,
+}
+
+/// An execution-local span: a model call. Its id is drawn when it opens and
+/// carried, never recomputed.
+#[derive(Debug)]
+struct LeafSpan {
+    span: TraceCarrier,
+    parent: TraceCarrier,
+    kind: TraceSpanKind,
+    started_at_ms: u64,
+}
+
+/// The kind of span a scope's own records name.
+fn scope_span_kind(kind: TraceScopeKind) -> TraceSpanKind {
+    match kind {
+        TraceScopeKind::Turn => TraceSpanKind::Agent,
+        TraceScopeKind::Tool => TraceSpanKind::Tool,
+        TraceScopeKind::ToolIntent => TraceSpanKind::ToolIntent,
+        TraceScopeKind::Process => TraceSpanKind::Process,
+    }
 }
 
 impl TraceStanding {
@@ -812,6 +870,15 @@ impl TraceStanding {
         self.scope.as_deref()
     }
 
+    /// The span a child of this code is parented to: the leaf it is inside,
+    /// else its scope's span.
+    pub fn container(&self) -> Option<&TraceCarrier> {
+        match &self.leaf {
+            Some(leaf) => Some(&leaf.span),
+            None => self.scope.as_deref().and_then(|scope| scope.span.as_ref()),
+        }
+    }
+
     /// Whether a record made here now would reach an observer. Sites that
     /// must prepare a record's parts ahead of the call test it first.
     pub fn is_observed(&self) -> bool {
@@ -832,6 +899,7 @@ impl TraceStanding {
         Self {
             runtime: self.runtime.clone(),
             scope: Some(Arc::new(scope)),
+            leaf: None,
             right: self.right.clone(),
         }
     }
@@ -842,30 +910,173 @@ impl TraceStanding {
         Self {
             runtime: self.runtime.clone(),
             scope: self.scope.clone(),
+            leaf: self.leaf.clone(),
             right: EmissionRight::Body(Arc::clone(live)),
         }
     }
 
-    fn attempt_observation(&self) -> Option<&AttemptObservation> {
+    fn attempt_observation(&self) -> Option<&TraceAttemptLink> {
         match &self.right {
             EmissionRight::Body(live) => live.attempt_observation(),
             EmissionRight::Shift { attempt, .. } => attempt.as_ref(),
         }
     }
 
+    /// The position of a record made here in `role`, at `at_ms`: under the
+    /// leaf this code is inside, else its scope's span. `None` when the
+    /// scope is unobserved, or there is none.
+    fn position(&self, role: SpanRole, at_ms: u64) -> Option<TracePosition> {
+        let scope = self.scope.as_deref();
+        let (span, parent, links, kind, started_at_ms) = match &self.leaf {
+            Some(leaf) => (
+                leaf.span.clone(),
+                Some(leaf.parent.clone()),
+                TraceLinks::new(),
+                leaf.kind,
+                leaf.started_at_ms,
+            ),
+            None => {
+                let scope = scope?;
+                (
+                    scope.span.clone()?,
+                    scope
+                        .cause
+                        .as_parent()
+                        .map(|parent| parent.carrier().clone()),
+                    scope.links.clone(),
+                    scope_span_kind(scope.scope.kind()),
+                    scope.started_at_ms,
+                )
+            }
+        };
+        Some(TracePosition {
+            span,
+            parent,
+            links,
+            role,
+            kind,
+            started_at: TraceTimestamp::from_unix_ms(started_at_ms),
+            ended_at: role
+                .publishes()
+                .then(|| TraceTimestamp::from_unix_ms(at_ms)),
+            scope: scope.map(|scope| scope.scope.clone()),
+            attempt: self.attempt_observation().cloned(),
+        })
+    }
+
     /// Emits an observation of this attempt's own work: a model request, a
     /// diagnostic, a step of the shift. Each real attempt names its own
-    /// record. Shift code observes through its [`JournalFrontier`].
+    /// record. Shift code observes through its [`JournalFrontier`]. The
+    /// record is an event of the span this code is in.
     pub fn observe(&self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
+        self.observe_as(SpanRole::Event, None, record);
+    }
+
+    /// Emits the opening record of this standing's scope span: the start
+    /// its admitting owner observes. A live hint: the span is built from
+    /// its closing record.
+    pub fn open_scope(&self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
+        self.observe_as(SpanRole::Opens, None, record);
+    }
+
+    /// Emits the closing record of this standing's scope span, which ended
+    /// at `ended_at_ms`, the end its terminal's commit retained. Only the
+    /// owner whose acknowledged commit wrote that terminal calls it (P1), so
+    /// the span is published at most once.
+    pub fn close_scope(
+        &self,
+        ended_at_ms: u64,
+        record: impl FnOnce() -> (TraceContext, TraceEvent),
+    ) {
+        self.observe_as(SpanRole::Closes, Some(ended_at_ms), record);
+    }
+
+    /// Opens a `kind` leaf under this code's container with the opening
+    /// record `record`: the leaf's id is drawn now, and its events and close
+    /// go through the returned [`OpenSpan`]. Nothing is opened, and
+    /// `record` and the returned span's records are this standing's, when
+    /// there is no observed container.
+    pub fn open(
+        &self,
+        kind: TraceSpanKind,
+        record: impl FnOnce() -> (TraceContext, TraceEvent),
+    ) -> OpenSpan {
+        let Some(parent) = self.container().cloned().filter(|_| self.is_observed()) else {
+            // With no observed container the leaf has no span: its records
+            // are this standing's, unpositioned.
+            self.observe(record);
+            return OpenSpan {
+                standing: self.clone(),
+            };
+        };
+        let span = TraceCarrier::new(
+            parent.trace_id(),
+            self.runtime.parts.identity.leaf_span_id(),
+            parent.flags(),
+            parent.tracestate().clone(),
+        );
+        let standing = Self {
+            runtime: self.runtime.clone(),
+            scope: self.scope.clone(),
+            leaf: Some(Arc::new(LeafSpan {
+                span,
+                parent,
+                kind,
+                started_at_ms: self.runtime.parts.clock.timestamp_ms(),
+            })),
+            right: self.right.clone(),
+        };
+        standing.observe_as(SpanRole::Opens, None, record);
+        OpenSpan { standing }
+    }
+
+    /// Emits `record`, the one record of a `kind` span keyed `key` under
+    /// this code's container, which ran from `started_at_ms` to now: a
+    /// container whose id any owner derives the same way.
+    pub fn whole(
+        &self,
+        kind: TraceSpanKind,
+        key: &lash_trace::SpanKey<'_>,
+        started_at_ms: u64,
+        record: impl FnOnce() -> (TraceContext, TraceEvent),
+    ) {
+        let Some(parent) = self.container().cloned() else {
+            return self.observe(record);
+        };
+        let span = lash_trace::derive_span(&parent, key);
+        let standing = Self {
+            runtime: self.runtime.clone(),
+            scope: self.scope.clone(),
+            leaf: Some(Arc::new(LeafSpan {
+                span,
+                parent,
+                kind,
+                started_at_ms,
+            })),
+            right: self.right.clone(),
+        };
+        standing.observe_as(SpanRole::Whole, None, record);
+    }
+
+    fn observe_as(
+        &self,
+        role: SpanRole,
+        at_ms: Option<u64>,
+        record: impl FnOnce() -> (TraceContext, TraceEvent),
+    ) {
         if !self.runtime.is_observed() {
             return;
         }
+        // The clock is read only for a record that is made: a served prefix
+        // reads none.
+        let at_ms = || at_ms.unwrap_or_else(|| self.runtime.parts.clock.timestamp_ms());
         match &self.right {
             EmissionRight::Body(live) => self.emit_live(
                 live.permit(),
                 live.attempt.clone(),
                 live.next_ordinal(),
-                self.runtime.parts.clock.timestamp_ms(),
+                role,
+                at_ms(),
                 record,
             ),
             EmissionRight::Shift { frontier, .. } if frontier.is_crossed() => {
@@ -874,7 +1085,8 @@ impl TraceStanding {
                     &permit,
                     frontier.inner.attempt.clone(),
                     frontier.inner.next_ordinal.fetch_add(1, Ordering::Relaxed),
-                    self.runtime.parts.clock.timestamp_ms(),
+                    role,
+                    at_ms(),
                     record,
                 );
             }
@@ -900,6 +1112,7 @@ impl TraceStanding {
                         permit,
                         attempt,
                         ordinal,
+                        SpanRole::Event,
                         standing.runtime.parts.clock.timestamp_ms(),
                         record,
                     );
@@ -913,30 +1126,23 @@ impl TraceStanding {
         permit: &EmissionPermit,
         attempt: TraceAttemptId,
         ordinal: u64,
+        role: SpanRole,
         at_ms: u64,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
-        let Some(scope) = self.scope.as_deref() else {
-            self.runtime.parts.emitter.emit_unscoped(
-                Some(permit),
-                || TraceRecordIdentity::UnscopedLive { attempt, ordinal },
-                at_ms,
-                || self.project(record()),
-            );
-            return;
-        };
-        self.runtime.parts.emitter.emit(
-            Some(permit),
-            scope,
-            self.attempt_observation(),
-            || TraceRecordIdentity::Live {
+        let position = self.position(role, at_ms);
+        let identity = match self.scope.as_deref() {
+            Some(scope) => TraceRecordIdentity::Live {
                 scope: scope.scope.clone(),
                 attempt,
                 ordinal,
             },
-            at_ms,
-            || self.project(record()),
-        );
+            None => TraceRecordIdentity::UnscopedLive { attempt, ordinal },
+        };
+        self.runtime
+            .parts
+            .emitter
+            .emit(Some(permit), position, || identity, at_ms, record);
     }
 
     pub fn provider_attempts(
@@ -974,12 +1180,13 @@ impl TraceStanding {
     }
 
     /// The substrate attempt this standing's code runs under, if any.
-    pub fn attempt(&self) -> Option<&AttemptObservation> {
+    pub fn attempt(&self) -> Option<&TraceAttemptLink> {
         self.attempt_observation()
     }
 
     /// Emits the logical record of one lifecycle `transition` of this
-    /// standing's scope.
+    /// standing's scope: a start opens the scope's span, a terminal closes
+    /// it at `at_ms`, and any other transition is an event of it.
     ///
     /// `receipt` is the permit of the committed store receipt that reported
     /// the transition as newly inserted or changed
@@ -1009,33 +1216,53 @@ impl TraceStanding {
         let Some(scope) = self.scope.as_deref() else {
             return;
         };
+        let role = match transition {
+            TraceTransitionKind::Admitted | TraceTransitionKind::Started => SpanRole::Opens,
+            TraceTransitionKind::Terminal => SpanRole::Closes,
+            _ => SpanRole::Event,
+        };
         self.runtime.parts.emitter.emit(
             Some(receipt),
-            scope,
-            self.attempt_observation(),
+            self.position(role, at_ms),
             || TraceRecordIdentity::Transition {
                 scope: scope.scope.clone(),
                 transition,
                 ordinal,
             },
             at_ms,
-            || self.project(record()),
+            record,
         );
-    }
-
-    /// The record's context under the host's run metadata, with its span
-    /// identity assigned.
-    fn project(&self, (context, event): (TraceContext, TraceEvent)) -> (TraceContext, TraceEvent) {
-        let mut merged = super::merge_runtime_projection(&self.runtime.parts.base_context, context);
-        super::assign_span_identity(&mut merged, &event);
-        (merged, event)
     }
 }
 
-/// The scope of a call under its admitted logical owner, before an adapter
-/// anchors it. A retained trace parent supplies only the causal anchor,
-/// even across physical turns; a call with no observed parent is
-/// unobserved.
+/// A leaf span this code opened ([`TraceStanding::open`]): records of its
+/// work are its events, and its one close publishes it.
+#[must_use = "an open span publishes only when it is closed"]
+pub struct OpenSpan {
+    standing: TraceStanding,
+}
+
+impl OpenSpan {
+    /// The standing of code inside this span: its records are the span's
+    /// events, and a leaf it opens is the span's child.
+    pub fn standing(&self) -> &TraceStanding {
+        &self.standing
+    }
+
+    /// Closes the span now with its closing record `record`.
+    pub fn close(self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
+        let role = if self.standing.leaf.is_some() {
+            SpanRole::Closes
+        } else {
+            SpanRole::Event
+        };
+        self.standing.observe_as(role, None, record);
+    }
+}
+
+/// The scope of a call under its admitted logical owner: its span is
+/// derived from the retained parent's, even across physical turns; a call
+/// with no observed parent is unobserved.
 pub fn tool_trace_scope(
     opener: &crate::EffectOpener,
     parent: Option<&DurableTraceScope>,
@@ -1056,7 +1283,7 @@ pub fn tool_trace_scope(
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
 
     struct FailingSink(AtomicBool);
     impl TraceSink for FailingSink {
@@ -1083,9 +1310,10 @@ mod diagnostic_tests {
         let record = TraceRecord {
             schema_version: lash_trace::TRACE_SCHEMA_VERSION,
             id: "sink-law".into(),
-            timestamp: Default::default(),
+            timestamp: TraceTimestamp::from_unix_ms(0),
             content: TelemetryContent::Captured,
             context: TraceContext::default(),
+            position: None,
             event: TraceEvent::TurnStarted {
                 metadata: Default::default(),
             },
@@ -1104,5 +1332,78 @@ mod diagnostic_tests {
                 .field("failure_count"),
             "3"
         );
+    }
+
+    struct Counting(Arc<AtomicUsize>);
+    impl TraceSink for Counting {
+        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct Panicking;
+    impl TraceSink for Panicking {
+        fn append(&self, _: &TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+            panic!("the sink panics")
+        }
+    }
+
+    /// L1(g): sink acceptance is per sink. A sink that panics, and a flight
+    /// recorder whose snapshot callback panics, each cost only their own
+    /// delivery: the sink after them sees every record, and each panic
+    /// counts against its own sink alone.
+    #[test]
+    fn a_panicking_sink_or_snapshot_callback_costs_only_its_own_delivery() {
+        let forwarded = Arc::new(AtomicUsize::new(0));
+        let after = Arc::new(AtomicUsize::new(0));
+        let recorder = lash_trace::FlightRecorderSink::new(
+            Counting(Arc::clone(&forwarded)),
+            lash_trace::FlightRecorderSettings {
+                slow_threshold: std::time::Duration::ZERO,
+                minimum_interval: std::time::Duration::ZERO,
+                ..lash_trace::FlightRecorderSettings::default()
+            },
+            |_snapshot| panic!("the snapshot callback panics"),
+        );
+        let runtime = TraceRuntime::default()
+            .with_trace_sink(Arc::new(Panicking))
+            .with_trace_sink(Arc::new(recorder))
+            .with_trace_sink(Arc::new(Counting(Arc::clone(&after))));
+        let record = TraceRecord {
+            schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+            id: "containment-law".into(),
+            timestamp: TraceTimestamp::from_unix_ms(0),
+            content: TelemetryContent::Captured,
+            context: TraceContext::default(),
+            position: None,
+            event: TraceEvent::ToolCallCompleted {
+                call_id: crate::ToolCallId::fixture("call"),
+                provider_call_id: None,
+                name: "slow".into(),
+                args: serde_json::Value::Null,
+                output: lash_trace::TraceToolCallOutput {
+                    outcome: lash_trace::TraceToolCallOutcome::Success(serde_json::Value::Null),
+                    control: None,
+                },
+                duration_ms: 10,
+                issuing_node_id: None,
+                attempts: None,
+            },
+        };
+        for _ in 0..3 {
+            runtime.emitter().append(&record);
+        }
+        assert_eq!(
+            after.load(Ordering::SeqCst),
+            3,
+            "the last sink sees every record"
+        );
+        assert_eq!(
+            forwarded.load(Ordering::SeqCst),
+            3,
+            "the recorder forwards each"
+        );
+        assert_eq!(runtime.emitter().sink_failures(), vec![3, 3, 0]);
     }
 }

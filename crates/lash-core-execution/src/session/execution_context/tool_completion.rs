@@ -37,26 +37,20 @@ impl RuntimeExecutionContext<'_> {
         start: ToolCallStart<'_>,
         requested_at_ms: u64,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
-        if let Some(proposal) = self.propose_tool_trace(start.call_id, requested_at_ms)? {
-            proposal
-                .candidate
-                .settle(lash_trace::TraceCandidateOutcome::Selected);
-            self.trace_tool_call_admitted(start, proposal.scope);
+        if let Some(scope) = self.tool_trace_scope(start.call_id, requested_at_ms)? {
+            self.trace_tool_call_admitted(start, scope);
         }
         Ok(())
     }
 
-    /// Propose the admission of `call_id`'s trace scope, requested at
-    /// `requested_at_ms`, leaving its candidate for the caller to settle.
-    /// `None` without tracing.
-    pub(crate) fn propose_tool_trace(
+    /// The trace scope of `call_id`, requested at `requested_at_ms`, under
+    /// the turn's: its span derived from the turn's, so every owner that
+    /// reads the admission back names the same one. `None` without tracing.
+    pub(crate) fn tool_trace_scope(
         &self,
         call_id: &crate::ToolCallId,
         requested_at_ms: u64,
-    ) -> Result<
-        Option<crate::runtime::actor::round::TraceProposal>,
-        crate::RuntimeEffectControllerError,
-    > {
+    ) -> Result<Option<lash_trace::DurableTraceScope>, crate::RuntimeEffectControllerError> {
         let Some(tracing) = &self.tracing else {
             return Ok(None);
         };
@@ -66,32 +60,12 @@ impl RuntimeExecutionContext<'_> {
                 error.to_string(),
             )
         })?;
-        let admitted = crate::trace::tool_trace_scope(
+        Ok(Some(crate::trace::tool_trace_scope(
             &opener,
             tracing.scope.as_ref(),
             call_id,
             requested_at_ms,
-        );
-        let parent = admitted.cause.as_parent();
-        let (scope, candidate) = tracing.runtime.scopes().propose_scope(
-            admitted.scope,
-            parent.as_ref(),
-            admitted.links,
-            admitted.started_at_ms,
-        );
-        Ok(Some(crate::runtime::actor::round::TraceProposal {
-            scope,
-            candidate,
-        }))
-    }
-
-    /// Reconcile the admission of `scope`, a call's trace scope its
-    /// admission retained, whose export that admission owes: the exporter
-    /// dedupes its identity (FIG-5395).
-    pub(crate) fn export_tool_trace_admission(&self, scope: &lash_trace::DurableTraceScope) {
-        if let Some(tracing) = &self.tracing {
-            tracing.runtime.scopes().export_admitted(scope);
-        }
+        )))
     }
 
     /// Observe the start of a call under `scope`, the trace scope its
@@ -105,12 +79,15 @@ impl RuntimeExecutionContext<'_> {
         let Some(tracing) = &self.tracing else {
             return;
         };
-        let context = tracing.scope_context.clone();
+        let context = tracing
+            .scope_context
+            .clone()
+            .for_call(start.call_id.clone());
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
         let content = tracing.runtime.content();
         self.coordination_standing(tracing)
             .under(scope.clone())
-            .observe(|| {
+            .open_scope(|| {
                 (
                     context.clone(),
                     lash_trace::TraceEvent::ToolCallStarted {
@@ -138,17 +115,21 @@ impl RuntimeExecutionContext<'_> {
         let Some(tracing) = &self.tracing else {
             return;
         };
-        let context = tracing.scope_context.clone();
+        let context = tracing.scope_context.clone().for_call(call_id.clone());
         self.tool_requests
             .lock_recover()
             .insert(call_id.clone(), TracedToolCall { scope, context });
     }
 
-    /// Observe the completion of a call whose start this execution traced.
+    /// Close the span of a call whose start this execution traced, at
+    /// `ended_at_ms`: the end its outcome's commit retained, or now for a
+    /// call that commits nothing. Only the owner whose acknowledged commit
+    /// wrote the outcome calls it (P1).
     pub(crate) fn trace_tool_call_completed(
         &self,
         record: &crate::ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
+        ended_at_ms: Option<u64>,
     ) {
         let Some(tracing) = &self.tracing else {
             return;
@@ -158,16 +139,13 @@ impl RuntimeExecutionContext<'_> {
         else {
             return;
         };
-        let duration_ms = self
-            .dispatch
-            .clock
-            .timestamp_ms()
-            .saturating_sub(scope.started_at_ms);
+        let ended_at_ms = ended_at_ms.unwrap_or_else(|| self.dispatch.clock.timestamp_ms());
+        let duration_ms = ended_at_ms.saturating_sub(scope.started_at_ms);
         let issuing_node = self.issuing_language_node_id.as_deref().map(str::to_string);
         let content = tracing.runtime.content();
         self.coordination_standing(tracing)
             .under(scope)
-            .observe(|| {
+            .close_scope(ended_at_ms, || {
                 (
                     context,
                     lash_trace::TraceEvent::ToolCallCompleted {

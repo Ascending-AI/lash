@@ -510,7 +510,8 @@ async fn end(
     // stop's turn may have admitted it after `row` was read.
     let current = cx.durable_reads()?.turn(&row.session).await?;
     let current = current.as_ref().filter(|current| current.run == row.run);
-    super::tool_round::cancel_open_round(cx, &mut tx, current.unwrap_or(row)).await?;
+    let cancelled =
+        super::tool_round::cancel_open_round(cx, &mut tx, current.unwrap_or(row)).await?;
     let mut drive = None;
     let mut head_revision = None;
     if let Some(StoppedTurn {
@@ -575,10 +576,6 @@ async fn end(
     // requirements are what the session's head alone still owes, the
     // observers of a config change it has not delivered (FIG-6072,
     // FIG-6164).
-    // A turn cancelled before its first phase commit still owes its
-    // admission's export: it is made before the commit that ends the turn
-    // (FIG-5998).
-    super::session::export_owed_admission(services.tracing(), current.unwrap_or(row));
     // A head commit the session store refuses for its content is the stop's
     // runtime refusal, as it is `turn.commit`'s (FIG-5352).
     cx.commit(tx, CommitLabel::TURN_CANCEL)
@@ -594,6 +591,12 @@ async fn end(
         .as_ref()
         .map(|drive| drive.delivered_inputs())
         .unwrap_or_default();
+    super::turn_trace::members_ended(
+        services.tracing(),
+        row,
+        &cancelled,
+        super::turn_trace::MemberEnd::Cancelled,
+    );
     super::turn_trace::ended(services.tracing(), row, traced, &delivered);
     if let Some(mut drive) = drive {
         drive.committed().await;

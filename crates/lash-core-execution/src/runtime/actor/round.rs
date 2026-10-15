@@ -107,16 +107,16 @@ pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
 pub use rounds::{
-    PinnedRound, PresentRecord, admit_round, pin_round, present, presentation,
-    record_trace_exported, settle_retry, start_retry,
+    PinnedRound, PresentRecord, admit_round, pin_round, present, presentation, settle_retry,
+    start_retry,
 };
 pub use runner::{
     DeferredOutcome, PreparedRoundEnd, RoundEnd, RoundError, RoundRunner, SettledRound,
 };
 pub use tools::{
-    AcceptedStop, CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools,
-    TraceProposal, call_draft, completed_material, decode_completed, request_material,
-    require_admitted, settle_cancelled,
+    AcceptedStop, CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
+    completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
+    unsettled,
 };
 
 use records::{OutcomeBody, Record, append, first_start};
@@ -221,7 +221,7 @@ impl ExecutionDraft {
     }
 
     /// This draft with `trace`, the call's trace scope its admission
-    /// retains ([`TraceProposal`]).
+    /// retains.
     #[must_use]
     pub fn with_trace(mut self, trace: Option<lash_trace::DurableTraceScope>) -> Self {
         self.trace = trace;
@@ -1097,6 +1097,7 @@ fn record_outcome(
         start: id.ordinal.0,
         output,
         state,
+        ended_at_ms: Some(u64::try_from(tx.opened_at().0).unwrap_or(0)),
     };
     // A park is no outcome: the call's one `x_outcome` follows it.
     let record = if matches!(body.output, SettledOutput::Waiting(_)) {

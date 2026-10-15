@@ -111,9 +111,9 @@ pub struct DurableSession {
     /// against before the input is accepted (FIG-3877).
     models: Arc<dyn lash_core::LlmProfiles>,
     /// The deployment's usage ledger, read by [`usage`](Self::usage).
-    /// The core's telemetry adapter: what a [`send`](Self::send) captures
-    /// the caller's trace context from.
-    trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+    /// The core's trace runtime: what a [`send`](Self::send) captures the
+    /// caller's trace context through and opens its producer on.
+    tracing: lash_core::facade_support::TraceRuntime,
 }
 
 impl DurableSession {
@@ -293,7 +293,7 @@ impl DurableSession {
         effect_host: ActorContext,
         live_replay_store: Arc<dyn LiveReplayStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
-        trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+        tracing: lash_core::facade_support::TraceRuntime,
         observer_pacing: Arc<crate::ObserverPacing>,
     ) -> Self {
         Self {
@@ -307,8 +307,7 @@ impl DurableSession {
             effect_host,
             live_replay_store,
             models,
-
-            trace_scopes,
+            tracing,
         }
     }
 
@@ -325,7 +324,7 @@ impl DurableSession {
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn DeploymentStore>,
         models: Arc<dyn lash_core::LlmProfiles>,
-        trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
+        tracing: lash_core::facade_support::TraceRuntime,
         observer_pacing: Arc<crate::ObserverPacing>,
     ) -> Self {
         Self {
@@ -339,8 +338,7 @@ impl DurableSession {
             effect_host,
             live_replay_store,
             models,
-
-            trace_scopes,
+            tracing,
         }
     }
 
@@ -359,9 +357,9 @@ impl DurableSession {
         })
     }
 
-    /// The telemetry adapter a send captures the caller's context from.
-    pub(crate) fn trace_scopes(&self) -> &Arc<dyn lash_core::TraceScopeFactory> {
-        &self.trace_scopes
+    /// The trace runtime a send captures the caller's context through.
+    pub(crate) fn tracing(&self) -> &lash_core::facade_support::TraceRuntime {
+        &self.tracing
     }
 
     /// The live replay a handle's events come from.

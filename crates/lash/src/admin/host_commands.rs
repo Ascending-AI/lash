@@ -44,14 +44,17 @@ impl SessionCommandAdmin {
                 | lash_core::facade_support::SessionCommand::RunPluginTask { .. }
         )
         .then(|| {
-            self.context
-                .target
-                .open_producer(lash_core::ProducerKind::PluginInvoke, call)
-        })
-        .flatten();
-        let parent = producer
-            .as_deref()
-            .map(<dyn lash_core::TraceHostOperation>::parent);
+            let target = &self.context.target;
+            target.open_producer(
+                lash_core::ProducerKind::PluginInvoke,
+                call,
+                lash_core::TraceIds {
+                    session: Some(target.session_id()),
+                    ..Default::default()
+                },
+            )
+        });
+        let parent = producer.as_ref().and_then(lash_core::ProducerSpan::parent);
         let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
@@ -59,11 +62,14 @@ impl SessionCommandAdmin {
                     .await
                     .map_err(crate::EmbedError::from)
             })
-            .await?;
+            .await;
         if let Some(producer) = producer {
-            producer.settle(lash_trace::TraceCandidateOutcome::Selected);
+            producer.settle(match &receipt {
+                Ok(_) => lash_core::ProducerOutcome::Selected,
+                Err(error) => crate::tracing::refused(error),
+            });
         }
-        Ok(receipt)
+        receipt
     }
 
     /// Await the settlement of the command `receipt` names, reattaching by

@@ -162,15 +162,17 @@ impl CellTrace {
             }
         };
         let event_key = format!("kernel_execution:{}:{suffix}", self.identity.graph_key());
-        let mut context = self.tracing.trace_runtime().base_context().clone();
-        context.session_id = self.identity.scope.session_id.clone();
-        context.turn_id = self.identity.scope.turn_id.clone();
-        context.turn_index = self.identity.scope.turn_index;
-        context.protocol_iteration = self.identity.scope.protocol_iteration;
+        let mut context = lash_trace::TraceContext {
+            session_id: self.identity.scope.session_id.clone(),
+            turn_id: self.identity.scope.turn_id.clone(),
+            turn_index: self.identity.scope.turn_index,
+            protocol_iteration: self.identity.scope.protocol_iteration,
+            graph_node_id: node,
+            ..lash_trace::TraceContext::default()
+        };
         if let TraceRuntimeSubject::Effect { effect_id, .. } = &self.identity.subject {
             context.effect_id = Some(effect_id.clone());
         }
-        context.graph_node_id = node;
         let event = TraceLanguageExecution {
             event_key,
             identity: self.identity.clone(),

@@ -199,14 +199,23 @@ fn links_keep_the_first_sixty_four_distinct_spans_in_admission_order() {
 #[test]
 fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
     let parent = TraceCause::Parent(carrier(3)).as_parent();
-    let (scope, candidate) = (&UntracedScopes as &dyn TraceScopeFactory).propose_scope(
+    let scope = DurableTraceScope::admit(
         run_scope(),
         parent.as_ref(),
         [carrier(4)].into_iter().collect(),
         1_700_000_000_000,
     );
-    assert_eq!(scope.anchor, TraceAnchor::Untraced);
-    assert_eq!(UntracedScopes.capture_current(), None);
+    let span = derive_span(
+        &carrier(3),
+        &SpanKey::Scope {
+            scope: &run_scope(),
+        },
+    );
+    assert_eq!(scope.span.as_ref(), Some(&span));
+    assert_eq!(
+        scope.as_parent().map(|parent| parent.carrier().clone()),
+        Some(span.clone())
+    );
 
     let stored = serde_json::to_value(&scope).unwrap();
     assert_eq!(
@@ -215,6 +224,7 @@ fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
             "scope": { "owner": { "kind": "turn", "session_id": "session", "turn_id": "run" } },
             "cause": { "kind": "parent", "traceparent": carrier(3).traceparent() },
             "links": { "contexts": [{ "traceparent": carrier(4).traceparent() }] },
+            "span": { "traceparent": span.traceparent() },
             "started_at_ms": 1_700_000_000_000_u64,
         })
     );
@@ -230,29 +240,88 @@ fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
         &EmissionSource::NewTransition
     );
     assert!(existing.permit().is_none());
-    assert_eq!(inserted.outcome(), TraceCandidateOutcome::Selected);
-    assert_eq!(existing.outcome(), TraceCandidateOutcome::Reused);
     assert_eq!(existing.scope(), &scope);
-    candidate.settle(inserted.outcome());
 }
 
 /// No admission makes a root: a scope admitted with no parent is
-/// unobserved, links nothing and proposes no candidate, and its children
-/// have no parent either.
+/// unobserved, links nothing and has no span, and its children have no
+/// parent either.
 #[test]
 fn a_scope_admitted_without_a_parent_is_unobserved() {
-    let (scope, candidate) = (&UntracedScopes as &dyn TraceScopeFactory).propose_scope(
-        run_scope(),
-        None,
-        [carrier(4)].into_iter().collect(),
-        1,
-    );
+    let scope = DurableTraceScope::admit(run_scope(), None, [carrier(4)].into_iter().collect(), 1);
     assert_eq!(scope.cause, TraceCause::None);
     assert!(scope.links.is_empty());
-    assert_eq!(scope.anchor, TraceAnchor::Untraced);
+    assert_eq!(scope.span, None);
     assert_eq!(scope.as_parent(), None);
     assert!(scope.offer().is_empty());
-    candidate.settle(TraceCandidateOutcome::Selected);
+}
+
+/// A container's span is a pure function of its parent and its durable
+/// key: every owner derives the same id, another key or parent another,
+/// and it keeps the parent's trace id, flags and tracestate.
+#[test]
+fn a_container_span_derives_from_its_parent_and_key_alone() {
+    let mut parent = carrier(3);
+    parent = TraceCarrier::new(
+        parent.trace_id(),
+        parent.span_id(),
+        W3cTraceFlags::from_byte(0),
+        W3cTraceState::parse("vendor=x").unwrap(),
+    );
+    let scope = run_scope();
+    let key = SpanKey::Scope { scope: &scope };
+    let span = derive_span(&parent, &key);
+    assert_eq!(span, derive_span(&parent, &key));
+    assert_eq!(span.trace_id(), parent.trace_id());
+    assert_eq!(span.flags(), parent.flags());
+    assert_eq!(span.tracestate(), parent.tracestate());
+    assert_ne!(span.span_id(), parent.span_id());
+    let other = run_scope().at_boundary(1);
+    assert_ne!(
+        span.span_id(),
+        derive_span(&parent, &SpanKey::Scope { scope: &other }).span_id()
+    );
+    assert_ne!(
+        span.span_id(),
+        derive_span(&carrier(4), &key).span_id(),
+        "another parent derives another span"
+    );
+    assert_ne!(
+        derive_span(&parent, &SpanKey::Cell { graph_key: "a" }).span_id(),
+        derive_span(&parent, &SpanKey::Cell { graph_key: "b" }).span_id()
+    );
+}
+
+/// With no adapter, a producer joins its caller in parent mode and roots a
+/// new sampled trace in link mode or without a caller.
+#[test]
+fn lash_identity_joins_or_roots_a_producer_by_its_link_mode() {
+    let caller = TraceCarrier::new(
+        carrier(3).trace_id(),
+        carrier(3).span_id(),
+        W3cTraceFlags::from_byte(0),
+        W3cTraceState::parse("vendor=x").unwrap(),
+    );
+    let spec = |caller: Option<TraceCarrier>, link_mode| ProducerSpec {
+        kind: ProducerKind::Send,
+        caller,
+        link_mode,
+        ids: crate::TraceIds::default(),
+    };
+    let child = LashIdentity.open_producer(&spec(Some(caller.clone()), TraceLinkMode::Parent));
+    assert_eq!(child.trace_id(), caller.trace_id());
+    assert_eq!(child.flags(), caller.flags());
+    assert_eq!(child.tracestate(), caller.tracestate());
+    assert_ne!(child.span_id(), caller.span_id());
+    for root in [
+        LashIdentity.open_producer(&spec(Some(caller.clone()), TraceLinkMode::Link)),
+        LashIdentity.open_producer(&spec(None, TraceLinkMode::Parent)),
+    ] {
+        assert_ne!(root.trace_id(), caller.trace_id());
+        assert!(root.flags().is_sampled());
+        assert_eq!(root.tracestate(), &W3cTraceState::default());
+    }
+    assert_ne!(LashIdentity.leaf_span_id(), LashIdentity.leaf_span_id());
 }
 
 #[test]
@@ -290,7 +359,7 @@ fn record_identity_is_stable_per_fact_and_distinct_per_attempt() {
         live("b").record_id().unwrap()
     );
 
-    let at = chrono::DateTime::from_timestamp_millis(1_700_000_000_000).unwrap();
+    let at = crate::TraceTimestamp::from_unix_ms(1_700_000_000_000);
     let event = || crate::TraceEvent::Custom {
         name: "test.event".to_string(),
         payload: json!({}),

@@ -102,7 +102,7 @@ impl SendBatchBuilder {
     /// batch is first polled.
     pub fn capture_trace_context(mut self) -> Self {
         self.trace.caller =
-            lash_core::TraceCaller::Explicit(self.target.trace_scopes().capture_current());
+            lash_core::TraceCaller::Explicit(self.target.tracing().identity().ambient());
         self
     }
 
@@ -135,10 +135,15 @@ impl SendBatchBuilder {
         }
         // One request, one producer and one cause: opened on the first
         // poll and before the first await.
-        let host_send = target.open_producer(lash_core::ProducerKind::SendBatch, &trace);
-        let parent = host_send
-            .as_deref()
-            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let mut producer = target.open_producer(
+            lash_core::ProducerKind::SendBatch,
+            &trace,
+            lash_core::TraceIds {
+                session: Some(target.session_id()),
+                ..Default::default()
+            },
+        );
+        let parent = producer.parent();
         let trace_cause = lash_core::TraceCause::from(parent.clone());
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
@@ -150,33 +155,45 @@ impl SendBatchBuilder {
             input.trace_turn_id = None;
             submissions.push((input, Some(id.to_string())));
         }
-        let ids = submissions
-            .iter()
-            .filter_map(|(_, id)| id.as_deref())
-            .collect::<Vec<_>>();
-        let context = super::send_context(&target, &ids).await?;
-        let cursor = target.current_cursor();
-        let enqueued = context
-            .parts
-            .ops
-            .enqueue_turn_inputs(
-                &context.parts.store,
-                submissions,
-                TurnInputIngress::NextTurn,
-                run_spec,
-                false,
-                parent,
-            )
-            .await?;
-        if let Some(operation) = host_send {
-            operation.settle(
-                if enqueued.iter().any(|row| row.trace_cause == trace_cause) {
-                    lash_trace::TraceCandidateOutcome::Selected
-                } else {
-                    lash_trace::TraceCandidateOutcome::Reused
-                },
-            );
+        let accepted = async {
+            let ids = submissions
+                .iter()
+                .filter_map(|(_, id)| id.as_deref())
+                .collect::<Vec<_>>();
+            let context = super::send_context(&target, &ids).await?;
+            let cursor = target.current_cursor();
+            let enqueued = context
+                .parts
+                .ops
+                .enqueue_turn_inputs(
+                    &context.parts.store,
+                    submissions,
+                    TurnInputIngress::NextTurn,
+                    run_spec,
+                    false,
+                    parent,
+                )
+                .await?;
+            Ok::<_, crate::EmbedError>((enqueued, cursor))
         }
+        .await;
+        let (enqueued, cursor) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                producer.settle(crate::tracing::refused(&error));
+                return Err(error);
+            }
+        };
+        if let Some(head) = enqueued.first() {
+            producer.accepted(head.input_id.clone());
+        }
+        producer.settle(
+            if enqueued.iter().any(|row| row.trace_cause == trace_cause) {
+                lash_core::ProducerOutcome::Selected
+            } else {
+                lash_core::ProducerOutcome::Reused
+            },
+        );
         Ok(enqueued
             .iter()
             .map(|row| SendHandle {

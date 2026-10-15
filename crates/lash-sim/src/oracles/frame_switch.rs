@@ -316,9 +316,10 @@ mod admission_identity_tests {
         lash_core::facade_support::TraceRecord {
             schema_version: 1,
             id: format!("{name}-record"),
-            timestamp: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            timestamp: lash_core::TraceTimestamp::from_unix_ms(0),
             content: lash_core::TelemetryContent::Captured,
             context: lash_core::TraceContext::default(),
+            position: None,
             event: lash_core::TraceEvent::Custom {
                 name: name.to_string(),
                 payload,

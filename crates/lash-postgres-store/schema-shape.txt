@@ -567,7 +567,6 @@ table lash_turn_phases
   column phase_arg bigint nullable
   column run text not-null
   column session_id text not-null
-  column trace_exported boolean not-null default
   column turn_deadline_ms bigint nullable
   column working_execution_ref text nullable
   column written_epoch bigint not-null

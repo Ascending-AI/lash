@@ -15,9 +15,7 @@ use lash_core::{
 };
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{ProcessId, SessionId};
-use lash_trace::{
-    LanguageExecutionObservation, TraceEvent, TraceRecord, TraceSink, TraceSinkError,
-};
+use lash_trace::{LanguageExecutionObservation, TraceEvent, TraceRecord};
 
 mod ingress;
 mod routing;
@@ -243,15 +241,15 @@ impl LanguageObservationPublisher {
         let Some(subject) = routing::subject(execution) else {
             return;
         };
-        let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
-        let charge = timestamp.and_then(|_| match &subject {
+        let timestamp = record.timestamp.unix_ms();
+        let charge = match &subject {
             Subject::Process(id) => self.charge(&(id, language, execution)),
             Subject::Session(id) => self.charge(&(id, language, execution)),
-        });
+        };
         let observation = || LanguageExecutionObservation {
             language: language.map(str::to_owned),
             execution: execution.clone(),
-            observed_at_ms: timestamp.unwrap_or(0),
+            observed_at_ms: timestamp,
         };
         match subject {
             Subject::Process(process) => self.enqueue_process(&process, charge, None, || {
@@ -282,22 +280,22 @@ impl LanguageObservationPublisher {
         if self.closed.load(Ordering::Acquire) {
             return;
         }
-        let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
-        let charge = timestamp.and_then(|_| self.charge(step));
+        let timestamp = record.timestamp.unix_ms();
+        let charge = self.charge(step);
         self.enqueue_process(&step.process_id, charge, None, || {
             ProcessReplayEventDraft::step_body_started(
                 ProcessSequence(0),
                 lash_trace::StepBodyStartedObservation {
                     step: step.clone(),
-                    observed_at_ms: timestamp.unwrap_or(0),
+                    observed_at_ms: timestamp,
                 },
             )
         });
     }
 }
 
-impl TraceSink for LanguageObservationPublisher {
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+impl lash_trace::ProductObservationSink for LanguageObservationPublisher {
+    fn observe(&self, record: &TraceRecord) {
         match &record.event {
             TraceEvent::LanguageExecution { language, event } => {
                 self.enqueue_language(record, language.as_deref(), event);
@@ -305,7 +303,6 @@ impl TraceSink for LanguageObservationPublisher {
             TraceEvent::StepBodyStarted { step } => self.enqueue_step_body_started(record, step),
             _ => {}
         }
-        Ok(())
     }
 }
 

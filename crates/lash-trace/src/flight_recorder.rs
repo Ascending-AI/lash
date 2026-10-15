@@ -5,7 +5,6 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use lash_sansio::llm::types::AttemptOutcome;
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
@@ -13,7 +12,8 @@ use lash_sansio::{ProcessId, SessionId, ToolCallId, TurnId};
 use crate::{
     TraceDomainStatus, TraceEvent, TraceEventKind, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus, TraceNodeFact, TraceProgramStepOutcome, TraceRecord,
-    TraceRuntimeSubject, TraceSink, TraceSinkError, TraceToolCallStatus, TraceTurnOutcome,
+    TraceRuntimeSubject, TraceSink, TraceSinkError, TraceTimestamp, TraceToolCallStatus,
+    TraceTurnOutcome,
 };
 
 /// Host policy for retention and snapshot frequency, independent of content policy.
@@ -62,7 +62,7 @@ pub enum FlightRecorderOutcome {
 pub struct FlightRecorderRecord {
     pub record_id: String,
     pub kind: TraceEventKind,
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: TraceTimestamp,
     /// Reported duration, or endpoint difference for domain/attempt completions.
     /// Absent when the event has no timing evidence; no start map is retained.
     pub duration: Option<Duration>,
@@ -70,7 +70,6 @@ pub struct FlightRecorderRecord {
     pub session_id: Option<SessionId>,
     pub turn_id: Option<TurnId>,
     pub graph_node_id: Option<String>,
-    pub parent_graph_node_id: Option<String>,
     pub effect_id: Option<String>,
     pub llm_call_id: Option<String>,
     pub tool_call_id: Option<ToolCallId>,
@@ -95,13 +94,15 @@ pub struct FlightRecorderSnapshot {
 struct RecorderState {
     records: VecDeque<FlightRecorderRecord>,
     evicted_records: u64,
-    last_snapshot_at: Option<DateTime<Utc>>,
+    last_snapshot_at: Option<TraceTimestamp>,
 }
 
 /// Forwards every record unchanged and retains a bounded metadata ring.
 ///
 /// The callback runs synchronously after forwarding, outside the ring lock,
-/// including when the inner sink returns an error. Hosts should hand snapshots
+/// including when the inner sink returns an error. A callback that panics
+/// unwinds out of [`append`](TraceSink::append): the runtime's emitter
+/// contains it as this sink's append failure, and no other sink sees it. Hosts should hand snapshots
 /// to a bounded queue if exporting them is expensive. Concurrent appends are
 /// ordered by acquisition of the ring lock; callbacks may run concurrently.
 /// The decorator reads no clock: interval decisions use record timestamps.
@@ -140,10 +141,7 @@ impl<S: TraceSink> FlightRecorderSink<S> {
         let timestamp = metadata.timestamp;
         state.records.push_back(metadata);
         let interval_elapsed = state.last_snapshot_at.is_none_or(|last| {
-            timestamp
-                .signed_duration_since(last)
-                .to_std()
-                .is_ok_and(|elapsed| elapsed >= self.settings.minimum_interval)
+            timestamp >= last && timestamp.duration_since(last) >= self.settings.minimum_interval
         });
         if !(failed || slow) || !interval_elapsed {
             return None;
@@ -185,7 +183,6 @@ impl FlightRecorderRecord {
             session_id: record.context.session_id.clone(),
             turn_id: record.context.turn_id.clone(),
             graph_node_id: record.context.graph_node_id.clone(),
-            parent_graph_node_id: record.context.parent_graph_node_id.clone(),
             effect_id: record.context.effect_id.clone(),
             llm_call_id: record.context.llm_call_id.clone(),
             tool_call_id: None,
@@ -246,12 +243,11 @@ fn operation_duration(record: &TraceRecord) -> Option<Duration> {
         TraceEvent::PromptCompositionFailed { elapsed_ms, .. } => {
             Some(Duration::from_millis(*elapsed_ms))
         }
-        TraceEvent::DomainCompleted { completion } => {
-            let ended = u64::try_from(record.timestamp.timestamp_millis()).ok()?;
-            ended
-                .checked_sub(completion.started_at_ms)
-                .map(Duration::from_millis)
-        }
+        TraceEvent::DomainCompleted { completion } => record
+            .timestamp
+            .unix_ms()
+            .checked_sub(completion.started_at_ms)
+            .map(Duration::from_millis),
         TraceEvent::LlmAttemptCompleted { observation, .. } => observation
             .ended_at_ms?
             .checked_sub(observation.started_at_ms?)
@@ -276,7 +272,7 @@ fn operation_outcome(event: &TraceEvent) -> Option<FlightRecorderOutcome> {
         TraceEvent::ToolCallCompleted { output, .. } => Some(match output.status() {
             TraceToolCallStatus::Success => Outcome::Completed,
             TraceToolCallStatus::Failure => Outcome::Failed,
-            TraceToolCallStatus::Cancelled => Outcome::Cancelled,
+            TraceToolCallStatus::Cancelled | TraceToolCallStatus::Discarded => Outcome::Cancelled,
         }),
         TraceEvent::DomainCompleted { completion } => Some(match completion.status {
             TraceDomainStatus::Completed => Outcome::Completed,

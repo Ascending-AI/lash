@@ -35,7 +35,7 @@ struct Counts {
 }
 
 pub struct HostTelemetry {
-    tracer: SdkTracerProvider,
+    tracer: lash::tracing::LashTracerProvider,
     meter: SdkMeterProvider,
     counts: Arc<Counts>,
 }
@@ -77,10 +77,11 @@ impl HostTelemetry {
             )
             .build();
         Ok(Self {
-            tracer: SdkTracerProvider::builder()
-                .with_sampler(Sampler::AlwaysOn)
-                .with_span_processor(processor)
-                .build(),
+            tracer: lash::tracing::LashTracerProvider::new(
+                SdkTracerProvider::builder().with_span_processor(processor),
+                Sampler::AlwaysOn,
+                opentelemetry_sdk::trace::RandomIdGenerator::default(),
+            ),
             meter: SdkMeterProvider::builder().build(),
             counts,
         })

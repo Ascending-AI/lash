@@ -179,10 +179,23 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
             attempts.len() == 1,
             "actual provider execution missing or repeated in the trace for {session}"
         );
+        // The attempt is an event of its call's `chat` span: the call's
+        // closing record is what the exporter delivers.
+        let closed: Vec<_> = records
+            .iter()
+            .filter(|record| {
+                record.context.llm_call_id == attempts[0].context.llm_call_id
+                    && matches!(
+                        record.event,
+                        lash::tracing::TraceEvent::LlmCallCompleted { .. }
+                    )
+            })
+            .collect();
+        ensure!(closed.len() == 1, "the call closed once for {session}");
         let exported: Vec<_> = collector
             .spans
             .iter()
-            .filter(|span| span.attribute("lash.record.id") == Some(attempts[0].id.as_str()))
+            .filter(|span| span.attribute("lash.record.id") == Some(closed[0].id.as_str()))
             .collect();
         ensure!(
             exported.len() == usize::from(session != "otlp-disconnected"),
@@ -190,8 +203,8 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
         );
         if let Some(span) = exported.first() {
             ensure!(
-                span.integer("lash.model.attempt.ordinal") == Some(1),
-                "actual attempt ordinal missing"
+                span.integer("lash.model.attempts") == Some(1),
+                "the call's one attempt missing"
             );
             ensure!(
                 span.integer("gen_ai.usage.input_tokens") == Some(7)

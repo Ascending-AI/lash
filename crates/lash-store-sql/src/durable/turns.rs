@@ -66,14 +66,6 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2 AND phase = 'model' AND answer_ref IS NULL
              RETURNING run";
 
-        /// Record that run `?2` of session `?1` exported its admission's
-        /// trace admission, at epoch `?3`. No row when the run has no phase
-        /// row.
-        trace_exported = "UPDATE turn_phases
-             SET trace_exported = TRUE, written_epoch = ?3
-             WHERE session_id = ?1 AND run = ?2
-             RETURNING run";
-
         /// End unfinished run `?2` of session `?1` with cause `?4`, whose kind
         /// is `?3`, and head revision `?5` at `?6`, on the session's
         /// published head as its window (FIG-5931): the head's revision,
@@ -167,7 +159,7 @@ crate::statements! {
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.trace_exported, p.working_execution_ref, p.answer_ref
+                    p.working_execution_ref, p.answer_ref
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL

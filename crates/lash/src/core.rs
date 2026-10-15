@@ -714,7 +714,7 @@ pub struct LashCoreBuilder {
     delivery_fetch_horizon: crate::attachments::DeliveryFetchHorizon,
     // Core fields applied over the config the backend's ports assemble.
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
-    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+    trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
     trace_level: Option<lash_trace::TraceLevel>,
@@ -722,7 +722,6 @@ pub struct LashCoreBuilder {
     trace_limits: Option<crate::tracing::TraceLimits>,
     observation_work_limits: crate::tracing::ObservationWorkLimits,
     data_limits: crate::RuntimeDataLimits,
-    trace_context: Option<lash_trace::TraceContext>,
     execution_budgets: Option<lash_core::ExecutionBudgets>,
     delta_coalescing: Option<crate::DeltaCoalescing>,
     /// Each builder tool provider under its declared key: the plugin it is
@@ -790,7 +789,7 @@ impl LashCoreBuilder {
             provider_file_cache: Default::default(),
             delivery_fetch_horizon: Default::default(),
             trace_runtime: None,
-            trace_sink: None,
+            trace_sinks: Vec::new(),
             #[cfg(feature = "otel-trace")]
             telemetry: None,
             trace_level: None,
@@ -798,7 +797,6 @@ impl LashCoreBuilder {
             trace_limits: None,
             observation_work_limits: Default::default(),
             data_limits: crate::RuntimeDataLimits::standard(),
-            trace_context: None,
             execution_budgets: None,
             delta_coalescing: None,
             tool_providers: Vec::new(),
@@ -1004,20 +1002,22 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Installs the runtime's single admission, projection and metrics adapter.
-    /// Replaces the previously configured adapter.
+    /// Installs the runtime's OpenTelemetry adapter: the identity that
+    /// decides each trace at its producer, a sink beside the others, and
+    /// the metrics. Replaces the previously configured adapter.
     #[cfg(feature = "otel-trace")]
     pub fn telemetry(mut self, telemetry: lash_trace::otel::OtelTelemetry) -> Self {
         self.telemetry = Some(telemetry);
         self
     }
 
-    /// Set the record sink, replacing any sink configured through this builder.
+    /// Add a record sink beside the sinks configured already: each sees
+    /// every record, under its own panic containment.
     ///
     /// Lash ships no trace writer: a host that wants records in a file or on a console
     /// implements [`TraceSink`](lash_trace::TraceSink) itself.
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
-        self.trace_sink = Some(trace_sink);
+        self.trace_sinks.push(trace_sink);
         self
     }
 
@@ -1054,11 +1054,6 @@ impl LashCoreBuilder {
         limits: crate::tracing::ObservationWorkLimits,
     ) -> Self {
         self.observation_work_limits = limits;
-        self
-    }
-
-    pub fn trace_context(mut self, trace_context: lash_trace::TraceContext) -> Self {
-        self.trace_context = Some(trace_context);
         self
     }
 
@@ -1263,16 +1258,9 @@ impl LashCoreBuilder {
                 core.observation_work_limits,
             ),
         );
-        let observation_sink: Arc<dyn lash_trace::TraceSink> =
-            language_observation_publisher.clone();
-        let observation_sink = match core.tracing.emitter().product_observer() {
-            Some(configured) => Arc::new(lash_trace::TeeTraceSink::new([
-                Arc::clone(configured),
-                observation_sink,
-            ])) as Arc<dyn lash_trace::TraceSink>,
-            None => observation_sink,
-        };
-        let core = core.with_process_observation_sink(observation_sink);
+        // Product observers are additive: the language publisher observes
+        // beside any the host configured.
+        let core = core.with_process_observation_sink(language_observation_publisher.clone());
         // Appends through this core tick the other nodes' process change
         // hubs, and theirs tick this core's, through the backend's node hints.
         let watched = lash_core::runtime::watch_process_registry(backend.process_registry());

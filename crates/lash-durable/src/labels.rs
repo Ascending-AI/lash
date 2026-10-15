@@ -76,10 +76,6 @@ impl CommitLabel {
     /// `round.start`: A retried member's or process step's next attempt
     /// started, before its body runs.
     pub const ROUND_START: Self = Self::new("round.start");
-    /// `round.traced`: The round's decision that the trace admissions its
-    /// admission retained are exported, by the owner that exported them:
-    /// it discharges the export the admission owes (FIG-5452).
-    pub const ROUND_TRACED: Self = Self::new("round.traced");
     /// `tool.effect`: The store-local effects of a call that no round
     /// member runs (a code cell's), committed when the call ends.
     pub const TOOL_EFFECT: Self = Self::new("tool.effect");
@@ -175,7 +171,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 48] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -199,7 +195,6 @@ impl CommitLabel {
         Self::ROUND_OUTCOME,
         Self::ROUND_RETRY,
         Self::ROUND_START,
-        Self::ROUND_TRACED,
         Self::TOOL_EFFECT,
         Self::WAIT_MINT,
         Self::WAIT_RESOLVE,

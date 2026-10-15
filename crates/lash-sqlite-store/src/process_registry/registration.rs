@@ -30,10 +30,9 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
     async fn commit_process_registration(
         &self,
         prepared: lash_core_execution::PreparedProcessRegistration,
-        anchor: lash_core_execution::TraceAnchor,
     ) -> Result<lash_core_execution::ProcessRegistrationReceipt, lash_core_execution::PluginError>
     {
-        let (registration, observers, process_id, retained, now) = prepared.into_commit(anchor);
+        let (registration, observers, process_id, retained, now) = prepared.into_commit();
         self.conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();

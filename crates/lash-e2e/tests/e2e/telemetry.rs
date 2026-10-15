@@ -103,8 +103,8 @@ case!(
 /// spans it dropped, the Run still completes, and once it is back the
 /// shutdown drains the rest, acknowledged. Resume, the node is killed while
 /// the second attempt runs and another node finishes the turn. Either way
-/// the logical send, its admission and the tool call's admission export
-/// once, a model attempt span
+/// the logical send, its turn and the tool call export once, a model call
+/// span
 /// exists only for a body that ran its model call, every span is delivered
 /// at most once, and the spans of both nodes name the one session and turn.
 async fn s34(case: &mut Case) -> Result<()> {
@@ -198,9 +198,8 @@ async fn s34(case: &mut Case) -> Result<()> {
         .count();
     match case.leg {
         Leg::Live => {
-            // Seven spans in all: the send, its admission, the tool call's
-            // admission, two model calls of the turn and one of each tool
-            // body that ran.
+            // Seven spans in all: the send, the turn, the tool call, two
+            // model calls of the turn and one of each tool body that ran.
             let attempted = receipts[0]["attempted_spans"].as_u64().unwrap_or_default();
             let dropped = receipts[0]["dropped_spans"].as_u64().unwrap_or_default();
             ensure!(
@@ -210,24 +209,24 @@ async fn s34(case: &mut Case) -> Result<()> {
         }
         Leg::Resume => {
             ensure!(
-                named("lash.send") == 1 && named("lash.turn.admitted") == 1,
-                "the logical send and admission did not export once: {summaries:?}"
+                named("lash.send") == 1 && named("invoke_agent") == 1,
+                "the logical send and turn did not export once: {summaries:?}"
             );
             ensure!(
-                named("lash.tool.admitted") == 1,
-                "the one tool call's admission exported {} times across the handover: {summaries:?}",
-                named("lash.tool.admitted")
+                named("execute_tool s34_retry") == 1,
+                "the one tool call closed {} times across the handover: {summaries:?}",
+                named("execute_tool s34_retry")
             );
             ensure!(
                 chats == 4,
                 "{chats} model attempt spans, not one per model call that ran: {summaries:?}"
             );
-            // The handover keeps the turn's trace: every model attempt of
-            // either node hangs in the one admitted scope's trace.
+            // The handover keeps the turn's trace: every model call of
+            // either node hangs in the one turn's trace.
             let admitted = summaries
                 .iter()
-                .find(|span| span["name"] == "lash.turn.admitted")
-                .context("no admission span")?;
+                .find(|span| span["name"] == "invoke_agent")
+                .context("no turn span")?;
             ensure!(
                 summaries
                     .iter()

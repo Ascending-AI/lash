@@ -842,7 +842,7 @@ async fn declared_start_retention_hold_blocks_prune_until_consumed(tier: Tier) {
         1,
         Fault::CommitThenAbort,
     );
-    let ((child, held), violations, spawn) = run_cut(spawn, script, async |backend| {
+    let ((child, held), violations, spawn) = Box::pin(run_cut(spawn, script, async |backend| {
         let children = registered(backend).await;
         assert_eq!(children.len(), 1, "one child: {children:#?}");
         assert!(
@@ -850,7 +850,7 @@ async fn declared_start_retention_hold_blocks_prune_until_consumed(tier: Tier) {
             "the cut left the child ended: {children:#?}"
         );
         (children[0].id.clone(), prunable(backend).await)
-    })
+    }))
     .await;
     assert!(violations.is_empty(), "{violations:#?}");
     assert!(

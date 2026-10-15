@@ -81,7 +81,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     pub(crate) fn issued_under(
         mut self,
         frontier: crate::trace::JournalFrontier,
-        attempt: Option<lash_trace::AttemptObservation>,
+        attempt: Option<lash_trace::TraceAttemptLink>,
         scope: Option<lash_trace::DurableTraceScope>,
     ) -> Self {
         self.issued = crate::trace::StepIssue::new(frontier, attempt, scope);

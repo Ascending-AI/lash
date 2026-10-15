@@ -545,8 +545,8 @@ async fn provider_spans_are_children_of_the_turn_span() -> Result<()> {
 
 /// One call of `tool_name` with `input_json` writes exactly one ordered
 /// `tool_call_started`/`tool_call_completed` record pair and one ordered
-/// activity pair, both keyed by the call, the completion nested under the
-/// turn as `tool:<lash call id>`.
+/// activity pair, both keyed by the call, the completion closing the
+/// call's span.
 async fn assert_standard_tool_lifecycle(
     call_id: &str,
     tool_name: &str,
@@ -661,8 +661,17 @@ async fn assert_standard_tool_lifecycle(
         "Started must precede Completed: {entries:?}"
     );
     assert_eq!(
-        completions[0].1["context"]["graph_node_id"].as_str(),
-        Some(format!("tool:{lash_call_id}").as_str())
+        completions[0].1["context"]["call_id"].as_str(),
+        Some(lash_call_id.to_string().as_str())
+    );
+    assert_eq!(
+        (
+            completions[0].1["position"]["kind"].as_str(),
+            completions[0].1["position"]["role"].as_str()
+        ),
+        (Some("tool"), Some("closes")),
+        "the completion closes the call's span: {:?}",
+        completions[0].1
     );
     traced.core.shutdown().await?;
     Ok(())
@@ -1259,10 +1268,12 @@ async fn standard_runtime_trace_records_failed_llm_calls() -> Result<()> {
 
 // ---- the tree across nodes ----------------------------------------------
 
-/// The span tree a run's records build: each record's type and the
-/// `(graph_node_id, parent_graph_node_id)` edge a consumer nests it by, with
-/// the record's identity last.
-fn span_tree(entries: &[serde_json::Value]) -> Vec<[String; 4]> {
+/// The span tree a run's records build: each record's type, the kind and
+/// role of the span its position names, and the kind of that span's parent
+/// among the run's spans (`root` for the producer's, which no record of the
+/// run names), with the record's identity last. Span ids are left out: a
+/// model call's is random per real execution, and the producer's per send.
+fn span_tree(entries: &[serde_json::Value]) -> Vec<[String; 5]> {
     let field = |entry: &serde_json::Value, pointer: &str| {
         entry
             .pointer(pointer)
@@ -1270,6 +1281,22 @@ fn span_tree(entries: &[serde_json::Value]) -> Vec<[String; 4]> {
             .unwrap_or_default()
             .to_owned()
     };
+    let span_id = |entry: &serde_json::Value, pointer: &str| {
+        field(entry, pointer)
+            .split('-')
+            .nth(2)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let kinds = entries
+        .iter()
+        .map(|entry| {
+            (
+                span_id(entry, "/position/span/traceparent"),
+                field(entry, "/position/kind"),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
     let mut tree = entries
         .iter()
         .filter(|entry| {
@@ -1279,10 +1306,15 @@ fn span_tree(entries: &[serde_json::Value]) -> Vec<[String; 4]> {
                 .any(|prefix| kind.starts_with(prefix))
         })
         .map(|entry| {
+            let parent = span_id(entry, "/position/parent/traceparent");
             [
                 field(entry, "/type"),
-                field(entry, "/context/graph_node_id"),
-                field(entry, "/context/parent_graph_node_id"),
+                field(entry, "/position/kind"),
+                field(entry, "/position/role"),
+                kinds
+                    .get(&parent)
+                    .cloned()
+                    .unwrap_or_else(|| "root".to_owned()),
                 field(entry, "/id"),
             ]
         })
@@ -1372,7 +1404,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let (key, _) = published.recv().await.expect("the call publishes its key");
     node_a.core.shutdown().await?;
     drop(parked);
-    let before = span_tree(&node_a.entries());
+    let before = node_a.entries();
 
     let (keys, _) = tokio::sync::mpsc::unbounded_channel();
     let node_b = Traced::over(
@@ -1400,13 +1432,17 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
         .output()
         .await?;
     assert!(completed(&output), "{:?}", output.result.outcome);
-    let mut cut_tree = before;
-    cut_tree.extend(span_tree(&node_b.entries()));
-    cut_tree.sort();
+    // The trees of both nodes' records together: node B's records name
+    // spans node A's opened.
+    let mut entries = before;
+    entries.extend(node_b.entries());
+    let cut_tree = span_tree(&entries);
     node_b.core.shutdown().await?;
-    let edges = |tree: &[[String; 4]]| {
+    let edges = |tree: &[[String; 5]]| {
         tree.iter()
-            .map(|[kind, node, parent, _]| [kind.clone(), node.clone(), parent.clone()])
+            .map(|[kind, span, role, parent, _]| {
+                [kind.clone(), span.clone(), role.clone(), parent.clone()]
+            })
             .collect::<Vec<_>>()
     };
     assert_eq!(
@@ -1417,7 +1453,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     assert_eq!(
         cut_tree
             .iter()
-            .map(|record| &record[3])
+            .map(|record| &record[4])
             .collect::<std::collections::HashSet<_>>()
             .len(),
         cut_tree.len(),
@@ -1435,17 +1471,12 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
             "the golden tree has a `{kind}` record: {golden_tree:#?}"
         );
     }
-    let turn_node = golden_tree
-        .iter()
-        .find(|record| record[0] == "turn_started")
-        .map(|record| record[1].clone())
-        .expect("the turn's span");
     for record in golden_tree
         .iter()
         .filter(|record| record[0].starts_with("tool_call_") || record[0].starts_with("llm_call_"))
     {
         assert_eq!(
-            record[2], turn_node,
+            record[3], "agent",
             "a tool or model call nests under its turn: {record:?}"
         );
     }

@@ -766,7 +766,10 @@ pub(super) fn catalog_policies(context: &RuntimeExecutionContext<'_>) -> PolicyV
 
 /// A member's committed answer as the singleton trace helpers read it,
 /// including the call's recorded intent outcomes.
-fn member_record(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolCallRecord {
+pub(super) fn member_record(
+    call: &crate::sansio::PendingToolCall,
+    output: &SettledOutput,
+) -> ToolCallRecord {
     let mut completed = completed_answer(call, output);
     super::super::attempt_coordinator::project_recorded_intent_outcomes(
         &mut completed.output,
@@ -795,14 +798,15 @@ impl RoundTools for ProductionRoundTools {
         call: &crate::sansio::PendingToolCall,
         member: &crate::runtime::actor::round::RoundMember,
         admitted_here: bool,
+        settled_here: bool,
     ) {
-        let (start, complete) = {
+        let (start, close) = {
             let mut traced = self.traced.lock_recover();
             let start = !traced.contains_key(&call.call_id);
-            let completed = traced.entry(call.call_id.clone()).or_insert(false);
-            let complete = !*completed && member.outcome().is_some();
-            *completed |= complete;
-            (start, complete)
+            let closed = traced.entry(call.call_id.clone()).or_insert(false);
+            let close = !*closed && settled_here && member.outcome().is_some();
+            *closed |= close;
+            (start, close)
         };
         // The call was admitted with its round, under the scope its member
         // carries: a successor re-folding the round traces it under that
@@ -822,7 +826,10 @@ impl RoundTools for ProductionRoundTools {
                     .adopt_tool_call_trace(&call.call_id, scope.clone());
             }
         }
-        if complete && let Some(output) = member.outcome() {
+        // Only the owner whose acknowledged commit wrote the outcome closes
+        // the call's span, at the end that commit retained (P1): a successor
+        // that folds an outcome another owner committed closes nothing.
+        if close && let Some(output) = member.outcome() {
             let record = member_record(call, output);
             let attempts = member
                 .attempts()
@@ -830,24 +837,21 @@ impl RoundTools for ProductionRoundTools {
                     crate::trace::trace_tool_attempt(ordinal, &member_record(call, output), delay)
                 })
                 .collect::<Vec<_>>();
-            self.context.trace_tool_call_completed(&record, &attempts);
+            self.context
+                .trace_tool_call_completed(&record, &attempts, member.ended_at_ms());
         }
     }
 
-    fn propose_trace(
+    fn trace_scope(
         &self,
         call: &crate::sansio::PendingToolCall,
-    ) -> Option<crate::runtime::actor::round::TraceProposal> {
+    ) -> Option<lash_trace::DurableTraceScope> {
         self.context
-            .propose_tool_trace(&call.call_id, self.context.dispatch().clock.timestamp_ms())
+            .tool_trace_scope(&call.call_id, self.context.dispatch().clock.timestamp_ms())
             .unwrap_or_else(|error| {
                 self.context.record_nested_effect_error(error);
                 None
             })
-    }
-
-    fn export_admitted(&self, scope: &lash_trace::DurableTraceScope) {
-        self.context.export_tool_trace_admission(scope);
     }
 
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {

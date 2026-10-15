@@ -10,7 +10,6 @@ pub const GEN_AI_SEMCONV_SNAPSHOT: &str = "b31e9e8ea26ac1c086d3313d474e31d7c3f39
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ownership {
-    Candidate,
     Transition,
     Live,
     Gauge,
@@ -47,7 +46,7 @@ macro_rules! attributes {
 attributes! {
     ScopeKind => ("lash.scope.kind", String),
     ScopeBoundary => ("lash.scope.boundary", Integer),
-    AdmissionOutcome => ("lash.admission.outcome", String),
+    ProducerOutcome => ("lash.producer.outcome", String),
     LinksOmitted => ("lash.links.omitted", Integer),
     RecordId => ("lash.record.id", String),
     EventType => ("lash.event.type", String),
@@ -55,7 +54,7 @@ attributes! {
     RunId => ("lash.run.id", String),
     ProcessId => ("lash.process.id", String),
     LlmCallId => ("lash.llm_call.id", String),
-    HostRunId => ("lash.context.run.id", String),
+    SendId => ("lash.send.id", String),
     HttpResponseStatusCode => ("http.response.status_code", Integer),
     SessionId => ("lash.session.id", String),
     TurnId => ("lash.turn.id", String),
@@ -72,11 +71,12 @@ attributes! {
     CacheWriteTokens => ("gen_ai.usage.cache_write.input_tokens", Integer),
     ReasoningTokens => ("lash.usage.reasoning_output_tokens", Integer),
     ModelAttemptOrdinal => ("lash.model.attempt.ordinal", Integer),
+    ModelAttempts => ("lash.model.attempts", Integer),
     ModelVariant => ("lash.request.model_variant", String),
     ResponseTextChars => ("lash.response.text_chars", Integer),
     Outcome => ("lash.outcome", String),
+    CancelOrigin => ("lash.cancel.origin", String),
     ErrorType => ("error.type", String),
-    ContextMetadata => ("lash.context.metadata", String),
     Payload => ("lash.payload.json", String),
     PayloadTruncated => ("lash.payload.truncated", Boolean),
     PayloadsTruncated => ("lash.payload.truncated_fields", Integer),
@@ -115,11 +115,6 @@ macro_rules! spans {
 }
 #[cfg(feature = "otel")]
 spans! {
-    AdmissionAttempt => ("lash.admission.attempt", Internal, Candidate),
-    TurnAdmitted => ("lash.turn.admitted", Internal, Candidate),
-    ToolAdmitted => ("lash.tool.admitted", Internal, Candidate),
-    IntentAdmitted => ("lash.tool_intent.admitted", Internal, Candidate),
-    ProcessAdmitted => ("lash.process.admitted", Internal, Candidate),
     Send => ("lash.send", Producer, Live),
     SendBatch => ("lash.send.batch", Producer, Live),
     ProcessStart => ("lash.process.start", Producer, Live),
@@ -127,7 +122,7 @@ spans! {
     PluginInvoke => ("lash.plugin.invoke", Producer, Live),
     Turn => ("invoke_agent", Internal, Transition),
     Model => ("chat", Client, Live),
-    Tool => ("execute_tool", Internal, Live),
+    Tool => ("execute_tool", Internal, Transition),
     Intent => ("lash.tool_intent", Internal, Transition),
     Process => ("lash.process", Internal, Transition),
     ExecCode => ("lash.exec_code", Internal, Live),

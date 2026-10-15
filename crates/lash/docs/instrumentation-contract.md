@@ -4,11 +4,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 
 | Span name or prefix | Kind | Ownership |
 |---|---|---|
-| `lash.admission.attempt` | Internal | Candidate |
-| `lash.turn.admitted` | Internal | Candidate |
-| `lash.tool.admitted` | Internal | Candidate |
-| `lash.tool_intent.admitted` | Internal | Candidate |
-| `lash.process.admitted` | Internal | Candidate |
 | `lash.send` | Producer | Live |
 | `lash.send.batch` | Producer | Live |
 | `lash.process.start` | Producer | Live |
@@ -16,7 +11,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.plugin.invoke` | Producer | Live |
 | `invoke_agent` | Internal | Transition |
 | `chat` | Client | Live |
-| `execute_tool` | Internal | Live |
+| `execute_tool` | Internal | Transition |
 | `lash.tool_intent` | Internal | Transition |
 | `lash.process` | Internal | Transition |
 | `lash.exec_code` | Internal | Live |
@@ -25,7 +20,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 |---|---|
 | `lash.scope.kind` | String |
 | `lash.scope.boundary` | Integer |
-| `lash.admission.outcome` | String |
+| `lash.producer.outcome` | String |
 | `lash.links.omitted` | Integer |
 | `lash.record.id` | String |
 | `lash.event.type` | String |
@@ -33,7 +28,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.run.id` | String |
 | `lash.process.id` | String |
 | `lash.llm_call.id` | String |
-| `lash.context.run.id` | String |
+| `lash.send.id` | String |
 | `http.response.status_code` | Integer |
 | `lash.session.id` | String |
 | `lash.turn.id` | String |
@@ -50,11 +45,12 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `gen_ai.usage.cache_write.input_tokens` | Integer |
 | `lash.usage.reasoning_output_tokens` | Integer |
 | `lash.model.attempt.ordinal` | Integer |
+| `lash.model.attempts` | Integer |
 | `lash.request.model_variant` | String |
 | `lash.response.text_chars` | Integer |
 | `lash.outcome` | String |
+| `lash.cancel.origin` | String |
 | `error.type` | String |
-| `lash.context.metadata` | String |
 | `lash.payload.json` | String |
 | `lash.payload.truncated` | Boolean |
 | `lash.payload.truncated_fields` | Integer |

@@ -162,6 +162,12 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::TurnStarted {
             metadata: Default::default(),
         },
+        TraceEvent::ProducerSettled {
+            producer: lash_trace::ProducerKind::Send,
+            outcome: lash_trace::ProducerOutcome::Refused {
+                error_type: "session_closed".into(),
+            },
+        },
         TraceEvent::PromptBuilt {
             prompt_hash: "h".to_string(),
             prompt_chars: 12,
@@ -671,10 +677,8 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     ))
     .expect("published trace schema");
     let context = TraceContext {
-        run_id: Some("run".to_string()),
         graph_node_id: Some("turn:s1:t1".to_string()),
         turn_index: Some(0),
-        metadata: [("k".to_string(), json!(1))].into_iter().collect(),
         ..TraceContext::default()
             .for_session("s1")
             .for_turn("t1")
@@ -793,9 +797,10 @@ fn fixture_record(
     lash_trace::TraceRecord {
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
-        timestamp: Default::default(),
+        timestamp: lash_trace::TraceTimestamp::from_unix_ms(0),
         content: lash_trace::TelemetryContent::Captured,
         context,
+        position: None,
         event,
     }
 }

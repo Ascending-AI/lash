@@ -13,23 +13,17 @@ impl OtelSpanEnricher for Enricher {
     }
 }
 
-fn install<P: otel::trace::TracerProvider, M: otel::metrics::MeterProvider>(
+fn install<M: otel::metrics::MeterProvider>(
     builder: lash::LashCoreBuilder,
-    tracer: &P,
+    tracer: &lash::tracing::LashTracerProvider,
     meter: &M,
-) -> lash::LashCoreBuilder
-where
-    P::Tracer: Send + Sync + 'static,
-    <P::Tracer as otel::trace::Tracer>::Span: Send + Sync + 'static,
-{
+) -> lash::LashCoreBuilder {
     let telemetry = OtelTelemetry::new(
         tracer,
         meter,
         OtelOptions {
-            include_context_metadata: false,
             max_payload_bytes: 256,
             enrich: Some(Arc::new(Enricher)),
-            ..OtelOptions::standard()
         },
     );
     let _: &lash::tracing::TelemetryMetrics = telemetry.metrics();

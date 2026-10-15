@@ -1383,7 +1383,7 @@ fn step_trace(
 ) {
     tracing.emit(|| {
         let context = lash_core::facade_support::trace_context_for_runtime_invocation(
-            tracing.trace_runtime().base_context().clone(),
+            lash_trace::TraceContext::default(),
             invocation,
         );
         let outcome = match failure {

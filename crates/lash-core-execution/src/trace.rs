@@ -10,7 +10,7 @@ const LASH_MODEL_FACING_COMPOSITION_DOMAIN_VERSION: &str = "lash-model-facing-co
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceRetryAttempt, TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceToolResultBlock,
-    TraceToolSpec, llm_node_id, session_node_id, tool_node_id, turn_node_id,
+    TraceToolSpec,
 };
 
 use crate::llm::types::{
@@ -38,37 +38,9 @@ pub use boundary::TraceBoundaryReceipt;
 mod composition;
 mod runtime;
 pub use runtime::{
-    JournalFrontier, LiveStep, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
+    JournalFrontier, LiveStep, OpenSpan, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
     tool_trace_scope,
 };
-
-/// Invocation-owned identity is authoritative, including absent fields; host-owned run
-/// metadata and an explicit host parent remain intact.
-fn merge_runtime_projection(base: &TraceContext, projection: TraceContext) -> TraceContext {
-    let explicit_parent = base.parent_graph_node_id.clone();
-    let projected_parent = projection.parent_graph_node_id.clone();
-    let projected_session = projection.session_id.clone();
-    let projected_turn = projection.turn_id.clone();
-    let projected_graph_node = projection.graph_node_id.clone();
-    let projected_turn_index = projection.turn_index;
-    let projected_protocol_iteration = projection.protocol_iteration;
-    let projected_effect = projection.effect_id.clone();
-    let projected_llm_call = projection.llm_call_id.clone();
-
-    let mut merged = base.clone();
-    merged.metadata.remove("replay_key");
-    merged.metadata.remove("caused_by");
-    merge_context(&mut merged, projection);
-    merged.session_id = projected_session;
-    merged.turn_id = projected_turn;
-    merged.graph_node_id = projected_graph_node;
-    merged.parent_graph_node_id = explicit_parent.or(projected_parent);
-    merged.turn_index = projected_turn_index;
-    merged.protocol_iteration = projected_protocol_iteration;
-    merged.effect_id = projected_effect;
-    merged.llm_call_id = projected_llm_call;
-    merged
-}
 
 /// Emit evidence only for store failures whose typed class means persisted
 /// state is corrupt or a monotonic durable identity cannot advance.
@@ -95,152 +67,6 @@ pub fn emit_store_error(
             },
         )
     });
-}
-
-fn merge_context(base: &mut TraceContext, overlay: TraceContext) {
-    if overlay.run_id.is_some() {
-        base.run_id = overlay.run_id;
-    }
-    if overlay.experiment_id.is_some() {
-        base.experiment_id = overlay.experiment_id;
-    }
-    if overlay.candidate_id.is_some() {
-        base.candidate_id = overlay.candidate_id;
-    }
-    if overlay.candidate_parent_id.is_some() {
-        base.candidate_parent_id = overlay.candidate_parent_id;
-    }
-    if overlay.example_id.is_some() {
-        base.example_id = overlay.example_id;
-    }
-    if overlay.split.is_some() {
-        base.split = overlay.split;
-    }
-    if overlay.session_id.is_some() {
-        base.session_id = overlay.session_id;
-    }
-    if overlay.turn_id.is_some() {
-        base.turn_id = overlay.turn_id;
-    }
-    if overlay.graph_node_id.is_some() {
-        base.graph_node_id = overlay.graph_node_id;
-    }
-    if overlay.parent_graph_node_id.is_some() {
-        base.parent_graph_node_id = overlay.parent_graph_node_id;
-    }
-    if overlay.turn_index.is_some() {
-        base.turn_index = overlay.turn_index;
-    }
-    if overlay.protocol_iteration.is_some() {
-        base.protocol_iteration = overlay.protocol_iteration;
-    }
-    if overlay.effect_id.is_some() {
-        base.effect_id = overlay.effect_id;
-    }
-    if overlay.llm_call_id.is_some() {
-        base.llm_call_id = overlay.llm_call_id;
-    }
-    base.metadata.extend(overlay.metadata);
-}
-
-/// Stamp the span identity (`graph_node_id`) and parent link
-/// (`parent_graph_node_id`) for the span this record represents, derived purely
-/// from data lash already carries (session / turn / llm / tool ids and any
-/// `caused_by` causal parent). This makes the trace stream self-describing: a
-/// consumer builds a correctly-nested span tree from `(graph_node_id,
-/// parent_graph_node_id)` with a single `id -> span` map, with no heuristic
-/// hierarchy reconstruction.
-///
-/// The tree is `session -> turn -> { llm call, tool call, … }`. A turn's parent
-/// is its causal origin (`caused_by` — e.g. the tool call in a parent session
-/// that started this child session) when one is already on the context, otherwise
-/// the session root. Records that already carry their own node identity in the
-/// payload, and host-defined custom events, are left untouched.
-fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
-    let session_node = context.session_id.as_ref().map(session_node_id);
-    let turn_node = turn_node_id(context);
-
-    match event {
-        TraceEvent::TurnStarted { .. } | TraceEvent::TurnCompleted { .. } => {
-            let parent = context.parent_graph_node_id.clone().or(session_node);
-            set_span(context, turn_node, parent);
-        }
-        TraceEvent::LlmCallStarted { .. }
-        | TraceEvent::LlmCallCompleted { .. }
-        | TraceEvent::LlmCallFailed { .. } => {
-            let self_id = context.llm_call_id.as_deref().map(llm_node_id);
-            set_span(context, self_id, turn_node);
-        }
-        TraceEvent::ToolCallStarted { call_id, .. }
-        | TraceEvent::ToolCallCompleted { call_id, .. } => {
-            set_span(context, Some(tool_node_id(call_id.as_str())), turn_node);
-        }
-        TraceEvent::ProviderEvent { .. }
-        | TraceEvent::ProviderReplayDropped { .. }
-        | TraceEvent::RuntimeStreamEvent { .. } => {
-            let parent = context
-                .llm_call_id
-                .as_deref()
-                .map(llm_node_id)
-                .or(turn_node);
-            set_span(context, None, parent);
-        }
-        TraceEvent::PromptBuilt { .. }
-        | TraceEvent::PromptCompositionFailed { .. }
-        | TraceEvent::AttachmentDegraded { .. }
-        | TraceEvent::CompositionChanged { .. }
-        | TraceEvent::CompactionNeeded { .. }
-        | TraceEvent::PromptViewAttachmentsPruned { .. }
-        | TraceEvent::EffectEnvelopeDiff { .. }
-        | TraceEvent::ProtocolStep { .. }
-        | TraceEvent::ExecCodeStarted { .. }
-        | TraceEvent::ExecCodeCompleted { .. }
-        | TraceEvent::ExecCodeFailed { .. }
-        | TraceEvent::ObservationProjection { .. }
-        | TraceEvent::StoreErrorObserved { .. } => set_span(context, None, turn_node),
-        TraceEvent::CompactionStarted { .. } | TraceEvent::CompactionCompleted { .. } => {
-            set_span(context, None, turn_node.or(session_node));
-        }
-        // Events that already carry their own node identity in the payload, and
-        // host-defined custom events, keep whatever the emitter set.
-        _ => {}
-    }
-}
-
-/// Apply a computed `(self_id, parent_id)` without clobbering identity an
-/// emitter set explicitly, and never letting a span become its own parent.
-fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Option<String>) {
-    if context.graph_node_id.is_none() {
-        context.graph_node_id = self_id;
-    }
-    if context.parent_graph_node_id.is_none()
-        && let Some(parent_id) = parent_id
-        && context.graph_node_id.as_deref() != Some(parent_id.as_str())
-    {
-        context.parent_graph_node_id = Some(parent_id);
-    }
-}
-
-/// The `Turn` / `ToolCall` arms intentionally mirror [`turn_node_id`] / [`tool_node_id`] so
-/// the cross-session parent reference resolves to a real span.
-fn causal_node_id(caused_by: &crate::CausalRef) -> String {
-    match caused_by {
-        crate::CausalRef::Turn {
-            session_id,
-            turn_id,
-        } => format!("turn:{session_id}:{turn_id}"),
-        crate::CausalRef::Effect { address } => address.graph_key(),
-        crate::CausalRef::ToolCall { call_id, .. } => format!("tool:{call_id}"),
-        crate::CausalRef::Process { process_id } => format!("process:{process_id}"),
-        crate::CausalRef::ProcessEvent {
-            process_id,
-            sequence,
-        } => format!("process:{process_id}:{sequence}"),
-        crate::CausalRef::SessionNode {
-            session_id,
-            node_id,
-        } => format!("node:{session_id}:{node_id}"),
-    }
 }
 
 pub fn trace_context_from_invocation(invocation: &crate::RuntimeInvocation) -> TraceContext {
@@ -292,37 +118,8 @@ fn trace_context_for_invocation_parts(
     context.turn_index = attribution.turn_index;
     context.protocol_iteration = attribution.protocol_iteration;
     context.effect_id = effect_id.map(str::to_string);
-    context.metadata.remove("replay_key");
-    context.metadata.remove("caused_by");
-    if let Some(replay_key) = replay_key {
-        context
-            .metadata
-            .insert("replay_key".to_string(), serde_json::json!(replay_key));
-    }
-    if let Some(caused_by) = caused_by {
-        context = trace_context_with_causal_ref(context, caused_by);
-    }
-    if context.parent_graph_node_id.is_none()
-        && let (Some(session_id), Some(turn_id)) = (
-            attribution.session_id.as_ref(),
-            attribution.turn_id.as_ref(),
-        )
-    {
-        context.parent_graph_node_id = Some(format!("turn:{session_id}:{turn_id}"));
-    }
-    context
-}
-
-pub(crate) fn trace_context_with_causal_ref(
-    mut context: TraceContext,
-    caused_by: &crate::CausalRef,
-) -> TraceContext {
-    if let Ok(value) = serde_json::to_value(caused_by) {
-        context.metadata.insert("caused_by".to_string(), value);
-    }
-    if context.parent_graph_node_id.is_none() {
-        context.parent_graph_node_id = Some(causal_node_id(caused_by));
-    }
+    context.replay_key = replay_key.map(str::to_string);
+    context.caused_by = caused_by.cloned();
     context
 }
 
@@ -636,7 +433,7 @@ mod span_identity_tests {
             }),
             cause: lash_trace::TraceCause::None,
             links: lash_trace::TraceLinks::new(),
-            anchor: lash_trace::TraceAnchor::Untraced,
+            span: None,
             started_at_ms,
         }
     }
@@ -720,58 +517,15 @@ mod span_identity_tests {
         assert!(sink.records().is_empty());
     }
 
-    fn turn_context() -> TraceContext {
-        TraceContext::default()
-            .for_session("sess")
-            .for_turn_index(0)
-            .for_turn("turn-1")
-    }
-
+    /// An effect invocation's record carries the effect's replay key and
+    /// cause as typed fields, and its own identity over any ambient one.
     #[test]
-    fn tool_span_parents_under_turn_and_matches_causal_tool_ref() {
-        let mut context = turn_context();
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::ToolCallStarted {
-                call_id: crate::ToolCallId::fixture("call_abc"),
-                provider_call_id: Some("call_abc".to_string()),
-                name: "read_file".to_string(),
-                args: serde_json::json!({}),
-                issuing_node_id: None,
-            },
-        );
-        let node = format!("tool:{}", crate::ToolCallId::fixture("call_abc"));
-        assert_eq!(context.graph_node_id.as_deref(), Some(node.as_str()));
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("turn:sess:turn-1")
-        );
-        // A child session caused_by this tool call must resolve to the same node id.
-        assert_eq!(
-            causal_node_id(&crate::CausalRef::ToolCall {
-                session_id: crate::SessionId::from("sess"),
-                call_id: crate::ToolCallId::fixture("call_abc"),
-            }),
-            node
-        );
-    }
-
-    #[test]
-    fn effect_projection_replaces_ambient_identity_but_keeps_host_metadata_and_parent() {
-        let mut base = TraceContext::default()
+    fn effect_projection_types_the_replay_key_and_cause_over_ambient_identity() {
+        let base = TraceContext::default()
             .for_session("ambient-session")
             .for_turn("ambient-turn")
             .for_turn_index(99)
             .for_protocol_iteration(42);
-        base.run_id = Some("host-run".to_string());
-        base.parent_graph_node_id = Some("host:explicit-parent".to_string());
-        base.metadata
-            .insert("host_key".to_string(), serde_json::json!("kept"));
-        base.metadata
-            .insert("caused_by".to_string(), serde_json::json!({"stale": true}));
-        base.metadata
-            .insert("replay_key".to_string(), serde_json::json!("stale"));
-
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
                 crate::ExecutionScope::process(crate::process_id_for_test("host-process")),
@@ -790,84 +544,8 @@ mod span_identity_tests {
         assert_eq!(context.turn_id, None);
         assert_eq!(context.turn_index, None);
         assert_eq!(context.protocol_iteration, None);
-        assert_eq!(context.run_id.as_deref(), Some("host-run"));
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("host:explicit-parent")
-        );
-        assert_eq!(
-            context.metadata.get("host_key"),
-            Some(&serde_json::json!("kept"))
-        );
-        assert_eq!(
-            context.metadata.get("replay_key"),
-            Some(&serde_json::json!("process-step"))
-        );
-        assert_eq!(
-            context.metadata.get("caused_by"),
-            Some(&serde_json::to_value(invocation.caused_by.as_ref().unwrap()).unwrap())
-        );
-    }
-
-    #[test]
-    fn effect_projection_uses_full_scoped_cause_before_real_turn_fallback() {
-        let parent_address = crate::EffectAddress::new(
-            crate::ExecutionScope::process(crate::process_id_for_test("parent-process")),
-            "shared-replay-key",
-        )
-        .expect("valid causal effect address");
-        let cause = crate::CausalRef::Effect {
-            address: parent_address.clone(),
-        };
-        let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::turn("child-session", "child-turn"),
-                "child-key",
-            )
-            .expect("valid child effect address"),
-            crate::RuntimeAttribution::for_turn("child-session", "child-turn", 3, 1),
-            "child-effect",
-        )
-        .with_caused_by(Some(cause));
-
-        let context = trace_context_from_effect_invocation(&invocation);
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some(parent_address.graph_key().as_str())
-        );
-
-        let turn_only = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                crate::ExecutionScope::turn("fallback-session", "fallback-turn"),
-                "fallback-key",
-            )
-            .expect("valid fallback effect address"),
-            crate::RuntimeAttribution::for_turn("fallback-session", "fallback-turn", 0, 0),
-            "fallback-effect",
-        );
-        let context = trace_context_from_effect_invocation(&turn_only);
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("turn:fallback-session:fallback-turn")
-        );
-    }
-
-    #[test]
-    fn turnless_compaction_record_parents_under_session() {
-        let mut context = TraceContext::default().for_session("compact-session");
-        assign_span_identity(
-            &mut context,
-            &TraceEvent::CompactionStarted {
-                source_messages: 3,
-                instructions_present: false,
-            },
-        );
-
-        assert_eq!(context.graph_node_id, None);
-        assert_eq!(
-            context.parent_graph_node_id.as_deref(),
-            Some("session:compact-session")
-        );
+        assert_eq!(context.replay_key.as_deref(), Some("process-step"));
+        assert_eq!(context.caused_by, invocation.caused_by);
     }
 
     #[test]
@@ -934,8 +612,15 @@ mod span_identity_tests {
             request_body: None,
             partial_response: None,
         };
+        // Unscoped, the call opens no span: its records are unpositioned.
+        let call = standing.open(lash_trace::TraceSpanKind::Model, || {
+            (
+                TraceContext::default(),
+                TraceEvent::CompactionCompleted { summary_nodes: 0 },
+            )
+        });
         crate::runtime::effect::emit_llm_trace_failed(
-            &standing,
+            call,
             TraceContext::default().for_session("llm-retry-session"),
             crate::runtime::effect::LlmTraceFailure::from(&error),
             None,
@@ -944,7 +629,7 @@ mod span_identity_tests {
         let emitted = sink
             .records()
             .into_iter()
-            .next()
+            .find(|record| matches!(record.event, TraceEvent::LlmCallFailed { .. }))
             .expect("one emitted LLM trace record");
         let TraceEvent::LlmCallFailed { attempts, .. } = emitted.event else {
             panic!("expected emitted LLM failure");

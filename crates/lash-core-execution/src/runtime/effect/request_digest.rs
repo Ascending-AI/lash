@@ -39,7 +39,7 @@ macro_rules! journaled_request {
             tool_choice: &$request.tool_choice,
             attachment_acceptance: $request.attachment_acceptance.as_ref(),
             generation: &$request.generation,
-            scope: &$request.scope,
+            scope: JournaledScope(&$request.scope),
             output_spec: &$request.output_spec,
         }
     };
@@ -114,8 +114,22 @@ struct JournaledLlmRequest<'a> {
     #[serde(skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty")]
     attachment_acceptance: &'a crate::provider::AttachmentCapabilitySnapshot,
     generation: &'a crate::GenerationOptions,
-    scope: &'a crate::LlmRequestScope,
+    scope: JournaledScope<'a>,
     output_spec: &'a Option<LlmOutputSpec>,
+}
+
+/// A request scope as the digest covers it: all of it but the trace's id of
+/// the call, which is a join key, not request configuration.
+struct JournaledScope<'a>(&'a crate::LlmRequestScope);
+
+impl Serialize for JournaledScope<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::LlmRequestScope {
+            llm_call_id: None,
+            ..self.0.clone()
+        }
+        .serialize(serializer)
+    }
 }
 
 /// How much content there is (items, or bytes for text) and its BLAKE3.
@@ -453,7 +467,7 @@ mod tests {
             lash_trace::TraceScopeOffer::new(
                 lash_trace::TraceCause::Parent(producer(id)),
                 [producer(id + 50)].into_iter().collect(),
-                lash_trace::TraceAnchor::Context(producer(id + 100)),
+                Some(producer(id + 100)),
             )
         };
         let start = |trace: lash_trace::TraceScopeOffer| {

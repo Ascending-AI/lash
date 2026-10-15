@@ -3,17 +3,22 @@
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
 Hosts install `lash::tracing::OtelTelemetry` through
-`LashCoreBuilder::telemetry`, supplying their tracer and meter providers.
-The adapter uses OpenTelemetry API 0.33. Hosts own sampling, resources,
-export, provider flush and shutdown. Lash accepts one adapter per core;
-`trace_sink` adds passive record consumers. The shared runtime also supplies
-every plugin with its clock, scope, emitter and metric instruments.
+`LashCoreBuilder::telemetry`, over a `LashTracerProvider` built with
+`LashTracerProvider::new(builder, sampler, id_fallback)` and a meter
+provider. The adapter uses OpenTelemetry SDK 0.33. Hosts own resources,
+export, provider flush and shutdown; their sampler decides once per trace,
+at the producer, and every lash span below follows that decision
+(`RecordOnly` and `Drop` both leave a trace unsampled). Lash accepts one
+adapter per core, and it is both a record sink and the runtime's span
+identity. Each `trace_sink` call adds a record consumer: every sink sees
+every record the adapter sees, with the same W3C position, and a sink that
+fails or panics affects only itself. The shared runtime also supplies every
+plugin with its clock, scope, emitter and metric instruments.
 
 The [instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
 lists the registered spans, attributes and metrics. Every trace record,
 span and operational metric lash declares has a production producer; an
-entry without one is deleted, not left registered (FIG-5658). Arbitrary
-context metadata is off by default.
+entry without one is deleted, not left registered (FIG-5658).
 
 ## Telemetry content
 
@@ -130,24 +135,24 @@ The 1.0 export baseline includes conversation, durable run, process and model-ca
 identities as span attributes, even with payload export off (FIG-5529).
 `gen_ai.conversation.id` and `lash.session.id` name the session. Scope ownership
 supplies `lash.run.id` and `lash.process.id`; record context supplies
-`lash.llm_call.id`. A physical turn's id does not imply its logical run's id.
-The free host metadata in `TraceContext::run_id` exports separately as
-`lash.context.run.id`. These identities do not enter default span names or
-metric dimensions.
+`lash.llm_call.id`, the id a provider decorator also reads from its request
+scope. A physical turn's id does not imply its logical run's id. These
+identities do not enter default span names or metric dimensions.
 
 A failed code cell exports Error status and its closed execution reason, or
 its cell failure kind when the executor returned a cell failure. A recovered
 outer turn keeps its own successful status. Tool failures export the terminal
 outcome's typed class, using the last attempt's class when the terminal payload
 has no class. Turn failures export their stop reason as `error.type`.
-Missing typed tool failure evidence exports `unknown`. Model failures retain their provider code or normalized class and,
-when present, `http.response.status_code`. Human-readable failure detail remains
+Missing typed tool failure evidence exports `unknown`. Model failures retain
+their provider code or normalized class. Human-readable failure detail remains
 subject to the payload policy.
 
 ## Required durability contract
 
-Admission retains a typed cause, its selected SDK-created anchor and the
-original start time beside business data. The first accepted write wins,
+Admission retains a typed cause and the original start time beside
+business data. The scope's span is derived from that cause and the scope's
+durable identity (`derive_span`), so every owner names the same span. The first accepted write wins,
 including an untraced admission. A retry under another context reads the
 winner. Trace provenance does not change business submission hashes,
 effect identities, tool-call identities or graph-node identities.
@@ -159,7 +164,7 @@ root. A host call that admits work opens a producer span first (`lash.send`,
 `TraceLinkMode::Link`, as a new root that links the caller, and the work it
 admits retains that producer as its parent (FIG-6298). A turn joins its head
 input's producer and links the other inputs of its batch. A child-session
-turn joins its process's anchor, and a follow-on turn joins the turn that
+turn joins its process, and a follow-on turn joins the turn that
 switched to it. An input a running turn consumes at a checkpoint is linked
 from the turn's completion and never becomes a second parent; the turn's
 checkpoint retains the delivered input's cause, so an owner that resumes
@@ -168,10 +173,14 @@ completion resolves a wait. A current execution attempt is an optional
 link, supplied through the engine interface; it never replaces the retained
 parent.
 
-A durable scope has a short admission span. Its logical completion creates
-a new span under that retained anchor, using retained start and terminal
-times. Children and the completion span are siblings under the admission
-anchor. No SDK span or event buffer stays open across suspension.
+Lash mints every span id. A container (a turn, a tool call, a process, a
+tool intent) takes its derived span; a leaf (a model call) takes a random id
+from the identity's id generator when it opens; a producer takes ids from
+the same generator and the host sampler's decision. Every record carries
+its `TracePosition`: its span, parent, links, role and kind. A container's
+children name it as their parent from its start, and the container is built
+once, from its closing record, at its retained start and end. No SDK span or
+event buffer stays open across suspension.
 
 Only a newly committed lifecycle transition emits a logical completion.
 Only an executed body emits a live attempt observation. Loading a committed
@@ -181,61 +190,37 @@ on replay, without exporting another lifecycle observation. The
 [process observation guide](../observing-processes.md) explains the durable
 facts, node execution telemetry and host persistence needed to replay a path.
 
-An admission's export is an obligation of the durable admission that
-retains its scope (FIG-5395): a turn's `turn.admit`, a round's `model.done`,
-a cell's admission of its call. Its candidate is selected once that commit
-lands, and deferred to the adapter when the commit's acknowledgement was
-lost. An owner that dies or loses the acknowledgement first leaves the
-export owed, and the next reader of the retained admission reconciles it
-through `TraceScopeFactory::export_admitted`: the owner that holds a turn
-still admitted, a round or a cell's admission of its calls, whose exports
-are not recorded. The adapter dedupes the
-admission's identity, its anchor, and a reconcile selects a deferred
-candidate of that anchor. The SDK mints every span id, so an adapter that no
-longer holds the candidate exports the admission as a span under the
-anchor, which names its identity. Each admission is therefore exported once
-per adapter, and at least once under one identity across owners.
+A container closes exactly once: on the owner whose acknowledged commit
+wrote its terminal, after that acknowledgement, from retained times (P1).
+A turn closes on the owner of `turn.commit`, a cancel, a session close's
+cancel or a refusal end. A tool call closes on the owner whose commit
+retained the member's outcome, at the `ended_at_ms` that commit retained:
+an owner that takes a round over closes only the members whose outcomes
+its own commits write. A member a turn's terminal settles `Cancelled` (a
+cancel or a refusal of a turn whose round no live owner settled) closes
+on that terminal's owner, `cancelled`; one a session close's cancel leaves
+with no outcome closes there, `discarded`. A process closes on the owner of
+`process.terminal`, and a tool intent on the submission that first retains
+its settlement. A successor that folds a committed terminal, a resend, a
+redrive and a reader of a retained terminal close nothing. Tracing adds no
+commit: there is no admission export to record.
 
-An adapter's dedupe lives in its process, so an obligation is discharged
-durably by the owner that exported it (FIG-5452, FIG-5457):
-
-- A turn's admission defers its candidate to the adapter and records
-  nothing. The turn's next commit that advances or ends it (its first
-  `model.start`, or a refusal, cancel or close that ends it first)
-  reconciles the export immediately before it is submitted, and a
-  `model.start` carries the record on the turn's phase row. The owner that
-  admitted the turn and one that took it over take the same path. An owner
-  lost before that commit exported nothing; one lost between the export and
-  the commit's acknowledgement leaves at most one more export, a window
-  one commit long with no host code in it. The admission span keeps its
-  start and ends when it was deferred (FIG-5998).
-- A round's owner records the decision `round.traced` once its calls'
-  candidates are selected, before any body runs. An owner that resumes the
-  round without that record reconciles the exports and then records it.
-- A cell's owner exports its admission's calls (selecting the candidates
-  it proposed, reconciling another owner's) and records the same
-  `round.traced` decision on the admission's run before any of their
-  bodies runs.
-
-A node that takes a turn, a round or a cell over after its exports are
-recorded exports none of those admissions again. Only a node lost between
-the export and its record leaves an admission to be exported twice.
-
-Every other export is best effort. A crash after commit and before emission
-can lose an observation. A body that exports before its result commits can
+Publication is at most once. An owner that loses the acknowledgement, or
+its life, between a terminal commit and the container's publication loses
+that container, and its published children keep a parent id with no span.
+A crash after commit and before emission can lose an observation. A body that exports before its result commits can
 execute again and export a distinct attempt. There is no telemetry outbox.
 Trace delivery does not decide control flow or billing.
 
 ## Integration status
 
-Production admission proposes an SDK candidate and retains the selected
-anchor before it dispatches children. Model attempts report the provider's
-actual responses. Each logical record is emitted by the owner whose commit
+Production admission retains its scope, and with it its span, before it
+dispatches children. Model attempts report the provider's actual responses. Each logical record is emitted by the owner whose commit
 was acknowledged, which is the record's first-writer receipt:
 
 | Record | Span or metric | Producer | Time |
 | --- | --- | --- | --- |
-| `turn_started` | none (`lash.turn.admitted` is the admission) | the session actor, after `turn.admit` | the scope's retained start |
+| `turn_started` | opens `invoke_agent` (a live hint; the span is built from its close) | the session actor, after `turn.admit` | the scope's retained start |
 | `turn_completed` | `invoke_agent` | the session actor, after the commit that writes the turn's terminal (`turn.commit`, a refusal, a cancel, a session close) | the owner's clock at the acknowledgement |
 | `domain_completed` (process) | `lash.process` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
 | `domain_completed` (tool intent) | `lash.tool_intent`, `lash.tool_intent.executed`, `lash.tool_intent.refused` | the host ingress, after the ledger retains the settlement | the settlement's retained time |
@@ -244,9 +229,9 @@ was acknowledged, which is the record's first-writer receipt:
 An owner that dies between its commit and the emission loses that record:
 there is no telemetry outbox. The next owner finds the terminal already
 written and emits nothing, so a resend, a redrive or a takeover never
-exports a second logical completion. A terminal no operator caused through
-the turn (an operator cancel, a fork, a deleted session, applied commands)
-writes no `turn_completed`.
+exports a second logical completion. Every cause that ends an admitted
+turn, an operator's cancel and a fork included, writes its `turn_completed`;
+a deleted session's read answer and a command run end no admitted turn.
 
 Lash emits no wait, timer, tool-receipt or journaled-effect record, and no
 run or process-segment span. A wait is not the unit an operator acts on:
@@ -265,11 +250,12 @@ A tool call runs in memory inside the admitted execution that makes it
 durable (ADR 0132 §5), and nothing replays it. Its trace scope is
 retained by that admission, so the call is admitted once however many
 attempts or owners run it. Its start and completion are live observations
-under that scope: each execution that reaches the call observes it once,
-and `execute_tool` is a live span. No store receipt grants tool transitions.
+under that scope: each execution that reaches the call observes its start,
+and its `execute_tool` span closes once, on the owner whose commit retained
+its outcome.
 
-A host-submitted tool intent proposes its admission candidate at the
-ingress and retains the selected anchor on its ledger row. The submission
+A host-submitted tool intent retains its scope on its ledger row, under
+its submission's producer. The submission
 that first retains the settlement exports `lash.tool_intent` and counts the
 outcome; a redelivery of the key finds the settlement and exports nothing.
 

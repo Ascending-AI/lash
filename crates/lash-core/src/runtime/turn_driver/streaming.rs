@@ -220,20 +220,24 @@ impl RuntimeTurnDriver<'_> {
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
         let request_model = request.model.wire_model().to_string();
-        let trace_enabled = self.trace.is_observed();
-        let llm_call_id = trace_enabled.then(|| self.llm_call_id(protocol_iteration, &invocation));
-        if let Some(llm_call_id) = llm_call_id.as_ref() {
+        // The call's id names it on the dispatched request's scope and on
+        // its trace records alike, whether or not anything observes it.
+        let llm_call_id = self.llm_call_id(protocol_iteration, &invocation);
+        // The call is a leaf span: opened now, under the turn, with a random
+        // id; its attempts and provider events are its events.
+        let call = self.trace.is_observed().then(|| {
             crate::runtime::effect::emit_llm_trace_started(
                 &self.trace,
                 crate::trace::trace_context_from_invocation(&invocation)
                     .for_llm_call(llm_call_id.clone()),
                 &request,
-            );
-        }
+            )
+        });
         let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
         let mut debug = LlmStreamDebugState::new(self.host.core.clock.now());
-        let provider_trace =
-            self.provider_trace_sender(protocol_iteration, llm_call_id.clone(), &debug);
+        let provider_trace = call.as_ref().and_then(|call| {
+            self.provider_trace_sender(call.standing(), protocol_iteration, &llm_call_id, &debug)
+        });
         // The request attributes and traces the call and carries this
         // attempt's live senders into its sideband; what is sent is the
         // admitted template, read under the admitted response context.
@@ -248,11 +252,15 @@ impl RuntimeTurnDriver<'_> {
         // one: a replay, which never runs this body, must make the same next
         // call as the live pass.
         let mut call_provider = provider;
-        let completion_sideband = self.trace.provider_attempts(
-            crate::provider::prepare_completion(&call_provider, &mut llm_request),
-            crate::trace::trace_context_from_invocation(&invocation)
-                .for_llm_call(llm_call_id.clone().unwrap_or_default()),
-        );
+        let prepared = crate::provider::prepare_completion(&call_provider, &mut llm_request);
+        let completion_sideband = match &call {
+            Some(call) => call.standing().provider_attempts(
+                prepared,
+                crate::trace::trace_context_from_invocation(&invocation)
+                    .for_llm_call(llm_call_id.clone()),
+            ),
+            None => prepared,
+        };
         let task_sideband = completion_sideband.clone();
         let charge_safety = self.policy.charge_safety.clone();
         let bounds = crate::provider::ModelCallBounds {
@@ -265,10 +273,11 @@ impl RuntimeTurnDriver<'_> {
         // the synthetic one of a cancellation included.
         let trace = self.trace.clone();
         let template = Arc::clone(&admitted.template);
-        let context = admitted.response.clone().with_senders(
+        let mut context = admitted.response.clone().with_senders(
             llm_request.stream_events.take(),
             llm_request.provider_trace.take(),
         );
+        context.scope.llm_call_id = Some(llm_call_id.clone());
         let deliveries: Arc<dyn crate::provider::SlotDeliveries> =
             self.host.core.durability.attachment_store.clone();
         let mut llm_task = crate::task::spawn(async move {
@@ -739,12 +748,12 @@ impl RuntimeTurnDriver<'_> {
         capsule.chunks = stream_chunks;
         capsule.finish = assistant_stream_finish_reason(&result, abort_requested);
 
-        if let Some(llm_call_id) = llm_call_id {
+        if let Some(call) = call {
             let stream_summary = debug.summary.to_json();
             match &result {
                 Ok(response) => {
                     crate::runtime::effect::emit_llm_trace_completed(
-                        &self.trace,
+                        call,
                         crate::trace::trace_context_from_invocation(&invocation)
                             .for_llm_call(llm_call_id),
                         response,
@@ -756,7 +765,7 @@ impl RuntimeTurnDriver<'_> {
                 }
                 Err(error) => {
                     crate::runtime::effect::emit_llm_trace_failed(
-                        &self.trace,
+                        call,
                         crate::trace::trace_context_from_invocation(&invocation)
                             .for_llm_call(llm_call_id),
                         crate::runtime::effect::LlmTraceFailure::from(error),
@@ -906,18 +915,21 @@ impl RuntimeTurnDriver<'_> {
         });
     }
 
+    /// The sender of the call's provider events, each an event of the call
+    /// `call` stands in: `None` unless the trace is extended.
     fn provider_trace_sender(
         &self,
+        call: &crate::trace::TraceStanding,
         protocol_iteration: usize,
-        llm_call_id: Option<String>,
+        llm_call_id: &str,
         debug: &LlmStreamDebugState,
     ) -> Option<LlmProviderTraceSender> {
-        if !self.trace.level().is_extended() || !self.trace.is_observed() {
+        if !call.level().is_extended() || !call.is_observed() {
             return None;
         }
 
-        let llm_call_id = llm_call_id?;
-        let trace = self.trace.clone();
+        let llm_call_id = llm_call_id.to_owned();
+        let trace = call.clone();
         let context = self.trace_context(protocol_iteration);
         let clock = Arc::clone(&self.host.core.clock);
         let created_at = debug.created_at;

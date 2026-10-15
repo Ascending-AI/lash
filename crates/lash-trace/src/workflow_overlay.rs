@@ -157,7 +157,7 @@ impl Incoming {
         Some(Self {
             execution,
             observation: Observation {
-                timestamp: record.timestamp,
+                timestamp: record.timestamp.to_chrono(),
                 fact,
             },
         })

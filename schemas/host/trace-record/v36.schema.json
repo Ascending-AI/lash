@@ -115,6 +115,135 @@
       ],
       "type": "string"
     },
+    "CausalRef": {
+      "description": "Stable semantic reference to the runtime fact that caused another fact.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/EffectAddress"
+            },
+            "type": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "address"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "process_event",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id",
+            "sequence"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "session_node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "node_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "CellDefect": {
       "description": "A rule of a session's cells that a cell's program broke.",
       "oneOf": [
@@ -930,6 +1059,36 @@
       ],
       "type": "object"
     },
+    "ProducerKind": {
+      "description": "The host call a producer span stands for.",
+      "oneOf": [
+        {
+          "const": "send",
+          "description": "A send of one input.",
+          "type": "string"
+        },
+        {
+          "const": "send_batch",
+          "description": "A batch send.",
+          "type": "string"
+        },
+        {
+          "const": "process_start",
+          "description": "A host process start.",
+          "type": "string"
+        },
+        {
+          "const": "tool_intent_submit",
+          "description": "A host tool-intent submission.",
+          "type": "string"
+        },
+        {
+          "const": "plugin_invoke",
+          "description": "A plugin operation invoked through the host admin surface.",
+          "type": "string"
+        }
+      ]
+    },
     "ProtocolPosition": {
       "enum": [
         "no_response",
@@ -1362,6 +1521,36 @@
         }
       ]
     },
+    "RuntimeOwner": {
+      "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "session": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "process": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "process"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "SchemaAdmissionError": {
       "oneOf": [
         {
@@ -1442,6 +1631,31 @@
         "unit"
       ],
       "type": "object"
+    },
+    "SpanRole": {
+      "description": "What a record is to the span it names.",
+      "oneOf": [
+        {
+          "const": "opens",
+          "description": "A live hint that the span started. Its span may never close if its\nexecution dies first.",
+          "type": "string"
+        },
+        {
+          "const": "closes",
+          "description": "The span's one closing record, published under the closure rules: it\ncarries the span's exported start and end.",
+          "type": "string"
+        },
+        {
+          "const": "whole",
+          "description": "A span opened and closed by this one record.",
+          "type": "string"
+        },
+        {
+          "const": "event",
+          "description": "A live record inside the span.",
+          "type": "string"
+        }
+      ]
     },
     "SpawnIdentity": {
       "additionalProperties": false,
@@ -1816,6 +2030,44 @@
       ],
       "type": "string"
     },
+    "ToolIntentIdentity": {
+      "properties": {
+        "execution_scope_id": {
+          "description": "The enclosing execution-scope id: a turn id for turn scope and a\nprocess id for process scope.",
+          "type": "string"
+        },
+        "intent_index": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "minting_emission_replay_key": {
+          "description": "Replay key of the durable invocation that minted this declaration,\nretained so `replay_key` stays re-derivable from the record alone.\n`None` for host-submitted intents, whose identity binds no emission.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/RuntimeOwner",
+          "description": "The runtime whose authority declared the intent: a session, or a\nprocess runtime."
+        },
+        "replay_key": {
+          "type": "string"
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "execution_scope_id",
+        "tool_call_id",
+        "intent_index",
+        "replay_key"
+      ],
+      "type": "object"
+    },
     "ToolIntentKind": {
       "description": "Literal command kind of one recorded declaration.\n\nGenerated from [`tool_intent_variants!`]; never hand-edited.",
       "enum": [
@@ -1870,6 +2122,31 @@
       ],
       "type": "object"
     },
+    "TraceAttemptLink": {
+      "additionalProperties": false,
+      "description": "The durable-substrate attempt a handler is executing under, as that\nsubstrate's transport delivered it.\n\nIt is an optional capability of the substrate seam: a substrate with no\nattempt notion reports none. A record it makes carries it in its\nposition, and its span links the attempt's context; it never becomes an\noperation's parent and is never stored.",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The attempt span the substrate injected, absent when its tracing is\noff or the header was malformed."
+        },
+        "invocation_id": {
+          "description": "The substrate's invocation id, when the delivery names one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "TraceAttemptObservation": {
       "description": "What the provider seam observed around one dispatched attempt. The\nattempt's facts are its sealed `AttemptRecord`, reported beside this.",
       "properties": {
@@ -1914,6 +2191,26 @@
         "else"
       ],
       "type": "string"
+    },
+    "TraceCarrier": {
+      "additionalProperties": false,
+      "properties": {
+        "traceparent": {
+          "description": "W3C `traceparent`, version 00.",
+          "type": "string"
+        },
+        "tracestate": {
+          "description": "W3C `tracestate`, absent when empty.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "traceparent"
+      ],
+      "type": "object"
     },
     "TraceContentBlock": {
       "oneOf": [
@@ -2057,14 +2354,34 @@
       ]
     },
     "TraceContext": {
+      "description": "A record's correlation: the stable ids it belongs to and the effect that\nmade it.",
       "properties": {
-        "candidate_id": {
+        "batch_id": {
+          "minLength": 1,
           "type": [
             "string",
             "null"
           ]
         },
-        "candidate_parent_id": {
+        "call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "caused_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CausalRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fact that caused the effect invocation that made the record."
+        },
+        "cell": {
+          "description": "A code cell's graph key.",
           "type": [
             "string",
             "null"
@@ -2076,20 +2393,8 @@
             "null"
           ]
         },
-        "example_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "experiment_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "graph_node_id": {
-          "description": "Stable id of the span this record represents (e.g. `turn:<session>:<turn>`,\n`llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn /\nllm / tool / session records so a consumer can build a nested span tree\nfrom `(graph_node_id, parent_graph_node_id)` with a single `id -> span`\nmap. A language-execution record for a node event carries the observed\nnode's structural id here, equal to the `WorkflowGraph` node id (ADR\n0100 R0), so a host joins trace to graph on this key; a child start\ncarries its parent node's id, and execution start and finish leave it\nunset.",
+          "description": "The workflow-graph join key of a language-execution record: the\nobserved node's structural id, equal to the `WorkflowGraph` node id\n(ADR 0100 R0). A child start carries its parent node's id, and\nexecution start and finish leave it unset.",
           "type": [
             "string",
             "null"
@@ -2101,12 +2406,7 @@
             "null"
           ]
         },
-        "metadata": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "parent_graph_node_id": {
-          "description": "Id of the enclosing span \u2014 the value of some other record's\n`graph_node_id`. A turn's parent is its causal origin (the spawning tool\ncall / effect, via `caused_by`) when known, otherwise the session root.",
+        "process_id": {
           "type": [
             "string",
             "null"
@@ -2120,7 +2420,16 @@
             "null"
           ]
         },
-        "run_id": {
+        "replay_key": {
+          "description": "The replay key of the effect invocation that made the record.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "send_id": {
+          "description": "The turn's head input, or a producer's accepted input.",
+          "minLength": 1,
           "type": [
             "string",
             "null"
@@ -2133,10 +2442,14 @@
             "null"
           ]
         },
-        "split": {
-          "type": [
-            "string",
-            "null"
+        "tool_intent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolIntentIdentity"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "turn_id": {
@@ -2622,6 +2935,27 @@
       ],
       "type": "string"
     },
+    "TraceLinks": {
+      "additionalProperties": false,
+      "properties": {
+        "contexts": {
+          "items": {
+            "$ref": "#/$defs/TraceCarrier"
+          },
+          "type": "array"
+        },
+        "omitted": {
+          "description": "Contexts dropped past the retained limit.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contexts"
+      ],
+      "type": "object"
+    },
     "TraceLlmMessage": {
       "properties": {
         "blocks": {
@@ -2994,6 +3328,78 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "TracePosition": {
+      "additionalProperties": false,
+      "description": "A record's position: the span it opens, closes, is, or is an event of,\nwith that span's parent, links and real start.\n\nThe span's flags are its trace's sampling decision. `parent` is `None`\nonly for a producer with no caller.",
+      "properties": {
+        "attempt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceAttemptLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The substrate attempt that made the record, when the substrate\nreports one: a link, never a parent."
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set on a closing or whole record: the span's exported end."
+        },
+        "kind": {
+          "$ref": "#/$defs/TraceSpanKind"
+        },
+        "links": {
+          "$ref": "#/$defs/TraceLinks"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/SpanRole"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceScopeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The span's logical owner, when a durable scope owns it."
+        },
+        "span": {
+          "$ref": "#/$defs/TraceCarrier"
+        },
+        "started_at": {
+          "$ref": "#/$defs/TraceTimestamp",
+          "description": "The span's real start; on a closing or whole record, its exported\nstart."
+        }
+      },
+      "required": [
+        "span",
+        "role",
+        "kind",
+        "started_at"
+      ],
+      "type": "object"
     },
     "TracePromptComponent": {
       "properties": {
@@ -3434,11 +3840,164 @@
         }
       ]
     },
+    "TraceScopeId": {
+      "additionalProperties": false,
+      "description": "A trace scope's identity: its owner and the owner's boundary ordinal.\n\nBoundary 0 is the owner's admission. A later boundary of the same owner\n(a process segment, a checkpoint that consumed new input) takes the next\nordinal the owner's own records already count. The id is separate from\nevery business identity preimage.",
+      "properties": {
+        "boundary": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "owner": {
+          "$ref": "#/$defs/TraceScopeOwner"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "type": "object"
+    },
+    "TraceScopeOwner": {
+      "description": "The durable owner of a trace scope: the admitted thing whose work the\nscope parents.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "One physical agent turn, including a follow-on within a run.",
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One tool call under its original logical owner.",
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "tool",
+              "type": "string"
+            },
+            "owner": {
+              "$ref": "#/$defs/TraceToolOwner"
+            }
+          },
+          "required": [
+            "kind",
+            "owner",
+            "call_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One host-submitted tool intent, by its replay key, under the\nruntime whose authority declared it: a session or a process.",
+          "properties": {
+            "kind": {
+              "const": "tool_intent",
+              "type": "string"
+            },
+            "owner": {
+              "$ref": "#/$defs/RuntimeOwner"
+            },
+            "replay_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner",
+            "replay_key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A registered process, across all of its segments.",
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceSpanKind": {
+      "description": "The kind of span a record names.",
+      "oneOf": [
+        {
+          "const": "producer",
+          "description": "A host call that admits durable work: a trace's root or the caller's\nchild.",
+          "type": "string"
+        },
+        {
+          "const": "agent",
+          "description": "A turn.",
+          "type": "string"
+        },
+        {
+          "const": "model",
+          "description": "One logical model call.",
+          "type": "string"
+        },
+        {
+          "const": "tool",
+          "description": "One tool call.",
+          "type": "string"
+        },
+        {
+          "const": "cell",
+          "description": "One code cell.",
+          "type": "string"
+        },
+        {
+          "const": "process",
+          "description": "A process.",
+          "type": "string"
+        },
+        {
+          "const": "tool_intent",
+          "description": "A host-submitted tool intent.",
+          "type": "string"
+        }
+      ]
+    },
     "TraceStoreErrorClass": {
       "enum": [
         "stored_data_corrupt",
         "monotonic_counter_overflow"
       ],
+      "type": "string"
+    },
+    "TraceTimestamp": {
+      "format": "date-time",
       "type": "string"
     },
     "TraceToolAttemptOutcome": {
@@ -3569,6 +4128,19 @@
             "payload"
           ],
           "type": "object"
+        },
+        {
+          "description": "The call never settled: the session closed while it ran, and its\nturn's terminal owner closed its span. It has no output.",
+          "properties": {
+            "status": {
+              "const": "discarded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3588,9 +4160,78 @@
       "enum": [
         "success",
         "failure",
-        "cancelled"
+        "cancelled",
+        "discarded"
       ],
       "type": "string"
+    },
+    "TraceToolOwner": {
+      "description": "The logical owner of a tool call, independent of its execution route.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The admitted logical run, whose turn id stays fixed across follow-ons.",
+          "properties": {
+            "kind": {
+              "const": "turn",
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "operation",
+              "type": "string"
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "operation_id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TraceToolResultBlock": {
       "description": "One ordered block of a traced tool result: text, or an attachment at the\nposition the tool's value placed it.",
@@ -4090,6 +4731,10 @@
             "null"
           ]
         },
+        "attachment_position": {
+          "$ref": "#/$defs/AttachmentPosition",
+          "description": "On the wire `attachment_position`: a record's own `position`\nis its place in the trace."
+        },
         "label": {
           "type": [
             "string",
@@ -4102,9 +4747,6 @@
             "null"
           ]
         },
-        "position": {
-          "$ref": "#/$defs/AttachmentPosition"
-        },
         "reason": {
           "$ref": "#/$defs/AttachmentMaterializationReason"
         },
@@ -4115,7 +4757,7 @@
       },
       "required": [
         "type",
-        "position",
+        "attachment_position",
         "reason"
       ],
       "type": "object"
@@ -4797,6 +5439,81 @@
       "type": "object"
     },
     {
+      "description": "A host call that admits durable work ended: its producer span's one\nrecord.",
+      "oneOf": [
+        {
+          "description": "This call's acceptance retained the cause.",
+          "properties": {
+            "outcome": {
+              "const": "selected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A retry read back an earlier acceptance's cause.",
+          "properties": {
+            "outcome": {
+              "const": "reused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The call failed before acceptance.",
+          "properties": {
+            "error_type": {
+              "type": "string"
+            },
+            "outcome": {
+              "const": "refused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "error_type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The host future was dropped or panicked before it settled.",
+          "properties": {
+            "outcome": {
+              "const": "abandoned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "producer": {
+          "$ref": "#/$defs/ProducerKind"
+        },
+        "type": {
+          "const": "producer_settled",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "producer"
+      ],
+      "type": "object"
+    },
+    {
       "description": "A built-in tool check selected one terminal reply over others. The\nsame fact reaches session observers as a plugin runtime event.",
       "properties": {
         "conflict": {
@@ -4847,6 +5564,16 @@
     "id": {
       "type": "string"
     },
+    "position": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TracePosition"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "schema_version": {
       "enum": [
         36
@@ -4856,8 +5583,7 @@
       "type": "integer"
     },
     "timestamp": {
-      "format": "date-time",
-      "type": "string"
+      "$ref": "#/$defs/TraceTimestamp"
     }
   },
   "required": [

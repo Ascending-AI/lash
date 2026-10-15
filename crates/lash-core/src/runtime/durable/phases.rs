@@ -50,7 +50,7 @@ use super::phase_root::StagedPhase;
 use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
     PreparedCall, TurnCancelRequest, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
-    UnfinishedPhase, export_owed_admission,
+    UnfinishedPhase,
 };
 use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
@@ -205,7 +205,7 @@ pub async fn run_phases(
     let OpenTurn {
         mut drive,
         mut pending,
-        mut row,
+        row,
     } = turn;
     let session = row.session.clone();
     let run = row.run.clone();
@@ -470,25 +470,12 @@ pub async fn run_phases(
                         },
                         iteration: current,
                     }));
-                    // The turn's first phase commit exports the admission
-                    // its trace scope still owes, then records it: the
-                    // export is made before the commit is submitted, never
-                    // after its acknowledgement, which a lost owner would
-                    // not live to act on (FIG-5998).
-                    let traced = export_owed_admission(services.tracing(), &row);
-                    if traced {
-                        tx.write(DomainWrite::Turn(TurnWrite::TraceExported {
-                            session: session.clone(),
-                            run: run.clone(),
-                        }));
-                    }
                     let released = cx.draining();
                     let committed = if released {
                         cx.commit_draining(tx, label, Release::Ready).await?
                     } else {
                         cx.commit(tx, label).await?
                     };
-                    row.trace_exported |= traced;
                     boundary.committed(cx, drive.as_mut()).await?;
                     stored.committed(drive.as_mut());
                     drive.run_changes_committed(&written);
@@ -873,9 +860,6 @@ pub async fn run_phases(
                 // revoked and its first batch of `Until` children marked; the
                 // next pass marks the rest.
                 end_turn_scope(cx, &mut tx, &session, &run).await?;
-                // A turn that ends with no model call still owes its
-                // admission's export (FIG-5998).
-                export_owed_admission(services.tracing(), &row);
                 // A head commit whose content the session store refuses (a
                 // node id the session already holds) is refused again on
                 // every pass: it is the turn's runtime refusal, and a
@@ -1030,7 +1014,7 @@ pub(super) async fn refuse(
         );
     }
     let mut tx = cx.begin().await?;
-    tool_round::cancel_open_round(cx, &mut tx, row).await?;
+    let cancelled = tool_round::cancel_open_round(cx, &mut tx, row).await?;
     let cause = crate::store::RunTerminalCause::Refused {
         refusal: refusal.into(),
     };
@@ -1042,14 +1026,8 @@ pub(super) async fn refuse(
         head_revision: None,
     }));
     end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
-    // A turn refused before its first phase commit still owes its
-    // admission's export. `row` is as the pass read it: the turn's row now
-    // says whether a phase commit since recorded it (FIG-5998).
-    let current = cx.durable_reads()?.turn(&row.session).await?;
-    if let Some(current) = current.filter(|current| current.run == row.run) {
-        export_owed_admission(tracing, &current);
-    }
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+    turn_trace::members_ended(tracing, row, &cancelled, turn_trace::MemberEnd::Cancelled);
     turn_trace::ended(tracing, row, traced, &[]);
     Ok(())
 }

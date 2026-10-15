@@ -127,33 +127,16 @@ impl TraceSink for Lines {
     }
 }
 
-/// The records the telemetry adapter is handed to project.
-#[derive(Default)]
-struct Projected(StdMutex<Vec<TraceRecord>>);
-
-impl lash_trace::TraceDomainProjector for Projected {
-    fn project(
-        &self,
-        _scope: &lash_trace::DurableTraceScope,
-        _attempt: Option<&lash_trace::AttemptObservation>,
-        _source: &lash_trace::EmissionSource,
-        record: &TraceRecord,
-    ) {
-        self.0.lock().expect("projected").push(record.clone());
-    }
-}
-
 /// What one tool-calling turn wrote to each telemetry path.
 struct Telemetry {
     recorded: Vec<TraceRecord>,
     lines: Vec<String>,
-    projected: Vec<TraceRecord>,
     lash_call_id: String,
 }
 
 impl Telemetry {
     /// Every path's records as text, named for a failure message.
-    fn paths(&self) -> [(&'static str, String); 3] {
+    fn paths(&self) -> [(&'static str, String); 2] {
         [
             (
                 "the recording sink",
@@ -164,14 +147,6 @@ impl Telemetry {
                     .join("\n"),
             ),
             ("a serializing sink", self.lines.join("\n")),
-            (
-                "the adapter's projection",
-                self.projected
-                    .iter()
-                    .map(|record| serde_json::to_string(record).expect("encode record"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
         ]
     }
 
@@ -191,7 +166,6 @@ async fn tool_calling_turn(
 ) -> Result<Telemetry> {
     let recording = Arc::new(crate::testing::RecordingTraceSink::new());
     let lines = Arc::new(Lines::default());
-    let projected = Arc::new(Projected::default());
     // Report the terminals the provider observed: an Unknown terminal seals
     // an interrupted attempt even when the response carries output.
     let provider = mock_provider(vec![
@@ -218,13 +192,10 @@ async fn tool_calling_turn(
     ])
     .into_handle();
     let backend = sqlite_memory_store_backend().await;
-    let runtime = lash_core::runtime::TraceRuntime::new(backend.clock())
-        .with_projector(Arc::clone(&projected) as Arc<dyn lash_trace::TraceDomainProjector>);
     let core = configure(
         explicit_ephemeral_facets(LashCore::standard_builder(backend))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
             .tools(crate::tool_provider_key!("tools"), Arc::new(EchoTool))
-            .trace_runtime(runtime)
             .trace_sink(Arc::new(lash_trace::TeeTraceSink::new([
                 Arc::clone(&recording) as Arc<dyn TraceSink>,
                 Arc::clone(&lines) as Arc<dyn TraceSink>,
@@ -260,7 +231,6 @@ async fn tool_calling_turn(
     Ok(Telemetry {
         recorded: recording.records(),
         lines: lines.0.lock().expect("lines").clone(),
-        projected: projected.0.lock().expect("projected").clone(),
         lash_call_id,
     })
 }
@@ -273,7 +243,7 @@ fn of_type<'a>(entries: &'a [serde_json::Value], kind: &str) -> Vec<&'a serde_js
 }
 
 /// With no telemetry content setting, a turn with a tool call writes its
-/// records to a recording sink, to a serializing sink and to the adapter with their
+/// records to a recording sink and to a serializing sink with their
 /// identities and outcomes and with no prompt, response, tool argument or
 /// tool output. A host that states `TelemetryContent::Captured` gets the same
 /// records with all four present.
@@ -293,13 +263,6 @@ async fn telemetry_content_policy_governs_every_built_in_telemetry_path() -> Res
     assert!(
         entries.iter().all(|entry| entry["content"] == "omitted"),
         "every record says its content was omitted: {entries:?}"
-    );
-    assert!(
-        omitted
-            .projected
-            .iter()
-            .all(|record| record.content == TelemetryContent::Omitted),
-        "the adapter is handed governed records"
     );
     assert_eq!(omitted.lines.len(), entries.len(), "one line per record");
 

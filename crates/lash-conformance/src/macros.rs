@@ -1399,7 +1399,7 @@ macro_rules! queue_observation_tests {
 }
 
 /// Register the trace-provenance law (FIG-4829, C1): the first writer's
-/// cause and anchor are retained. The fixture yields a guard and the store
+/// cause and span are retained. The fixture yields a guard and the store
 /// set under test.
 #[macro_export]
 macro_rules! trace_provenance_tests {

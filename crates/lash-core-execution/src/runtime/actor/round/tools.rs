@@ -95,20 +95,6 @@ impl MemberPin {
     }
 }
 
-/// A trace admission proposed with the durable admission that retains its
-/// scope: a call's with its round's (FIG-5382), a turn's with its
-/// `turn.admit` (FIG-5395). Every owner traces under the retained scope,
-/// and the admission's commit settles the candidate. A successor reads the
-/// scope back and proposes nothing, so the scope is admitted once across a
-/// handover.
-pub struct TraceProposal {
-    /// The scope the admission record retains.
-    pub scope: lash_trace::DurableTraceScope,
-    /// Selected once the admission commits, deferred to its adapter when
-    /// the commit's acknowledgement was lost, refused otherwise.
-    pub candidate: Box<dyn lash_trace::TraceAdmissionCandidate>,
-}
-
 /// The tools a turn's rounds run: the catalog the turn was built with.
 ///
 /// Nothing here drives the turn or commits: the phase runner admits, runs
@@ -119,19 +105,23 @@ pub trait RoundTools: Send + Sync {
     /// after every fold; a live observer deduplicates it. `admitted_here`
     /// says this activation's own commit admitted the call: only that owner
     /// observes its start, so a successor that takes the round over writes
-    /// no second one (FIG-5353).
-    fn observe(&self, _call: &PendingToolCall, _member: &super::RoundMember, _admitted_here: bool) {
+    /// no second one (FIG-5353). `settled_here` says this activation's
+    /// acknowledged commit wrote its final outcome: only that owner closes
+    /// its span (P1).
+    fn observe(
+        &self,
+        _call: &PendingToolCall,
+        _member: &super::RoundMember,
+        _admitted_here: bool,
+        _settled_here: bool,
+    ) {
     }
 
-    /// Propose `call`'s trace admission for its round's admission to
-    /// retain. `None` when the catalog traces nothing.
-    fn propose_trace(&self, _call: &PendingToolCall) -> Option<TraceProposal> {
+    /// The trace scope `call`'s round admission retains, admitted under
+    /// the turn's: `None` when nothing observes the runtime.
+    fn trace_scope(&self, _call: &PendingToolCall) -> Option<lash_trace::DurableTraceScope> {
         None
     }
-
-    /// Reconcile the admission of `scope`, a call's trace scope its round's
-    /// admission retained, whose export that admission owes (FIG-5395).
-    fn export_admitted(&self, _scope: &lash_trace::DurableTraceScope) {}
 
     /// What `call` is admitted as, read from the catalog at `now_ms`. Runs
     /// no hook, preparation or body.
@@ -384,11 +374,17 @@ impl MemberBodies for RoundCalls {
         &self,
         round: &super::RoundView,
         admitted_here: &std::collections::BTreeSet<lash_durable::domain::AdmittedId>,
+        settled_here: &std::collections::BTreeSet<lash_durable::domain::AdmittedId>,
     ) {
         for member in round.members() {
             if let Some(call) = self.calls.get(member.call()) {
-                let here = admitted_here.contains(&round.id_of(member));
-                self.tools.observe(call, member, here);
+                let id = round.id_of(member);
+                self.tools.observe(
+                    call,
+                    member,
+                    admitted_here.contains(&id),
+                    settled_here.contains(&id),
+                );
             }
         }
     }
@@ -486,6 +482,9 @@ pub fn require_admitted(
 /// stopped before its members settled. Runs no body. A run that was never
 /// admitted, or whose members all settled, records nothing.
 ///
+/// Returns the drafts of the members it settled: the caller that commits
+/// `tx` closes their trace scopes once the commit is acknowledged (P1).
+///
 /// # Errors
 ///
 /// [`RoundError`] when the rows cannot be read or do not fold.
@@ -494,26 +493,61 @@ pub async fn settle_cancelled(
     tx: &mut ActorTx,
     owner: &OwnerKey,
     run: RunSeq,
-) -> Result<(), RoundError> {
+) -> Result<Vec<ExecutionDraft>, RoundError> {
+    let open = open_members(cx, owner, run).await?;
+    for execution in &open {
+        settle(
+            tx,
+            execution,
+            SettledOutput::Cancelled {
+                evidence: AvailableEvidence::default(),
+            },
+            Vec::new(),
+        )?;
+    }
+    Ok(open
+        .into_iter()
+        .map(|execution| execution.draft().clone())
+        .collect())
+}
+
+/// The drafts of the members of `owner`'s run `run` that have no final
+/// outcome: what a terminal that settles nothing discards of the round.
+///
+/// # Errors
+///
+/// [`RoundError`] when the rows cannot be read or do not fold.
+pub async fn unsettled(
+    cx: &ActorContext,
+    owner: &OwnerKey,
+    run: RunSeq,
+) -> Result<Vec<ExecutionDraft>, RoundError> {
+    Ok(open_members(cx, owner, run)
+        .await?
+        .into_iter()
+        .map(|execution| execution.draft().clone())
+        .collect())
+}
+
+/// The current executions of the members of `owner`'s run `run` with no
+/// final outcome; none for a run that was never admitted.
+async fn open_members(
+    cx: &ActorContext,
+    owner: &OwnerKey,
+    run: RunSeq,
+) -> Result<Vec<AdmittedExecution>, RoundError> {
     let reads = cx.durable_reads()?;
     let mut rows = reads.run_facts_of(owner, run).await?;
     rows.read_limits = cx.backend().config().settings().graph_reads.owner();
     let waits = PinnedWaits::read(reads, &rows).await?;
     let folded = fold(&rows, &PolicyView::default(), &waits)?;
     let Some(view) = folded.round(run) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
-    for member in view.members() {
-        if member.outcome().is_none() {
-            settle(
-                tx,
-                &view.execution(member),
-                SettledOutput::Cancelled {
-                    evidence: AvailableEvidence::default(),
-                },
-                Vec::new(),
-            )?;
-        }
-    }
-    Ok(())
+    Ok(view
+        .members()
+        .iter()
+        .filter(|member| member.outcome().is_none())
+        .map(|member| view.execution(member))
+        .collect())
 }

@@ -272,7 +272,7 @@ impl ToolIntentIngress {
     /// telemetry adapter, instead of when each submission is made.
     pub fn capture_trace_context(mut self) -> Self {
         self.trace.caller =
-            lash_core::TraceCaller::Explicit(self.core.env.core.tracing.scopes().capture_current());
+            lash_core::TraceCaller::Explicit(self.core.env.core.tracing.identity().ambient());
         self
     }
 
@@ -287,21 +287,19 @@ impl ToolIntentIngress {
     /// offers its ledger row: the producer as the intent's cause.
     fn submission_trace(
         &self,
-    ) -> (
-        Option<Box<dyn lash_core::TraceHostOperation>>,
-        SubmissionTrace,
-    ) {
-        let scopes = self.core.env.core.tracing.scopes().as_ref();
-        let producer = scopes.open_producer(
-            self.trace
-                .producer(lash_core::ProducerKind::ToolIntentSubmit, scopes),
+        identity: &lash_core::ToolIntentIdentity,
+    ) -> (lash_core::ProducerSpan, SubmissionTrace) {
+        let producer = self.core.env.core.tracing.open_producer(
+            lash_core::ProducerKind::ToolIntentSubmit,
+            &self.trace,
+            lash_core::TraceIds {
+                session: Some(self.session_id.clone()),
+                tool_intent: Some(identity.clone()),
+                ..Default::default()
+            },
         );
         let trace = SubmissionTrace {
-            offer: lash_core::TraceScopeOffer::caused_by(
-                producer
-                    .as_deref()
-                    .map(<dyn lash_core::TraceHostOperation>::parent),
-            ),
+            offer: lash_core::TraceScopeOffer::caused_by(producer.parent()),
             submitted_at_ms: self.core.env.core.clock.timestamp_ms(),
         };
         (producer, trace)
@@ -370,7 +368,7 @@ impl ToolIntentIngress {
             submitted_kind = %intent.kind().as_str(),
         );
         // The submission's producer opens here, before the first await.
-        let (producer, trace) = self.submission_trace();
+        let (producer, trace) = self.submission_trace(&identity);
         let outcome = Box::pin(
             async {
                 let outcome = self.submit_inner(key, intent, &trace).await;
@@ -380,19 +378,23 @@ impl ToolIntentIngress {
             .instrument(span),
         )
         .await;
-        if let Some(producer) = producer {
-            producer.settle(match &outcome {
-                ToolIntentIngressOutcome::Admitted {
-                    replayed: false, ..
-                } => lash_trace::TraceCandidateOutcome::Selected,
-                ToolIntentIngressOutcome::Admitted { replayed: true, .. } => {
-                    lash_trace::TraceCandidateOutcome::Reused
-                }
-                ToolIntentIngressOutcome::Refused { .. } => {
-                    lash_trace::TraceCandidateOutcome::Refused
-                }
-            });
-        }
+        producer.settle(match &outcome {
+            ToolIntentIngressOutcome::Admitted {
+                replayed: false, ..
+            } => lash_core::ProducerOutcome::Selected,
+            ToolIntentIngressOutcome::Admitted { replayed: true, .. } => {
+                lash_core::ProducerOutcome::Reused
+            }
+            ToolIntentIngressOutcome::Refused { refusal } => lash_core::ProducerOutcome::Refused {
+                error_type: serde_json::to_value(refusal)
+                    .ok()
+                    .and_then(|refusal| refusal["reason"].as_str().map(str::to_owned))
+                    .map_or(
+                        std::borrow::Cow::Borrowed("_OTHER"),
+                        std::borrow::Cow::Owned,
+                    ),
+            },
+        });
         outcome
     }
 
@@ -676,10 +678,10 @@ impl ToolIntentIngress {
         let registry = self
             .process_registry()
             .map_err(|error| RealizationFailure::Command(kind, error))?;
-        // The submission's admission proposes the anchor its scope retains
-        // under its producer, so the committed settlement has a parent to
-        // export under.
-        let (scope, candidate) = self.core.env.core.tracing.scopes().propose_scope(
+        // The submission's admission retains its scope under its producer,
+        // its span derived from it, so the committed settlement closes a
+        // span every owner names alike.
+        let scope = lash_core::DurableTraceScope::admit(
             record.trace_scope_id(),
             trace.offer.cause().as_parent().as_ref(),
             lash_core::TraceLinks::new(),
@@ -691,23 +693,8 @@ impl ToolIntentIngress {
             .await
         {
             Ok(admission) => admission,
-            Err(error) => {
-                // The row may have committed: a later reader reconciles it.
-                candidate.defer();
-                return Err(RealizationFailure::Command(kind, error));
-            }
+            Err(error) => return Err(RealizationFailure::Command(kind, error)),
         };
-        candidate.settle(match &admission {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => {
-                lash_trace::TraceCandidateOutcome::Selected
-            }
-            lash_core::ToolIntentSubmissionAdmission::Existing(_) => {
-                lash_trace::TraceCandidateOutcome::Reused
-            }
-            lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
-                lash_trace::TraceCandidateOutcome::Refused
-            }
-        });
         let existing = match admission {
             lash_core::ToolIntentSubmissionAdmission::Admitted => {
                 return Ok((None, scope.as_parent()));
@@ -826,8 +813,6 @@ impl ToolIntentIngress {
                     .as_ref()
                     .map(|settlement| settlement.at_ms),
             ) {
-                // Reconciles an admission whose candidate was deferred.
-                runtime.scopes().export_admitted(scope);
                 runtime.unreplayed(Some(scope.clone())).transition(
                     permit.as_ref(),
                     at_ms,

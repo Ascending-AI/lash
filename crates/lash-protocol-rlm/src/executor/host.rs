@@ -525,7 +525,7 @@ impl KernelEffects for CellHost<'_> {
         let draft = MemberDraft::pinned(member.id().clone(), frozen, &self.opener, pin)?;
         // The cell's admission retains the call's trace scope, which every
         // attempt and every owner traces it under.
-        let trace = self.members.propose_trace(&member, now_ms);
+        let trace = self.members.trace_scope(&member, now_ms);
         self.members.register(member);
         Ok(Ok(MemberDraft {
             draft: draft.draft.with_trace(trace),

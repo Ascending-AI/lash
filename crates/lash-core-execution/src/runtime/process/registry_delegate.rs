@@ -171,10 +171,9 @@ macro_rules! delegate_process_registrar {
             async fn commit_process_registration(
                 &self,
                 prepared: $crate::PreparedProcessRegistration,
-                anchor: $crate::TraceAnchor,
             ) -> Result<$crate::ProcessRegistrationReceipt, $crate::PluginError> {
                 let $registration_self = self;
-                let $registration_call = self.$inner.commit_process_registration(prepared, anchor);
+                let $registration_call = self.$inner.commit_process_registration(prepared);
                 $registration_hook
             }
 

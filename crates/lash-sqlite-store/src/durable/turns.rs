@@ -31,8 +31,6 @@ use crate::conn::cached_execute;
 /// model phase, whose attempt is the phase argument and whose call is
 /// `model_calls`, the count of model calls the turn admitted, and the pinned
 /// call's receipt only in the model phase.
-/// `trace_exported` records that the admission's trace export is
-/// discharged (FIG-5457).
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS turn_phases (
     session_id TEXT NOT NULL,
@@ -53,8 +51,6 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
     model_calls INTEGER NOT NULL DEFAULT 0,
-    trace_exported INTEGER NOT NULL DEFAULT 0
-        CONSTRAINT ck_turn_phases_trace_exported CHECK (trace_exported IN (0, 1)),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -229,22 +225,6 @@ pub(super) fn apply(
                         answer.to_hex(),
                         commit.epoch.0
                     ],
-                    |_| Ok(()),
-                )
-                .optional()?;
-            match recorded {
-                Some(()) => Ok(Ok(())),
-                None => refuse(DomainRefusal::TurnNotOpen {
-                    session: session.clone(),
-                    run: run.clone(),
-                }),
-            }
-        }
-        TurnWrite::TraceExported { session, run } => {
-            let recorded = tx
-                .prepare_cached(SQL.trace_exported.sql())?
-                .query_row(
-                    rusqlite::params![session.as_str(), run.as_str(), commit.epoch.0],
                     |_| Ok(()),
                 )
                 .optional()?;
@@ -721,7 +701,6 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         epoch: i64,
         model_calls: i64,
         stream_from: Option<String>,
-        trace_exported: bool,
     }
     let stored = tx
         .prepare_cached(SQL.unfinished.sql())?
@@ -733,15 +712,14 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
                 argument: row.get(3)?,
                 iteration: row.get(4)?,
                 checkpoint: row.get(5)?,
-                working: row.get(13)?,
-                answer: row.get(14)?,
+                working: row.get(12)?,
+                answer: row.get(13)?,
                 request: row.get(6)?,
                 deadline: row.get(7)?,
                 turn_deadline: row.get(8)?,
                 epoch: row.get(9)?,
                 model_calls: row.get(10)?,
                 stream_from: row.get(11)?,
-                trace_exported: row.get(12)?,
             })
         })
         .optional()?;
@@ -800,7 +778,6 @@ pub(super) fn turn(tx: &Connection, session: &SessionId) -> Answer<Option<TurnRo
         turn_deadline: stored.turn_deadline.map(DurableInstant),
         written_epoch: Epoch(stored.epoch),
         cancel,
-        trace_exported: stored.trace_exported,
     })))
 }
 

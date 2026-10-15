@@ -45,8 +45,9 @@ fn fixture_record(context: lash_trace::TraceContext, event: TraceEvent) -> Trace
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "language-fixture".into(),
         content: lash_trace::TelemetryContent::Captured,
-        timestamp: "2026-10-09T00:00:00Z".parse().expect("fixture time"),
+        timestamp: lash_trace::TraceTimestamp::from_unix_ms(1_791_504_000_000),
         context,
+        position: None,
         event,
     }
 }
@@ -765,8 +766,8 @@ fn deployment_language_publication_limits_are_honored() {
         .unwrap(),
         effect_id: "cell".into(),
     };
-    publisher.append(&record(subject.clone(), 0)).unwrap();
+    lash_trace::ProductObservationSink::observe(&publisher, &record(subject.clone(), 0));
     assert_eq!(publisher.session.admitted(), 1);
-    publisher.append(&record(subject, 1)).unwrap();
+    lash_trace::ProductObservationSink::observe(&publisher, &record(subject, 1));
     assert_eq!(publisher.session.admitted(), 0);
 }

@@ -520,7 +520,6 @@ impl ProcessRegistrar for Integrator {
     async fn commit_process_registration(
         &self,
         prepared: PreparedProcessRegistration,
-        anchor: lash::tracing::TraceAnchor,
     ) -> Result<ProcessRegistrationReceipt, PluginError> {
         unreachable!("external signature witness")
     }

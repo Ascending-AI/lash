@@ -32,9 +32,10 @@ pub(super) fn fixture_record(
     lash_trace::TraceRecord {
         schema_version: lash_trace::TRACE_SCHEMA_VERSION,
         id: "fixture-record".into(),
-        timestamp: Default::default(),
+        timestamp: lash_trace::TraceTimestamp::from_unix_ms(0),
         content: lash_trace::TelemetryContent::Captured,
         context,
+        position: None,
         event,
     }
 }

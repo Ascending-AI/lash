@@ -169,17 +169,17 @@ pub trait TurnServices: Send + Sync {
         Ok(())
     }
 
-    /// Propose the trace admission of `run`, the turn `cx` admits taking
-    /// inputs whose retained causes are `inputs`, in admission order: the
-    /// scope its `turn.admit` commit retains, under the head input's
-    /// producer and linking the others, and the candidate that commit
-    /// settles (FIG-5395). `None` when the services trace nothing.
-    fn propose_turn_trace(
+    /// The trace scope of `run`, the turn `cx` admits taking inputs whose
+    /// retained causes are `inputs`, in admission order: the scope its
+    /// `turn.admit` commit retains, under the head input's producer and
+    /// linking the others, its span derived from that parent. `None` when
+    /// the services trace nothing.
+    fn turn_trace_scope(
         &self,
         _cx: &ActorContext,
         _run: &TurnId,
         _inputs: &[lash_trace::TraceCause],
-    ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
+    ) -> Option<lash_trace::DurableTraceScope> {
         None
     }
 
@@ -190,10 +190,6 @@ pub trait TurnServices: Send + Sync {
         None
     }
 }
-
-mod trace;
-use trace::defer_turn_admission;
-pub(super) use trace::{export_owed_admission, settle_trace_admission};
 
 /// One admitted model attempt's ordinal, execution bound and cooperative stop.
 #[derive(Clone, Debug)]
@@ -711,17 +707,14 @@ impl SessionActivation {
             }
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
-                    // The turn's trace scope is retained by its admission,
-                    // and its candidate is handed to its adapter once that
-                    // commits: a pass that starts the turn reads the scope
-                    // back, and the turn's first phase commit exports the
-                    // admission (FIG-5395, FIG-5998).
-                    let (trace, candidate) = self
+                    // The turn's trace scope is retained by its admission:
+                    // every owner that runs the turn reads the scope back
+                    // and names its span from it (FIG-5395).
+                    let trace = self
                         .services
-                        .propose_turn_trace(cx, &admitted.run, &admitted.causes)
-                        .map(|proposal| (Some(proposal.scope), Some(proposal.candidate)))
-                        .unwrap_or_default();
+                        .turn_trace_scope(cx, &admitted.run, &admitted.causes);
                     let inputs = admitted.admission.input_ids().len();
+                    let send = admitted.admission.input_ids().first().cloned();
                     let admitted = AdmittedInputs {
                         admission: admitted.admission.with_trace(trace.clone()),
                         ..admitted
@@ -732,17 +725,14 @@ impl SessionActivation {
                     // from now only a node that decodes it claims the
                     // session.
                     tx.stamp_formats(cx.backend().formats().session().clone());
-                    let committed = cx.commit(tx, CommitLabel::TURN_ADMIT).await;
-                    if let Some(candidate) = candidate {
-                        defer_turn_admission(candidate, &committed);
-                    }
-                    committed?;
+                    cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
                     turn_trace::started(
                         self.services.tracing(),
                         session,
                         &run,
                         trace.as_ref(),
                         inputs,
+                        send.as_ref(),
                     );
                     Ok(Pass::Again)
                 }
@@ -1391,7 +1381,6 @@ pub async fn admit_turn(
         working: None,
         written_epoch: cx.epoch(),
         cancel: None,
-        trace_exported: false,
     })
 }
 

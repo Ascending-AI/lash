@@ -651,12 +651,6 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
             Some(session_id)
         );
         assert!(context.get("turn_id").is_none());
-        assert_eq!(
-            context
-                .get("parent_graph_node_id")
-                .and_then(serde_json::Value::as_str),
-            Some("session:standard-compaction-durable-parent")
-        );
     }
 
     // FIG-4029: the threshold turn's prompt is the frame it switched to, not

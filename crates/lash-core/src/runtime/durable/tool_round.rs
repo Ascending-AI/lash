@@ -17,16 +17,11 @@
 //!   without an outcome is `Interrupted`, a started `Repeatable` reruns at
 //!   its ordinal, and nothing it recorded runs again.
 //! - **Trace admission.** Each call's trace scope is retained by the
-//!   round's admission, whose commit selects its candidate. The admission
-//!   owes each traced call's admission export until an owner records that
-//!   it exported them (`round.traced`): the admitting owner does once its
-//!   candidates are selected, and an owner that resumes a round without the
-//!   record reconciles the exports first, as the admitting owner may have
-//!   lost its life or the commit's acknowledgement before it selected them.
-//!   A process's exporter dedupes an identity only in its own memory, so a
-//!   resume of a round whose exports are recorded exports nothing: a node
-//!   that takes the round over never exports a call's admission again
-//!   (FIG-5382, FIG-5395, FIG-5452).
+//!   round's admission, its span derived from the turn's, so every owner
+//!   that reads the admission back names the same span. A call's span
+//!   closes once, on the owner whose acknowledged commit wrote its outcome,
+//!   at the end that commit retained: an owner that resumes a round closes
+//!   no member another owner settled (FIG-5382, P1).
 //! - **Cancel.** An `Immediate` cancel the turn accepted before the round's
 //!   admission admits none of it, and one it accepts while the round runs
 //!   ends its unfinished members `Cancelled`. Each commit of members'
@@ -83,15 +78,6 @@ pub(super) enum RoundExit {
         /// The earliest retry due time or parked wait deadline.
         due: Option<DurableInstant>,
     },
-}
-
-/// Commit the record that `round`'s traced calls' admissions are exported,
-/// discharging the export its admission owes (FIG-5452).
-async fn record_trace_exported(cx: &ActorContext, round: &AdmittedRound) -> Result<(), TurnError> {
-    let mut tx = cx.begin().await?;
-    round::record_trace_exported(&mut tx, round);
-    cx.commit(tx, CommitLabel::ROUND_TRACED).await?;
-    Ok(())
 }
 
 /// The label of the turn's next model call: `round.present+model.start` when
@@ -208,16 +194,6 @@ pub(super) async fn run(
             if let Some(drift) = tools.drift(&runnable) {
                 return Err(TurnError::Runtime(drift));
             }
-            let owed = view.owed_trace_exports();
-            if !owed.is_empty() {
-                for scope in owed {
-                    tools.export_admitted(scope);
-                }
-                let admitted = folded
-                    .admitted_round(run)
-                    .ok_or_else(|| exec(DurableError::Store(missing_round(run))))?;
-                record_trace_exported(cx, &admitted).await?;
-            }
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
@@ -235,21 +211,14 @@ pub(super) async fn run(
                 return Ok(RoundExit::CancelRequested);
             }
             let now_ms = u64::try_from(tx.opened_at().0).unwrap_or(0);
-            // Each call's trace admission is proposed with the round's: the
-            // admission record retains its scope, which every later owner
-            // reads back, and the candidate is selected once that record
-            // commits (FIG-5382).
-            let mut candidates = Vec::new();
+            // Each call's trace scope is admitted with the round's: the
+            // admission record retains it, and every later owner reads it
+            // back and names the call's span from it (FIG-5382).
             let members = calls
                 .iter()
                 .map(|call| {
                     let draft = round::call_draft(&opener, call, tools.pin(call, now_ms))?;
-                    let proposal = tools.propose_trace(call);
-                    let trace = proposal.map(|proposal| {
-                        candidates.push(proposal.candidate);
-                        proposal.scope
-                    });
-                    Ok::<_, round::RoundCallsRefusal>(draft.with_trace(trace))
+                    Ok::<_, round::RoundCallsRefusal>(draft.with_trace(tools.trace_scope(call)))
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
@@ -291,30 +260,17 @@ pub(super) async fn run(
                     .map_err(exec)?;
                 }
             }
-            // A commit whose acknowledgement was lost may have landed: its
-            // candidates are deferred, and the owner that resumes the round
-            // reconciles their admissions if so.
-            let exports = candidates
-                .iter()
-                .any(|candidate| candidate.anchor().context().is_some());
-            let committed = cx.commit(tx, CommitLabel::MODEL_DONE).await;
-            for candidate in candidates {
-                super::session::settle_trace_admission(candidate, &committed);
-            }
-            committed?;
+            cx.commit(tx, CommitLabel::MODEL_DONE).await?;
             *unsettled = false;
             stored.committed(&mut *drive);
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
             release_cell_emissions(cx, drive, held, CommitLabel::MODEL_DONE).await?;
-            // The candidates are selected: their exports are discharged
-            // before any body runs, so an owner that takes the round over
-            // exports none again.
-            if exports {
-                record_trace_exported(cx, &admitted).await?;
-            }
             if refused.is_some() {
+                // The admission's commit wrote the refused members'
+                // outcomes: their spans close on this owner.
                 RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
+                    .settled_here(admitted.members())
             } else {
                 RoundRunner::admitted(cx, &admitted, policies, bodies)
                     .ok_or_else(|| exec("an admitted round has no members"))?
@@ -578,7 +534,9 @@ fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {
 
 /// Settle the open members of `row`'s round `Cancelled` on `tx`, when the
 /// turn is in its `Tools` phase: what a turn cancel leaves of a round whose
-/// owner stopped, or crashed, before its members settled.
+/// owner stopped, or crashed, before its members settled. Returns the
+/// members it settled, whose spans the terminal's owner closes once `tx`'s
+/// commit is acknowledged ([`super::turn_trace::members_ended`]).
 ///
 /// # Errors
 ///
@@ -587,12 +545,30 @@ pub(super) async fn cancel_open_round(
     cx: &ActorContext,
     tx: &mut lash_durable::ActorTx,
     row: &TurnRow,
-) -> Result<(), TurnError> {
+) -> Result<Vec<round::ExecutionDraft>, TurnError> {
     let UnfinishedPhase::Tools { run, .. } = row.phase else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
     round::settle_cancelled(cx, tx, &owner, run)
         .await
         .map_err(round_error)
+}
+
+/// The open members of `row`'s round, when the turn is in its `Tools`
+/// phase: what a terminal that settles nothing, the session close's
+/// cancel, discards.
+///
+/// # Errors
+///
+/// [`TurnError`] when the round's rows cannot be read or do not fold.
+pub(super) async fn open_round_members(
+    cx: &ActorContext,
+    row: &TurnRow,
+) -> Result<Vec<round::ExecutionDraft>, TurnError> {
+    let UnfinishedPhase::Tools { run, .. } = row.phase else {
+        return Ok(Vec::new());
+    };
+    let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
+    round::unsettled(cx, &owner, run).await.map_err(round_error)
 }

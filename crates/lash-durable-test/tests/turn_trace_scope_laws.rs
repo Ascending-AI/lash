@@ -6,34 +6,28 @@
 //! turn. The phase checkpoint carries it, so a turn resumed from its rows
 //! reads it back instead of proposing a new one.
 //!
-//! Each law serves the core with a recording telemetry adapter
-//! (`support/telemetry.rs`). A turn parks on a deferred call and its
-//! session releases `waiting`; the call is resolved out of band and the
-//! turn resumes from its checkpoint, on the node that parked it or on a
-//! node that took the session over.
+//! Each law serves the core with a recording trace sink
+//! (`support/telemetry.rs`) that every process publishes to. A turn parks
+//! on a deferred call and its session releases `waiting`; the call is
+//! resolved out of band and the turn resumes from its checkpoint, on the
+//! node that parked it or on a node that took the session over.
 //!
-//! - **One admission:** the turn's scope is selected exactly once, the
-//!   `lash.turn.admitted` span an adapter exports.
-//! - **One trace:** every record of the turn carries the trace its
-//!   admission started, and every record of the turn's own scope its
-//!   admission's anchor.
-//! - **One tool admission (FIG-5382):** the parked call's scope is selected
-//!   exactly once, the `lash.tool.admitted` span an adapter exports, on the
-//!   turn's trace: the resume reads the scope its round's admission retained
-//!   back instead of admitting the call again. A taking-over node is
-//!   another process, whose adapter remembers nothing the parking node
-//!   exported: the call's admission export is owed only until an owner
-//!   discharged it, and the takeover reconciles nothing (FIG-5452).
-//! - **Admissions across a lost node (FIG-5457, FIG-5998):** a node that
-//!   loses its life after an admission, with no phase or outcome after it,
-//!   is taken over by another process, whose adapter remembers nothing the
-//!   lost node exported. A turn whose node is lost between `turn.admit` and
+//! - **One close:** the turn's span closes once, on the owner whose
+//!   acknowledged commit wrote its terminal (P1), and its opening and
+//!   closing records name one span.
+//! - **One trace:** every record of the turn carries a position on the
+//!   trace of the send that caused it.
+//! - **One tool close (FIG-5382):** the parked call's span closes once, on
+//!   the turn's trace: the resume reads the scope its round's admission
+//!   retained back instead of admitting the call again, and an owner that
+//!   did not write the call's outcome publishes no close for it.
+//! - **Across a lost node (FIG-5457):** a node that loses its life after
+//!   an admission, with no phase or outcome after it, is taken over by
+//!   another process. A turn whose node is lost between `turn.admit` and
 //!   `model.start`, and a code cell's call whose node is lost while its
-//!   body runs, are each admitted exactly once. The turn's admission is
-//!   exported with its first phase commit: the lost node exported nothing,
-//!   and the takeover exports it once. The cell's call was exported and
-//!   durably recorded so by the lost node, so the takeover reconciles
-//!   nothing.
+//!   body runs, each close once, on the taking-over owner.
+//! - **Unique ids:** no span id is published by two closing or whole
+//!   records (L1(b)).
 //!
 //! The crash half, a turn cut at a phase commit and resumed on the other
 //! node, is `Turn::Trace` in `tool_crash_laws.rs`.
@@ -162,7 +156,7 @@ enum Resume {
 }
 
 /// A turn admitted, parked on its deferred call and resumed per `resume`
-/// is admitted once, and its records carry one trace.
+/// closes once, and its records carry one trace.
 async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
     let telemetry = Telemetry::default();
     let (keys, mut parked) = tokio::sync::mpsc::unbounded_channel();
@@ -196,8 +190,8 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
         .expect("the tool hands over its key");
     released_waiting(&world.backend, &name).await;
     if let Resume::Takeover = resume {
-        // The taking-over node is another process: its adapter remembers
-        // nothing the parking node exported (FIG-5452).
+        // The taking-over node is another process, publishing to the same
+        // collector.
         world
             .restart(
                 "trace-takeover-boot",
@@ -234,8 +228,9 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
             served::assert_answered("the follow-up turn", &output);
         }
     }
-    let mut violations = telemetry.first_turn_violations(&name);
-    violations.extend(telemetry.first_turn_tool_violations(&name));
+    let mut violations = telemetry.first_turn_violations(&name, false);
+    violations.extend(telemetry.publication_violations(false));
+    violations.extend(telemetry.first_turn_tool_violations(&name, false));
     world.shutdown().await;
     assert!(
         violations.is_empty(),
@@ -401,7 +396,7 @@ fn held_builder(
 }
 
 /// A turn whose node is lost where `lost` says, after the admission there,
-/// and which a node of another process takes over, is admitted once, as is
+/// and which a node of another process takes over, closes once, as does
 /// its cell's call (FIG-5457, FIG-5998).
 async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     let telemetry = Telemetry::default();
@@ -431,8 +426,7 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
         .expect("deadlock watchdog: the lost node never held")
         .expect("the hold tells the law");
     // The node is lost where it holds, and a node of another process takes
-    // the session over: its adapter remembers nothing the lost node
-    // exported.
+    // the session over.
     world
         .restart(
             "trace-lost-takeover-boot",
@@ -450,9 +444,10 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
         .expect("the session is open on the taking-over node");
     let output = world.send(&session, "after the takeover").await;
     served::assert_answered("the follow-up turn", &output);
-    let mut violations = telemetry.first_turn_violations(&name);
+    let mut violations = telemetry.first_turn_violations(&name, false);
+    violations.extend(telemetry.publication_violations(false));
     if let Lost::InCellCall = lost {
-        violations.extend(telemetry.first_turn_tool_violations(&name));
+        violations.extend(telemetry.first_turn_tool_violations(&name, false));
     }
     world.shutdown().await;
     assert!(

@@ -205,7 +205,6 @@ pub struct DirectLlmClient {
     instructions: Option<Arc<str>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
     telemetry_content: lash_trace::TelemetryContent,
-    trace_context: TraceContext,
     clock: Arc<dyn crate::Clock>,
     /// What delivers a request's attachment slots on each attempt. A client
     /// with none refuses an attachment-bearing request unsent.
@@ -232,7 +231,6 @@ impl DirectLlmClient {
             instructions: None,
             trace_sink: None,
             telemetry_content: lash_trace::TelemetryContent::standard(),
-            trace_context: TraceContext::default(),
             clock: Arc::new(crate::SystemClock),
             deliveries: Arc::new(NoSlotDeliveries),
         }
@@ -264,11 +262,6 @@ impl DirectLlmClient {
         self
     }
 
-    pub fn with_trace_context(mut self, context: TraceContext) -> Self {
-        self.trace_context = context;
-        self
-    }
-
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
         self.clock = clock;
         self
@@ -292,6 +285,10 @@ impl DirectLlmClient {
         llm_request.stream_events =
             transport_stream_events_for_direct(&self.provider, llm_request.stream_events.take());
         let request_model = llm_request.model.wire_model().to_string();
+        // The call's id names it on every attempt's request scope and on its
+        // trace records alike, whether or not anything observes it.
+        let id = uuid::Uuid::new_v4().to_string();
+        llm_request.scope.llm_call_id = Some(id.clone());
         // A host-owned call made outside any journal: nothing replays it, so
         // the call is its own live attempt, and it belongs to no admitted
         // scope.
@@ -299,22 +296,21 @@ impl DirectLlmClient {
             let standing = crate::trace::TraceRuntime::new(Arc::clone(&self.clock))
                 .with_trace_sink(Arc::clone(sink))
                 .with_content(self.telemetry_content)
-                .with_base_context(self.trace_context.clone())
                 .unreplayed(None);
-            let id = uuid::Uuid::new_v4().to_string();
-            crate::runtime::effect::emit_llm_trace_started(
+            let call = crate::runtime::effect::emit_llm_trace_started(
                 &standing,
                 TraceContext::default().for_llm_call(id.clone()),
                 &llm_request,
             );
-            (standing, id)
+            (call, id)
         });
         // No lash execution owns this call: the host that made it owns its
         // billing, and lash keeps no ledger row for it (ADR 0127).
         let sideband =
             lash_core_llm::core_internal::prepare_completion(&self.provider, &mut llm_request);
         let sideband = match &traced {
-            Some((standing, id)) => standing
+            Some((call, id)) => call
+                .standing()
                 .provider_attempts(sideband, TraceContext::default().for_llm_call(id.clone())),
             None => sideband,
         };
@@ -332,7 +328,7 @@ impl DirectLlmClient {
             &Default::default(),
             traced
                 .as_ref()
-                .and_then(|(standing, _)| standing.body_permit()),
+                .and_then(|(call, _)| call.standing().body_permit()),
             // A host's own completion runs under no lash execution, so the
             // budgets its client was created with bound it.
             lash_core_llm::core_internal::ModelCallBounds::unnested(self.budgets.clone()),
@@ -351,13 +347,13 @@ impl DirectLlmClient {
                         source,
                         result: Box::new(result),
                     };
-                    if let Some((standing, llm_call_id)) = traced {
+                    if let Some((call, llm_call_id)) = traced {
                         let call_record = match &error {
                             DirectLlmError::InvalidResponse { result, .. } => &result.llm_call,
                             _ => unreachable!("constructed InvalidResponse above"),
                         };
                         crate::runtime::effect::emit_llm_trace_failed(
-                            &standing,
+                            call,
                             TraceContext::default().for_llm_call(llm_call_id),
                             crate::runtime::effect::LlmTraceFailure::invalid_structured_output(),
                             None,
@@ -366,9 +362,9 @@ impl DirectLlmClient {
                     }
                     return Err(error);
                 }
-                if let Some((standing, llm_call_id)) = traced {
+                if let Some((call, llm_call_id)) = traced {
                     crate::runtime::effect::emit_llm_trace_completed(
-                        &standing,
+                        call,
                         TraceContext::default().for_llm_call(llm_call_id),
                         &result.response,
                         &request_model,
@@ -380,9 +376,9 @@ impl DirectLlmClient {
                 Ok(result)
             }
             Err(error) => {
-                if let Some((standing, llm_call_id)) = traced {
+                if let Some((call, llm_call_id)) = traced {
                     crate::runtime::effect::emit_llm_trace_failed(
-                        &standing,
+                        call,
                         TraceContext::default().for_llm_call(llm_call_id),
                         crate::runtime::effect::LlmTraceFailure::from(&error.error),
                         None,
@@ -616,7 +612,6 @@ mod tests {
                     .and_then(serde_json::Value::as_object_mut)
                     .expect("trace record has a context object");
                 context.insert("llm_call_id".to_string(), json!("llm-call-id"));
-                context.insert("graph_node_id".to_string(), json!("llm:llm-call-id"));
                 serde_json::to_vec(&value).expect("canonical trace record is serializable")
             })
             .collect()
@@ -764,18 +759,18 @@ mod tests {
         // attempt is its own record ahead of the call's outcome record, and
         // carries the same sealed attempt the outcome record lists.
         let expected = [
-            r#"{"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-success","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","provider_usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0},"response":{"duration_ms":0,"parts":[{"Text":{"response_meta":null,"text":"direct success"}}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#.to_string(),
-            r#"{"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}}],"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"failure_kind":"unknown","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
-            r#"{"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
-            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-structured-rejection","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
-            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"lash:invalid_structured_output","failure_kind":"unknown","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
+            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
+            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-success","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","provider_usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0},"response":{"duration_ms":0,"parts":[{"Text":{"response_meta":null,"text":"direct success"}}],"request_model":"trace-model","terminal_reason":"stop","text":"direct success"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#.to_string(),
+            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
+            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempt":{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-failure","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempts":[{"error":{"class":"unknown"},"ordinal":1,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":2,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":3,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"class":{"class":"no_response"},"outcome":"scheduled","wait":"backoff"}},{"error":{"class":"unknown"},"ordinal":4,"outcome":"failed","protocol_position":"no_response","retry_budget_consumed":true,"retry_decision":{"cause":"retry_budget_exhausted","outcome":"declined"}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"error":{"failure_kind":"unknown","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
+            r#"{"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#.to_string(),
+            r#"{"attempt":{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}},"content":"captured","context":{"llm_call_id":"llm-call-id"},"id":"trace-id","observation":{"ended_at_ms":0,"provider":"direct-trace-structured-rejection","request_model":"trace-model","started_at_ms":0},"schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_attempt_completed"}"#.to_string(),
+            r#"{"attempts":[{"ordinal":1,"outcome":"completed","protocol_position":"terminal_observed","retry_budget_consumed":true,"usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":17,"output_tokens":3,"reasoning_output_tokens":0}}],"content":"captured","context":{"llm_call_id":"llm-call-id"},"error":{"code":"lash:invalid_structured_output","failure_kind":"unknown","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":36,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#.to_string(),
         ];
 
         assert_eq!(

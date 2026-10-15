@@ -598,6 +598,17 @@ async fn prepared_registration_race(
     .with_start_key(Some(lash_core::StartKey::for_host(format!(
         "{nonce}:prepared-race"
     ))));
+    let parent = lash_core::TraceCarrier::parse_w3c(
+        "00-11111111111111111111111111111111-2222222222222222-01",
+        None,
+    )
+    .unwrap_or_else(|error| panic!("parent: {error}"));
+    let mut registration = registration;
+    registration.trace = lash_core::TraceScopeOffer::new(
+        lash_core::TraceCause::Parent(parent.clone()),
+        lash_core::TraceLinks::new(),
+        None,
+    );
     let first = registry
         .prepare_process_registration(registration.clone(), &[])
         .await
@@ -621,44 +632,33 @@ async fn prepared_registration_race(
             .unwrap_or_else(|error| panic!("pure prepare: {error}"))
             .is_none()
     );
-    let first_anchor = lash_core::TraceAnchor::Context(
-        lash_core::TraceCarrier::parse_w3c(
-            "00-11111111111111111111111111111111-2222222222222222-01",
-            None,
-        )
-        .unwrap_or_else(|error| panic!("first anchor: {error}")),
-    );
-    let second_anchor = lash_core::TraceAnchor::Context(
-        lash_core::TraceCarrier::parse_w3c(
-            "00-33333333333333333333333333333333-4444444444444444-01",
-            None,
-        )
-        .unwrap_or_else(|error| panic!("second anchor: {error}")),
-    );
     let (a, b) = tokio::join!(
-        registry.commit_process_registration(first, first_anchor.clone()),
-        registry.commit_process_registration(second, second_anchor.clone())
+        registry.commit_process_registration(first),
+        registry.commit_process_registration(second)
     );
     let (a, b) = (
         a.unwrap_or_else(|error| panic!("first commit: {error}")),
         b.unwrap_or_else(|error| panic!("second commit: {error}")),
     );
     assert_ne!(a.is_created(), b.is_created());
-    let (winner, loser, expected) = if a.is_created() {
-        (a, b, first_anchor)
-    } else {
-        (b, a, second_anchor)
-    };
+    let (winner, loser) = if a.is_created() { (a, b) } else { (b, a) };
     assert_eq!(winner.record.id, loser.record.id);
     assert_eq!(winner.record.trace, loser.record.trace);
+    // The retained span is the one derived for the winner's own id.
+    let scope = lash_core::TraceScopeId::admission(lash_core::TraceScopeOwner::Process {
+        process_id: winner.record.id.clone(),
+    });
     assert_eq!(
         winner
             .record
             .trace
             .as_ref()
             .unwrap_or_else(|| panic!("retained scope"))
-            .anchor,
-        expected
+            .span,
+        Some(lash_core::derive_span(
+            &parent,
+            &lash_core::SpanKey::Scope { scope: &scope }
+        ))
     );
     let retained = registry
         .get_process(&winner.record.id)

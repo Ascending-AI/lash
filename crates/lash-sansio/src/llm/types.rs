@@ -596,6 +596,15 @@ pub struct LlmRequestScope {
     /// before the call is dispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
+    /// The trace's id of this logical model call: the same value as the
+    /// call's trace records' `llm_call` id and its `chat` span's
+    /// `lash.llm_call.id`. Lash sets it on every call it dispatches,
+    /// observed or not, before the first attempt, so every attempt's copy
+    /// carries it. `None` only on a scope a host builds itself.
+    /// `request_id` keeps its meaning. It is a trace join key, not request
+    /// configuration: no request digest covers it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_call_id: Option<String>,
 }
 
 /// The turn a model call serves, typed so a host attributes the call's cost
@@ -636,6 +645,7 @@ impl LlmRequestScope {
             request_id: request_id.into(),
             turn: None,
             attempt: None,
+            llm_call_id: None,
         }
     }
 

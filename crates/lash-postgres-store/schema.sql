@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
     run_seq BIGINT NOT NULL,
     ordinal BIGINT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'decide', 'present', 'retry',
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'present', 'retry',
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).
@@ -1021,8 +1021,7 @@ CREATE TABLE IF NOT EXISTS lash_prompt_prefixes (
 -- one after, and the pinned model call exactly in the model phase, whose
 -- attempt is phase_arg and whose call is model_calls, the count of model
 -- calls the turn admitted, and the pinned call's receipt only in the model
--- phase. trace_exported records that the admission's trace export is
--- discharged (FIG-5457).
+-- phase.
 CREATE TABLE IF NOT EXISTS lash_turn_phases (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -1042,7 +1041,6 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
-    trace_exported BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -1263,9 +1261,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry 012582136e52999c); a call
+    -- Generated from this build's statements (registry 057f0e8420e8e700); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '012582136e52999c'
+    IF p_registry IS DISTINCT FROM '057f0e8420e8e700'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1478,17 +1476,6 @@ BEGIN
             v_rows := 0;
             FOR v_row IN UPDATE lash_turn_phases SET answer_ref = (v_p->>2), written_epoch = ((v_p->>3)::BIGINT)
              WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND phase = 'model' AND answer_ref IS NULL
-             RETURNING run LOOP
-                IF v_step ? 'c' AND v_first IS NULL THEN
-                    v_first := to_jsonb(v_row);
-                END IF;
-                v_rows := v_rows + 1;
-            END LOOP;
-        WHEN 'durable_turn.trace_exported' THEN
-            v_rows := 0;
-            FOR v_row IN UPDATE lash_turn_phases
-             SET trace_exported = TRUE, written_epoch = ((v_p->>2)::BIGINT)
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
              RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);

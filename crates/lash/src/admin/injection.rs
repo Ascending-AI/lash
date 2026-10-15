@@ -53,41 +53,61 @@ impl InjectionAdmin {
         messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
         // The injection's producer opens here, before the first await.
-        let producer = self
-            .context
-            .target
-            .open_producer(lash_core::ProducerKind::PluginInvoke, &self.trace);
-        let parent = producer
-            .as_deref()
-            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let target = &self.context.target;
+        let mut producer = target.open_producer(
+            lash_core::ProducerKind::PluginInvoke,
+            &self.trace,
+            lash_core::TraceIds {
+                session: Some(target.session_id()),
+                turn: Some(turn_id.clone()),
+                ..Default::default()
+            },
+        );
+        let parent = producer.parent();
         let cause = lash_core::TraceCause::from(parent.clone());
-        let mut selected = true;
-        for input in messages {
-            let source_key = input.id.map(|id| format!("injection:{id}"));
-            let turn_input = turn_input_from_plugin_message(input.message);
-            self.context
-                .runtime
-                .enqueue_turn_input(
-                    turn_input,
-                    lash_core::TurnInputIngress::active_turn(
-                        turn_id,
-                        lash_core::TurnInputCheckpointBoundary::AfterWork,
-                    ),
-                    source_key,
-                    parent.clone(),
-                )
-                .await
-                .map(|accepted| selected &= accepted.trace_cause == cause)
-                .map_err(EmbedError::Runtime)?;
+        let accepted = async {
+            let mut selected = true;
+            let mut head = None;
+            for input in messages {
+                let source_key = input.id.map(|id| format!("injection:{id}"));
+                let turn_input = turn_input_from_plugin_message(input.message);
+                let accepted = self
+                    .context
+                    .runtime
+                    .enqueue_turn_input(
+                        turn_input,
+                        lash_core::TurnInputIngress::active_turn(
+                            turn_id,
+                            lash_core::TurnInputCheckpointBoundary::AfterWork,
+                        ),
+                        source_key,
+                        parent.clone(),
+                    )
+                    .await
+                    .map_err(EmbedError::Runtime)?;
+                selected &= accepted.trace_cause == cause;
+                head.get_or_insert(accepted.input_id);
+            }
+            Ok::<_, EmbedError>((selected, head))
         }
-        if let Some(producer) = producer {
-            producer.settle(if selected {
-                lash_trace::TraceCandidateOutcome::Selected
-            } else {
-                lash_trace::TraceCandidateOutcome::Reused
-            });
+        .await;
+        match accepted {
+            Ok((selected, head)) => {
+                if let Some(head) = head {
+                    producer.accepted(head);
+                }
+                producer.settle(if selected {
+                    lash_core::ProducerOutcome::Selected
+                } else {
+                    lash_core::ProducerOutcome::Reused
+                });
+                Ok(())
+            }
+            Err(error) => {
+                producer.settle(crate::tracing::refused(&error));
+                Err(error)
+            }
         }
-        Ok(())
     }
 }
 

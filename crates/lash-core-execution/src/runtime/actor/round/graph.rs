@@ -9,8 +9,8 @@
 //! - **CallOutcome** (kind 20): the live outcome's archival body reference,
 //!   its admission, attempt, replay/intent data, and presentation recipe.
 //! - **RoundFact** (kind 21): a run record's typed body, Admit, Start,
-//!   Wait, Retry, Decide, Present, Outcome and CellReport (variants 0 to 7,
-//!   [`RunFactKind::round_fact_variant`]). A fact that names material
+//!   Wait, Retry, Present, Outcome and CellReport (variants 0 to 3 and 5 to
+//!   7, [`RunFactKind::round_fact_variant`]; 4 is retired). A fact that names material
 //!   refers to one graph node, the material: a CallOutcome for a tool
 //!   call's answer, or a FrozenValue for any other payload. The fact's
 //!   material reference is minted over that node's identity, so the owner,
@@ -1005,12 +1005,6 @@ pub fn admission_pin(
     })
 }
 
-/// A coordinator decision: TraceExported 0 (the round codec table).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Decision {
-    TraceExported,
-}
-
 /// Kind 21: one run record's typed body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoundFact {
@@ -1027,16 +1021,18 @@ pub enum RoundFact {
         output: SettledFact,
         due_at_ms: i64,
     },
-    /// 4: a coordinator decision.
-    Decide(Decision),
     /// 5: the round's presentation, in admitted order.
     Present,
     /// 6: the attempt started at `start` settled the call, with the plugin
-    /// state its completion resolved (as a tree).
+    /// state its completion resolved (as a tree), at `ended_at_ms`: the
+    /// store's clock at the commit that retains it, the member's end. An
+    /// outcome retained before members kept their end has none: its three
+    /// fields decode, and encode back, as they were stored.
     Outcome {
         start: u64,
         output: SettledFact,
         state: Vec<lash_core_store::tool_run::StateResolution>,
+        ended_at_ms: Option<u64>,
     },
     /// 7: a cell's report: a reference to its ReportView over the
     /// original outcomes, never a re-admission or a re-settlement.
@@ -1052,7 +1048,6 @@ impl RoundFact {
             Self::Start { .. } => RunFactKind::XStart,
             Self::Wait { .. } => RunFactKind::XWait,
             Self::Retry { .. } => RunFactKind::Retry,
-            Self::Decide(_) => RunFactKind::Decide,
             Self::Present => RunFactKind::Present,
             Self::Outcome { .. } => RunFactKind::XOutcome,
             Self::CellReport { .. } => RunFactKind::CellReport,
@@ -1102,7 +1097,7 @@ impl RoundFact {
             Self::CellReport { report } => {
                 decoder.child_kind(id, *report, &[NodeKind::REPORT_VIEW])?;
             }
-            Self::Start { .. } | Self::Decide(_) | Self::Present => {}
+            Self::Start { .. } | Self::Present => {}
         }
         Ok(fact)
     }
@@ -1145,20 +1140,20 @@ impl TokenCodec for RoundFact {
                 output.encode(out);
                 out.signed(*due_at_ms);
             }
-            Self::Decide(Decision::TraceExported) => {
-                out.sum(variant, 1);
-                out.sum(0, 0);
-            }
             Self::Present => out.sum(variant, 0),
             Self::Outcome {
                 start,
                 output,
                 state,
+                ended_at_ms,
             } => {
-                out.sum(variant, 3);
+                out.sum(variant, 3 + u64::from(ended_at_ms.is_some()));
                 out.unsigned(*start);
                 output.encode(out);
                 encode_tree(state, out);
+                if let Some(ended_at_ms) = ended_at_ms {
+                    out.unsigned(*ended_at_ms);
+                }
             }
             Self::CellReport { report } => {
                 out.sum(variant, 1);
@@ -1203,25 +1198,22 @@ impl TokenCodec for RoundFact {
                     due_at_ms: input.signed()?,
                 }
             }
-            RunFactKind::Decide => {
-                expect(1)?;
-                let (decision, decision_fields) = input.sum()?;
-                TokenReader::expect_fields(decision_fields, 0)?;
-                match decision {
-                    0 => Self::Decide(Decision::TraceExported),
-                    other => return Err(unsupported(other)),
-                }
-            }
             RunFactKind::Present => {
                 expect(0)?;
                 Self::Present
             }
             RunFactKind::XOutcome => {
-                expect(3)?;
+                // An outcome retained before members kept their end has
+                // three fields.
+                let ended = fields == 4;
+                if !ended {
+                    expect(3)?;
+                }
                 Self::Outcome {
                     start: input.unsigned()?,
                     output: SettledFact::decode(input)?,
                     state: decode_tree(input)?,
+                    ended_at_ms: if ended { Some(input.unsigned()?) } else { None },
                 }
             }
             RunFactKind::CellReport => {

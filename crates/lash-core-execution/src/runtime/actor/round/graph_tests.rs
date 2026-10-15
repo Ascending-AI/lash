@@ -149,6 +149,7 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
             material: Some(material),
         },
         state: Vec::new(),
+        ended_at_ms: Some(0),
     };
     let root = fact.stage(&mut staging).unwrap();
 
@@ -182,6 +183,7 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
             material: Some(other),
         },
         state: Vec::new(),
+        ended_at_ms: Some(0),
     };
     assert_eq!(
         forged.stage(&mut staging),
@@ -234,7 +236,6 @@ fn every_round_fact_round_trips_through_its_node() {
             },
             due_at_ms: -5,
         },
-        RoundFact::Decide(Decision::TraceExported),
         RoundFact::Present,
         RoundFact::CellReport { report },
     ] {

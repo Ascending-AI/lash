@@ -10,7 +10,7 @@ use lash_durable::domain::{
     AdmittedId, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFacts, RunSeq,
 };
 
-use super::records::{self, ADMIT_ORDINAL, DecideBody, Record, first_start};
+use super::records::{self, ADMIT_ORDINAL, Record, first_start};
 use super::{
     AdmittedExecution, ExecutionDraft, FoldRefusal, Material, PinnedWaits, PolicyView, Recovery,
     RunCursor, RunFold, SettledOutput,
@@ -69,6 +69,8 @@ pub struct RoundMember {
     committed_state: Vec<StateResolution>,
     /// Recorded attempt outcomes and the backoff before the next attempt.
     attempts: BTreeMap<u32, (SettledOutput, Option<u64>)>,
+    /// When its final outcome's commit retained it.
+    ended_at_ms: Option<u64>,
 }
 
 impl RoundMember {
@@ -107,6 +109,13 @@ impl RoundMember {
     #[must_use]
     pub fn committed_state(&self) -> &[StateResolution] {
         &self.committed_state
+    }
+
+    /// The member's end: the store's clock at the commit that retained its
+    /// final outcome, once it has one. Its tool span ends here.
+    #[must_use]
+    pub fn ended_at_ms(&self) -> Option<u64> {
+        self.ended_at_ms
     }
 
     /// Its final outcome, once it has one.
@@ -170,9 +179,6 @@ pub struct RoundView {
     members: Vec<RoundMember>,
     cursor: Arc<RunCursor>,
     presented: bool,
-    /// Whether an owner recorded that it exported the trace admissions the
-    /// admission retained.
-    trace_exported: bool,
 }
 
 impl RoundView {
@@ -203,23 +209,6 @@ impl RoundView {
                 .map(|member| member.call().clone())
                 .collect()
         })
-    }
-
-    /// The traced scopes whose admission exports the admission still owes:
-    /// its members' scopes with an anchor to export, until an owner records
-    /// that it exported them (`round.traced`), which discharges them
-    /// (FIG-5452, FIG-5457). An owner that holds the admission without that
-    /// record exports these, then records so.
-    #[must_use]
-    pub fn owed_trace_exports(&self) -> Vec<&lash_trace::DurableTraceScope> {
-        if self.trace_exported {
-            return Vec::new();
-        }
-        self.members
-            .iter()
-            .filter_map(|member| member.draft.trace())
-            .filter(|scope| scope.anchor.context().is_some())
-            .collect()
     }
 
     /// Whether every member has its final outcome.
@@ -419,7 +408,6 @@ fn fold_run(
             reason: reason.to_owned(),
         })?;
     let mut presented = false;
-    let mut trace_exported = false;
     for row in &records[1..] {
         match decode(facts, row)? {
             Record::Admit(_) | Record::CellReport(_) => return Err(out_of_order(row)),
@@ -447,6 +435,7 @@ fn fold_run(
                             },
                             committed_state: Vec::new(),
                             attempts: BTreeMap::new(),
+                            ended_at_ms: None,
                         });
                     }
                     Some(member)
@@ -493,6 +482,7 @@ fn fold_run(
                     outcome: settled.output,
                 };
                 member.committed_state = settled.state;
+                member.ended_at_ms = settled.ended_at_ms;
             }
             Record::Retry(retry) => {
                 let member = open_attempt(&mut members, row, retry.start)?;
@@ -534,9 +524,6 @@ fn fold_run(
                 }
                 presented = true;
             }
-            // A coordinator decision is the tool round's to fold; the
-            // primitive's recoveries do not depend on it.
-            Record::Decide(DecideBody::TraceExported) => trace_exported = true,
         }
     }
     // The admission commits every member's first start with it, so a
@@ -556,7 +543,6 @@ fn fold_run(
         members,
         cursor: RunCursor::at(Ordinal(records.len() as u64)),
         presented,
-        trace_exported,
     })
 }
 

@@ -392,10 +392,9 @@ pub async fn register_process_start(
         staging,
         registration,
     } = stage_process_start(stores, registration, observers).await?;
-    let anchor = staging.anchor();
     let committed = stores
         .registry
-        .commit_process_registration(registration, anchor)
+        .commit_process_registration(registration)
         .await;
     staging.adopt(stores, committed).await
 }
@@ -424,7 +423,7 @@ pub struct StagedProcessStart {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StagedRegistration {
-    /// The registration, its trace anchor bound.
+    /// The registration, its trace span derived.
     pub registration: ProcessRegistration,
     /// The sessions that observe the process from its creation.
     pub observers: Vec<SessionId>,
@@ -509,7 +508,6 @@ pub async fn stage_store_local_start(
                 process_id: registration.process_id().clone(),
             })
             .map_err(crate::PluginError::from)?;
-        staging.settle_trace(lash_trace::TraceCandidateOutcome::Reused);
         return Ok(StagedProcessStart {
             record,
             disposition: crate::ProcessRegistrationOutcome::Existing,
@@ -528,8 +526,7 @@ pub async fn stage_store_local_start(
             ),
         ));
     }
-    let anchor = staging.anchor();
-    let (registration, observers, process_id, _, prepared_at_ms) = registration.into_commit(anchor);
+    let (registration, observers, process_id, _, prepared_at_ms) = registration.into_commit();
     // The registrar refuses a start whose starter or lifetime scope closed
     // (FIG-3607 R11) when its rows commit, and with it the commit of its
     // call's outcome. A closed scope never reopens, so the start is refused
@@ -556,7 +553,6 @@ pub async fn stage_store_local_start(
     };
     let record = staged.record()?;
     let rows = staged.rows()?;
-    staging.settle_trace(lash_trace::TraceCandidateOutcome::Selected);
     Ok(StagedProcessStart {
         record,
         disposition: crate::ProcessRegistrationOutcome::Created,
@@ -582,8 +578,6 @@ pub struct StartStaging<'a> {
     engine: Option<StagedEngine<'a>>,
     submitted_env_ref: Option<ProcessEnvRef>,
     submitted_input: Arc<ProcessInput>,
-    anchor: lash_trace::TraceAnchor,
-    candidate: Option<Box<dyn lash_trace::TraceAdmissionCandidate>>,
 }
 
 /// Admit and stage one process start, and prepare its registration: every
@@ -780,25 +774,6 @@ async fn stage<'a>(
         .registry
         .prepare_process_registration(registration, observers)
         .await?;
-    // An unobserved start (no parent) proposes no candidate: no admission
-    // makes a trace root.
-    let candidate = stores
-        .tracing
-        .zip(prepared.trace().cause().as_parent())
-        .map(|(tracing, parent)| {
-            tracing.scopes().propose(
-                &lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
-                    process_id: prepared.process_id().clone(),
-                }),
-                &parent,
-                &prepared.trace().links(),
-                prepared.prepared_at_ms(),
-            )
-        });
-    let anchor = candidate.as_ref().map_or_else(
-        || prepared.trace().anchor().clone(),
-        |candidate| candidate.anchor(),
-    );
     Ok(PreparedProcessStart {
         staging: StartStaging {
             start_key: start_key.clone(),
@@ -808,8 +783,6 @@ async fn stage<'a>(
             engine,
             submitted_env_ref,
             submitted_input,
-            anchor,
-            candidate,
         },
         registration: prepared,
     })
@@ -824,20 +797,6 @@ impl StartStaging<'_> {
             .is_some_and(|definition| !definition.staged)
             || self.env.as_ref().is_some_and(|env| !env.staged)
             || self.engine.as_ref().is_some_and(|engine| !engine.staged)
-    }
-
-    /// End the start's trace candidate with `outcome`, for a start whose
-    /// row commits elsewhere.
-    fn settle_trace(self, outcome: lash_trace::TraceCandidateOutcome) {
-        if let Some(candidate) = self.candidate {
-            candidate.settle(outcome);
-        }
-    }
-
-    /// The trace anchor the registration commits with.
-    #[must_use]
-    pub fn anchor(&self) -> lash_trace::TraceAnchor {
-        self.anchor.clone()
     }
 
     /// Settle the start once the transaction that applies its registration
@@ -888,9 +847,6 @@ impl StartStaging<'_> {
         self,
         stores: &ProcessStartStores<'_>,
     ) -> Result<(), RuntimeEffectControllerError> {
-        if let Some(candidate) = self.candidate {
-            candidate.settle(lash_trace::TraceCandidateOutcome::Refused);
-        }
         abandon_start(stores, self.start_key.clone()).await?;
         if let Some(ports) = stores.ports() {
             ports
@@ -913,16 +869,7 @@ impl StartStaging<'_> {
             engine,
             submitted_env_ref,
             submitted_input,
-            anchor: _,
-            candidate,
         } = self;
-        if let Some(candidate) = candidate {
-            candidate.settle(match &committed {
-                Ok(receipt) if receipt.is_created() => lash_trace::TraceCandidateOutcome::Selected,
-                Ok(_) => lash_trace::TraceCandidateOutcome::Reused,
-                Err(_) => lash_trace::TraceCandidateOutcome::Refused,
-            });
-        }
         let registered = committed?;
         let disposition = registered.outcome;
         let created = disposition == crate::ProcessRegistrationOutcome::Created;

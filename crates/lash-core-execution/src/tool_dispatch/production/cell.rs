@@ -10,14 +10,11 @@
 //! ([`CellMembers::reply`]).
 //!
 //! A tool call's trace scope is retained by the cell's admission of it
-//! ([`CellMembers::propose_trace`]), and every attempt traces the call
-//! under it: the call is admitted once, not once per attempt. The
-//! admission owes its calls' admission exports until an owner records that
-//! it exported them (`round.traced`): the cell's owner exports them before
-//! any of their bodies runs, selecting the candidates it proposed or
-//! reconciling the exports of another owner's, and then records so. A node
-//! that takes the cell over after that record exports none of its calls'
-//! admissions again (FIG-5395, FIG-5457).
+//! ([`CellMembers::trace_scope`]), and every attempt traces the call's
+//! start under it: the call is admitted once, not once per attempt, and its
+//! span is derived from the cell's turn, so every owner names the same one.
+//! Its span closes on the owner whose acknowledged commit wrote its outcome
+//! ([`MemberBodies::observe`]), never inside an attempt (P1).
 //!
 //! When the cell's Run closes with calls still open (a race's loser), each
 //! is stopped for the closing, under its own cause: a body that observes
@@ -295,9 +292,6 @@ fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolI
 pub struct CellMembers {
     tools: CellTools,
     calls: Mutex<BTreeMap<crate::ToolCallId, CellMember>>,
-    /// The trace candidates of the tool calls this owner proposed, until
-    /// their admission's exports are owed ([`CellMembers::export_trace_admissions`]).
-    candidates: Mutex<BTreeMap<crate::ToolCallId, Box<dyn lash_trace::TraceAdmissionCandidate>>>,
 }
 
 impl CellMembers {
@@ -325,38 +319,24 @@ impl CellMembers {
                 closing: RunClosing::default(),
             },
             calls: Mutex::default(),
-            candidates: Mutex::default(),
         })
     }
 
-    /// Propose the trace admission of `member`, a tool call, requested at
-    /// `now_ms`: the scope the cell's admission of it retains. The candidate
-    /// is held until the admission, committed, has its exports discharged.
-    /// `None` without tracing.
-    pub fn propose_trace(
+    /// The trace scope the cell's admission of `member`, a tool call
+    /// requested at `now_ms`, retains. `None` without tracing.
+    pub fn trace_scope(
         &self,
         member: &CellMember,
         now_ms: u64,
     ) -> Option<lash_trace::DurableTraceScope> {
         let CellMember::Tool(call) = member;
-        let proposal = self
-            .tools
+        self.tools
             .context
-            .propose_tool_trace(&call.id, now_ms)
+            .tool_trace_scope(&call.id, now_ms)
             .unwrap_or_else(|error| {
                 self.tools.context.record_nested_effect_error(error);
                 None
-            })?;
-        // A call proposed again replaces its earlier candidate, whose
-        // admission never committed.
-        if let Some(earlier) = self
-            .candidates
-            .lock_recover()
-            .insert(call.id.clone(), proposal.candidate)
-        {
-            earlier.settle(lash_trace::TraceCandidateOutcome::Refused);
-        }
-        Some(proposal.scope)
+            })
     }
 
     /// Know `member`, admitted or open, so its body can be built.
@@ -457,17 +437,45 @@ fn unknown_member() -> MemberBody {
 }
 
 impl MemberBodies for CellMembers {
-    fn export_trace_admissions(&self, members: &[AdmittedExecution]) {
-        let mut candidates = self.candidates.lock_recover();
-        for execution in members {
-            match candidates.remove(execution.call()) {
-                Some(candidate) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
-                None => {
-                    if let Some(scope) = execution.draft().trace() {
-                        self.tools.context.export_tool_trace_admission(scope);
-                    }
-                }
+    /// Close the span of each call whose outcome this activation's
+    /// acknowledged commit wrote, at the end that commit retained (P1): an
+    /// attempt that ends closes nothing, and a successor that folds an
+    /// outcome another owner committed closes nothing.
+    fn observe(
+        &self,
+        round: &crate::runtime::actor::round::RoundView,
+        _admitted_here: &std::collections::BTreeSet<lash_durable::domain::AdmittedId>,
+        settled_here: &std::collections::BTreeSet<lash_durable::domain::AdmittedId>,
+    ) {
+        for member in round.members() {
+            if !settled_here.contains(&round.id_of(member)) {
+                continue;
             }
+            let (Some(output), Some(scope), Some(CellMember::Tool(call))) = (
+                member.outcome(),
+                member.draft().trace(),
+                self.calls.lock_recover().get(member.call()).cloned(),
+            ) else {
+                continue;
+            };
+            let pending = self.tools.named(&call);
+            let context = &self.tools.context;
+            context.adopt_tool_call_trace(&call.id, scope.clone());
+            let attempts = member
+                .attempts()
+                .map(|(ordinal, output, delay)| {
+                    crate::trace::trace_tool_attempt(
+                        ordinal,
+                        &super::round::member_record(&pending, output),
+                        delay,
+                    )
+                })
+                .collect::<Vec<_>>();
+            context.trace_tool_call_completed(
+                &super::round::member_record(&pending, output),
+                &attempts,
+                member.ended_at_ms(),
+            );
         }
     }
 
@@ -556,17 +564,5 @@ impl MemberBodies for CellMembers {
             .dispatch()
             .state
             .run_changes_committed(written);
-    }
-}
-
-/// A candidate still held when the cell's owner lets its members go was
-/// proposed for an admission whose fate this owner cannot tell: its adapter
-/// holds it until a reconcile selects it or another candidate of its call
-/// wins.
-impl Drop for CellMembers {
-    fn drop(&mut self) {
-        for candidate in std::mem::take(&mut *self.candidates.lock_recover()).into_values() {
-            candidate.defer();
-        }
     }
 }

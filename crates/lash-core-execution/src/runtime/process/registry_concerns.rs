@@ -224,8 +224,7 @@ pub trait ProcessRegistrar: Send + Sync {
         let prepared = self
             .prepare_process_registration(registration, observers)
             .await?;
-        let anchor = prepared.trace().anchor().clone();
-        self.commit_process_registration(prepared, anchor).await
+        self.commit_process_registration(prepared).await
     }
 
     /// Prepare the actual id and immutable composition without mutating SQL.
@@ -241,7 +240,6 @@ pub trait ProcessRegistrar: Send + Sync {
     async fn commit_process_registration(
         &self,
         prepared: PreparedProcessRegistration,
-        anchor: lash_trace::TraceAnchor,
     ) -> Result<ProcessRegistrationReceipt, PluginError>;
 
     /// Attach a durable backend reference to a registered process.

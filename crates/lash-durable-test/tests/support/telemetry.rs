@@ -1,310 +1,308 @@
-//! A recording telemetry adapter for the trace-scope laws (FIG-5363,
-//! FIG-5382): the scope factory and projector a core's trace runtime is
-//! served with.
+//! A recording trace sink for the trace-scope laws (FIG-5363, FIG-5382,
+//! FIG-6299): the publication oracle a core's trace runtime is served with.
 //!
-//! The factory opens every producer on a fresh trace unless it is its
-//! caller's child, and proposes every admission on its parent's trace, as
-//! an exporting adapter does, and its collector records every admission any process exported: the
-//! `lash.turn.admitted` span an adapter exports for a turn's scope, and the
-//! `lash.tool.admitted` span for a tool call's, whether a candidate was
-//! selected for it or a reader reconciled it (FIG-5395). Like an exporting
-//! adapter, each process's adapter dedupes an admission's identity, its
-//! anchor, and holds a deferred candidate until a reconcile of its anchor
-//! selects it; that memory is the process's own, so a restarted process
-//! ([`Telemetry::restarted`]) remembers nothing another exported
-//! (FIG-5452). The projector records the scope every record was made under.
+//! Every process's runtime appends to one collector, so the laws read what
+//! every owner published. A container (a turn, a tool call) closes on the
+//! owner whose acknowledged commit wrote its terminal (P1), so its closing
+//! record is published at most once across every owner, and exactly once
+//! unless that owner lost its acknowledgement or its life after the commit
+//! (D4's at-most-once window).
+//!
+//! Each runtime installs two consumers ahead of the collector (L1(g)): a
+//! sink that panics on every third append and a flight recorder whose
+//! snapshot callback panics. Sink acceptance is per sink: each is offered
+//! every record the collector holds, whatever the others did. (The
+//! matrix's virtual clock reports no slow operation, so the recorder's
+//! callback panic is pinned by the runtime's own containment law.)
 
 #![allow(dead_code)]
 
+use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash::tracing::{
-    AttemptObservation, DurableTraceScope, EmissionSource, ProducerSpec, TraceAdmissionCandidate,
-    TraceAnchor, TraceCandidateOutcome, TraceCarrier, TraceDomainProjector, TraceHostOperation,
-    TraceLinkMode, TraceLinks, TraceParent, TraceRecord, TraceScopeFactory, TraceScopeId,
-    TraceScopeOwner, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
+    FlightRecorderSettings, FlightRecorderSink, SpanRole, TraceCarrier, TraceRecord, TraceScopeId,
+    TraceScopeOwner, TraceSink, TraceSinkError, TraceSpanKind,
 };
 use lash_sansio::sync::MutexExt as _;
 
-/// What the collector received from every process's adapter.
-#[derive(Default)]
-struct Recorded {
-    /// How many producers were opened and candidates proposed: each mints
-    /// the next span.
-    proposed: u64,
-    /// Every exported admission, with the anchor it gave its scope.
-    admitted: Vec<(TraceScopeId, TraceCarrier)>,
-    /// Every projected record's scope and turn.
-    projected: Vec<(DurableTraceScope, Option<lash_sansio::TurnId>)>,
-}
-
-/// What one process's adapter remembers, and loses with its process.
-#[derive(Default)]
-struct Memory {
-    /// The identities of the admissions it exported.
-    exported: Vec<TraceCarrier>,
-    /// The candidates it holds deferred.
-    deferred: Vec<(TraceScopeId, TraceCarrier)>,
-}
-
-/// One process's recording adapter: its scope factory and its projector,
-/// over the collector every process exports to.
+/// The collector every process's runtime publishes to.
 #[derive(Clone, Default)]
 pub struct Telemetry {
-    recorded: Arc<Mutex<Recorded>>,
-    memory: Arc<Mutex<Memory>>,
+    published: Arc<Mutex<Vec<TraceRecord>>>,
+    /// Appends offered to the sink that panics on every third.
+    panicking: Arc<AtomicUsize>,
+    /// Appends the flight recorder forwarded.
+    recorded: Arc<AtomicUsize>,
 }
 
-struct Candidate {
-    scope: TraceScopeId,
-    carrier: TraceCarrier,
-    telemetry: Telemetry,
-}
+/// A sink that counts every append it is offered and panics on every
+/// third.
+struct PanicEveryThird(Arc<AtomicUsize>);
 
-impl TraceAdmissionCandidate for Candidate {
-    fn anchor(&self) -> TraceAnchor {
-        TraceAnchor::Context(self.carrier.clone())
-    }
-
-    fn settle(self: Box<Self>, outcome: TraceCandidateOutcome) {
-        if outcome == TraceCandidateOutcome::Selected {
-            self.telemetry.export(self.scope, self.carrier);
-        }
-    }
-
-    fn defer(self: Box<Self>) {
-        self.telemetry
-            .memory
-            .lock_recover()
-            .deferred
-            .push((self.scope, self.carrier));
+impl TraceSink for PanicEveryThird {
+    fn append(&self, _record: &TraceRecord) -> Result<(), TraceSinkError> {
+        let offered = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+        assert!(!offered.is_multiple_of(3), "the third append panics");
+        Ok(())
     }
 }
 
-/// A producer span: settling it records nothing.
-struct Producer(TraceCarrier);
+/// A sink that counts what it is forwarded.
+struct Counting(Arc<AtomicUsize>);
 
-impl TraceHostOperation for Producer {
-    fn carrier(&self) -> TraceCarrier {
-        self.0.clone()
-    }
-
-    fn settle(self: Box<Self>, _outcome: TraceCandidateOutcome) {}
-}
-
-impl Telemetry {
-    /// The next span, on `trace` or else on a fresh trace of its own.
-    fn mint(&self, trace: Option<W3cTraceId>) -> TraceCarrier {
-        let minted = {
-            let mut recorded = self.recorded.lock_recover();
-            recorded.proposed += 1;
-            recorded.proposed
-        };
-        TraceCarrier::new(
-            trace.unwrap_or_else(|| {
-                W3cTraceId::from_bytes(u128::from(minted).to_be_bytes()).expect("a trace id")
-            }),
-            W3cSpanId::from_bytes(minted.to_be_bytes()).expect("a span id"),
-            W3cTraceFlags::from_byte(W3cTraceFlags::SAMPLED),
-            W3cTraceState::default(),
-        )
-    }
-
-    /// Export the admission of `scope` under `carrier` unless this process
-    /// already did: its deferred candidates of the scope are settled.
-    fn export(&self, scope: TraceScopeId, carrier: TraceCarrier) {
-        {
-            let mut memory = self.memory.lock_recover();
-            memory.deferred.retain(|(deferred, _)| *deferred != scope);
-            if memory.exported.contains(&carrier) {
-                return;
-            }
-            memory.exported.push(carrier.clone());
-        }
-        self.recorded.lock_recover().admitted.push((scope, carrier));
+impl TraceSink for Counting {
+    fn append(&self, _record: &TraceRecord) -> Result<(), TraceSinkError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 }
 
-impl TraceScopeFactory for Telemetry {
-    fn capture_current(&self) -> Option<TraceCarrier> {
-        None
-    }
-
-    fn open_producer(&self, spec: ProducerSpec) -> Option<Box<dyn TraceHostOperation>> {
-        // A producer is its caller's child, or else a root of its own.
-        let trace = match spec.link_mode {
-            TraceLinkMode::Parent => spec.caller.as_ref().map(TraceCarrier::trace_id),
-            TraceLinkMode::Link => None,
-        };
-        Some(Box::new(Producer(self.mint(trace))))
-    }
-
-    fn propose(
-        &self,
-        scope: &TraceScopeId,
-        parent: &TraceParent,
-        _links: &TraceLinks,
-        _started_at_ms: u64,
-    ) -> Box<dyn TraceAdmissionCandidate> {
-        // An admission continues its parent's trace.
-        let carrier = self.mint(Some(parent.carrier().trace_id()));
-        Box::new(Candidate {
-            scope: scope.clone(),
-            carrier,
-            telemetry: self.clone(),
-        })
-    }
-
-    fn export_admitted(&self, scope: &DurableTraceScope) {
-        if let TraceAnchor::Context(carrier) = &scope.anchor {
-            self.export(scope.scope.clone(), carrier.clone());
-        }
-    }
-}
-
-impl TraceDomainProjector for Telemetry {
-    fn project(
-        &self,
-        scope: &DurableTraceScope,
-        _attempt: Option<&AttemptObservation>,
-        _source: &EmissionSource,
-        record: &TraceRecord,
-    ) {
-        self.recorded
-            .lock_recover()
-            .projected
-            .push((scope.clone(), record.context.turn_id.clone()));
+impl TraceSink for Telemetry {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        self.published.lock_recover().push(record.clone());
+        Ok(())
     }
 }
 
 impl Telemetry {
-    /// A trace runtime served with this adapter.
+    /// A trace runtime that publishes to this collector, with lash's own
+    /// identity: no adapter, so producers root sampled traces.
+    /// The failing consumers go first: one whose failure stopped later
+    /// sinks would starve the collector.
     pub fn runtime(&self) -> lash_core::runtime::TraceRuntime {
+        let recorder = FlightRecorderSink::new(
+            Counting(Arc::clone(&self.recorded)),
+            FlightRecorderSettings {
+                slow_threshold: std::time::Duration::ZERO,
+                minimum_interval: std::time::Duration::ZERO,
+                ..FlightRecorderSettings::default()
+            },
+            |_snapshot| panic!("the snapshot callback panics"),
+        );
         lash_core::runtime::TraceRuntime::new(Arc::new(lash_core::runtime::SystemClock))
-            .with_scopes(Arc::new(self.clone()))
-            .with_projector(Arc::new(self.clone()))
+            .with_trace_sink(Arc::new(PanicEveryThird(Arc::clone(&self.panicking))))
+            .with_trace_sink(Arc::new(recorder))
+            .with_trace_sink(Arc::new(self.clone()))
     }
 
-    /// The adapter of a process started after this one's: it exports to the
-    /// same collector and remembers nothing this one exported or deferred,
-    /// as a node that takes a session over (FIG-5452).
-    #[must_use]
-    pub fn restarted(&self) -> Self {
-        Self {
-            recorded: Arc::clone(&self.recorded),
-            memory: Arc::default(),
-        }
-    }
-
-    /// How `session`'s first turn broke its trace scope: unless its
-    /// admission scope was exported exactly once, and every record of the
-    /// turn carries the trace that admission started (every record of the
-    /// turn's own scope, its anchor).
-    pub fn first_turn_violations(&self, session: &str) -> Vec<String> {
-        let recorded = self.recorded.lock_recover();
-        let turn_admissions = recorded
-            .admitted
-            .iter()
-            .filter(|(scope, _)| {
-                scope.boundary == 0
-                    && matches!(
-                        &scope.owner,
-                        TraceScopeOwner::Turn { session_id, .. } if session_id.as_str() == session
-                    )
-            })
-            .collect::<Vec<_>>();
-        let Some((scope, _)) = turn_admissions.first() else {
-            return vec![format!("no turn of session {session} was admitted")];
-        };
-        let TraceScopeOwner::Turn { turn_id, .. } = &scope.owner else {
-            unreachable!("filtered to turn scopes");
-        };
-        let admitted = turn_admissions
-            .iter()
-            .filter(|(other, _)| other == scope)
-            .map(|(_, carrier)| carrier)
-            .collect::<Vec<_>>();
-        let original = admitted[0];
+    /// How publication broke across every owner (L1(c), (f), (g)): unless
+    /// each failing consumer was offered every record the collector holds,
+    /// and every published parent is a span some owner published. Only
+    /// when `lossy` may a parent be missing, and only a container's whose
+    /// opening record was published: an owner lost its acknowledgement or
+    /// its life between that container's terminal commit and its close.
+    pub fn publication_violations(&self, lossy: bool) -> Vec<String> {
+        let published = self.published.lock_recover();
         let mut violations = Vec::new();
-        if admitted.len() != 1 {
+        for (consumer, offered) in [
+            ("the panicking sink", self.panicking.load(Ordering::SeqCst)),
+            ("the flight recorder", self.recorded.load(Ordering::SeqCst)),
+        ] {
+            if offered != published.len() {
+                violations.push(format!(
+                    "{consumer} was offered {offered} records, the collector holds {}",
+                    published.len()
+                ));
+            }
+        }
+        let positions = || {
+            published
+                .iter()
+                .filter_map(|record| record.position.as_ref())
+        };
+        let closed: HashSet<_> = positions()
+            .filter(|position| position.publishes())
+            .map(|position| position.span.span_id())
+            .collect();
+        let opened: HashSet<_> = positions()
+            .filter(|position| position.role == SpanRole::Opens)
+            .map(|position| position.span.span_id())
+            .collect();
+        for position in positions() {
+            let Some(parent) = &position.parent else {
+                continue;
+            };
+            let parent = parent.span_id();
+            if closed.contains(&parent) || (lossy && opened.contains(&parent)) {
+                continue;
+            }
             violations.push(format!(
-                "turn {turn_id}'s scope must be admitted exactly once, but was admitted with \
-                 {admitted:?}"
+                "a {:?} {:?} record names parent {parent:?}, which no owner published",
+                position.kind, position.role
             ));
         }
-        for (record_scope, _) in recorded
-            .projected
-            .iter()
-            .filter(|(record_scope, record_turn)| {
-                record_turn.as_ref() == Some(turn_id) || record_scope.scope == *scope
-            })
-        {
-            let anchor = record_scope.anchor.context();
-            let stray = if record_scope.scope == *scope {
-                anchor != Some(original)
-            } else {
-                anchor.map(TraceCarrier::trace_id) != Some(original.trace_id())
-            };
-            if stray {
+        violations
+    }
+
+    /// The collector of a process started after this one's: the same
+    /// collector, so the laws read every owner's publications.
+    #[must_use]
+    pub fn restarted(&self) -> Self {
+        self.clone()
+    }
+
+    /// Every record published so far.
+    pub fn published(&self) -> Vec<TraceRecord> {
+        self.published.lock_recover().clone()
+    }
+
+    /// How `session`'s first turn broke its trace: unless every record of
+    /// the turn carries a position on the trace of the turn's span, the
+    /// turn's opening and closing records name one span, and that span
+    /// closes once (at most once when `lossy`: an owner may have lost its
+    /// acknowledgement or its life after the terminal commit). Span ids are
+    /// unique across every published closing or whole record.
+    pub fn first_turn_violations(&self, session: &str, lossy: bool) -> Vec<String> {
+        let published = self.published.lock_recover();
+        let mut violations = unique_span_violations(&published);
+        let Some((scope, span)) = first_turn(&published, session) else {
+            violations.push(format!("no turn of session {session} was published"));
+            return violations;
+        };
+        let TraceScopeOwner::Turn { turn_id, .. } = &scope.owner else {
+            unreachable!("found a turn scope");
+        };
+        let turn_records = published.iter().filter(|record| {
+            record.context.turn_id.as_ref() == Some(turn_id)
+                || record
+                    .position
+                    .as_ref()
+                    .is_some_and(|position| position.scope.as_ref() == Some(&scope))
+        });
+        let mut closes = 0;
+        for record in turn_records {
+            let Some(position) = &record.position else {
                 violations.push(format!(
-                    "a record of turn {turn_id} under {:?} carries {anchor:?}, not its \
-                     admission's trace {original:?}",
-                    record_scope.scope
+                    "a record of turn {turn_id} carries no position: {:?}",
+                    record.event.kind()
+                ));
+                continue;
+            };
+            if position.span.trace_id() != span.trace_id() {
+                violations.push(format!(
+                    "a {:?} record of turn {turn_id} is on trace {:?}, not its turn's {:?}",
+                    record.event.kind(),
+                    position.span.trace_id(),
+                    span.trace_id()
                 ));
             }
+            if position.kind == TraceSpanKind::Agent && position.scope.as_ref() == Some(&scope) {
+                if position.span.span_id() != span.span_id() {
+                    violations.push(format!(
+                        "turn {turn_id}'s records name two spans: {:?} and {:?}",
+                        span.span_id(),
+                        position.span.span_id()
+                    ));
+                }
+                closes += usize::from(position.role == SpanRole::Closes);
+            }
+        }
+        if closes > 1 || (closes == 0 && !lossy) {
+            violations.push(format!(
+                "turn {turn_id}'s span must close once, but closed {closes} times"
+            ));
         }
         violations
     }
 
-    /// How the tool calls of `session`'s first turn broke their admission
-    /// (FIG-5382, FIG-5395): unless each call's scope was admitted exactly
-    /// once (the `lash.tool.admitted` span an adapter exports), on the trace
-    /// the turn's admission started.
-    pub fn first_turn_tool_violations(&self, session: &str) -> Vec<String> {
-        let recorded = self.recorded.lock_recover();
-        let Some((turn_scope, turn_anchor)) = recorded.admitted.iter().find(|(scope, _)| {
-            scope.boundary == 0
-                && matches!(
-                    &scope.owner,
-                    TraceScopeOwner::Turn { session_id, .. } if session_id.as_str() == session
-                )
-        }) else {
-            return vec![format!("no turn of session {session} was admitted")];
+    /// How the tool calls of `session`'s first turn broke their spans
+    /// (FIG-5382): unless each call's span closes once (at most once when
+    /// `lossy`), on the trace of its turn, under a parent on that trace.
+    pub fn first_turn_tool_violations(&self, session: &str, lossy: bool) -> Vec<String> {
+        let published = self.published.lock_recover();
+        let Some((scope, span)) = first_turn(&published, session) else {
+            return vec![format!("no turn of session {session} was published")];
         };
-        let TraceScopeOwner::Turn { turn_id, .. } = &turn_scope.owner else {
+        let TraceScopeOwner::Turn { turn_id, .. } = &scope.owner else {
             unreachable!("found a turn scope");
         };
-        let mut calls = std::collections::BTreeMap::<&str, Vec<&TraceCarrier>>::new();
-        for (scope, carrier) in &recorded.admitted {
-            if let TraceScopeOwner::Tool {
+        let mut calls = BTreeMap::<&str, Vec<&TraceCarrier>>::new();
+        let mut violations = Vec::new();
+        for record in published.iter() {
+            let Some(position) = &record.position else {
+                continue;
+            };
+            let Some(TraceScopeOwner::Tool {
                 owner: lash::tracing::TraceToolOwner::Turn { turn_id: owner, .. },
                 call_id,
-            } = &scope.owner
-                && owner == turn_id
-            {
-                calls.entry(call_id.as_str()).or_default().push(carrier);
+            }) = position.scope.as_ref().map(|scope| &scope.owner)
+            else {
+                continue;
+            };
+            if owner != turn_id || position.kind != TraceSpanKind::Tool {
+                continue;
             }
-        }
-        let mut violations = Vec::new();
-        if calls.is_empty() {
-            violations.push(format!("no tool call of turn {turn_id} was admitted"));
-        }
-        for (call_id, admitted) in calls {
-            if admitted.len() != 1 {
+            let closes = calls.entry(call_id.as_str()).or_default();
+            if position.role == SpanRole::Closes {
+                closes.push(&position.span);
+            }
+            if position.span.trace_id() != span.trace_id()
+                || position
+                    .parent
+                    .as_ref()
+                    .is_none_or(|parent| parent.trace_id() != span.trace_id())
+            {
                 violations.push(format!(
-                    "tool call {call_id} of turn {turn_id} must be admitted exactly once, but \
-                     was admitted with {admitted:?}"
+                    "tool call {call_id}'s {:?} record {:?} under {:?} is not on its turn's \
+                     trace {:?}",
+                    position.role,
+                    position.span,
+                    position.parent,
+                    span.trace_id()
                 ));
             }
-            for carrier in admitted {
-                if carrier.trace_id() != turn_anchor.trace_id() {
-                    violations.push(format!(
-                        "tool call {call_id}'s admission {carrier:?} is not on its turn's trace \
-                         {turn_anchor:?}"
-                    ));
-                }
+        }
+        if calls.is_empty() {
+            violations.push(format!("no tool call of turn {turn_id} was published"));
+        }
+        for (call_id, closes) in calls {
+            if closes.len() > 1 || (closes.is_empty() && !lossy) {
+                violations.push(format!(
+                    "tool call {call_id} of turn {turn_id} must close once, but closed with \
+                     {closes:?}"
+                ));
             }
         }
         violations
     }
+}
+
+/// The scope and span of `session`'s first turn, from its first published
+/// agent record.
+fn first_turn(published: &[TraceRecord], session: &str) -> Option<(TraceScopeId, TraceCarrier)> {
+    published.iter().find_map(|record| {
+        let position = record.position.as_ref()?;
+        let scope = position.scope.as_ref()?;
+        (position.kind == TraceSpanKind::Agent
+            && scope.boundary == 0
+            && matches!(
+                &scope.owner,
+                TraceScopeOwner::Turn { session_id, .. } if session_id.as_str() == session
+            ))
+        .then(|| (scope.clone(), position.span.clone()))
+    })
+}
+
+/// A span id named by two published closing or whole records (L1(b)).
+///
+/// A code cell is exempt until its span closes on the commit that consumes
+/// its answer (the tracing lane T5, §3.8's cell row): until then a cell
+/// that re-runs after a cut before that commit publishes its span again.
+fn unique_span_violations(published: &[TraceRecord]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    published
+        .iter()
+        .filter_map(|record| record.position.as_ref())
+        .filter(|position| position.publishes() && position.kind != TraceSpanKind::Cell)
+        .filter(|position| !seen.insert(position.span.span_id()))
+        .map(|position| {
+            format!(
+                "span {:?} ({:?}) was published twice",
+                position.span.span_id(),
+                position.kind
+            )
+        })
+        .collect()
 }

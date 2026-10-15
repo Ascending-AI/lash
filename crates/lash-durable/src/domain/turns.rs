@@ -283,11 +283,6 @@ pub struct TurnRow {
     pub written_epoch: Epoch,
     /// The cancel request the turn accepted, if any (L3).
     pub cancel: Option<TurnCancelRequest>,
-    /// Whether an owner recorded that it exported the admission of the trace
-    /// scope the turn's admission retained: the turn's first phase commit
-    /// makes the export and carries the record, and until then the
-    /// admission owes it (FIG-5998).
-    pub trace_exported: bool,
 }
 
 /// A turn-row write inside an owner commit.
@@ -337,18 +332,6 @@ pub enum TurnWrite {
         run: TurnId,
         /// The receipt's root.
         answer: NodeId,
-    },
-    /// Record that the admission of the trace scope the unfinished turn's
-    /// admission retained is exported, by the owner that exported it, in
-    /// the turn's first phase commit: it discharges the export the
-    /// admission owes (FIG-5998). Refused with
-    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
-    /// it is not the session's unfinished turn.
-    TraceExported {
-        /// The session.
-        session: SessionId,
-        /// The run.
-        run: TurnId,
     },
     /// Record namespaces the unfinished turn's run changed (FIG-5301): each
     /// replaces the run's row for its plugin. The run's changes are the

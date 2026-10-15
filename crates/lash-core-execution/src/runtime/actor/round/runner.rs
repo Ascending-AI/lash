@@ -46,6 +46,8 @@ pub enum RoundEnd {
 /// Nothing in this value has published or committed yet.
 pub struct DeferredOutcome {
     tx: lash_durable::ActorTx,
+    /// The members whose outcomes `tx` writes: settled here once it commits.
+    settled: BTreeSet<lash_durable::domain::AdmittedId>,
     folded: RunFold,
     bodies: Arc<dyn MemberBodies>,
 }
@@ -69,7 +71,7 @@ impl DeferredOutcome {
     /// acknowledged. No store-local state or unanswered callback is deferred.
     pub fn committed(self) {
         for view in self.folded.rounds() {
-            self.bodies.observe(view, &BTreeSet::new());
+            self.bodies.observe(view, &BTreeSet::new(), &self.settled);
         }
     }
 }
@@ -196,6 +198,18 @@ impl RoundRunner {
         }
     }
 
+    /// This runner observing `members` as settled here: the commit that
+    /// admitted them, this activation's own and acknowledged, also wrote
+    /// their outcomes, so their spans close on this owner (P1).
+    #[must_use]
+    pub fn settled_here<'a>(
+        mut self,
+        members: impl IntoIterator<Item = &'a crate::runtime::actor::round::AdmittedExecution>,
+    ) -> Self {
+        self.lifecycle.settled_here(members);
+        self
+    }
+
     /// Cancel the round's unfinished members when `cancel` fires: the turn's
     /// cancel. A running body gets its token cancelled and the stop grace;
     /// a member not running records `Cancelled` at once.
@@ -269,7 +283,7 @@ impl RoundRunner {
                 }
                 Act::Idle(idle) => idle,
             };
-            if let Some(tx) = self.lifecycle.take_prepared() {
+            if let Some((tx, settled)) = self.lifecycle.take_prepared() {
                 rows.extend(
                     RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch()).of_run(self.run),
                 );
@@ -282,6 +296,7 @@ impl RoundRunner {
                     },
                     outcome: Box::new(DeferredOutcome {
                         tx,
+                        settled,
                         folded,
                         bodies: self.bodies,
                     }),

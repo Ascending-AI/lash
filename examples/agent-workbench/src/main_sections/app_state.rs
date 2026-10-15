@@ -462,7 +462,8 @@ pub(crate) fn emit_workbench_trace(
             name: format!("agent_workbench.{name}"),
             payload,
         },
-        Utc::now(),
+        lash::tracing::TraceTimestamp::from_system_time(std::time::SystemTime::now())
+            .unwrap_or(lash::tracing::TraceTimestamp::from_unix_ms(0)),
     );
     let record = match record {
         Ok(record) => record,

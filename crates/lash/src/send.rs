@@ -97,7 +97,7 @@ impl SendTarget {
         }
     }
 
-    fn session_id(&self) -> SessionId {
+    pub(crate) fn session_id(&self) -> SessionId {
         match self {
             Self::Live(session) => session.session_id(),
             Self::Durable(durable) => durable.session_id().clone(),
@@ -114,24 +114,25 @@ impl SendTarget {
         }
     }
 
-    /// The core's telemetry adapter, which captures the caller's context
-    /// and opens a send's producer span.
-    pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
+    /// The core's trace runtime, which captures the caller's context and
+    /// opens a send's producer span.
+    pub(crate) fn tracing(&self) -> lash_core::facade_support::TraceRuntime {
         match self {
-            Self::Live(session) => session.binding.trace_scopes(),
-            Self::Durable(durable) => Arc::clone(durable.trace_scopes()),
+            Self::Live(session) => session.binding.tracing(),
+            Self::Durable(durable) => durable.tracing().clone(),
         }
     }
 
     /// Open the producer span of a `kind` host call making `call`'s trace
-    /// choices. Synchronous: a send opens it before its first await.
+    /// choices, which knows `ids` now. Synchronous: a send opens it before
+    /// its first await.
     pub(crate) fn open_producer(
         &self,
         kind: lash_core::ProducerKind,
         call: &lash_core::TraceCall,
-    ) -> Option<Box<dyn lash_core::TraceHostOperation>> {
-        let scopes = self.trace_scopes();
-        scopes.open_producer(call.producer(kind, scopes.as_ref()))
+        ids: lash_core::TraceIds,
+    ) -> lash_core::ProducerSpan {
+        self.tracing().open_producer(kind, call, ids)
     }
 
     /// The live replay position now: a cursor taken before an acceptance
@@ -287,7 +288,7 @@ impl SendBuilder {
     /// nothing to capture and the producer is a root.
     pub fn capture_trace_context(mut self) -> Self {
         self.trace.caller =
-            lash_core::TraceCaller::Explicit(self.target.trace_scopes().capture_current());
+            lash_core::TraceCaller::Explicit(self.target.tracing().identity().ambient());
         self
     }
 
@@ -443,61 +444,76 @@ impl SendBuilder {
         // The producer opens once, here, on the first poll and before the
         // first await, under the caller's context: nothing later changes the
         // edge. The input retains it as its cause.
-        let host_send = target.open_producer(lash_core::ProducerKind::Send, &trace);
-        let parent = host_send
-            .as_deref()
-            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let mut producer = target.open_producer(
+            lash_core::ProducerKind::Send,
+            &trace,
+            lash_core::TraceIds {
+                session: Some(target.session_id()),
+                ..Default::default()
+            },
+        );
+        let parent = producer.parent();
         let trace_cause = lash_core::TraceCause::from(parent.clone());
-        // The host id names the run; the shift executes the run's turns under
-        // it, so the input carries no turn id of its own. An input sent
-        // without one gets a fresh id, so its row is keyed and its run named
-        // like any other.
-        let host_id = id.or_else(|| input.trace_turn_id.take());
-        input.trace_turn_id = None;
-        let id = host_id.unwrap_or_else(crate::turn::fresh_turn_id);
-        let context = send_context(&target, &[id.as_str()]).await?;
-        let cursor = target.current_cursor();
-        // A retained submission is answered by the store's digest verdict,
-        // including a changed-content conflict. Only a new key consults the
-        // host's current model selection (FIG-5762).
-        if (run_spec.overrides.model.is_some() || run_spec.overrides.reasoning.is_some())
-            && context
+        let accepted = async {
+            // The host id names the run; the shift executes the run's turns
+            // under it, so the input carries no turn id of its own. An input
+            // sent without one gets a fresh id, so its row is keyed and its
+            // run named like any other.
+            let host_id = id.or_else(|| input.trace_turn_id.take());
+            input.trace_turn_id = None;
+            let id = host_id.unwrap_or_else(crate::turn::fresh_turn_id);
+            let context = send_context(&target, &[id.as_str()]).await?;
+            let cursor = target.current_cursor();
+            // A retained submission is answered by the store's digest
+            // verdict, including a changed-content conflict. Only a new key
+            // consults the host's current model selection (FIG-5762).
+            if (run_spec.overrides.model.is_some() || run_spec.overrides.reasoning.is_some())
+                && context
+                    .parts
+                    .store
+                    .turn_input_submission_digest(id.as_str())
+                    .await?
+                    .is_none()
+            {
+                refuse_unservable_selection(&context, &run_spec).await?;
+            }
+            let enqueued = context
                 .parts
-                .store
-                .turn_input_submission_digest(id.as_str())
+                .ops
+                .enqueue_turn_inputs(
+                    &context.parts.store,
+                    vec![(input, Some(id.to_string()))],
+                    ingress,
+                    run_spec,
+                    pin,
+                    parent,
+                )
                 .await?
-                .is_none()
-        {
-            refuse_unservable_selection(&context, &run_spec).await?;
+                .pop()
+                .ok_or_else(|| {
+                    EmbedError::Runtime(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::StoreCommitFailed,
+                        "a batch of one admitted no pending turn input",
+                    ))
+                })?;
+            Ok::<_, EmbedError>((enqueued, id, cursor))
         }
-        let enqueued = context
-            .parts
-            .ops
-            .enqueue_turn_inputs(
-                &context.parts.store,
-                vec![(input, Some(id.to_string()))],
-                ingress,
-                run_spec,
-                pin,
-                parent,
-            )
-            .await?
-            .pop()
-            .ok_or_else(|| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::StoreCommitFailed,
-                    "a batch of one admitted no pending turn input",
-                ))
-            })?;
-        if let Some(operation) = host_send {
-            // The unique local carrier is retained only by this acceptance's
-            // first SQL writer. A retry returns the original cause instead.
-            operation.settle(if enqueued.trace_cause == trace_cause {
-                lash_trace::TraceCandidateOutcome::Selected
-            } else {
-                lash_trace::TraceCandidateOutcome::Reused
-            });
-        }
+        .await;
+        let (enqueued, id, cursor) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                producer.settle(crate::tracing::refused(&error));
+                return Err(error);
+            }
+        };
+        // The unique local carrier is retained only by this acceptance's
+        // first SQL writer. A retry returns the original cause instead.
+        producer.accepted(enqueued.input_id.clone());
+        producer.settle(if enqueued.trace_cause == trace_cause {
+            lash_core::ProducerOutcome::Selected
+        } else {
+            lash_core::ProducerOutcome::Reused
+        });
         let receipt = TurnInputAcceptanceReceipt::from(&enqueued);
         Ok(SendHandle {
             target,

@@ -443,9 +443,17 @@ mod projection;
 mod recorded_carriers;
 mod telemetry_content;
 #[cfg(feature = "otel-trace")]
+mod trace_call_ids;
+#[cfg(feature = "otel-trace")]
 mod trace_emission;
 #[cfg(feature = "otel-trace")]
+mod trace_nesting;
+#[cfg(feature = "otel-trace")]
 mod trace_parentage;
+#[cfg(feature = "otel-trace")]
+mod trace_sampling;
+#[cfg(feature = "otel-trace")]
+mod trace_terminals;
 mod tracing;
 mod warm_admission;
 pub(crate) use harness::{

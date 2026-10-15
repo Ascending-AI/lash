@@ -177,14 +177,16 @@ impl PluginOperations {
             .queue_store
             .is_some()
             .then(|| {
-                self.context
-                    .target
-                    .open_producer(lash_core::ProducerKind::PluginInvoke, &self.trace)
-            })
-            .flatten();
-        let parent = producer
-            .as_deref()
-            .map(<dyn lash_core::TraceHostOperation>::parent);
+                self.context.target.open_producer(
+                    lash_core::ProducerKind::PluginInvoke,
+                    &self.trace,
+                    lash_core::TraceIds {
+                        session: Some(session_id.clone()),
+                        ..Default::default()
+                    },
+                )
+            });
+        let parent = producer.as_ref().and_then(lash_core::ProducerSpan::parent);
         let submitted = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
@@ -207,9 +209,18 @@ impl PluginOperations {
                     .await;
                 receipt.map(SubmittedCommand::Applied).map_err(Into::into)
             })
-            .await?;
+            .await;
+        let submitted = match submitted {
+            Ok(submitted) => submitted,
+            Err(error) => {
+                if let Some(producer) = producer.take() {
+                    producer.settle(crate::tracing::refused(&error));
+                }
+                return Err(error);
+            }
+        };
         if let (Some(producer), SubmittedCommand::Queued(_)) = (producer.take(), &submitted) {
-            producer.settle(lash_trace::TraceCandidateOutcome::Selected);
+            producer.settle(lash_core::ProducerOutcome::Selected);
         }
         let receipt = match submitted {
             SubmittedCommand::Applied(receipt) => receipt,

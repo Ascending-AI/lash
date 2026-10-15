@@ -150,13 +150,19 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
 
     let exporter = opentelemetry_sdk::trace::InMemorySpanExporter::default();
     let exports = Arc::new(AtomicU64::new(0));
-    let tracer = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-        .with_simple_exporter(TimedExporter {
-            inner: exporter.clone(),
-            meter: meter.clone(),
-            exports: exports.clone(),
-        })
-        .build();
+    let tracer = lash::tracing::LashTracerProvider::new(
+        opentelemetry_sdk::trace::SdkTracerProvider::builder().with_simple_exporter(
+            TimedExporter {
+                inner: exporter.clone(),
+                meter: meter.clone(),
+                exports: exports.clone(),
+            },
+        ),
+        opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+            opentelemetry_sdk::trace::Sampler::AlwaysOn,
+        )),
+        opentelemetry_sdk::trace::RandomIdGenerator::default(),
+    );
     let meters = opentelemetry_sdk::metrics::SdkMeterProvider::default();
     let otel = matches!(args.case, Case::TraceSinkOtel);
 
@@ -199,9 +205,13 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                 timed.append(&TraceRecord {
                     schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
                     id: format!("observation-workload-custom-{n}"),
-                    timestamp: chrono::Utc::now(),
+                    timestamp: lash::tracing::TraceTimestamp::from_system_time(
+                        std::time::SystemTime::now(),
+                    )
+                    .unwrap_or(lash::tracing::TraceTimestamp::from_unix_ms(0)),
                     content,
                     context: Default::default(),
+                    position: None,
                     event: TraceEvent::Custom {
                         name: "observation_workload.custom".into(),
                         payload: payload.clone(),

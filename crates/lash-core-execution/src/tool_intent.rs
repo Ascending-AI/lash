@@ -203,7 +203,7 @@ pub struct ToolIntentSubmissionRecord {
     /// First typed realization outcome, absent while admission is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settlement: Option<ToolIntentSubmissionSettlement>,
-    /// The submission's trace scope: the cause and anchor its first
+    /// The submission's trace scope: the cause and span its first
     /// submission offered and when it was made. The ledger's first writer
     /// retains it with the row; a later submission of the identity reads it
     /// back. It is beside the intent, never inside it, so the payload hash

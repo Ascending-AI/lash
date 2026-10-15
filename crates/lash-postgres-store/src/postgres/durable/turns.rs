@@ -153,11 +153,6 @@ pub(super) static ANSWER_SET: Entry = Entry::new(
     &[Ty::Text, Ty::Text, Ty::Text, Ty::Int],
     Shape::Returning,
 );
-pub(super) static TRACE_EXPORTED: Entry = Entry::new(
-    || &SQL.trace_exported,
-    &[Ty::Text, Ty::Text, Ty::Int],
-    Shape::Returning,
-);
 pub(super) static OPEN_NAMED_RUN: Entry =
     Entry::new(|| &SQL.open_named_run, &[Ty::Text, Ty::Text], Shape::Select);
 pub(super) static UPSERT_NAMESPACES: Entry = Entry::new(
@@ -443,11 +438,6 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
             values.extend([Value::text(answer.to_hex()), Value::int(epoch.0)]);
             vec![Step::one(&ANSWER_SET, values)]
         }
-        TurnWrite::TraceExported { session, run } => {
-            let mut values = turn(session, run);
-            values.push(Value::int(epoch.0));
-            vec![Step::one(&TRACE_EXPORTED, values)]
-        }
         TurnWrite::Namespaces {
             session,
             run,
@@ -555,7 +545,6 @@ pub(super) async fn apply(
         }
         TurnWrite::Advance { session, run, .. }
         | TurnWrite::Answer { session, run, .. }
-        | TurnWrite::TraceExported { session, run }
         | TurnWrite::Namespaces { session, run, .. }
         | TurnWrite::Working { session, run, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
@@ -864,9 +853,9 @@ pub(super) async fn turn(
     let argument = argument.map(integer::<u64>).transpose()?;
     let checkpoint: Option<String> = row.try_get(5).map_err(decode)?;
     let checkpoint = checkpoint.as_deref().map(node_ref).transpose()?;
-    let working: Option<String> = row.try_get(13).map_err(decode)?;
+    let working: Option<String> = row.try_get(12).map_err(decode)?;
     let working = working.as_deref().map(node_ref).transpose()?;
-    let answer: Option<String> = row.try_get(14).map_err(decode)?;
+    let answer: Option<String> = row.try_get(13).map_err(decode)?;
     let answer = answer.as_deref().map(node_ref).transpose()?;
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
@@ -893,7 +882,6 @@ pub(super) async fn turn(
     let admission: String = row.try_get(1).map_err(decode)?;
     let admission =
         RunAdmissionRecord::from_stored(&admission).map_err(|error| encoding(&error))?;
-    let trace_exported: bool = row.try_get(12).map_err(decode)?;
     let cancel = cancel_of(tx, session, &run).await?;
     Ok(Some(TurnRow {
         session: session.clone(),
@@ -906,7 +894,6 @@ pub(super) async fn turn(
         turn_deadline: turn_deadline.map(DurableInstant),
         written_epoch,
         cancel,
-        trace_exported,
     }))
 }
 

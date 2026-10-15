@@ -1078,9 +1078,8 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 &presented.intent_outcomes,
             );
         }
-        if self.traced_scope.is_some() {
-            context.trace_tool_call_completed(&record, &[]);
-        }
+        // A cell's call closes its span from its committed outcome, on the
+        // owner whose commit wrote it (`CellMembers::observe`), not here.
         context.emit_tool_call_completed_activity(call_id.as_str(), &record, 0);
         Ok(())
     }

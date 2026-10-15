@@ -6,7 +6,7 @@ use std::sync::Arc;
 use lash_durable::domain::AdmittedId;
 use lash_durable::{ActorTx, DurableInstant};
 
-use super::records::{DecideBody, Record, RetryBody, append, decide_record, start_record};
+use super::records::{Record, RetryBody, append, start_record};
 use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
     RunFold, SettleRefusal, SettledOutput, check_drafts,
@@ -115,26 +115,6 @@ pub fn pin_round(
         run: round.run,
         members,
     })
-}
-
-/// Record that the trace admissions `round`'s admission retained are
-/// exported, at its run's next ordinal: the decision of the owner that
-/// exported them, in a transaction of its own, which discharges the export
-/// the admission owes (FIG-5452). An owner that resumes a round whose
-/// admission has no such record reconciles the export and records it; one
-/// whose admission has it exports nothing.
-pub fn record_trace_exported(tx: &mut ActorTx, round: &AdmittedRound) {
-    let Some(first) = round.members().first() else {
-        return;
-    };
-    let id = first.id();
-    decide_record(
-        tx,
-        &id.owner,
-        id.run,
-        first.cursor().take(),
-        DecideBody::TraceExported,
-    );
 }
 
 /// Record a round's presentation inside the `round.present+model.start`

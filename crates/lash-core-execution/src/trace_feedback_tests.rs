@@ -56,7 +56,7 @@ fn runtime_feedback_composition_identity_includes_instruction_authority() {
 #[test]
 fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
     use lash_trace::{
-        DurableTraceScope, TraceAnchor, TraceCause, TraceScopeId, TraceScopeOwner, TraceToolOwner,
+        DurableTraceScope, TraceCause, TraceScopeId, TraceScopeOwner, TraceToolOwner,
     };
     let call_id = crate::ToolCallId::fixture("same-call");
     let opener = crate::EffectOpener::turn("session", "logical-run");
@@ -70,7 +70,7 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
             }),
             cause: TraceCause::None,
             links: lash_trace::TraceLinks::new(),
-            anchor: TraceAnchor::Untraced,
+            span: None,
             started_at_ms: 1,
         };
         let scope = tool_trace_scope(&opener, Some(&parent), &call_id, 2);
@@ -90,7 +90,7 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
         }),
         cause: TraceCause::None,
         links: lash_trace::TraceLinks::new(),
-        anchor: TraceAnchor::Untraced,
+        span: None,
         started_at_ms: 1,
     };
     assert_eq!(

@@ -98,15 +98,13 @@ async fn a_sent_turn_joins_the_trace_of_its_send() -> Result<()> {
         .await;
     let sends = observed.spans("lash.send");
     let send = producer(&sends, 0xe1);
-    let admitted = observed.spans("lash.turn.admitted");
-    assert_eq!(admitted.len(), 1, "{admitted:#?}");
-    assert_eq!(
-        admitted[0].parent_span_id,
-        span_id(send),
-        "the turn's admission is its send's child"
-    );
     let invoked = observed.spans("invoke_agent");
     assert_eq!(invoked.len(), 1, "{invoked:#?}");
+    assert_eq!(
+        invoked[0].parent_span_id,
+        span_id(send),
+        "the turn is its send's child"
+    );
     assert_eq!(
         invoked[0].span_context.trace_id(),
         send.span_context.trace_id(),
@@ -149,11 +147,11 @@ async fn a_retried_send_keeps_the_parent_its_first_acceptance_retained() -> Resu
     let sends = observed.spans("lash.send");
     let (first, retried) = (producer(&sends, 1), producer(&sends, 2));
     assert_eq!(
-        attribute(first, "lash.admission.outcome").as_deref(),
+        attribute(first, "lash.producer.outcome").as_deref(),
         Some("selected")
     );
     assert_eq!(
-        attribute(retried, "lash.admission.outcome").as_deref(),
+        attribute(retried, "lash.producer.outcome").as_deref(),
         Some("reused")
     );
     let parents = durable
@@ -292,8 +290,6 @@ fn assert_consumed_inputs_are_linked(spans: &[SpanData]) {
     let sends = named("lash.send");
     assert_eq!(sends.len(), 4, "one producer per send: {sends:#?}");
     let [a, b, c, d] = [A, B, C, D].map(|context| span_id(producer(&sends, context)));
-    let admitted = named("lash.turn.admitted");
-    assert_eq!(admitted.len(), 2, "two turns: {admitted:#?}");
     let invoked = named("invoke_agent");
     assert_eq!(invoked.len(), 2, "two terminals: {invoked:#?}");
     let first = one(&invoked, "T1's terminal", |span| {
@@ -302,17 +298,8 @@ fn assert_consumed_inputs_are_linked(spans: &[SpanData]) {
     let second = one(&invoked, "T2's terminal", |span| {
         attribute(span, "lash.turn.id").as_deref() != Some(T1)
     });
-    let admission_of = |terminal: &SpanData| {
-        one(&admitted, "a terminal's admission", |span| {
-            span_id(span) == terminal.parent_span_id
-        })
-        .clone()
-    };
-    let (first_admitted, second_admitted) = (admission_of(first), admission_of(second));
-
-    assert_eq!(first_admitted.parent_span_id, a, "T1's parent is A's");
-    assert!(links(&first_admitted).is_empty(), "T1 admitted A alone");
-    assert_eq!(links(first), vec![b], "T1 links the input it consumed");
+    assert_eq!(first.parent_span_id, a, "T1's parent is A's");
+    assert_eq!(links(first), vec![b], "T1 links only the input it consumed");
     assert_eq!(
         first.span_context.trace_id(),
         trace_of(A),
@@ -323,14 +310,10 @@ fn assert_consumed_inputs_are_linked(spans: &[SpanData]) {
         trace_of(C),
         "T2 is on C's trace"
     );
-    assert_eq!(
-        second_admitted.parent_span_id, c,
-        "T2's parent is its head's"
-    );
-    assert_eq!(links(&second_admitted), vec![d], "T2 admitted D as a link");
+    assert_eq!(second.parent_span_id, c, "T2's parent is its head's");
     assert_eq!(links(second), vec![d], "T2 links the rest of its batch");
     for producer in [a, b, c, d] {
-        let parented = admitted
+        let parented = invoked
             .iter()
             .filter(|span| span.parent_span_id == producer)
             .count();
@@ -342,7 +325,7 @@ fn assert_consumed_inputs_are_linked(spans: &[SpanData]) {
         assert!(linked <= 1, "a producer is linked from at most one turn");
     }
     assert!(
-        admitted.iter().all(|span| span.parent_span_id != b),
+        invoked.iter().all(|span| span.parent_span_id != b),
         "the consumed input parents no turn"
     );
 }
@@ -352,7 +335,7 @@ fn finished(nodes: &[&Observed]) -> Vec<SpanData> {
     nodes
         .iter()
         .flat_map(|observed| {
-            ["lash.send", "lash.turn.admitted", "invoke_agent"]
+            ["lash.send", "invoke_agent"]
                 .into_iter()
                 .flat_map(|name| observed.spans(name))
         })
@@ -439,8 +422,8 @@ async fn a_consumed_input_stays_linked_across_a_resume_on_another_owner() -> Res
     Ok(())
 }
 
-/// A `SessionTurn` process's child turn is admitted under the process's
-/// anchor: it shares the process's trace id.
+/// A `SessionTurn` process's child turn joins its cause, the process: it is
+/// the process span's child, on the process's trace.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_turn_child_shares_the_trace_of_its_process() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()
@@ -484,11 +467,12 @@ async fn a_session_turn_child_shares_the_trace_of_its_process() -> Result<()> {
         .await;
     let process = observed.spans("lash.process");
     assert_eq!(process.len(), 1, "{process:#?}");
-    let admitted = observed.spans("lash.turn.admitted");
-    assert_eq!(admitted.len(), 1, "the child's turn: {admitted:#?}");
+    let invoked = observed.spans("invoke_agent");
+    assert_eq!(invoked.len(), 1, "the child's turn: {invoked:#?}");
     assert_eq!(
-        admitted[0].parent_span_id, process[0].parent_span_id,
-        "the child turn is admitted under the process's anchor"
+        invoked[0].parent_span_id,
+        process[0].span_context.span_id(),
+        "the child turn is the process's child"
     );
     assert_eq!(
         observed.spans("invoke_agent")[0].span_context.trace_id(),
