@@ -448,6 +448,8 @@ runtime_error_codes! {
         /// A process environment was refused at admission, or a start named
         /// one that is not published (FIG-6034).
         ProcessEnvRefused = "process_env_refused" => Terminal,
+        /// Retained work needs a registration this deployment retired.
+        PluginRetired = "plugin_retired" => Parked,
         // a different cancellation is durably recorded.
         /// Effect-host implementor diagnostic for a conflicting cancellation request.
         ProcessCancelConflict = "process_cancel_conflict" => Terminal,
@@ -1110,6 +1112,7 @@ impl RuntimeError {
             | RuntimeErrorCause::PluginOperation { .. }
             | RuntimeErrorCause::PluginHooks { .. }
             | RuntimeErrorCause::ProcessParentEnded { .. }
+            | RuntimeErrorCause::PluginRetired { .. }
             | RuntimeErrorCause::ProcessEnvRefused { .. }
             | RuntimeErrorCause::ProcessStartKeyConflict { .. }
             | RuntimeErrorCause::SchemaRefused { .. }

@@ -67,7 +67,7 @@ use super::head::HeadCache;
 use super::session::{
     ModelCall, OpenTurn, Pass, TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError,
     TurnRestore, TurnRestoreError, TurnRow, TurnServices, UnfinishedPhase, await_stop,
-    cancel_evidence, cancelled_cause, paid_answer, undecodable_state,
+    cancel_evidence, cancelled_cause, paid_answer, resume_refusal,
 };
 use super::session_close::{Closing, close_pass};
 use super::tool_round::AnsweredCell;
@@ -274,7 +274,7 @@ pub(super) async fn restore(
     let turn = match services.resume(cx, TurnRestore::new(cx, row, heads)).await {
         Ok(turn) => turn,
         Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => return Ok(None),
-        Err(error) => match undecodable_state(&error) {
+        Err(error) => match resume_refusal(&error) {
             Some(refusal) => {
                 tracing::warn!(
                     session_id = %row.session,

@@ -12,7 +12,8 @@ lash_store_sql::statements! {
         await_owner_commit = "SELECT 1 FROM actors WHERE actor_key = ?1 FOR SHARE";
 
         /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
-        /// whose claim requirements are all in `?7`; process actors in
+        /// whose claim requirements are served by `?7`, including retired
+        /// owners; process actors in
         /// another set or with another requirement with mail of kind `?6`
         /// (a cancel) pending; and session actors in a set of `?4` with
         /// another requirement whose open turn holds an `immediate` cancel
@@ -29,7 +30,15 @@ lash_store_sql::statements! {
                      OR (p.state = 'waiting' AND p.next_due_ms <= ?1))
                    AND ((p.formats = ANY(?4)
                          AND (p.requires IS NULL
-                             OR p.requires::jsonb <@ to_jsonb(?7::text[])))
+                             OR NOT EXISTS (
+                                 SELECT 1 FROM jsonb_array_elements_text(p.requires::jsonb) r(value)
+                                 WHERE NOT EXISTS (
+                                     SELECT 1 FROM unnest(?7::text[]) s(value)
+                                     WHERE s.value = r.value OR (
+                                         left(r.value, 9) = 'callback:'
+                                         AND right(s.value, 1) = '/'
+                                         AND left(r.value, length(s.value)) = s.value
+                                         AND strpos(substr(r.value, length(s.value) + 1), '/') = 0)))))
                      OR (p.kind = 'process' AND EXISTS (
                          SELECT 1 FROM actor_mail m
                          WHERE m.actor_key = p.actor_key AND m.seq > p.acked_seq

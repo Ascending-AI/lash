@@ -183,6 +183,7 @@ impl crate::PluginSession {
                 .plugins
                 .insert(row.plugin.clone(), row.entry.namespace(values));
         }
+        self.host.retired_plugins.check_state(&state)?;
         run.rows = rows
             .into_iter()
             .map(|row| (row.plugin, row.entry))

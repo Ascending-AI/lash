@@ -10,7 +10,7 @@ use crate::{
 };
 
 enum PluginSource {
-    Host(PluginHost),
+    Host(Box<PluginHost>),
     Session(Arc<PluginSession>),
 }
 
@@ -37,10 +37,10 @@ impl EmbeddedRuntimeBuilder {
             session_id: None,
             creation: None,
             initial_state: None,
-            plugin_source: PluginSource::Host(PluginHost::empty(
+            plugin_source: PluginSource::Host(Box::new(PluginHost::empty(
                 core.control.execution_budgets.clone(),
                 core.tracing.clone(),
-            )),
+            ))),
             core,
             store: None,
             attachment_referrers_store: None,
@@ -67,7 +67,7 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_plugin_host(mut self, plugin_host: PluginHost) -> Self {
-        self.plugin_source = PluginSource::Host(plugin_host);
+        self.plugin_source = PluginSource::Host(Box::new(plugin_host));
         self
     }
 
@@ -82,7 +82,7 @@ impl EmbeddedRuntimeBuilder {
             self.core.control.execution_budgets.clone(),
             self.core.tracing.clone(),
         );
-        self.plugin_source = PluginSource::Host(host);
+        self.plugin_source = PluginSource::Host(Box::new(host));
         self
     }
 

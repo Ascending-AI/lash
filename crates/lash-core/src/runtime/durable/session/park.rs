@@ -25,6 +25,11 @@ use crate::{ActorContext, SessionId};
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionParkReason {
+    /// A run still needs a registration the deployment retired. Nothing
+    /// resumes or settles; a deployment restoring it may redrive the run.
+    PluginRetired {
+        refusal: crate::plugin::RetirementRefusal,
+    },
     /// Its passes failed `failed_passes` times in a row within one claim,
     /// each with an error a retry does not clear: the activation-loop budget
     /// (FIG-5230).
@@ -146,11 +151,16 @@ pub enum ParkedTurnState {
     ExecutionState,
 }
 
-/// The park of a pass that failed on a state its turn resumes from and this
-/// build does not decode; `None` for every other failure.
-pub(in crate::runtime::durable) fn undecodable_state(
-    error: &TurnError,
-) -> Option<SessionParkReason> {
+/// A refusal that parks a recorded run before redelivery: state this build
+/// cannot decode, or a registration it retired. `None` for other failures.
+pub(in crate::runtime::durable) fn resume_refusal(error: &TurnError) -> Option<SessionParkReason> {
+    if let TurnError::Runtime(error) = error
+        && let Some(crate::RuntimeErrorCause::PluginRetired { refusal }) = &error.cause
+    {
+        return Some(SessionParkReason::PluginRetired {
+            refusal: refusal.as_ref().clone(),
+        });
+    }
     use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
     let (state, reason) = match error {
         TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),
@@ -183,13 +193,15 @@ impl SessionParkReason {
     /// ended inside a live claim, so the node that met it outlived it. A
     /// [`PassLoop`](Self::PassLoop)'s passes each failed with a typed error,
     /// and an [`UndecodableState`](Self::UndecodableState)'s restore refused
-    /// before any of the turn's work was delivered again. An
+    /// before any of the turn's work was delivered again. A retired plugin
+    /// refusal also keeps the turn intact for a build that serves it. An
     /// [`ActivationLoop`](Self::ActivationLoop) or
     /// [`CancelLoop`](Self::CancelLoop) park counts claims that committed
     /// nothing, which a node's death also leaves: redriven at every boot, one
     /// such session could take down every node that boots, so it waits for
     /// an operator's redrive.
-    pub const REDRIVEN_AT_BOOT: [&'static str; 2] = ["pass_loop", "undecodable_state"];
+    pub const REDRIVEN_AT_BOOT: [&'static str; 3] =
+        ["pass_loop", "undecodable_state", "plugin_retired"];
 
     /// The reason's kind: the serde `reason` tag's spelling, which a host
     /// reads without a serde round trip (FIG-6044). The park reports it as
@@ -197,6 +209,7 @@ impl SessionParkReason {
     #[must_use]
     pub const fn kind(&self) -> &'static str {
         match self {
+            Self::PluginRetired { .. } => "plugin_retired",
             Self::PassLoop { .. } => "pass_loop",
             Self::ActivationLoop { .. } => "activation_loop",
             Self::CancelLoop { .. } => "cancel_loop",
@@ -212,6 +225,7 @@ impl SessionParkReason {
             Self::PassLoop { error, .. } => error.profile_key(),
             Self::ActivationLoop { .. }
             | Self::CancelLoop { .. }
+            | Self::PluginRetired { .. }
             | Self::UndecodableState { .. } => None,
         }
     }
@@ -363,6 +377,12 @@ mod tests {
     #[test]
     fn kind_is_the_serde_reason_tag() {
         let reasons = [
+            SessionParkReason::PluginRetired {
+                refusal: crate::plugin::RetirementRefusal::HasState {
+                    registry: crate::RegistryKind::Session,
+                    id: "retired".into(),
+                },
+            },
             SessionParkReason::PassLoop {
                 failed_passes: 3,
                 error: SessionPassFailure {

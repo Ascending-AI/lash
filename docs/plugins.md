@@ -208,3 +208,27 @@ way the process parks before any step resumes, with
 `ProcessEnvRefusal::RetiredComponentServes` or
 `ProcessEnvRefusal::RetiredComponentHasState`. Retire only a component whose
 sealed envs link none of its tools.
+
+
+## Retiring a session plugin
+
+Declare a plugin permanently removed from this deployment by its stable id:
+
+```rust
+let builder = builder.retire_session_plugin(lash::plugins::PluginId::new("my-plugin"));
+```
+
+Recorded sessions keep their recorded configuration and rebuild without the
+plugin. New sessions explicitly naming it refuse with the typed
+`RetirementRefusal::Admission`. Installing and retiring the same session id,
+or retiring it twice, refuses the core build. Session and process registries
+are independent, including when their registrations share an id.
+
+Recorded hook and presentation decisions remain recorded decisions. A run
+whose recorded tool surface still links a provider of the retired plugin, or
+whose plugin namespace holds nonempty state, parks before replay delivers
+work. `SessionParkReason::PluginRetired` carries `RetirementRefusal::Serves`
+or `RetirementRefusal::HasState`. Its input and checkpoint remain open for a
+build that restores the plugin, or cancellation. Retirement serves only the
+retired owner's callback claim tokens so the node can record this refusal;
+it supplies no callback implementation.

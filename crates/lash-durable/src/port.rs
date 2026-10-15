@@ -157,9 +157,9 @@ impl ClaimPurpose {
     #[must_use]
     pub fn of(node: &NodeLease, formats: &str, requires: &[String]) -> Self {
         if node.decodes.iter().any(|set| set.as_str() == formats)
-            && requires
-                .iter()
-                .all(|required| node.serves.contains(required))
+            && requires.iter().all(|required| {
+                lash_core_store::obligations::ObligationToken::is_served(required, &node.serves)
+            })
         {
             Self::Run
         } else {

@@ -498,3 +498,216 @@ async fn a_deleted_session_leaves_no_engine_row_and_only_its_own_nodes_go() -> R
     world.core.shutdown().await?;
     Ok(())
 }
+
+/// RETIRED-SESSION-USED (FIG-6335): a run using a removed session
+/// provider refuses before it resumes any work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recorded_run_using_a_retired_session_plugins_effect_parks_typed() -> Result<()> {
+    let mut world = World::new(true).await?;
+    let session = world.session("retired-session-used").await?;
+    let running = session.send(TurnInput::text("approval")).await?;
+    let key = world.parked().await;
+    world.core.node.stop().await;
+    let backend = lash_conformance::backend_over(Arc::clone(&world.stores) as Arc<_>);
+    let second = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .retire_session_plugin(crate::plugins::PluginId::new("tools"))
+        .serve_test_llm_profile(
+            text_provider("turn-retirement", cell(true)),
+            mock_llm_profile_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+    second
+        .completions()
+        .resolve(&key, lash_core::Resolution::Ok(serde_json::json!({})))
+        .await?;
+    let durable = second
+        .session(crate::SessionId::fixture("retired-session-used"))
+        .durable()
+        .await?;
+    let park = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            if let Some(park) = durable.park_reason().await? {
+                return Ok::<_, EmbedError>(park);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        matches!(park, Ok(Ok(crate::SessionParkReason::PluginRetired {
+        refusal: crate::plugins::RetirementRefusal::Serves { registry: crate::plugins::RegistryKind::Session, ref id, .. }
+    })) if id == "tools"),
+        "the removed provider must produce a typed park: {park:?}"
+    );
+    drop(running);
+    second.shutdown().await?;
+    recorded_session_with_retired_plugin(true).await
+}
+
+/// RETIRED-SESSION-SEALED (FIG-6335): recorded before-turn decisions
+/// survive removal of their plugin; a resumed run invokes none again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recorded_session_naming_a_retired_plugin_rebuilds_without_it_and_resumes() -> Result<()>
+{
+    recorded_session_with_retired_plugin(false).await
+}
+
+async fn recorded_session_with_retired_plugin(retain_state: bool) -> Result<()> {
+    let stores = sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(Arc::clone(&stores) as Arc<_>);
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let plugin = StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("retired-spare"),
+        crate::plugins::PluginSpec::new().with_before_turn(crate::hook_key!("prepare"), {
+            let calls = Arc::clone(&calls);
+            Arc::new(move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    Ok(crate::plugins::TurnContributions {
+                        state: if retain_state {
+                            crate::plugins::StateCommands::new()
+                                .set("kept", serde_json::json!(true))
+                        } else {
+                            Default::default()
+                        },
+                        ..Default::default()
+                    })
+                })
+            })
+        }),
+    );
+    let provider = crate::testing::TestProvider::builder()
+        .kind("retired-session-unused")
+        .complete({
+            let entered = Arc::clone(&entered);
+            move |_| {
+                let entered = Arc::clone(&entered);
+                async move {
+                    entered.notify_one();
+                    std::future::pending().await
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let first = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .plugin(Arc::new(plugin))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = first
+        .session(crate::SessionId::fixture("retired-session-unused"))
+        .created()
+        .await
+        .durable()
+        .await?;
+    let running = session.send(TurnInput::text("resume me")).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(60), entered.notified())
+        .await
+        .expect("the first model call starts");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    first.node.stop().await;
+    let second = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .retire_session_plugin(crate::plugins::PluginId::new("retired-spare"))
+        .serve_test_llm_profile(
+            text_provider(
+                "retired-session-unused",
+                typescript_block("await control.finish(\"resumed\");"),
+            ),
+            mock_llm_profile_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+    if retain_state {
+        let durable = second
+            .session(crate::SessionId::fixture("retired-session-unused"))
+            .durable()
+            .await?;
+        let park = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            loop {
+                if let Some(park) = durable.park_reason().await? {
+                    return Ok::<_, EmbedError>(park);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("retained plugin state refuses before replay")?;
+        assert_eq!(
+            park,
+            crate::SessionParkReason::PluginRetired {
+                refusal: crate::plugins::RetirementRefusal::HasState {
+                    registry: crate::plugins::RegistryKind::Session,
+                    id: "retired-spare".into(),
+                }
+            }
+        );
+        drop(running);
+    } else {
+        let output = tokio::time::timeout(std::time::Duration::from_secs(60), running.output())
+            .await
+            .expect("the recorded turn resumes")?;
+        assert_eq!(output.result.status(), crate::TurnStatus::Answered);
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "recorded decisions are read without the retired callback"
+    );
+    second.shutdown().await?;
+    Ok(())
+}
+
+/// RETIRED-SESSION-NEW (FIG-6335): new sessions cannot request a retired
+/// plugin. The refusal retains its typed cause across the facade boundary.
+#[tokio::test]
+async fn a_new_session_naming_a_retired_plugin_is_refused_typed() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let builder = || {
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+            .retire_session_plugin(crate::plugins::PluginId::new("retired-spare"))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    };
+    assert!(
+        builder()
+            .retire_session_plugin(crate::plugins::PluginId::new("retired-spare"))
+            .build(crate::testing::runtime_lease_owner())
+            .is_err(),
+        "duplicate retirement refuses the build"
+    );
+    assert!(
+        builder()
+            .plugin(Arc::new(StaticPluginFactory::new(
+                crate::plugins::PluginDeclaration::initial("retired-spare"),
+                crate::plugins::PluginSpec::new(),
+            )))
+            .build(crate::testing::runtime_lease_owner())
+            .is_err(),
+        "an installed retirement refuses the build"
+    );
+    let core = builder().build(crate::testing::runtime_lease_owner())?;
+    let mut spec = mock_session_spec();
+    spec.plugin_options
+        .insert_typed("retired-spare", serde_json::json!({}))
+        .expect("plain config");
+    let error = match core
+        .session(crate::SessionId::fixture("retired-session-new"))
+        .create(crate::SessionCreation::root(spec))
+        .await
+    {
+        Ok(_) => panic!("a new session refuses its retired plugin"),
+        Err(error) => error,
+    };
+    let EmbedError::Session(lash_core::SessionError::Plugin(crate::plugins::PluginError::Runtime(
+        error,
+    ))) = error
+    else {
+        panic!("a typed plugin refusal: {error:?}");
+    };
+    assert!(error.is_terminal(), "admission refuses permanently");
+    assert!(
+        matches!(error.cause, Some(lash_core::RuntimeErrorCause::PluginRetired { refusal })
+        if *refusal == crate::plugins::RetirementRefusal::Admission { registry: crate::plugins::RegistryKind::Session, id: "retired-spare".into() })
+    );
+    core.shutdown().await?;
+    Ok(())
+}

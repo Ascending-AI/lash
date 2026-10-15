@@ -245,7 +245,8 @@ lash_store_sql::statements! {
         boots = "SELECT node_id, boot_id FROM nodes ORDER BY node_id, boot_id";
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
-        /// `?2` whose claim requirements are all in JSON array `?5`; process
+        /// `?2` whose claim requirements are served by JSON array `?5`,
+        /// including retired-owner tokens; process
         /// actors in another set or with another requirement with mail of
         /// kind `?4` (a cancel) pending; and session actors in a set of `?2`
         /// with another requirement whose open turn holds an `immediate`
@@ -259,7 +260,13 @@ lash_store_sql::statements! {
                AND ((a.formats IN (SELECT value FROM json_each(?2))
                      AND (a.requires IS NULL OR NOT EXISTS (
                          SELECT 1 FROM json_each(a.requires) r
-                         WHERE r.value NOT IN (SELECT value FROM json_each(?5)))))
+                         WHERE NOT EXISTS (
+                             SELECT 1 FROM json_each(?5) s
+                             WHERE s.value = r.value OR (
+                                 substr(r.value, 1, 9) = 'callback:'
+                                 AND substr(s.value, -1) = '/'
+                                 AND substr(r.value, 1, length(s.value)) = s.value
+                                 AND instr(substr(r.value, length(s.value) + 1), '/') = 0)))))
                  OR (a.kind = 'process' AND EXISTS (
                      SELECT 1 FROM actor_mail m
                      WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq

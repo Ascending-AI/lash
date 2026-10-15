@@ -63,7 +63,7 @@ mod park;
 
 pub use super::model_call::ModelAnswer;
 use park::park;
-pub(super) use park::undecodable_state;
+pub(super) use park::resume_refusal;
 pub use park::{ParkedTurnState, SessionParkReason, SessionPassFailure};
 
 /// What a session's turns run with: the deployment's protocol, model,
@@ -816,7 +816,7 @@ impl SessionActivation {
             // build that does not decode its state: the request ends the
             // turn without it, as a cancel's restore does, so the refusal
             // never holds the session's one way out (FIG-5601).
-            Err(error) if row.cancel.is_some() && undecodable_state(&error).is_some() => {
+            Err(error) if row.cancel.is_some() && resume_refusal(&error).is_some() => {
                 if let Some(request) = &row.cancel {
                     turn_cancel::finalize(cx, self.services.as_ref(), &row, request, None, heads)
                         .await?;
@@ -989,7 +989,7 @@ impl Activation for SessionActivation {
                     // A parked state this build does not decode fails every
                     // pass of this build the same way: the session parks at
                     // once with the typed refusal, its turn open (FIG-5592).
-                    let reason = match undecodable_state(&error) {
+                    let reason = match resume_refusal(&error) {
                         Some(reason) => Some(reason),
                         None => (failed_passes >= budget).then(|| SessionParkReason::PassLoop {
                             failed_passes,

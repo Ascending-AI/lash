@@ -12,6 +12,7 @@ use lash_sansio::SessionId;
 
 mod drain;
 mod node;
+mod plugin_retirement;
 mod recovery;
 mod retired_observers;
 mod runtime_host_config;
@@ -732,6 +733,8 @@ pub struct LashCoreBuilder {
     /// and the first registration refused, reported at build.
     process_components: lash_core::plugin::ProcessComponentRegistry,
     process_component_refusal: Option<lash_core::PluginError>,
+    /// Whole session plugins this deployment permanently removed.
+    retired_session_plugins: lash_core::plugin::RetiredSessionPlugins,
     /// The session config-change observers the deployment uninstalled for
     /// good, each by its exact identity (FIG-6164).
     retired_config_observers: Vec<lash_core::plugin::PluginCallbackIdentity>,
@@ -802,6 +805,7 @@ impl LashCoreBuilder {
             plugin_stack: PluginStack::default(),
             process_components: lash_core::plugin::ProcessComponentRegistry::new(),
             process_component_refusal: None,
+            retired_session_plugins: Default::default(),
             retired_config_observers: Vec::new(),
             recovery_lease: None,
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
@@ -967,25 +971,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Retire the session config-change observer `observer`, which this
-    /// deployment uninstalled for good (FIG-6164): exactly that owner and
-    /// key. A session whose head owes a config change to it is claimed by
-    /// this core's node, and its delivery retires the observer's share as
-    /// undeliverable, recorded in the head as a
-    /// [`RetiredConfigDelivery`](crate::persistence::RetiredConfigDelivery)
-    /// naming the change's revision, the observer and this core's lease
-    /// owner. Its other observers are delivered as ever. The retirement
-    /// resolves config-change deliveries only. The build refuses an identity
-    /// that names no lifecycle observer, or one an installed plugin still
-    /// registers.
-    pub fn retire_config_observer(
-        mut self,
-        observer: lash_core::plugin::PluginCallbackIdentity,
-    ) -> Self {
-        self.retired_config_observers.push(observer);
-        self
-    }
-
     /// Install the process component `factory` under `key`, the config key
     /// its environment entries are written with (FIG-6034 §3.2). A process
     /// builds only the components its environment names; a session never
@@ -996,29 +981,6 @@ impl LashCoreBuilder {
         key: lash_core::ProcessConfigKey<T>,
     ) -> Self {
         if let Err(error) = self.process_components.register(factory, key)
-            && self.process_component_refusal.is_none()
-        {
-            self.process_component_refusal = Some(error);
-        }
-        self
-    }
-
-    /// Retire the process component `declaration` names, which this
-    /// deployment no longer installs (FIG-6296); `declaration` is the one
-    /// it was installed under. A sealed env that names it still builds,
-    /// without it, and its processes resume here; the env view lists it
-    /// under [`ProcessAuthority::Engine`](crate::process::ProcessAuthority::Engine)'s
-    /// `retired`. A new env that names it is refused with
-    /// [`ProcessEnvRefusal::ComponentRetired`](lash_core::ProcessEnvRefusal::ComponentRetired).
-    /// A process whose env links an effect to one of its providers, or
-    /// that holds state it published, parks with the typed refusal instead
-    /// of resuming without it. The build refuses a component that is also
-    /// installed, or retired twice.
-    pub fn retire_process_component(
-        mut self,
-        declaration: lash_core::plugin::ProcessComponentDeclaration,
-    ) -> Self {
-        if let Err(error) = self.process_components.retire(declaration)
             && self.process_component_refusal.is_none()
         {
             self.process_component_refusal = Some(error);
@@ -1354,6 +1316,7 @@ impl LashCoreBuilder {
         // deployment uninstalled for good, once they are checked against
         // the plugins it installs.
         let mut core = core;
+        core.control.retired_session_plugins = Arc::new(self.retired_session_plugins);
         core.control.retired_config_observers = Arc::new(retired_observers::checked(
             &build_plugin_host(protocol_factory.as_ref(), &plugin_factories, &core)?,
             &runtime_owner,
@@ -1395,6 +1358,11 @@ impl LashCoreBuilder {
         // so no node advertises less than it installed.
         let mut serves = core.process_engines.components().served_tokens();
         serves.extend(default_plugin_host.installed_inventory()?.served_tokens());
+        serves.extend(
+            default_plugin_host
+                .retired_session_plugins()
+                .served_tokens(),
+        );
         serves.extend(
             default_plugin_host
                 .retired_config_observers()
@@ -1532,6 +1500,7 @@ pub(crate) fn build_plugin_host(
     if let Some(protocol) = protocol_factory {
         host = host.with_protocol_plugin(Arc::clone(protocol));
     }
+    host = host.with_retired_session_plugins(Arc::clone(&core.control.retired_session_plugins))?;
     Ok(host)
 }
 

@@ -47,6 +47,7 @@ mod turn_namespaces;
 
 pub use claims::{
     a_replaced_boot_adopts_none_of_its_successors_actors,
+    a_retired_owner_claims_only_its_registry_callbacks,
     claims_take_the_oldest_eligible_actors_first,
     progress_before_an_empty_ready_release_resets_failed_activations,
 };

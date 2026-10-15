@@ -284,3 +284,66 @@ pub async fn claims_take_the_oldest_eligible_actors_first(
     );
     Ok(())
 }
+
+/// RETIRED-REGISTRY-CLAIM (FIG-6335): retiring an owner allows its
+/// callbacks to be claimed for refusal, without serving another owner,
+/// registry or opaque requirement. The claim and adoption agree.
+pub async fn a_retired_owner_claims_only_its_registry_callbacks(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    use super::{TTL_MILLIS, formats};
+    use crate::{NodeId, NodeSpec};
+    use lash_core_store::obligations::{ObligationToken, RegistryKind};
+    use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
+    let callback = |kind, owner: &str| {
+        ObligationToken::for_callback(kind, &PluginCallbackIdentity::tool_provider(owner, "tools"))
+            .into_string()
+    };
+    let requirements = [
+        callback(RegistryKind::Session, "retired/nested"),
+        callback(RegistryKind::Session, "retired/nested-other"),
+        callback(RegistryKind::Process, "retired/nested"),
+        callback(RegistryKind::Session, "retired"),
+        "opaque/requirement".to_owned(),
+    ];
+    let actors = (0..requirements.len())
+        .map(|index| session(&format!("retirement-{index}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    create(store, &actors).await?;
+    let setup = node(store, "retirement-setup").await?;
+    let grants = store.claim(&setup, actors.len()).await?;
+    for (actor, required) in actors.iter().zip(requirements) {
+        let grant = grants
+            .iter()
+            .find(|claim| &claim.actor == actor)
+            .ok_or_else(|| LawBroken("missing setup grant".into()))?;
+        let mut tx = store.begin(actor, grant.epoch).await?;
+        tx.set_requires(vec![required]);
+        tx.give_up(Release::Ready);
+        store.commit(tx, LABEL).await?;
+    }
+    let retired = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("retirement-claimant"),
+            decodes: vec![formats()],
+            serves: vec![
+                ObligationToken::for_retired_owner(RegistryKind::Session, "retired/nested")
+                    .into_string(),
+            ],
+            ttl_millis: TTL_MILLIS,
+        })
+        .await?;
+    let claimed = store.claim(&retired, actors.len()).await?;
+    ensure!(
+        claimed.len() == 1
+            && claimed[0].actor == actors[0]
+            && claimed[0].purpose == crate::ClaimPurpose::Run,
+        "retirement claim crossed its registry/owner boundary: {claimed:?}"
+    );
+    let adopted = store.owned(&retired).await?;
+    ensure!(
+        adopted.len() == 1 && adopted[0].purpose == crate::ClaimPurpose::Run,
+        "retirement adoption and claim disagree: {adopted:?}"
+    );
+    Ok(())
+}

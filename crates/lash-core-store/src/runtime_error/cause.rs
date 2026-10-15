@@ -14,6 +14,10 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// The deployment retired a registry entry a session still needs.
+    PluginRetired {
+        refusal: Box<crate::obligations::RetirementRefusal>,
+    },
     /// A host-configured aggregate callback deadline passed without an answer.
     ControlPhaseExpired {
         expiry: Box<lash_sansio::ControlPhaseExpired>,

@@ -300,7 +300,10 @@ pub(super) struct RegisteredComponent {
 #[derive(Clone)]
 pub struct ProcessComponentRegistry {
     pub(super) components: Arc<BTreeMap<String, Arc<RegisteredComponent>>>,
-    retired: Arc<BTreeMap<String, ProcessComponentDeclaration>>,
+    retired: super::registries::RegistryRetirements<
+        super::registries::Process,
+        ProcessComponentDeclaration,
+    >,
     host: ProcessComponentHost,
     materialized_inventories: super::MaterializedInventoryReader,
 }
@@ -309,7 +312,7 @@ impl Default for ProcessComponentRegistry {
     fn default() -> Self {
         Self {
             components: Arc::default(),
-            retired: Arc::default(),
+            retired: Default::default(),
             materialized_inventories: Default::default(),
             host: ProcessComponentHost::new(crate::trace::TraceRuntime::default()),
         }
@@ -436,12 +439,7 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
-        if self.retired.contains_key(declaration.id.as_str()) {
-            return Err(PluginError::Registration(format!(
-                "process component `{}` is installed and retired",
-                declaration.id
-            )));
-        }
+        self.retired.check_installation(declaration.id.as_str())?;
         let mut recipe = Arc::clone(&factory).recipe()?;
         if recipe
             .entries
@@ -488,21 +486,9 @@ impl ProcessComponentRegistry {
     ///
     /// The component is installed, or already retired.
     pub fn retire(&mut self, declaration: ProcessComponentDeclaration) -> Result<(), PluginError> {
-        let id = declaration.id.as_str();
-        if self.components.contains_key(id) {
-            return Err(PluginError::Registration(format!(
-                "process component `{id}` is installed and retired"
-            )));
-        }
-        if self.retired.contains_key(id) {
-            return Err(PluginError::Registration(format!(
-                "process component `{id}` is retired twice"
-            )));
-        }
-        let mut retired = (*self.retired).clone();
-        retired.insert(id.to_owned(), declaration);
-        self.retired = Arc::new(retired);
-        Ok(())
+        let id = declaration.id.to_string();
+        self.retired
+            .retire(&id, declaration, self.components.contains_key(&id))
     }
 
     /// The components `env` names that this registry declares retired, in
@@ -588,6 +574,7 @@ impl ProcessComponentRegistry {
     /// installed registrations.
     pub fn served_tokens(&self) -> BTreeSet<crate::ObligationToken> {
         let mut served = self.installed_inventory().served_tokens();
+        served.extend(self.retired.served_tokens());
         for registered in self
             .components
             .values()

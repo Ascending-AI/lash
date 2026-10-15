@@ -463,3 +463,8 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         "PREFIX-DELTA: 32 sequential calls, max new nodes={maximum_nodes}, max new edges={maximum_edges}, max settlement bytes={maximum_settlement_bytes}, byte-exact after every settlement and changed prefix"
     );
 }
+
+claim_law!(
+    a_retired_owner_claims_only_its_registry_callbacks,
+    |store, _advance| { laws::a_retired_owner_claims_only_its_registry_callbacks(store) }
+);

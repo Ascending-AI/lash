@@ -43,7 +43,13 @@ error[E0599]: no method named `session_plugin` found for struct `LashCoreBuilder
   --> tests/ui/core_builder_holds_no_session_defaults.rs:37:55
    |
 37 |     let _ = lash::LashCore::standard_builder(backend).session_plugin("plugin", ());
-   |                                                       ^^^^^^^^^^^^^^ method not found in `LashCoreBuilder`
+   |                                                       ^^^^^^^^^^^^^^
+   |
+help: there is a method `retire_session_plugin` with a similar name, but with different arguments
+  --> src/core/plugin_retirement.rs
+   |
+   |     pub fn retire_session_plugin(mut self, id: lash_core::plugin::PluginId) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[E0599]: no method named `session_spec` found for struct `LashCoreBuilder` in the current scope
   --> tests/ui/core_builder_holds_no_session_defaults.rs:41:55

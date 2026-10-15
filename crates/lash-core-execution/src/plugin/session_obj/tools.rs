@@ -89,6 +89,25 @@ impl PluginSession {
         &self,
         surface: &crate::RecordedSurface,
     ) -> Result<crate::ToolCatalog, PluginError> {
+        for (effect, provider) in surface
+            .tools()
+            .iter()
+            .map(|(effect, entry)| (effect.as_str(), &entry.provider))
+            .chain(surface.deferred().map(|provider| ("deferred", provider)))
+        {
+            if provider.registry() == crate::RegistryKind::Session
+                && self.host.retired_plugins.contains_key(provider.owner())
+            {
+                return Err(PluginError::Runtime(
+                    super::super::RetirementRefusal::Serves {
+                        registry: crate::RegistryKind::Session,
+                        id: provider.owner().to_owned(),
+                        effect: effect.to_owned(),
+                    }
+                    .into_runtime_error(),
+                ));
+            }
+        }
         let definitions = surface.definitions().cloned().collect::<Vec<_>>();
         let tools = definitions
             .iter()

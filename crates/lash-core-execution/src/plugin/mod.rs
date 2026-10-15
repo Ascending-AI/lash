@@ -124,6 +124,8 @@ pub use protocol::{
 };
 mod recipe;
 pub mod registries;
+pub use lash_core_store::obligations::RetirementRefusal;
+pub use registries::RetiredSessionPlugins;
 mod service_bindings;
 pub use config_observers::{ConfigChangeDelivery, RetiredConfigObservers, is_lifecycle_observer};
 pub use recipe::{

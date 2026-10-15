@@ -18,6 +18,10 @@ impl RuntimeErrorCause {
             Self::VmWorker { outcome } => {
                 !outcome.is_retryable() && outcome.deployment_fault().is_none()
             }
+            Self::PluginRetired { refusal } => matches!(
+                refusal.as_ref(),
+                crate::obligations::RetirementRefusal::Admission { .. }
+            ),
             Self::LlmProfileUnavailable { .. }
             | Self::CellSnapshotUndecodable { .. }
             | Self::RecordedCallbackUnavailable { .. }

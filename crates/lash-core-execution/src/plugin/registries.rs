@@ -179,3 +179,85 @@ contribution_table! {
         TranscriptDecoder => [Session];
     }
 }
+
+/// Deliberately removed registrations, scoped by registry. Both registries
+/// share duplicate/install checks and retain their own declaration data.
+#[derive(Clone, Debug)]
+pub struct RegistryRetirements<R, D> {
+    entries: std::sync::Arc<std::collections::BTreeMap<String, D>>,
+    registry: std::marker::PhantomData<R>,
+}
+impl<R, D> Default for RegistryRetirements<R, D> {
+    fn default() -> Self {
+        Self {
+            entries: Default::default(),
+            registry: std::marker::PhantomData,
+        }
+    }
+}
+impl<R: Registry, D: Clone> RegistryRetirements<R, D> {
+    pub fn contains_key(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
+    pub fn values(&self) -> impl Iterator<Item = &D> {
+        self.entries.values()
+    }
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+    pub fn check_installation(&self, id: &str) -> Result<(), super::PluginError> {
+        if self.contains_key(id) {
+            return Err(super::PluginError::Registration(format!(
+                "{:?} registration `{id}` is installed and retired",
+                R::KIND
+            )));
+        }
+        Ok(())
+    }
+    pub fn retire(
+        &mut self,
+        id: &str,
+        declaration: D,
+        installed: bool,
+    ) -> Result<(), super::PluginError> {
+        if installed {
+            return Err(super::PluginError::Registration(format!(
+                "{:?} registration `{id}` is installed and retired",
+                R::KIND
+            )));
+        }
+        if self.contains_key(id) {
+            return Err(super::PluginError::Registration(format!(
+                "{:?} registration `{id}` is retired twice",
+                R::KIND
+            )));
+        }
+        std::sync::Arc::make_mut(&mut self.entries).insert(id.to_owned(), declaration);
+        Ok(())
+    }
+    pub fn served_tokens(&self) -> std::collections::BTreeSet<crate::ObligationToken> {
+        self.ids()
+            .map(|id| crate::ObligationToken::for_retired_owner(R::KIND, id))
+            .collect()
+    }
+    pub(super) fn check_state(&self, state: &super::PluginState) -> Result<(), super::PluginError> {
+        for id in self.ids() {
+            if state
+                .plugins
+                .get(id)
+                .is_some_and(|namespace| !namespace.values.is_empty())
+            {
+                return Err(super::PluginError::Runtime(
+                    super::RetirementRefusal::HasState {
+                        registry: R::KIND,
+                        id: id.to_owned(),
+                    }
+                    .into_runtime_error(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+/// Session retirements need only the stable plugin id.
+pub type RetiredSessionPlugins = RegistryRetirements<Session, ()>;

@@ -27,6 +27,8 @@ pub struct PluginHost {
     /// host's sessions run in: an isolated tool enters a session's catalog
     /// only where its engine is among them.
     isolation_engines: Arc<StdMutex<BTreeSet<String>>>,
+    /// Whole session plugins this deployment permanently removed.
+    pub(super) retired_plugins: Arc<super::RetiredSessionPlugins>,
     /// The config-change observers the deployment uninstalled for good
     /// (FIG-6164).
     pub(super) retired_config_observers: Arc<super::RetiredConfigObservers>,
@@ -110,6 +112,22 @@ impl SessionAuthorityContext {
 }
 
 impl PluginHost {
+    /// Declare this deployment's session retirements, refusing an installed id.
+    pub fn with_retired_session_plugins(
+        mut self,
+        retired: Arc<super::RetiredSessionPlugins>,
+    ) -> Result<Self, PluginError> {
+        for factory in self.factories() {
+            retired.check_installation(factory.id())?;
+        }
+        self.retired_plugins = retired;
+        Ok(self)
+    }
+
+    pub fn retired_session_plugins(&self) -> &super::RetiredSessionPlugins {
+        &self.retired_plugins
+    }
+
     /// Deployment payload bounds used by every session and process this host builds.
     pub fn with_data_limits(mut self, limits: crate::runtime::RuntimeDataLimits) -> Self {
         self.data_limits = limits;
@@ -179,6 +197,7 @@ impl PluginHost {
             trace_runtime,
             execution_budgets,
             isolation_engines: Arc::default(),
+            retired_plugins: Arc::default(),
             retired_config_observers: Arc::default(),
         }
     }
@@ -246,6 +265,7 @@ impl PluginHost {
             trace_runtime: self.trace_runtime.clone(),
             execution_budgets: self.execution_budgets.clone(),
             isolation_engines: Arc::clone(&self.isolation_engines),
+            retired_plugins: Arc::clone(&self.retired_plugins),
             retired_config_observers: Arc::clone(&self.retired_config_observers),
         }
     }
@@ -363,6 +383,21 @@ impl PluginHost {
         requested: &crate::PluginOptions,
         writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<super::PluginConfig, super::CreationConfigError> {
+        if let Some(id) = requested
+            .plugins
+            .keys()
+            .find(|id| self.retired_plugins.contains_key(id))
+        {
+            return Err(super::CreationConfigError::Recipe(Box::new(
+                PluginError::Runtime(
+                    super::RetirementRefusal::Admission {
+                        registry: crate::RegistryKind::Session,
+                        id: id.clone(),
+                    }
+                    .into_runtime_error(),
+                ),
+            )));
+        }
         let options = super::PluginConfig::from_recorded_parts(None, requested.plugins.clone());
         self.decode_config(&options)?;
         Ok(self
@@ -542,6 +577,7 @@ impl PluginHost {
         if session.capabilities.get().is_none() {
             let authority = session.live_authority();
             let snapshot = session.capture_state();
+            self.retired_plugins.check_state(&snapshot)?;
             // The engine installs recorded transition postimages before constructing
             // capabilities. Current admission limits must not re-judge those results.
             self.validate_native_formats(&snapshot, &authority.plugin_config.config)?;

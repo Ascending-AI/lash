@@ -986,3 +986,8 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     );
     assert_eq!(reads, 1, "text and edge reads must share their snapshot");
 }
+
+law!(
+    a_retired_owner_claims_only_its_registry_callbacks,
+    |store, _advance| { laws::a_retired_owner_claims_only_its_registry_callbacks(store) }
+);

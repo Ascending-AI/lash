@@ -722,6 +722,7 @@ pub mod plugins {
     /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
     /// `#[schemars(crate = "lash::plugins::schemars")]`.
     pub use lash_core::facade_support::schemars;
+    pub use lash_core::plugin::RetirementRefusal;
     pub use lash_core::plugin::prompt::PromptRenderPoolConfig;
     /// Prompt sections (ADR 0133): a plugin registers keyed sections and
     /// trusted wrappers through `reg.prompt()`. A renderer reads only a

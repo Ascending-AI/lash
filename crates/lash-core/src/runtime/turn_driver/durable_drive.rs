@@ -167,9 +167,9 @@ impl RuntimeDrive {
                     state: ParkedTurnState::PluginState,
                     reason: error.to_string(),
                 },
-                error => TurnError::Exec(format!(
-                    "the turn's plugin state did not reinstall: {error}"
-                )),
+                error => TurnError::Runtime(
+                    crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                ),
             })?;
         // The protocol records the restored machine already delivered
         // through its progress boundaries reached only the previous owner's
@@ -1240,7 +1240,9 @@ impl RuntimeTurnDriver<'static> {
         self.session
             .install_recorded_tool_surface(recorded)
             .map_err(|error| {
-                TurnError::Exec(format!("the tool surface did not install: {error}"))
+                TurnError::Runtime(
+                    crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                )
             })?;
         self.surface_installed = true;
         Ok(())
