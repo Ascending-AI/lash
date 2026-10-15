@@ -1292,3 +1292,67 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
         "quoted metadata is not token-converted"
     );
 }
+
+/// FIG-6332: printed helper identities need the document they came from.
+#[test]
+fn authored_import_of_printed_source_needs_its_base() {
+    let environment = lash_kernel_dialect::Environment {
+        library: super::library(),
+        effects: &BTreeMap::new(),
+        controls: &BTreeMap::new(),
+        tool_roots: &BTreeSet::new(),
+        bindings: &BTreeSet::new(),
+        functions: &BTreeMap::new(),
+    };
+    let document = crate::lower_workflow(
+        "export async function digest(inbox: string) { return inbox; }",
+        &environment,
+    )
+    .unwrap()
+    .document;
+    let printed = crate::print(&document, Default::default()).unwrap();
+    let refusal = crate::lower_workflow(&printed.source, &environment).unwrap_err();
+    assert_eq!(
+        refusal.code,
+        crate::DiagnosticCode::PrintedSourceNeedsBase,
+        "{refusal}"
+    );
+    assert_eq!(refusal.kind, crate::DiagnosticKind::Refusal);
+    assert!(refusal.message.contains("typescript::read(source, base)"));
+    assert!(refusal.span.is_some());
+    assert!(
+        refusal
+            .suggestions
+            .iter()
+            .any(|repair| repair.contains("typescript::read(source, base)"))
+    );
+    for source in [
+        "helper_list_len([]);",
+        "const f = declared.digest;",
+        "kernel_name_1;",
+    ] {
+        let refusal = crate::lower_workflow(source, &environment).unwrap_err();
+        assert_eq!(
+            refusal.code,
+            crate::DiagnosticCode::PrintedSourceNeedsBase,
+            "{source}: {refusal}"
+        );
+    }
+    crate::lower_workflow(
+        "function helper_list_len(x) { return x; } const declared = {digest: 1}; const kernel_name_1 = 1; helper_list_len([declared.digest, kernel_name_1]);",
+        &environment,
+    ).expect("authored bindings with printer spellings still resolve");
+    crate::lower_workflow(
+        "const text = 'helper_list_len declared.digest';",
+        &environment,
+    )
+    .expect("quoted data is not a printed reference");
+    assert_eq!(
+        crate::lower_workflow("missing;", &environment)
+            .unwrap_err()
+            .code,
+        crate::DiagnosticCode::UnknownBinding
+    );
+    let read = crate::read(&printed.source, &document, Default::default()).unwrap();
+    assert_eq!(read.identity().unwrap(), document.identity().unwrap());
+}

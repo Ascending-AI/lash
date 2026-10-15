@@ -160,7 +160,10 @@ fn a_missing_helper_is_named() {
 #[test]
 fn every_advertised_repair_form_lowers() {
     use Code::*;
+    let base = lash_kernel_doc::Document::new(lash_kernel_doc::NumberPolicy::BySpelling, vec![]);
+    let printed = crate::print(&base, Default::default()).unwrap();
     let examples = [
+        (PrintedSourceNeedsBase, printed.source.as_str()),
         (
             SavedFunctionUnusable,
             "def invoice(total):\n    return total\ninvoice(42)",
@@ -272,7 +275,11 @@ fn every_advertised_repair_form_lowers() {
         }
     }
     for (code, source) in examples {
-        machine::lower(source).unwrap_or_else(|error| {
+        let accepted = match code {
+            PrintedSourceNeedsBase => crate::read(source, &base, Default::default()).map(|_| ()),
+            _ => machine::lower(source).map(|_| ()),
+        };
+        accepted.unwrap_or_else(|error| {
             panic!(
                 "{} suggests an unaccepted idiom: {error}\n{source}",
                 code.as_str()

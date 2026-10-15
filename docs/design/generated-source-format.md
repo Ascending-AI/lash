@@ -166,6 +166,17 @@ complete `PrintedSource`. The facade exposes `lash::typescript::read` and
 `HostArtifacts::import_exported_workflow(source, format, base, environment)`
 reads and admits in one step, against the same environment as publication.
 `HostArtifacts::import_typescript_workflow` is authored lowering only.
+Authored TypeScript and Python lowering refuse unresolved printed helper names
+(`helper_*`), renamed bindings (`kernel_name_*`) and the `declared`
+namespace (also `k` attribute and method references in Python) as
+`PrintedSourceNeedsBase` (`TS_PRINTED_SOURCE_NEEDS_BASE` or
+`PY_PRINTED_SOURCE_NEEDS_BASE`). The diagnostic names
+`typescript::read(source, base)` or `python::read(source, base)` so a host can
+route the source with its
+base document. Ordinary authored bindings with those spellings still resolve;
+quoted data and unrelated unknown names do not trigger this refusal. Source
+without these unresolved references carries no provenance marker and is not
+guaranteed to be distinguishable from newly authored source.
 
 `lash::vm::WorkerService::print(document, format, options)` and
 `::read_exported(source, base, format, limits)` run the same operations in the

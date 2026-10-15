@@ -65,6 +65,8 @@ pub enum DiagnosticCode {
     DuplicateNodeLabel,
     TemporalDeadZone,
     UnknownBinding,
+    /// Printed helper identities and declarations require their base document.
+    PrintedSourceNeedsBase,
     AssignConst,
     SavedFunctionUnusable,
     NonLiftableCapture,
@@ -148,6 +150,7 @@ impl DiagnosticCode {
         Self::DuplicateNodeLabel,
         Self::TemporalDeadZone,
         Self::UnknownBinding,
+        Self::PrintedSourceNeedsBase,
         Self::AssignConst,
         Self::SavedFunctionUnusable,
         Self::NonLiftableCapture,
@@ -302,6 +305,9 @@ impl DiagnosticCode {
             Self::GeneratedSourceDepth => {
                 "export a shallower document or raise the host's depth budget within the native ceiling"
             }
+            Self::PrintedSourceNeedsBase => {
+                "use `typescript::read(source, base)` with the document the source was printed from"
+            }
             Self::ReservedIdentifier => "choose a different name",
             Self::ShadowsBuiltin => {
                 "rename the binding and its references, preserving the built-in name"
@@ -333,7 +339,8 @@ impl DiagnosticCode {
         match self {
             // Constructs the dialect does not have. Writing one again in any
             // form is refused again; the fix is the other construct.
-            Self::ClassUnsupported
+            Self::PrintedSourceNeedsBase
+            | Self::ClassUnsupported
             | Self::GeneratorUnsupported
             | Self::WithUnsupported
             | Self::EvalUnsupported
@@ -476,6 +483,7 @@ impl DiagnosticCode {
             Self::DuplicateNodeLabel => "TS_DUPLICATE_NODE_LABEL",
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
+            Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
@@ -822,6 +830,7 @@ mod tests {
             decoded.canonical_bytes().unwrap()
         );
         let examples = [
+            (PrintedSourceNeedsBase, generated.source.as_str()),
             (GeneratedSourceBytes, generated.source.as_str()),
             (GeneratedSourceDepth, generated.source.as_str()),
             (
@@ -1013,7 +1022,7 @@ mod tests {
         }
         for (code, source) in examples {
             let accepted = match code {
-                GeneratedSourceBytes | GeneratedSourceDepth => {
+                PrintedSourceNeedsBase | GeneratedSourceBytes | GeneratedSourceDepth => {
                     crate::read(source, &document, Default::default()).map(|_| ())
                 }
                 _ => crate::tests::lower_with_effects(source).map(|_| ()),

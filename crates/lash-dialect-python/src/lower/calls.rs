@@ -895,6 +895,9 @@ impl Lowerer<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Lowering<Operand> {
+        if let Some(refusal) = self.printed_receiver(&attribute.value) {
+            return Err(refusal);
+        }
         let name = attribute.attr.id.as_str();
         let Some(method) = METHODS.iter().find(|method| method.name == name) else {
             let repair = match name {

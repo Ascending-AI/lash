@@ -610,6 +610,18 @@ impl Lowerer<'_> {
         }
     }
 
+    // Attribute/method dispatch can refuse before evaluating its receiver.
+    // Recognize a missing printed namespace there as well as in plain reads.
+    fn printed_receiver(&self, receiver: &ast::Expr) -> Option<Diagnostic> {
+        let ast::Expr::Name(name) = receiver else {
+            return None;
+        };
+        if self.variable(name.id.as_str()).is_some() {
+            return None;
+        }
+        diagnostics::printed_source_name(name.id.as_str(), name.range)
+    }
+
     fn not_a_variable(&self, id: &str, range: TextRange) -> Diagnostic {
         if self.effects.keys().any(|effect| effect.as_str() == id) {
             return diagnostics::with_repair(
@@ -640,6 +652,9 @@ impl Lowerer<'_> {
                     format!("replace `{id}` with a supported built-in or an ordinary function")
                 },
             );
+        }
+        if let Some(refusal) = diagnostics::printed_source_name(id, range) {
+            return refusal;
         }
         diagnostics::diagnostic(
             Code::UnknownName,

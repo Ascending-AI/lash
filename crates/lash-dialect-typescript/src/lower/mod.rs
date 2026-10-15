@@ -1200,6 +1200,17 @@ impl Lowerer<'_> {
 }
 
 pub(crate) fn unknown_binding(name: &str, span: Option<SourceSpan>) -> Diagnostic {
+    // These unbound spellings are references into the printer's base, not
+    // authored variables. Bound names have already resolved before this point.
+    if name.starts_with("helper_") || name.starts_with("kernel_name_") || name == "declared" {
+        return Diagnostic::refusal(
+            DiagnosticCode::PrintedSourceNeedsBase,
+            format!(
+                "`{name}` needs its printed document's base; use `typescript::read(source, base)`"
+            ),
+            span,
+        );
+    }
     Diagnostic::defect(
         DiagnosticCode::UnknownBinding,
         format!("`{name}` is not defined"),

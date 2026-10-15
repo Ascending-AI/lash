@@ -485,6 +485,9 @@ impl Lowerer<'_> {
     }
 
     fn attribute(&mut self, attribute: &ast::ExprAttribute) -> Lowering<Operand> {
+        if let Some(refusal) = self.printed_receiver(&attribute.value) {
+            return Err(refusal);
+        }
         let name = attribute.attr.id.as_str();
         // `type(x).__name__`.
         if name == "__name__"

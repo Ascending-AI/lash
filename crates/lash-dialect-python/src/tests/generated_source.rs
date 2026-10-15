@@ -1376,3 +1376,54 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
         "quoted metadata is not token-converted"
     );
 }
+
+/// FIG-6332: the authored importer cannot resolve a printed document's helpers.
+#[test]
+fn authored_import_of_printed_source_needs_its_base() {
+    let document =
+        super::machine::lower("def digest(inbox):\n    return inbox\nprint(digest('hello'))\n")
+            .unwrap()
+            .document;
+    let printed = crate::print(&document, Default::default()).unwrap();
+    let refusal = super::machine::lower(&printed.source).unwrap_err();
+    assert_eq!(
+        refusal.code,
+        crate::Code::PrintedSourceNeedsBase.as_str(),
+        "{refusal}"
+    );
+    assert_eq!(refusal.kind, lash_kernel_dialect::DiagnosticKind::Refusal);
+    assert!(refusal.message.contains("python::read(source, base)"));
+    assert!(refusal.span.is_some());
+    assert!(
+        refusal
+            .repairs
+            .iter()
+            .any(|repair| repair.contains("python::read(source, base)"))
+    );
+    for source in [
+        "helper_py_add(1, 2)",
+        "f = declared.digest",
+        "declared.digest()",
+        "x = k.absent",
+        "k.int('1')",
+        "kernel_name_1",
+    ] {
+        let refusal = super::machine::lower(source).unwrap_err();
+        assert_eq!(
+            refusal.code,
+            crate::Code::PrintedSourceNeedsBase.as_str(),
+            "{source}: {refusal}"
+        );
+    }
+    super::machine::lower(
+        "def helper_py_add(x, y):\n    return x + y\ndeclared = 1\nk = 2\nkernel_name_1 = 3\nhelper_py_add(declared, k)\n",
+    ).expect("authored bindings with printer spellings still resolve");
+    super::machine::lower("text = 'helper_py_add declared.digest k.absent'\n")
+        .expect("quoted data is not a printed reference");
+    assert_eq!(
+        super::machine::lower("missing\n").unwrap_err().code,
+        crate::Code::UnknownName.as_str()
+    );
+    let read = crate::read(&printed.source, &document, Default::default()).unwrap();
+    assert_eq!(read.identity().unwrap(), document.identity().unwrap());
+}
